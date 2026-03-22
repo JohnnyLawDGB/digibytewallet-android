@@ -26,6 +26,14 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
+    sourceSets {
+        // Expose Room schema JSON files to MigrationTestHelper via test assets
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

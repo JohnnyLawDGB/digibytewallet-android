@@ -23,4 +23,7 @@ interface UtxoDao {
 
     @Query("DELETE FROM utxos")
     suspend fun deleteAll()
+
+    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
+    fun getAssetBalances(): Flow<List<AssetBalance>>
 }

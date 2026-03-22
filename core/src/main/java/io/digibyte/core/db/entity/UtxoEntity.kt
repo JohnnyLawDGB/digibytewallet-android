@@ -12,6 +12,7 @@ data class UtxoEntity(
     val blockHeight: Long,
     @ColumnInfo(name = "is_asset") val isAsset: Boolean = false,
     @ColumnInfo(name = "asset_id") val assetId: String? = null,
+    @ColumnInfo(name = "asset_quantity") val assetQuantity: Long = 0,
     val spent: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {

@@ -15,10 +15,12 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         HeaderEntity::class,
         PeerEntity::class,
         WalletConfigEntity::class,
-        PriceCacheEntity::class
+        PriceCacheEntity::class,
+        AssetMetadataEntity::class,
+        DigiIdHistoryEntity::class
     ],
-    version = 1,
-    exportSchema = false
+    version = 2,
+    exportSchema = true
 )
 abstract class WalletDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
@@ -27,6 +29,8 @@ abstract class WalletDatabase : RoomDatabase() {
     abstract fun peerDao(): PeerDao
     abstract fun priceCacheDao(): PriceCacheDao
     abstract fun walletConfigDao(): WalletConfigDao
+    abstract fun assetMetadataDao(): AssetMetadataDao
+    abstract fun digiIdHistoryDao(): DigiIdHistoryDao
 
     companion object {
         fun create(context: Context, passphrase: ByteArray): WalletDatabase {
@@ -38,6 +42,7 @@ abstract class WalletDatabase : RoomDatabase() {
                 "wallet.db"
             )
                 .openHelperFactory(factory)
+                .addMigrations(MIGRATION_1_2)
                 .build()
         }
     }
