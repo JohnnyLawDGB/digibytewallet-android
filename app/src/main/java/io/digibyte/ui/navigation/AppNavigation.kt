@@ -1,0 +1,263 @@
+package io.digibyte.ui.navigation
+
+import android.content.Intent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.core.content.ContextCompat
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.*
+import io.digibyte.core.WalletManager
+import io.digibyte.core.WalletState
+import io.digibyte.core.security.BiometricAuth
+import io.digibyte.core.security.KeyStoreManager
+import io.digibyte.core.security.PinManager
+import io.digibyte.service.SyncService
+import io.digibyte.ui.onboarding.*
+import io.digibyte.ui.settings.*
+import io.digibyte.ui.wallet.*
+
+sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
+    data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
+    data object Hub : Screen("hub", "Hub", Icons.AutoMirrored.Filled.Chat)
+    data object DigiId : Screen("digiid", "Digi-ID", Icons.Default.Fingerprint)
+    data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+}
+
+val bottomNavScreens = listOf(Screen.Wallet, Screen.Hub, Screen.DigiId, Screen.Settings)
+
+/** Routes that should NOT show the bottom navigation bar. */
+private val fullScreenRoutes = setOf(
+    "onboarding",
+    "seed_display/{wordCount}",
+    "seed_verify",
+    "mnemonic_input",
+    "recovery_date",
+    "pin_setup",
+    "unlock",
+    "send",
+    "receive",
+    "transaction_detail/{txid}",
+    "settings_security",
+    "settings_network",
+    "settings_display",
+    "settings_about",
+    "settings_view_seed"
+)
+
+@Composable
+fun AppNavigation(
+    walletManager: WalletManager,
+    pinManager: PinManager,
+    biometricAuth: BiometricAuth,
+    keyStoreManager: KeyStoreManager
+) {
+    val navController = rememberNavController()
+    val context = LocalContext.current
+    val currentBackStack by navController.currentBackStackEntryAsState()
+    val currentRoute = currentBackStack?.destination?.route
+
+    // Observe wallet state to gate navigation
+    val walletState by walletManager.walletState.collectAsState()
+
+    // Determine start destination based on wallet state at launch
+    val startDestination = remember(walletState) {
+        when (walletState) {
+            is WalletState.NoWallet -> "onboarding"
+            is WalletState.Locked   -> "unlock"
+            is WalletState.Unlocked -> Screen.Wallet.route
+        }
+    }
+
+    // Helper: start SPV sync foreground service whenever the wallet is unlocked.
+    val startSyncService: () -> Unit = {
+        val intent = Intent(context, SyncService::class.java)
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    val showBottomNav = currentRoute !in fullScreenRoutes
+
+    Scaffold(
+        bottomBar = {
+            if (showBottomNav) {
+                NavigationBar {
+                    bottomNavScreens.forEach { screen ->
+                        NavigationBarItem(
+                            icon = { Icon(screen.icon, contentDescription = screen.label) },
+                            label = { Text(screen.label) },
+                            selected = currentRoute == screen.route,
+                            onClick = {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    ) { padding ->
+        NavHost(
+            navController = navController,
+            startDestination = startDestination,
+            modifier = Modifier.padding(padding)
+        ) {
+            // ── Onboarding flow ───────────────────────────────────────────────
+            composable("onboarding") {
+                OnboardingScreen(navController = navController)
+            }
+
+            composable("seed_display/{wordCount}") { backStackEntry ->
+                val wordCount = backStackEntry.arguments?.getString("wordCount")?.toIntOrNull() ?: 12
+                SeedDisplayScreen(
+                    navController = navController,
+                    wordCount = wordCount
+                )
+            }
+
+            composable("seed_verify") {
+                SeedVerifyScreen(navController = navController)
+            }
+
+            composable("mnemonic_input") {
+                MnemonicInputScreen(navController = navController)
+            }
+
+            composable("recovery_date") {
+                RecoveryDateScreen(navController = navController)
+            }
+
+            composable("pin_setup") {
+                PinSetupScreen(
+                    navController = navController,
+                    biometricAuth = biometricAuth
+                )
+            }
+
+            // ── Unlock (returning users) ──────────────────────────────────────
+            composable("unlock") {
+                UnlockScreen(
+                    navController = navController,
+                    pinManager = pinManager,
+                    biometricAuth = biometricAuth,
+                    walletManager = walletManager
+                )
+            }
+
+            // ── Main wallet tabs ──────────────────────────────────────────────
+            composable(Screen.Wallet.route) {
+                // Start the foreground sync service the first time the wallet
+                // screen is composed (covers both post-onboarding and post-unlock
+                // entry points). Idempotent — the service is START_STICKY.
+                LaunchedEffect(Unit) { startSyncService() }
+
+                WalletScreen(
+                    onNavigateSend = { navController.navigate("send") },
+                    onNavigateReceive = { navController.navigate("receive") },
+                    onNavigateScan = {
+                        // TODO Phase 2: launch camera QR scanner; for now navigate to send
+                        navController.navigate("send")
+                    },
+                    onNavigateTx = { txid ->
+                        navController.navigate("transaction_detail/${txid}")
+                    }
+                )
+            }
+
+            composable(Screen.Hub.route) {
+                PlaceholderScreen("Community Hub\n(Phase 3)")
+            }
+
+            composable(Screen.DigiId.route) {
+                PlaceholderScreen("Digi-ID\n(Phase 2)")
+            }
+
+            composable(Screen.Settings.route) {
+                SettingsScreen(navController = navController)
+            }
+
+            // ── Settings sub-screens ──────────────────────────────────────────
+            composable("settings_security") {
+                SecuritySettingsScreen(
+                    navController = navController,
+                    pinManager = pinManager,
+                    biometricAuth = biometricAuth,
+                    walletManager = walletManager
+                )
+            }
+
+            composable("settings_network") {
+                NetworkInfoScreen(navController = navController)
+            }
+
+            composable("settings_display") {
+                DisplaySettingsScreen(navController = navController)
+            }
+
+            composable("settings_about") {
+                AboutScreen(navController = navController)
+            }
+
+            composable("settings_view_seed") {
+                SeedViewScreen(
+                    navController = navController,
+                    walletManager = walletManager,
+                    keyStoreManager = keyStoreManager
+                )
+            }
+
+            // ── Send flow ─────────────────────────────────────────────────────
+            composable("send") {
+                SendScreen(
+                    biometricAuth = biometricAuth,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ── Receive flow ──────────────────────────────────────────────────
+            composable("receive") {
+                ReceiveScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ── Transaction detail ────────────────────────────────────────────
+            composable("transaction_detail/{txid}") { backStackEntry ->
+                val txid = backStackEntry.arguments?.getString("txid") ?: ""
+                TransactionDetailScreen(
+                    txid = txid,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PlaceholderScreen(title: String) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center
+        )
+    }
+}

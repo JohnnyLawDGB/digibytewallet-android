@@ -1,0 +1,84 @@
+package io.digibyte.ui.wallet
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import io.digibyte.core.PriceData
+import io.digibyte.core.PriceProvider
+import io.digibyte.core.UtxoManager
+import io.digibyte.core.WalletManager
+import io.digibyte.core.db.dao.TransactionDao
+import io.digibyte.core.db.entity.TransactionEntity
+import io.digibyte.core.model.SyncState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.text.NumberFormat
+import java.util.Locale
+import javax.inject.Inject
+
+@HiltViewModel
+class WalletViewModel @Inject constructor(
+    private val utxoManager: UtxoManager,
+    private val transactionDao: TransactionDao,
+    private val walletManager: WalletManager,
+    private val priceProvider: PriceProvider
+) : ViewModel() {
+
+    /** Live balance in satoshis. */
+    val balance: StateFlow<Long> = utxoManager.getBalance()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+
+    /** Live transaction list, most-recent first. */
+    val transactions: StateFlow<List<TransactionEntity>> = transactionDao.getAllTransactions()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** SPV sync state propagated from WalletManager. */
+    val syncState: StateFlow<SyncState> = walletManager.syncState
+
+    /** Latest price data from PriceProvider (null until first fetch). */
+    private val _price = MutableStateFlow<PriceData?>(null)
+    val price: StateFlow<PriceData?> = _price.asStateFlow()
+
+    /** Fiat balance string, e.g. "$12.34" — derived from balance + price. */
+    val fiatBalance: StateFlow<String> = combine(balance, price) { sats, priceData ->
+        if (priceData == null || priceData.priceUsd <= 0.0) return@combine "$ --"
+        val dgb = sats / 100_000_000.0
+        val fiat = dgb * priceData.priceUsd
+        val fmt = NumberFormat.getCurrencyInstance(Locale.US)
+        fmt.format(fiat)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "$ --")
+
+    init {
+        fetchPricePeriodically()
+    }
+
+    /** Fetch price now and then every 5 minutes. */
+    private fun fetchPricePeriodically() {
+        viewModelScope.launch {
+            while (true) {
+                runCatching { _price.value = priceProvider.fetchPrice() }
+                delay(5 * 60 * 1000L)
+            }
+        }
+    }
+
+    /** Get a receive address for [index]. Delegates to WalletManager (bech32 by default). */
+    fun getReceiveAddress(index: Int = 0): String? =
+        walletManager.getReceiveAddress(index, format = 2)
+
+    companion object {
+        /**
+         * Format satoshis to a human-readable DGB string with up to 8 decimal places.
+         * Example: 123456789012 → "1,234.56789012 DGB"
+         */
+        fun formatSatoshis(satoshis: Long): String {
+            val dgb = satoshis / 100_000_000.0
+            val fmt = NumberFormat.getNumberInstance(Locale.US).apply {
+                minimumFractionDigits = 2
+                maximumFractionDigits = 8
+            }
+            return "${fmt.format(dgb)} DGB"
+        }
+    }
+}

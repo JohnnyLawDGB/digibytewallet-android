@@ -1,0 +1,176 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
+package io.digibyte.ui.settings
+
+import android.view.WindowManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import io.digibyte.core.WalletManager
+import io.digibyte.core.security.KeyStoreManager
+import io.digibyte.ui.theme.DigiByteRed
+
+/**
+ * Displays the recovery seed phrase.
+ * FLAG_SECURE prevents screenshots and screen recording for the lifetime of this screen.
+ *
+ * Access: gated by PIN + biometric in SecuritySettingsScreen before navigating here.
+ */
+@Composable
+fun SeedViewScreen(
+    navController: NavController,
+    walletManager: WalletManager,
+    keyStoreManager: KeyStoreManager
+) {
+    val view = LocalView.current
+
+    // Apply FLAG_SECURE on entry, remove on exit
+    DisposableEffect(Unit) {
+        val window = (view.context as? android.app.Activity)?.window
+        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    // In a real implementation the mnemonic would be decrypted from KeyStoreManager.
+    // The WalletManager holds the encrypted blob; here we show a placeholder until
+    // the decryption path is wired in Phase 2. The FLAG_SECURE protection is active
+    // regardless, so screenshots are blocked even for the placeholder.
+    val words: List<String> = remember {
+        // TODO Phase 2: decrypt via keyStoreManager.decrypt(encryptedMnemonic)
+        List(12) { "••••••" }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A1628))
+    ) {
+        TopAppBar(
+            title = { Text("Recovery Phrase", color = Color.White) },
+            navigationIcon = {
+                IconButton(onClick = { navController.popBackStack() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0A1628))
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Warning banner
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DigiByteRed.copy(alpha = 0.15f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Default.Warning, null, tint = DigiByteRed, modifier = Modifier.size(22.dp))
+                    Column {
+                        Text(
+                            "Never share your recovery phrase",
+                            color = DigiByteRed,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Anyone with these words can steal your funds.",
+                            color = Color(0xFFB0BEC5),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            Text(
+                text = "Your ${words.size}-word Recovery Phrase",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = "Write these words down in order and store them safely.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF8899AA)
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                itemsIndexed(words) { idx, word ->
+                    Card(
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "${idx + 1}.",
+                                color = Color(0xFF546E7A),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.width(24.dp)
+                            )
+                            Text(
+                                text = word,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = { navController.popBackStack() },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2742))
+            ) {
+                Text("Done — Hide Phrase", color = Color.White)
+            }
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}

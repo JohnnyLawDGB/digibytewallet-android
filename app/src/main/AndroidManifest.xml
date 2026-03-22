@@ -1,241 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          xmlns:tools="http://schemas.android.com/tools"
-          package="io.digibyte">
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <uses-permission android:name="android.permission.WRITE_INTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.READ_INTERNAL_STORAGE"/>
-
-    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-
-    <uses-permission android:name="android.permission.NFC"/>
-
-    <uses-feature android:name="android.hardware.nfc" android:required="false"/>
-
-    <uses-permission
-        android:name="android.permission.READ_CONTACTS"
-        tools:node="remove"/>
-
-    <uses-permission
-        android:name="android.permission.FLASHLIGHT"
-        tools:node="remove"/>
-
-    <uses-permission
-        android:name="android.permission.VIBRATE"
-        tools:node="remove"/>
-
-    <uses-permission
-        android:name="android.permission.READ_HISTORY_BOOKMARKS"
-        tools:node="remove"/>
-
-    <uses-feature
-        android:name="android.hardware.location.gps"
-        android:required="false"/>
-    <uses-feature
-        android:name="android.hardware.location.network"
-        android:required="false"/>
-    <uses-feature
-        android:name="android.hardware.telephony"
-        android:required="false"/>
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="true"/>
-    <uses-feature
-        android:name="android.hardware.camera.autofocus"
-        android:required="false"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
-        android:name=".DigiByte"
+        android:name=".DigiByteApp"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/digi_wallet_name"
-        android:largeHeap="true"
-        android:launchMode="singleTask"
+        android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/Theme.DigiByte"
         tools:replace="android:allowBackup,android:label">
 
-        <meta-data
-            android:name="io.fabric.ApiKey"
-            android:value="108511e9bca59555cc48f2d13514c03dd5ca0035"/>
-
-        <activity
-            android:name=".presenter.activities.intro.LauncherActivity"
-            android:label="@string/digi_wallet_name"
-            android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.MAIN"/>
-
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-
-        <activity
-            android:name=".presenter.activities.intro.IntroActivity"
-            android:label="@string/digi_wallet_name"
-            android:exported="false"
-            android:screenOrientation="portrait"/>
-
-        <activity
-            android:name=".presenter.activities.BreadActivity"
-            android:label="@string/digi_wallet_name"
-            android:launchMode="singleTop"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:windowSoftInputMode="adjustPan">
-        </activity>
-        <activity
-            android:name=".presenter.activities.intro.RecoverActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.WipeActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.ImportActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.UpdatePinActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.LoginActivity"
-            android:launchMode="singleTop"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="digiid"/>
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="digibyte"/>
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.nfc.action.TAG_DISCOVERED"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-            </intent-filter>
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.SettingsActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.NotificationActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.SyncBlockchainActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.DisplayCurrencyActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.AboutActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.SecurityCenterActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.ShareDataActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.intro.WriteDownActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.PaperKeyActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.SpendLimitActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.PaperKeyProveActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.InputWordsActivity"
-            android:screenOrientation="portrait"
-            android:exported="false"
-            android:windowSoftInputMode="adjustPan">
-        </activity>
-        <activity
-            android:name=".presenter.activities.DisabledActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.FingerprintActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.AdvancedActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.NodesActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity
-            android:name=".presenter.activities.settings.TestActivity"
-            android:exported="false"
-            android:screenOrientation="portrait">
-        </activity>
-        <activity android:name=".presenter.activities.QRCodeActivity"
-                  android:exported="false"
-                  android:theme="@style/Theme.AppCompat.Translucent"/>
-
         <service
-            android:name="com.evernote.android.job.gcm.PlatformGcmService"
-            tools:node="remove"/>
+            android:name=".service.SyncService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
 
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="io.digibyte.fileprovider"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"/>
-        </provider>
-        <meta-data
-            android:name="io.fabric.ApiKey"
-            android:value="108511e9bca59555cc48f2d13514c03dd5ca0035"/>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="digibyte" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="digiid" />
+            </intent-filter>
+        </activity>
     </application>
-
 </manifest>

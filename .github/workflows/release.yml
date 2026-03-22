@@ -1,0 +1,31 @@
+name: Release Build
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build in Docker
+        run: |
+          docker build -t dgb-wallet-build docker/
+          docker run --rm -v "$(pwd)":/build dgb-wallet-build \
+            bash -c "./gradlew :app:assembleMainnetRelease"
+
+      - name: Compute SHA-256
+        run: |
+          sha256sum app/build/outputs/apk/mainnet/release/*.apk > checksums.sha256
+          cat checksums.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/mainnet/release/*.apk
+            checksums.sha256
+          draft: true

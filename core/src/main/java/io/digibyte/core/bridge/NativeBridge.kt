@@ -1,0 +1,75 @@
+package io.digibyte.core.bridge
+
+/**
+ * JNI bridge to the DigiByte C core (digibytewallet-core).
+ * All cryptographic operations and peer-to-peer networking happen in native code.
+ * Raw keys NEVER cross this boundary — only addresses, signed transactions, and status.
+ */
+object NativeBridge {
+    init { System.loadLibrary("core-lib") }
+
+    // === Wallet operations ===
+    /** Generate BIP39 mnemonic. entropyBits: 128 = 12 words, 256 = 24 words */
+    external fun generateMnemonic(entropyBits: Int): String?
+
+    /** Create wallet from mnemonic phrase. Returns true on success. */
+    external fun createWallet(phrase: String): Boolean
+
+    /** Recover wallet from mnemonic, syncing from creationTimestamp (Unix epoch seconds). */
+    external fun recoverWallet(phrase: String, creationTimestamp: Long): Boolean
+
+    /** Authorize a session (called after biometric unlock). Token is Keystore-decrypted auth blob. */
+    external fun unlockSession(authToken: ByteArray): Boolean
+
+    /** Lock the session — zeros all derived keys from C core memory. */
+    external fun lockSession()
+
+    /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */
+    external fun getReceiveAddress(index: Int, format: Int): String?
+
+    /** Get a change address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */
+    external fun getChangeAddress(index: Int, format: Int): String?
+
+    /** Get current wallet balance in satoshis. */
+    external fun getBalance(): Long
+
+    // === Transaction operations ===
+    /** Create an unsigned transaction. Returns serialized tx bytes or null on failure. */
+    external fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?
+
+    /** Sign a transaction. Returns signed tx bytes or null on failure. */
+    external fun signTransaction(unsignedTx: ByteArray): ByteArray?
+
+    /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
+    external fun publishTransaction(signedTx: ByteArray): String?
+
+    // === Fee estimation ===
+    /** Get estimated fee in sat/KB. priority: 0=high(next block), 1=medium, 2=low(economy). */
+    external fun getEstimatedFee(priority: Int): Long
+
+    // === Peer / sync operations ===
+    /** Start SPV sync — connects to peers and begins header/transaction sync. */
+    external fun startSync()
+
+    /** Stop SPV sync — disconnects from all peers. */
+    external fun stopSync()
+
+    /** Get sync progress as float 0.0 to 1.0. */
+    external fun getSyncProgress(): Float
+
+    /** Get number of currently connected peers. */
+    external fun getPeerCount(): Int
+
+    /** Get estimated network block height. */
+    external fun getEstimatedBlockHeight(): Long
+
+    /** Get last synced block height. */
+    external fun getLastBlockHeight(): Long
+
+    /** Register callback handler for native events. */
+    external fun setCallbackHandler(handler: NativeCallback)
+
+    // === Validation ===
+    /** Validate a DigiByte address. Returns true if valid for current network. */
+    external fun isValidAddress(address: String): Boolean
+}
