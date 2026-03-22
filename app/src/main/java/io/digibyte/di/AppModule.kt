@@ -10,6 +10,7 @@ import io.digibyte.core.*
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
 import io.digibyte.core.security.*
+import java.security.SecureRandom
 import javax.inject.Singleton
 
 @Module
@@ -27,11 +28,55 @@ object AppModule {
 
     @Provides @Singleton
     fun provideDatabase(@ApplicationContext context: Context, ksm: KeyStoreManager): WalletDatabase {
-        // Use a derived key from Keystore for DB encryption
-        // For now, use a static passphrase — will be replaced with Keystore-derived key
-        val passphrase = "digibyte-wallet-db".toByteArray()
+        val dbFile = context.getDatabasePath("wallet.db")
+        val prefs = context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE)
+
+        val passphrase: ByteArray = when {
+            prefs.contains("encrypted_key") -> {
+                // Existing install: decrypt the stored random passphrase
+                val stored = prefs.getString("encrypted_key", "")!!
+                val parts = stored.split(":")
+                val encrypted = EncryptedData(
+                    ciphertext = hexToBytes(parts[0]),
+                    iv = hexToBytes(parts[1])
+                )
+                ksm.decrypt(encrypted)
+            }
+            dbFile.exists() -> {
+                // Phase 1 upgrade: DB already exists with the old hardcoded passphrase.
+                // Re-keying an SQLCipher DB through Room's abstraction layer requires
+                // low-level PRAGMA rekey calls that bypass Room's lifecycle — this is
+                // fragile and risks DB corruption. Compromise: continue using the legacy
+                // passphrase for existing installs and store a flag to document the state.
+                // Security improvement (random Keystore-derived passphrase) applies to
+                // all new installs going forward.
+                prefs.edit().putBoolean("legacy_passphrase", true).apply()
+                "digibyte-wallet-db".toByteArray()
+            }
+            else -> {
+                // New install: generate a random 32-byte passphrase, encrypt it with
+                // an Android Keystore AES-256-GCM key, and persist the encrypted blob.
+                ksm.createKey()
+                val newPassphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
+                val encrypted = ksm.encrypt(newPassphrase)
+                prefs.edit()
+                    .putString(
+                        "encrypted_key",
+                        "${bytesToHex(encrypted.ciphertext)}:${bytesToHex(encrypted.iv)}"
+                    )
+                    .apply()
+                newPassphrase
+            }
+        }
+
         return WalletDatabase.create(context, passphrase)
     }
+
+    private fun bytesToHex(bytes: ByteArray): String =
+        bytes.joinToString("") { "%02x".format(it) }
+
+    private fun hexToBytes(hex: String): ByteArray =
+        hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
     @Provides fun provideTransactionDao(db: WalletDatabase): TransactionDao = db.transactionDao()
     @Provides fun provideUtxoDao(db: WalletDatabase): UtxoDao = db.utxoDao()
