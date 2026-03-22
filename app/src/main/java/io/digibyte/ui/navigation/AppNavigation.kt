@@ -24,6 +24,7 @@ import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
 import io.digibyte.service.SyncService
+import io.digibyte.ui.asset.*
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.settings.*
 import io.digibyte.ui.wallet.*
@@ -53,7 +54,10 @@ private val fullScreenRoutes = setOf(
     "settings_network",
     "settings_display",
     "settings_about",
-    "settings_view_seed"
+    "settings_view_seed",
+    "assets",
+    "asset_detail/{assetId}",
+    "asset_send/{assetId}"
 )
 
 @Composable
@@ -175,7 +179,8 @@ fun AppNavigation(
                     },
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
-                    }
+                    },
+                    onNavigateAssets = { navController.navigate("assets") }
                 )
             }
 
@@ -241,6 +246,35 @@ fun AppNavigation(
                 val txid = backStackEntry.arguments?.getString("txid") ?: ""
                 TransactionDetailScreen(
                     txid = txid,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ── Asset screens ─────────────────────────────────────────────────
+            composable("assets") {
+                AssetListScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToAsset = { assetId ->
+                        navController.navigate("asset_detail/${assetId}")
+                    }
+                )
+            }
+
+            composable("asset_detail/{assetId}") { backStackEntry ->
+                val assetId = backStackEntry.arguments?.getString("assetId") ?: ""
+                AssetDetailScreen(
+                    assetId = assetId,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateSend = { id ->
+                        navController.navigate("asset_send/${id}")
+                    }
+                )
+            }
+
+            composable("asset_send/{assetId}") { backStackEntry ->
+                val assetId = backStackEntry.arguments?.getString("assetId") ?: ""
+                AssetSendScreen(
+                    assetId = assetId,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

@@ -37,6 +37,7 @@ fun WalletScreen(
     onNavigateReceive: () -> Unit,
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
+    onNavigateAssets: () -> Unit = {},
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -108,7 +109,7 @@ fun WalletScreen(
                     icon = Icons.Default.Stars,
                     label = "Assets",
                     modifier = Modifier.weight(1f),
-                    onClick = { /* Phase 2 */ }
+                    onClick = onNavigateAssets
                 )
             }
         }
