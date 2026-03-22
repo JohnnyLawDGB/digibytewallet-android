@@ -21,9 +21,11 @@ import androidx.navigation.compose.*
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.security.BiometricAuth
+import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
 import io.digibyte.service.SyncService
 import io.digibyte.ui.onboarding.*
+import io.digibyte.ui.settings.*
 import io.digibyte.ui.wallet.*
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
@@ -46,14 +48,20 @@ private val fullScreenRoutes = setOf(
     "unlock",
     "send",
     "receive",
-    "transaction_detail/{txid}"
+    "transaction_detail/{txid}",
+    "settings_security",
+    "settings_network",
+    "settings_display",
+    "settings_about",
+    "settings_view_seed"
 )
 
 @Composable
 fun AppNavigation(
     walletManager: WalletManager,
     pinManager: PinManager,
-    biometricAuth: BiometricAuth
+    biometricAuth: BiometricAuth,
+    keyStoreManager: KeyStoreManager
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -180,7 +188,37 @@ fun AppNavigation(
             }
 
             composable(Screen.Settings.route) {
-                PlaceholderScreen("Settings")
+                SettingsScreen(navController = navController)
+            }
+
+            // ── Settings sub-screens ──────────────────────────────────────────
+            composable("settings_security") {
+                SecuritySettingsScreen(
+                    navController = navController,
+                    pinManager = pinManager,
+                    biometricAuth = biometricAuth,
+                    walletManager = walletManager
+                )
+            }
+
+            composable("settings_network") {
+                NetworkInfoScreen(navController = navController)
+            }
+
+            composable("settings_display") {
+                DisplaySettingsScreen(navController = navController)
+            }
+
+            composable("settings_about") {
+                AboutScreen(navController = navController)
+            }
+
+            composable("settings_view_seed") {
+                SeedViewScreen(
+                    navController = navController,
+                    walletManager = walletManager,
+                    keyStoreManager = keyStoreManager
+                )
             }
 
             // ── Send flow ─────────────────────────────────────────────────────

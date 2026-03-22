@@ -38,6 +38,7 @@ object AppModule {
     @Provides fun provideHeaderDao(db: WalletDatabase): HeaderDao = db.headerDao()
     @Provides fun providePeerDao(db: WalletDatabase): PeerDao = db.peerDao()
     @Provides fun providePriceCacheDao(db: WalletDatabase): PriceCacheDao = db.priceCacheDao()
+    @Provides fun provideWalletConfigDao(db: WalletDatabase): io.digibyte.core.db.dao.WalletConfigDao = db.walletConfigDao()
 
     @Provides @Singleton
     fun provideUtxoManager(utxoDao: UtxoDao): UtxoManager = UtxoManager(utxoDao)

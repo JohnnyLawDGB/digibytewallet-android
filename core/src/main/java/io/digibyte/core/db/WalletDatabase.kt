@@ -26,6 +26,7 @@ abstract class WalletDatabase : RoomDatabase() {
     abstract fun headerDao(): HeaderDao
     abstract fun peerDao(): PeerDao
     abstract fun priceCacheDao(): PriceCacheDao
+    abstract fun walletConfigDao(): WalletConfigDao
 
     companion object {
         fun create(context: Context, passphrase: ByteArray): WalletDatabase {

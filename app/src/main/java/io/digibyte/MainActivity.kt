@@ -10,6 +10,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.security.BiometricAuth
+import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
 import io.digibyte.service.SyncService
 import io.digibyte.ui.navigation.AppNavigation
@@ -22,6 +23,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var pinManager: PinManager
     @Inject lateinit var biometricAuth: BiometricAuth
+    @Inject lateinit var keyStoreManager: KeyStoreManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,7 +41,8 @@ class MainActivity : ComponentActivity() {
                 AppNavigation(
                     walletManager = walletManager,
                     pinManager = pinManager,
-                    biometricAuth = biometricAuth
+                    biometricAuth = biometricAuth,
+                    keyStoreManager = keyStoreManager
                 )
             }
         }
