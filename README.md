@@ -1,82 +1,163 @@
-<h1 margin="0 auto">DigiByte for Android</h1>
-    
-<a href="https://play.google.com/store/apps/details?id=io.digibyte">
-    <img alt="Get it on Google Play"
-        height="80"
-        src="https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png"/>
-</a>
+# DigiByte Wallet for Android — v3.0 Development Fork
 
-<br>
+A complete modernization of the official DigiByte Android wallet. Full Kotlin rewrite with Jetpack Compose, patched native C core for DigiByte Core 8.26+ compatibility, hardware-backed security, DigiAssets v2, Digi-ID authentication, privacy-by-default Tor routing, and reproducible builds.
 
-Fast, simple and safe! DigiByte for Android is the easiest way to get started sending and receiving DigiByte. Designed with both new and experienced users in-mind, DigiByte for Android is simple enough for a first-time novice to use, yet powerful enough for regular power-users.
+> **Status:** Active development. Phase 1 (core wallet) and Phase 2 (assets, Digi-ID, IPFS, Tor) complete. Phase 3 (community hub) in progress.
 
-Part of the DigiByte Network: DigiByte for Android uses the very large DigiByte Network, the worlds most robust and decentralized Blockchain, to allow you to access your DigiBytes at any time. Your app connects directly as an [SPV](https://en.bitcoinwiki.org/wiki/Simplified_Payment_Verification) (Lite) wallet, so you can start sending and receiving DigiByte right away. No lengthy downloads or syncing!
+## What's New in v3.0
 
-Safer than a vault: DigiByte for Android is based on the latest security features to protect you and your precious DigiBytes. Utilizing secure hardware encryption and a variety of other measures, you can rest assured that your DigiBytes are accessible to you and you alone.
+This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a modern, secure, privacy-first application.
 
-Your first Digital wallet: DigiByte for Android was engineered from the ground-up to be as friendly to first-time users as possible. Central to this ideal is your Personal Recovery Key, that is all that is required to restore your DigiBytes in the event you ever lose your phone or happen to flush it away. DigiByte for Android uses “Brain wallet” techniques (A phrase you keep in your brain) to allow you to easily get back up and running on a new phone.
+### Core Wallet
+- **Full SPV** — No server dependencies. Connects directly to the DigiByte peer network. Your keys, your coins.
+- **DigiByte Core 8.26+ compatible** — Updated protocol version (70019), DNS seeds, checkpoints through block 23M, corrected fee constants.
+- **Hardware-backed security** — Seed encrypted with AES-256-GCM via Android Keystore (TEE/Strongbox). BiometricPrompt unlock. Argon2id PIN hashing.
+- **Modern Android** — Kotlin 2.0, Jetpack Compose, Material 3, SDK 35, Hilt DI, Room + SQLCipher.
+- **Reproducible builds** — Docker build environment, multi-party attestation workflow, no proprietary dependencies.
 
-[Digi-ID](https://digibyte.io/#digi-id): this will allow you to securely authenticate and login to any website that supports Digi-ID. Simply by scanning QR and entering your PIN or your finger print in your DigiByte Wallet.
+### DigiAssets v2
+- **Full asset support** — Detect, decode, display, send, and receive DigiAssets v2 tokens directly in the wallet.
+- **BitIO decoder** — Complete OP_RETURN parser ported from digiasset-core and digibyte-js. Handles issuance, transfer, and burn operations.
+- **UTXO protection** — Asset-bearing UTXOs (700-sat markers) are segregated from DGB coin selection. You cannot accidentally spend your assets as fees.
+- **Trustless IPFS** — Asset metadata fetched from IPFS gateways with CID hash verification. No gateway trust required. No IPFS daemon on device.
+- **Marketplace link** — View assets on [DigiNexum](https://diginexum.trade/) directly from the wallet.
 
-[DigiAssets](https://digibyte.io/nl/#digiassets): is a secure, scalable layer on top of the DigiByte blockchain that allows for the decentralized issuance of digital assets, tokens, smart contracts,   digital identity and more.
+### Digi-ID
+- **Scan to authenticate** — Scan a `digiid://` QR code to log in to any Digi-ID-enabled website.
+- **Shared QR scanner** — CameraX + ZXing barcode scanner shared between Send, Receive, and Digi-ID flows.
+- **DigiScope integration** — One-tap login to [digiscope.me](https://digiscope.me), handle registration, tip wallet linking.
+- **Login history** — Track your Digi-ID authentication history.
 
-<br>
+### Privacy
+- **Tor by default** — All network connections routed through Tor (SOCKS5 proxy in the C core). New installs have Tor enabled by default.
+- **Multi-peer random submission** — Transactions submitted to a randomly chosen peer to obscure origin.
+- **Trusted full node relay** — Optionally connect exclusively to your own node with Dandelion++ for maximum privacy.
+- **Dandelion++ SPV stem submission** — [DIP filed](https://github.com/DigiByte-Core/dips/pull/15) to extend Dandelion++ to lightweight wallets. First-in-class for any UTXO chain.
 
-**Features:**
+### Fun
+- **DigiRunner** — A pixel-art side-scrolling mini-game that plays during blockchain sync. Collect DGB coins while you wait.
 
-* Simplified Payment Verification for fast mobile performance
-* Start using DigiByte Wallet immediately, thanks SPV (Lite) wallet technology
-* Safety with your fingerprint, for easy unlocking of your wallet
-* Easily import paper wallets, or restore from another phone
-* No server to get hacked or go down
-* Redundancy and resiliency, powered by DigiByte's globally distributed Blockchain
-* The Single Personal Recovery Key is all that's needed to backup your wallet
-* Your secure / private keys never leave your phone and are never transmitted to any 3rd party, ensuring you maintain total control of your DigiByte
-* QR Code scanning to save you time and effort
-* Currency conversion, to quickly and easily see the value of your DigiByte in other fiat currencies
-* Digi-ID for secure and fast authentication and login into websites
-* DigiAssets is a secure, scalable layer on top of the DigiByte blockchain that allows for the decentralized issuance of digital assets, tokens, smart contracts,   digital identity and more.
+## Architecture
 
-<br>
+```
+┌─────────────────────────────────────────────┐
+│          Presentation (Kotlin/Compose)       │
+│   Material 3 · MVVM · Jetpack Navigation    │
+├─────────────────────────────────────────────┤
+│          Application (ViewModels/DI)         │
+│  Hilt · StateFlow · Coroutines              │
+├─────────────────────────────────────────────┤
+│            Domain (Kotlin)                   │
+│  WalletManager · AssetManager · CoinSelector│
+│  DigiIdManager · TorManager · IpfsClient    │
+├─────────────────────────────────────────────┤
+│           Native Core (C/JNI)               │
+│  digibytewallet-core (patched 8.26+)        │
+│  SPV Peer Manager · secp256k1 · 5-algo PoW  │
+├─────────────────────────────────────────────┤
+│         Platform (Android)                  │
+│  Keystore · BiometricPrompt · Room+SQLCipher│
+└─────────────────────────────────────────────┘
+```
 
-**How to set up the development environment:**
+All cryptographic operations and peer-to-peer networking happen in the native C core. Raw keys never cross the JNI boundary during normal operation.
 
-1. Download and install Java 7 or up
+## Building
 
-2. Download and Install the latest Android studio
+### Prerequisites
+- JDK 17
+- Android SDK 35
+- NDK 27.0.12077973
+- CMake 3.22.1
 
-3. Download and install the latest [NDK](https://developer.android.com/ndk/downloads/index.html) or download it in android studio by "choosing the NDK" and press "download"
+### Quick Build
+```bash
+git clone --recursive https://github.com/JohnnyLawDGB/digibytewallet-android.git
+cd digibytewallet-android
+./gradlew :app:assembleMainnetDebug
+```
 
-4. Go to [Bread wallet](https://github.com/breadwallet/breadwallet-android) and clone or download the project
+### Reproducible Build (Docker)
+```bash
+docker build -t dgb-wallet-build docker/
+docker run --rm -v "$(pwd)":/build dgb-wallet-build \
+  bash -c "./gradlew :app:assembleMainnetRelease && \
+  sha256sum app/build/outputs/apk/mainnet/release/app-mainnet-release-unsigned.apk"
+```
 
-5. Open the project with Android Studio and let the project sync
+See [VERIFICATION.md](VERIFICATION.md) for multi-party attestation instructions.
 
-6. Go to SDK Manager and download all the SDK Platforms and SDK Tools
+## Module Structure
 
-7. Initialize the submodules - <code>git submodule init</code>
+```
+digibytewallet-android/
+├── app/        — Android app (Compose UI, navigation, services)
+├── core/       — Business logic (wallet, assets, IPFS, Digi-ID, security)
+├── native/     — C core + JNI bridge (SPV, crypto, secp256k1)
+├── game/       — DigiRunner sync mini-game
+└── docker/     — Reproducible build environment
+```
 
-8. Update the submodules - <code>git submodule update</code>
+## Testing
 
-9. Build -> Rebuild Project
+```bash
+# Unit tests (JVM)
+./gradlew testMainnetDebugUnitTest
 
+# Instrumented tests (requires device/emulator)
+./gradlew connectedMainnetDebugAndroidTest
+```
 
-### Localization
+**139+ tests, 0 failures** across:
+- Native JNI bridge (mnemonic generation, address validation, asset detection, proxy)
+- Room DAO operations (UTXO segregation, asset balances, migration v1→v2)
+- Security (Keystore encrypt/decrypt, PIN hashing)
+- DigiAsset decoder (BitIO parsing, real mainnet transaction data)
+- IPFS client (CID verification, gateway fallback)
+- Digi-ID (URI parsing, domain extraction)
+- Coin selection (asset protection, dust avoidance)
 
-**DigiByte for Android** is available in the following languages:
+## Development Phases
 
-English, Afrikaans, Albanian, Arabic, Bengali, Bosnian, Bulgarian, Catalan, Croatian, Czech, Danish, Dutch, Filipino, Finnish, French, German, Greek, Gujarati, Hebrew, Hindi, Hungarian, Icelandic, Indonesian, Italian, Japanese, Kannada, Korean, Macedonian, Malay, Malayalam, Maltese, Marathi, Mongolian, Norwegian Bokmål, Oriya, Persian, Polish, Portuguese, Punjabi, Romanian, Russian, Serbian, Simplified Chinese, Slovak, Slovenian, Spanish, Swahili, Swedish, Tamil, Telugu, Thai, Traditional Chinese, Turkish, Turkmen, Ukrainian, Urdu, Vietnamese
+| Phase | Status | Tag | Features |
+|-------|--------|-----|----------|
+| 1 — Alpha | Complete | `v3.0.0-alpha1` | Core wallet: send, receive, sync, security, DigiRunner |
+| 2 — Beta | Complete | `v3.0.0-beta1` | DigiAssets v2, Digi-ID, IPFS, Tor, DigiScope |
+| 3 — Production | In Progress | — | Community Hub, oracle price feed, full DigiScope UI |
+| 4 — Post-launch | Planned | — | Dandelion++ SPV stem, v9 features, iOS port |
 
-We manage all translations with:
+## Security
 
-[POEditor](https://poeditor.com)
+- **Threat model:** [THREAT_MODEL.md](THREAT_MODEL.md)
+- **Crypto inventory:** [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md)
+- **Reproducible builds:** [VERIFICATION.md](VERIFICATION.md)
+- **Responsible disclosure:** [SECURITY.md](SECURITY.md)
 
+### Key Security Properties
+- Seed encrypted at rest with Android Keystore (TEE/Strongbox)
+- Key invalidated on biometric enrollment change
+- PIN hashed with Argon2id (PBKDF2 fallback)
+- Database encrypted with SQLCipher (Keystore-derived passphrase)
+- No analytics, no telemetry, no proprietary dependencies
+- FLAG_SECURE on seed display, filterTouchesWhenObscured on send confirmation
+- R8 shrinking only — no obfuscation, for auditability
 
-## Donate
+## Related
 
-[Donate to the DigiByte Foundation](https://digibytefoundation.io/donate/)
-<br>
-<br>
-[Donate to the DigiByte Awareness Team](https://dgbat.org/#donate)
+- **Dandelion++ DIP:** [DigiByte-Core/dips#15](https://github.com/DigiByte-Core/dips/pull/15) — Extending stem-phase privacy to SPV wallets
+- **DigiNexum Marketplace:** [diginexum.trade](https://diginexum.trade/) — DigiAsset marketplace by RenzoDGB
+- **DigiScope:** [digiscope.me](https://digiscope.me) — DigiByte community platform
+- **Original wallet:** [DigiByte-Core/digibytewallet-android](https://github.com/DigiByte-Core/digibytewallet-android)
 
+## Contributing
 
-We appreciate your support!
+This is an open-source project. Contributions welcome via pull requests.
+
+- Fork the repo
+- Create a feature branch
+- Submit a PR with tests
+- All builds must be reproducible
+
+## License
+
+MIT — see [LICENSE](LICENSE)
