@@ -2,6 +2,8 @@ package io.digibyte.core
 
 import io.digibyte.core.db.dao.PriceCacheDao
 import io.digibyte.core.db.entity.PriceCacheEntity
+import io.digibyte.core.model.OraclePriceProvider
+import io.digibyte.core.model.PriceSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -48,8 +50,52 @@ fun okHttpFetcher(client: OkHttpClient = OkHttpClient()): HttpFetcher = HttpFetc
 class PriceProvider(
     private val priceCacheDao: PriceCacheDao,
     private val fetcher: HttpFetcher = okHttpFetcher(),
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val oracleProvider: OraclePriceProvider? = null
 ) {
+    /**
+     * Fetch with a preferred [PriceSource].
+     * - [PriceSource.ORACLE]: tries the oracle provider first; falls back to API if unavailable.
+     * - [PriceSource.API]: goes directly to external APIs (CoinGecko → Binance).
+     * - [PriceSource.CACHED]: returns only the Room-cached value (fast, no network).
+     */
+    suspend fun fetchPrice(
+        currency: String = "USD",
+        preferredSource: PriceSource
+    ): PriceData = withContext(ioDispatcher) {
+        when (preferredSource) {
+            PriceSource.ORACLE -> {
+                // Try oracle provider first; fall back to API path if not available
+                val oracle = oracleProvider
+                if (oracle != null && oracle.isAvailable()) {
+                    try {
+                        val price = oracle.fetchOraclePrice()
+                        if (price != null) {
+                            cachePrice(price, currency)
+                            return@withContext price
+                        }
+                    } catch (_: Exception) { }
+                }
+                // Oracle unavailable — fall through to normal API path
+                return@withContext fetchPrice(currency)
+            }
+            PriceSource.CACHED -> {
+                val cached = priceCacheDao.getPrice(currency)
+                return@withContext if (cached != null) {
+                    PriceData(
+                        priceUsd = cached.pricePerDgb,
+                        change24h = cached.change24h,
+                        source = cached.source + " (cached)",
+                        updatedAt = cached.updatedAt
+                    )
+                } else {
+                    PriceData(0.0, 0.0, "unavailable", System.currentTimeMillis())
+                }
+            }
+            PriceSource.API -> fetchPrice(currency)
+        }
+    }
+
     suspend fun fetchPrice(currency: String = "USD"): PriceData = withContext(ioDispatcher) {
         // Try CoinGecko first
         try {

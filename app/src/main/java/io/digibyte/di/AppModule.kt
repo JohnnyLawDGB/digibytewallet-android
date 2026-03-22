@@ -12,6 +12,7 @@ import io.digibyte.core.tor.TorManager
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
 import io.digibyte.core.digiscope.DigiScopeClient
+import io.digibyte.core.hub.HubWebSocket
 import io.digibyte.core.digiid.DigiIdManager
 import io.digibyte.core.ipfs.AssetMetadataService
 import io.digibyte.core.ipfs.IpfsClient
@@ -128,7 +129,16 @@ object AppModule {
         DigiIdManager(client, historyDao)
 
     @Provides @Singleton
-    fun provideDigiScopeClient(client: OkHttpClient): DigiScopeClient = DigiScopeClient(client)
+    fun provideDigiScopeClient(
+        client: OkHttpClient,
+        @ApplicationContext context: Context
+    ): DigiScopeClient = DigiScopeClient(client, context)
+
+    @Provides @Singleton
+    fun provideHubWebSocket(client: OkHttpClient, digiScopeClient: DigiScopeClient): HubWebSocket =
+        HubWebSocket(client, digiScopeClient)
+
+    @Provides fun provideCachedMessageDao(db: WalletDatabase): CachedMessageDao = db.cachedMessageDao()
 
     @Provides @Singleton
     fun provideAssetManager(
