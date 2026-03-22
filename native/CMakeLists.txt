@@ -89,6 +89,7 @@ add_library(
         src/main/jni/digibytewallet-core/crypto/sha3/sph_echo.h
 
         # JNI bridge
+        src/main/jni/bridge/jni_test.c
         src/main/jni/bridge/core.c
         src/main/jni/bridge/core.h
         src/main/jni/bridge/JNIBase58.c
