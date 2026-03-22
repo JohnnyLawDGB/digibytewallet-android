@@ -10,6 +10,7 @@ import io.digibyte.core.*
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
+import io.digibyte.core.digiscope.DigiScopeClient
 import io.digibyte.core.digiid.DigiIdManager
 import io.digibyte.core.ipfs.AssetMetadataService
 import io.digibyte.core.ipfs.IpfsClient
@@ -121,6 +122,9 @@ object AppModule {
     @Provides @Singleton
     fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao): DigiIdManager =
         DigiIdManager(client, historyDao)
+
+    @Provides @Singleton
+    fun provideDigiScopeClient(client: OkHttpClient): DigiScopeClient = DigiScopeClient(client)
 
     @Provides @Singleton
     fun provideAssetManager(
