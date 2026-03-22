@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.tor.TorState
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
@@ -35,6 +36,8 @@ fun NetworkInfoScreen(
     val peerCount by viewModel.peerCount.collectAsState()
     val lastBlock by viewModel.lastBlockHeight.collectAsState()
     val estimatedHeight by viewModel.estimatedHeight.collectAsState()
+    val torEnabled by viewModel.torEnabled.collectAsState()
+    val torState by viewModel.torState.collectAsState()
 
     // Refresh network stats when this screen is opened
     LaunchedEffect(Unit) { viewModel.refreshNetworkStats() }
@@ -180,20 +183,38 @@ fun NetworkInfoScreen(
                 }
             }
 
-            // ── Tor (Phase 2) ────────────────────────────────────────────────
+            // ── Tor Privacy ──────────────────────────────────────────────────
             item {
                 SettingsCategory(title = "Privacy") {
+                    val torSubtitle = when (val ts = torState) {
+                        is TorState.Disabled -> "Disabled — connecting directly"
+                        is TorState.Starting -> "Starting…"
+                        is TorState.Connecting -> "Connecting to Tor network…"
+                        is TorState.Connected -> "Connected via port ${ts.socksPort}"
+                        is TorState.Failed -> "Failed: ${ts.reason}"
+                    }
+                    val torSubtitleColor = when (torState) {
+                        is TorState.Connected -> DigiByteGreen
+                        is TorState.Failed -> DigiByteRed
+                        is TorState.Starting, is TorState.Connecting -> DigiByteAccent
+                        else -> Color(0xFF8899AA)
+                    }
+
                     SettingsRow(
                         icon = Icons.Default.VpnLock,
                         iconTint = Color(0xFF7C4DFF),
                         title = "Tor Routing",
-                        subtitle = "Coming in Phase 2",
-                        onClick = {},
+                        subtitle = torSubtitle,
+                        subtitleColor = torSubtitleColor,
+                        onClick = { viewModel.setTorEnabled(!torEnabled) },
                         trailing = {
                             Switch(
-                                checked = false,
-                                onCheckedChange = null,
-                                enabled = false
+                                checked = torEnabled,
+                                onCheckedChange = { viewModel.setTorEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF7C4DFF)
+                                )
                             )
                         }
                     )
