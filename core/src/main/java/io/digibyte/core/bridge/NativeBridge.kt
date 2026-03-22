@@ -72,4 +72,11 @@ object NativeBridge {
     // === Validation ===
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean
+
+    // === Asset detection ===
+    /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */
+    external fun isAssetTransaction(rawTx: ByteArray): Boolean
+
+    /** Returns the raw script bytes of the first OP_RETURN output, or null if none. */
+    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
 }

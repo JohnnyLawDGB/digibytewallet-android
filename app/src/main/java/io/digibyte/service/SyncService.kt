@@ -152,6 +152,10 @@ class SyncService : Service() {
             // UtxoDao Flow picks this up automatically via Room's invalidation
             // tracker — no explicit action needed here.
         }
+
+        override fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean) {
+            // Wired in Task 7
+        }
     }
 
     // ── Notification helpers ──────────────────────────────────────────────────

@@ -23,4 +23,9 @@ interface TransactionDao {
 
     @Query("DELETE FROM transactions")
     suspend fun deleteAll()
+
+    /** Returns all asset transactions ordered by descending timestamp.
+     *  Per-asset filtering will be added once the schema gains an assetId column (Task 7+). */
+    @Query("SELECT * FROM transactions WHERE isAssetTx = 1 ORDER BY timestamp DESC")
+    fun getAssetTransactions(): Flow<List<TransactionEntity>>
 }

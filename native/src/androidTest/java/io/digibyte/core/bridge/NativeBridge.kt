@@ -27,4 +27,6 @@ object NativeBridge {
     external fun getLastBlockHeight(): Long
     external fun setCallbackHandler(handler: NativeCallback)
     external fun isValidAddress(address: String): Boolean
+    external fun isAssetTransaction(rawTx: ByteArray): Boolean
+    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
 }
