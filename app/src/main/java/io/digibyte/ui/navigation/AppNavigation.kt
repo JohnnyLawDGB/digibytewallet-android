@@ -2,6 +2,9 @@ package io.digibyte.ui.navigation
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -17,10 +20,11 @@ import io.digibyte.core.WalletState
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.PinManager
 import io.digibyte.ui.onboarding.*
+import io.digibyte.ui.wallet.*
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
-    data object Hub : Screen("hub", "Hub", Icons.Default.Chat)
+    data object Hub : Screen("hub", "Hub", Icons.AutoMirrored.Filled.Chat)
     data object DigiId : Screen("digiid", "Digi-ID", Icons.Default.Fingerprint)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
@@ -35,7 +39,10 @@ private val fullScreenRoutes = setOf(
     "mnemonic_input",
     "recovery_date",
     "pin_setup",
-    "unlock"
+    "unlock",
+    "send",
+    "receive",
+    "transaction_detail/{txid}"
 )
 
 @Composable
@@ -55,7 +62,7 @@ fun AppNavigation(
     val startDestination = remember(walletState) {
         when (walletState) {
             is WalletState.NoWallet -> "onboarding"
-            is WalletState.Locked -> "unlock"
+            is WalletState.Locked   -> "unlock"
             is WalletState.Unlocked -> Screen.Wallet.route
         }
     }
@@ -135,16 +142,53 @@ fun AppNavigation(
 
             // ── Main wallet tabs ──────────────────────────────────────────────
             composable(Screen.Wallet.route) {
-                PlaceholderScreen("Wallet")
+                WalletScreen(
+                    onNavigateSend = { navController.navigate("send") },
+                    onNavigateReceive = { navController.navigate("receive") },
+                    onNavigateScan = {
+                        // TODO Phase 2: launch camera QR scanner; for now navigate to send
+                        navController.navigate("send")
+                    },
+                    onNavigateTx = { txid ->
+                        navController.navigate("transaction_detail/${txid}")
+                    }
+                )
             }
+
             composable(Screen.Hub.route) {
                 PlaceholderScreen("Community Hub\n(Phase 3)")
             }
+
             composable(Screen.DigiId.route) {
                 PlaceholderScreen("Digi-ID\n(Phase 2)")
             }
+
             composable(Screen.Settings.route) {
                 PlaceholderScreen("Settings")
+            }
+
+            // ── Send flow ─────────────────────────────────────────────────────
+            composable("send") {
+                SendScreen(
+                    biometricAuth = biometricAuth,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ── Receive flow ──────────────────────────────────────────────────
+            composable("receive") {
+                ReceiveScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ── Transaction detail ────────────────────────────────────────────
+            composable("transaction_detail/{txid}") { backStackEntry ->
+                val txid = backStackEntry.arguments?.getString("txid") ?: ""
+                TransactionDetailScreen(
+                    txid = txid,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
         }
     }
