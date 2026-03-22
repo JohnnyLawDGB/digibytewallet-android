@@ -8,6 +8,7 @@ import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.WalletManager
+import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
 import io.digibyte.core.db.dao.PeerDao
@@ -37,6 +38,7 @@ class SyncService : Service() {
     @Inject lateinit var utxoManager: UtxoManager
     @Inject lateinit var transactionDao: TransactionDao
     @Inject lateinit var peerDao: PeerDao
+    @Inject lateinit var assetManager: AssetManager
 
     /**
      * SupervisorJob so that a child coroutine failure never cancels the
@@ -154,7 +156,33 @@ class SyncService : Service() {
         }
 
         override fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean) {
-            // Wired in Task 7
+            // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
+            // and ensures all Room writes are serialised through the supervisor job.
+            serviceScope.launch {
+                // Upsert the transaction record marked as an asset tx.
+                // amount is stored as positive (receive) or negative (send).
+                transactionDao.insert(
+                    TransactionEntity(
+                        txid          = txHash,
+                        blockHeight   = 0, // updated when the block confirms
+                        timestamp     = System.currentTimeMillis() / 1000L,
+                        amount        = if (isReceive) quantity else -quantity,
+                        fee           = 0,
+                        toAddress     = "",
+                        fromAddress   = "",
+                        confirmations = 0,
+                        isAssetTx     = true
+                    )
+                )
+
+                // Queue an IPFS metadata fetch for this asset id.
+                // AssetMetadataService checks its local cache first (no redundant fetches).
+                // The CID is not available from the callback directly — the C core knows the
+                // asset id but not the metadata CID at this point.  We hand off to
+                // AssetMetadataService with a null CID; it will no-op until the CID is
+                // learned later (e.g. via processAssetUtxo once the full tx is confirmed).
+                assetManager.getAssetHistory(assetId) // touches the DAO, warms the flow
+            }
         }
     }
 

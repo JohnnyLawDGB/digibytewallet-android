@@ -7,8 +7,11 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.*
+import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
+import io.digibyte.core.ipfs.AssetMetadataService
+import io.digibyte.core.ipfs.IpfsClient
 import io.digibyte.core.security.*
 import okhttp3.OkHttpClient
 import java.security.SecureRandom
@@ -103,4 +106,22 @@ object AppModule {
     @Provides @Singleton
     fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
         PriceProvider(dao, okHttpFetcher(client))
+
+    @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
+    @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()
+
+    @Provides @Singleton
+    fun provideIpfsClient(client: OkHttpClient): IpfsClient = IpfsClient(client)
+
+    @Provides @Singleton
+    fun provideAssetMetadataService(ipfsClient: IpfsClient, dao: AssetMetadataDao): AssetMetadataService =
+        AssetMetadataService(ipfsClient, dao)
+
+    @Provides @Singleton
+    fun provideAssetManager(
+        utxoDao: UtxoDao,
+        transactionDao: TransactionDao,
+        metadataDao: AssetMetadataDao,
+        metadataService: AssetMetadataService
+    ): AssetManager = AssetManager(utxoDao, transactionDao, metadataDao, metadataService)
 }
