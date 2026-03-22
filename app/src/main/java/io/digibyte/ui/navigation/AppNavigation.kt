@@ -34,6 +34,7 @@ import io.digibyte.ui.digiid.DigiIdConfirmScreen
 import io.digibyte.ui.digiid.DigiIdScreen
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.settings.*
+import io.digibyte.ui.hub.ChatScreen
 import io.digibyte.ui.wallet.*
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
@@ -191,7 +192,7 @@ fun AppNavigation(
             }
 
             composable(Screen.Hub.route) {
-                PlaceholderScreen("Community Hub\n(Phase 3)")
+                ChatScreen()
             }
 
             composable(Screen.DigiId.route) {

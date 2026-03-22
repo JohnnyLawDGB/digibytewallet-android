@@ -76,6 +76,14 @@ object NativeBridge {
     /** Register callback handler for native events. */
     external fun setCallbackHandler(handler: NativeCallback)
 
+    // === Message signing ===
+    /**
+     * Sign an arbitrary message with the wallet's key at the given address index.
+     * format: 1=bech32. Returns a Base64-encoded signature, or null if the session
+     * is locked or the native implementation is not yet available.
+     */
+    external fun signMessage(message: String, addressFormat: Int): String?
+
     // === Validation ===
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean
