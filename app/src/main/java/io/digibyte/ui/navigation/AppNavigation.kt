@@ -35,6 +35,9 @@ import io.digibyte.ui.digiid.DigiIdScreen
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.settings.*
 import io.digibyte.ui.hub.ChatScreen
+import io.digibyte.ui.hub.CreateThreadScreen
+import io.digibyte.ui.hub.HubScreen
+import io.digibyte.ui.hub.ThreadDetailScreen
 import io.digibyte.ui.wallet.*
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
@@ -67,7 +70,9 @@ private val fullScreenRoutes = setOf(
     "asset_detail/{assetId}",
     "asset_send/{assetId}",
     "qr_scanner",
-    "digiid_confirm/{uri}"
+    "digiid_confirm/{uri}",
+    "thread_detail/{threadId}",
+    "create_thread"
 )
 
 @Composable
@@ -192,7 +197,35 @@ fun AppNavigation(
             }
 
             composable(Screen.Hub.route) {
-                ChatScreen()
+                HubScreen(
+                    onNavigateToThread = { threadId ->
+                        navController.navigate("thread_detail/$threadId")
+                    },
+                    onNavigateCreateThread = {
+                        navController.navigate("create_thread")
+                    }
+                )
+            }
+
+            // ── Forum: thread detail ───────────────────────────────────────
+            composable("thread_detail/{threadId}") { backStackEntry ->
+                val threadId = backStackEntry.arguments?.getString("threadId")?.toIntOrNull() ?: 0
+                ThreadDetailScreen(
+                    threadId = threadId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ── Forum: create thread ───────────────────────────────────────
+            composable("create_thread") {
+                CreateThreadScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onThreadCreated = { threadId ->
+                        navController.navigate("thread_detail/$threadId") {
+                            popUpTo("create_thread") { inclusive = true }
+                        }
+                    }
+                )
             }
 
             composable(Screen.DigiId.route) {

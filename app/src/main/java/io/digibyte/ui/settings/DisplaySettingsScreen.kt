@@ -3,6 +3,7 @@
 package io.digibyte.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -205,7 +206,114 @@ fun DisplaySettingsScreen(
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
+
+            // ── Price Source ─────────────────────────────────────────────
+            item {
+                SettingsCategory(title = "Price Source") {
+                    Card(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // External API — active and selected
+                            PriceSourceOption(
+                                label = "External API",
+                                description = "CoinGecko · Binance",
+                                selected = true,
+                                enabled = true,
+                                onSelect = {}
+                            )
+                            HorizontalDivider(
+                                color = Color(0xFF243352),
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(start = 56.dp)
+                            )
+                            // On-Chain Oracle — greyed out, v9 mainnet pending
+                            PriceSourceOption(
+                                label = "On-Chain Oracle",
+                                description = "Available when v9 launches on mainnet",
+                                selected = false,
+                                enabled = false,
+                                onSelect = {}
+                            )
+                            HorizontalDivider(
+                                color = Color(0xFF243352),
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(start = 56.dp)
+                            )
+                            // Auto — greyed out
+                            PriceSourceOption(
+                                label = "Auto",
+                                description = "Available when v9 launches on mainnet",
+                                selected = false,
+                                enabled = false,
+                                onSelect = {}
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "On-chain oracle price feeds require DigiByte v9 on mainnet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF546E7A),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+            }
         }
+    }
+}
+
+@Composable
+private fun PriceSourceOption(
+    label: String,
+    description: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: () -> Unit
+) {
+    val labelColor = when {
+        !enabled -> Color(0xFF546E7A)
+        selected  -> Color.White
+        else      -> Color(0xFFB0BEC5)
+    }
+    val descColor = if (enabled) Color(0xFF8899AA) else Color(0xFF3D5066)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (enabled) Modifier.clickable(onClick = onSelect) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = labelColor,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = descColor
+            )
+        }
+
+        RadioButton(
+            selected = selected,
+            onClick = if (enabled) onSelect else null,
+            enabled = enabled,
+            colors = RadioButtonDefaults.colors(
+                selectedColor = DigiByteAccent,
+                unselectedColor = if (enabled) Color(0xFF546E7A) else Color(0xFF2D3D52),
+                disabledUnselectedColor = Color(0xFF2D3D52),
+                disabledSelectedColor = DigiByteAccent
+            )
+        )
     }
 }
 
