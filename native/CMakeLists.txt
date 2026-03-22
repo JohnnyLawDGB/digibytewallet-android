@@ -88,20 +88,19 @@ add_library(
         src/main/jni/digibytewallet-core/crypto/sha3/sph_echo.c
         src/main/jni/digibytewallet-core/crypto/sha3/sph_echo.h
 
-        # JNI bridge
+        # JNI bridge — clean bridge (Task 3)
         src/main/jni/bridge/jni_test.c
-        src/main/jni/bridge/core.c
-        src/main/jni/bridge/core.h
-        src/main/jni/bridge/JNIBase58.c
-        src/main/jni/bridge/JNIBase58.h
-        src/main/jni/bridge/JNIBIP32Sequence.c
-        src/main/jni/bridge/JNIBIP32Sequence.h
-        src/main/jni/bridge/JNIKey.c
-        src/main/jni/bridge/JNIKey.h
-        src/main/jni/bridge/PeerManager.c
-        src/main/jni/bridge/PeerManager.h
-        src/main/jni/bridge/wallet.c
-        src/main/jni/bridge/wallet.h
+        src/main/jni/bridge/jni_bridge.h
+        src/main/jni/bridge/jni_wallet.c
+        src/main/jni/bridge/jni_transaction.c
+        src/main/jni/bridge/jni_peer.c
+        # Old bridge files retained for reference but NOT compiled:
+        # src/main/jni/bridge/core.c
+        # src/main/jni/bridge/wallet.c
+        # src/main/jni/bridge/PeerManager.c
+        # src/main/jni/bridge/JNIKey.c
+        # src/main/jni/bridge/JNIBase58.c
+        # src/main/jni/bridge/JNIBIP32Sequence.c
 )
 
 include_directories(src/main/jni/digibytewallet-core/)
