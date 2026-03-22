@@ -34,6 +34,14 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Trusted full node relay** — Optionally connect exclusively to your own node with Dandelion++ for maximum privacy.
 - **Dandelion++ SPV stem submission** — [DIP filed](https://github.com/DigiByte-Core/dips/pull/15) to extend Dandelion++ to lightweight wallets. First-in-class for any UTXO chain.
 
+### Community Hub
+- **Real-time chat** — Channel-based messaging via WebSocket. General, Trading, Development, Assets channels.
+- **Enigma AI bot** — Ask Enigma anything about DigiByte directly in the wallet. Same AI as the Telegram bot.
+- **Forum threads** — Longer-form discussion with replies and upvotes. Announcements, Proposals, Support channels.
+- **Inline tipping** — Tap any user to send them a DGB tip. Powered by DigiScope's tip bot infrastructure.
+- **Pseudonymous identity** — Register a handle linked to your DGB address. No email, no phone number.
+- **Chat messages ephemeral** — 30-day retention for chat. Forum threads permanent.
+
 ### Fun
 - **DigiRunner** — A pixel-art side-scrolling mini-game that plays during blockchain sync. Collect DGB coins while you wait.
 
@@ -108,14 +116,15 @@ digibytewallet-android/
 ./gradlew connectedMainnetDebugAndroidTest
 ```
 
-**139+ tests, 0 failures** across:
+**150+ tests, 0 failures** across:
 - Native JNI bridge (mnemonic generation, address validation, asset detection, proxy)
-- Room DAO operations (UTXO segregation, asset balances, migration v1→v2)
+- Room DAO operations (UTXO segregation, asset balances, migrations v1→v2→v3)
 - Security (Keystore encrypt/decrypt, PIN hashing)
 - DigiAsset decoder (BitIO parsing, real mainnet transaction data)
 - IPFS client (CID verification, gateway fallback)
 - Digi-ID (URI parsing, domain extraction)
 - Coin selection (asset protection, dust avoidance)
+- Price provider (multi-API fallback, oracle interface)
 
 ## Development Phases
 
@@ -123,8 +132,8 @@ digibytewallet-android/
 |-------|--------|-----|----------|
 | 1 — Alpha | Complete | `v3.0.0-alpha1` | Core wallet: send, receive, sync, security, DigiRunner |
 | 2 — Beta | Complete | `v3.0.0-beta1` | DigiAssets v2, Digi-ID, IPFS, Tor, DigiScope |
-| 3 — Production | In Progress | — | Community Hub, oracle price feed, full DigiScope UI |
-| 4 — Post-launch | Planned | — | Dandelion++ SPV stem, v9 features, iOS port |
+| 3 — Production | Complete | `v3.0.0` | Community Hub (chat + forum + Enigma AI), oracle price hook |
+| 4 — Post-launch | Planned | — | Dandelion++ SPV stem, v9 features, asset issuance, iOS port |
 
 ## Security
 
