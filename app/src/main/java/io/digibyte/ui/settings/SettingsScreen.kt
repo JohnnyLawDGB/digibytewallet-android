@@ -131,6 +131,7 @@ fun SettingsRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    subtitleColor: Color = Color(0xFF8899AA),
     trailing: @Composable (() -> Unit)? = null
 ) {
     Row(
@@ -166,7 +167,7 @@ fun SettingsRow(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF8899AA)
+                color = subtitleColor
             )
         }
 

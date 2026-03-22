@@ -86,6 +86,9 @@ dependencies {
     // Material 3 for XML theme (Theme.Material3.DayNight.NoActionBar)
     implementation("com.google.android.material:material:1.12.0")
 
+    // OkHttp (needed so Hilt/KSP can resolve OkHttpClient in NetworkModule + AppModule)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Room runtime (needed so app module can reference WalletDatabase from :core)
     implementation("androidx.room:room-runtime:2.6.1")
 

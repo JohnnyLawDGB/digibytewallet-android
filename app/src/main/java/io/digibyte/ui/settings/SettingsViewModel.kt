@@ -9,6 +9,8 @@ import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.WalletConfigEntity
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.security.PinManager
+import io.digibyte.core.tor.TorManager
+import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,7 +26,8 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val walletManager: WalletManager,
     private val pinManager: PinManager,
-    private val walletConfigDao: WalletConfigDao
+    private val walletConfigDao: WalletConfigDao,
+    private val torManager: TorManager
 ) : ViewModel() {
 
     // ── Sync / network state ──────────────────────────────────────────────────
@@ -48,6 +51,14 @@ class SettingsViewModel @Inject constructor(
 
     val autoLockTimeout: StateFlow<Long> = _config.map { it.autoLockTimeoutMs }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 60_000L)
+
+    // ── Tor state ─────────────────────────────────────────────────────────────
+    /** Live Tor state from TorManager. */
+    val torState: StateFlow<TorState> = torManager.state
+
+    /** Whether Tor routing is currently enabled in user preferences. */
+    private val _torEnabled = MutableStateFlow(torManager.isEnabled)
+    val torEnabled: StateFlow<Boolean> = _torEnabled.asStateFlow()
 
     // ── Action results ────────────────────────────────────────────────────────
     private val _wipeResult = MutableStateFlow<WipeResult?>(null)
@@ -98,6 +109,29 @@ class SettingsViewModel @Inject constructor(
             val updated = (_config.value).copy(autoLockTimeoutMs = ms)
             walletConfigDao.upsert(updated)
             _config.value = updated
+        }
+    }
+
+    // ── Tor management ────────────────────────────────────────────────────────
+    /**
+     * Toggle Tor on or off. Persists the choice to both TorManager prefs and
+     * WalletConfigEntity so both surfaces agree on the enabled state.
+     */
+    fun setTorEnabled(enabled: Boolean) {
+        torManager.isEnabled = enabled
+        _torEnabled.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            // Persist to Room so SyncService and new install logic can read it.
+            val updated = (_config.value).copy(torEnabled = enabled)
+            walletConfigDao.upsert(updated)
+            _config.value = updated
+        }
+        if (enabled) {
+            viewModelScope.launch {
+                torManager.start()
+            }
+        } else {
+            torManager.stop()
         }
     }
 

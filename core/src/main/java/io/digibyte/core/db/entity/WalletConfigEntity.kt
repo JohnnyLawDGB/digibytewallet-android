@@ -10,5 +10,7 @@ data class WalletConfigEntity(
     val defaultAddressFormat: Int = 2,
     val lastSyncHeight: Long = 0L,
     val fiatCurrency: String = "USD",
-    val autoLockTimeoutMs: Long = 60_000L
+    val autoLockTimeoutMs: Long = 60_000L,
+    val torEnabled: Boolean = false,
+    val torPromptShown: Boolean = false
 )

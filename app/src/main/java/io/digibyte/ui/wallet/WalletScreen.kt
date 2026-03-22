@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.tor.TorState
 import io.digibyte.ui.components.BalanceDisplay
 import io.digibyte.ui.components.TransactionItem
 import io.digibyte.ui.sync.SyncOverlay
@@ -37,6 +38,7 @@ fun WalletScreen(
     onNavigateReceive: () -> Unit,
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
+    onNavigateAssets: () -> Unit = {},
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -44,6 +46,7 @@ fun WalletScreen(
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
     val syncState by viewModel.syncState.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
+    val torState by viewModel.torState.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier
@@ -74,6 +77,9 @@ fun WalletScreen(
 
                     // Sync state indicator
                     SyncIndicator(syncState)
+
+                    // Tor indicator — only visible when Tor is connected
+                    TorIndicator(torState)
                 }
             }
         }
@@ -108,7 +114,7 @@ fun WalletScreen(
                     icon = Icons.Default.Stars,
                     label = "Assets",
                     modifier = Modifier.weight(1f),
-                    onClick = { /* Phase 2 */ }
+                    onClick = onNavigateAssets
                 )
             }
         }
@@ -274,6 +280,41 @@ private fun PriceFeedCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * Small badge shown in the wallet header when Tor is actively connected.
+ * Shows nothing when Tor is disabled, starting, or failed — keeps the header
+ * clean when Tor is not yet fully operational.
+ */
+@Composable
+private fun TorIndicator(torState: TorState) {
+    if (torState !is TorState.Connected) return
+
+    Spacer(modifier = Modifier.height(4.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .background(
+                color = Color(0xFF7C4DFF).copy(alpha = 0.20f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 3.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.VpnLock,
+            contentDescription = "Tor active",
+            tint = Color(0xFFB39DDB),
+            modifier = Modifier.size(12.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = "Tor — your IP stays hidden",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFB39DDB)
+        )
     }
 }
 

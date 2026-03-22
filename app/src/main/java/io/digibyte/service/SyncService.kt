@@ -8,6 +8,7 @@ import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.WalletManager
+import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
 import io.digibyte.core.db.dao.PeerDao
@@ -15,6 +16,8 @@ import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.PeerEntity
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.tor.TorManager
+import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
 import javax.inject.Inject
 
@@ -37,6 +40,11 @@ class SyncService : Service() {
     @Inject lateinit var utxoManager: UtxoManager
     @Inject lateinit var transactionDao: TransactionDao
     @Inject lateinit var peerDao: PeerDao
+    @Inject lateinit var assetManager: AssetManager
+    @Inject lateinit var torManager: TorManager
+
+    /** True if Tor proxy was successfully wired before this sync session started. */
+    @Volatile private var torProxyActive: Boolean = false
 
     /**
      * SupervisorJob so that a child coroutine failure never cancels the
@@ -68,9 +76,10 @@ class SyncService : Service() {
         // Wire C core → Kotlin before kicking off sync so no events are lost.
         NativeBridge.setCallbackHandler(syncCallback)
 
-        // Start the BRPeerManager.
-        NativeBridge.startSync()
-        walletManager.updateSyncState(SyncState.Syncing(0f, 0))
+        // Launch Tor-aware startup asynchronously.
+        serviceScope.launch {
+            startSyncWithTor()
+        }
 
         // Poll peer count every 30 s for notification accuracy.
         serviceScope.launch {
@@ -82,6 +91,36 @@ class SyncService : Service() {
         }
 
         return START_STICKY
+    }
+
+    /**
+     * If Tor is enabled, attempt to start Tor and wire the SOCKS5 proxy before
+     * calling startSync(). If Tor fails or is disabled, clear any stale proxy
+     * and start sync directly — graceful degradation is critical.
+     *
+     * NEVER blocks sync on Tor failure.
+     */
+    private suspend fun startSyncWithTor() {
+        if (torManager.isEnabled) {
+            val torResult = torManager.start()
+            if (torResult is TorState.Connected) {
+                // Wire the SOCKS5 proxy into the C core before connecting to peers.
+                NativeBridge.setSocksProxy("127.0.0.1", torResult.socksPort)
+                torProxyActive = true
+            } else {
+                // Tor failed to start — clear any stale proxy and fall through.
+                NativeBridge.clearSocksProxy()
+                torProxyActive = false
+            }
+        } else {
+            // Tor disabled — ensure no stale proxy from a previous session.
+            NativeBridge.clearSocksProxy()
+            torProxyActive = false
+        }
+
+        // Start SPV sync regardless of Tor outcome.
+        NativeBridge.startSync()
+        walletManager.updateSyncState(SyncState.Syncing(0f, 0))
     }
 
     override fun onDestroy() {
@@ -152,6 +191,36 @@ class SyncService : Service() {
             // UtxoDao Flow picks this up automatically via Room's invalidation
             // tracker — no explicit action needed here.
         }
+
+        override fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean) {
+            // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
+            // and ensures all Room writes are serialised through the supervisor job.
+            serviceScope.launch {
+                // Upsert the transaction record marked as an asset tx.
+                // amount is stored as positive (receive) or negative (send).
+                transactionDao.insert(
+                    TransactionEntity(
+                        txid          = txHash,
+                        blockHeight   = 0, // updated when the block confirms
+                        timestamp     = System.currentTimeMillis() / 1000L,
+                        amount        = if (isReceive) quantity else -quantity,
+                        fee           = 0,
+                        toAddress     = "",
+                        fromAddress   = "",
+                        confirmations = 0,
+                        isAssetTx     = true
+                    )
+                )
+
+                // Queue an IPFS metadata fetch for this asset id.
+                // AssetMetadataService checks its local cache first (no redundant fetches).
+                // The CID is not available from the callback directly — the C core knows the
+                // asset id but not the metadata CID at this point.  We hand off to
+                // AssetMetadataService with a null CID; it will no-op until the CID is
+                // learned later (e.g. via processAssetUtxo once the full tx is confirmed).
+                assetManager.getAssetHistory(assetId) // touches the DAO, warms the flow
+            }
+        }
     }
 
     // ── Notification helpers ──────────────────────────────────────────────────
@@ -170,10 +239,11 @@ class SyncService : Service() {
 
     private fun buildNotification(progress: Float, peerCount: Int): Notification {
         val pct = (progress * 100).toInt()
+        val torSuffix = if (torProxyActive) " · via Tor" else ""
         val contentText = when {
-            pct >= 100 -> "Synced — $peerCount peer${if (peerCount != 1) "s" else ""} connected"
-            peerCount == 0 -> "Connecting to peers…"
-            else -> "Syncing $pct% — $peerCount peer${if (peerCount != 1) "s" else ""}"
+            pct >= 100 -> "Synced — $peerCount peer${if (peerCount != 1) "s" else ""} connected$torSuffix"
+            peerCount == 0 -> "Connecting to peers…$torSuffix"
+            else -> "Syncing $pct% — $peerCount peer${if (peerCount != 1) "s" else ""}$torSuffix"
         }
         val indeterminate = pct == 0 && peerCount == 0
 

@@ -9,6 +9,32 @@
 
 #include "jni_bridge.h"
 
+/* ---------- setSocksProxy / clearSocksProxy ---------- */
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setSocksProxy(
+    JNIEnv *env, jobject thiz, jstring host, jint port)
+{
+    (void)thiz;
+    const char *hostStr = (*env)->GetStringUTFChars(env, host, NULL);
+    if (hostStr == NULL) return;
+
+    BRPeerSetSocksProxy(hostStr, (int)port);
+
+    (*env)->ReleaseStringUTFChars(env, host, hostStr);
+    LOGI("setSocksProxy: proxy configured (port=%d)", (int)port);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_clearSocksProxy(
+    JNIEnv *env, jobject thiz)
+{
+    (void)env;
+    (void)thiz;
+    BRPeerClearSocksProxy();
+    LOGI("clearSocksProxy: proxy cleared");
+}
+
 /* ---------- BRPeerManager callback bridges ---------- */
 
 static void bridge_syncStarted(void *info) {

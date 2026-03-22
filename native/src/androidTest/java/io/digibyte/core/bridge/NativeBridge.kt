@@ -19,6 +19,8 @@ object NativeBridge {
     external fun signTransaction(unsignedTx: ByteArray): ByteArray?
     external fun publishTransaction(signedTx: ByteArray): String?
     external fun getEstimatedFee(priority: Int): Long
+    external fun setSocksProxy(host: String, port: Int)
+    external fun clearSocksProxy()
     external fun startSync()
     external fun stopSync()
     external fun getSyncProgress(): Float
@@ -27,4 +29,6 @@ object NativeBridge {
     external fun getLastBlockHeight(): Long
     external fun setCallbackHandler(handler: NativeCallback)
     external fun isValidAddress(address: String): Boolean
+    external fun isAssetTransaction(rawTx: ByteArray): Boolean
+    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
 }

@@ -10,6 +10,8 @@ import io.digibyte.core.WalletManager
 import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.tor.TorManager
+import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -22,7 +24,8 @@ class WalletViewModel @Inject constructor(
     private val utxoManager: UtxoManager,
     private val transactionDao: TransactionDao,
     private val walletManager: WalletManager,
-    private val priceProvider: PriceProvider
+    private val priceProvider: PriceProvider,
+    private val torManager: TorManager
 ) : ViewModel() {
 
     /** Live balance in satoshis. */
@@ -35,6 +38,9 @@ class WalletViewModel @Inject constructor(
 
     /** SPV sync state propagated from WalletManager. */
     val syncState: StateFlow<SyncState> = walletManager.syncState
+
+    /** Live Tor state — used by WalletScreen to show the Tor indicator badge. */
+    val torState: StateFlow<TorState> = torManager.state
 
     /** Latest price data from PriceProvider (null until first fetch). */
     private val _price = MutableStateFlow<PriceData?>(null)

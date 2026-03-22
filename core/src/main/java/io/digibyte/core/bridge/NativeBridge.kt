@@ -47,6 +47,13 @@ object NativeBridge {
     /** Get estimated fee in sat/KB. priority: 0=high(next block), 1=medium, 2=low(economy). */
     external fun getEstimatedFee(priority: Int): Long
 
+    // === Tor / SOCKS5 proxy ===
+    /** Set SOCKS5 proxy for peer connections. Call BEFORE startSync(). */
+    external fun setSocksProxy(host: String, port: Int)
+
+    /** Clear SOCKS5 proxy — peers will connect directly. */
+    external fun clearSocksProxy()
+
     // === Peer / sync operations ===
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
@@ -72,4 +79,11 @@ object NativeBridge {
     // === Validation ===
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean
+
+    // === Asset detection ===
+    /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */
+    external fun isAssetTransaction(rawTx: ByteArray): Boolean
+
+    /** Returns the raw script bytes of the first OP_RETURN output, or null if none. */
+    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
 }
