@@ -10,6 +10,7 @@ import io.digibyte.core.*
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
 import io.digibyte.core.security.*
+import okhttp3.OkHttpClient
 import java.security.SecureRandom
 import javax.inject.Singleton
 
@@ -100,5 +101,6 @@ object AppModule {
         WalletManager(ksm, um)
 
     @Provides @Singleton
-    fun providePriceProvider(dao: PriceCacheDao): PriceProvider = PriceProvider(dao)
+    fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
+        PriceProvider(dao, okHttpFetcher(client))
 }

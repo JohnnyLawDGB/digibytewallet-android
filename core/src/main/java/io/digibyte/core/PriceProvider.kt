@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 data class PriceData(
@@ -26,14 +27,12 @@ fun interface HttpFetcher {
 }
 
 /** Production [HttpFetcher] backed by OkHttp. */
-internal fun okHttpFetcher(
-    client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-): HttpFetcher = HttpFetcher { url ->
-    val response = client.newCall(Request.Builder().url(url).build()).execute()
-    response.body?.string() ?: throw Exception("Empty response from $url")
+fun okHttpFetcher(client: OkHttpClient = OkHttpClient()): HttpFetcher = HttpFetcher { url ->
+    val request = Request.Builder().url(url).build()
+    client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+        response.body?.string() ?: throw IOException("Empty body")
+    }
 }
 
 /**
