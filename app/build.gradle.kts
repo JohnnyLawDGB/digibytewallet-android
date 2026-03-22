@@ -88,4 +88,9 @@ dependencies {
 
     // Room runtime (needed so app module can reference WalletDatabase from :core)
     implementation("androidx.room:room-runtime:2.6.1")
+
+    // WorkManager + Hilt integration (for SyncWorker background sync job)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.hilt:hilt-work:1.2.0")
+    ksp("androidx.hilt:hilt-compiler:1.2.0")
 }

@@ -1,5 +1,6 @@
 package io.digibyte.ui.navigation
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -11,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
@@ -19,6 +22,7 @@ import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.PinManager
+import io.digibyte.service.SyncService
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.wallet.*
 
@@ -52,6 +56,7 @@ fun AppNavigation(
     biometricAuth: BiometricAuth
 ) {
     val navController = rememberNavController()
+    val context = LocalContext.current
     val currentBackStack by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStack?.destination?.route
 
@@ -65,6 +70,12 @@ fun AppNavigation(
             is WalletState.Locked   -> "unlock"
             is WalletState.Unlocked -> Screen.Wallet.route
         }
+    }
+
+    // Helper: start SPV sync foreground service whenever the wallet is unlocked.
+    val startSyncService: () -> Unit = {
+        val intent = Intent(context, SyncService::class.java)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     val showBottomNav = currentRoute !in fullScreenRoutes
@@ -142,6 +153,11 @@ fun AppNavigation(
 
             // ── Main wallet tabs ──────────────────────────────────────────────
             composable(Screen.Wallet.route) {
+                // Start the foreground sync service the first time the wallet
+                // screen is composed (covers both post-onboarding and post-unlock
+                // entry points). Idempotent — the service is START_STICKY.
+                LaunchedEffect(Unit) { startSyncService() }
+
                 WalletScreen(
                     onNavigateSend = { navController.navigate("send") },
                     onNavigateReceive = { navController.navigate("receive") },
