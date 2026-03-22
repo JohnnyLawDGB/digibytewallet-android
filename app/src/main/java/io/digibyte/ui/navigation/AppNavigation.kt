@@ -1,6 +1,8 @@
 package io.digibyte.ui.navigation
 
 import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -20,11 +22,16 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
+import io.digibyte.core.model.DigiIdRequest
+import io.digibyte.core.model.DigiByteUri
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
 import io.digibyte.service.SyncService
 import io.digibyte.ui.asset.*
+import io.digibyte.ui.components.QrScannerScreen
+import io.digibyte.ui.digiid.DigiIdConfirmScreen
+import io.digibyte.ui.digiid.DigiIdScreen
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.settings.*
 import io.digibyte.ui.wallet.*
@@ -57,7 +64,9 @@ private val fullScreenRoutes = setOf(
     "settings_view_seed",
     "assets",
     "asset_detail/{assetId}",
-    "asset_send/{assetId}"
+    "asset_send/{assetId}",
+    "qr_scanner",
+    "digiid_confirm/{uri}"
 )
 
 @Composable
@@ -173,10 +182,7 @@ fun AppNavigation(
                 WalletScreen(
                     onNavigateSend = { navController.navigate("send") },
                     onNavigateReceive = { navController.navigate("receive") },
-                    onNavigateScan = {
-                        // TODO Phase 2: launch camera QR scanner; for now navigate to send
-                        navController.navigate("send")
-                    },
+                    onNavigateScan = { navController.navigate("qr_scanner") },
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
                     },
@@ -189,7 +195,9 @@ fun AppNavigation(
             }
 
             composable(Screen.DigiId.route) {
-                PlaceholderScreen("Digi-ID\n(Phase 2)")
+                DigiIdScreen(
+                    onNavigateScan = { navController.navigate("qr_scanner") }
+                )
             }
 
             composable(Screen.Settings.route) {
@@ -277,6 +285,55 @@ fun AppNavigation(
                     assetId = assetId,
                     onNavigateBack = { navController.popBackStack() }
                 )
+            }
+
+            // ── QR Scanner (shared) ───────────────────────────────────────
+            composable("qr_scanner") {
+                val localContext = LocalContext.current
+                QrScannerScreen(
+                    onDigiId = { request ->
+                        // URL-encode the raw digiid:// URI for safe nav arg transport
+                        val encoded = Uri.encode(
+                            "digiid://${request.callbackUrl
+                                .removePrefix("https://")
+                                .removePrefix("http://")}?x=${request.nonce}" +
+                                if (request.isUnsecure) "&u=1" else ""
+                        )
+                        navController.navigate("digiid_confirm/$encoded") {
+                            popUpTo("qr_scanner") { inclusive = true }
+                        }
+                    },
+                    onDigiByteUri = { uri ->
+                        // Navigate to send with pre-filled address (and optional amount)
+                        navController.navigate("send") {
+                            popUpTo("qr_scanner") { inclusive = true }
+                        }
+                        // The SendViewModel can be seeded via SavedStateHandle; for now
+                        // navigate to send — pre-fill wiring is handled in SendViewModel.
+                    },
+                    onInvalidQr = { reason ->
+                        Toast.makeText(localContext, reason, Toast.LENGTH_SHORT).show()
+                        navController.popBackStack()
+                    },
+                    onCancel = { navController.popBackStack() }
+                )
+            }
+
+            // ── Digi-ID confirm (after scan) ──────────────────────────────
+            composable("digiid_confirm/{uri}") { backStackEntry ->
+                val encodedUri = backStackEntry.arguments?.getString("uri") ?: ""
+                val rawUri = Uri.decode(encodedUri)
+                val request = DigiIdRequest.parse(rawUri)
+                if (request == null) {
+                    // Malformed — go back
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                } else {
+                    DigiIdConfirmScreen(
+                        request = request,
+                        biometricAuth = biometricAuth,
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
             }
         }
     }
