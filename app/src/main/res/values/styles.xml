@@ -21,7 +21,7 @@
         <item name="actionMenuTextColor">@android:color/white</item>
     </style>
 
-    <style name="MyCustomTabLayout" parent="Widget.Design.TabLayout">
+    <style name="MyCustomTabLayout" parent="Widget.MaterialComponents.TabLayout">
         <item name="tabTextAppearance">@style/MyCustomTabText</item>
         <item name="tabSelectedTextColor">@color/blue</item>
         <item name="tabIndicatorColor">@color/blue</item>
@@ -85,4 +85,7 @@
     <style name="CaptureTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowFullscreen">true</item>
     </style>
+
+    <!-- Material 3 theme for new Compose MainActivity -->
+    <style name="Theme.DigiByte" parent="Theme.Material3.DayNight.NoActionBar" />
 </resources>

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <resources>
+  <string name="app_name">DigiByte</string>
+  <string name="tab_wallet">Wallet</string>
+  <string name="tab_hub">Hub</string>
+  <string name="tab_digi_id">Digi-ID</string>
+  <string name="tab_settings">Settings</string>
+
   <!-- About screen blog label -->
   <string name="About.blog">https://digibyte.io/</string>
   <!-- About screen footer -->
