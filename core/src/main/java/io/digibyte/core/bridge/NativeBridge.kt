@@ -47,6 +47,13 @@ object NativeBridge {
     /** Get estimated fee in sat/KB. priority: 0=high(next block), 1=medium, 2=low(economy). */
     external fun getEstimatedFee(priority: Int): Long
 
+    // === Tor / SOCKS5 proxy ===
+    /** Set SOCKS5 proxy for peer connections. Call BEFORE startSync(). */
+    external fun setSocksProxy(host: String, port: Int)
+
+    /** Clear SOCKS5 proxy — peers will connect directly. */
+    external fun clearSocksProxy()
+
     // === Peer / sync operations ===
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()

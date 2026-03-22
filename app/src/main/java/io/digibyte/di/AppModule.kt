@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.*
 import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.tor.TorManager
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
 import io.digibyte.core.digiscope.DigiScopeClient
@@ -22,6 +23,9 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+    @Provides @Singleton
+    fun provideTorManager(@ApplicationContext context: Context): TorManager = TorManager(context)
 
     @Provides @Singleton
     fun provideKeyStoreManager(): KeyStoreManager = KeyStoreManager()
