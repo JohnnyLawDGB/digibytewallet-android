@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.model.SyncState
 import io.digibyte.ui.components.BalanceDisplay
 import io.digibyte.ui.components.TransactionItem
+import io.digibyte.ui.sync.SyncOverlay
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteNavy
@@ -110,6 +111,16 @@ fun WalletScreen(
                     onClick = { /* Phase 2 */ }
                 )
             }
+        }
+
+        // ── DigiRunner sync game / progress bar ──────────────────────────
+        item {
+            SyncOverlay(
+                syncState = syncState,
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            )
         }
 
         // ── Price feed card ───────────────────────────────────────────────
