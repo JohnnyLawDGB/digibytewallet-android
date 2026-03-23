@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <time.h>
 
 /* C core headers */
 #include "BRWallet.h"
@@ -52,6 +53,10 @@ extern int      g_seedValid;
 /* Master public key — derived once from seed */
 extern BRMasterPubKey g_mpk;
 extern int            g_mpkValid;
+
+/* Wallet creation timestamp — used to pick the right sync checkpoint.
+ * Set by createWallet (current time) or recoverWallet (user-provided). */
+extern uint32_t g_walletCreationTime;
 
 /* Callback handler (NativeCallback interface) */
 extern jobject  g_callbackHandler;

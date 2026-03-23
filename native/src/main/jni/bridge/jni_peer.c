@@ -137,9 +137,13 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     }
 
     if (!g_peerManager) {
-        /* Create peer manager for mainnet */
-        LOGI("startSync: creating peer manager");
-        g_peerManager = BPPeerManagerMainNetNew(g_wallet, BIP39_CREATION_TIME, NULL, 0, NULL, 0);
+        /* Create peer manager for mainnet.
+         * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
+         * peer manager starts syncing from the checkpoint nearest to when the
+         * wallet was created — not from BIP39_CREATION_TIME (Dec 2017). */
+        uint32_t syncFromTime = g_walletCreationTime ? g_walletCreationTime : (uint32_t)time(NULL);
+        LOGI("startSync: creating peer manager (syncFromTime=%u)", syncFromTime);
+        g_peerManager = BPPeerManagerMainNetNew(g_wallet, syncFromTime, NULL, 0, NULL, 0);
         if (!g_peerManager) {
             LOGE("startSync: BPPeerManagerMainNetNew failed");
             return;
