@@ -48,6 +48,8 @@ static void bridge_syncStarted(void *info) {
     (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)0.0f, height);
 }
 
+static int g_initialSyncDone = 0;
+
 static void bridge_syncStopped(void *info, int error) {
     (void)info;
     JNIEnv *env = jni_get_env();
@@ -55,13 +57,29 @@ static void bridge_syncStopped(void *info, int error) {
 
     if (error) {
         LOGW("bridge_syncStopped: error=%d (%s)", error, strerror(error));
+        /* On network error, auto-reconnect */
+        if (g_peerManager) {
+            LOGI("startSync: connecting to peers");
+            BRPeerManagerConnect(g_peerManager);
+        }
         if (g_mid_onSyncFailed) {
             jstring msg = (*env)->NewStringUTF(env, strerror(error));
             (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncFailed, (jint)error, msg);
             (*env)->DeleteLocalRef(env, msg);
         }
     } else {
-        LOGD("bridge_syncStopped: success");
+        LOGD("bridge_syncStopped: sync complete");
+
+        /* After FIRST successful sync, trigger a rescan to catch any
+         * transactions that were in blocks downloaded during the initial
+         * header-only fast sync. The bloom filter wasn't active during
+         * that phase, so matching transactions were missed. */
+        if (!g_initialSyncDone && g_peerManager) {
+            g_initialSyncDone = 1;
+            LOGI("bridge_syncStopped: first sync done, triggering rescan for missed transactions");
+            BRPeerManagerRescan(g_peerManager);
+        }
+
         if (g_mid_onSyncComplete) {
             (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncComplete);
         }

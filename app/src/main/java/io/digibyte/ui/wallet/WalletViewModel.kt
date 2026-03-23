@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.digibyte.core.PriceData
 import io.digibyte.core.PriceProvider
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.WalletManager
 import io.digibyte.core.db.dao.TransactionDao
@@ -28,9 +29,10 @@ class WalletViewModel @Inject constructor(
     private val torManager: TorManager
 ) : ViewModel() {
 
-    /** Live balance in satoshis. */
-    val balance: StateFlow<Long> = utxoManager.getBalance()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    /** Live balance in satoshis — polls C core every 5 seconds.
+     *  The C core tracks balance from SPV-synced transactions. Room DB is secondary. */
+    private val _balance = MutableStateFlow(0L)
+    val balance: StateFlow<Long> = _balance.asStateFlow()
 
     /** Live transaction list, most-recent first. */
     val transactions: StateFlow<List<TransactionEntity>> = transactionDao.getAllTransactions()
@@ -57,6 +59,21 @@ class WalletViewModel @Inject constructor(
 
     init {
         fetchPricePeriodically()
+        pollNativeBalance()
+    }
+
+    /** Poll the C core for balance every 5 seconds.
+     *  This catches transactions detected by SPV sync that aren't in Room yet. */
+    private fun pollNativeBalance() {
+        viewModelScope.launch {
+            while (true) {
+                val nativeBalance = NativeBridge.getBalance()
+                if (nativeBalance != _balance.value) {
+                    _balance.value = nativeBalance
+                }
+                delay(5_000L)
+            }
+        }
     }
 
     /** Fetch price now and then every 5 minutes. */

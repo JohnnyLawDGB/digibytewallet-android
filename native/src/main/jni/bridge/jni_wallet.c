@@ -146,6 +146,22 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
 
     secure_zero(seed, sizeof(seed));
 
+    /* Diagnostic: log how many addresses the wallet generated */
+    {
+        size_t addrCount = BRWalletAllAddrs(g_wallet, NULL, 0);
+        LOGI("createWallet: wallet has %zu addresses in bloom filter pool", addrCount);
+        if (addrCount > 0 && addrCount < 100) {
+            BRAddress *addrs = malloc(addrCount * sizeof(BRAddress));
+            if (addrs) {
+                BRWalletAllAddrs(g_wallet, addrs, addrCount);
+                for (size_t i = 0; i < addrCount && i < 5; i++) {
+                    LOGI("createWallet: addr[%zu] = %s", i, addrs[i].s);
+                }
+                if (addrCount > 5) LOGI("createWallet: ... and %zu more", addrCount - 5);
+                free(addrs);
+            }
+        }
+    }
     LOGI("createWallet: wallet created successfully (creationTime=%u)", g_walletCreationTime);
     return JNI_TRUE;
 }
