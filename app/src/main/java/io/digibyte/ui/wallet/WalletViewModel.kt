@@ -34,9 +34,9 @@ class WalletViewModel @Inject constructor(
     private val _balance = MutableStateFlow(0L)
     val balance: StateFlow<Long> = _balance.asStateFlow()
 
-    /** Live transaction list, most-recent first. */
-    val transactions: StateFlow<List<TransactionEntity>> = transactionDao.getAllTransactions()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** Live transaction list from C core, most-recent first. */
+    private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
+    val transactions: StateFlow<List<TransactionEntity>> = _transactions.asStateFlow()
 
     /** SPV sync state propagated from WalletManager. */
     val syncState: StateFlow<SyncState> = walletManager.syncState
@@ -62,15 +62,41 @@ class WalletViewModel @Inject constructor(
         pollNativeBalance()
     }
 
-    /** Poll the C core for balance every 5 seconds.
-     *  This catches transactions detected by SPV sync that aren't in Room yet. */
+    /** Poll the C core for balance and transactions every 5 seconds.
+     *  The C core tracks these from SPV sync — Room DB is secondary. */
     private fun pollNativeBalance() {
         viewModelScope.launch {
             while (true) {
+                // Poll balance
                 val nativeBalance = NativeBridge.getBalance()
                 if (nativeBalance != _balance.value) {
                     _balance.value = nativeBalance
                 }
+
+                // Poll transactions
+                val txDetails = NativeBridge.getTransactionDetails()
+                if (txDetails.isNotEmpty()) {
+                    val txList = txDetails.trim().lines().mapNotNull { line ->
+                        val parts = line.split("|")
+                        if (parts.size >= 5) {
+                            TransactionEntity(
+                                txid = parts[0],
+                                amount = parts[1].toLongOrNull() ?: 0L,
+                                fee = parts[2].toLongOrNull() ?: 0L,
+                                blockHeight = parts[3].toLongOrNull() ?: 0L,
+                                timestamp = parts[4].toLongOrNull() ?: 0L,
+                                toAddress = "",
+                                fromAddress = "",
+                                confirmations = if ((parts[3].toLongOrNull() ?: 0L) > 0) 1 else 0,
+                                isAssetTx = false
+                            )
+                        } else null
+                    }
+                    if (txList != _transactions.value) {
+                        _transactions.value = txList
+                    }
+                }
+
                 delay(5_000L)
             }
         }

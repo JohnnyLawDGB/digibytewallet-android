@@ -37,19 +37,21 @@ Java_io_digibyte_core_bridge_NativeBridge_clearSocksProxy(
 
 /* ---------- BRPeerManager callback bridges ---------- */
 
+static int g_initialSyncDone = 0;
+static int g_isRescanning = 0;
+
 static void bridge_syncStarted(void *info) {
     (void)info;
-    LOGD("bridge_syncStarted");
-    /* Sync started — onSyncProgress(0.0, lastBlockHeight) */
+    LOGD("bridge_syncStarted (rescanning=%d)", g_isRescanning);
+    /* During rescan, suppress sync-started so the UI stays on "Synced" */
+    if (g_isRescanning) return;
+
     JNIEnv *env = jni_get_env();
     if (!env || !g_callbackHandler || !g_mid_onSyncProgress) return;
 
     jlong height = g_peerManager ? (jlong)BRPeerManagerLastBlockHeight(g_peerManager) : 0;
     (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)0.0f, height);
 }
-
-static int g_initialSyncDone = 0;
-static int g_isRescanning = 0;
 
 static void bridge_syncStopped(void *info, int error) {
     (void)info;

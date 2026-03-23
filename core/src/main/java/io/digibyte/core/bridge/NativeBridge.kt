@@ -93,6 +93,13 @@ object NativeBridge {
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean
 
+    /** Get number of transactions known to the C core wallet. */
+    external fun getTransactionCount(): Int
+
+    /** Get transaction details as pipe-separated string.
+     *  Format per line: "txHash|amount|fee|blockHeight|timestamp" */
+    external fun getTransactionDetails(): String
+
     // === Asset detection ===
     /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */
     external fun isAssetTransaction(rawTx: ByteArray): Boolean

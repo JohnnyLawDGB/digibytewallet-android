@@ -348,3 +348,69 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidAddress(JNIEnv *env, jobject th
 
     return valid ? JNI_TRUE : JNI_FALSE;
 }
+
+/* ---------- getTransactionCount ---------- */
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getTransactionCount(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_wallet) return 0;
+    return (jint)BRWalletTransactions(g_wallet, NULL, 0);
+}
+
+/* ---------- getTransactionDetails ----------
+ * Returns a pipe-separated string for each transaction:
+ * "txHash|amount|fee|blockHeight|timestamp\n..."
+ * Amount is signed: positive = received, negative = sent.
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t txCount = BRWalletTransactions(g_wallet, NULL, 0);
+    if (txCount == 0) return (*env)->NewStringUTF(env, "");
+
+    BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
+    if (!txs) return (*env)->NewStringUTF(env, "");
+    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+
+    /* Build result string — estimate 120 chars per tx */
+    size_t bufSize = txCount * 120 + 1;
+    char *buf = malloc(bufSize);
+    if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+    size_t pos = 0;
+
+    for (size_t i = 0; i < txCount && i < 50; i++) { /* limit to 50 most recent */
+        BRTransaction *tx = txs[i];
+        if (!tx) continue;
+
+        /* Calculate amount: received - sent */
+        uint64_t received = BRWalletAmountReceivedFromTx(g_wallet, tx);
+        uint64_t sent = BRWalletAmountSentByTx(g_wallet, tx);
+        int64_t amount = (int64_t)received - (int64_t)sent;
+        uint64_t fee = BRWalletFeeForTx(g_wallet, tx);
+
+        /* txHash as hex string */
+        char hashHex[65];
+        for (int j = 0; j < 32; j++) {
+            sprintf(&hashHex[j*2], "%02x", tx->txHash.u8[31 - j]);
+        }
+        hashHex[64] = '\0';
+
+        int written = snprintf(buf + pos, bufSize - pos,
+            "%s|%lld|%llu|%u|%u\n",
+            hashHex,
+            (long long)amount,
+            (unsigned long long)fee,
+            tx->blockHeight,
+            tx->timestamp);
+        if (written > 0) pos += written;
+    }
+
+    free(txs);
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    return result;
+}
