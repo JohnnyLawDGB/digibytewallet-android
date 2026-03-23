@@ -70,15 +70,21 @@ class WalletManager(
 
     /**
      * Restore wallet from persisted encrypted seed on app restart.
+     * Stops any running sync first to avoid use-after-free crashes.
      * Returns true if the wallet was successfully restored.
      */
     fun restoreFromDisk(): Boolean {
         val seed = loadSeed() ?: return false
+
+        // CRITICAL: stop sync before replacing the wallet — the peer manager's
+        // background threads are using the old wallet pointer. Freeing it
+        // while they're running causes SIGSEGV.
+        NativeBridge.stopSync()
+
         val success = NativeBridge.createWallet(seed)
         if (success) {
             _walletState.value = WalletState.Unlocked
         }
-        // Zero the seed string from memory
         return success
     }
 
