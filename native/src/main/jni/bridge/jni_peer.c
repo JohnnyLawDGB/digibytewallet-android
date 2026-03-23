@@ -136,6 +136,16 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         return;
     }
 
+    if (g_peerManager && g_peerManagerNeedsRecreate) {
+        /* Wallet was created/recovered after peer manager was initialized.
+         * Destroy and recreate so the bloom filter includes the wallet's addresses. */
+        LOGI("startSync: recreating peer manager (wallet changed since last init)");
+        BRPeerManagerDisconnect(g_peerManager);
+        BRPeerManagerFree(g_peerManager);
+        g_peerManager = NULL;
+        g_peerManagerNeedsRecreate = 0;
+    }
+
     if (!g_peerManager) {
         /* Create peer manager for mainnet.
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
@@ -174,6 +184,21 @@ Java_io_digibyte_core_bridge_NativeBridge_stopSync(JNIEnv *env, jobject thiz) {
     if (g_peerManager) {
         BRPeerManagerDisconnect(g_peerManager);
         LOGI("stopSync: disconnected");
+    }
+}
+
+/* ---------- rescan ---------- */
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_rescan(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    if (g_peerManager) {
+        LOGI("rescan: triggering BRPeerManagerRescan");
+        BRPeerManagerRescan(g_peerManager);
+    } else {
+        LOGW("rescan: peer manager not initialized");
     }
 }
 

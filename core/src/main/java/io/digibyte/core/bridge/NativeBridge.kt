@@ -61,6 +61,11 @@ object NativeBridge {
     /** Stop SPV sync — disconnects from all peers. */
     external fun stopSync()
 
+    /** Rescan blockchain from the wallet's creation checkpoint.
+     *  Triggers BRPeerManagerRescan — reconnects with fresh bloom filter
+     *  to find transactions matching the wallet's addresses. */
+    external fun rescan()
+
     /** Get sync progress as float 0.0 to 1.0. */
     external fun getSyncProgress(): Float
 

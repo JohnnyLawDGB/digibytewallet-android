@@ -35,6 +35,10 @@ class WalletManager(
             val encrypted = keyStoreManager.encrypt(mnemonic.toByteArray(Charsets.UTF_8))
             // Store encrypted data (implementation depends on storage mechanism)
             _walletState.value = WalletState.Unlocked
+
+            // Trigger rescan so the bloom filter includes the new wallet's addresses
+            // and peers send us matching transactions
+            NativeBridge.rescan()
         }
         return success
     }
@@ -48,6 +52,9 @@ class WalletManager(
             keyStoreManager.createKey()
             val encrypted = keyStoreManager.encrypt(mnemonic.toByteArray(Charsets.UTF_8))
             _walletState.value = WalletState.Unlocked
+
+            // Trigger rescan to find transactions for the recovered wallet
+            NativeBridge.rescan()
         }
         return success
     }

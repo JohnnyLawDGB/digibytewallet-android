@@ -58,6 +58,10 @@ extern int            g_mpkValid;
  * Set by createWallet (current time) or recoverWallet (user-provided). */
 extern uint32_t g_walletCreationTime;
 
+/* Flag: set to 1 when createWallet/recoverWallet is called, so startSync
+ * knows to recreate the peer manager with the wallet's bloom filter. */
+extern int g_peerManagerNeedsRecreate;
+
 /* Callback handler (NativeCallback interface) */
 extern jobject  g_callbackHandler;
 

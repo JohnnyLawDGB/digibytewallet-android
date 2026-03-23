@@ -19,6 +19,7 @@ int           g_seedValid    = 0;
 BRMasterPubKey g_mpk;
 int           g_mpkValid     = 0;
 uint32_t      g_walletCreationTime = 0;
+int           g_peerManagerNeedsRecreate = 0;
 
 /* Callback globals — defined here, used by jni_peer.c via extern */
 jobject   g_callbackHandler  = NULL;
@@ -141,6 +142,7 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
     g_mpk = mpk;
     g_mpkValid = 1;
     g_walletCreationTime = (uint32_t)time(NULL);  /* New wallet = now */
+    g_peerManagerNeedsRecreate = 1;  /* Force peer manager rebuild on next startSync */
 
     secure_zero(seed, sizeof(seed));
 
@@ -196,6 +198,7 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
 
     /* Use the user-provided creation timestamp for sync checkpoint selection */
     g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
+    g_peerManagerNeedsRecreate = 1;  /* Force peer manager rebuild on next startSync */
     LOGI("recoverWallet: wallet recovered, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }

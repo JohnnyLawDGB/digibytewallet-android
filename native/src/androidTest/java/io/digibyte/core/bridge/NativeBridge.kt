@@ -23,6 +23,7 @@ object NativeBridge {
     external fun clearSocksProxy()
     external fun startSync()
     external fun stopSync()
+    external fun rescan()
     external fun getSyncProgress(): Float
     external fun getPeerCount(): Int
     external fun getEstimatedBlockHeight(): Long
