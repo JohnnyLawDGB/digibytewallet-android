@@ -49,6 +49,7 @@ static void bridge_syncStarted(void *info) {
 }
 
 static int g_initialSyncDone = 0;
+static int g_isRescanning = 0;
 
 static void bridge_syncStopped(void *info, int error) {
     (void)info;
@@ -76,12 +77,15 @@ static void bridge_syncStopped(void *info, int error) {
          * that phase, so matching transactions were missed. */
         if (!g_initialSyncDone && g_peerManager) {
             g_initialSyncDone = 1;
+            g_isRescanning = 1;
             LOGI("bridge_syncStopped: first sync done, triggering rescan for missed transactions");
             BRPeerManagerRescan(g_peerManager);
-        }
-
-        if (g_mid_onSyncComplete) {
-            (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncComplete);
+            /* Don't fire onSyncComplete yet — wait for rescan to finish */
+        } else {
+            g_isRescanning = 0;
+            if (g_mid_onSyncComplete) {
+                (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncComplete);
+            }
         }
     }
 }
@@ -98,9 +102,9 @@ static void bridge_txStatusUpdate(void *info) {
         (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onBalanceChanged, balance);
     }
 
-    /* Report sync progress — but only if still syncing (progress < 1.0).
-     * Once synced, onSyncComplete handles the state transition. */
-    if (g_mid_onSyncProgress && g_peerManager) {
+    /* Report sync progress — suppress during rescan (user already saw 100%)
+     * and when progress is 1.0 (let onSyncComplete handle that). */
+    if (g_mid_onSyncProgress && g_peerManager && !g_isRescanning) {
         double progress = BRPeerManagerSyncProgress(g_peerManager, 0);
         if (progress < 1.0) {
             jlong height = (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
