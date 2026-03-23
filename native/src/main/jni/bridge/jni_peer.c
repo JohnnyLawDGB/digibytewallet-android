@@ -165,15 +165,23 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
 
     if (g_peerManager && g_peerManagerNeedsRecreate) {
         /* Wallet was created/recovered after peer manager was initialized.
-         * Destroy and recreate so the bloom filter includes the wallet's addresses. */
+         * Destroy and recreate so the bloom filter includes the wallet's addresses.
+         * Only do this ONCE — clear the flag immediately. */
+        g_peerManagerNeedsRecreate = 0;
         LOGI("startSync: recreating peer manager (wallet changed since last init)");
         BRPeerManagerDisconnect(g_peerManager);
         BRPeerManagerFree(g_peerManager);
         g_peerManager = NULL;
-        g_peerManagerNeedsRecreate = 0;
     }
 
-    if (!g_peerManager) {
+    if (g_peerManager) {
+        /* Peer manager already exists — just reconnect if not connected */
+        LOGI("startSync: peer manager exists, connecting");
+        BRPeerManagerConnect(g_peerManager);
+        return;
+    }
+
+    {
         /* Create peer manager for mainnet.
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
          * peer manager starts syncing from the checkpoint nearest to when the
