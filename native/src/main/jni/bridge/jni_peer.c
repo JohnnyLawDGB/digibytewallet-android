@@ -98,12 +98,15 @@ static void bridge_txStatusUpdate(void *info) {
         (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onBalanceChanged, balance);
     }
 
-    /* Report sync progress */
+    /* Report sync progress — but only if still syncing (progress < 1.0).
+     * Once synced, onSyncComplete handles the state transition. */
     if (g_mid_onSyncProgress && g_peerManager) {
         double progress = BRPeerManagerSyncProgress(g_peerManager, 0);
-        jlong height = (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
-        (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress,
-                               (jfloat)progress, height);
+        if (progress < 1.0) {
+            jlong height = (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
+            (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress,
+                                   (jfloat)progress, height);
+        }
     }
 }
 
