@@ -107,8 +107,8 @@ object AppModule {
         TransactionBuilder(cs, um)
 
     @Provides @Singleton
-    fun provideWalletManager(ksm: KeyStoreManager, um: UtxoManager): WalletManager =
-        WalletManager(ksm, um)
+    fun provideWalletManager(@ApplicationContext context: Context, ksm: KeyStoreManager, um: UtxoManager): WalletManager =
+        WalletManager(context, ksm, um)
 
     @Provides @Singleton
     fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
