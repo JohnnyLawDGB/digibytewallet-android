@@ -8,6 +8,7 @@ import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.WalletManager
+import io.digibyte.core.WalletState
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
@@ -19,6 +20,7 @@ import io.digibyte.core.model.SyncState
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 /**
@@ -89,7 +91,9 @@ class SyncService : Service() {
         }
 
         // Poll peer count every 30s — also reconnects if peers dropped to 0.
+        // Waits for wallet to be ready before polling.
         serviceScope.launch {
+            walletManager.walletState.first { it is WalletState.Unlocked }
             while (isActive) {
                 delay(30_000L)
                 val peers = NativeBridge.getPeerCount()
@@ -128,6 +132,11 @@ class SyncService : Service() {
             NativeBridge.clearSocksProxy()
             torProxyActive = false
         }
+
+        // Wait for the wallet to be created/restored (PIN entry + seed restore).
+        // The SyncService can start before the UI flow completes (START_STICKY).
+        walletManager.walletState.first { it is WalletState.Unlocked }
+        android.util.Log.i("SyncService", "Wallet unlocked, starting sync")
 
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
