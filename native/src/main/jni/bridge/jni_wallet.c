@@ -399,13 +399,17 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
         }
         hashHex[64] = '\0';
 
+        /* Use tx timestamp if available, otherwise fall back to current time.
+         * tx->timestamp is 0 until the block header is processed by the peer manager. */
+        uint32_t ts = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
+
         int written = snprintf(buf + pos, bufSize - pos,
             "%s|%lld|%llu|%u|%u\n",
             hashHex,
             (long long)amount,
             (unsigned long long)fee,
             tx->blockHeight,
-            tx->timestamp);
+            ts);
         if (written > 0) pos += written;
     }
 
