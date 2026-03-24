@@ -36,6 +36,8 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class SyncService : Service() {
 
+    private var syncAlreadyLaunched = false
+
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var utxoManager: UtxoManager
     @Inject lateinit var transactionDao: TransactionDao
@@ -72,6 +74,11 @@ class SyncService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Must call startForeground within 5 seconds — do it first thing.
         startForeground(NOTIFICATION_ID, buildNotification(progress = 0f, peerCount = 0))
+
+        // Only launch sync ONCE — service may receive multiple onStartCommand calls
+        // from redundant startForegroundService() invocations.
+        if (syncAlreadyLaunched) return START_STICKY
+        syncAlreadyLaunched = true
 
         // Wire C core → Kotlin before kicking off sync so no events are lost.
         NativeBridge.setCallbackHandler(syncCallback)
@@ -131,10 +138,21 @@ class SyncService : Service() {
 
     // ── NativeCallback — called from C JNI threads ────────────────────────────
 
+    private var hasReachedSynced = false
+
     private val syncCallback = object : NativeCallback {
 
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
-            walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
+            // Once synced, don't revert to "Syncing" for minor sync cycles
+            // (new blocks arriving trigger brief sync cycles with progress 0.0→1.0)
+            if (hasReachedSynced && progress >= 0.99f) return
+            if (hasReachedSynced && progress < 0.5f) {
+                // Genuine re-sync (e.g., after long offline period) — show progress
+                hasReachedSynced = false
+            }
+            if (!hasReachedSynced) {
+                walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
+            }
             val peers = NativeBridge.getPeerCount()
             updateNotification(progress, peers)
         }
@@ -178,6 +196,7 @@ class SyncService : Service() {
         }
 
         override fun onSyncComplete() {
+            hasReachedSynced = true
             val height = NativeBridge.getLastBlockHeight()
             walletManager.updateSyncState(SyncState.Complete)
             updateNotification(progress = 1f, peerCount = NativeBridge.getPeerCount())

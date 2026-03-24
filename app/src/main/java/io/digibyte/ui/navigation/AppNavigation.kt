@@ -131,6 +131,15 @@ fun AppNavigation(
             }
         }
     ) { padding ->
+        // Start sync service ONCE when the wallet is unlocked — not per-tab
+        var syncStarted by remember { mutableStateOf(false) }
+        LaunchedEffect(startDestination) {
+            if (startDestination == "wallet" && !syncStarted) {
+                syncStarted = true
+                startSyncService()
+            }
+        }
+
         NavHost(
             navController = navController,
             startDestination = startDestination,
@@ -203,11 +212,6 @@ fun AppNavigation(
 
             // ── Main wallet tabs ──────────────────────────────────────────────
             composable(Screen.Wallet.route) {
-                // Start the foreground sync service the first time the wallet
-                // screen is composed (covers both post-onboarding and post-unlock
-                // entry points). Idempotent — the service is START_STICKY.
-                LaunchedEffect(Unit) { startSyncService() }
-
                 WalletScreen(
                     onNavigateSend = { navController.navigate("send") },
                     onNavigateReceive = { navController.navigate("receive") },

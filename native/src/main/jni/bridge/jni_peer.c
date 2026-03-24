@@ -175,8 +175,13 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     }
 
     if (g_peerManager) {
-        /* Peer manager already exists — just reconnect if not connected */
-        LOGI("startSync: peer manager exists, connecting");
+        /* Peer manager already exists — only reconnect if not already connected */
+        if (BRPeerManagerPeerCount(g_peerManager) > 0) {
+            LOGD("startSync: already connected with %zu peers, skipping",
+                 BRPeerManagerPeerCount(g_peerManager));
+            return;
+        }
+        LOGI("startSync: peer manager exists, reconnecting");
         BRPeerManagerConnect(g_peerManager);
         return;
     }
