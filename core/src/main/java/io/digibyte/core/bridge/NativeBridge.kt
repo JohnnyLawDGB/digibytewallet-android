@@ -93,6 +93,13 @@ object NativeBridge {
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean
 
+    /** Load previously saved blocks into the C core before startSync.
+     *  Data format: serialized by bridge_saveBlocks in jni_peer.c */
+    external fun loadSavedBlocks(data: ByteArray): Int
+
+    /** Load previously saved peers into the C core before startSync. */
+    external fun loadSavedPeers(data: ByteArray): Int
+
     /** Get number of transactions known to the C core wallet. */
     external fun getTransactionCount(): Int
 

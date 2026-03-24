@@ -60,11 +60,11 @@ static void bridge_syncStopped(void *info, int error) {
 
     if (error) {
         LOGW("bridge_syncStopped: error=%d (%s)", error, strerror(error));
-        /* On network error, auto-reconnect */
-        if (g_peerManager) {
-            LOGI("startSync: connecting to peers");
-            BRPeerManagerConnect(g_peerManager);
-        }
+        /* Report failure to UI — do NOT auto-reconnect here.
+         * Immediate reconnect on "Network is unreachable" creates a tight
+         * infinite loop that burns CPU and keeps resetting the UI to 0%.
+         * The Kotlin SyncService handles reconnection via its peer-count
+         * polling loop (every 30s) which will call startSync if needed. */
         if (g_mid_onSyncFailed) {
             jstring msg = (*env)->NewStringUTF(env, strerror(error));
             (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncFailed, (jint)error, msg);
@@ -104,8 +104,8 @@ static void bridge_txStatusUpdate(void *info) {
         (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onBalanceChanged, balance);
     }
 
-    /* Report sync progress — suppress during rescan (user already saw 100%)
-     * and when progress is 1.0 (let onSyncComplete handle that). */
+    /* Report sync progress — suppress during rescan and at 1.0.
+     * onSyncComplete (via bridge_syncStopped) is the proper "done" signal. */
     if (g_mid_onSyncProgress && g_peerManager && !g_isRescanning) {
         double progress = BRPeerManagerSyncProgress(g_peerManager, 0);
         if (progress < 1.0) {
@@ -116,25 +116,126 @@ static void bridge_txStatusUpdate(void *info) {
     }
 }
 
+/* ── Block & Peer Persistence ────────────────────────────────────────────
+ * Serialize blocks/peers to byte arrays and pass to Kotlin via JNI callback.
+ * Kotlin side persists to SharedPreferences as hex-encoded blobs.
+ * On restart, Kotlin passes the blobs back to startSync which deserializes
+ * and feeds them to BRPeerManagerNew.
+ */
+
+/* Cached method IDs for save callbacks */
+static jmethodID g_mid_onSaveBlocks = NULL;
+static jmethodID g_mid_onSavePeers = NULL;
+
 static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
                                size_t blocksCount, uint64_t *memIntegrityCheck) {
     (void)info;
-    (void)replace;
-    (void)blocks;
-    (void)blocksCount;
     (void)memIntegrityCheck;
-    /* Block persistence will be implemented in Task 4 (Room database).
-       For now, blocks are kept in memory only. */
-    LOGD("bridge_saveBlocks: %zu blocks (replace=%d)", blocksCount, replace);
+
+    if (blocksCount == 0 || !blocks) return;
+
+    JNIEnv *env = jni_get_env();
+    if (!env || !g_callbackHandler) {
+        LOGD("bridge_saveBlocks: %zu blocks (no JNI env, skipping persist)", blocksCount);
+        return;
+    }
+
+    /* Cache method ID on first call */
+    if (!g_mid_onSaveBlocks) {
+        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
+        g_mid_onSaveBlocks = (*env)->GetMethodID(env, cls, "onSaveBlocks", "([BI)V");
+        (*env)->DeleteLocalRef(env, cls);
+        if (!g_mid_onSaveBlocks) {
+            LOGW("bridge_saveBlocks: onSaveBlocks method not found");
+            return;
+        }
+    }
+
+    /* Serialize all blocks into a single buffer:
+     * [4 bytes: block count]
+     * For each block:
+     *   [4 bytes: serialized length]
+     *   [4 bytes: height]
+     *   [N bytes: serialized block data]
+     */
+    size_t totalSize = 4; /* block count */
+    size_t *blockSizes = malloc(blocksCount * sizeof(size_t));
+    if (!blockSizes) return;
+
+    for (size_t i = 0; i < blocksCount; i++) {
+        blockSizes[i] = BRMerkleBlockSerialize(blocks[i], NULL, 0);
+        totalSize += 4 + 4 + blockSizes[i]; /* length + height + data */
+    }
+
+    uint8_t *buf = malloc(totalSize);
+    if (!buf) { free(blockSizes); return; }
+
+    size_t pos = 0;
+    UInt32SetLE(&buf[pos], (uint32_t)blocksCount); pos += 4;
+
+    for (size_t i = 0; i < blocksCount; i++) {
+        UInt32SetLE(&buf[pos], (uint32_t)blockSizes[i]); pos += 4;
+        UInt32SetLE(&buf[pos], blocks[i]->height); pos += 4;
+        BRMerkleBlockSerialize(blocks[i], &buf[pos], blockSizes[i]);
+        pos += blockSizes[i];
+    }
+    free(blockSizes);
+
+    /* Pass to Kotlin */
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)pos);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)pos, (jbyte *)buf);
+    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveBlocks, jbuf, (jint)replace);
+    (*env)->DeleteLocalRef(env, jbuf);
+    free(buf);
+
+    LOGD("bridge_saveBlocks: serialized %zu blocks (%zu bytes, replace=%d)", blocksCount, pos, replace);
 }
 
 static void bridge_savePeers(void *info, int replace, const BRPeer peers[], size_t peersCount) {
     (void)info;
-    (void)replace;
-    (void)peers;
-    (void)peersCount;
-    /* Peer persistence will be implemented in Task 4 (Room database). */
-    LOGD("bridge_savePeers: %zu peers (replace=%d)", peersCount, replace);
+
+    if (peersCount == 0 || !peers) return;
+
+    JNIEnv *env = jni_get_env();
+    if (!env || !g_callbackHandler) {
+        LOGD("bridge_savePeers: %zu peers (no JNI env, skipping persist)", peersCount);
+        return;
+    }
+
+    /* Cache method ID on first call */
+    if (!g_mid_onSavePeers) {
+        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
+        g_mid_onSavePeers = (*env)->GetMethodID(env, cls, "onSavePeers", "([BI)V");
+        (*env)->DeleteLocalRef(env, cls);
+        if (!g_mid_onSavePeers) {
+            LOGW("bridge_savePeers: onSavePeers method not found");
+            return;
+        }
+    }
+
+    /* Serialize peers: [4 bytes count] + [per peer: 16 bytes addr + 2 bytes port + 8 bytes timestamp + 8 bytes services] */
+    size_t peerSize = 16 + 2 + 8 + 8; /* 34 bytes per peer */
+    size_t totalSize = 4 + peersCount * peerSize;
+    uint8_t *buf = malloc(totalSize);
+    if (!buf) return;
+
+    size_t pos = 0;
+    UInt32SetLE(&buf[pos], (uint32_t)peersCount); pos += 4;
+
+    for (size_t i = 0; i < peersCount; i++) {
+        memcpy(&buf[pos], &peers[i].address, 16); pos += 16;
+        UInt16SetLE(&buf[pos], peers[i].port); pos += 2;
+        UInt64SetLE(&buf[pos], peers[i].timestamp); pos += 8;
+        UInt64SetLE(&buf[pos], peers[i].services); pos += 8;
+    }
+
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)pos);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)pos, (jbyte *)buf);
+    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSavePeers, jbuf, (jint)replace);
+    (*env)->DeleteLocalRef(env, jbuf);
+    free(buf);
+
+    LOGD("bridge_savePeers: serialized %zu peers (%zu bytes, replace=%d)", peersCount, pos, replace);
 }
 
 static int bridge_networkIsReachable(void *info) {
@@ -150,6 +251,13 @@ static void bridge_threadCleanup(void *info) {
         (*g_jvm)->DetachCurrentThread(g_jvm);
     }
 }
+
+/* ── Saved blocks/peers globals (populated by loadSavedBlocks/loadSavedPeers) ── */
+
+static BRMerkleBlock **g_savedBlocks = NULL;
+static size_t g_savedBlocksCount = 0;
+static BRPeer *g_savedPeers = NULL;
+static size_t g_savedPeersCount = 0;
 
 /* ---------- startSync ---------- */
 
@@ -192,8 +300,11 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * peer manager starts syncing from the checkpoint nearest to when the
          * wallet was created — not from BIP39_CREATION_TIME (Dec 2017). */
         uint32_t syncFromTime = g_walletCreationTime ? g_walletCreationTime : (uint32_t)time(NULL);
-        LOGI("startSync: creating peer manager (syncFromTime=%u)", syncFromTime);
-        g_peerManager = BPPeerManagerMainNetNew(g_wallet, syncFromTime, NULL, 0, NULL, 0);
+        LOGI("startSync: creating peer manager (syncFromTime=%u, savedBlocks=%zu, savedPeers=%zu)",
+             syncFromTime, g_savedBlocksCount, g_savedPeersCount);
+        g_peerManager = BPPeerManagerMainNetNew(g_wallet, syncFromTime,
+                                                 g_savedBlocks, g_savedBlocksCount,
+                                                 g_savedPeers, g_savedPeersCount);
         if (!g_peerManager) {
             LOGE("startSync: BPPeerManagerMainNetNew failed");
             return;
@@ -339,4 +450,87 @@ Java_io_digibyte_core_bridge_NativeBridge_setCallbackHandler(JNIEnv *env, jobjec
     (*env)->DeleteLocalRef(env, callbackClass);
 
     LOGI("setCallbackHandler: handler registered, method IDs cached");
+}
+
+/* ── Load saved blocks/peers ─────────────────────────────────────────── */
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject thiz,
+                                                           jbyteArray data) {
+    (void)thiz;
+    if (!data) return 0;
+
+    jsize len = (*env)->GetArrayLength(env, data);
+    if (len < 4) return 0;
+
+    jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
+    if (!buf) return 0;
+
+    uint8_t *b = (uint8_t *)buf;
+    size_t pos = 0;
+    uint32_t count = UInt32GetLE(&b[pos]); pos += 4;
+
+    /* Free any previously loaded blocks */
+    if (g_savedBlocks) {
+        for (size_t i = 0; i < g_savedBlocksCount; i++) {
+            if (g_savedBlocks[i]) BRMerkleBlockFree(g_savedBlocks[i]);
+        }
+        free(g_savedBlocks);
+    }
+
+    g_savedBlocks = malloc(count * sizeof(BRMerkleBlock *));
+    g_savedBlocksCount = 0;
+
+    for (uint32_t i = 0; i < count && pos + 8 <= (size_t)len; i++) {
+        uint32_t blockLen = UInt32GetLE(&b[pos]); pos += 4;
+        uint32_t height = UInt32GetLE(&b[pos]); pos += 4;
+
+        if (pos + blockLen > (size_t)len) break;
+
+        BRMerkleBlock *block = BRMerkleBlockParse(&b[pos], blockLen);
+        pos += blockLen;
+
+        if (block) {
+            block->height = height;
+            g_savedBlocks[g_savedBlocksCount++] = block;
+        }
+    }
+
+    (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+    LOGI("loadSavedBlocks: loaded %zu blocks from persistent storage", g_savedBlocksCount);
+    return (jint)g_savedBlocksCount;
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_loadSavedPeers(JNIEnv *env, jobject thiz,
+                                                          jbyteArray data) {
+    (void)thiz;
+    if (!data) return 0;
+
+    jsize len = (*env)->GetArrayLength(env, data);
+    if (len < 4) return 0;
+
+    jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
+    if (!buf) return 0;
+
+    uint8_t *b = (uint8_t *)buf;
+    size_t pos = 0;
+    uint32_t count = UInt32GetLE(&b[pos]); pos += 4;
+
+    if (g_savedPeers) free(g_savedPeers);
+    g_savedPeers = calloc(count, sizeof(BRPeer));
+    g_savedPeersCount = 0;
+
+    size_t peerSize = 16 + 2 + 8 + 8; /* addr + port + timestamp + services */
+    for (uint32_t i = 0; i < count && pos + peerSize <= (size_t)len; i++) {
+        memcpy(&g_savedPeers[i].address, &b[pos], 16); pos += 16;
+        g_savedPeers[i].port = UInt16GetLE(&b[pos]); pos += 2;
+        g_savedPeers[i].timestamp = (uint32_t)UInt64GetLE(&b[pos]); pos += 8;
+        g_savedPeers[i].services = UInt64GetLE(&b[pos]); pos += 8;
+        g_savedPeersCount++;
+    }
+
+    (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+    LOGI("loadSavedPeers: loaded %zu peers from persistent storage", g_savedPeersCount);
+    return (jint)g_savedPeersCount;
 }

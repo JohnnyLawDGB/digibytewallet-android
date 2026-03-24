@@ -9,8 +9,9 @@ data class GameState(
     val score: Int = 0,
     val isJumping: Boolean = false,
     val isGameOver: Boolean = false,
-    val highScore: Int = 0
+    val highScore: Int = 0,
+    val stumbleTimer: Float = 0f       // >0 = stumbling (seconds remaining)
 )
 
 data class Coin(val x: Float, val y: Float, val collected: Boolean = false)
-data class Obstacle(val x: Float, val width: Float, val height: Float)
+data class Obstacle(val x: Float, val width: Float, val height: Float, val hit: Boolean = false)

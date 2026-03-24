@@ -34,4 +34,6 @@ object NativeBridge {
     external fun getOpReturnData(rawTx: ByteArray): ByteArray?
     external fun getTransactionCount(): Int
     external fun getTransactionDetails(): String
+    external fun loadSavedBlocks(data: ByteArray): Int
+    external fun loadSavedPeers(data: ByteArray): Int
 }

@@ -88,11 +88,15 @@ class SyncService : Service() {
             startSyncWithTor()
         }
 
-        // Poll peer count every 30 s for notification accuracy.
+        // Poll peer count every 30s — also reconnects if peers dropped to 0.
         serviceScope.launch {
             while (isActive) {
                 delay(30_000L)
                 val peers = NativeBridge.getPeerCount()
+                if (peers == 0) {
+                    android.util.Log.i("SyncService", "No peers connected, attempting reconnect")
+                    NativeBridge.startSync()
+                }
                 updateNotification(NativeBridge.getSyncProgress(), peers)
             }
         }
@@ -125,9 +129,28 @@ class SyncService : Service() {
             torProxyActive = false
         }
 
-        // Start SPV sync regardless of Tor outcome.
-        NativeBridge.startSync()
+        // Load saved blocks and peers from previous session before syncing
+        val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        val savedBlocks = prefs.getString("saved_blocks", null)
+        val savedPeers = prefs.getString("saved_peers", null)
+
+        if (savedBlocks != null) {
+            val blockBytes = savedBlocks.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val loaded = NativeBridge.loadSavedBlocks(blockBytes)
+            android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
+        }
+        if (savedPeers != null) {
+            val peerBytes = savedPeers.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val loaded = NativeBridge.loadSavedPeers(peerBytes)
+            android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
+        }
+
+        // Always start in Syncing state — "Connected" is only set by onSyncComplete.
+        // This ensures the mini-game shows during initial sync.
         walletManager.updateSyncState(SyncState.Syncing(0f, 0))
+
+        // Start SPV sync — will use saved blocks/peers if loaded
+        NativeBridge.startSync()
     }
 
     override fun onDestroy() {
@@ -143,16 +166,10 @@ class SyncService : Service() {
     private val syncCallback = object : NativeCallback {
 
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
-            // Once synced, don't revert to "Syncing" for minor sync cycles
-            // (new blocks arriving trigger brief sync cycles with progress 0.0→1.0)
-            if (hasReachedSynced && progress >= 0.99f) return
-            if (hasReachedSynced && progress < 0.5f) {
-                // Genuine re-sync (e.g., after long offline period) — show progress
-                hasReachedSynced = false
-            }
-            if (!hasReachedSynced) {
-                walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
-            }
+            // Once connected, don't revert to "Syncing" for minor sync cycles
+            if (hasReachedSynced) return
+
+            walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
             val peers = NativeBridge.getPeerCount()
             updateNotification(progress, peers)
         }
@@ -188,22 +205,30 @@ class SyncService : Service() {
 
         override fun onPeerDisconnected(peerCount: Int) {
             updateNotification(NativeBridge.getSyncProgress(), peerCount)
-            if (peerCount == 0) {
-                walletManager.updateSyncState(
-                    SyncState.Failed(ERR_NO_PEERS, "No peers connected")
-                )
-            }
+            // Don't show failure if we already reached the chain tip —
+            // peer drops are normal, the polling loop will reconnect.
         }
 
         override fun onSyncComplete() {
             hasReachedSynced = true
-            val height = NativeBridge.getLastBlockHeight()
             walletManager.updateSyncState(SyncState.Complete)
             updateNotification(progress = 1f, peerCount = NativeBridge.getPeerCount())
+            // Persist sync-complete so restarts don't flash "Syncing 0%"
+            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                .edit().putBoolean("has_synced", true).apply()
         }
 
         override fun onSyncFailed(errorCode: Int, message: String) {
-            walletManager.updateSyncState(SyncState.Failed(errorCode, message))
+            // Don't show failure to the user — just retry after a short delay.
+            // Most "failures" are peers rejecting SPV mode, which is normal.
+            // The wallet will keep trying peers until it finds a compatible one.
+            if (!hasReachedSynced) {
+                android.util.Log.w("SyncService", "Sync error ($errorCode): $message — retrying in 5s")
+                serviceScope.launch {
+                    delay(5_000L)
+                    NativeBridge.startSync()
+                }
+            }
         }
 
         override fun onBalanceChanged(balanceSatoshis: Long) {
@@ -239,6 +264,19 @@ class SyncService : Service() {
                 // learned later (e.g. via processAssetUtxo once the full tx is confirmed).
                 assetManager.getAssetHistory(assetId) // touches the DAO, warms the flow
             }
+        }
+        override fun onSaveBlocks(data: ByteArray, replace: Int) {
+            // Persist serialized blocks to SharedPreferences
+            val hex = data.joinToString("") { "%02x".format(it) }
+            val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+            prefs.edit().putString("saved_blocks", hex).apply()
+        }
+
+        override fun onSavePeers(data: ByteArray, replace: Int) {
+            // Persist serialized peers to SharedPreferences
+            val hex = data.joinToString("") { "%02x".format(it) }
+            val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+            prefs.edit().putString("saved_peers", hex).apply()
         }
     }
 

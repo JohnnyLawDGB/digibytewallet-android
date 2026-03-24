@@ -49,6 +49,10 @@ class WalletManager(
         if (success) {
             persistSeed(mnemonic)
             _walletState.value = WalletState.Unlocked
+            // Clear stale sync data from any previous wallet —
+            // saved blocks/peers are for a different seed's bloom filter.
+            context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
+                .edit().clear().apply()
             NativeBridge.rescan()
         }
         return success

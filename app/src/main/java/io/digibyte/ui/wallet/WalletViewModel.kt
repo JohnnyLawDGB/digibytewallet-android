@@ -1,5 +1,6 @@
 package io.digibyte.ui.wallet
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +23,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class WalletViewModel @Inject constructor(
+    private val application: Application,
     private val utxoManager: UtxoManager,
     private val transactionDao: TransactionDao,
     private val walletManager: WalletManager,
@@ -29,9 +31,11 @@ class WalletViewModel @Inject constructor(
     private val torManager: TorManager
 ) : ViewModel() {
 
+    private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
+
     /** Live balance in satoshis — polls C core every 5 seconds.
-     *  The C core tracks balance from SPV-synced transactions. Room DB is secondary. */
-    private val _balance = MutableStateFlow(0L)
+     *  Initialized from last-known snapshot so the UI isn't blank on restart. */
+    private val _balance = MutableStateFlow(prefs.getLong("last_balance", 0L))
     val balance: StateFlow<Long> = _balance.asStateFlow()
 
     /** Live transaction list from C core, most-recent first. */
@@ -71,6 +75,8 @@ class WalletViewModel @Inject constructor(
                 val nativeBalance = NativeBridge.getBalance()
                 if (nativeBalance != _balance.value) {
                     _balance.value = nativeBalance
+                    // Snapshot for next restart
+                    prefs.edit().putLong("last_balance", nativeBalance).apply()
                 }
 
                 // Poll transactions

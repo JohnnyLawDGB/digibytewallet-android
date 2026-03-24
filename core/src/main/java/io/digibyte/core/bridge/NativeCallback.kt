@@ -14,4 +14,6 @@ interface NativeCallback {
     fun onSyncFailed(errorCode: Int, message: String)
     fun onBalanceChanged(balanceSatoshis: Long)
     fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean)
+    fun onSaveBlocks(data: ByteArray, replace: Int)
+    fun onSavePeers(data: ByteArray, replace: Int)
 }
