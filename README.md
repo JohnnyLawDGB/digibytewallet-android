@@ -2,7 +2,7 @@
 
 A complete modernization of the official DigiByte Android wallet. Full Kotlin rewrite with Jetpack Compose, patched native C core for DigiByte Core 8.26+ compatibility, hardware-backed security, DigiAssets v2, Digi-ID authentication, privacy-by-default Tor routing, and reproducible builds.
 
-> **Status:** Active development. Phase 1 (core wallet) and Phase 2 (assets, Digi-ID, IPFS, Tor) complete. Phase 3 (community hub) in progress.
+> **Status:** Active development. Phase 1 (core wallet) and Phase 2 (assets, Digi-ID, IPFS, Tor) complete. Sync stability and block/peer persistence shipped. Phase 3 (community hub) next.
 
 ## What's New in v3.0
 
@@ -42,8 +42,13 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Pseudonymous identity** — Register a handle linked to your DGB address. No email, no phone number.
 - **Chat messages ephemeral** — 30-day retention for chat. Forum threads permanent.
 
+### Sync Experience
+- **Block & peer persistence** — Blockchain state serialized to disk via JNI callbacks. Wallet resumes sync from last position on restart instead of re-syncing from checkpoint.
+- **Balance snapshots** — Last-known balance shown (greyed out) immediately on launch, brightens when sync confirms it.
+- **Graceful peer handling** — Automatic retry with backoff. No "Sync failed" flashing. Shows "Connected" only when truly at the chain tip.
+
 ### Fun
-- **DigiRunner** — A pixel-art side-scrolling mini-game that plays during blockchain sync. Collect DGB coins while you wait.
+- **DigiRunner** — A side-scrolling mini-game during blockchain sync. Cyber city skyline, DigiByte-branded coins to collect, hazard obstacles with real collision physics. Tap to jump.
 
 ## Architecture
 
