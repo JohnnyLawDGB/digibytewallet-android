@@ -84,6 +84,8 @@ class WalletManager(
         // background threads are using the old wallet pointer. Freeing it
         // while they're running causes SIGSEGV.
         NativeBridge.stopSync()
+        // Give peer manager threads time to fully stop
+        Thread.sleep(200)
 
         val success = NativeBridge.createWallet(seed)
         if (success) {

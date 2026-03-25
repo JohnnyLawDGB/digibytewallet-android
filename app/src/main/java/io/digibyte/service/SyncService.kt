@@ -238,11 +238,9 @@ class SyncService : Service() {
             // Most "failures" are peers rejecting SPV mode, which is normal.
             // The wallet will keep trying peers until it finds a compatible one.
             if (!hasReachedSynced) {
-                android.util.Log.w("SyncService", "Sync error ($errorCode): $message — retrying in 5s")
-                serviceScope.launch {
-                    delay(5_000L)
-                    NativeBridge.startSync()
-                }
+                android.util.Log.w("SyncService", "Sync error ($errorCode): $message — will retry via poll loop")
+                // Don't retry from here — let the 30s polling loop handle reconnection.
+                // Multiple concurrent startSync calls cause use-after-free crashes.
             }
         }
 
