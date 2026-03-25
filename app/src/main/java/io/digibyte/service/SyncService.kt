@@ -91,8 +91,8 @@ class SyncService : Service() {
         }
 
         // Poll peer count every 30s — also reconnects if peers dropped to 0.
-        // Waits for wallet to be ready before polling.
         serviceScope.launch {
+            // Wait for startSyncWithTor to finish first
             walletManager.walletState.first { it is WalletState.Unlocked }
             while (isActive) {
                 delay(30_000L)
@@ -134,9 +134,15 @@ class SyncService : Service() {
         }
 
         // Wait for the wallet to be created/restored (PIN entry + seed restore).
-        // The SyncService can start before the UI flow completes (START_STICKY).
-        walletManager.walletState.first { it is WalletState.Unlocked }
-        android.util.Log.i("SyncService", "Wallet unlocked, starting sync")
+        // Poll the C core directly — WalletManager state may already be Unlocked
+        // but the native wallet needs time to initialize.
+        while (NativeBridge.getLastBlockHeight() == 0L && NativeBridge.getTransactionCount() == 0) {
+            // getLastBlockHeight returns 0 when no peer manager exists (no wallet).
+            // Once createWallet succeeds in the C core, we can proceed.
+            if (walletManager.walletState.value is WalletState.Unlocked) break
+            delay(500L)
+        }
+        android.util.Log.i("SyncService", "Wallet ready, starting sync")
 
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
