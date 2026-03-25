@@ -87,6 +87,12 @@ class WalletManager(
         // Give peer manager threads time to fully stop
         Thread.sleep(200)
 
+        // Clear saved blocks/peers — they may be from a different wallet seed
+        // (e.g. after uninstall/reinstall) and cause heap corruption or wrong
+        // block heights if loaded into the new wallet's peer manager.
+        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
+            .edit().clear().apply()
+
         val success = NativeBridge.createWallet(seed)
         if (success) {
             _walletState.value = WalletState.Unlocked
