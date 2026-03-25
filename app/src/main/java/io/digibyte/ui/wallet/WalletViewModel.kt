@@ -80,20 +80,24 @@ class WalletViewModel @Inject constructor(
                 }
 
                 // Poll transactions
+                val currentHeight = NativeBridge.getLastBlockHeight()
                 val txDetails = NativeBridge.getTransactionDetails()
                 if (txDetails.isNotEmpty()) {
                     val txList = txDetails.trim().lines().mapNotNull { line ->
                         val parts = line.split("|")
                         if (parts.size >= 5) {
+                            val txHeight = parts[3].toLongOrNull() ?: 0L
+                            val confs = if (txHeight > 0 && currentHeight >= txHeight)
+                                (currentHeight - txHeight + 1).toInt() else 0
                             TransactionEntity(
                                 txid = parts[0],
                                 amount = parts[1].toLongOrNull() ?: 0L,
                                 fee = parts[2].toLongOrNull() ?: 0L,
-                                blockHeight = parts[3].toLongOrNull() ?: 0L,
+                                blockHeight = txHeight,
                                 timestamp = parts[4].toLongOrNull() ?: 0L,
                                 toAddress = "",
                                 fromAddress = "",
-                                confirmations = if ((parts[3].toLongOrNull() ?: 0L) > 0) 1 else 0,
+                                confirmations = confs,
                                 isAssetTx = false
                             )
                         } else null
