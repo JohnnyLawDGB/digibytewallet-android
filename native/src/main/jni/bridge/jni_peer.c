@@ -259,6 +259,74 @@ static size_t g_savedBlocksCount = 0;
 static BRPeer *g_savedPeers = NULL;
 static size_t g_savedPeersCount = 0;
 
+/* ---------- Priority peer injection ---------- */
+
+#include <netdb.h>
+#include <arpa/inet.h>
+
+/**
+ * Resolve a hostname and prepend it to g_savedPeers so the peer manager
+ * tries it first. Uses a recent timestamp so it sorts to the top.
+ * If resolution fails, logs a warning and returns silently.
+ */
+static void _injectPriorityPeer(const char *hostname, uint16_t port) {
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;  /* IPv4 — most reliable for mobile */
+    hints.ai_socktype = SOCK_STREAM;
+
+    int err = getaddrinfo(hostname, NULL, &hints, &res);
+    if (err != 0 || !res) {
+        LOGW("_injectPriorityPeer: failed to resolve %s: %s", hostname,
+             err ? gai_strerror(err) : "no results");
+        return;
+    }
+
+    struct sockaddr_in *ipv4 = (struct sockaddr_in *)res->ai_addr;
+    uint32_t ip4 = ipv4->sin_addr.s_addr; /* network byte order */
+
+    /* Build IPv4-mapped IPv6 address (::ffff:x.x.x.x) as UInt128 */
+    UInt128 addr = UINT128_ZERO;
+    addr.u16[5] = 0xffff;
+    addr.u32[3] = ip4;
+
+    freeaddrinfo(res);
+
+    /* Check if already present in saved peers */
+    for (size_t i = 0; i < g_savedPeersCount; i++) {
+        if (UInt128Eq(g_savedPeers[i].address, addr)) {
+            /* Already there — just bump its timestamp to the top */
+            g_savedPeers[i].timestamp = (uint64_t)time(NULL);
+            g_savedPeers[i].services = SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM;
+            LOGI("_injectPriorityPeer: %s already in saved peers, bumped timestamp", hostname);
+            return;
+        }
+    }
+
+    /* Prepend: allocate new array with +1 slot */
+    size_t newCount = g_savedPeersCount + 1;
+    BRPeer *newPeers = malloc(newCount * sizeof(BRPeer));
+    if (!newPeers) return;
+
+    /* Priority peer at index 0 */
+    newPeers[0] = (BRPeer){ addr, port,
+        SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM,
+        (uint64_t)time(NULL), 0 };
+
+    /* Copy existing peers after it */
+    if (g_savedPeers && g_savedPeersCount > 0) {
+        memcpy(newPeers + 1, g_savedPeers, g_savedPeersCount * sizeof(BRPeer));
+    }
+
+    free(g_savedPeers);
+    g_savedPeers = newPeers;
+    g_savedPeersCount = newCount;
+
+    char ipStr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &ip4, ipStr, sizeof(ipStr));
+    LOGI("_injectPriorityPeer: injected %s (%s:%u) as priority peer", hostname, ipStr, port);
+}
+
 /* ---------- startSync ---------- */
 
 JNIEXPORT void JNICALL
@@ -295,6 +363,12 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     }
 
     {
+        /* Inject digiscope.me as a priority peer so it's always tried.
+         * Resolve the hostname and prepend to g_savedPeers before creating
+         * the peer manager. This ensures a bloom-filter-enabled node is
+         * always in the pool, even if DNS seeds aren't re-queried. */
+        _injectPriorityPeer("digiscope.me", 12024);
+
         /* Create peer manager for mainnet.
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
          * peer manager starts syncing from the checkpoint nearest to when the
