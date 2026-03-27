@@ -1,14 +1,15 @@
 package io.digibyte.game
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameMillis
@@ -113,11 +114,30 @@ fun DigiRunnerGame(
             .fillMaxWidth()
             .height(200.dp)
             .pointerInput(Unit) {
-                detectTapGestures {
-                    gameState = GamePhysics.jump(gameState)
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        when (event.type) {
+                            PointerEventType.Press -> {
+                                if (gameState.characterY <= GamePhysics.GROUND_Y + 1f) {
+                                    gameState = gameState.copy(isHolding = true)
+                                }
+                            }
+                            PointerEventType.Release -> {
+                                if (gameState.isHolding) {
+                                    gameState = GamePhysics.chargedJump(gameState)
+                                }
+                            }
+                        }
+                    }
                 }
             }
     ) {
+        DisposableEffect(Unit) {
+            onDispose {
+                gameState = gameState.copy(isHolding = false, holdDuration = 0f)
+            }
+        }
         Canvas(modifier = Modifier.fillMaxSize()) {
             // World rendering
             drawBackground(gameState.scrollOffset)
