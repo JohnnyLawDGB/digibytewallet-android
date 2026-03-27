@@ -681,8 +681,8 @@ fun DrawScope.drawBTCStacks(state: GameState) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Draw score and branding in the HUD. */
-fun DrawScope.drawScore(textMeasurer: TextMeasurer, score: Int) {
+/** Draw HUD — branding, score, and sprint charge bar. */
+fun DrawScope.drawHud(textMeasurer: TextMeasurer, state: GameState) {
     // "DigiByte" branding top-left
     val brandStyle = TextStyle(
         color = DgbLight.copy(alpha = 0.7f),
@@ -697,7 +697,7 @@ fun DrawScope.drawScore(textMeasurer: TextMeasurer, score: Int) {
     )
 
     // Score top-right
-    val text = "DGB: $score"
+    val text = "DGB: ${state.score}"
     val style = TextStyle(
         color = ScoreColor,
         fontSize = 14.sp,
@@ -710,4 +710,24 @@ fun DrawScope.drawScore(textMeasurer: TextMeasurer, score: Int) {
         topLeft = Offset(size.width - measured.size.width - 12f, 10f),
         style = style
     )
+
+    // Sprint charge bar (visible when holding or sprint active)
+    if (state.sprintMultiplier > 1.02f || state.isHolding) {
+        val barW = 60f
+        val barH = 6f
+        val barX = 10f
+        val barY = 26f
+        val fill = ((state.sprintMultiplier - 1f) / (GamePhysics.SPRINT_MAX_MULT - 1f)).coerceIn(0f, 1f)
+
+        drawRect(color = Color.Black.copy(alpha = 0.4f), topLeft = Offset(barX, barY), size = Size(barW, barH))
+        drawRect(color = Color(0xFF00AAFF), topLeft = Offset(barX, barY), size = Size(barW * fill, barH))
+
+        val label = if (fill >= 0.99f) "MAX" else "SPRINT"
+        drawText(
+            textMeasurer = textMeasurer,
+            text = label,
+            topLeft = Offset(barX, barY + barH + 2f),
+            style = TextStyle(color = Color(0xFF00AAFF), fontSize = 10.sp)
+        )
+    }
 }

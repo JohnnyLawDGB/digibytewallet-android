@@ -146,7 +146,7 @@ fun DigiRunnerGame(
             drawCoins(gameState)
             drawDigiRobot(gameState)
             // HUD
-            drawScore(textMeasurer, gameState.score)
+            drawHud(textMeasurer, gameState)
         }
     }
 }
