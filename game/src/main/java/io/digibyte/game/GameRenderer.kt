@@ -5,9 +5,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.text.TextMeasurer
@@ -35,16 +33,7 @@ private val GridGlow    = Color(0xFF00AAFF)   // grid intersection glow
 private val DgbBlue     = Color(0xFF0066CC)   // official DigiByte blue
 private val DgbLight    = Color(0xFF4A9EFF)   // light accent
 private val DgbDark     = Color(0xFF002352)   // official dark navy
-private val CoinShine   = Color(0xFFAAC8FF)   // coin highlight
-
-private val CharHead    = Color(0xFFFFDBAC)   // skin tone
-private val CharBody    = Color(0xFF0052CC)   // DGB blue shirt
-private val CharLegs    = Color(0xFF1A1A2E)   // dark trousers
-private val CharStumble = Color(0xFFFF4444)   // flash red on hit
-
-private val ObsBody     = Color(0xFFCC2222)   // firewall red
-private val ObsStripe   = Color(0xFFFFCC00)   // warning stripe
-private val ObsGlow     = Color(0xFFFF4444)   // danger glow
+private val StumbleRed  = Color(0xFFFF4444)   // flash red on hit
 
 private val BtcOrange   = Color(0xFFF7931A)   // Bitcoin orange
 private val BtcDark     = Color(0xFFC16800)   // dark Bitcoin edge
@@ -473,8 +462,8 @@ fun DrawScope.drawDigiRobot(state: GameState) {
     val visorY = headTopY + headH * 0.25f
     val visorH = headH * 0.28f
     val visorColor = when {
-        isStumbling && ((state.stumbleTimer * 10f).toInt() % 2 == 0) -> Color(0xFFFF4444)
-        isStumbling -> Color(0xFFFF4444)
+        isStumbling && ((state.stumbleTimer * 10f).toInt() % 2 == 0) -> StumbleRed
+        isStumbling -> StumbleRed
         sprintMult > 1.05f -> Color(0xFF00DDFF)
         else -> DgbBlue
     }
@@ -598,55 +587,95 @@ fun DrawScope.drawCoins(state: GameState) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Draw obstacles — warning blocks with hazard stripes. */
-fun DrawScope.drawObstacles(state: GameState) {
-    val gndY = groundYCanvas()
+/** Draw BTC coin stack obstacles. */
+fun DrawScope.drawBTCStacks(state: GameState) {
+    val groundY = groundYCanvas()
+    val coinR = GamePhysics.BTC_COIN_DIAMETER / 2f   // 18f
+    val overlap = GamePhysics.BTC_STACK_OVERLAP        // 16f
+    val coinStep = GamePhysics.BTC_COIN_DIAMETER - overlap
+
     state.obstacles.forEach { obs ->
-        val screenX = obs.x - state.scrollOffset
-        if (screenX + obs.width < 0 || screenX > size.width) return@forEach
+        val baseScreenX = obs.x - state.scrollOffset
+        if (baseScreenX + obs.width < 0 || baseScreenX > size.width) return@forEach
 
-        val top = gndY - obs.height
+        for (i in 0 until obs.stackCount) {
+            val coinCenterY = groundY - coinR - i * coinStep
+            val coinCenterX = baseScreenX + coinR + if (i % 2 == 1) 2f else -1f
 
-        // Danger glow beneath
-        drawRect(
-            color = ObsGlow.copy(alpha = 0.15f),
-            topLeft = Offset(screenX - 4f, top - 4f),
-            size = Size(obs.width + 8f, obs.height + 4f)
-        )
-
-        // Main block
-        drawRect(
-            color = ObsBody,
-            topLeft = Offset(screenX, top),
-            size = Size(obs.width, obs.height)
-        )
-
-        // Hazard stripes (diagonal yellow/black)
-        val stripeW = 6f
-        var sx = screenX
-        while (sx < screenX + obs.width) {
-            drawLine(
-                color = ObsStripe.copy(alpha = 0.7f),
-                start = Offset(sx, top),
-                end = Offset(sx + stripeW, top + obs.height.coerceAtMost(stripeW * 2f)),
-                strokeWidth = 3f
+            // Orange glow behind each coin
+            drawCircle(
+                color = BtcOrange.copy(alpha = 0.15f),
+                radius = 22f,
+                center = Offset(coinCenterX, coinCenterY)
             )
-            sx += stripeW * 2f
+
+            // Coin body — top coin brighter
+            val bodyColor = if (i == obs.stackCount - 1) BtcOrange else BtcDark
+            drawCircle(
+                color = bodyColor,
+                radius = coinR,
+                center = Offset(coinCenterX, coinCenterY)
+            )
+
+            // Edge ring
+            val ringColor = if (i == obs.stackCount - 1) BtcLight else BtcOrange
+            drawCircle(
+                color = ringColor,
+                radius = coinR - 2f,
+                center = Offset(coinCenterX, coinCenterY),
+                style = Stroke(width = 2f)
+            )
+
+            // Shadow between coins (below each coin except bottom)
+            if (i > 0) {
+                drawOval(
+                    color = Color.Black.copy(alpha = 0.25f),
+                    topLeft = Offset(coinCenterX - coinR * 0.7f, coinCenterY + coinR - 2f),
+                    size = Size(coinR * 1.4f, 4f)
+                )
+            }
+
+            // "B" symbol on top coin (shape-based approximation)
+            if (i == obs.stackCount - 1) {
+                // Vertical bar
+                drawRect(
+                    color = Color.White,
+                    topLeft = Offset(coinCenterX - 3f, coinCenterY - coinR * 0.5f),
+                    size = Size(2f, coinR)
+                )
+                // Top bump of B
+                drawArc(
+                    color = Color.White,
+                    startAngle = -90f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(coinCenterX - 3f, coinCenterY - coinR * 0.5f),
+                    size = Size(coinR * 0.6f, coinR * 0.5f),
+                    style = Stroke(width = 1.5f)
+                )
+                // Bottom bump of B
+                drawArc(
+                    color = Color.White,
+                    startAngle = -90f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(coinCenterX - 3f, coinCenterY),
+                    size = Size(coinR * 0.7f, coinR * 0.5f),
+                    style = Stroke(width = 1.5f)
+                )
+                // Serifs (small vertical bars top and bottom)
+                drawRect(
+                    color = Color.White,
+                    topLeft = Offset(coinCenterX - 4f, coinCenterY - coinR * 0.55f),
+                    size = Size(6f, 1.5f)
+                )
+                drawRect(
+                    color = Color.White,
+                    topLeft = Offset(coinCenterX - 4f, coinCenterY + coinR * 0.45f),
+                    size = Size(6f, 1.5f)
+                )
+            }
         }
-
-        // Top warning bar
-        drawRect(
-            color = ObsStripe,
-            topLeft = Offset(screenX, top),
-            size = Size(obs.width, 3f)
-        )
-
-        // Side shadow
-        drawRect(
-            color = Color.Black.copy(alpha = 0.4f),
-            topLeft = Offset(screenX + obs.width - 3f, top),
-            size = Size(3f, obs.height)
-        )
     }
 }
 

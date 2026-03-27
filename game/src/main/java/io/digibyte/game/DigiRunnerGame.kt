@@ -142,7 +142,7 @@ fun DigiRunnerGame(
             // World rendering
             drawBackground(gameState.scrollOffset)
             drawGround(gameState.scrollOffset)
-            drawObstacles(gameState)
+            drawBTCStacks(gameState)
             drawCoins(gameState)
             drawDigiRobot(gameState)
             // HUD
