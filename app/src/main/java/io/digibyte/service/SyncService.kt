@@ -160,9 +160,16 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
         }
 
-        // Always start in Syncing state — "Connected" is only set by onSyncComplete.
-        // This ensures the mini-game shows during initial sync.
-        walletManager.updateSyncState(SyncState.Syncing(0f, 0))
+        // If we loaded saved blocks, start with last known height — not misleading "0%".
+        // On a fresh wallet with no saved blocks, this will still show 0.
+        val lastHeight = NativeBridge.getLastBlockHeight()
+        val hasSynced = prefs.getBoolean("has_synced", false)
+        if (hasSynced && lastHeight > 0) {
+            // Wallet was previously synced — show "Connected" while we catch up the last few blocks
+            walletManager.updateSyncState(SyncState.Complete)
+        } else {
+            walletManager.updateSyncState(SyncState.Syncing(0f, lastHeight))
+        }
 
         // Start SPV sync — will use saved blocks/peers if loaded
         NativeBridge.startSync()
