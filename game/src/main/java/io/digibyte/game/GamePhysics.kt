@@ -5,17 +5,17 @@ object GamePhysics {
     const val JUMP_VELOCITY = 600f
     const val GROUND_Y = 0f
     const val SCROLL_SPEED = 200f
-    const val CHARACTER_SIZE = 48f      // was 40f (+20%)
-    const val COIN_SIZE = 29f           // was 24f (+20%)
-    const val COIN_COLLECT_RADIUS = 36f // was 30f (+20%)
+    const val CHARACTER_SIZE = 62f      // +30% from 48
+    const val COIN_SIZE = 38f           // +30% from 29
+    const val COIN_COLLECT_RADIUS = 46f // +30% from 36
     const val STUMBLE_DURATION = 0.8f
     const val STUMBLE_SPEED_MULT = 0.3f
-    const val CHAR_SCREEN_X = 80f       // was 60f (shifted right for bigger sprite)
+    const val CHAR_SCREEN_X = 90f       // shifted right for bigger sprite
 
     // Sprint mechanics
-    const val SPRINT_MAX_MULT = 1.3f
-    const val SPRINT_RAMP_TIME = 0.8f   // seconds to reach max sprint
-    const val SPRINT_DECAY_RATE = 0.6f  // per second after release
+    const val SPRINT_MAX_MULT = 1.8f    // was 1.3 — needs to be noticeable
+    const val SPRINT_RAMP_TIME = 0.6f   // seconds to reach max sprint
+    const val SPRINT_DECAY_RATE = 1.0f  // per second after release
     const val CROUCH_RAMP_RATE = 2.5f   // 0→1 in 0.4s
     const val CROUCH_SNAP_RATE = 5.0f   // 1→0 in 0.2s
     const val JUMP_MIN_SCALE = 0.6f     // tap jump multiplier
@@ -23,8 +23,8 @@ object GamePhysics {
     const val JUMP_CHARGE_TIME = 0.8f   // seconds to full charge
 
     // BTC stack obstacles
-    const val BTC_COIN_DIAMETER = 36f
-    const val BTC_STACK_OVERLAP = 16f
+    const val BTC_COIN_DIAMETER = 46f   // +30% from 36
+    const val BTC_STACK_OVERLAP = 20f   // scaled overlap
 
     fun update(state: GameState, deltaTime: Float, syncProgress: Float): GameState {
         // ── Hold duration & sprint ramp ──
