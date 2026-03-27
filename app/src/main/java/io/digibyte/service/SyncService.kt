@@ -279,18 +279,37 @@ class SyncService : Service() {
             }
         }
         override fun onSaveBlocks(data: ByteArray, replace: Int) {
-            // Persist serialized blocks to SharedPreferences
-            val hex = data.joinToString("") { "%02x".format(it) }
-            val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
-            prefs.edit().putString("saved_blocks", hex).apply()
+            // Persist off the C core callback thread to avoid blocking peer manager
+            val copy = data.copyOf()
+            serviceScope.launch(Dispatchers.IO) {
+                val hex = bytesToHex(copy)
+                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    .edit().putString("saved_blocks", hex).apply()
+            }
         }
 
         override fun onSavePeers(data: ByteArray, replace: Int) {
-            // Persist serialized peers to SharedPreferences
-            val hex = data.joinToString("") { "%02x".format(it) }
-            val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
-            prefs.edit().putString("saved_peers", hex).apply()
+            val copy = data.copyOf()
+            serviceScope.launch(Dispatchers.IO) {
+                val hex = bytesToHex(copy)
+                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    .edit().putString("saved_peers", hex).apply()
+            }
         }
+    }
+
+    // ── Hex encoding (allocation-free) ─────────────────────────────────────────
+
+    private val hexChars = "0123456789abcdef".toCharArray()
+
+    private fun bytesToHex(bytes: ByteArray): String {
+        val chars = CharArray(bytes.size * 2)
+        for (i in bytes.indices) {
+            val v = bytes[i].toInt() and 0xFF
+            chars[i * 2] = hexChars[v ushr 4]
+            chars[i * 2 + 1] = hexChars[v and 0x0F]
+        }
+        return String(chars)
     }
 
     // ── Notification helpers ──────────────────────────────────────────────────

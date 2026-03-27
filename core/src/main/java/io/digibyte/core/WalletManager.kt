@@ -51,8 +51,9 @@ class WalletManager(
             _walletState.value = WalletState.Unlocked
             // Clear stale sync data from any previous wallet —
             // saved blocks/peers are for a different seed's bloom filter.
-            context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
-                .edit().clear().apply()
+            clearSyncData()
+            // Store fingerprint so restoreFromDisk() knows these blocks belong to this seed
+            saveSeedFingerprint(mnemonic)
             NativeBridge.rescan()
         }
         return success
@@ -67,6 +68,8 @@ class WalletManager(
         if (success) {
             persistSeed(mnemonic)
             _walletState.value = WalletState.Unlocked
+            clearSyncData()
+            saveSeedFingerprint(mnemonic)
             NativeBridge.rescan()
         }
         return success
@@ -87,11 +90,13 @@ class WalletManager(
         // Give peer manager threads time to fully stop
         Thread.sleep(200)
 
-        // Clear saved blocks/peers — they may be from a different wallet seed
-        // (e.g. after uninstall/reinstall) and cause heap corruption or wrong
-        // block heights if loaded into the new wallet's peer manager.
-        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
-            .edit().clear().apply()
+        // Only clear saved blocks/peers if the seed has changed (e.g. after
+        // uninstall/reinstall with a different mnemonic). On normal app restarts
+        // the seed is the same, so we KEEP the saved blocks to resume sync.
+        if (!seedFingerprintMatches(seed)) {
+            clearSyncData()
+            saveSeedFingerprint(seed)
+        }
 
         val success = NativeBridge.createWallet(seed)
         if (success) {
@@ -161,6 +166,7 @@ class WalletManager(
         NativeBridge.lockSession()
         keyStoreManager.deleteKey()
         utxoManager.clearAll()
+        clearSyncData()
         prefs.edit().clear().apply()
         _walletState.value = WalletState.NoWallet
         _syncState.value = SyncState.Idle
@@ -191,6 +197,32 @@ class WalletManager(
             null
         }
     }
+
+    // ── Sync data management ────────────────────────────────────
+
+    private fun clearSyncData() {
+        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
+            .edit().clear().apply()
+    }
+
+    /**
+     * Store a SHA-256 fingerprint of the mnemonic so we can detect seed changes
+     * on subsequent restarts without decrypting the full seed for comparison.
+     */
+    private fun saveSeedFingerprint(mnemonic: String) {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(mnemonic.toByteArray(Charsets.UTF_8))
+        prefs.edit().putString("seed_fingerprint", bytesToHex(hash)).apply()
+    }
+
+    private fun seedFingerprintMatches(mnemonic: String): Boolean {
+        val saved = prefs.getString("seed_fingerprint", null) ?: return false
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = bytesToHex(digest.digest(mnemonic.toByteArray(Charsets.UTF_8)))
+        return saved == hash
+    }
+
+    // ── Hex utilities ────────────────────────────────────────────
 
     private fun bytesToHex(bytes: ByteArray): String =
         bytes.joinToString("") { "%02x".format(it) }

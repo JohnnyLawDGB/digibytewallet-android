@@ -353,13 +353,7 @@ fun AppNavigation(
                 val localContext = LocalContext.current
                 QrScannerScreen(
                     onDigiId = { request ->
-                        // URL-encode the raw digiid:// URI for safe nav arg transport
-                        val encoded = Uri.encode(
-                            "digiid://${request.callbackUrl
-                                .removePrefix("https://")
-                                .removePrefix("http://")}?x=${request.nonce}" +
-                                if (request.isUnsecure) "&u=1" else ""
-                        )
+                        val encoded = Uri.encode(request.rawUri)
                         navController.navigate("digiid_confirm/$encoded") {
                             popUpTo("qr_scanner") { inclusive = true }
                         }

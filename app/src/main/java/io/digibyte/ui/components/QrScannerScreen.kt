@@ -30,8 +30,12 @@ import io.digibyte.core.model.DigiByteUri
 import io.digibyte.core.model.DigiIdRequest
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteNavy
+import android.os.Handler
+import android.os.Looper
+import android.util.Size
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "QrScannerScreen"
 
@@ -197,9 +201,10 @@ private fun CameraPreviewWithZxing(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-    // Guard against multiple callbacks for a single scan
-    var scanned by remember { mutableStateOf(false) }
+    // Thread-safe guard against multiple callbacks for a single scan
+    val scanned = remember { AtomicBoolean(false) }
 
     val previewView = remember {
         PreviewView(context).apply {
@@ -220,13 +225,13 @@ private fun CameraPreviewWithZxing(
         }
 
         val imageAnalysis = ImageAnalysis.Builder()
+            .setTargetResolution(Size(1280, 720))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
             .also { analysis ->
                 analysis.setAnalyzer(analysisExecutor, ZxingAnalyzer { result ->
-                    if (!scanned) {
-                        scanned = true
-                        onScanResult(result)
+                    if (scanned.compareAndSet(false, true)) {
+                        mainHandler.post { onScanResult(result) }
                     }
                 })
             }
@@ -264,12 +269,14 @@ private class ZxingAnalyzer(private val onResult: (String) -> Unit) : ImageAnaly
 
     override fun analyze(image: ImageProxy) {
         try {
-            val buffer: ByteBuffer = image.planes[0].buffer
+            val plane = image.planes[0]
+            val buffer: ByteBuffer = plane.buffer
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
+            val rowStride = plane.rowStride
             val source = PlanarYUVLuminanceSource(
                 bytes,
-                image.width,
+                rowStride,
                 image.height,
                 0, 0,
                 image.width,

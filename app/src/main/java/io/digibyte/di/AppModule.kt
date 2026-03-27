@@ -125,8 +125,8 @@ object AppModule {
         AssetMetadataService(ipfsClient, dao)
 
     @Provides @Singleton
-    fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao): DigiIdManager =
-        DigiIdManager(client, historyDao)
+    fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao, digiScopeClient: DigiScopeClient): DigiIdManager =
+        DigiIdManager(client, historyDao, digiScopeClient)
 
     @Provides @Singleton
     fun provideDigiScopeClient(

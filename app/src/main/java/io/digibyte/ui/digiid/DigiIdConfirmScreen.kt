@@ -104,12 +104,12 @@ fun DigiIdConfirmScreen(
                             isLoading = isLoading,
                             onApprove = {
                                 coroutineScope.launch {
-                                    val activity = context as? Activity
-                                    if (activity != null && biometricAuth.canAuthenticate(
-                                            activity as androidx.fragment.app.FragmentActivity
+                                    val fragmentActivity = context as? androidx.fragment.app.FragmentActivity
+                                    if (fragmentActivity != null && biometricAuth.canAuthenticate(
+                                            fragmentActivity
                                         )) {
                                         val bioResult = biometricAuth.authenticate(
-                                            activity = activity as androidx.fragment.app.FragmentActivity,
+                                            activity = fragmentActivity,
                                             title = "Digi-ID Authentication",
                                             subtitle = "Authenticate to log in to ${request.domain}",
                                             negativeButtonText = "Cancel"
