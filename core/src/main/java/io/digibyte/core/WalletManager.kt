@@ -87,8 +87,17 @@ class WalletManager(
         // background threads are using the old wallet pointer. Freeing it
         // while they're running causes SIGSEGV.
         NativeBridge.stopSync()
-        // Give peer manager threads time to fully stop
-        Thread.sleep(200)
+        // Wait for peer manager threads to fully drain. 200ms was insufficient —
+        // SIGSEGV crashes were observed on the DefaultDispatch thread after the
+        // old wallet was freed. Poll peer count to confirm disconnection, with
+        // a hard cap to avoid hanging.
+        var waitMs = 0
+        while (NativeBridge.getPeerCount() > 0 && waitMs < 2000) {
+            Thread.sleep(100)
+            waitMs += 100
+        }
+        // Extra settle time for threads that may be mid-callback
+        Thread.sleep(300)
 
         // Only clear saved blocks/peers if the seed has changed (e.g. after
         // uninstall/reinstall with a different mnemonic). On normal app restarts
