@@ -40,6 +40,10 @@ Java_io_digibyte_core_bridge_NativeBridge_clearSocksProxy(
 static int g_initialSyncDone = 0;
 static int g_isRescanning = 0;
 
+/* Priority peer (digiscope.me) — resolved once in _injectPriorityPeer, reused for rescan */
+static UInt128 g_priorityPeerAddr = { .u64 = {0, 0} };
+static uint16_t g_priorityPeerPort = 0;
+
 static void bridge_syncStarted(void *info) {
     (void)info;
     LOGD("bridge_syncStarted (rescanning=%d)", g_isRescanning);
@@ -81,9 +85,24 @@ static void bridge_syncStopped(void *info, int error) {
             g_initialSyncDone = 1;
             g_isRescanning = 1;
             LOGI("bridge_syncStopped: first sync done, triggering rescan for missed transactions");
+
+            /* Force digiscope.me as the fixed peer for rescan — guarantees
+             * a bloom-filter-enabled node handles the rescan. Most peers in
+             * the pool reject SPV mode, so the rescan would stall otherwise. */
+            if (!UInt128IsZero(g_priorityPeerAddr)) {
+                LOGI("bridge_syncStopped: locking to priority peer for rescan");
+                BRPeerManagerSetFixedPeer(g_peerManager, g_priorityPeerAddr, g_priorityPeerPort);
+            }
+
             BRPeerManagerRescan(g_peerManager);
             /* Don't fire onSyncComplete yet — wait for rescan to finish */
         } else {
+            /* Rescan done (or subsequent sync cycle). Clear fixed peer
+             * so normal peer discovery resumes. */
+            if (g_isRescanning && g_peerManager) {
+                LOGI("bridge_syncStopped: rescan complete, clearing fixed peer");
+                BRPeerManagerSetFixedPeer(g_peerManager, UINT128_ZERO, 0);
+            }
             g_isRescanning = 0;
             if (g_mid_onSyncComplete) {
                 (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncComplete);
@@ -298,6 +317,8 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
             /* Already there — just bump its timestamp to the top */
             g_savedPeers[i].timestamp = (uint64_t)time(NULL);
             g_savedPeers[i].services = SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM;
+            g_priorityPeerAddr = addr;
+            g_priorityPeerPort = port;
             LOGI("_injectPriorityPeer: %s already in saved peers, bumped timestamp", hostname);
             return;
         }
@@ -324,6 +345,10 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
 
     char ipStr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &ip4, ipStr, sizeof(ipStr));
+    /* Cache for rescan locking */
+    g_priorityPeerAddr = addr;
+    g_priorityPeerPort = port;
+
     LOGI("_injectPriorityPeer: injected %s (%s:%u) as priority peer", hostname, ipStr, port);
 }
 
