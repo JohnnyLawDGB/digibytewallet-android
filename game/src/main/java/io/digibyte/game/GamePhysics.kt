@@ -120,7 +120,7 @@ object GamePhysics {
             scrollOffset = newScroll,
             coins = culledCoins,
             obstacles = culledObstacles,
-            score = state.score + newlyCollected,
+            score = (state.score + newlyCollected - if (hitObstacle) 2 else 0).coerceAtLeast(0),
             isJumping = newY > GROUND_Y,
             stumbleTimer = finalStumble,
             isHolding = finalHolding,

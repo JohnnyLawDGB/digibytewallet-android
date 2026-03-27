@@ -683,6 +683,9 @@ fun DrawScope.drawBTCStacks(state: GameState) {
 
 /** Draw HUD — branding, score, and sprint charge bar. */
 fun DrawScope.drawHud(textMeasurer: TextMeasurer, state: GameState) {
+    // Guard: skip HUD if canvas is too small for text layout
+    if (size.width < 100f || size.height < 50f) return
+
     // "DigiByte" branding top-left
     val brandStyle = TextStyle(
         color = DgbLight.copy(alpha = 0.7f),
