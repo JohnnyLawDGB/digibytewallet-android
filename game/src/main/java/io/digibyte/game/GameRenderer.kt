@@ -509,55 +509,89 @@ fun DrawScope.drawDigiRobot(state: GameState) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Draw DigiByte coins — blue with "D" shield. */
+/** Draw 3D Y-axis spinning DigiByte coins. */
 fun DrawScope.drawCoins(state: GameState) {
     val gndY = groundYCanvas()
+    val coinSize = GamePhysics.COIN_SIZE
+    val r = coinSize / 2f
+
     state.coins.filter { !it.collected }.forEach { coin ->
         val screenX = coin.x - state.scrollOffset
-        if (screenX < -GamePhysics.COIN_SIZE || screenX > size.width + GamePhysics.COIN_SIZE) return@forEach
+        if (screenX < -coinSize || screenX > size.width + coinSize) return@forEach
 
-        val screenY = gndY - coin.y - GamePhysics.COIN_SIZE / 2f
-        val r = GamePhysics.COIN_SIZE / 2f
+        val screenY = gndY - coin.y - r
+        val center = Offset(screenX, screenY)
+        val cosA = kotlin.math.cos(coin.rotationAngle)
+        val absCos = kotlin.math.abs(cosA)
+
+        val renderWidth = coinSize * absCos.coerceAtLeast(0.15f)
 
         // Glow behind coin
         drawCircle(
-            color = DgbLight.copy(alpha = 0.3f),
+            color = DgbBlue.copy(alpha = 0.25f),
             radius = r + 4f,
-            center = Offset(screenX, screenY)
+            center = center
         )
-        // Outer blue circle
-        drawCircle(color = DgbBlue, radius = r, center = Offset(screenX, screenY))
-        // Inner ring
-        drawCircle(
-            color = DgbLight,
-            radius = r - 3f,
-            center = Offset(screenX, screenY),
-            style = Stroke(width = 2f)
-        )
-        // Highlight arc (top-left shine)
-        drawArc(
-            color = CoinShine.copy(alpha = 0.5f),
-            startAngle = 200f,
-            sweepAngle = 80f,
-            useCenter = false,
-            topLeft = Offset(screenX - r, screenY - r),
-            size = Size(r * 2f, r * 2f),
-            style = Stroke(width = 2f)
-        )
-        // "D" letter
-        drawRect(
-            color = Color.White,
-            topLeft = Offset(screenX - r * 0.35f, screenY - r * 0.5f),
-            size = Size(2.5f, r)
-        )
-        drawArc(
-            color = Color.White,
-            startAngle = -90f,
-            sweepAngle = 180f,
-            useCenter = false,
-            topLeft = Offset(screenX - r * 0.35f, screenY - r * 0.5f),
-            size = Size(r * 0.9f, r),
-            style = Stroke(width = 2.5f)
+
+        if (absCos < 0.15f) {
+            // ── Edge view — thin rect ──
+            drawRect(
+                color = DgbDark,
+                topLeft = Offset(screenX - 2f, screenY - r),
+                size = Size(4f, coinSize)
+            )
+        } else if (cosA > 0f) {
+            // ── Front face ──
+            drawOval(
+                color = DgbBlue,
+                topLeft = Offset(screenX - renderWidth / 2f, screenY - r),
+                size = Size(renderWidth, coinSize)
+            )
+            // Ring stroke
+            drawOval(
+                color = DgbLight,
+                topLeft = Offset(screenX - renderWidth / 2f + 3f, screenY - r + 3f),
+                size = Size(renderWidth - 6f, coinSize - 6f),
+                style = Stroke(width = 2f)
+            )
+            // "D" letter — vertical bar + arc, scaled by absCos
+            val dWidth = r * 0.9f * absCos
+            val dLeft = screenX - dWidth * 0.35f
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(dLeft, screenY - r * 0.5f),
+                size = Size(2.5f * absCos, r)
+            )
+            drawArc(
+                color = Color.White,
+                startAngle = -90f,
+                sweepAngle = 180f,
+                useCenter = false,
+                topLeft = Offset(dLeft, screenY - r * 0.5f),
+                size = Size(dWidth, r),
+                style = Stroke(width = 2f)
+            )
+        } else {
+            // ── Back face ──
+            drawOval(
+                color = DgbDark,
+                topLeft = Offset(screenX - renderWidth / 2f, screenY - r),
+                size = Size(renderWidth, coinSize)
+            )
+            // Faint ring
+            drawOval(
+                color = DgbBlue.copy(alpha = 0.3f),
+                topLeft = Offset(screenX - renderWidth / 2f + 3f, screenY - r + 3f),
+                size = Size(renderWidth - 6f, coinSize - 6f),
+                style = Stroke(width = 1.5f)
+            )
+        }
+
+        // Highlight glint — top-left
+        drawOval(
+            color = Color.White.copy(alpha = 0.3f * absCos),
+            topLeft = Offset(screenX - renderWidth * 0.3f, screenY - r * 0.7f),
+            size = Size(renderWidth * 0.3f, coinSize * 0.2f)
         )
     }
 }
