@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -267,90 +268,242 @@ private fun DrawScope.physToCanvas(physY: Float): Float =
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** DigiByte runner character. */
-fun DrawScope.drawCharacter(state: GameState) {
+/** Chrome gradient used for robot body, head, arms, feet. */
+private val ChromeGradient = Brush.horizontalGradient(
+    colors = listOf(
+        Color(0xFF556677), Color(0xFFBBCCDD), Color(0xFFDDEEFF),
+        Color(0xFFBBCCDD), Color(0xFF556677)
+    )
+)
+
+/** Digi-Robot — chrome metallic robot character. */
+fun DrawScope.drawDigiRobot(state: GameState) {
     val charX = GamePhysics.CHAR_SCREEN_X
     val canvasY = physToCanvas(state.characterY)
-    val s = GamePhysics.CHARACTER_SIZE
+    val s = GamePhysics.CHARACTER_SIZE          // 48px tall
     val t = state.scrollOffset
     val isStumbling = state.stumbleTimer > 0f
+    val crouch = state.crouchAmount
+    val sprintMult = state.sprintMultiplier
 
-    // Blink effect during stumble
+    // ── 13. Stumble blink — skip render on blink frame ──
     if (isStumbling && ((state.stumbleTimer * 10f).toInt() % 2 == 0)) return
 
-    // Shadow on the ground
+    // ── 12. Sprint glow — behind character ──
+    if (sprintMult > 1.05f) {
+        drawCircle(
+            color = Color(0xFF00AAFF).copy(alpha = (sprintMult - 1f) * 0.5f),
+            radius = s * 0.6f,
+            center = Offset(charX, canvasY - s * 0.5f)
+        )
+    }
+
+    // ── 1. Ground shadow ──
     drawOval(
         color = DgbBlue.copy(alpha = 0.2f),
         topLeft = Offset(charX - s * 0.4f, groundYCanvas() - 3f),
         size = Size(s * 0.8f, 6f)
     )
 
-    val bodyColor = if (isStumbling) CharStumble else CharBody
+    // ── Running animation phase ──
+    val legPhase = if (state.isJumping) 0f else (t * 0.02f) % (2f * Math.PI.toFloat())
+    val legSwing = kotlin.math.sin(legPhase) * 6f
+    val armSwing = kotlin.math.cos(legPhase) * 8f
 
-    // Head
-    val headSize = s * 0.38f
+    // ── Dimensional helpers ──
+    val footW = s * 0.22f
+    val footH = s * 0.10f
+    val legW = s * 0.14f
+    val baseLegH = s * 0.28f
+    val legH = baseLegH * (1f - crouch * 0.4f)   // shorter when crouching
+    val kneeR = 2.5f
+    val torsoW = s * 0.5f
+    val torsoH = s * 0.32f
+    val headW = s * 0.42f
+    val headH = s * 0.22f
+    val armW = s * 0.10f
+    val armH = s * 0.26f
+    val antennaH = s * 0.12f
+
+    // ── Y positions (bottom to top) ──
+    val feetY = canvasY - footH
+    val legTopY = feetY - legH
+    val kneeY = feetY - legH * 0.5f
+
+    // ── 2. Metal feet ──
+    val leftFootX = charX - s * 0.22f + legSwing * 0.3f
+    val rightFootX = charX + s * 0.04f - legSwing * 0.3f
     drawRoundRect(
-        color = CharHead,
-        topLeft = Offset(charX - headSize / 2f, canvasY - s - headSize),
-        size = Size(headSize, headSize),
-        cornerRadius = CornerRadius(4f)
+        brush = ChromeGradient,
+        topLeft = Offset(leftFootX - footW * 0.1f, feetY),
+        size = Size(footW, footH),
+        cornerRadius = CornerRadius(2f)
     )
-    // Eye
-    drawCircle(
-        color = Color(0xFF333333),
-        radius = 2f,
-        center = Offset(charX + headSize * 0.2f, canvasY - s - headSize * 0.55f)
-    )
-    // DGB cap (small blue rectangle on top of head)
     drawRoundRect(
-        color = DgbBlue,
-        topLeft = Offset(charX - headSize * 0.4f, canvasY - s - headSize - 4f),
-        size = Size(headSize * 0.9f, 6f),
+        brush = ChromeGradient,
+        topLeft = Offset(rightFootX - footW * 0.1f, feetY),
+        size = Size(footW, footH),
         cornerRadius = CornerRadius(2f)
     )
 
-    // Body
+    // ── 3. Piston legs ──
     drawRoundRect(
-        color = bodyColor,
-        topLeft = Offset(charX - s * 0.25f, canvasY - s),
-        size = Size(s * 0.5f, s * 0.5f),
+        brush = ChromeGradient,
+        topLeft = Offset(leftFootX, legTopY),
+        size = Size(legW, legH),
+        cornerRadius = CornerRadius(2f)
+    )
+    // Shine highlight on left leg
+    drawRect(
+        color = Color.White.copy(alpha = 0.15f),
+        topLeft = Offset(leftFootX + legW * 0.3f, legTopY + 2f),
+        size = Size(legW * 0.2f, legH - 4f)
+    )
+    drawRoundRect(
+        brush = ChromeGradient,
+        topLeft = Offset(rightFootX, legTopY),
+        size = Size(legW, legH),
+        cornerRadius = CornerRadius(2f)
+    )
+    // Shine highlight on right leg
+    drawRect(
+        color = Color.White.copy(alpha = 0.15f),
+        topLeft = Offset(rightFootX + legW * 0.3f, legTopY + 2f),
+        size = Size(legW * 0.2f, legH - 4f)
+    )
+
+    // ── 4. Knee joints ──
+    drawCircle(
+        color = DgbBlue,
+        radius = kneeR,
+        center = Offset(leftFootX + legW * 0.5f, kneeY)
+    )
+    drawCircle(
+        color = DgbBlue,
+        radius = kneeR,
+        center = Offset(rightFootX + legW * 0.5f, kneeY)
+    )
+
+    // ── 5. Chrome torso (with crouch scale transform) ──
+    val torsoBaseY = legTopY - torsoH
+    val torsoScaleX = 1f + crouch * 0.1f
+    val torsoScaleY = 1f - crouch * 0.2f
+    val torsoCenterX = charX
+    val torsoCenterY = torsoBaseY + torsoH * 0.5f
+
+    withTransform({
+        scale(torsoScaleX, torsoScaleY, Offset(torsoCenterX, torsoCenterY))
+    }) {
+        drawRoundRect(
+            brush = ChromeGradient,
+            topLeft = Offset(charX - torsoW * 0.5f, torsoBaseY),
+            size = Size(torsoW, torsoH),
+            cornerRadius = CornerRadius(4f)
+        )
+
+        // ── 6. DGB logo on chest ──
+        val logoR = torsoH * 0.28f
+        val logoCX = charX
+        val logoCY = torsoBaseY + torsoH * 0.45f
+        drawCircle(color = DgbBlue, radius = logoR, center = Offset(logoCX, logoCY))
+        // White "D" — vertical bar + arc
+        drawRect(
+            color = Color.White,
+            topLeft = Offset(logoCX - logoR * 0.35f, logoCY - logoR * 0.5f),
+            size = Size(1.5f, logoR)
+        )
+        drawArc(
+            color = Color.White,
+            startAngle = -90f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(logoCX - logoR * 0.35f, logoCY - logoR * 0.5f),
+            size = Size(logoR * 0.8f, logoR),
+            style = Stroke(width = 1.5f)
+        )
+
+        // ── 7. Energy seam ──
+        drawLine(
+            color = DgbBlue.copy(alpha = 0.4f),
+            start = Offset(charX - torsoW * 0.45f, torsoCenterY),
+            end = Offset(charX + torsoW * 0.45f, torsoCenterY),
+            strokeWidth = 1f
+        )
+    }
+
+    // ── 8. Arms ──
+    val shoulderY = torsoBaseY + torsoH * 0.15f
+    // Left arm
+    val leftArmX = charX - torsoW * 0.5f - armW
+    drawRoundRect(
+        brush = ChromeGradient,
+        topLeft = Offset(leftArmX, shoulderY + armSwing),
+        size = Size(armW, armH),
+        cornerRadius = CornerRadius(2f)
+    )
+    drawCircle(
+        color = DgbBlue,
+        radius = 2.5f,
+        center = Offset(leftArmX + armW * 0.5f, shoulderY)
+    )
+    // Right arm
+    val rightArmX = charX + torsoW * 0.5f
+    drawRoundRect(
+        brush = ChromeGradient,
+        topLeft = Offset(rightArmX, shoulderY - armSwing),
+        size = Size(armW, armH),
+        cornerRadius = CornerRadius(2f)
+    )
+    drawCircle(
+        color = DgbBlue,
+        radius = 2.5f,
+        center = Offset(rightArmX + armW * 0.5f, shoulderY)
+    )
+
+    // ── 9. Chrome head ──
+    val headTopY = torsoBaseY - headH - 2f
+    drawRoundRect(
+        brush = ChromeGradient,
+        topLeft = Offset(charX - headW * 0.5f, headTopY),
+        size = Size(headW, headH),
         cornerRadius = CornerRadius(4f)
     )
-    // "D" on shirt
+
+    // ── 10. LED visor ──
+    val visorY = headTopY + headH * 0.25f
+    val visorH = headH * 0.28f
+    val visorColor = when {
+        isStumbling && ((state.stumbleTimer * 10f).toInt() % 2 == 0) -> Color(0xFFFF4444)
+        isStumbling -> Color(0xFFFF4444)
+        sprintMult > 1.05f -> Color(0xFF00DDFF)
+        else -> DgbBlue
+    }
+    drawRoundRect(
+        color = visorColor,
+        topLeft = Offset(charX - headW * 0.4f, visorY),
+        size = Size(headW * 0.8f, visorH),
+        cornerRadius = CornerRadius(2f)
+    )
+    // Visor shine
+    drawRect(
+        color = Color.White.copy(alpha = 0.3f),
+        topLeft = Offset(charX - headW * 0.3f, visorY + 1f),
+        size = Size(headW * 0.3f, visorH * 0.4f)
+    )
+
+    // ── 11. Antenna ──
+    val antennaBaseY = headTopY
+    val antennaTipY = antennaBaseY - antennaH
+    drawLine(
+        color = Color(0xFFBBCCDD),
+        start = Offset(charX, antennaBaseY),
+        end = Offset(charX, antennaTipY),
+        strokeWidth = 1.5f
+    )
     drawCircle(
-        color = Color.White.copy(alpha = 0.6f),
-        radius = 5f,
-        center = Offset(charX, canvasY - s * 0.78f)
-    )
-
-    // Legs — running animation
-    val legPhase = if (state.isJumping) 0f else (t * 0.02f) % (2f * Math.PI.toFloat())
-    val legSwing = kotlin.math.sin(legPhase) * 6f
-
-    drawRect(
-        color = CharLegs,
-        topLeft = Offset(charX - s * 0.22f, canvasY - s * 0.5f),
-        size = Size(s * 0.18f, s * 0.5f + legSwing)
-    )
-    drawRect(
-        color = CharLegs,
-        topLeft = Offset(charX + s * 0.04f, canvasY - s * 0.5f),
-        size = Size(s * 0.18f, s * 0.5f - legSwing)
-    )
-
-    // Arms
-    val armSwing = kotlin.math.cos(legPhase) * 8f
-    drawLine(
-        color = bodyColor,
-        start = Offset(charX - s * 0.25f, canvasY - s * 0.85f),
-        end = Offset(charX - s * 0.5f, canvasY - s * 0.5f + armSwing),
-        strokeWidth = 5f
-    )
-    drawLine(
-        color = bodyColor,
-        start = Offset(charX + s * 0.25f, canvasY - s * 0.85f),
-        end = Offset(charX + s * 0.5f, canvasY - s * 0.5f - armSwing),
-        strokeWidth = 5f
+        color = DgbBlue,
+        radius = 2f,
+        center = Offset(charX, antennaTipY)
     )
 }
 

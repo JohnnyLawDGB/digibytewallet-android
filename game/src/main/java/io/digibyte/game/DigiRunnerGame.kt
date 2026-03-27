@@ -144,7 +144,7 @@ fun DigiRunnerGame(
             drawGround(gameState.scrollOffset)
             drawObstacles(gameState)
             drawCoins(gameState)
-            drawCharacter(gameState)
+            drawDigiRobot(gameState)
             // HUD
             drawScore(textMeasurer, gameState.score)
         }
