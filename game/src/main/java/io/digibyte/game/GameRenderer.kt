@@ -31,9 +31,9 @@ private val GridLine    = Color(0xFF0066CC)   // ground grid lines
 private val GridBase    = Color(0xFF050D1A)   // ground base
 private val GridGlow    = Color(0xFF00AAFF)   // grid intersection glow
 
-private val DgbBlue     = Color(0xFF002FD7)   // DigiByte brand blue
-private val DgbLight    = Color(0xFF4A7DFF)   // lighter DGB blue
-private val DgbCoinEdge = Color(0xFF001A80)   // coin rim
+private val DgbBlue     = Color(0xFF0066CC)   // official DigiByte blue
+private val DgbLight    = Color(0xFF4A9EFF)   // light accent
+private val DgbDark     = Color(0xFF002352)   // official dark navy
 private val CoinShine   = Color(0xFFAAC8FF)   // coin highlight
 
 private val CharHead    = Color(0xFFFFDBAC)   // skin tone
@@ -44,6 +44,10 @@ private val CharStumble = Color(0xFFFF4444)   // flash red on hit
 private val ObsBody     = Color(0xFFCC2222)   // firewall red
 private val ObsStripe   = Color(0xFFFFCC00)   // warning stripe
 private val ObsGlow     = Color(0xFFFF4444)   // danger glow
+
+private val BtcOrange   = Color(0xFFF7931A)   // Bitcoin orange
+private val BtcDark     = Color(0xFFC16800)   // dark Bitcoin edge
+private val BtcLight    = Color(0xFFFFB347)   // light Bitcoin highlight
 
 private val ScoreColor  = Color(0xFF00CCFF)   // HUD text
 
