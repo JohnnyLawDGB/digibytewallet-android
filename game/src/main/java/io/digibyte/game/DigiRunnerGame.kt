@@ -18,20 +18,20 @@ import kotlin.random.Random
 // ── Initial world generation ──────────────────────────────────────────────────
 
 private fun generateInitialState(): GameState {
-    // Pre-populate coins and obstacles ahead in world-space
     val coins = buildList {
         repeat(12) { i ->
             val x = 300f + i * 180f + Random.nextFloat() * 60f
-            // Alternate ground-level coins and airborne coins
             val y = if (i % 3 == 1) 80f + Random.nextFloat() * 40f else 20f
-            add(Coin(x = x, y = y))
+            add(Coin(x = x, y = y, rotationAngle = Random.nextFloat() * 6.28f))
         }
     }
     val obstacles = buildList {
         repeat(5) { i ->
             val x = 600f + i * 400f + Random.nextFloat() * 100f
-            val h = 30f + Random.nextFloat() * 20f
-            add(Obstacle(x = x, width = 28f, height = h))
+            val stackCount = Random.nextInt(1, 4)
+            val h = GamePhysics.BTC_COIN_DIAMETER +
+                (stackCount - 1) * (GamePhysics.BTC_COIN_DIAMETER - GamePhysics.BTC_STACK_OVERLAP)
+            add(Obstacle(x = x, width = GamePhysics.BTC_COIN_DIAMETER, height = h, stackCount = stackCount))
         }
     }
     return GameState(coins = coins, obstacles = obstacles)
@@ -53,7 +53,7 @@ private fun maybeSpawnCoins(state: GameState): GameState {
         repeat(count) { i ->
             val x = clusterX + i * (GamePhysics.COIN_SIZE * 2.5f)
             val y = if (i % 2 == 0) 20f else 85f + Random.nextFloat() * 30f
-            add(Coin(x = x, y = y))
+            add(Coin(x = x, y = y, rotationAngle = Random.nextFloat() * 6.28f))
         }
     }
     return state.copy(coins = state.coins + newCoins)
@@ -64,13 +64,13 @@ private fun maybeSpawnObstacles(state: GameState): GameState {
     val horizon = state.scrollOffset + 900f
     val furthestObs = state.obstacles.maxOfOrNull { it.x } ?: state.scrollOffset
     if (furthestObs > horizon) return state
-
-    // 50 % chance to actually add one (keeps the game from being constant obstacles)
     if (Random.nextFloat() > 0.5f) return state
 
     val obsX = furthestObs + 350f + Random.nextFloat() * 250f
-    val obsH = 28f + Random.nextFloat() * 24f
-    val newObs = Obstacle(x = obsX, width = 26f, height = obsH)
+    val stackCount = Random.nextInt(1, 4)
+    val h = GamePhysics.BTC_COIN_DIAMETER +
+        (stackCount - 1) * (GamePhysics.BTC_COIN_DIAMETER - GamePhysics.BTC_STACK_OVERLAP)
+    val newObs = Obstacle(x = obsX, width = GamePhysics.BTC_COIN_DIAMETER, height = h, stackCount = stackCount)
     return state.copy(obstacles = state.obstacles + newObs)
 }
 
