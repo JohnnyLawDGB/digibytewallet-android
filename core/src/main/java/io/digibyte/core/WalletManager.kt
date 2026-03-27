@@ -119,8 +119,11 @@ class WalletManager(
      * On app restart, this restores the C core wallet from disk.
      */
     fun unlock(authToken: ByteArray): Boolean {
-        // If C core wallet isn't initialized, restore from disk
-        if (NativeBridge.getBalance() == 0L && hasSavedWallet()) {
+        // Only restore from disk if the C core wallet isn't loaded yet
+        // (i.e. fresh process after crash/restart). Never re-create an
+        // already-loaded wallet — that frees the wallet while the peer
+        // manager's threads still reference it, causing SIGABRT/SIGSEGV.
+        if (!NativeBridge.isWalletLoaded() && hasSavedWallet()) {
             restoreFromDisk()
         }
         val success = NativeBridge.unlockSession(authToken)

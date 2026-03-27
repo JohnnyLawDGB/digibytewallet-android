@@ -89,6 +89,10 @@ object NativeBridge {
      */
     external fun signMessage(message: String, addressFormat: Int): String?
 
+    // === Wallet state ===
+    /** Returns true if the C core wallet is initialized (g_wallet != NULL). */
+    external fun isWalletLoaded(): Boolean
+
     // === Validation ===
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean

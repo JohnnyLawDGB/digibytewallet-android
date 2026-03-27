@@ -325,6 +325,14 @@ Java_io_digibyte_core_bridge_NativeBridge_getBalance(JNIEnv *env, jobject thiz) 
     return (jlong)BRWalletBalance(g_wallet);
 }
 
+/* ---------- isWalletLoaded ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isWalletLoaded(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return g_wallet != NULL ? JNI_TRUE : JNI_FALSE;
+}
+
 /* ---------- isValidAddress ---------- */
 
 JNIEXPORT jboolean JNICALL
