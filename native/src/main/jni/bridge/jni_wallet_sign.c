@@ -150,6 +150,6 @@ Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
     char result[256];
     snprintf(result, sizeof(result), "%s|%s", addr, sigB64);
 
-    LOGI("signMessage: signed with address %s (sigLen=%zu)", addr, sigLen);
+    LOGD("signMessage: signed successfully (sigLen=%zu)", sigLen);
     return (*env)->NewStringUTF(env, result);
 }

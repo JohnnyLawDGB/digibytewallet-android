@@ -24,6 +24,27 @@ class DigiIdManager(
 ) {
     suspend fun authenticate(request: DigiIdRequest): DigiIdResult = withContext(Dispatchers.IO) {
         try {
+            // ── Security: validate callback domain matches URI ──
+            // CRITICAL-4: The callback URL is derived from the scanned QR.
+            // Verify it actually points to the domain shown to the user.
+            val callbackHost = try {
+                java.net.URL(request.callbackUrl).host
+            } catch (e: Exception) { "" }
+
+            if (callbackHost.isEmpty()) {
+                return@withContext DigiIdResult.Error(1, "Invalid callback URL")
+            }
+            if (callbackHost != request.domain && !callbackHost.endsWith(".${request.domain}")) {
+                Log.e(TAG, "Callback host mismatch: $callbackHost vs ${request.domain}")
+                return@withContext DigiIdResult.Error(1, "Callback domain doesn't match — possible phishing")
+            }
+
+            // HIGH-3: Block plaintext HTTP callbacks — signatures must never travel in cleartext
+            if (request.isUnsecure) {
+                Log.w(TAG, "Rejecting insecure (HTTP) Digi-ID callback to ${request.domain}")
+                return@withContext DigiIdResult.Error(1, "Insecure (HTTP) authentication not allowed")
+            }
+
             // Sign the original digiid:// URI (includes nonce) with the wallet's first BIP32 key.
             val signResult = NativeBridge.signMessage(request.rawUri, 0)
             if (signResult == null) {
@@ -33,13 +54,14 @@ class DigiIdManager(
 
             val parts = signResult.split("|", limit = 2)
             if (parts.size != 2) {
-                Log.e(TAG, "signMessage returned unexpected format: $signResult")
+                // HIGH-1: Don't log the full signResult — contains address
+                Log.e(TAG, "signMessage returned unexpected format (length=${signResult.length})")
                 return@withContext DigiIdResult.Error(1, "Signing failed — unexpected result")
             }
             val address = parts[0]
             val signature = parts[1]
 
-            Log.i(TAG, "Digi-ID: signing with address $address for ${request.domain}")
+            Log.d(TAG, "Digi-ID: authenticating with ${request.domain}")
 
             val json = JSONObject().apply {
                 put("uri", request.rawUri)
@@ -53,12 +75,12 @@ class DigiIdManager(
                 .post(body)
                 .build()
 
-            Log.d(TAG, "POST to ${request.callbackUrl}")
             val response = httpClient.newCall(httpRequest).execute()
             val responseBody = response.body?.string()
             val success = response.isSuccessful
 
-            Log.i(TAG, "Response: ${response.code} — $responseBody")
+            // MEDIUM-2: Don't log response body — could contain tokens or attacker content
+            Log.d(TAG, "Digi-ID response: ${response.code}")
 
             // Persist to history regardless of outcome
             historyDao.insert(

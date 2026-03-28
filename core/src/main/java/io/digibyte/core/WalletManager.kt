@@ -176,10 +176,13 @@ class WalletManager(
      */
     suspend fun wipeWallet() {
         NativeBridge.lockSession()
-        keyStoreManager.deleteKey()
-        utxoManager.clearAll()
+        // Clear seed ciphertext FIRST — if process dies after this but before
+        // key deletion, hasSavedWallet()=false so no orphaned state.
+        // (MEDIUM-4: ordering prevents permanent funds loss on partial failure)
+        prefs.edit().clear().commit()  // commit (sync) not apply (async) — must complete
         clearSyncData()
-        prefs.edit().clear().apply()
+        utxoManager.clearAll()
+        keyStoreManager.deleteKey()
         _walletState.value = WalletState.NoWallet
         _syncState.value = SyncState.Idle
     }

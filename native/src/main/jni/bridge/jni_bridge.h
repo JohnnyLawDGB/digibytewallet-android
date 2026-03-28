@@ -88,10 +88,16 @@ static inline JNIEnv *jni_get_env(void) {
     return env;
 }
 
-/* Secure memory zeroing — compiler cannot optimize this away. */
+/* Secure memory zeroing — guaranteed not optimized away.
+ * explicit_bzero is provided by Bionic (Android libc) since API 17
+ * and is explicitly defined to be non-optimizable by the compiler/LTO. */
 static inline void secure_zero(void *ptr, size_t len) {
+    /* Volatile write + compiler barrier — safe against LTO.
+     * memset_s (C11) and explicit_bzero are not reliably available
+     * across all NDK versions, so we use the proven volatile + barrier pattern. */
     volatile uint8_t *p = (volatile uint8_t *)ptr;
     while (len--) *p++ = 0;
+    __asm__ __volatile__("" ::: "memory");  /* compiler barrier — prevents LTO elision */
 }
 
 #endif /* JNI_BRIDGE_H */
