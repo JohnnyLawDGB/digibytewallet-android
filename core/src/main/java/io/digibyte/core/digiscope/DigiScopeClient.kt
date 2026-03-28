@@ -109,7 +109,7 @@ class DigiScopeClient(
             val json = JSONObject().apply { put("handle", handle) }
             val body = json.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
-                .url("$BASE_URL/user/handle")
+                .url("$BASE_URL/hub/profile/handle")
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
@@ -145,17 +145,18 @@ class DigiScopeClient(
         val token = jwtToken ?: return@withContext null
         try {
             val request = Request.Builder()
-                .url("$BASE_URL/user/profile")
+                .url("$BASE_URL/hub/profile")
                 .header("Authorization", "Bearer $token")
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
 
             val json = JSONObject(response.body?.string() ?: return@withContext null)
+            val profile = json.optJSONObject("profile") ?: json
             DigiScopeProfile(
-                handle = json.optString("handle", null),
-                address = json.optString("address", ""),
-                tipBalance = json.optLong("tipBalance", 0)
+                handle = profile.optString("handle", null),
+                address = profile.optString("address", ""),
+                tipBalance = profile.optLong("tip_balance", profile.optLong("tipBalance", 0))
             )
         } catch (e: Exception) {
             null
@@ -211,7 +212,9 @@ class DigiScopeClient(
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) return@withContext emptyList()
 
-                val array = JSONArray(response.body?.string() ?: return@withContext emptyList())
+                val bodyStr = response.body?.string() ?: return@withContext emptyList()
+                val json = JSONObject(bodyStr)
+                val array = json.optJSONArray("messages") ?: JSONArray(bodyStr)
                 parseChatMessages(array)
             } catch (e: Exception) {
                 emptyList()
@@ -228,13 +231,15 @@ class DigiScopeClient(
             val token = jwtToken ?: return@withContext emptyList()
             try {
                 val request = Request.Builder()
-                    .url("$BASE_URL/hub/channels/$channelId/threads?page=$page")
+                    .url("$BASE_URL/hub/threads?channelId=$channelId&page=$page")
                     .header("Authorization", "Bearer $token")
                     .build()
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) return@withContext emptyList()
 
-                val array = JSONArray(response.body?.string() ?: return@withContext emptyList())
+                val bodyStr = response.body?.string() ?: return@withContext emptyList()
+                val json = JSONObject(bodyStr)
+                val array = json.optJSONArray("threads") ?: JSONArray(bodyStr)
                 parseForumThreads(array)
             } catch (e: Exception) {
                 emptyList()
@@ -278,20 +283,22 @@ class DigiScopeClient(
         val token = jwtToken ?: return@withContext null
         try {
             val json = JSONObject().apply {
+                put("channelId", channelId)
                 put("title", title)
                 put("content", content)
                 put("signature", signature)
             }
             val body = json.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
-                .url("$BASE_URL/hub/channels/$channelId/threads")
+                .url("$BASE_URL/hub/threads")
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
 
-            parseForumThread(JSONObject(response.body?.string() ?: return@withContext null))
+            val respJson = JSONObject(response.body?.string() ?: return@withContext null)
+            parseForumThread(respJson.optJSONObject("thread") ?: respJson)
         } catch (e: Exception) {
             null
         }
@@ -310,14 +317,15 @@ class DigiScopeClient(
                 }
                 val body = json.toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
-                    .url("$BASE_URL/hub/threads/$threadId/replies")
+                    .url("$BASE_URL/hub/threads/$threadId/reply")
                     .header("Authorization", "Bearer $token")
                     .post(body)
                     .build()
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) return@withContext null
 
-                parseReply(JSONObject(response.body?.string() ?: return@withContext null))
+                val respJson = JSONObject(response.body?.string() ?: return@withContext null)
+                parseReply(respJson.optJSONObject("reply") ?: respJson)
             } catch (e: Exception) {
                 null
             }
@@ -400,9 +408,11 @@ class DigiScopeClient(
      * Check whether a hub handle is still available.
      */
     suspend fun checkHandleAvailable(handle: String): Boolean = withContext(Dispatchers.IO) {
+        val token = jwtToken ?: return@withContext false
         try {
             val request = Request.Builder()
-                .url("$BASE_URL/hub/handle/check?handle=${handle.trim()}")
+                .url("$BASE_URL/hub/profile/handle/${handle.trim()}/available")
+                .header("Authorization", "Bearer $token")
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext false
