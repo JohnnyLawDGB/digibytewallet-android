@@ -86,23 +86,15 @@ static void bridge_syncStopped(void *info, int error) {
             g_isRescanning = 1;
             LOGI("bridge_syncStopped: first sync done, triggering rescan for missed transactions");
 
-            /* Force digiscope.me as the fixed peer for rescan — guarantees
-             * a bloom-filter-enabled node handles the rescan. Most peers in
-             * the pool reject SPV mode, so the rescan would stall otherwise. */
-            if (!UInt128IsZero(g_priorityPeerAddr)) {
-                LOGI("bridge_syncStopped: locking to priority peer for rescan");
-                BRPeerManagerSetFixedPeer(g_peerManager, g_priorityPeerAddr, g_priorityPeerPort);
-            }
-
+            /* Rescan re-downloads blocks with the bloom filter active to find
+             * transactions matching wallet addresses. The priority peer
+             * (digiscope.me) is already at the top of the peer list from
+             * _injectPriorityPeer, so it will be tried first on reconnect.
+             * Don't use SetFixedPeer — it disconnects everything and clears
+             * the peer array, causing reconnection failures. */
             BRPeerManagerRescan(g_peerManager);
             /* Don't fire onSyncComplete yet — wait for rescan to finish */
         } else {
-            /* Rescan done (or subsequent sync cycle). Clear fixed peer
-             * so normal peer discovery resumes. */
-            if (g_isRescanning && g_peerManager) {
-                LOGI("bridge_syncStopped: rescan complete, clearing fixed peer");
-                BRPeerManagerSetFixedPeer(g_peerManager, UINT128_ZERO, 0);
-            }
             g_isRescanning = 0;
             if (g_mid_onSyncComplete) {
                 (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncComplete);
