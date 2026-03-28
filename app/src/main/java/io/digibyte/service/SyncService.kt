@@ -165,15 +165,12 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
         }
 
-        // If we loaded saved blocks, start with last known height — not misleading "0%".
-        // On a fresh wallet with no saved blocks, this will still show 0.
-        val lastHeight = NativeBridge.getLastBlockHeight()
-        val hasSynced = prefs.getBoolean("has_synced", false)
-        if (hasSynced && lastHeight > 0) {
-            // Wallet was previously synced — show "Connected" while we catch up the last few blocks
+        // If wallet previously completed sync, show Connected immediately.
+        // The peer manager will catch up the last few blocks silently.
+        if (hasReachedSynced) {
             walletManager.updateSyncState(SyncState.Complete)
         } else {
-            walletManager.updateSyncState(SyncState.Syncing(0f, lastHeight))
+            walletManager.updateSyncState(SyncState.Syncing(0f, 0))
         }
 
         // Start SPV sync — will use saved blocks/peers if loaded
