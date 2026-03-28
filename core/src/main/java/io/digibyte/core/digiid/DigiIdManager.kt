@@ -72,18 +72,17 @@ class DigiIdManager(
             )
 
             if (success) {
-                // If this was a DigiScope login, capture the sessionToken from
-                // the callback response and use it for Hub access.
-                if (isDigiScopeDomain(request.domain) && responseBody != null) {
-                    try {
-                        val respJson = JSONObject(responseBody)
-                        val sessionToken = respJson.optString("sessionToken", null)
-                        if (sessionToken != null) {
-                            digiScopeClient.persistToken(sessionToken)
-                            Log.i(TAG, "Hub session token captured from callback")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to extract sessionToken: ${e.message}")
+                // If this was a DigiScope login, authenticate the WALLET's own
+                // identity with the backend to get a Hub session token.
+                // The callback token belongs to whoever's browser generated the QR —
+                // the wallet needs its own session tied to its own address.
+                if (isDigiScopeDomain(request.domain)) {
+                    Log.i(TAG, "DigiScope domain — authenticating wallet identity for Hub")
+                    val jwt = digiScopeClient.login(address, signature, request.rawUri)
+                    if (jwt != null) {
+                        Log.i(TAG, "Hub JWT obtained for wallet address $address")
+                    } else {
+                        Log.w(TAG, "Hub JWT login failed — Hub will be disconnected")
                     }
                 }
                 DigiIdResult.Success(request.domain)

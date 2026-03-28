@@ -80,7 +80,7 @@ class DigiScopeClient(
             }
             val body = json.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
-                .url("$BASE_URL/auth/digiid")
+                .url("$BASE_URL/auth/digiid/callback")
                 .post(body)
                 .build()
 
@@ -88,7 +88,9 @@ class DigiScopeClient(
             if (!response.isSuccessful) return@withContext null
 
             val responseJson = JSONObject(response.body?.string() ?: return@withContext null)
-            val token = responseJson.optString("token", null)
+            // Backend returns sessionToken (not token)
+            val token = responseJson.optString("sessionToken",
+                responseJson.optString("token", null))
             if (token != null) {
                 persistToken(token)
             }
