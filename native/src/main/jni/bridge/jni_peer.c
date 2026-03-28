@@ -365,6 +365,12 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     }
 
     if (g_peerManager && g_peerManagerNeedsRecreate) {
+        /* Don't destroy the peer manager mid-rescan — the rescan needs it alive
+         * to find transactions. Defer the recreate until rescan finishes. */
+        if (g_isRescanning) {
+            LOGI("startSync: deferring peer manager recreate — rescan in progress");
+            return;
+        }
         /* Wallet was created/recovered after peer manager was initialized.
          * Destroy and recreate so the bloom filter includes the wallet's addresses.
          * Only do this ONCE — clear the flag immediately. */
