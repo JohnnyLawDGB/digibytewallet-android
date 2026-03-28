@@ -82,6 +82,11 @@ class SyncService : Service() {
         if (syncAlreadyLaunched) return START_STICKY
         syncAlreadyLaunched = true
 
+        // Restore persisted sync state so progress callbacks don't revert
+        // "Connected" back to "Syncing 0%" on restart near the chain tip.
+        hasReachedSynced = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+            .getBoolean("has_synced", false)
+
         // Wire C core → Kotlin before kicking off sync so no events are lost.
         NativeBridge.setCallbackHandler(syncCallback)
 
@@ -183,10 +188,9 @@ class SyncService : Service() {
 
     // ── NativeCallback — called from C JNI threads ────────────────────────────
 
-    // Initialize from persisted flag so progress callbacks don't revert
-    // "Connected" back to "Syncing 0%" on restart near the chain tip.
-    private var hasReachedSynced =
-        getSharedPreferences("dgb_sync_data", MODE_PRIVATE).getBoolean("has_synced", false)
+    // Initialized in onStartCommand from persisted flag so progress callbacks
+    // don't revert "Connected" back to "Syncing 0%" on restart near the chain tip.
+    private var hasReachedSynced = false
 
     private val syncCallback = object : NativeCallback {
 
