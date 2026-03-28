@@ -13,13 +13,13 @@ object GamePhysics {
     const val CHAR_SCREEN_X = 90f       // shifted right for bigger sprite
 
     // Sprint mechanics
-    const val SPRINT_MAX_MULT = 2.43f   // 35% faster than previous 1.8x
-    const val SPRINT_RAMP_TIME = 0.8f   // proportionally longer ramp to max
-    const val SPRINT_DECAY_RATE = 1.2f  // per second after release
+    const val SPRINT_MAX_MULT = 1.94f   // dialed back 20% from 2.43
+    const val SPRINT_RAMP_TIME = 0.7f   // slightly shorter ramp
+    const val SPRINT_DECAY_RATE = 1.0f  // per second after release
 
     // Difficulty progression — base speed ramps with distance
-    const val DIFFICULTY_RAMP_DISTANCE = 10000f  // pixels of scroll to reach max difficulty
-    const val MAX_SPEED_MULT = 1.6f              // base speed at max difficulty (60% faster)
+    const val DIFFICULTY_RAMP_DISTANCE = 12000f  // slower ramp (was 10000)
+    const val MAX_SPEED_MULT = 1.48f             // dialed back 20% from 1.6
     const val CROUCH_RAMP_RATE = 2.5f   // 0→1 in 0.4s
     const val CROUCH_SNAP_RATE = 5.0f   // 1→0 in 0.2s
     const val JUMP_MIN_SCALE = 0.6f     // tap jump multiplier
