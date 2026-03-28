@@ -51,6 +51,7 @@ fun NetworkInfoScreen(
             val pct = (s.progress * 100).toInt()
             Triple("Syncing ($pct%)", DigiByteAccent, Icons.Default.Sync)
         }
+        is SyncState.Rescanning -> Triple("Verifying transactions", DigiByteAccent, Icons.Default.Sync)
         is SyncState.Complete -> Triple("Synced", DigiByteGreen, Icons.Default.CheckCircle)
         is SyncState.Failed -> Triple("Error", DigiByteRed, Icons.Default.Error)
         is SyncState.ChainSplit -> Triple("Chain Split!", DigiByteRed, Icons.Default.Warning)

@@ -59,6 +59,41 @@ fun SyncOverlay(
             }
         }
 
+        is SyncState.Rescanning -> {
+            var showGame by remember { mutableStateOf(true) }
+
+            Column(modifier = modifier) {
+                if (showGame) {
+                    DigiRunnerGame(
+                        syncProgress = 0.9f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(
+                        onClick = { showGame = false },
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        Text(
+                            text = "Skip game",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                )
+
+                Text(
+                    text = "Verifying transactions\u2026",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+        }
+
         // Not syncing — show nothing
         else -> {}
     }

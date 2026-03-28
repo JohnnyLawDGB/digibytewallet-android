@@ -47,14 +47,18 @@ static uint16_t g_priorityPeerPort = 0;
 static void bridge_syncStarted(void *info) {
     (void)info;
     LOGD("bridge_syncStarted (rescanning=%d)", g_isRescanning);
-    /* During rescan, suppress sync-started so the UI stays on "Synced" */
-    if (g_isRescanning) return;
 
     JNIEnv *env = jni_get_env();
     if (!env || !g_callbackHandler || !g_mid_onSyncProgress) return;
 
     jlong height = g_peerManager ? (jlong)BRPeerManagerLastBlockHeight(g_peerManager) : 0;
-    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)0.0f, height);
+
+    if (g_isRescanning) {
+        /* Signal Kotlin that a rescan is in progress — use progress=-1 as marker */
+        (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)-1.0f, height);
+    } else {
+        (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)0.0f, height);
+    }
 }
 
 static void bridge_syncStopped(void *info, int error) {

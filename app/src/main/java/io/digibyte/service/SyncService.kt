@@ -192,6 +192,12 @@ class SyncService : Service() {
     private val syncCallback = object : NativeCallback {
 
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
+            // progress == -1 is a signal from C core that a rescan is starting
+            if (progress < 0f) {
+                walletManager.updateSyncState(SyncState.Rescanning)
+                return
+            }
+
             // Once connected, don't revert to "Syncing" for minor sync cycles
             if (hasReachedSynced) return
 
