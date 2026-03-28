@@ -54,6 +54,8 @@ fun DrawScope.drawBackground(scrollOffset: Float) {
     )
     // Twinkling stars
     drawStars(scrollOffset)
+    // DGB moon — always visible in the sky
+    drawDgbMoon(scrollOffset)
     // City skyline layers
     drawFarCity(scrollOffset)
     drawNearCity(scrollOffset)
@@ -78,6 +80,107 @@ private fun DrawScope.drawStars(scrollOffset: Float) {
             center = Offset(x, y)
         )
     }
+}
+
+/**
+ * Build the official DigiByte "D" mark as a Compose Path.
+ * Traced from DigiByte-Core/digibyte-logos SVG (viewBox 0 0 1280 1280).
+ * The path is normalized to fit a 1x1 box, then scaled at draw time.
+ */
+private fun buildDgbMarkPath(): androidx.compose.ui.graphics.Path = androidx.compose.ui.graphics.Path().apply {
+    // SVG path normalized: original coords / 1280, centered around (0.5, 0.5)
+    // Original SVG "d" attribute from the st2 (white) path, simplified key points.
+    // The mark spans roughly x=380..860, y=380..900 in the 1280 viewport.
+    val s = 1f / 1280f  // normalize to 0..1
+
+    moveTo(769.9f * s, 428f * s)
+    lineTo(784.9f * s, 388.9f * s)
+    cubicTo(786.4f * s, 384.9f * s, 783.5f * s, 380.7f * s, 779.3f * s, 380.7f * s)
+    lineTo(723.6f * s, 380.7f * s)
+    lineTo(706f * s, 426.5f * s)
+    lineTo(681.3f * s, 426.5f * s)
+    lineTo(695.7f * s, 388.9f * s)
+    cubicTo(697.2f * s, 384.9f * s, 694.3f * s, 380.7f * s, 690.1f * s, 380.7f * s)
+    lineTo(634.4f * s, 380.7f * s)
+    lineTo(616.8f * s, 426.5f * s)
+    lineTo(442.6f * s, 426.5f * s)
+    cubicTo(434.7f * s, 426.5f * s, 427.3f * s, 430.8f * s, 423.4f * s, 437.7f * s)
+    lineTo(380f * s, 514.3f * s)
+    lineTo(440.7f * s, 514.3f * s)
+    lineTo(705.5f * s, 514.3f * s)
+    cubicTo(716.3f * s, 514.3f * s, 727f * s, 516.3f * s, 737f * s, 520.4f * s)
+    cubicTo(756.2f * s, 528.3f * s, 778.9f * s, 546.2f * s, 773.2f * s, 586.5f * s)
+    cubicTo(763.7f * s, 654f * s, 694.9f * s, 773.6f * s, 545.6f * s, 775.5f * s)
+    lineTo(622.8f * s, 574.5f * s)
+    cubicTo(626f * s, 566.2f * s, 619.9f * s, 557.4f * s, 611f * s, 557.4f * s)
+    lineTo(507.5f * s, 557.4f * s)
+    lineTo(382.5f * s, 864.6f * s)
+    cubicTo(382.5f * s, 864.6f * s, 407.7f * s, 867.7f * s, 447.2f * s, 867.7f * s)
+    lineTo(434.8f * s, 900f * s)
+    lineTo(491.7f * s, 900f * s)
+    cubicTo(496.2f * s, 900f * s, 500.3f * s, 897.2f * s, 502f * s, 893f * s)
+    lineTo(512.7f * s, 865.2f * s)
+    cubicTo(521.1f * s, 864.5f * s, 529.6f * s, 863.6f * s, 538.4f * s, 862.6f * s)
+    lineTo(524f * s, 900f * s)
+    lineTo(580.9f * s, 900f * s)
+    cubicTo(585.4f * s, 900f * s, 589.5f * s, 897.2f * s, 591.2f * s, 893f * s)
+    lineTo(607.4f * s, 850.7f * s)
+    cubicTo(700.9f * s, 829.4f * s, 801.4f * s, 783f * s, 861.1f * s, 685.1f * s)
+    cubicTo(981.6f * s, 487.7f * s, 856.4f * s, 436.7f * s, 769.9f * s, 428f * s)
+    close()
+}
+
+/** Cached path instance — built once. */
+private var dgbMarkPath: androidx.compose.ui.graphics.Path? = null
+private fun getDgbMarkPath(): androidx.compose.ui.graphics.Path {
+    if (dgbMarkPath == null) dgbMarkPath = buildDgbMarkPath()
+    return dgbMarkPath!!
+}
+
+/** DGB logo as a glowing moon — slow parallax drift in the sky. */
+private fun DrawScope.drawDgbMoon(scrollOffset: Float) {
+    val moonRadius = size.height * 0.12f
+    val baseX = size.width * 0.78f
+    val drift = (scrollOffset * 0.03f) % size.width
+    val moonX = ((baseX - drift) % size.width + size.width) % size.width
+    val moonY = size.height * 0.15f
+
+    // Outer glow
+    drawCircle(color = DgbBlue.copy(alpha = 0.12f), radius = moonRadius * 2f, center = Offset(moonX, moonY))
+    drawCircle(color = DgbBlue.copy(alpha = 0.2f), radius = moonRadius * 1.4f, center = Offset(moonX, moonY))
+
+    // Outer ring — official DGB blue
+    drawCircle(color = DgbBlue, radius = moonRadius, center = Offset(moonX, moonY))
+
+    // Inner circle — official DGB dark
+    drawCircle(color = DgbDark, radius = moonRadius * 0.81f, center = Offset(moonX, moonY))
+
+    // Official DGB mark — scaled and centered on the moon
+    // The SVG mark spans roughly (0.297..0.767, 0.297..0.703) in normalized coords
+    val markCenterX = 0.53f  // approximate center of the SVG mark
+    val markCenterY = 0.52f
+    val markScale = moonRadius * 2.2f  // scale factor to fill the inner circle
+
+    drawContext.canvas.save()
+    drawContext.canvas.translate(
+        moonX - markCenterX * markScale,
+        moonY - markCenterY * markScale
+    )
+    drawContext.canvas.scale(markScale, markScale)
+
+    val path = getDgbMarkPath()
+    drawPath(path = path, color = Color.White)
+
+    drawContext.canvas.restore()
+
+    // Subtle highlight (moonlight sheen)
+    drawArc(
+        color = Color.White.copy(alpha = 0.12f),
+        startAngle = 200f, sweepAngle = 100f, useCenter = false,
+        topLeft = Offset(moonX - moonRadius, moonY - moonRadius),
+        size = Size(moonRadius * 2f, moonRadius * 2f),
+        style = Stroke(width = 2f)
+    )
 }
 
 /** Distant city skyline — slow parallax. */
