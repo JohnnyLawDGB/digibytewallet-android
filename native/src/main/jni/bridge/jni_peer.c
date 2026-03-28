@@ -415,6 +415,11 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             return;
         }
 
+        /* Clear the flag — peer manager is now built with current wallet.
+         * Without this, the poll loop's next startSync call would see the
+         * stale flag and destroy what we just created. */
+        g_peerManagerNeedsRecreate = 0;
+
         /* Set callbacks */
         BRPeerManagerSetCallbacks(g_peerManager, NULL,
                                   bridge_syncStarted,
