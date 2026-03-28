@@ -1,7 +1,8 @@
 package io.digibyte.core.model
 
 data class DigiIdRequest(
-    val callbackUrl: String,
+    val rawUri: String,       // original digiid://... URI (signed + echoed in POST)
+    val callbackUrl: String,  // https/http callback for the POST
     val nonce: String,
     val isUnsecure: Boolean,  // http vs https
     val domain: String
@@ -25,7 +26,7 @@ data class DigiIdRequest(
             val callbackUrl = "$scheme://$callbackPath"
             val domain = callbackPath.split("/")[0].split(":")[0]
 
-            return DigiIdRequest(callbackUrl, nonce, unsecure, domain)
+            return DigiIdRequest(uri.trim(), callbackUrl, nonce, unsecure, domain)
         }
     }
 }

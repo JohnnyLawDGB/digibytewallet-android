@@ -18,6 +18,8 @@ uint8_t       g_seed[64];
 int           g_seedValid    = 0;
 BRMasterPubKey g_mpk;
 int           g_mpkValid     = 0;
+uint32_t      g_walletCreationTime = 0;
+int           g_peerManagerNeedsRecreate = 0;
 
 /* Callback globals — defined here, used by jni_peer.c via extern */
 jobject   g_callbackHandler  = NULL;
@@ -139,10 +141,27 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
     g_seedValid = 1;
     g_mpk = mpk;
     g_mpkValid = 1;
+    g_walletCreationTime = (uint32_t)time(NULL);  /* New wallet = now */
+    g_peerManagerNeedsRecreate = 1;  /* Force peer manager rebuild on next startSync */
 
     secure_zero(seed, sizeof(seed));
 
-    LOGI("createWallet: wallet created successfully");
+    /* Diagnostic: log how many addresses the wallet generated */
+    {
+        size_t addrCount = BRWalletAllAddrs(g_wallet, NULL, 0);
+        LOGI("createWallet: wallet has %zu addresses in bloom filter pool", addrCount);
+        if (addrCount > 0 && addrCount < 100) {
+            BRAddress *addrs = malloc(addrCount * sizeof(BRAddress));
+            if (addrs) {
+                BRWalletAllAddrs(g_wallet, addrs, addrCount);
+                for (size_t i = 0; i < addrCount; i++) {
+                    LOGI("createWallet: addr[%zu] = %s", i, addrs[i].s);
+                }
+                free(addrs);
+            }
+        }
+    }
+    LOGI("createWallet: wallet created successfully (creationTime=%u)", g_walletCreationTime);
     return JNI_TRUE;
 }
 
@@ -192,9 +211,26 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
 
     secure_zero(seed, sizeof(seed));
 
-    LOGI("recoverWallet: wallet recovered, creationTimestamp=%lld", (long long)creationTimestamp);
-    /* Note: creationTimestamp is used by the peer manager (jni_peer.c) when starting sync
-       to avoid downloading the full blockchain. It's stored for later use. */
+    /* Use the user-provided creation timestamp for sync checkpoint selection */
+    g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
+    g_peerManagerNeedsRecreate = 1;  /* Force peer manager rebuild on next startSync */
+
+    /* Log all addresses for debugging bloom filter coverage */
+    {
+        size_t addrCount = BRWalletAllAddrs(g_wallet, NULL, 0);
+        LOGI("recoverWallet: wallet has %zu addresses in bloom filter pool", addrCount);
+        if (addrCount > 0 && addrCount < 300) {
+            BRAddress *addrs = malloc(addrCount * sizeof(BRAddress));
+            if (addrs) {
+                BRWalletAllAddrs(g_wallet, addrs, addrCount);
+                for (size_t i = 0; i < addrCount; i++) {
+                    LOGI("recoverWallet: addr[%zu] = %s", i, addrs[i].s);
+                }
+                free(addrs);
+            }
+        }
+    }
+    LOGI("recoverWallet: wallet recovered, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }
 
@@ -304,6 +340,14 @@ Java_io_digibyte_core_bridge_NativeBridge_getBalance(JNIEnv *env, jobject thiz) 
     return (jlong)BRWalletBalance(g_wallet);
 }
 
+/* ---------- isWalletLoaded ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isWalletLoaded(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return g_wallet != NULL ? JNI_TRUE : JNI_FALSE;
+}
+
 /* ---------- isValidAddress ---------- */
 
 JNIEXPORT jboolean JNICALL
@@ -326,4 +370,74 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidAddress(JNIEnv *env, jobject th
     (*env)->ReleaseStringUTFChars(env, address, addrChars);
 
     return valid ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ---------- getTransactionCount ---------- */
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getTransactionCount(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_wallet) return 0;
+    return (jint)BRWalletTransactions(g_wallet, NULL, 0);
+}
+
+/* ---------- getTransactionDetails ----------
+ * Returns a pipe-separated string for each transaction:
+ * "txHash|amount|fee|blockHeight|timestamp\n..."
+ * Amount is signed: positive = received, negative = sent.
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t txCount = BRWalletTransactions(g_wallet, NULL, 0);
+    if (txCount == 0) return (*env)->NewStringUTF(env, "");
+
+    BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
+    if (!txs) return (*env)->NewStringUTF(env, "");
+    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+
+    /* Build result string — estimate 120 chars per tx */
+    size_t bufSize = txCount * 120 + 1;
+    char *buf = malloc(bufSize);
+    if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+    size_t pos = 0;
+
+    for (size_t i = 0; i < txCount && i < 50; i++) { /* limit to 50 most recent */
+        BRTransaction *tx = txs[i];
+        if (!tx) continue;
+
+        /* Calculate amount: received - sent */
+        uint64_t received = BRWalletAmountReceivedFromTx(g_wallet, tx);
+        uint64_t sent = BRWalletAmountSentByTx(g_wallet, tx);
+        int64_t amount = (int64_t)received - (int64_t)sent;
+        uint64_t fee = BRWalletFeeForTx(g_wallet, tx);
+
+        /* txHash as hex string */
+        char hashHex[65];
+        for (int j = 0; j < 32; j++) {
+            sprintf(&hashHex[j*2], "%02x", tx->txHash.u8[31 - j]);
+        }
+        hashHex[64] = '\0';
+
+        /* Use tx timestamp if available, otherwise fall back to current time.
+         * tx->timestamp is 0 until the block header is processed by the peer manager. */
+        uint32_t ts = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
+
+        int written = snprintf(buf + pos, bufSize - pos,
+            "%s|%lld|%llu|%u|%u\n",
+            hashHex,
+            (long long)amount,
+            (unsigned long long)fee,
+            tx->blockHeight,
+            ts);
+        if (written > 0) pos += written;
+    }
+
+    free(txs);
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    return result;
 }

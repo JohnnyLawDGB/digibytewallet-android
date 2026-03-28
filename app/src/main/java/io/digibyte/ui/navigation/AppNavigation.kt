@@ -131,6 +131,15 @@ fun AppNavigation(
             }
         }
     ) { padding ->
+        // Start sync service ONCE when the wallet is unlocked — not per-tab
+        var syncStarted by remember { mutableStateOf(false) }
+        LaunchedEffect(startDestination) {
+            if (startDestination == "wallet" && !syncStarted) {
+                syncStarted = true
+                startSyncService()
+            }
+        }
+
         NavHost(
             navController = navController,
             startDestination = startDestination,
@@ -143,28 +152,51 @@ fun AppNavigation(
 
             composable("seed_display/{wordCount}") { backStackEntry ->
                 val wordCount = backStackEntry.arguments?.getString("wordCount")?.toIntOrNull() ?: 12
+                // Share ViewModel across onboarding flow so mnemonic persists between screens
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 SeedDisplayScreen(
                     navController = navController,
-                    wordCount = wordCount
+                    wordCount = wordCount,
+                    viewModel = sharedViewModel
                 )
             }
 
-            composable("seed_verify") {
-                SeedVerifyScreen(navController = navController)
+            composable("seed_verify") { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                SeedVerifyScreen(navController = navController, viewModel = sharedViewModel)
             }
 
-            composable("mnemonic_input") {
-                MnemonicInputScreen(navController = navController)
+            composable("mnemonic_input") { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                MnemonicInputScreen(navController = navController, viewModel = sharedViewModel)
             }
 
-            composable("recovery_date") {
-                RecoveryDateScreen(navController = navController)
+            composable("recovery_date") { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                RecoveryDateScreen(navController = navController, viewModel = sharedViewModel)
             }
 
-            composable("pin_setup") {
+            composable("pin_setup") { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 PinSetupScreen(
                     navController = navController,
-                    biometricAuth = biometricAuth
+                    biometricAuth = biometricAuth,
+                    viewModel = sharedViewModel
                 )
             }
 
@@ -180,11 +212,6 @@ fun AppNavigation(
 
             // ── Main wallet tabs ──────────────────────────────────────────────
             composable(Screen.Wallet.route) {
-                // Start the foreground sync service the first time the wallet
-                // screen is composed (covers both post-onboarding and post-unlock
-                // entry points). Idempotent — the service is START_STICKY.
-                LaunchedEffect(Unit) { startSyncService() }
-
                 WalletScreen(
                     onNavigateSend = { navController.navigate("send") },
                     onNavigateReceive = { navController.navigate("receive") },
@@ -326,13 +353,7 @@ fun AppNavigation(
                 val localContext = LocalContext.current
                 QrScannerScreen(
                     onDigiId = { request ->
-                        // URL-encode the raw digiid:// URI for safe nav arg transport
-                        val encoded = Uri.encode(
-                            "digiid://${request.callbackUrl
-                                .removePrefix("https://")
-                                .removePrefix("http://")}?x=${request.nonce}" +
-                                if (request.isUnsecure) "&u=1" else ""
-                        )
+                        val encoded = Uri.encode(request.rawUri)
                         navController.navigate("digiid_confirm/$encoded") {
                             popUpTo("qr_scanner") { inclusive = true }
                         }

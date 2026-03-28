@@ -23,6 +23,7 @@ object NativeBridge {
     external fun clearSocksProxy()
     external fun startSync()
     external fun stopSync()
+    external fun rescan()
     external fun getSyncProgress(): Float
     external fun getPeerCount(): Int
     external fun getEstimatedBlockHeight(): Long
@@ -31,4 +32,8 @@ object NativeBridge {
     external fun isValidAddress(address: String): Boolean
     external fun isAssetTransaction(rawTx: ByteArray): Boolean
     external fun getOpReturnData(rawTx: ByteArray): ByteArray?
+    external fun getTransactionCount(): Int
+    external fun getTransactionDetails(): String
+    external fun loadSavedBlocks(data: ByteArray): Int
+    external fun loadSavedPeers(data: ByteArray): Int
 }

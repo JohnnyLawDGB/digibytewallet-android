@@ -1,37 +1,132 @@
 package io.digibyte.game
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameMillis
 import kotlinx.coroutines.isActive
 import kotlin.random.Random
 
+// ── Coin pattern generators ──────────────────────────────────────────────────
+//
+// Jump physics reference (determines reachable coin heights):
+//   Tap jump:     v=360, peak=36px,  airtime=0.4s, horiz=80-144px
+//   Charged jump: v=720, peak=144px, airtime=0.8s, horiz=160-288px
+//   Coin spacing must fit within horizontal travel during a single jump.
+
+private val coinSpacing = GamePhysics.COIN_SIZE * 1.6f  // ~61px between coins
+
+/** Long ground-level sprint run — reward for holding sprint. */
+private fun coinPatternSprintRun(startX: Float): List<Coin> = buildList {
+    val count = Random.nextInt(8, 14)
+    repeat(count) { i ->
+        add(Coin(x = startX + i * coinSpacing, y = 15f,
+            rotationAngle = Random.nextFloat() * 6.28f))
+    }
+}
+
+/** Gentle ascending staircase — fits within a charged jump arc. */
+private fun coinPatternStairUp(startX: Float): List<Coin> = buildList {
+    val steps = Random.nextInt(4, 7)
+    val stepHeight = 20f  // total climb: 4-6 steps × 20 = 80-120px (within 144px max)
+    repeat(steps) { i ->
+        add(Coin(x = startX + i * coinSpacing, y = 15f + i * stepHeight,
+            rotationAngle = Random.nextFloat() * 6.28f))
+    }
+}
+
+/** Descending staircase — come down from a peak. */
+private fun coinPatternStairDown(startX: Float): List<Coin> = buildList {
+    val steps = Random.nextInt(4, 7)
+    val stepHeight = 20f
+    val peakY = 15f + (steps - 1) * stepHeight
+    repeat(steps) { i ->
+        add(Coin(x = startX + i * coinSpacing, y = peakY - i * stepHeight,
+            rotationAngle = Random.nextFloat() * 6.28f))
+    }
+}
+
+/** Arc — matches actual jump parabola so a well-timed jump collects them all. */
+private fun coinPatternArc(startX: Float): List<Coin> = buildList {
+    val count = Random.nextInt(5, 8)
+    // Peak height reachable by a medium-charged jump
+    val peakHeight = 80f + Random.nextFloat() * 50f  // 80-130px (charged jump reaches 144)
+    // Total horizontal span should match jump travel (~200-250px)
+    val totalWidth = count * coinSpacing
+    repeat(count) { i ->
+        val t = i.toFloat() / (count - 1).coerceAtLeast(1)
+        val y = 15f + peakHeight * 4f * t * (1f - t)  // parabolic arc
+        add(Coin(x = startX + i * coinSpacing, y = y,
+            rotationAngle = Random.nextFloat() * 6.28f))
+    }
+}
+
+/** High cluster — at charged-jump peak, tight group. */
+private fun coinPatternHighCluster(startX: Float): List<Coin> = buildList {
+    val count = Random.nextInt(3, 5)
+    val baseY = 90f + Random.nextFloat() * 30f  // 90-120px, needs charged jump
+    repeat(count) { i ->
+        add(Coin(x = startX + i * coinSpacing * 0.8f, y = baseY,
+            rotationAngle = Random.nextFloat() * 6.28f))
+    }
+}
+
+/** Mixed ground + air — some coins low, some high, variety within one pattern. */
+private fun coinPatternMixed(startX: Float): List<Coin> = buildList {
+    // Ground run with a few airborne bonuses
+    val count = Random.nextInt(6, 10)
+    repeat(count) { i ->
+        val y = if (i % 3 == 0) 60f + Random.nextFloat() * 40f else 15f
+        add(Coin(x = startX + i * coinSpacing, y = y,
+            rotationAngle = Random.nextFloat() * 6.28f))
+    }
+}
+
+/** Pick a random coin pattern. */
+private fun generateCoinPattern(startX: Float): List<Coin> {
+    return when (Random.nextInt(6)) {
+        0 -> coinPatternSprintRun(startX)
+        1 -> coinPatternStairUp(startX)
+        2 -> coinPatternStairDown(startX)
+        3 -> coinPatternArc(startX)
+        4 -> coinPatternHighCluster(startX)
+        else -> coinPatternMixed(startX)
+    }
+}
+
+// ── Obstacle helper ──────────────────────────────────────────────────────────
+
+private fun makeObstacle(x: Float): Obstacle {
+    val stackCount = Random.nextInt(1, 4)
+    val h = GamePhysics.BTC_COIN_DIAMETER +
+        (stackCount - 1) * (GamePhysics.BTC_COIN_DIAMETER - GamePhysics.BTC_STACK_OVERLAP)
+    return Obstacle(x = x, width = GamePhysics.BTC_COIN_DIAMETER, height = h, stackCount = stackCount)
+}
+
 // ── Initial world generation ──────────────────────────────────────────────────
 
 private fun generateInitialState(): GameState {
-    // Pre-populate coins and obstacles ahead in world-space
     val coins = buildList {
-        repeat(12) { i ->
-            val x = 300f + i * 180f + Random.nextFloat() * 60f
-            // Alternate ground-level coins and airborne coins
-            val y = if (i % 3 == 1) 80f + Random.nextFloat() * 40f else 20f
-            add(Coin(x = x, y = y))
+        var x = 300f
+        repeat(3) {
+            addAll(generateCoinPattern(x))
+            x += 400f + Random.nextFloat() * 200f
         }
     }
     val obstacles = buildList {
-        repeat(5) { i ->
-            val x = 600f + i * 400f + Random.nextFloat() * 100f
-            val h = 30f + Random.nextFloat() * 20f
-            add(Obstacle(x = x, width = 28f, height = h))
+        var x = 800f
+        repeat(4) {
+            add(makeObstacle(x))
+            x += 450f + Random.nextFloat() * 400f
         }
     }
     return GameState(coins = coins, obstacles = obstacles)
@@ -39,39 +134,37 @@ private fun generateInitialState(): GameState {
 
 // ── Spawning helpers ──────────────────────────────────────────────────────────
 
-/** Spawn more coins when the world ahead is getting sparse. */
+/** Spawn a coin pattern when the world ahead is getting sparse. */
 private fun maybeSpawnCoins(state: GameState): GameState {
-    // Look 800px ahead of the current scroll position
-    val horizon = state.scrollOffset + 800f
+    val horizon = state.scrollOffset + 900f
     val furthestCoin = state.coins.maxOfOrNull { it.x } ?: state.scrollOffset
-    if (furthestCoin > horizon) return state   // plenty ahead
+    if (furthestCoin > horizon) return state
 
-    // Add a cluster of 3–5 coins just past the horizon
-    val clusterX = furthestCoin + 200f + Random.nextFloat() * 100f
-    val newCoins = buildList {
-        val count = Random.nextInt(3, 6)
-        repeat(count) { i ->
-            val x = clusterX + i * (GamePhysics.COIN_SIZE * 2.5f)
-            val y = if (i % 2 == 0) 20f else 85f + Random.nextFloat() * 30f
-            add(Coin(x = x, y = y))
-        }
-    }
+    // Gap before next pattern — varies to keep rhythm interesting
+    val gap = 150f + Random.nextFloat() * 200f
+    val newCoins = generateCoinPattern(furthestCoin + gap)
     return state.copy(coins = state.coins + newCoins)
 }
 
-/** Spawn obstacles when the world ahead is getting sparse. */
+/** Spawn obstacles with varied spacing — sometimes clustered, sometimes sparse. */
 private fun maybeSpawnObstacles(state: GameState): GameState {
-    val horizon = state.scrollOffset + 900f
+    val horizon = state.scrollOffset + 1000f
     val furthestObs = state.obstacles.maxOfOrNull { it.x } ?: state.scrollOffset
     if (furthestObs > horizon) return state
 
-    // 50 % chance to actually add one (keeps the game from being constant obstacles)
-    if (Random.nextFloat() > 0.5f) return state
+    // 40% chance to skip — creates natural gaps
+    if (Random.nextFloat() > 0.6f) return state
 
-    val obsX = furthestObs + 350f + Random.nextFloat() * 250f
-    val obsH = 28f + Random.nextFloat() * 24f
-    val newObs = Obstacle(x = obsX, width = 26f, height = obsH)
-    return state.copy(obstacles = state.obstacles + newObs)
+    // Minimum gap must be clearable: character needs time to land + jump again.
+    // At 1.8x sprint (~360px/s), a 400px gap gives ~1.1s — enough to land and tap-jump.
+    val spacing = when (Random.nextInt(3)) {
+        0 -> 400f + Random.nextFloat() * 150f    // snug but fair
+        1 -> 550f + Random.nextFloat() * 200f    // comfortable
+        else -> 750f + Random.nextFloat() * 300f  // breather
+    }
+
+    val obsX = furthestObs + spacing
+    return state.copy(obstacles = state.obstacles + makeObstacle(obsX))
 }
 
 // ── Main composable ───────────────────────────────────────────────────────────
@@ -111,22 +204,41 @@ fun DigiRunnerGame(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(360.dp)
             .pointerInput(Unit) {
-                detectTapGestures {
-                    gameState = GamePhysics.jump(gameState)
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        when (event.type) {
+                            PointerEventType.Press -> {
+                                // Always register hold — sprint charges even mid-air,
+                                // jump fires on release only when grounded
+                                gameState = gameState.copy(isHolding = true)
+                            }
+                            PointerEventType.Release -> {
+                                if (gameState.isHolding) {
+                                    gameState = GamePhysics.chargedJump(gameState)
+                                }
+                            }
+                        }
+                    }
                 }
             }
     ) {
+        DisposableEffect(Unit) {
+            onDispose {
+                gameState = gameState.copy(isHolding = false, holdDuration = 0f)
+            }
+        }
         Canvas(modifier = Modifier.fillMaxSize()) {
             // World rendering
             drawBackground(gameState.scrollOffset)
             drawGround(gameState.scrollOffset)
-            drawObstacles(gameState)
+            drawBTCStacks(gameState)
             drawCoins(gameState)
-            drawCharacter(gameState)
+            drawDigiRobot(gameState)
             // HUD
-            drawScore(textMeasurer, gameState.score)
+            drawHud(textMeasurer, gameState)
         }
     }
 }

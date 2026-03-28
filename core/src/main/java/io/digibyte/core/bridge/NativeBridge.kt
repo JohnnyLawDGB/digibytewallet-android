@@ -61,6 +61,11 @@ object NativeBridge {
     /** Stop SPV sync — disconnects from all peers. */
     external fun stopSync()
 
+    /** Rescan blockchain from the wallet's creation checkpoint.
+     *  Triggers BRPeerManagerRescan — reconnects with fresh bloom filter
+     *  to find transactions matching the wallet's addresses. */
+    external fun rescan()
+
     /** Get sync progress as float 0.0 to 1.0. */
     external fun getSyncProgress(): Float
 
@@ -84,9 +89,27 @@ object NativeBridge {
      */
     external fun signMessage(message: String, addressFormat: Int): String?
 
+    // === Wallet state ===
+    /** Returns true if the C core wallet is initialized (g_wallet != NULL). */
+    external fun isWalletLoaded(): Boolean
+
     // === Validation ===
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean
+
+    /** Load previously saved blocks into the C core before startSync.
+     *  Data format: serialized by bridge_saveBlocks in jni_peer.c */
+    external fun loadSavedBlocks(data: ByteArray): Int
+
+    /** Load previously saved peers into the C core before startSync. */
+    external fun loadSavedPeers(data: ByteArray): Int
+
+    /** Get number of transactions known to the C core wallet. */
+    external fun getTransactionCount(): Int
+
+    /** Get transaction details as pipe-separated string.
+     *  Format per line: "txHash|amount|fee|blockHeight|timestamp" */
+    external fun getTransactionDetails(): String
 
     // === Asset detection ===
     /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */

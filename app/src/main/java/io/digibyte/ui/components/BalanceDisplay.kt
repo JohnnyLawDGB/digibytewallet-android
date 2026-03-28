@@ -17,13 +17,25 @@ import io.digibyte.ui.theme.DigiByteAccent
  *
  * @param fiatAmount  Pre-formatted fiat string, e.g. "$12.34"
  * @param dgbAmount   Pre-formatted DGB string, e.g. "1,234.56789012 DGB"
+ * @param isSynced    When false, balance is greyed out (last-known snapshot)
  */
 @Composable
 fun BalanceDisplay(
     fiatAmount: String,
     dgbAmount: String,
+    isSynced: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val fiatColor = if (isSynced)
+        MaterialTheme.colorScheme.onBackground
+    else
+        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)
+
+    val dgbColor = if (isSynced)
+        DigiByteAccent
+    else
+        DigiByteAccent.copy(alpha = 0.4f)
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -34,7 +46,7 @@ fun BalanceDisplay(
                 fontWeight = FontWeight.Bold,
                 fontSize = 42.sp
             ),
-            color = MaterialTheme.colorScheme.onBackground,
+            color = fiatColor,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(4.dp))
@@ -44,7 +56,7 @@ fun BalanceDisplay(
                 fontWeight = FontWeight.Medium,
                 fontSize = 18.sp
             ),
-            color = DigiByteAccent,
+            color = dgbColor,
             textAlign = TextAlign.Center
         )
     }

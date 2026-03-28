@@ -82,6 +82,19 @@ class ChatViewModel @Inject constructor(
         }
         observeWebSocketEvents()
         loadHistory(channelId = 1)
+        // Poll for login state — connects WebSocket after Digi-ID login
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(2000)
+                if (digiScopeClient.isLoggedIn() &&
+                    hubWebSocket.connectionState.value == ConnectionState.DISCONNECTED) {
+                    hubWebSocket.connect()
+                    loadChannels()
+                    loadHistory(selectedChannel.value)
+                    break  // connected — stop polling
+                }
+            }
+        }
     }
 
     // ── Channel loading ───────────────────────────────────────────────────

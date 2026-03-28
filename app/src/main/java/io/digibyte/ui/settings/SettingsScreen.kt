@@ -91,7 +91,7 @@ fun SettingsScreen(navController: NavController) {
         item {
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "DigiByte Wallet v3.0.0-alpha1",
+                text = "DigiByte Wallet v3.0.0-beta",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF546E7A),
                 modifier = Modifier

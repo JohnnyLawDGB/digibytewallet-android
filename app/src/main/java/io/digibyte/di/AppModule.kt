@@ -107,8 +107,8 @@ object AppModule {
         TransactionBuilder(cs, um)
 
     @Provides @Singleton
-    fun provideWalletManager(ksm: KeyStoreManager, um: UtxoManager): WalletManager =
-        WalletManager(ksm, um)
+    fun provideWalletManager(@ApplicationContext context: Context, ksm: KeyStoreManager, um: UtxoManager): WalletManager =
+        WalletManager(context, ksm, um)
 
     @Provides @Singleton
     fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
@@ -125,8 +125,8 @@ object AppModule {
         AssetMetadataService(ipfsClient, dao)
 
     @Provides @Singleton
-    fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao): DigiIdManager =
-        DigiIdManager(client, historyDao)
+    fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao, digiScopeClient: DigiScopeClient): DigiIdManager =
+        DigiIdManager(client, historyDao, digiScopeClient)
 
     @Provides @Singleton
     fun provideDigiScopeClient(

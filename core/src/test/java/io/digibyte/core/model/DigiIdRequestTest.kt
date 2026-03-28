@@ -11,7 +11,8 @@ class DigiIdRequestTest {
         val result = DigiIdRequest.parse(uri)
 
         assertNotNull(result)
-        assertEquals("https://example.com/callback", result!!.callbackUrl)
+        assertEquals("digiid://example.com/callback?x=abc123nonce", result!!.rawUri)
+        assertEquals("https://example.com/callback", result.callbackUrl)
         assertEquals("abc123nonce", result.nonce)
         assertFalse(result.isUnsecure)
     }

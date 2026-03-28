@@ -87,17 +87,28 @@ fun PinSetupScreen(
                                     PinStep.CONFIRM -> {
                                         if (currentInput == firstPin) {
                                             isPinSaving = true
-                                            viewModel.setPin(currentInput) { success ->
-                                                isPinSaving = false
-                                                if (success) {
-                                                    if (biometricAvailable && activity != null) {
-                                                        step = PinStep.BIOMETRIC
-                                                    } else {
-                                                        navController.navigate("wallet") {
-                                                            popUpTo("onboarding") { inclusive = true }
+                                            viewModel.setPin(currentInput) { pinSuccess ->
+                                                if (pinSuccess) {
+                                                    // NOW create the wallet in the C core
+                                                    viewModel.createWallet { walletSuccess ->
+                                                        isPinSaving = false
+                                                        if (walletSuccess) {
+                                                            if (biometricAvailable && activity != null) {
+                                                                step = PinStep.BIOMETRIC
+                                                            } else {
+                                                                navController.navigate("wallet") {
+                                                                    popUpTo("onboarding") { inclusive = true }
+                                                                }
+                                                            }
+                                                        } else {
+                                                            errorMessage = "Wallet creation failed. Please try again."
+                                                            currentInput = ""
+                                                            step = PinStep.ENTER
+                                                            firstPin = ""
                                                         }
                                                     }
                                                 } else {
+                                                    isPinSaving = false
                                                     errorMessage = "Failed to save PIN. Please try again."
                                                     currentInput = ""
                                                     step = PinStep.ENTER
@@ -131,20 +142,20 @@ fun PinSetupScreen(
                     onEnable = {
                         scope.launch {
                             if (activity != null) {
-                                val result = biometricAuth.authenticate(
+                                biometricAuth.authenticate(
                                     activity,
                                     title = "Enable Biometric Unlock",
                                     subtitle = "Authenticate to enable fingerprint/face unlock"
                                 )
-                                // Navigate to wallet regardless of biometric result
-                                // (biometric is opt-in, not required)
-                                navController.navigate("wallet") {
-                                    popUpTo("onboarding") { inclusive = true }
-                                }
+                            }
+                            // Wallet already created before reaching biometric step
+                            navController.navigate("wallet") {
+                                popUpTo("onboarding") { inclusive = true }
                             }
                         }
                     },
                     onSkip = {
+                        // Wallet already created before reaching biometric step
                         navController.navigate("wallet") {
                             popUpTo("onboarding") { inclusive = true }
                         }

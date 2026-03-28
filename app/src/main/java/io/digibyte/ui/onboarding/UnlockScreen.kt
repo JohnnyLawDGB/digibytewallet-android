@@ -56,6 +56,7 @@ fun UnlockScreen(
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
             if (result is BiometricResult.Success) {
+                walletManager.restoreFromDisk()
                 navController.navigate("wallet") {
                     popUpTo("unlock") { inclusive = true }
                 }
@@ -65,6 +66,7 @@ fun UnlockScreen(
 
     fun attemptUnlock(pin: String) {
         if (pinManager.verifyPin(pin)) {
+            walletManager.restoreFromDisk()
             navController.navigate("wallet") {
                 popUpTo("unlock") { inclusive = true }
             }

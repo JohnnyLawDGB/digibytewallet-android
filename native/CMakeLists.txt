@@ -95,6 +95,7 @@ add_library(
         src/main/jni/bridge/jni_transaction.c
         src/main/jni/bridge/jni_peer.c
         src/main/jni/bridge/jni_asset.c
+        src/main/jni/bridge/jni_wallet_sign.c
         # Old bridge files retained for reference but NOT compiled:
         # src/main/jni/bridge/core.c
         # src/main/jni/bridge/wallet.c

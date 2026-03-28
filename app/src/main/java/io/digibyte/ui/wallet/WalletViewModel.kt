@@ -1,10 +1,12 @@
 package io.digibyte.ui.wallet
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.digibyte.core.PriceData
 import io.digibyte.core.PriceProvider
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.WalletManager
 import io.digibyte.core.db.dao.TransactionDao
@@ -21,6 +23,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class WalletViewModel @Inject constructor(
+    private val application: Application,
     private val utxoManager: UtxoManager,
     private val transactionDao: TransactionDao,
     private val walletManager: WalletManager,
@@ -28,13 +31,16 @@ class WalletViewModel @Inject constructor(
     private val torManager: TorManager
 ) : ViewModel() {
 
-    /** Live balance in satoshis. */
-    val balance: StateFlow<Long> = utxoManager.getBalance()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
 
-    /** Live transaction list, most-recent first. */
-    val transactions: StateFlow<List<TransactionEntity>> = transactionDao.getAllTransactions()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** Live balance in satoshis — polls C core every 5 seconds.
+     *  Initialized from last-known snapshot so the UI isn't blank on restart. */
+    private val _balance = MutableStateFlow(prefs.getLong("last_balance", 0L))
+    val balance: StateFlow<Long> = _balance.asStateFlow()
+
+    /** Live transaction list from C core, most-recent first. */
+    private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
+    val transactions: StateFlow<List<TransactionEntity>> = _transactions.asStateFlow()
 
     /** SPV sync state propagated from WalletManager. */
     val syncState: StateFlow<SyncState> = walletManager.syncState
@@ -57,6 +63,53 @@ class WalletViewModel @Inject constructor(
 
     init {
         fetchPricePeriodically()
+        pollNativeBalance()
+    }
+
+    /** Poll the C core for balance and transactions every 5 seconds.
+     *  The C core tracks these from SPV sync — Room DB is secondary. */
+    private fun pollNativeBalance() {
+        viewModelScope.launch {
+            while (true) {
+                // Poll balance
+                val nativeBalance = NativeBridge.getBalance()
+                if (nativeBalance != _balance.value) {
+                    _balance.value = nativeBalance
+                    // Snapshot for next restart
+                    prefs.edit().putLong("last_balance", nativeBalance).apply()
+                }
+
+                // Poll transactions
+                val currentHeight = NativeBridge.getLastBlockHeight()
+                val txDetails = NativeBridge.getTransactionDetails()
+                if (txDetails.isNotEmpty()) {
+                    val txList = txDetails.trim().lines().mapNotNull { line ->
+                        val parts = line.split("|")
+                        if (parts.size >= 5) {
+                            val txHeight = parts[3].toLongOrNull() ?: 0L
+                            val confs = if (txHeight > 0 && currentHeight >= txHeight)
+                                (currentHeight - txHeight + 1).toInt() else 0
+                            TransactionEntity(
+                                txid = parts[0],
+                                amount = parts[1].toLongOrNull() ?: 0L,
+                                fee = parts[2].toLongOrNull() ?: 0L,
+                                blockHeight = txHeight,
+                                timestamp = parts[4].toLongOrNull() ?: 0L,
+                                toAddress = "",
+                                fromAddress = "",
+                                confirmations = confs,
+                                isAssetTx = false
+                            )
+                        } else null
+                    }
+                    if (txList != _transactions.value) {
+                        _transactions.value = txList
+                    }
+                }
+
+                delay(5_000L)
+            }
+        }
     }
 
     /** Fetch price now and then every 5 minutes. */

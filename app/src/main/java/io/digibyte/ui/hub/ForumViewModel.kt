@@ -18,9 +18,9 @@ import javax.inject.Inject
 data class ForumChannel(val id: Int, val name: String)
 
 val FORUM_CHANNELS = listOf(
-    ForumChannel(10, "Announcements"),
-    ForumChannel(11, "Proposals"),
-    ForumChannel(12, "Support")
+    ForumChannel(6, "Announcements"),
+    ForumChannel(7, "Proposals"),
+    ForumChannel(8, "Support")
 )
 
 sealed class ForumUiState {

@@ -70,7 +70,8 @@ fun WalletScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
-                        dgbAmount = WalletViewModel.formatSatoshis(balance)
+                        dgbAmount = WalletViewModel.formatSatoshis(balance),
+                        isSynced = syncState is SyncState.Complete
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -342,7 +343,7 @@ private fun SyncIndicator(syncState: SyncState) {
         }
         is SyncState.Complete -> {
             Text(
-                text = "Synced",
+                text = "Connected",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF4CAF50).copy(alpha = 0.85f)
             )

@@ -85,7 +85,7 @@ fun AboutScreen(navController: NavController) {
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "v3.0.0-alpha1",
+                            text = "v3.0.0-beta",
                             style = MaterialTheme.typography.bodyMedium,
                             color = DigiByteAccent
                         )
@@ -105,7 +105,7 @@ fun AboutScreen(navController: NavController) {
                         icon = Icons.Default.BuildCircle,
                         iconTint = Color(0xFF4CAF50),
                         label = "Build Type",
-                        value = "Debug (alpha)"
+                        value = "Debug (beta)"
                     )
                     SettingsRowDivider()
                     AboutInfoRow(

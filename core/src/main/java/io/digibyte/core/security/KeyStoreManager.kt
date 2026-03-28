@@ -41,7 +41,8 @@ class KeyStoreManager {
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
             .setInvalidatedByBiometricEnrollment(true)
-            .setUserAuthenticationRequired(false) // We handle auth at app level
+            .setUserAuthenticationRequired(true)
+            .setUserAuthenticationValidityDurationSeconds(10) // 10s window after biometric/PIN
             .build()
 
         KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
