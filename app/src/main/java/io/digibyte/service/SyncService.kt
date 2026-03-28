@@ -183,7 +183,10 @@ class SyncService : Service() {
 
     // ── NativeCallback — called from C JNI threads ────────────────────────────
 
-    private var hasReachedSynced = false
+    // Initialize from persisted flag so progress callbacks don't revert
+    // "Connected" back to "Syncing 0%" on restart near the chain tip.
+    private var hasReachedSynced =
+        getSharedPreferences("dgb_sync_data", MODE_PRIVATE).getBoolean("has_synced", false)
 
     private val syncCallback = object : NativeCallback {
 
