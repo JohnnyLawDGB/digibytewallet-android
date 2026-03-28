@@ -13,9 +13,13 @@ object GamePhysics {
     const val CHAR_SCREEN_X = 90f       // shifted right for bigger sprite
 
     // Sprint mechanics
-    const val SPRINT_MAX_MULT = 1.8f    // was 1.3 — needs to be noticeable
-    const val SPRINT_RAMP_TIME = 0.6f   // seconds to reach max sprint
-    const val SPRINT_DECAY_RATE = 1.0f  // per second after release
+    const val SPRINT_MAX_MULT = 2.43f   // 35% faster than previous 1.8x
+    const val SPRINT_RAMP_TIME = 0.8f   // proportionally longer ramp to max
+    const val SPRINT_DECAY_RATE = 1.2f  // per second after release
+
+    // Difficulty progression — base speed ramps with distance
+    const val DIFFICULTY_RAMP_DISTANCE = 10000f  // pixels of scroll to reach max difficulty
+    const val MAX_SPEED_MULT = 1.6f              // base speed at max difficulty (60% faster)
     const val CROUCH_RAMP_RATE = 2.5f   // 0→1 in 0.4s
     const val CROUCH_SNAP_RATE = 5.0f   // 1→0 in 0.2s
     const val JUMP_MIN_SCALE = 0.6f     // tap jump multiplier
@@ -54,9 +58,12 @@ object GamePhysics {
         val newStumble = (state.stumbleTimer - deltaTime).coerceAtLeast(0f)
         val isStumbling = newStumble > 0f
 
-        // ── Scroll ──
+        // ── Scroll with difficulty progression ──
+        // Base speed ramps up gradually with distance traveled
+        val difficultyProgress = (state.scrollOffset / DIFFICULTY_RAMP_DISTANCE).coerceAtMost(1f)
+        val difficultyMult = 1f + difficultyProgress * (MAX_SPEED_MULT - 1f)
         val stumbleMult = if (isStumbling) STUMBLE_SPEED_MULT else 1f
-        val scrollSpeed = SCROLL_SPEED * (1f + syncProgress * 0.5f) * newSprintMult * stumbleMult
+        val scrollSpeed = SCROLL_SPEED * difficultyMult * (1f + syncProgress * 0.5f) * newSprintMult * stumbleMult
         val newScroll = state.scrollOffset + scrollSpeed * deltaTime
 
         // ── Coin collection + rotation ──
