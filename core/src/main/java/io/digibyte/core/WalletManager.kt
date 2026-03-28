@@ -48,11 +48,10 @@ class WalletManager(
         val success = NativeBridge.createWallet(mnemonic)
         if (success) {
             persistSeed(mnemonic)
+            // Persist creation time so restoreFromDisk uses the right sync checkpoint
+            prefs.edit().putLong("wallet_creation_time", System.currentTimeMillis() / 1000).apply()
             _walletState.value = WalletState.Unlocked
-            // Clear stale sync data from any previous wallet —
-            // saved blocks/peers are for a different seed's bloom filter.
             clearSyncData()
-            // Store fingerprint so restoreFromDisk() knows these blocks belong to this seed
             saveSeedFingerprint(mnemonic)
             NativeBridge.rescan()
         }
@@ -107,7 +106,17 @@ class WalletManager(
             saveSeedFingerprint(seed)
         }
 
-        val success = NativeBridge.createWallet(seed)
+        // Use recoverWallet with the original creation timestamp so the
+        // peer manager starts syncing from the right checkpoint — not NOW.
+        // Without this, the rescan skips all historical transactions.
+        val creationTime = prefs.getLong("wallet_creation_time", 0L)
+        val success = if (creationTime > 0) {
+            NativeBridge.recoverWallet(seed, creationTime)
+        } else {
+            // Fallback for wallets created before this fix — use a safe
+            // early timestamp (2024-01-01) to ensure all transactions found.
+            NativeBridge.recoverWallet(seed, 1704067200L)
+        }
         if (success) {
             _walletState.value = WalletState.Unlocked
         }
