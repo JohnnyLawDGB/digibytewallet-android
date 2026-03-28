@@ -128,10 +128,13 @@ class WalletManager(
      * On app restart, this restores the C core wallet from disk.
      */
     fun unlock(authToken: ByteArray): Boolean {
-        // Only restore from disk if the C core wallet isn't loaded yet
-        // (i.e. fresh process after crash/restart). Never re-create an
-        // already-loaded wallet — that frees the wallet while the peer
-        // manager's threads still reference it, causing SIGABRT/SIGSEGV.
+        // If wallet is already loaded in native memory (UI-only lock from onStop),
+        // just flip the state — no need to re-derive the seed.
+        if (NativeBridge.isWalletLoaded() && _walletState.value is WalletState.Locked) {
+            _walletState.value = WalletState.Unlocked
+            return true
+        }
+        // Fresh process — restore wallet from encrypted seed on disk
         if (!NativeBridge.isWalletLoaded() && hasSavedWallet()) {
             restoreFromDisk()
         }
@@ -147,6 +150,15 @@ class WalletManager(
      */
     fun lock() {
         NativeBridge.lockSession()
+        _walletState.value = WalletState.Locked
+    }
+
+    /**
+     * UI-only lock — sets state to Locked so PIN/biometric is required,
+     * but does NOT zero the native seed. SyncService continues running
+     * in the background with full signing capability.
+     */
+    fun lockUi() {
         _walletState.value = WalletState.Locked
     }
 

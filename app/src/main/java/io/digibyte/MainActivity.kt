@@ -122,6 +122,22 @@ class MainActivity : FragmentActivity() {
     }
 
     /**
+     * Lock the wallet UI when the activity goes to background.
+     * SyncService continues running but the user must re-enter PIN/biometric
+     * when they return to the app. This prevents unauthorized access if
+     * someone picks up an unlocked phone.
+     */
+    override fun onStop() {
+        super.onStop()
+        // UI-only lock — requires PIN/biometric to re-enter the app.
+        // Does NOT call NativeBridge.lockSession() — the native seed stays
+        // in memory so SyncService can continue syncing in the background.
+        if (walletManager.walletState.value is WalletState.Unlocked) {
+            walletManager.lockUi()
+        }
+    }
+
+    /**
      * Determine and apply Tor defaults based on install type:
      * - New install (no wallet config row): enable Tor by default.
      * - Phase 1 upgrade (config exists, torPromptShown = false): leave isEnabled alone;
