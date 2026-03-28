@@ -2,7 +2,7 @@
 
 A complete modernization of the official DigiByte Android wallet. Full Kotlin rewrite with Jetpack Compose, patched native C core for DigiByte Core 8.26+ compatibility, hardware-backed security, DigiAssets v2, Digi-ID authentication, privacy-by-default Tor routing, and reproducible builds.
 
-> **Status:** Active development. Phase 1 (core wallet) and Phase 2 (assets, Digi-ID, IPFS, Tor) complete. Sync stability and block/peer persistence shipped. Phase 3 (community hub) next.
+> **Status:** Active development. Phase 1 (core wallet), Phase 2 (assets, Digi-ID, IPFS, Tor), and Phase 3 (Community Hub) complete. DigiRunner v2 mini-game shipped. SPV sync stability with bloom peer priority and block persistence.
 
 ## What's New in v3.0
 
@@ -23,9 +23,11 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Marketplace link** — View assets on [DigiNexum](https://diginexum.trade/) directly from the wallet.
 
 ### Digi-ID
+- **Real message signing** — Bitcoin-style compact signatures via BRKeyCompactSign in the C core. No placeholder signatures.
 - **Scan to authenticate** — Scan a `digiid://` QR code to log in to any Digi-ID-enabled website.
-- **Shared QR scanner** — CameraX + ZXing barcode scanner shared between Send, Receive, and Digi-ID flows.
-- **DigiScope integration** — One-tap login to [digiscope.me](https://digiscope.me), handle registration, tip wallet linking.
+- **Shared QR scanner** — CameraX + ZXing barcode scanner with proper YUV row stride handling and thread-safe callbacks.
+- **DigiScope auto-login** — Scanning a DigiScope QR authenticates both the website and the wallet's Hub connection in one flow.
+- **Biometric gate** — BiometricPrompt confirmation before signing (FragmentActivity compatible).
 - **Login history** — Track your Digi-ID authentication history.
 
 ### Privacy
@@ -43,12 +45,18 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Chat messages ephemeral** — 30-day retention for chat. Forum threads permanent.
 
 ### Sync Experience
-- **Block & peer persistence** — Blockchain state serialized to disk via JNI callbacks. Wallet resumes sync from last position on restart instead of re-syncing from checkpoint.
-- **Balance snapshots** — Last-known balance shown (greyed out) immediately on launch, brightens when sync confirms it.
-- **Graceful peer handling** — Automatic retry with backoff. No "Sync failed" flashing. Shows "Connected" only when truly at the chain tip.
+- **Block & peer persistence** — Blockchain state serialized to disk via async JNI callbacks with fast hex encoding. Seed fingerprint check prevents clearing saved blocks on restart.
+- **Priority bloom peer** — digiscope.me injected as a priority peer on every sync start. Rescan phase locks to the bloom peer via BRPeerManagerSetFixedPeer to guarantee transaction detection.
+- **Crash-safe wallet restore** — Polls peer disconnection before wallet replace to prevent SIGSEGV. `isWalletLoaded()` JNI check prevents double-free on unlock.
+- **Connected on restart** — Previously-synced wallets show "Connected" immediately, no misleading "Syncing 0%".
 
-### Fun
-- **DigiRunner** — A side-scrolling mini-game during blockchain sync. Cyber city skyline, DigiByte-branded coins to collect, hazard obstacles with real collision physics. Tap to jump.
+### DigiRunner v2
+- **Digi-Robot character** — Chrome metallic robot with LED visor, piston legs, DGB logo chest, antenna. Visor brightens on sprint, flickers red on stumble.
+- **Sprint + Crouch + Spring Jump** — Hold to sprint (1.8x speed) and crouch, release to spring jump. Longer hold = higher jump. Momentum carries through the air.
+- **3D spinning DGB coins** — Y-axis rotation with front face (official #0066CC blue, white "D"), dark back, thin edge at 90 degrees.
+- **Bitcoin stack obstacles** — 1-3 stacked orange BTC coins. Taller stacks need charged jumps. Hit one and lose 2 coins + stumble slowdown.
+- **Mario-style coin patterns** — Sprint runs, staircases, jump arcs, high clusters, mixed layouts. All heights tuned to actual jump physics.
+- **DGB moon** — Official DigiByte logo as a glowing moon over the cyber city skyline, traced from the DigiByte-Core/digibyte-logos SVG.
 
 ## Architecture
 
@@ -137,8 +145,8 @@ digibytewallet-android/
 |-------|--------|-----|----------|
 | 1 — Alpha | Complete | `v3.0.0-alpha1` | Core wallet: send, receive, sync, security, DigiRunner |
 | 2 — Beta | Complete | `v3.0.0-beta1` | DigiAssets v2, Digi-ID, IPFS, Tor, DigiScope |
-| 3 — Production | Complete | `v3.0.0` | Community Hub (chat + forum + Enigma AI), oracle price hook |
-| 4 — Post-launch | Planned | — | Dandelion++ SPV stem, v9 features, asset issuance, iOS port |
+| 3 — Production | Complete | `v3.0.0` | Community Hub, Digi-ID signing, DigiRunner v2, sync stability |
+| 4 — Post-launch | Planned | — | Dandelion++ SPV stem, BIP157/158 compact block filters, v9 features, asset issuance |
 
 ## Security
 
