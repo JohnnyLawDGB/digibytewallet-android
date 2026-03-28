@@ -154,10 +154,9 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
             BRAddress *addrs = malloc(addrCount * sizeof(BRAddress));
             if (addrs) {
                 BRWalletAllAddrs(g_wallet, addrs, addrCount);
-                for (size_t i = 0; i < addrCount && i < 5; i++) {
+                for (size_t i = 0; i < addrCount; i++) {
                     LOGI("createWallet: addr[%zu] = %s", i, addrs[i].s);
                 }
-                if (addrCount > 5) LOGI("createWallet: ... and %zu more", addrCount - 5);
                 free(addrs);
             }
         }
@@ -215,6 +214,22 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
     /* Use the user-provided creation timestamp for sync checkpoint selection */
     g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
     g_peerManagerNeedsRecreate = 1;  /* Force peer manager rebuild on next startSync */
+
+    /* Log all addresses for debugging bloom filter coverage */
+    {
+        size_t addrCount = BRWalletAllAddrs(g_wallet, NULL, 0);
+        LOGI("recoverWallet: wallet has %zu addresses in bloom filter pool", addrCount);
+        if (addrCount > 0 && addrCount < 300) {
+            BRAddress *addrs = malloc(addrCount * sizeof(BRAddress));
+            if (addrs) {
+                BRWalletAllAddrs(g_wallet, addrs, addrCount);
+                for (size_t i = 0; i < addrCount; i++) {
+                    LOGI("recoverWallet: addr[%zu] = %s", i, addrs[i].s);
+                }
+                free(addrs);
+            }
+        }
+    }
     LOGI("recoverWallet: wallet recovered, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }

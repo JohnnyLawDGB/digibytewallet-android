@@ -113,9 +113,9 @@ class WalletManager(
         val success = if (creationTime > 0) {
             NativeBridge.recoverWallet(seed, creationTime)
         } else {
-            // Fallback for wallets created before this fix — use a safe
-            // early timestamp (2024-01-01) to ensure all transactions found.
-            NativeBridge.recoverWallet(seed, 1704067200L)
+            // Fallback for wallets created before this fix — use March 2026
+            // (when the wallet app was first deployed to devices).
+            NativeBridge.recoverWallet(seed, 1774252800L)
         }
         if (success) {
             _walletState.value = WalletState.Unlocked
