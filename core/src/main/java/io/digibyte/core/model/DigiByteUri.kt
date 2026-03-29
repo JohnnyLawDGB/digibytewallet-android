@@ -11,6 +11,11 @@ data class DigiByteUri(
             val cleaned = input.trim()
             if (cleaned.isBlank()) return null
 
+            // Reject non-DigiByte URIs (digiid://, http://, etc.)
+            if (cleaned.contains("://") && !cleaned.startsWith("digibyte:")) {
+                return null
+            }
+
             // Handle raw address (no scheme)
             if (!cleaned.startsWith("digibyte:")) {
                 return DigiByteUri(address = cleaned)
@@ -22,15 +27,20 @@ data class DigiByteUri(
             val address = ssp.split("?").firstOrNull()?.trim() ?: return null
             if (address.isBlank()) return null
 
-            val amountDgb = uri.getQueryParameter("amount")?.toDoubleOrNull()
-            val amountSats = amountDgb?.let { (it * 100_000_000).toLong() }
+            return try {
+                val amountDgb = uri.getQueryParameter("amount")?.toDoubleOrNull()
+                val amountSats = amountDgb?.let { (it * 100_000_000).toLong() }
 
-            return DigiByteUri(
-                address = address,
-                amount = amountSats,
-                label = uri.getQueryParameter("label"),
-                message = uri.getQueryParameter("message")
-            )
+                DigiByteUri(
+                    address = address,
+                    amount = amountSats,
+                    label = uri.getQueryParameter("label"),
+                    message = uri.getQueryParameter("message")
+                )
+            } catch (e: UnsupportedOperationException) {
+                // Non-hierarchical URI — just return the address
+                DigiByteUri(address = address)
+            }
         }
 
         fun encode(address: String, amountSats: Long? = null, label: String? = null): String {
