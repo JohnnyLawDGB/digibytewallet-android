@@ -219,11 +219,13 @@ fun DigiRunnerGame(
         }
     }
 
-    // Shared pointer handler for both game canvas and touch zone
+    // Shared pointer handler — consumes events to prevent parent scroll
     val pointerMod = Modifier.pointerInput(Unit) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent()
+                // Consume all pointer events so LazyColumn doesn't scroll
+                event.changes.forEach { it.consume() }
                 when (event.type) {
                     PointerEventType.Press -> {
                         gameState = gameState.copy(isHolding = true)
@@ -302,24 +304,34 @@ fun DigiRunnerGame(
         }
         } // end game canvas Box
 
-        // Touch zone — visually distinct area below the game for input
+        // Touch zone — high-contrast area below the game for input
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (standalone) 60.dp else 48.dp)
+                .height(if (standalone) 80.dp else 64.dp)
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF050D1A),  // matches ground grid base
-                            Color(0xFF0A1830)
+                        colors = if (gameState.isHolding) listOf(
+                            Color(0xFF0A2040),  // brighter when holding
+                            Color(0xFF102850)
+                        ) else listOf(
+                            Color(0xFF0D1B35),  // visible contrast from game
+                            Color(0xFF162545)
                         )
                     )
                 )
                 .then(pointerMod),
             contentAlignment = Alignment.Center
         ) {
-            // Subtle visual hint
-            val holdingAlpha = if (gameState.isHolding) 0.6f else 0.2f
+            // Divider line at top for clear separation
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .align(Alignment.TopCenter)
+                    .background(Color(0xFF0066CC).copy(alpha = if (gameState.isHolding) 0.8f else 0.3f))
+            )
+            val holdingAlpha = if (gameState.isHolding) 0.9f else 0.4f
             Text(
                 text = if (gameState.isHolding) "SPRINTING ▸▸" else "HOLD to sprint  ·  RELEASE to jump",
                 color = Color(0xFF0066CC).copy(alpha = holdingAlpha),
