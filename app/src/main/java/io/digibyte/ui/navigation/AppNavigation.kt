@@ -367,7 +367,11 @@ fun AppNavigation(
             composable("send") {
                 SendScreen(
                     biometricAuth = biometricAuth,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onScanQr = { callback ->
+                        // Navigate to QR scanner — result comes back via saved state or nav
+                        navController.navigate("qr_scanner")
+                    }
                 )
             }
 
