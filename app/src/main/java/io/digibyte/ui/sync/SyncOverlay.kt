@@ -68,25 +68,9 @@ fun SyncOverlay(
         }
 
         is SyncState.Rescanning -> {
-            var showGame by remember { mutableStateOf(true) }
-
+            // Simple progress indicator — no embedded game here to avoid
+            // confusion when returning from standalone DigiRunner.
             Column(modifier = modifier) {
-                if (showGame) {
-                    DigiRunnerGame(
-                        syncProgress = 0.9f,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    TextButton(
-                        onClick = { showGame = false },
-                        modifier = Modifier.padding(start = 8.dp)
-                    ) {
-                        Text(
-                            text = "Skip game",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                }
-
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()

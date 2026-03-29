@@ -786,13 +786,13 @@ fun DrawScope.drawBTCStacks(state: GameState) {
 
 /** Draw 3 heart icons for remaining lives. */
 fun DrawScope.drawHearts(state: GameState) {
-    // Position: right side of HUD, below score, big enough to see
+    // Position: top-center, clear of branding (left) and score (right)
     val heartW = 20f
     val heartH = 18f
     val spacing = 28f
     val totalWidth = 3 * spacing
-    val startX = size.width - totalWidth - 12f  // right-aligned
-    val y = 28f
+    val startX = (size.width - totalWidth) / 2f  // centered
+    val y = 6f
 
     for (i in 0 until 3) {
         val cx = startX + i * spacing
