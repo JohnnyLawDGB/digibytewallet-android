@@ -249,6 +249,16 @@ class SyncService : Service() {
             // Persist sync-complete so restarts don't flash "Syncing 0%"
             getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
                 .edit().putBoolean("has_synced", true).apply()
+            // Persist transactions so balance is immediately spendable on restart
+            serviceScope.launch(Dispatchers.IO) {
+                val txData = NativeBridge.getSerializedTransactions()
+                if (txData != null) {
+                    val hex = bytesToHex(txData)
+                    getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                        .edit().putString("saved_transactions", hex).apply()
+                    android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
+                }
+            }
         }
 
         override fun onSyncFailed(errorCode: Int, message: String) {

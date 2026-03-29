@@ -106,15 +106,22 @@ class WalletManager(
             saveSeedFingerprint(seed)
         }
 
+        // Load saved transactions BEFORE creating wallet — recoverWallet uses them
+        // so the wallet starts with full tx history and balance is immediately spendable.
+        val syncPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+        val savedTxHex = syncPrefs.getString("saved_transactions", null)
+        if (savedTxHex != null) {
+            val txBytes = hexToBytes(savedTxHex)
+            val loaded = NativeBridge.loadSerializedTransactions(txBytes)
+            android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
+        }
+
         // Use recoverWallet with the original creation timestamp so the
         // peer manager starts syncing from the right checkpoint — not NOW.
-        // Without this, the rescan skips all historical transactions.
         val creationTime = prefs.getLong("wallet_creation_time", 0L)
         val success = if (creationTime > 0) {
             NativeBridge.recoverWallet(seed, creationTime)
         } else {
-            // Fallback for wallets created before this fix — use March 2026
-            // (when the wallet app was first deployed to devices).
             NativeBridge.recoverWallet(seed, 1774252800L)
         }
         if (success) {

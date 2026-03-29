@@ -93,6 +93,13 @@ object NativeBridge {
     /** Returns true if the C core wallet is initialized (g_wallet != NULL). */
     external fun isWalletLoaded(): Boolean
 
+    // === Transaction persistence ===
+    /** Serialize all wallet transactions to a byte array for persistence. */
+    external fun getSerializedTransactions(): ByteArray?
+
+    /** Load previously saved transactions before recoverWallet/createWallet. */
+    external fun loadSerializedTransactions(data: ByteArray): Int
+
     // === Validation ===
     /** Validate a DigiByte address. Returns true if valid for current network. */
     external fun isValidAddress(address: String): Boolean

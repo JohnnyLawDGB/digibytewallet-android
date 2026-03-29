@@ -197,7 +197,17 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
         g_wallet = NULL;
     }
 
-    g_wallet = BRWalletNew(NULL, 0, mpk);
+    /* Use saved transactions if available — wallet starts with full history
+     * so balance is immediately spendable without waiting for rescan. */
+    extern BRTransaction **g_savedTransactions;
+    extern size_t g_savedTransactionCount;
+
+    if (g_savedTransactions && g_savedTransactionCount > 0) {
+        LOGI("recoverWallet: restoring with %zu saved transactions", g_savedTransactionCount);
+        g_wallet = BRWalletNew(g_savedTransactions, g_savedTransactionCount, mpk);
+    } else {
+        g_wallet = BRWalletNew(NULL, 0, mpk);
+    }
     if (!g_wallet) {
         LOGE("recoverWallet: BRWalletNew failed");
         secure_zero(seed, sizeof(seed));
