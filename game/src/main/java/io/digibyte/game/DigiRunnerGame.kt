@@ -219,20 +219,22 @@ fun DigiRunnerGame(
         }
     }
 
-    // Shared pointer handler — consumes events to prevent parent scroll
-    val pointerMod = Modifier.pointerInput(Unit) {
+    // Shared pointer handler — consumes events during gameplay to prevent parent scroll
+    val pointerMod = Modifier.pointerInput(gameState.isGameOver) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent()
-                // Consume all pointer events so LazyColumn doesn't scroll
-                event.changes.forEach { it.consume() }
-                when (event.type) {
-                    PointerEventType.Press -> {
-                        gameState = gameState.copy(isHolding = true)
-                    }
-                    PointerEventType.Release -> {
-                        if (gameState.isHolding) {
-                            gameState = GamePhysics.chargedJump(gameState)
+                // Only consume during active gameplay — let buttons work on game over
+                if (!gameState.isGameOver) {
+                    event.changes.forEach { it.consume() }
+                    when (event.type) {
+                        PointerEventType.Press -> {
+                            gameState = gameState.copy(isHolding = true)
+                        }
+                        PointerEventType.Release -> {
+                            if (gameState.isHolding) {
+                                gameState = GamePhysics.chargedJump(gameState)
+                            }
                         }
                     }
                 }
