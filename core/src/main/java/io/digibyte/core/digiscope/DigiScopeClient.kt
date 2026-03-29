@@ -151,7 +151,7 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .build()
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
+            if (!handleAuthResponse(response)) return@withContext null
 
             val json = JSONObject(response.body?.string() ?: return@withContext null)
             val profile = json.optJSONObject("profile") ?: json
@@ -444,7 +444,7 @@ class DigiScopeClient(
                     .header("Authorization", "Bearer $token")
                     .post(body)
                     .build()
-                client.newCall(request).execute().isSuccessful
+                handleAuthResponse(client.newCall(request).execute())
             } catch (e: Exception) { false }
         }
 
@@ -492,6 +492,17 @@ class DigiScopeClient(
     }
 
     // ── Token helpers ─────────────────────────────────────────────────────────
+
+    /** Check if a response indicates expired session, and clear token if so. */
+    private fun handleAuthResponse(response: okhttp3.Response): Boolean {
+        if (response.code == 401) {
+            // Session expired — clear stale token so isLoggedIn() returns false
+            jwtToken = null
+            prefs.edit().remove(KEY_JWT).apply()
+            return false
+        }
+        return response.isSuccessful
+    }
 
     /** Override in-memory token (e.g. for testing). Use [persistToken] to also save to disk. */
     fun setToken(token: String) { jwtToken = token }
