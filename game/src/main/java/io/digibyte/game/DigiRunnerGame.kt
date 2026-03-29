@@ -291,7 +291,7 @@ fun DigiRunnerGame(
                     OutlinedButton(onClick = {
                         onScoreSubmit(
                             gameState.finalScore,
-                            (gameState.scrollOffset / GamePhysics.DISTANCE_DIVISOR).toInt(),
+                            gameState.scrollOffset.toInt(),  // raw pixels — backend divides by 100
                             gameState.score,
                             gameState.lives
                         )
