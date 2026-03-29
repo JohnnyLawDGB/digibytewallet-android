@@ -39,6 +39,7 @@ fun WalletScreen(
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
+    onNavigateGame: () -> Unit = {},
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -124,6 +125,7 @@ fun WalletScreen(
         item {
             SyncOverlay(
                 syncState = syncState,
+                onPlayGame = onNavigateGame,
                 modifier  = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)

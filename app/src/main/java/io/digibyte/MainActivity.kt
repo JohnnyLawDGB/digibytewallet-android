@@ -18,6 +18,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.db.dao.WalletConfigDao
+import io.digibyte.core.digiscope.DigiScopeClient
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
@@ -39,6 +40,7 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var keyStoreManager: KeyStoreManager
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var walletConfigDao: WalletConfigDao
+    @Inject lateinit var digiScopeClient: DigiScopeClient
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -115,7 +117,8 @@ class MainActivity : FragmentActivity() {
                     walletManager = walletManager,
                     pinManager = pinManager,
                     biometricAuth = biometricAuth,
-                    keyStoreManager = keyStoreManager
+                    keyStoreManager = keyStoreManager,
+                    digiScopeClient = digiScopeClient
                 )
             }
         }

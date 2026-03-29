@@ -13,25 +13,30 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
+import io.digibyte.core.digiscope.DigiScopeClient
 import io.digibyte.core.model.DigiIdRequest
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
+import io.digibyte.game.DigiRunnerGame
 import io.digibyte.service.SyncService
 import io.digibyte.ui.asset.*
 import io.digibyte.ui.components.QrScannerScreen
 import io.digibyte.ui.digiid.DigiIdConfirmScreen
 import io.digibyte.ui.digiid.DigiIdScreen
+import io.digibyte.ui.hub.DigiRunnerLeaderboardScreen
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.settings.*
 import io.digibyte.ui.hub.ChatScreen
@@ -39,6 +44,7 @@ import io.digibyte.ui.hub.CreateThreadScreen
 import io.digibyte.ui.hub.HubScreen
 import io.digibyte.ui.hub.ThreadDetailScreen
 import io.digibyte.ui.wallet.*
+import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
@@ -72,7 +78,9 @@ private val fullScreenRoutes = setOf(
     "qr_scanner",
     "digiid_confirm/{uri}",
     "thread_detail/{threadId}",
-    "create_thread"
+    "create_thread",
+    "digirunner",
+    "digirunner_leaderboard"
 )
 
 @Composable
@@ -80,7 +88,8 @@ fun AppNavigation(
     walletManager: WalletManager,
     pinManager: PinManager,
     biometricAuth: BiometricAuth,
-    keyStoreManager: KeyStoreManager
+    keyStoreManager: KeyStoreManager,
+    digiScopeClient: DigiScopeClient
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -219,7 +228,8 @@ fun AppNavigation(
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
                     },
-                    onNavigateAssets = { navController.navigate("assets") }
+                    onNavigateAssets = { navController.navigate("assets") },
+                    onNavigateGame = { navController.navigate("digirunner") }
                 )
             }
 
@@ -230,7 +240,10 @@ fun AppNavigation(
                     },
                     onNavigateCreateThread = {
                         navController.navigate("create_thread")
-                    }
+                    },
+                    onPlayDigiRunner = { navController.navigate("digirunner") },
+                    onViewLeaderboard = { navController.navigate("digirunner_leaderboard") },
+                    digiScopeClient = digiScopeClient
                 )
             }
 
@@ -252,6 +265,53 @@ fun AppNavigation(
                             popUpTo("create_thread") { inclusive = true }
                         }
                     }
+                )
+            }
+
+            // ── DigiRunner: standalone game ───────────────────────────────
+            composable("digirunner") {
+                val gameContext = LocalContext.current
+                val coroutineScope = rememberCoroutineScope()
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    DigiRunnerGame(
+                        standalone = true,
+                        onScoreSubmit = { score, distance, coins, livesRemaining ->
+                            coroutineScope.launch {
+                                val ok = digiScopeClient.submitDigiRunnerScore(
+                                    score, distance, coins, livesRemaining
+                                )
+                                val msg = if (ok) "Score submitted!" else "Score submit failed — are you logged in?"
+                                Toast.makeText(gameContext, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onShowLeaderboard = {
+                            navController.navigate("digirunner_leaderboard")
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Close button overlay
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close game",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+
+            // ── DigiRunner: leaderboard ───────────────────────────────────
+            composable("digirunner_leaderboard") {
+                DigiRunnerLeaderboardScreen(
+                    digiScopeClient = digiScopeClient,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
 
