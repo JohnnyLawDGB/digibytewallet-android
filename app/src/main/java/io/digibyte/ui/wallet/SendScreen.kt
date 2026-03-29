@@ -41,9 +41,16 @@ import kotlinx.coroutines.launch
 fun SendScreen(
     biometricAuth: BiometricAuth,
     onNavigateBack: () -> Unit,
+    prefillAddress: String = "",
     onScanQr: ((String) -> Unit) -> Unit = {},
     viewModel: SendViewModel = hiltViewModel()
 ) {
+    // Pre-fill address from QR scan
+    LaunchedEffect(prefillAddress) {
+        if (prefillAddress.isNotBlank()) {
+            viewModel.onAddressChanged(prefillAddress)
+        }
+    }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 

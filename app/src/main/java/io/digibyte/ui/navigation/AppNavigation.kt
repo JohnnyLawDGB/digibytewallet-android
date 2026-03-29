@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.digiscope.DigiScopeClient
@@ -364,12 +366,16 @@ fun AppNavigation(
             }
 
             // ── Send flow ─────────────────────────────────────────────────────
-            composable("send") {
+            composable(
+                "send?address={address}",
+                arguments = listOf(navArgument("address") { defaultValue = "" })
+            ) { backStackEntry ->
+                val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
                 SendScreen(
                     biometricAuth = biometricAuth,
                     onNavigateBack = { navController.popBackStack() },
+                    prefillAddress = prefillAddress,
                     onScanQr = { callback ->
-                        // Navigate to QR scanner — result comes back via saved state or nav
                         navController.navigate("qr_scanner")
                     }
                 )
@@ -431,12 +437,11 @@ fun AppNavigation(
                         }
                     },
                     onDigiByteUri = { uri ->
-                        // Navigate to send with pre-filled address (and optional amount)
-                        navController.navigate("send") {
+                        // Navigate to send with pre-filled address
+                        val encoded = Uri.encode(uri.address)
+                        navController.navigate("send?address=$encoded") {
                             popUpTo("qr_scanner") { inclusive = true }
                         }
-                        // The SendViewModel can be seeded via SavedStateHandle; for now
-                        // navigate to send — pre-fill wiring is handled in SendViewModel.
                     },
                     onInvalidQr = { reason ->
                         Toast.makeText(localContext, reason, Toast.LENGTH_SHORT).show()
