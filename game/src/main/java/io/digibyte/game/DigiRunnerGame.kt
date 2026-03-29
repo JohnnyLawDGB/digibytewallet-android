@@ -1,6 +1,7 @@
 package io.digibyte.game
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +18,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.DisposableEffect
@@ -215,36 +219,39 @@ fun DigiRunnerGame(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(360.dp)
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        when (event.type) {
-                            PointerEventType.Press -> {
-                                // Always register hold — sprint charges even mid-air,
-                                // jump fires on release only when grounded
-                                gameState = gameState.copy(isHolding = true)
-                            }
-                            PointerEventType.Release -> {
-                                if (gameState.isHolding) {
-                                    gameState = GamePhysics.chargedJump(gameState)
-                                }
-                            }
+    // Shared pointer handler for both game canvas and touch zone
+    val pointerMod = Modifier.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                when (event.type) {
+                    PointerEventType.Press -> {
+                        gameState = gameState.copy(isHolding = true)
+                    }
+                    PointerEventType.Release -> {
+                        if (gameState.isHolding) {
+                            gameState = GamePhysics.chargedJump(gameState)
                         }
                     }
                 }
             }
-    ) {
-        DisposableEffect(Unit) {
-            onDispose {
-                gameState = gameState.copy(isHolding = false, holdDuration = 0f)
-            }
         }
-        Canvas(modifier = Modifier.fillMaxSize()) {
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Game canvas
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (standalone) 320.dp else 280.dp)
+                .then(pointerMod)
+        ) {
+            DisposableEffect(Unit) {
+                onDispose {
+                    gameState = gameState.copy(isHolding = false, holdDuration = 0f)
+                }
+            }
+            Canvas(modifier = Modifier.fillMaxSize()) {
             // World rendering
             drawBackground(gameState.scrollOffset)
             drawGround(gameState.scrollOffset)
@@ -293,5 +300,32 @@ fun DigiRunnerGame(
                 }
             }
         }
-    }
+        } // end game canvas Box
+
+        // Touch zone — visually distinct area below the game for input
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (standalone) 60.dp else 48.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF050D1A),  // matches ground grid base
+                            Color(0xFF0A1830)
+                        )
+                    )
+                )
+                .then(pointerMod),
+            contentAlignment = Alignment.Center
+        ) {
+            // Subtle visual hint
+            val holdingAlpha = if (gameState.isHolding) 0.6f else 0.2f
+            Text(
+                text = if (gameState.isHolding) "SPRINTING ▸▸" else "HOLD to sprint  ·  RELEASE to jump",
+                color = Color(0xFF0066CC).copy(alpha = holdingAlpha),
+                fontSize = 11.sp,
+                fontWeight = if (gameState.isHolding) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    } // end Column
 }
