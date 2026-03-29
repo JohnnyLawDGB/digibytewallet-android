@@ -193,21 +193,14 @@ class SyncService : Service() {
 
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
             // progress == -1 is a signal from C core that a rescan is starting.
-            // ALWAYS show this — even if hasReachedSynced is true, the user
-            // needs to know their transactions are being verified.
             if (progress < 0f) {
                 walletManager.updateSyncState(SyncState.Rescanning)
                 return
             }
 
-            // Once connected, show Rescanning if a significant sync is happening
-            // (e.g. catch-up after restore). Don't revert to "Syncing 0%" though.
-            if (hasReachedSynced) {
-                if (progress > 0f && progress < 0.99f) {
-                    walletManager.updateSyncState(SyncState.Rescanning)
-                }
-                return
-            }
+            // Once we've reached synced, don't revert to Syncing/Rescanning.
+            // The only way back is via the -1 rescan signal above.
+            if (hasReachedSynced) return
 
             walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
             val peers = NativeBridge.getPeerCount()
