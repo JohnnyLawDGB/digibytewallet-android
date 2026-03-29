@@ -15,7 +15,10 @@ data class GameState(
     val isHolding: Boolean = false,
     val holdDuration: Float = 0f,
     val sprintMultiplier: Float = 1.0f,
-    val crouchAmount: Float = 0f
+    val crouchAmount: Float = 0f,
+    // Lives + game over
+    val lives: Int = 3,
+    val finalScore: Int = 0
 )
 
 data class Coin(val x: Float, val y: Float, val collected: Boolean = false, val rotationAngle: Float = 0f)
