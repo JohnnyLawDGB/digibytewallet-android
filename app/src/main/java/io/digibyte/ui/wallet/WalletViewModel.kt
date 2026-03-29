@@ -74,9 +74,13 @@ class WalletViewModel @Inject constructor(
                 // Poll balance
                 val nativeBalance = NativeBridge.getBalance()
                 if (nativeBalance != _balance.value) {
-                    _balance.value = nativeBalance
-                    // Snapshot for next restart
-                    prefs.edit().putLong("last_balance", nativeBalance).apply()
+                    // Don't overwrite cached balance with 0 — the rescan
+                    // hasn't found transactions yet. Only update when we
+                    // have a real balance or the native balance is higher.
+                    if (nativeBalance > 0 || _balance.value == 0L) {
+                        _balance.value = nativeBalance
+                        prefs.edit().putLong("last_balance", nativeBalance).apply()
+                    }
                 }
 
                 // Poll transactions
