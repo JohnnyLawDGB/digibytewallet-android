@@ -50,6 +50,20 @@ class ProfileViewModel @Inject constructor(
         loadProfile()
     }
 
+    // ── Quick login (no QR scan) ────────────────────────────────────────
+
+    fun quickLogin() {
+        _profileState.value = ProfileState.Loading
+        viewModelScope.launch {
+            val success = digiScopeClient.quickLogin()
+            if (success) {
+                loadProfile()
+            } else {
+                _profileState.value = ProfileState.Error("Login failed. Check your connection.")
+            }
+        }
+    }
+
     // ── Profile loading ───────────────────────────────────────────────────
 
     fun loadProfile() {

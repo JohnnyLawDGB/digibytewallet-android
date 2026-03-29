@@ -68,6 +68,40 @@ class DigiScopeClient(
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     /**
+     * One-tap login — requests a Digi-ID challenge from the server, signs it
+     * locally with the wallet's key, and authenticates. No QR scan needed.
+     * Returns true on success.
+     */
+    suspend fun quickLogin(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            // 1. Request challenge
+            val challengeReq = Request.Builder()
+                .url("$BASE_URL/auth/digiid/challenge")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            val challengeResp = client.newCall(challengeReq).execute()
+            if (!challengeResp.isSuccessful) return@withContext false
+
+            val challengeJson = JSONObject(challengeResp.body?.string() ?: return@withContext false)
+            val uri = challengeJson.optString("uri", null) ?: return@withContext false
+
+            // 2. Sign with wallet key
+            val signResult = io.digibyte.core.bridge.NativeBridge.signMessage(uri, 0)
+                ?: return@withContext false
+            val parts = signResult.split("|", limit = 2)
+            if (parts.size != 2) return@withContext false
+            val address = parts[0]
+            val signature = parts[1]
+
+            // 3. Submit to callback
+            val token = login(address, signature, uri)
+            token != null
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Login to DigiScope using Digi-ID credentials.
      * Returns JWT token on success.
      */
