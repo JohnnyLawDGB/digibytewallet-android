@@ -30,7 +30,13 @@ object GamePhysics {
     const val BTC_COIN_DIAMETER = 46f   // +30% from 36
     const val BTC_STACK_OVERLAP = 20f   // scaled overlap
 
+    // Scoring
+    const val COIN_SCORE_MULT = 5     // each coin worth 5 points in final score
+    const val DISTANCE_DIVISOR = 100f // 1 point per 100px traveled
+
     fun update(state: GameState, deltaTime: Float, syncProgress: Float): GameState {
+        if (state.isGameOver) return state
+
         // ── Hold duration & sprint ramp ──
         val newHoldDuration = if (state.isHolding) state.holdDuration + deltaTime else 0f
 
@@ -110,7 +116,9 @@ object GamePhysics {
         }
 
         // Sprint broken on hit
-        val finalStumble = if (hitObstacle) STUMBLE_DURATION else newStumble
+        val newLives = if (hitObstacle) state.lives - 1 else state.lives
+        val gameOver = newLives <= 0
+        val finalStumble = if (hitObstacle && !gameOver) STUMBLE_DURATION else newStumble
         val finalHolding = if (hitObstacle) false else state.isHolding
         val finalHoldDur = if (hitObstacle) 0f else newHoldDuration
         val finalSprint = if (hitObstacle) 1f else newSprintMult
@@ -120,6 +128,10 @@ object GamePhysics {
         val cullThreshold = newScroll - 200f
         val culledCoins = updatedCoins.filter { it.x > cullThreshold }
         val culledObstacles = updatedObstacles.filter { it.x > cullThreshold }
+
+        val computedFinalScore = if (gameOver) {
+            (newScroll / DISTANCE_DIVISOR).toInt() + (state.score + newlyCollected) * COIN_SCORE_MULT
+        } else 0
 
         return state.copy(
             characterY = newY,
@@ -133,7 +145,10 @@ object GamePhysics {
             isHolding = finalHolding,
             holdDuration = finalHoldDur,
             sprintMultiplier = finalSprint,
-            crouchAmount = finalCrouch
+            crouchAmount = finalCrouch,
+            lives = newLives,
+            isGameOver = gameOver,
+            finalScore = if (gameOver) computedFinalScore else state.finalScore
         )
     }
 
