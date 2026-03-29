@@ -209,7 +209,9 @@ fun DigiRunnerGame(
                     val deltaRaw = (frameTime - lastFrameTime) / 1000f
                     val delta = deltaRaw.coerceAtMost(0.05f)  // cap at 50 ms to avoid physics explosion
 
-                    var next = GamePhysics.update(gameState, delta, syncProgress)
+                    // Standalone uses 0.8 base speed to match the "synced" feel
+                    val effectiveProgress = if (standalone) 0.8f else syncProgress
+                    var next = GamePhysics.update(gameState, delta, effectiveProgress)
                     next = maybeSpawnCoins(next)
                     next = maybeSpawnObstacles(next)
                     gameState = next
