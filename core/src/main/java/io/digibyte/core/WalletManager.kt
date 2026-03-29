@@ -163,6 +163,19 @@ class WalletManager(
     }
 
     /**
+     * Check if the native wallet is loaded in memory (UI-only lock vs fresh process).
+     */
+    fun isWalletReady(): Boolean = NativeBridge.isWalletLoaded()
+
+    /**
+     * UI-only unlock — flips state without touching the native layer.
+     * Used after lockUi() when the wallet is still loaded in memory.
+     */
+    fun unlockFromUi() {
+        _walletState.value = WalletState.Unlocked
+    }
+
+    /**
      * Get a new receive address.
      */
     fun getReceiveAddress(index: Int, format: Int = 2): String? {
