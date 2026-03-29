@@ -495,9 +495,11 @@ class DigiScopeClient(
 
     suspend fun getDigiRunnerLeaderboard(period: String = "all", limit: Int = 20): List<LeaderboardEntry> =
         withContext(Dispatchers.IO) {
+            val token = jwtToken ?: return@withContext emptyList()
             try {
                 val request = Request.Builder()
                     .url("$BASE_URL/hub/digirunner/leaderboard?period=$period&limit=$limit")
+                    .header("Authorization", "Bearer $token")
                     .build()
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) return@withContext emptyList()
