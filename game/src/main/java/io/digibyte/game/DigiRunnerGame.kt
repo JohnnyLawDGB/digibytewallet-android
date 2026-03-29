@@ -1,12 +1,23 @@
 package io.digibyte.game
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.DisposableEffect
@@ -177,6 +188,9 @@ private fun maybeSpawnObstacles(state: GameState): GameState {
 @Composable
 fun DigiRunnerGame(
     syncProgress: Float = 0f,
+    standalone: Boolean = false,
+    onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
+    onShowLeaderboard: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var gameState by remember { mutableStateOf(generateInitialState()) }
@@ -239,6 +253,45 @@ fun DigiRunnerGame(
             drawDigiRobot(gameState)
             // HUD
             drawHud(textMeasurer, gameState)
+            drawHearts(gameState)
+            if (gameState.isGameOver) {
+                drawGameOver(textMeasurer, gameState)
+            }
+        }
+
+        if (gameState.isGameOver) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = { gameState = generateInitialState() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0066CC))
+                ) {
+                    Text("Play Again", color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                if (onScoreSubmit != null) {
+                    OutlinedButton(onClick = {
+                        onScoreSubmit(
+                            gameState.finalScore,
+                            (gameState.scrollOffset / GamePhysics.DISTANCE_DIVISOR).toInt(),
+                            gameState.score,
+                            gameState.lives
+                        )
+                    }) {
+                        Text("Submit Score", color = Color(0xFF4A9EFF))
+                    }
+                }
+                if (onShowLeaderboard != null) {
+                    TextButton(onClick = { onShowLeaderboard() }) {
+                        Text("Leaderboard", color = Color(0xFF4A9EFF))
+                    }
+                }
+            }
         }
     }
 }
