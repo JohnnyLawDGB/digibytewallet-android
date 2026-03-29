@@ -786,16 +786,18 @@ fun DrawScope.drawBTCStacks(state: GameState) {
 
 /** Draw 3 heart icons for remaining lives. */
 fun DrawScope.drawHearts(state: GameState) {
-    val startX = 80f
-    val y = 10f
-    val heartW = 12f
-    val heartH = 11f
-    val spacing = 18f
+    // Position: right side of HUD, below score, big enough to see
+    val heartW = 20f
+    val heartH = 18f
+    val spacing = 28f
+    val totalWidth = 3 * spacing
+    val startX = size.width - totalWidth - 12f  // right-aligned
+    val y = 28f
 
     for (i in 0 until 3) {
         val cx = startX + i * spacing
         val filled = i < state.lives
-        val color = if (filled) DgbBlue else DgbDark
+        val color = if (filled) Color(0xFFFF4466) else Color(0xFF442233)  // red hearts, dark when lost
 
         val path = androidx.compose.ui.graphics.Path().apply {
             // Bottom point of heart
