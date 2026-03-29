@@ -395,6 +395,7 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * the peer manager. This ensures a bloom-filter-enabled node is
          * always in the pool, even if DNS seeds aren't re-queried. */
         _injectPriorityPeer("digiscope.me", 12024);
+        _injectPriorityPeer("192.168.7.59", 12024);  /* JohnnyLaw LAN node */
 
         /* Create peer manager for mainnet.
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
