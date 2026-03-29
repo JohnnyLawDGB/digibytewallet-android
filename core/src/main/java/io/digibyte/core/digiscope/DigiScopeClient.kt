@@ -464,7 +464,12 @@ class DigiScopeClient(
 
     suspend fun submitDigiRunnerScore(score: Int, distance: Int, coins: Int, livesRemaining: Int): Boolean =
         withContext(Dispatchers.IO) {
-            val token = jwtToken ?: return@withContext false
+            val token = jwtToken
+            if (token == null) {
+                android.util.Log.e("DigiScope", "submitScore: no token")
+                return@withContext false
+            }
+            android.util.Log.d("DigiScope", "submitScore: score=$score distance=$distance coins=$coins lives=$livesRemaining expected=${distance/100 + coins*5}")
             try {
                 val json = JSONObject().apply {
                     put("score", score)
@@ -478,8 +483,14 @@ class DigiScopeClient(
                     .header("Authorization", "Bearer $token")
                     .post(body)
                     .build()
-                handleAuthResponse(client.newCall(request).execute())
-            } catch (e: Exception) { false }
+                val response = client.newCall(request).execute()
+                val respBody = response.body?.string()
+                android.util.Log.d("DigiScope", "submitScore: ${response.code} — $respBody")
+                response.isSuccessful
+            } catch (e: Exception) {
+                android.util.Log.e("DigiScope", "submitScore exception: ${e.message}")
+                false
+            }
         }
 
     suspend fun getDigiRunnerLeaderboard(period: String = "all", limit: Int = 20): List<LeaderboardEntry> =

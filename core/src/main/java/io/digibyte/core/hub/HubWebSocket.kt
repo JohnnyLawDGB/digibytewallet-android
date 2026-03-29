@@ -32,7 +32,12 @@ class HubWebSocket(
     private var reconnectAttempts = 0
 
     fun connect() {
-        val token = digiScopeClient.getToken() ?: return
+        val token = digiScopeClient.getToken()
+        if (token == null) {
+            android.util.Log.w("HubWS", "connect: no token, skipping")
+            return
+        }
+        android.util.Log.i("HubWS", "connect: attempting WebSocket to $WS_URL")
         val request = Request.Builder()
             .url(WS_URL)
             .header("Authorization", "Bearer $token")
@@ -42,6 +47,7 @@ class HubWebSocket(
 
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                android.util.Log.i("HubWS", "connected!")
                 _connectionState.value = ConnectionState.CONNECTED
                 reconnectAttempts = 0
             }
@@ -55,10 +61,12 @@ class HubWebSocket(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                android.util.Log.w("HubWS", "closed: $code $reason")
                 _connectionState.value = ConnectionState.DISCONNECTED
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                android.util.Log.e("HubWS", "failure: ${t.message}, response=${response?.code}")
                 _connectionState.value = ConnectionState.DISCONNECTED
                 // Auto-reconnect with exponential backoff would go here
             }
