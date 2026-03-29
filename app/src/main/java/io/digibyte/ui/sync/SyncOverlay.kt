@@ -27,6 +27,8 @@ import io.digibyte.ui.theme.DigiByteBlue
 fun SyncOverlay(
     syncState: SyncState,
     onPlayGame: () -> Unit = {},
+    onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
+    onShowLeaderboard: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     when (syncState) {
@@ -37,6 +39,8 @@ fun SyncOverlay(
                 if (showGame) {
                     DigiRunnerGame(
                         syncProgress = syncState.progress,
+                        onScoreSubmit = onScoreSubmit,
+                        onShowLeaderboard = onShowLeaderboard,
                         modifier = Modifier.fillMaxWidth()
                     )
                     TextButton(
@@ -74,6 +78,8 @@ fun SyncOverlay(
                 if (showGame) {
                     DigiRunnerGame(
                         syncProgress = 0.9f,
+                        onScoreSubmit = onScoreSubmit,
+                        onShowLeaderboard = onShowLeaderboard,
                         modifier = Modifier.fillMaxWidth()
                     )
                     TextButton(

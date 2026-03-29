@@ -40,6 +40,8 @@ fun WalletScreen(
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
     onNavigateGame: () -> Unit = {},
+    onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
+    onShowLeaderboard: (() -> Unit)? = null,
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -126,6 +128,8 @@ fun WalletScreen(
             SyncOverlay(
                 syncState = syncState,
                 onPlayGame = onNavigateGame,
+                onScoreSubmit = onScoreSubmit,
+                onShowLeaderboard = onShowLeaderboard,
                 modifier  = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)
