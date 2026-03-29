@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import io.digibyte.core.hub.Channel
 import io.digibyte.core.hub.ChatMessage
+import io.digibyte.core.hub.DigiRunnerStats
 import io.digibyte.core.hub.ForumThread
+import io.digibyte.core.hub.LeaderboardEntry
 import io.digibyte.core.hub.Reply
 import io.digibyte.core.hub.ThreadDetail
 import io.digibyte.core.hub.UserInfo
@@ -422,6 +424,71 @@ class DigiScopeClient(
         } catch (e: Exception) {
             false
         }
+    }
+
+    // ── DigiRunner Leaderboard ────────────────────────────────────────────────
+
+    suspend fun submitDigiRunnerScore(score: Int, distance: Int, coins: Int, livesRemaining: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            val token = jwtToken ?: return@withContext false
+            try {
+                val json = JSONObject().apply {
+                    put("score", score)
+                    put("distance", distance)
+                    put("coins", coins)
+                    put("livesRemaining", livesRemaining)
+                }
+                val body = json.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("$BASE_URL/hub/digirunner/score")
+                    .header("Authorization", "Bearer $token")
+                    .post(body)
+                    .build()
+                client.newCall(request).execute().isSuccessful
+            } catch (e: Exception) { false }
+        }
+
+    suspend fun getDigiRunnerLeaderboard(period: String = "all", limit: Int = 20): List<LeaderboardEntry> =
+        withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("$BASE_URL/hub/digirunner/leaderboard?period=$period&limit=$limit")
+                    .build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) return@withContext emptyList()
+                val json = JSONObject(response.body?.string() ?: return@withContext emptyList())
+                val arr = json.optJSONArray("leaderboard") ?: return@withContext emptyList()
+                (0 until arr.length()).map { i ->
+                    val e = arr.getJSONObject(i)
+                    LeaderboardEntry(
+                        rank = e.optInt("rank", i + 1),
+                        handle = e.optString("handle", "Anonymous"),
+                        score = e.getInt("score"),
+                        distance = e.optInt("distance", 0),
+                        coins = e.optInt("coins", 0),
+                        createdAt = e.optLong("createdAt", 0)
+                    )
+                }
+            } catch (e: Exception) { emptyList() }
+        }
+
+    suspend fun getDigiRunnerStats(): DigiRunnerStats? = withContext(Dispatchers.IO) {
+        val token = jwtToken ?: return@withContext null
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/hub/digirunner/me")
+                .header("Authorization", "Bearer $token")
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext null
+            val json = JSONObject(response.body?.string() ?: return@withContext null)
+            DigiRunnerStats(
+                bestScore = json.optInt("bestScore", 0),
+                bestRank = json.optInt("bestRank", 0),
+                totalGames = json.optInt("totalGames", 0),
+                totalCoins = json.optInt("totalCoins", 0)
+            )
+        } catch (e: Exception) { null }
     }
 
     // ── Token helpers ─────────────────────────────────────────────────────────
