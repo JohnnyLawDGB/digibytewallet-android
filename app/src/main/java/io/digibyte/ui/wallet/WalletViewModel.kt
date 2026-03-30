@@ -84,13 +84,16 @@ class WalletViewModel @Inject constructor(
                 }
 
                 // Poll transactions
-                val currentHeight = NativeBridge.getLastBlockHeight()
+                var currentHeight = NativeBridge.getLastBlockHeight()
+                // If peer manager hasn't synced yet, estimate from highest tx block
                 val txDetails = NativeBridge.getTransactionDetails()
                 if (txDetails.isNotEmpty()) {
                     val txList = txDetails.trim().lines().mapNotNull { line ->
                         val parts = line.split("|")
                         if (parts.size >= 5) {
                             val txHeight = parts[3].toLongOrNull() ?: 0L
+                            // Track highest block for fallback
+                            if (txHeight > currentHeight) currentHeight = txHeight
                             val confs = if (txHeight > 0 && currentHeight >= txHeight)
                                 (currentHeight - txHeight + 1).toInt() else 0
                             TransactionEntity(
