@@ -32,13 +32,12 @@ class TransactionBuilder(
             return TxResult.Error("Amount must be positive")
         }
 
-        // Select coins (asset UTXOs are excluded by CoinSelector)
-        val selection = coinSelector.selectCoins(spendableUtxos, amountSatoshis, feePerKb)
-            ?: return TxResult.Error("Insufficient balance")
-
-        // Create unsigned transaction via C core
+        // Create unsigned transaction via C core — the C core's BRWallet handles
+        // UTXO selection internally using its own transaction set. The Room-based
+        // CoinSelector was redundant and failed because Room UTXOs weren't populated
+        // from the SPV sync. Let the C core do what it's designed to do.
         val unsignedTx = NativeBridge.createTransaction(toAddress, amountSatoshis, feePerKb)
-            ?: return TxResult.Error("Failed to create transaction")
+            ?: return TxResult.Error("Insufficient balance")
 
         // Sign via C core (uses RFC 6979 deterministic nonces)
         val signedTx = NativeBridge.signTransaction(unsignedTx)
@@ -47,11 +46,6 @@ class TransactionBuilder(
         // Broadcast via C core
         val txid = NativeBridge.publishTransaction(signedTx)
             ?: return TxResult.Error("Failed to broadcast transaction")
-
-        // Mark inputs as spent
-        for (input in selection.inputs) {
-            utxoManager.markSpent(input.txid, input.vout)
-        }
 
         return TxResult.Success(txid)
     }
