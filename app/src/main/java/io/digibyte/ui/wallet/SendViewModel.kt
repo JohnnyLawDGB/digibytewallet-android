@@ -24,7 +24,9 @@ sealed class SendState {
 }
 
 /** Fee tiers in sat/KB. Used as fallback when native returns 0. */
-private val FEE_DEFAULTS = longArrayOf(100_000L, 75_000L, 50_000L)
+// DigiByte fee defaults in sat/KB based on estimatesmartfee ~10,000 sat/byte
+// Priority: 2x estimate, Normal: 1x, Economy: 0.5x
+private val FEE_DEFAULTS = longArrayOf(20_000_000L, 10_000_000L, 5_000_000L)
 
 @HiltViewModel
 class SendViewModel @Inject constructor(

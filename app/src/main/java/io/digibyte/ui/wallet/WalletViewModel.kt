@@ -130,8 +130,8 @@ class WalletViewModel @Inject constructor(
     }
 
     /** Get a receive address for [index]. Delegates to WalletManager (bech32 by default). */
-    fun getReceiveAddress(index: Int = 0): String? =
-        walletManager.getReceiveAddress(index, format = 2)
+    fun getReceiveAddress(index: Int = 0, format: Int = 2): String? =
+        walletManager.getReceiveAddress(index, format = format)
 
     companion object {
         /**

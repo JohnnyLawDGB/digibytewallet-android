@@ -37,8 +37,12 @@ fun ReceiveScreen(
 ) {
     val context = LocalContext.current
 
-    // Generate fresh address — index 0 by default (production: derive from wallet gap limit)
-    val address = remember { viewModel.getReceiveAddress(0) ?: "Address unavailable" }
+    // Address format: 0=legacy(D), 2=bech32(dgb1q) — default to bech32
+    var addressFormat by remember { mutableIntStateOf(2) }
+
+    val address = remember(addressFormat) {
+        viewModel.getReceiveAddress(0, addressFormat) ?: "Address unavailable"
+    }
 
     // Optional amount for the QR URI
     var amountInput by remember { mutableStateOf("") }
@@ -140,6 +144,27 @@ fun ReceiveScreen(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Address format toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = addressFormat == 2,
+                onClick = { addressFormat = 2 },
+                label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) },
+                modifier = Modifier.padding(end = 8.dp)
+            )
+            FilterChip(
+                selected = addressFormat == 0,
+                onClick = { addressFormat = 0 },
+                label = { Text("Legacy (D…)", fontSize = 12.sp) }
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
