@@ -165,6 +165,67 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
     return JNI_TRUE;
 }
 
+/* ---------- createWalletFromBytes ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
+                                                                  jbyteArray phraseBytes) {
+    (void)thiz;
+
+    if (!phraseBytes) {
+        LOGW("createWalletFromBytes: phraseBytes is null");
+        return JNI_FALSE;
+    }
+
+    jsize phraseLen = (*env)->GetArrayLength(env, phraseBytes);
+    if (phraseLen <= 0 || phraseLen > 1024) {
+        LOGW("createWalletFromBytes: invalid length=%d", phraseLen);
+        return JNI_FALSE;
+    }
+
+    /* Copy phrase bytes to a null-terminated C string on the stack */
+    char phraseChars[phraseLen + 1];
+    (*env)->GetByteArrayRegion(env, phraseBytes, 0, phraseLen, (jbyte *)phraseChars);
+    phraseChars[phraseLen] = '\0';
+
+    if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
+        LOGW("createWalletFromBytes: invalid BIP39 phrase");
+        secure_zero(phraseChars, sizeof(phraseChars));
+        return JNI_FALSE;
+    }
+
+    uint8_t seed[64];
+    BRBIP39DeriveKey(seed, phraseChars, NULL);
+    secure_zero(phraseChars, sizeof(phraseChars));
+
+    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+
+    if (g_wallet) {
+        LOGW("createWalletFromBytes: wallet already exists, freeing old one");
+        BRWalletFree(g_wallet);
+        g_wallet = NULL;
+    }
+
+    g_wallet = BRWalletNew(NULL, 0, mpk);
+    if (!g_wallet) {
+        LOGE("createWalletFromBytes: BRWalletNew failed");
+        secure_zero(seed, sizeof(seed));
+        return JNI_FALSE;
+    }
+
+    memcpy(g_seed, seed, sizeof(seed));
+    g_seedValid = 1;
+    g_mpk = mpk;
+    g_mpkValid = 1;
+    g_walletCreationTime = (uint32_t)time(NULL);
+    g_peerManagerNeedsRecreate = 1;
+
+    secure_zero(seed, sizeof(seed));
+
+    LOGI("createWalletFromBytes: wallet created successfully (creationTime=%u)", g_walletCreationTime);
+    return JNI_TRUE;
+}
+
 /* ---------- recoverWallet ---------- */
 
 JNIEXPORT jboolean JNICALL
@@ -241,6 +302,75 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
         }
     }
     LOGI("recoverWallet: wallet recovered, creationTime=%u", g_walletCreationTime);
+    return JNI_TRUE;
+}
+
+/* ---------- recoverWalletFromBytes ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
+                                                                   jbyteArray phraseBytes,
+                                                                   jlong creationTimestamp) {
+    (void)thiz;
+
+    if (!phraseBytes) {
+        LOGW("recoverWalletFromBytes: phraseBytes is null");
+        return JNI_FALSE;
+    }
+
+    jsize phraseLen = (*env)->GetArrayLength(env, phraseBytes);
+    if (phraseLen <= 0 || phraseLen > 1024) {
+        LOGW("recoverWalletFromBytes: invalid length=%d", phraseLen);
+        return JNI_FALSE;
+    }
+
+    char phraseChars[phraseLen + 1];
+    (*env)->GetByteArrayRegion(env, phraseBytes, 0, phraseLen, (jbyte *)phraseChars);
+    phraseChars[phraseLen] = '\0';
+
+    if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
+        LOGW("recoverWalletFromBytes: invalid BIP39 phrase");
+        secure_zero(phraseChars, sizeof(phraseChars));
+        return JNI_FALSE;
+    }
+
+    uint8_t seed[64];
+    BRBIP39DeriveKey(seed, phraseChars, NULL);
+    secure_zero(phraseChars, sizeof(phraseChars));
+
+    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+
+    if (g_wallet) {
+        BRWalletFree(g_wallet);
+        g_wallet = NULL;
+    }
+
+    extern BRTransaction **g_savedTransactions;
+    extern size_t g_savedTransactionCount;
+
+    if (g_savedTransactions && g_savedTransactionCount > 0) {
+        LOGI("recoverWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
+        g_wallet = BRWalletNew(g_savedTransactions, g_savedTransactionCount, mpk);
+    } else {
+        g_wallet = BRWalletNew(NULL, 0, mpk);
+    }
+    if (!g_wallet) {
+        LOGE("recoverWalletFromBytes: BRWalletNew failed");
+        secure_zero(seed, sizeof(seed));
+        return JNI_FALSE;
+    }
+
+    memcpy(g_seed, seed, sizeof(seed));
+    g_seedValid = 1;
+    g_mpk = mpk;
+    g_mpkValid = 1;
+
+    secure_zero(seed, sizeof(seed));
+
+    g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
+    g_peerManagerNeedsRecreate = 1;
+
+    LOGI("recoverWalletFromBytes: wallet recovered, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }
 
