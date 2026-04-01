@@ -102,6 +102,61 @@ class NativeMemorySecurityTest {
     }
 
     @Test
+    fun `createWalletFromBytes zeros phraseChars after seed derivation`() {
+        val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
+        val section = content.substringAfter("createWalletFromBytes").substringBefore("recoverWalletFromBytes")
+        assertTrue("createWalletFromBytes must zero phraseChars after use",
+            section.contains("secure_zero(phraseChars,"))
+    }
+
+    @Test
+    fun `recoverWalletFromBytes zeros phraseChars after seed derivation`() {
+        val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
+        val section = content.substringAfter("recoverWalletFromBytes").substringBefore("unlockSession")
+        assertTrue("recoverWalletFromBytes must zero phraseChars after use",
+            section.contains("secure_zero(phraseChars,"))
+    }
+
+    @Test
+    fun `g_seed is static not extern`() {
+        val header = readNativeFile("native/src/main/jni/bridge/jni_bridge.h")
+        assertFalse("g_seed must not be declared extern in header",
+            header.contains("extern uint8_t") && header.contains("g_seed"))
+        val walletC = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
+        assertTrue("g_seed must be declared static in jni_wallet.c",
+            walletC.contains("static uint8_t") && walletC.contains("g_seed"))
+    }
+
+    @Test
+    fun `seed accessor functions declared in header`() {
+        val header = readNativeFile("native/src/main/jni/bridge/jni_bridge.h")
+        assertTrue("seed_sign_transaction must be declared in header",
+            header.contains("seed_sign_transaction"))
+        assertTrue("seed_derive_key must be declared in header",
+            header.contains("seed_derive_key"))
+        assertTrue("seed_is_valid must be declared in header",
+            header.contains("seed_is_valid"))
+    }
+
+    @Test
+    fun `signTransaction uses seed_sign_transaction not g_seed directly`() {
+        val content = readNativeFile("native/src/main/jni/bridge/jni_transaction.c")
+        assertTrue("signTransaction must use seed_sign_transaction()",
+            content.contains("seed_sign_transaction("))
+        assertFalse("signTransaction must not access g_seed directly",
+            content.contains("g_seed"))
+    }
+
+    @Test
+    fun `signMessage uses seed_derive_key not g_seed directly`() {
+        val content = readNativeFile("native/src/main/jni/bridge/jni_wallet_sign.c")
+        assertTrue("signMessage must use seed_derive_key()",
+            content.contains("seed_derive_key("))
+        assertFalse("signMessage must not access g_seed directly",
+            content.contains("g_seed"))
+    }
+
+    @Test
     fun `entropy is read from dev_urandom not BRRand`() {
         val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
         // BRRand is NOT cryptographic — must use /dev/urandom
