@@ -223,13 +223,10 @@ Java_io_digibyte_core_bridge_NativeBridge_getEstimatedFee(JNIEnv *env, jobject t
                                                            jint priority) {
     (void)env;
     (void)thiz;
+    (void)priority;
 
-    /* Fee tiers — DigiByte fees are simple, based on sat/KB */
-    /* priority: 0=high, 1=medium, 2=low */
-    switch (priority) {
-        case 0:  return (jlong)(DEFAULT_FEE_PER_KB * 5);   /* high: 5x default */
-        case 1:  return (jlong)(DEFAULT_FEE_PER_KB * 2);   /* medium: 2x default */
-        case 2:  return (jlong)DEFAULT_FEE_PER_KB;          /* low: default min relay */
-        default: return (jlong)DEFAULT_FEE_PER_KB;
-    }
+    /* DigiByte has 15-second blocks and no fee market.
+     * All transactions at the minimum relay fee confirm in the next block.
+     * Return DEFAULT_FEE_PER_KB (100 sat/byte) for all priority levels. */
+    return (jlong)DEFAULT_FEE_PER_KB;
 }
