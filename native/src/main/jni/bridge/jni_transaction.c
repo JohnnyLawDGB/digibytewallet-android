@@ -87,7 +87,7 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
         LOGW("signTransaction: wallet not initialized");
         return NULL;
     }
-    if (!g_seedValid) {
+    if (!seed_is_valid()) {
         LOGW("signTransaction: session not unlocked (no seed)");
         return NULL;
     }
@@ -116,7 +116,7 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
 
     /* Sign with wallet (uses RFC 6979 deterministic nonces internally) */
     /* forkId=0 for DigiByte (same as Bitcoin) */
-    int signed_ok = BRWalletSignTransaction(g_wallet, tx, 0, g_seed, sizeof(g_seed));
+    int signed_ok = seed_sign_transaction(g_wallet, tx, 0);
     if (!signed_ok) {
         LOGW("signTransaction: BRWalletSignTransaction failed");
         BRTransactionFree(tx);

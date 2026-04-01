@@ -14,8 +14,8 @@
 JavaVM       *g_jvm          = NULL;
 BRWallet     *g_wallet       = NULL;
 BRPeerManager *g_peerManager = NULL;
-uint8_t       g_seed[64];
-int           g_seedValid    = 0;
+static uint8_t  g_seed[64];
+static int      g_seedValid = 0;
 BRMasterPubKey g_mpk;
 int           g_mpkValid     = 0;
 uint32_t      g_walletCreationTime = 0;
@@ -417,9 +417,32 @@ Java_io_digibyte_core_bridge_NativeBridge_lockSession(JNIEnv *env, jobject thiz)
     (void)env;
     (void)thiz;
 
+    seed_zero();
+    LOGI("lockSession: seed zeroed");
+}
+
+/* ---------- Seed accessor functions ---------- */
+/* These provide controlled access to g_seed so other .c files
+ * never touch the global directly. */
+
+int seed_is_valid(void) {
+    return g_seedValid;
+}
+
+int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId) {
+    if (!g_seedValid) return 0;
+    return BRWalletSignTransaction(wallet, tx, forkId, g_seed, sizeof(g_seed));
+}
+
+int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index) {
+    if (!g_seedValid) return 0;
+    BRBIP32PrivKey(outKey, g_seed, sizeof(g_seed), chain, index);
+    return 1;
+}
+
+void seed_zero(void) {
     secure_zero(g_seed, sizeof(g_seed));
     g_seedValid = 0;
-    LOGI("lockSession: seed zeroed");
 }
 
 /* ---------- getReceiveAddress ---------- */

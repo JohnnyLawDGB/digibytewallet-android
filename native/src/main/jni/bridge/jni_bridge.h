@@ -46,9 +46,12 @@ extern JavaVM *g_jvm;
 extern BRWallet     *g_wallet;
 extern BRPeerManager *g_peerManager;
 
-/* Session seed — zeroed on lockSession, set on unlockSession */
-extern uint8_t  g_seed[64];
-extern int      g_seedValid;
+/* Session seed — managed by jni_wallet.c, accessed via functions below.
+ * g_seed is static to jni_wallet.c — no direct extern access. */
+int seed_is_valid(void);
+int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId);
+int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index);
+void seed_zero(void);
 
 /* Master public key — derived once from seed */
 extern BRMasterPubKey g_mpk;

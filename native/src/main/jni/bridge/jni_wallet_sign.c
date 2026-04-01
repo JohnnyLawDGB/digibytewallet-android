@@ -65,7 +65,7 @@ Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
         LOGW("signMessage: wallet not initialized");
         return NULL;
     }
-    if (!g_seedValid) {
+    if (!seed_is_valid()) {
         LOGW("signMessage: session locked — no seed available");
         return NULL;
     }
@@ -82,7 +82,11 @@ Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
      * This gives a deterministic address for Digi-ID across sessions. */
     BRKey key;
     memset(&key, 0, sizeof(key));
-    BRBIP32PrivKey(&key, g_seed, sizeof(g_seed), 0, 0);
+    if (!seed_derive_key(&key, 0, 0)) {
+        LOGW("signMessage: failed to derive key — session locked");
+        (*env)->ReleaseStringUTFChars(env, message, msgChars);
+        return NULL;
+    }
     key.compressed = 1;
 
     /* Get the address for this key */
