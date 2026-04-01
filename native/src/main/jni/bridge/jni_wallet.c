@@ -546,8 +546,9 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionCount(JNIEnv *env, jobje
 
 /* ---------- getTransactionDetails ----------
  * Returns a pipe-separated string for each transaction:
- * "txHash|amount|fee|blockHeight|timestamp\n..."
+ * "txHash|amount|fee|blockHeight|timestamp|sent|received\n..."
  * Amount is signed: positive = received, negative = sent.
+ * sent/received are unsigned raw values for self-send detection.
  */
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
@@ -561,8 +562,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
     if (!txs) return (*env)->NewStringUTF(env, "");
     txCount = BRWalletTransactions(g_wallet, txs, txCount);
 
-    /* Build result string — estimate 120 chars per tx */
-    size_t bufSize = txCount * 120 + 1;
+    /* Build result string — estimate 160 chars per tx (added sent|received fields) */
+    size_t bufSize = txCount * 160 + 1;
     char *buf = malloc(bufSize);
     if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
     buf[0] = '\0';
@@ -590,12 +591,14 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
         uint32_t ts = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
 
         int written = snprintf(buf + pos, bufSize - pos,
-            "%s|%lld|%llu|%u|%u\n",
+            "%s|%lld|%llu|%u|%u|%llu|%llu\n",
             hashHex,
             (long long)amount,
             (unsigned long long)fee,
             tx->blockHeight,
-            ts);
+            ts,
+            (unsigned long long)sent,
+            (unsigned long long)received);
         if (written > 0) pos += written;
     }
 

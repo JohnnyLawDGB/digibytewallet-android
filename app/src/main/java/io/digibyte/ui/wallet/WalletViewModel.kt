@@ -105,6 +105,8 @@ class WalletViewModel @Inject constructor(
                                 toAddress = "",
                                 fromAddress = "",
                                 confirmations = confs,
+                                sent = if (parts.size >= 7) parts[5].toLongOrNull() ?: 0L else 0L,
+                                received = if (parts.size >= 7) parts[6].toLongOrNull() ?: 0L else 0L,
                                 isAssetTx = false
                             )
                         } else null

@@ -13,6 +13,8 @@ data class TransactionEntity(
     val toAddress: String,
     val fromAddress: String,
     val confirmations: Int,
+    val sent: Long = 0L,
+    val received: Long = 0L,
     val isAssetTx: Boolean = false,
     val rawBytes: ByteArray? = null
 ) {
