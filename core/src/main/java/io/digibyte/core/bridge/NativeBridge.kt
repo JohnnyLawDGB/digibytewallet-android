@@ -18,6 +18,12 @@ object NativeBridge {
     /** Recover wallet from mnemonic, syncing from creationTimestamp (Unix epoch seconds). */
     external fun recoverWallet(phrase: String, creationTimestamp: Long): Boolean
 
+    /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
+    external fun createWalletFromBytes(phraseBytes: ByteArray): Boolean
+
+    /** Recover wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
+    external fun recoverWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long): Boolean
+
     /** Authorize a session (called after biometric unlock). Token is Keystore-decrypted auth blob. */
     external fun unlockSession(authToken: ByteArray): Boolean
 
