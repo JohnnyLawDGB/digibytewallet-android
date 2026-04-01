@@ -58,8 +58,10 @@ fun SendScreen(
     val addressValid by viewModel.addressValid.collectAsStateWithLifecycle()
     val amountDgb by viewModel.amountDgb.collectAsStateWithLifecycle()
     val amountFiat by viewModel.amountFiat.collectAsStateWithLifecycle()
-    val selectedFeeTier by viewModel.selectedFeeTier.collectAsStateWithLifecycle()
-    val feeEstimate by viewModel.feeEstimate.collectAsStateWithLifecycle()
+    val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
+    val customFeeInput by viewModel.customFeeInput.collectAsStateWithLifecycle()
+    val estimatedFeeSat by viewModel.estimatedFeeSat.collectAsStateWithLifecycle()
+    val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val validationError by viewModel.validationError.collectAsStateWithLifecycle()
 
@@ -83,7 +85,7 @@ fun SendScreen(
             address = address,
             amountDgb = amountDgb,
             amountFiat = amountFiat,
-            feeEstimate = feeEstimate,
+            feeEstimate = estimatedFeeSat,
             onConfirm = {
                 coroutineScope.launch {
                     val activity = context as? androidx.fragment.app.FragmentActivity
@@ -248,37 +250,71 @@ fun SendScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // ── Fee tier selector ─────────────────────────────────────────────
-        Text(
-            text = "Network Fee",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(0, 1, 2).forEach { tier ->
-                FeeTierChip(
-                    label = viewModel.feeTierLabel(tier),
-                    satPerKb = viewModel.feeTierSatPerKb(tier),
-                    selected = selectedFeeTier == tier,
-                    onClick = { viewModel.selectedFeeTier.value = tier },
-                    modifier = Modifier.weight(1f)
+        // ── Network fee ──────────────────────────────────────────────────
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Network Fee",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { viewModel.toggleCustomFee() }) {
+                Text(
+                    text = if (isCustomFee) "Default" else "Custom",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = DigiByteAccent
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        val feeKb = feeEstimate / 1000.0
-        Text(
-            text = "Estimated: ${String.format("%.0f", feeKb.coerceAtLeast(0.001) * 1000)} sat/KB",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (isCustomFee) {
+            OutlinedTextField(
+                value = customFeeInput,
+                onValueChange = { viewModel.customFeeInput.value = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("0.00014100") },
+                suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                isError = feeWarning is FeeWarning.ZeroFee
+            )
+        } else {
+            val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
+            Text(
+                text = String.format("%.8f DGB", defaultFeeDgb),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        when (feeWarning) {
+            is FeeWarning.BelowRelay -> {
+                Text(
+                    text = "⚠ Below minimum relay fee — transaction may not broadcast",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFA000)
+                )
+            }
+            is FeeWarning.ZeroFee -> {
+                Text(
+                    text = "Fee required",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteRed
+                )
+            }
+            is FeeWarning.None -> {
+                Text(
+                    text = "Confirms in ~15 seconds",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteGreen
+                )
+            }
+        }
 
         // ── Validation error ──────────────────────────────────────────────
         if (validationError != null) {
@@ -329,46 +365,6 @@ fun SendScreen(
                 color = DigiByteRed,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
-            )
-        }
-    }
-}
-
-// ── Fee tier chip ────────────────────────────────────────────────────────────
-
-@Composable
-private fun FeeTierChip(
-    label: String,
-    satPerKb: Long,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val containerColor = if (selected) DigiByteAccent.copy(alpha = 0.18f)
-                         else MaterialTheme.colorScheme.surface
-    val borderColor = if (selected) DigiByteAccent else MaterialTheme.colorScheme.outline
-
-    Surface(
-        onClick = onClick,
-        modifier = modifier.border(1.dp, borderColor, RoundedCornerShape(8.dp)),
-        shape = RoundedCornerShape(8.dp),
-        color = containerColor
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = if (selected) DigiByteAccent else MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "${satPerKb / 1000} sat/B",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
             )
         }
     }
