@@ -45,17 +45,22 @@ class WalletManager(
      * Encrypts and persists the phrase to disk.
      */
     fun createWallet(mnemonic: String): Boolean {
-        val success = NativeBridge.createWallet(mnemonic)
-        if (success) {
-            persistSeed(mnemonic)
-            // Persist creation time so restoreFromDisk uses the right sync checkpoint
-            prefs.edit().putLong("wallet_creation_time", System.currentTimeMillis() / 1000).apply()
-            _walletState.value = WalletState.Unlocked
-            clearSyncData()
-            saveSeedFingerprint(mnemonic)
-            NativeBridge.rescan()
+        val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
+        try {
+            val success = NativeBridge.createWalletFromBytes(mnemonicBytes)
+            if (success) {
+                persistSeed(mnemonicBytes)
+                // Persist creation time so restoreFromDisk uses the right sync checkpoint
+                prefs.edit().putLong("wallet_creation_time", System.currentTimeMillis() / 1000).apply()
+                _walletState.value = WalletState.Unlocked
+                clearSyncData()
+                saveSeedFingerprint(mnemonicBytes)
+                NativeBridge.rescan()
+            }
+            return success
+        } finally {
+            mnemonicBytes.fill(0)
         }
-        return success
     }
 
     /**
@@ -63,15 +68,20 @@ class WalletManager(
      * Encrypts and persists the phrase to disk.
      */
     fun recoverWallet(mnemonic: String, creationTimestamp: Long): Boolean {
-        val success = NativeBridge.recoverWallet(mnemonic, creationTimestamp)
-        if (success) {
-            persistSeed(mnemonic)
-            _walletState.value = WalletState.Unlocked
-            clearSyncData()
-            saveSeedFingerprint(mnemonic)
-            NativeBridge.rescan()
+        val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
+        try {
+            val success = NativeBridge.recoverWalletFromBytes(mnemonicBytes, creationTimestamp)
+            if (success) {
+                persistSeed(mnemonicBytes)
+                _walletState.value = WalletState.Unlocked
+                clearSyncData()
+                saveSeedFingerprint(mnemonicBytes)
+                NativeBridge.rescan()
+            }
+            return success
+        } finally {
+            mnemonicBytes.fill(0)
         }
-        return success
     }
 
     /**
@@ -80,54 +90,57 @@ class WalletManager(
      * Returns true if the wallet was successfully restored.
      */
     fun restoreFromDisk(): Boolean {
-        val seed = loadSeed() ?: return false
+        val seedBytes = loadSeed() ?: return false
+        try {
+            // CRITICAL: stop sync before replacing the wallet — the peer manager's
+            // background threads are using the old wallet pointer. Freeing it
+            // while they're running causes SIGSEGV.
+            NativeBridge.stopSync()
+            // Wait for peer manager threads to fully drain. 200ms was insufficient —
+            // SIGSEGV crashes were observed on the DefaultDispatch thread after the
+            // old wallet was freed. Poll peer count to confirm disconnection, with
+            // a hard cap to avoid hanging.
+            var waitMs = 0
+            while (NativeBridge.getPeerCount() > 0 && waitMs < 2000) {
+                Thread.sleep(100)
+                waitMs += 100
+            }
+            // Extra settle time for threads that may be mid-callback
+            Thread.sleep(300)
 
-        // CRITICAL: stop sync before replacing the wallet — the peer manager's
-        // background threads are using the old wallet pointer. Freeing it
-        // while they're running causes SIGSEGV.
-        NativeBridge.stopSync()
-        // Wait for peer manager threads to fully drain. 200ms was insufficient —
-        // SIGSEGV crashes were observed on the DefaultDispatch thread after the
-        // old wallet was freed. Poll peer count to confirm disconnection, with
-        // a hard cap to avoid hanging.
-        var waitMs = 0
-        while (NativeBridge.getPeerCount() > 0 && waitMs < 2000) {
-            Thread.sleep(100)
-            waitMs += 100
-        }
-        // Extra settle time for threads that may be mid-callback
-        Thread.sleep(300)
+            // Only clear saved blocks/peers if the seed has changed (e.g. after
+            // uninstall/reinstall with a different mnemonic). On normal app restarts
+            // the seed is the same, so we KEEP the saved blocks to resume sync.
+            if (!seedFingerprintMatches(seedBytes)) {
+                clearSyncData()
+                saveSeedFingerprint(seedBytes)
+            }
 
-        // Only clear saved blocks/peers if the seed has changed (e.g. after
-        // uninstall/reinstall with a different mnemonic). On normal app restarts
-        // the seed is the same, so we KEEP the saved blocks to resume sync.
-        if (!seedFingerprintMatches(seed)) {
-            clearSyncData()
-            saveSeedFingerprint(seed)
-        }
+            // Load saved transactions BEFORE creating wallet — recoverWallet uses them
+            // so the wallet starts with full tx history and balance is immediately spendable.
+            val syncPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+            val savedTxHex = syncPrefs.getString("saved_transactions", null)
+            if (savedTxHex != null) {
+                val txBytes = hexToBytes(savedTxHex)
+                val loaded = NativeBridge.loadSerializedTransactions(txBytes)
+                android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
+            }
 
-        // Load saved transactions BEFORE creating wallet — recoverWallet uses them
-        // so the wallet starts with full tx history and balance is immediately spendable.
-        val syncPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
-        val savedTxHex = syncPrefs.getString("saved_transactions", null)
-        if (savedTxHex != null) {
-            val txBytes = hexToBytes(savedTxHex)
-            val loaded = NativeBridge.loadSerializedTransactions(txBytes)
-            android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
+            // Use recoverWalletFromBytes with the original creation timestamp so the
+            // peer manager starts syncing from the right checkpoint — not NOW.
+            val creationTime = prefs.getLong("wallet_creation_time", 0L)
+            val success = if (creationTime > 0) {
+                NativeBridge.recoverWalletFromBytes(seedBytes, creationTime)
+            } else {
+                NativeBridge.recoverWalletFromBytes(seedBytes, 1774252800L)
+            }
+            if (success) {
+                _walletState.value = WalletState.Unlocked
+            }
+            return success
+        } finally {
+            seedBytes.fill(0)
         }
-
-        // Use recoverWallet with the original creation timestamp so the
-        // peer manager starts syncing from the right checkpoint — not NOW.
-        val creationTime = prefs.getLong("wallet_creation_time", 0L)
-        val success = if (creationTime > 0) {
-            NativeBridge.recoverWallet(seed, creationTime)
-        } else {
-            NativeBridge.recoverWallet(seed, 1774252800L)
-        }
-        if (success) {
-            _walletState.value = WalletState.Unlocked
-        }
-        return success
     }
 
     /**
@@ -230,16 +243,16 @@ class WalletManager(
 
     // ── Seed persistence ────────────────────────────────────────
 
-    private fun persistSeed(mnemonic: String) {
+    private fun persistSeed(mnemonicBytes: ByteArray) {
         keyStoreManager.createKey()
-        val encrypted = keyStoreManager.encrypt(mnemonic.toByteArray(Charsets.UTF_8))
+        val encrypted = keyStoreManager.encrypt(mnemonicBytes)
         prefs.edit()
             .putString("encrypted_seed", bytesToHex(encrypted.ciphertext))
             .putString("encrypted_seed_iv", bytesToHex(encrypted.iv))
             .apply()
     }
 
-    private fun loadSeed(): String? {
+    private fun loadSeed(): ByteArray? {
         val ciphertextHex = prefs.getString("encrypted_seed", null) ?: return null
         val ivHex = prefs.getString("encrypted_seed_iv", null) ?: return null
         return try {
@@ -247,8 +260,7 @@ class WalletManager(
                 ciphertext = hexToBytes(ciphertextHex),
                 iv = hexToBytes(ivHex)
             )
-            val decrypted = keyStoreManager.decrypt(encrypted)
-            String(decrypted, Charsets.UTF_8)
+            keyStoreManager.decrypt(encrypted)
         } catch (e: Exception) {
             null
         }
@@ -265,16 +277,16 @@ class WalletManager(
      * Store a SHA-256 fingerprint of the mnemonic so we can detect seed changes
      * on subsequent restarts without decrypting the full seed for comparison.
      */
-    private fun saveSeedFingerprint(mnemonic: String) {
+    private fun saveSeedFingerprint(mnemonicBytes: ByteArray) {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(mnemonic.toByteArray(Charsets.UTF_8))
+        val hash = digest.digest(mnemonicBytes)
         prefs.edit().putString("seed_fingerprint", bytesToHex(hash)).apply()
     }
 
-    private fun seedFingerprintMatches(mnemonic: String): Boolean {
+    private fun seedFingerprintMatches(mnemonicBytes: ByteArray): Boolean {
         val saved = prefs.getString("seed_fingerprint", null) ?: return false
         val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = bytesToHex(digest.digest(mnemonic.toByteArray(Charsets.UTF_8)))
+        val hash = bytesToHex(digest.digest(mnemonicBytes))
         return saved == hash
     }
 
