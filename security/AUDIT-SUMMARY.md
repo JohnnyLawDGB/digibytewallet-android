@@ -13,7 +13,7 @@ This audit covers the security posture of the DigiByte Android wallet with focus
 
 | Severity | Count | Status |
 |----------|-------|--------|
-| CRITICAL | 4 | Open — remediation planned |
+| CRITICAL | 4 | 2 Remediated, 2 Open |
 | HIGH | 4 | Open — remediation planned |
 | MEDIUM | 4 | Open |
 | LOW/INFO | 5 | Informational (positive findings) |
@@ -34,12 +34,16 @@ The 512-bit derived seed is copied into the process-global `g_seed[64]` during `
 
 **Fix:** Minimize the window — zero `g_seed` after peer manager is created and only re-derive for signing operations. Design-level limitation of the BRWallet SPV model.
 
+**Status:** Remediated — `g_seed` is now `static` to `jni_wallet.c` with controlled accessor API (`seed_sign_transaction`, `seed_derive_key`, `seed_is_valid`, `seed_zero`). External compilation units cannot access the seed directly. 7 new security tests verify encapsulation.
+
 ### CRITICAL-3: Seed flows through JVM heap as un-zeroed String
 **File:** `WalletManager.kt:207`, `jni_wallet.c:241`
 
 `loadSeed()` returns `String(decrypted, Charsets.UTF_8)` — Java `String` is immutable and may be interned. The plaintext mnemonic can persist in GC heap indefinitely. `unlockSession` accepts a raw 64-byte seed as `ByteArray`, also not zeroed after JNI call.
 
 **Fix:** Change `loadSeed()` to return `ByteArray`, add `createWalletFromBytes` JNI variant, call `byteArray.fill(0)` immediately after JNI returns.
+
+**Status:** Remediated — `loadSeed()` returns `ByteArray` (zeroed after use via `fill(0)` in `finally` blocks). `createWalletFromBytes`/`recoverWalletFromBytes` JNI functions accept `jbyteArray` with `secure_zero()` on the C stack copy. The mnemonic never becomes an immutable Java `String` on the restore path. 42 security tests passing (8 new).
 
 ### CRITICAL-4: Digi-ID callback URL is attacker-controlled
 **File:** `DigiIdManager.kt:50-57`
@@ -119,14 +123,14 @@ The confirmation screen displays the raw callback URL but doesn't highlight that
 | `secure_zero` uses volatile pointer, `BRKeyClean` called after signing | PASS |
 | DigiScopeClient/HubWebSocket/DigiIdManager never reference seed material | PASS |
 
-## Automated Test Suite (34 tests, 34 passing)
+## Automated Test Suite (42 tests, 42 passing)
 
 | Test Class | Tests | Coverage |
 |------------|-------|----------|
-| `SeedIsolationTest` | 9 | NativeBridge API surface — no seed/key return methods |
+| `SeedIsolationTest` | 11 | NativeBridge API surface — no seed/key return methods, ByteArray variants |
 | `ManifestSecurityTest` | 8 | Backup, exports, permissions, network config |
 | `NetworkLeakTest` | 6 | HTTP/WS/JSON payloads contain no seed references |
-| `NativeMemorySecurityTest` | 11 | C code secure_zero, BRKeyClean, volatile, /dev/urandom |
+| `NativeMemorySecurityTest` | 17 | C code secure_zero, BRKeyClean, volatile, /dev/urandom, g_seed encapsulation |
 
 ## MobSF Static Analysis
 
