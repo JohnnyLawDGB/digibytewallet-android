@@ -587,10 +587,10 @@ class DigiScopeClient(
         title = obj.getString("title"),
         content = obj.optString("content", ""),
         author = parseUserInfo(obj.optJSONObject("author")),
-        replyCount = obj.optInt("replyCount", 0),
+        replyCount = obj.optInt("reply_count", obj.optInt("replyCount", 0)),
         upvotes = obj.optInt("upvotes", 0),
-        createdAt = obj.optLong("createdAt", 0),
-        updatedAt = obj.optLong("updatedAt", 0)
+        createdAt = parseDatetimeToMs(obj.optString("created_at", obj.optString("createdAt", ""))),
+        updatedAt = parseDatetimeToMs(obj.optString("updated_at", obj.optString("updatedAt", "")))
     )
 
     private fun parseReply(obj: JSONObject): Reply = Reply(
@@ -598,6 +598,21 @@ class DigiScopeClient(
         content = obj.getString("content"),
         author = parseUserInfo(obj.optJSONObject("author")),
         upvotes = obj.optInt("upvotes", 0),
-        createdAt = obj.optLong("createdAt", 0)
+        createdAt = parseDatetimeToMs(obj.optString("created_at", obj.optString("createdAt", "")))
     )
+
+    /** Parse SQLite DATETIME string ("2026-03-28 00:38:46") or Unix ms to epoch ms. */
+    private fun parseDatetimeToMs(value: String): Long {
+        if (value.isBlank()) return System.currentTimeMillis()
+        // Try as Unix ms (numeric)
+        value.toLongOrNull()?.let { return it }
+        // Parse as DATETIME string
+        return try {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            fmt.parse(value)?.time ?: System.currentTimeMillis()
+        } catch (e: Exception) {
+            System.currentTimeMillis()
+        }
+    }
 }
