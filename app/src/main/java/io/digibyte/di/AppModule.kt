@@ -29,7 +29,7 @@ object AppModule {
     fun provideTorManager(@ApplicationContext context: Context): TorManager = TorManager(context)
 
     @Provides @Singleton
-    fun provideKeyStoreManager(): KeyStoreManager = KeyStoreManager()
+    fun provideKeyStoreManager(@ApplicationContext context: Context): KeyStoreManager = KeyStoreManager(context)
 
     @Provides @Singleton
     fun providePinManager(@ApplicationContext context: Context): PinManager = PinManager(context)
