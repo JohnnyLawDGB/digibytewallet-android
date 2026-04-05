@@ -348,6 +348,22 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
     LOGI("_injectPriorityPeer: injected %s (%s:%u) as priority peer", hostname, ipStr, port);
 }
 
+/* ---------- injectPeerByIp ---------- */
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
+                                                           jstring ipStr, jint port) {
+    (void)thiz;
+    if (!ipStr) return;
+
+    const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
+    if (!ip) return;
+
+    _injectPriorityPeer(ip, (uint16_t)port);
+
+    (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+}
+
 /* ---------- startSync ---------- */
 
 JNIEXPORT void JNICALL

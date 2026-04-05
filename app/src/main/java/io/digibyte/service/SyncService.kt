@@ -99,6 +99,7 @@ class SyncService : Service() {
         serviceScope.launch {
             // Wait for startSyncWithTor to finish first
             walletManager.walletState.first { it is WalletState.Unlocked }
+            var lastBloomRefresh = System.currentTimeMillis()
             while (isActive) {
                 delay(30_000L)
                 val peers = NativeBridge.getPeerCount()
@@ -107,6 +108,13 @@ class SyncService : Service() {
                     NativeBridge.startSync()
                 }
                 updateNotification(NativeBridge.getSyncProgress(), peers)
+
+                // Refresh bloom peers hourly
+                val now = System.currentTimeMillis()
+                if (now - lastBloomRefresh >= BLOOM_REFRESH_INTERVAL_MS) {
+                    lastBloomRefresh = now
+                    withContext(Dispatchers.IO) { injectBloomPeers() }
+                }
             }
         }
 
@@ -164,6 +172,10 @@ class SyncService : Service() {
             val loaded = NativeBridge.loadSavedPeers(peerBytes)
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
         }
+
+        // Inject bloom-capable peers from the seeder API before starting sync.
+        // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
+        injectBloomPeers()
 
         // If wallet previously completed sync, show Connected immediately.
         // The peer manager will catch up the last few blocks silently.
@@ -326,6 +338,78 @@ class SyncService : Service() {
         }
     }
 
+    // ── Bloom peer discovery ────────────────────────────────────────────────────
+
+    /**
+     * Fetch bloom-capable peers from the seeder API and inject them into the
+     * C core's peer list. Uses a cached response (SharedPreferences) and
+     * refreshes from the network at most once per hour.
+     */
+    private fun injectBloomPeers() {
+        val prefs = getSharedPreferences("dgb_bloom_peers", MODE_PRIVATE)
+        val cachedJson = prefs.getString("peers_json", null)
+        val lastFetch = prefs.getLong("last_fetch", 0L)
+        val now = System.currentTimeMillis()
+
+        // Use cached peers if fresh enough (< 1 hour old)
+        if (cachedJson != null && now - lastFetch < BLOOM_REFRESH_INTERVAL_MS) {
+            injectPeersFromJson(cachedJson)
+            return
+        }
+
+        // Try to fetch fresh peers from the seeder API (non-blocking best-effort)
+        try {
+            val url = java.net.URL(BLOOM_SEEDER_URL)
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.requestMethod = "GET"
+
+            if (conn.responseCode == 200) {
+                val json = conn.inputStream.bufferedReader().readText()
+                prefs.edit()
+                    .putString("peers_json", json)
+                    .putLong("last_fetch", now)
+                    .apply()
+                injectPeersFromJson(json)
+                android.util.Log.i("SyncService", "Fetched bloom peers from seeder API")
+            } else {
+                // API error — use cached data if available
+                if (cachedJson != null) injectPeersFromJson(cachedJson)
+                android.util.Log.w("SyncService", "Bloom seeder API returned ${conn.responseCode}")
+            }
+            conn.disconnect()
+        } catch (e: Exception) {
+            // Network error — use cached data if available
+            if (cachedJson != null) injectPeersFromJson(cachedJson)
+            android.util.Log.w("SyncService", "Bloom seeder API unreachable: ${e.message}")
+        }
+    }
+
+    /**
+     * Parse the seeder JSON response and inject each peer into the C core.
+     * Expected format: {"peers": [{"ip": "1.2.3.4", "port": 12024, ...}], ...}
+     */
+    private fun injectPeersFromJson(json: String) {
+        try {
+            val root = org.json.JSONObject(json)
+            val peers = root.getJSONArray("peers")
+            var count = 0
+            for (i in 0 until peers.length()) {
+                val peer = peers.getJSONObject(i)
+                val ip = peer.getString("ip")
+                val port = peer.optInt("port", 12024)
+                NativeBridge.injectPeerByIp(ip, port)
+                count++
+            }
+            if (count > 0) {
+                android.util.Log.i("SyncService", "Injected $count bloom peers from seeder")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SyncService", "Failed to parse bloom peer JSON: ${e.message}")
+        }
+    }
+
     // ── Hex encoding (allocation-free) ─────────────────────────────────────────
 
     private val hexChars = "0123456789abcdef".toCharArray()
@@ -389,5 +473,9 @@ class SyncService : Service() {
         const val ERR_NO_PEERS     = 1001
         /** Peers not seen in 24 hours are pruned from the DB. */
         private const val PEER_STALE_SECONDS = 86_400L
+        /** Bloom seeder API URL — returns bloom-capable peers as JSON. */
+        private const val BLOOM_SEEDER_URL = "https://api.digiscope.me/api/peers/bloom"
+        /** Refresh bloom peer list every 60 minutes. */
+        private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
     }
 }

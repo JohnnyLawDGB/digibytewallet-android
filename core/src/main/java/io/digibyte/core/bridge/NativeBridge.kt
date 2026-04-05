@@ -61,6 +61,10 @@ object NativeBridge {
     external fun clearSocksProxy()
 
     // === Peer / sync operations ===
+    /** Inject a peer by IP address into the saved peers list for priority connection.
+     *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle. */
+    external fun injectPeerByIp(ip: String, port: Int)
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
 
