@@ -95,26 +95,18 @@ class SyncService : Service() {
             startSyncWithTor()
         }
 
-        // Poll peer count every 30s — also reconnects if peers dropped to 0.
+        // Poll peer count every 30s while syncing — reconnects if peers dropped to 0.
+        // Stops automatically when onSyncComplete fires and kills the service.
         serviceScope.launch {
-            // Wait for startSyncWithTor to finish first
             walletManager.walletState.first { it is WalletState.Unlocked }
-            var lastBloomRefresh = System.currentTimeMillis()
-            while (isActive) {
+            while (isActive && !hasReachedSynced) {
                 delay(30_000L)
                 val peers = NativeBridge.getPeerCount()
-                if (peers == 0) {
+                if (peers == 0 && !hasReachedSynced) {
                     android.util.Log.i("SyncService", "No peers connected, attempting reconnect")
                     NativeBridge.startSync()
                 }
                 updateNotification(NativeBridge.getSyncProgress(), peers)
-
-                // Refresh bloom peers hourly
-                val now = System.currentTimeMillis()
-                if (now - lastBloomRefresh >= BLOOM_REFRESH_INTERVAL_MS) {
-                    lastBloomRefresh = now
-                    withContext(Dispatchers.IO) { injectBloomPeers() }
-                }
             }
         }
 
@@ -257,11 +249,11 @@ class SyncService : Service() {
         override fun onSyncComplete() {
             hasReachedSynced = true
             walletManager.updateSyncState(SyncState.Complete)
-            updateNotification(progress = 1f, peerCount = NativeBridge.getPeerCount())
             // Persist sync-complete so restarts don't flash "Syncing 0%"
             getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
                 .edit().putBoolean("has_synced", true).apply()
-            // Persist transactions so balance is immediately spendable on restart
+            // Persist transactions and blocks, then stop the foreground service.
+            // WorkManager's SyncWorker handles periodic 15-min catch-ups from here.
             serviceScope.launch(Dispatchers.IO) {
                 val txData = NativeBridge.getSerializedTransactions()
                 if (txData != null) {
@@ -270,6 +262,12 @@ class SyncService : Service() {
                         .edit().putString("saved_transactions", hex).apply()
                     android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
                 }
+                // Disconnect peers and stop the foreground service.
+                // Bloom peer cache + WorkManager ensure we sync again quickly.
+                NativeBridge.stopSync()
+                android.util.Log.i("SyncService", "Sync complete — stopping foreground service (WorkManager takes over)")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
         }
 
