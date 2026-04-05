@@ -47,11 +47,30 @@ object AppModule {
                 // Existing install: decrypt the stored random passphrase
                 val stored = prefs.getString("encrypted_key", "")!!
                 val parts = stored.split(":")
-                val encrypted = EncryptedData(
-                    ciphertext = hexToBytes(parts[0]),
-                    iv = hexToBytes(parts[1])
-                )
-                ksm.decrypt(encrypted)
+                val alias = prefs.getString("db_key_alias", null)
+                if (alias != null) {
+                    // New-style: dedicated DB key (no auth required)
+                    val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+                    keyStore.load(null)
+                    val key = keyStore.getKey(alias, null)
+                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                    val spec = javax.crypto.spec.GCMParameterSpec(128, hexToBytes(parts[1]))
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
+                    cipher.doFinal(hexToBytes(parts[0]))
+                } else {
+                    // Legacy: uses the shared wallet key (may require auth)
+                    try {
+                        val encrypted = EncryptedData(
+                            ciphertext = hexToBytes(parts[0]),
+                            iv = hexToBytes(parts[1])
+                        )
+                        ksm.decrypt(encrypted)
+                    } catch (e: Exception) {
+                        // Auth failed — fall back to legacy passphrase
+                        android.util.Log.w("AppModule", "DB decrypt failed, using legacy passphrase: ${e.message}")
+                        "digibyte-wallet-db".toByteArray()
+                    }
+                }
             }
             dbFile.exists() -> {
                 // Phase 1 upgrade: DB already exists with the old hardcoded passphrase.
@@ -67,14 +86,38 @@ object AppModule {
             else -> {
                 // New install: generate a random 32-byte passphrase, encrypt it with
                 // an Android Keystore AES-256-GCM key, and persist the encrypted blob.
-                ksm.createKey()
+                // Use a non-authenticated key for DB passphrase — it needs to be
+                // available at app startup before any user interaction.
+                val dbKeyAlias = "dgb_db_passphrase"
                 val newPassphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
-                val encrypted = ksm.encrypt(newPassphrase)
+                val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+                keyStore.load(null)
+                if (!keyStore.containsAlias(dbKeyAlias)) {
+                    val spec = android.security.keystore.KeyGenParameterSpec.Builder(
+                        dbKeyAlias,
+                        android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or
+                        android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+                    )
+                        .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setKeySize(256)
+                        // No setUserAuthenticationRequired — DB key must be usable at startup
+                        .build()
+                    javax.crypto.KeyGenerator.getInstance(
+                        android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+                    ).apply { init(spec) }.generateKey()
+                }
+                val key = keyStore.getKey(dbKeyAlias, null)
+                val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
+                val ciphertext = cipher.doFinal(newPassphrase)
+                val iv = cipher.iv
                 prefs.edit()
                     .putString(
                         "encrypted_key",
-                        "${bytesToHex(encrypted.ciphertext)}:${bytesToHex(encrypted.iv)}"
+                        "${bytesToHex(ciphertext)}:${bytesToHex(iv)}"
                     )
+                    .putString("db_key_alias", dbKeyAlias)
                     .apply()
                 newPassphrase
             }
