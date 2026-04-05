@@ -252,8 +252,10 @@ class SyncService : Service() {
             // Persist sync-complete so restarts don't flash "Syncing 0%"
             getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
                 .edit().putBoolean("has_synced", true).apply()
-            // Persist transactions and blocks, then stop the foreground service.
+            // Persist transactions, then stop the foreground service.
             // WorkManager's SyncWorker handles periodic 15-min catch-ups from here.
+            // Note: stopSelf() triggers onDestroy() which calls NativeBridge.stopSync()
+            // — don't call stopSync here to avoid blocking the callback thread.
             serviceScope.launch(Dispatchers.IO) {
                 val txData = NativeBridge.getSerializedTransactions()
                 if (txData != null) {
@@ -262,9 +264,6 @@ class SyncService : Service() {
                         .edit().putString("saved_transactions", hex).apply()
                     android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
                 }
-                // Disconnect peers and stop the foreground service.
-                // Bloom peer cache + WorkManager ensure we sync again quickly.
-                NativeBridge.stopSync()
                 android.util.Log.i("SyncService", "Sync complete — stopping foreground service (WorkManager takes over)")
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
