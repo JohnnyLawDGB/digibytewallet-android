@@ -252,10 +252,10 @@ class SyncService : Service() {
             // Persist sync-complete so restarts don't flash "Syncing 0%"
             getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
                 .edit().putBoolean("has_synced", true).apply()
-            // Persist transactions, then stop the foreground service.
-            // WorkManager's SyncWorker handles periodic 15-min catch-ups from here.
-            // Note: stopSelf() triggers onDestroy() which calls NativeBridge.stopSync()
-            // — don't call stopSync here to avoid blocking the callback thread.
+            // Persist transactions and drop the foreground notification.
+            // Peers stay connected so the user can send/receive while the app
+            // is open. The service dies naturally when the activity is destroyed.
+            // WorkManager handles background catch-ups after that.
             serviceScope.launch(Dispatchers.IO) {
                 val txData = NativeBridge.getSerializedTransactions()
                 if (txData != null) {
@@ -264,9 +264,8 @@ class SyncService : Service() {
                         .edit().putString("saved_transactions", hex).apply()
                     android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
                 }
-                android.util.Log.i("SyncService", "Sync complete — stopping foreground service (WorkManager takes over)")
+                android.util.Log.i("SyncService", "Sync complete — dropping foreground notification, peers stay connected")
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
             }
         }
 
