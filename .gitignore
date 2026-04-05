@@ -74,3 +74,7 @@ crash.txt
 /fastlane/
 fastlane/
 .superpowers/
+
+# Test suite
+test-fixtures/*.apk
+test-results/
