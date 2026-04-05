@@ -77,6 +77,7 @@ class OnboardingViewModel @Inject constructor(
         val phrase = _mnemonic.joinToString(" ")
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
+            pinManager.clearPin()
             val success = withContext(Dispatchers.Default) {
                 walletManager.createWallet(phrase)
             }
@@ -92,6 +93,9 @@ class OnboardingViewModel @Inject constructor(
         val ts = _recoveryTimestamp
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
+            // Clear any stale PIN from a previous install so the user
+            // is routed to PIN setup, not the unlock screen.
+            pinManager.clearPin()
             val success = withContext(Dispatchers.Default) {
                 walletManager.recoverWallet(phrase, ts)
             }

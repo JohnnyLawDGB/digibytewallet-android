@@ -105,8 +105,16 @@ fun AppNavigation(
     val startDestination = remember(walletState) {
         when (walletState) {
             is WalletState.NoWallet -> "onboarding"
-            is WalletState.Locked   -> "unlock"
-            is WalletState.Unlocked -> Screen.Wallet.route
+            is WalletState.Locked   -> {
+                // If wallet exists but no PIN is set (e.g. recovery completed
+                // but PIN setup was skipped or old PIN was cleared), route to
+                // PIN setup instead of the unlock screen.
+                if (pinManager.hasPin()) "unlock" else "pin_setup"
+            }
+            is WalletState.Unlocked -> {
+                // Wallet recovered but PIN not yet set — route to PIN setup
+                if (!pinManager.hasPin()) "pin_setup" else Screen.Wallet.route
+            }
         }
     }
 
