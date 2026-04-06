@@ -89,15 +89,20 @@ fun PinSetupScreen(
                                             isPinSaving = true
                                             viewModel.setPin(currentInput) { pinSuccess ->
                                                 if (pinSuccess) {
-                                                    // NOW create the wallet in the C core
-                                                    viewModel.createWallet { walletSuccess ->
+                                                    // Create the wallet if not already created.
+                                                    // The mnemonic is still in the ViewModel
+                                                    // from the seed display/verify flow.
+                                                    val afterWalletReady: (Boolean) -> Unit = { success ->
                                                         isPinSaving = false
-                                                        if (walletSuccess) {
+                                                        if (success) {
+                                                            // Kick off sync now that wallet is created.
+                                                            // SyncService may be waiting for isWalletLoaded().
+                                                            io.digibyte.core.bridge.NativeBridge.startSync()
                                                             if (biometricAvailable && activity != null) {
                                                                 step = PinStep.BIOMETRIC
                                                             } else {
                                                                 navController.navigate("wallet") {
-                                                                    popUpTo("onboarding") { inclusive = true }
+                                                                    popUpTo(navController.graph.startDestinationId) { inclusive = true }
                                                                 }
                                                             }
                                                         } else {
@@ -106,6 +111,13 @@ fun PinSetupScreen(
                                                             step = PinStep.ENTER
                                                             firstPin = ""
                                                         }
+                                                    }
+                                                    // If wallet already exists (recovery flow or
+                                                    // recomposition), skip creation and proceed.
+                                                    if (io.digibyte.core.bridge.NativeBridge.isWalletLoaded()) {
+                                                        afterWalletReady(true)
+                                                    } else {
+                                                        viewModel.createWallet(afterWalletReady)
                                                     }
                                                 } else {
                                                     isPinSaving = false

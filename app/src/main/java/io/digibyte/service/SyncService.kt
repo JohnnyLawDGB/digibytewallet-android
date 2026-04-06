@@ -138,16 +138,20 @@ class SyncService : Service() {
             torProxyActive = false
         }
 
-        // Wait for the wallet to be created/restored (PIN entry + seed restore).
-        // Poll the C core directly — WalletManager state may already be Unlocked
-        // but the native wallet needs time to initialize.
-        while (NativeBridge.getLastBlockHeight() == 0L && NativeBridge.getTransactionCount() == 0) {
-            // getLastBlockHeight returns 0 when no peer manager exists (no wallet).
-            // Once createWallet succeeds in the C core, we can proceed.
-            if (walletManager.walletState.value is WalletState.Unlocked) break
+        // Wait for the C core wallet to be fully initialized.
+        // The Kotlin WalletState may be Unlocked before the native wallet
+        // is ready (race between createWalletFromBytes and SyncService startup).
+        // Poll isWalletLoaded() which checks g_wallet != NULL in the C core.
+        var waitCount = 0
+        while (!NativeBridge.isWalletLoaded()) {
             delay(500L)
+            waitCount++
+            if (waitCount > 120) { // 60 seconds max wait
+                android.util.Log.w("SyncService", "Wallet not loaded after 60s — giving up")
+                return
+            }
         }
-        android.util.Log.i("SyncService", "Wallet ready, starting sync")
+        android.util.Log.i("SyncService", "Wallet ready, starting sync (waited ${waitCount * 500}ms)")
 
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
