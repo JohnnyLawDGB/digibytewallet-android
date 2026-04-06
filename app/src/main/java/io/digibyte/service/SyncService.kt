@@ -268,8 +268,12 @@ class SyncService : Service() {
                         .edit().putString("saved_transactions", hex).apply()
                     android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
                 }
-                android.util.Log.i("SyncService", "Sync complete — dropping foreground notification, peers stay connected")
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                android.util.Log.i("SyncService", "Sync complete — keeping foreground service for peer connections")
+                // Do NOT call stopForeground — Android kills the service without
+                // the notification, which triggers onDestroy → stopSync → peers drop.
+                // Update the notification to show connected status instead.
+                val peers = NativeBridge.getPeerCount()
+                updateNotification(1f, peers)
             }
         }
 
