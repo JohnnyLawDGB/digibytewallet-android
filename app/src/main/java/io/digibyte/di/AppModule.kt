@@ -64,12 +64,8 @@ object AppModule {
         context.getDatabasePath("wallet.db-wal").delete()
         // Clear DB key prefs
         context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE).edit().clear().apply()
-        // Clear PIN store file (EncryptedSharedPreferences)
-        val pinFile = java.io.File(context.filesDir.parent, "shared_prefs/dgb_pin_store.xml")
-        if (pinFile.exists()) {
-            pinFile.delete()
-            android.util.Log.w("AppModule", "Deleted stale PIN store")
-        }
+        // NOTE: do NOT delete the PIN store here. Clearing the PIN locks the
+        // user out of their wallet. Only the recovery flow should clear the PIN.
         // Clear sync data (blocks/peers will be re-downloaded)
         context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).edit().clear().apply()
         // Clear bloom peer cache

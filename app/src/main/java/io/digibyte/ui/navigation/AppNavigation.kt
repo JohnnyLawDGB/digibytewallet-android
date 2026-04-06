@@ -103,19 +103,28 @@ fun AppNavigation(
 
     // Determine start destination based on wallet state at launch
     val startDestination = remember(walletState) {
-        when (walletState) {
+        val hasPin = try { pinManager.hasPin() } catch (e: Exception) {
+            android.util.Log.e("AppNavigation", "hasPin() failed: ${e.message}")
+            false
+        }
+        val dest = when (walletState) {
             is WalletState.NoWallet -> "onboarding"
             is WalletState.Locked   -> {
-                // If wallet exists but no PIN is set (e.g. recovery completed
-                // but PIN setup was skipped or old PIN was cleared), route to
-                // PIN setup instead of the unlock screen.
-                if (pinManager.hasPin()) "unlock" else "pin_setup"
+                if (hasPin) {
+                    "unlock"
+                } else {
+                    // Wallet exists but PIN was lost. Restore the wallet from
+                    // disk first, then route to pin_setup to set a new PIN.
+                    // The wallet is already on disk — don't go to onboarding.
+                    android.util.Log.w("AppNavigation", "Wallet exists but no PIN — restoring and routing to pin_setup")
+                    walletManager.restoreFromDisk()
+                    "pin_setup"
+                }
             }
-            is WalletState.Unlocked -> {
-                // Wallet recovered but PIN not yet set — route to PIN setup
-                if (!pinManager.hasPin()) "pin_setup" else Screen.Wallet.route
-            }
+            is WalletState.Unlocked -> if (!hasPin) "pin_setup" else Screen.Wallet.route
         }
+        android.util.Log.i("AppNavigation", "startDestination=$dest walletState=$walletState hasPin=$hasPin")
+        dest
     }
 
     // Helper: start SPV sync foreground service whenever the wallet is unlocked.
