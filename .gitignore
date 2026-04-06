@@ -78,3 +78,5 @@ fastlane/
 # Test suite
 test-fixtures/*.apk
 test-results/
+dgb-wallet-release.jks
+*.jks
