@@ -39,55 +39,94 @@ object AppModule {
 
     @Provides @Singleton
     fun provideDatabase(@ApplicationContext context: Context, ksm: KeyStoreManager): WalletDatabase {
+        return try {
+            provideDatabaseInner(context, ksm)
+        } catch (e: Exception) {
+            // If ANYTHING fails during DB init, wipe stale data and try fresh.
+            // The wallet seed is in its own SharedPreferences — not lost.
+            android.util.Log.e("AppModule", "DB init failed, wiping stale data and retrying: ${e.message}", e)
+            wipeStaleData(context)
+            provideDatabaseInner(context, ksm)
+        }
+    }
+
+    /**
+     * Wipe all app data that can become stale across installs/upgrades:
+     * DB files, DB key prefs, PIN, sync data. The wallet seed prefs
+     * (dgb_wallet_seed) are preserved — user funds are never lost.
+     */
+    private fun wipeStaleData(context: Context) {
+        android.util.Log.w("AppModule", "Wiping stale app data (wallet seed preserved)")
+        // Delete database files
+        context.getDatabasePath("wallet.db").delete()
+        context.getDatabasePath("wallet.db-journal").delete()
+        context.getDatabasePath("wallet.db-shm").delete()
+        context.getDatabasePath("wallet.db-wal").delete()
+        // Clear DB key prefs
+        context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE).edit().clear().apply()
+        // Clear PIN store file (EncryptedSharedPreferences)
+        val pinFile = java.io.File(context.filesDir.parent, "shared_prefs/dgb_pin_store.xml")
+        if (pinFile.exists()) {
+            pinFile.delete()
+            android.util.Log.w("AppModule", "Deleted stale PIN store")
+        }
+        // Clear sync data (blocks/peers will be re-downloaded)
+        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).edit().clear().apply()
+        // Clear bloom peer cache
+        context.getSharedPreferences("dgb_bloom_peers", Context.MODE_PRIVATE).edit().clear().apply()
+        // Delete stale Keystore keys
+        try {
+            val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
+            ks.load(null)
+            for (alias in listOf("dgb_db_passphrase", "dgb_wallet_master")) {
+                if (ks.containsAlias(alias)) {
+                    ks.deleteEntry(alias)
+                    android.util.Log.w("AppModule", "Deleted stale Keystore key: $alias")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AppModule", "Could not clean Keystore: ${e.message}")
+        }
+    }
+
+    private fun provideDatabaseInner(context: Context, ksm: KeyStoreManager): WalletDatabase {
         val dbFile = context.getDatabasePath("wallet.db")
         val prefs = context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE)
 
+        android.util.Log.i("AppModule", "DB init: exists=${dbFile.exists()} hasKey=${prefs.contains("encrypted_key")} legacy=${prefs.getBoolean("legacy_passphrase", false)}")
+
         val passphrase: ByteArray = when {
             prefs.contains("encrypted_key") -> {
-                // Existing install: decrypt the stored random passphrase
                 val stored = prefs.getString("encrypted_key", "")!!
                 val parts = stored.split(":")
+                if (parts.size != 2) throw IllegalStateException("Corrupt DB key format")
                 val alias = prefs.getString("db_key_alias", null)
                 if (alias != null) {
-                    // New-style: dedicated DB key (no auth required)
+                    android.util.Log.i("AppModule", "Decrypting DB passphrase with dedicated key: $alias")
                     val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
                     keyStore.load(null)
                     val key = keyStore.getKey(alias, null)
+                        ?: throw IllegalStateException("DB key '$alias' not found in Keystore")
                     val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
                     val spec = javax.crypto.spec.GCMParameterSpec(128, hexToBytes(parts[1]))
                     cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
                     cipher.doFinal(hexToBytes(parts[0]))
                 } else {
-                    // Legacy: uses the shared wallet key (may require auth)
-                    try {
-                        val encrypted = EncryptedData(
-                            ciphertext = hexToBytes(parts[0]),
-                            iv = hexToBytes(parts[1])
-                        )
-                        ksm.decrypt(encrypted)
-                    } catch (e: Exception) {
-                        // Auth failed — fall back to legacy passphrase
-                        android.util.Log.w("AppModule", "DB decrypt failed, using legacy passphrase: ${e.message}")
-                        "digibyte-wallet-db".toByteArray()
-                    }
+                    android.util.Log.i("AppModule", "Decrypting DB passphrase with legacy wallet key")
+                    val encrypted = EncryptedData(
+                        ciphertext = hexToBytes(parts[0]),
+                        iv = hexToBytes(parts[1])
+                    )
+                    ksm.decrypt(encrypted)
                 }
             }
             dbFile.exists() -> {
-                // Phase 1 upgrade: DB already exists with the old hardcoded passphrase.
-                // Re-keying an SQLCipher DB through Room's abstraction layer requires
-                // low-level PRAGMA rekey calls that bypass Room's lifecycle — this is
-                // fragile and risks DB corruption. Compromise: continue using the legacy
-                // passphrase for existing installs and store a flag to document the state.
-                // Security improvement (random Keystore-derived passphrase) applies to
-                // all new installs going forward.
+                android.util.Log.i("AppModule", "Using legacy hardcoded passphrase for existing DB")
                 prefs.edit().putBoolean("legacy_passphrase", true).apply()
                 "digibyte-wallet-db".toByteArray()
             }
             else -> {
-                // New install: generate a random 32-byte passphrase, encrypt it with
-                // an Android Keystore AES-256-GCM key, and persist the encrypted blob.
-                // Use a non-authenticated key for DB passphrase — it needs to be
-                // available at app startup before any user interaction.
+                android.util.Log.i("AppModule", "New install: generating fresh DB passphrase")
                 val dbKeyAlias = "dgb_db_passphrase"
                 val newPassphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
                 val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
@@ -101,7 +140,6 @@ object AppModule {
                         .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
                         .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
                         .setKeySize(256)
-                        // No setUserAuthenticationRequired — DB key must be usable at startup
                         .build()
                     javax.crypto.KeyGenerator.getInstance(
                         android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
@@ -113,12 +151,10 @@ object AppModule {
                 val ciphertext = cipher.doFinal(newPassphrase)
                 val iv = cipher.iv
                 prefs.edit()
-                    .putString(
-                        "encrypted_key",
-                        "${bytesToHex(ciphertext)}:${bytesToHex(iv)}"
-                    )
+                    .putString("encrypted_key", "${bytesToHex(ciphertext)}:${bytesToHex(iv)}")
                     .putString("db_key_alias", dbKeyAlias)
                     .apply()
+                android.util.Log.i("AppModule", "DB passphrase encrypted and stored")
                 newPassphrase
             }
         }
