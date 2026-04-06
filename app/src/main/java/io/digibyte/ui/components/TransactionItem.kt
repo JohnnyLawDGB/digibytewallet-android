@@ -31,12 +31,16 @@ fun TransactionItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isSelfSend = tx.sent > 0 && tx.received > 0
+    // Self-send: nearly all DGB comes back (only the fee leaves).
+    // Regular send with change also has received > 0, so check if the
+    // net loss (sent - received) is just the fee (< 1 DGB threshold).
+    val netLoss = tx.sent - tx.received
+    val isSelfSend = tx.sent > 0 && tx.received > 0 && netLoss > 0 && netLoss < 100_000_000L
     val isSend = !isSelfSend && tx.amount < 0
 
-    // For self-sends, amount = received - sent = -(fee). Show the fee as
-    // the cost. The full DGB amount is still in the wallet — only the fee left.
-    val amountAbs = kotlin.math.abs(tx.amount)
+    // For self-sends, amount = received - sent = -(fee). Show the fee
+    // since that's the only DGB that actually left the wallet.
+    val amountAbs = if (isSelfSend) tx.fee else kotlin.math.abs(tx.amount)
     val dgb = amountAbs / 100_000_000.0
     val amountFormatted = NumberFormat.getInstance().apply {
         maximumFractionDigits = 8
