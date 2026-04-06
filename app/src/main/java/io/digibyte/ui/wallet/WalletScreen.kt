@@ -327,6 +327,17 @@ private fun TorIndicator(torState: TorState) {
 
 @Composable
 private fun SyncIndicator(syncState: SyncState) {
+    // Live peer count — polled alongside balance in WalletViewModel
+    val peerCount = remember { mutableIntStateOf(0) }
+    val blockHeight = remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            peerCount.intValue = io.digibyte.core.bridge.NativeBridge.getPeerCount()
+            blockHeight.longValue = io.digibyte.core.bridge.NativeBridge.getLastBlockHeight()
+            kotlinx.coroutines.delay(5000L)
+        }
+    }
+
     when (syncState) {
         is SyncState.Syncing -> {
             val pct = (syncState.progress * 100).toInt()
@@ -341,26 +352,61 @@ private fun SyncIndicator(syncState: SyncState) {
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Syncing $pct%",
+                    text = "Syncing $pct% · ${peerCount.intValue} peers · Block ${syncState.blockHeight}",
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent.copy(alpha = 0.85f)
                 )
             }
         }
         is SyncState.Complete -> {
+            val peers = peerCount.intValue
+            val block = blockHeight.longValue
+            val statusText = when {
+                peers > 0 && block > 0 -> "Connected · $peers peers · Block $block"
+                peers > 0 -> "Connected · $peers peers"
+                else -> "Connected"
+            }
             Text(
-                text = "Connected",
+                text = statusText,
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF4CAF50).copy(alpha = 0.85f)
             )
         }
+        is SyncState.Rescanning -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 2.dp,
+                    color = DigiByteAccent
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Rescanning · ${peerCount.intValue} peers",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteAccent.copy(alpha = 0.85f)
+                )
+            }
+        }
         is SyncState.Failed -> {
             Text(
-                text = "Sync failed",
+                text = "Disconnected · 0 peers",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
             )
         }
-        else -> { /* Idle — show nothing */ }
+        else -> {
+            // Idle — show peer count if available
+            val peers = peerCount.intValue
+            if (peers > 0) {
+                Text(
+                    text = "Connecting · $peers peers",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteAccent.copy(alpha = 0.85f)
+                )
+            }
+        }
     }
 }
