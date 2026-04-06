@@ -23,7 +23,7 @@ PACKAGE="io.digibyte"
 ACTIVITY="$PACKAGE/.MainActivity"
 
 # API levels to test
-ALL_API_LEVELS=(26 28 33 34 36)
+ALL_API_LEVELS=(28 33 34 35)
 
 # Parse arguments
 SKIP_BUILD=false

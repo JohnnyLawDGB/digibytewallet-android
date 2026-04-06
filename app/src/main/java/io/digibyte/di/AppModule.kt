@@ -93,68 +93,48 @@ object AppModule {
         val dbFile = context.getDatabasePath("wallet.db")
         val prefs = context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE)
 
-        android.util.Log.i("AppModule", "DB init: exists=${dbFile.exists()} hasKey=${prefs.contains("encrypted_key")} legacy=${prefs.getBoolean("legacy_passphrase", false)}")
+        android.util.Log.i("AppModule", "DB init: dbExists=${dbFile.exists()} hasKey=${prefs.contains("encrypted_key")}")
 
         val passphrase: ByteArray = when {
             prefs.contains("encrypted_key") -> {
+                // Existing install: decrypt the stored passphrase using the wallet key.
+                // The wallet key no longer requires user authentication, so this works
+                // on all API levels without UserNotAuthenticatedException.
+                android.util.Log.i("AppModule", "Decrypting stored DB passphrase")
                 val stored = prefs.getString("encrypted_key", "")!!
                 val parts = stored.split(":")
                 if (parts.size != 2) throw IllegalStateException("Corrupt DB key format")
+
+                // Handle both old dedicated DB key and wallet key
                 val alias = prefs.getString("db_key_alias", null)
                 if (alias != null) {
-                    android.util.Log.i("AppModule", "Decrypting DB passphrase with dedicated key: $alias")
                     val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
                     keyStore.load(null)
                     val key = keyStore.getKey(alias, null)
-                        ?: throw IllegalStateException("DB key '$alias' not found in Keystore")
+                        ?: throw IllegalStateException("Keystore key '$alias' missing")
                     val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-                    val spec = javax.crypto.spec.GCMParameterSpec(128, hexToBytes(parts[1]))
-                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key,
+                        javax.crypto.spec.GCMParameterSpec(128, hexToBytes(parts[1])))
                     cipher.doFinal(hexToBytes(parts[0]))
                 } else {
-                    android.util.Log.i("AppModule", "Decrypting DB passphrase with legacy wallet key")
-                    val encrypted = EncryptedData(
-                        ciphertext = hexToBytes(parts[0]),
-                        iv = hexToBytes(parts[1])
-                    )
-                    ksm.decrypt(encrypted)
+                    ksm.decrypt(EncryptedData(hexToBytes(parts[0]), hexToBytes(parts[1])))
                 }
             }
             dbFile.exists() -> {
-                android.util.Log.i("AppModule", "Using legacy hardcoded passphrase for existing DB")
-                prefs.edit().putBoolean("legacy_passphrase", true).apply()
+                // Legacy DB from earlier version — use hardcoded passphrase
+                android.util.Log.i("AppModule", "Legacy DB — using hardcoded passphrase")
                 "digibyte-wallet-db".toByteArray()
             }
             else -> {
-                android.util.Log.i("AppModule", "New install: generating fresh DB passphrase")
-                val dbKeyAlias = "dgb_db_passphrase"
+                // New install: generate random passphrase, encrypt with wallet key
+                android.util.Log.i("AppModule", "New install — generating DB passphrase")
+                ksm.createKey()
                 val newPassphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
-                val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
-                keyStore.load(null)
-                if (!keyStore.containsAlias(dbKeyAlias)) {
-                    val spec = android.security.keystore.KeyGenParameterSpec.Builder(
-                        dbKeyAlias,
-                        android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or
-                        android.security.keystore.KeyProperties.PURPOSE_DECRYPT
-                    )
-                        .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setKeySize(256)
-                        .build()
-                    javax.crypto.KeyGenerator.getInstance(
-                        android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
-                    ).apply { init(spec) }.generateKey()
-                }
-                val key = keyStore.getKey(dbKeyAlias, null)
-                val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
-                val ciphertext = cipher.doFinal(newPassphrase)
-                val iv = cipher.iv
+                val encrypted = ksm.encrypt(newPassphrase)
                 prefs.edit()
-                    .putString("encrypted_key", "${bytesToHex(ciphertext)}:${bytesToHex(iv)}")
-                    .putString("db_key_alias", dbKeyAlias)
+                    .putString("encrypted_key",
+                        "${bytesToHex(encrypted.ciphertext)}:${bytesToHex(encrypted.iv)}")
                     .apply()
-                android.util.Log.i("AppModule", "DB passphrase encrypted and stored")
                 newPassphrase
             }
         }

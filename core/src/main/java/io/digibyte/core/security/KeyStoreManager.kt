@@ -1,6 +1,5 @@
 package io.digibyte.core.security
 
-import android.app.KeyguardManager
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -32,37 +31,27 @@ class KeyStoreManager(private val context: Context? = null) {
 
     private val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
 
-    /** Returns true if the device has a secure lock screen (PIN/pattern/password/biometric). */
-    private fun hasSecureLockScreen(): Boolean {
-        val ctx = context ?: return false
-        val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        return km?.isDeviceSecure == true
-    }
-
     fun createKey() {
         if (keyStore.containsAlias(KEY_ALIAS)) return
 
-        val deviceSecure = hasSecureLockScreen()
-
-        val builder = KeyGenParameterSpec.Builder(
+        // No setUserAuthenticationRequired — the key must be usable at any
+        // point during app lifecycle without requiring a recent device unlock.
+        // Android Keystore auth binding (10-second window) has caused crashes
+        // on API 28 (UserNotAuthenticatedException), API 33 (no lock screen),
+        // and API 35 (auth state inconsistency). The app enforces its own
+        // PIN lock for access control. The seed is still AES-256-GCM encrypted
+        // with a hardware-backed key — just not bound to device unlock timing.
+        val spec = KeyGenParameterSpec.Builder(
             KEY_ALIAS,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-
-        if (deviceSecure) {
-            builder.setInvalidatedByBiometricEnrollment(true)
-                .setUserAuthenticationRequired(true)
-                .setUserAuthenticationValidityDurationSeconds(10)
-        }
-        // If no secure lock screen, create key without user authentication.
-        // Less secure, but the app remains functional. The seed is still
-        // AES-256-GCM encrypted — just not bound to device unlock.
+            .build()
 
         KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
-            .apply { init(builder.build()) }
+            .apply { init(spec) }
             .generateKey()
     }
 
