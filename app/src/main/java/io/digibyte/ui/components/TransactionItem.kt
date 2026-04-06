@@ -34,12 +34,9 @@ fun TransactionItem(
     val isSelfSend = tx.sent > 0 && tx.received > 0
     val isSend = !isSelfSend && tx.amount < 0
 
-    // For self-sends, show the received amount (what was transferred to self)
-    // minus the change output. The simplest proxy: received - (sent - fee) would be 0,
-    // so show the received amount directly (includes change, but that's what moved).
-    // Actually, for a self-send the user cares about the amount they sent to themselves.
-    // Since amount = received - sent = -(fee), just show the fee as the cost.
-    val amountAbs = if (isSelfSend) tx.received else kotlin.math.abs(tx.amount)
+    // For self-sends, amount = received - sent = -(fee). Show the fee as
+    // the cost. The full DGB amount is still in the wallet — only the fee left.
+    val amountAbs = kotlin.math.abs(tx.amount)
     val dgb = amountAbs / 100_000_000.0
     val amountFormatted = NumberFormat.getInstance().apply {
         maximumFractionDigits = 8
@@ -52,7 +49,7 @@ fun TransactionItem(
         else       -> DigiByteGreen
     }
     val amountPrefix = when {
-        isSelfSend -> "↻ "
+        isSelfSend -> "Fee: "
         isSend     -> "- "
         else       -> "+ "
     }
