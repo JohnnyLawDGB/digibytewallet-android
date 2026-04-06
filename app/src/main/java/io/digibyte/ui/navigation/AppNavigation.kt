@@ -208,10 +208,17 @@ fun AppNavigation(
             }
 
             composable("pin_setup") { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                // Get the shared onboarding ViewModel if we came from the onboarding
+                // flow. If pin_setup is the startDestination (wallet exists but no PIN),
+                // "onboarding" won't be on the back stack — use own entry instead.
+                val hasOnboarding = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry("onboarding") }.isSuccess
                 }
-                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                val vmEntry = remember(backStackEntry) {
+                    if (hasOnboarding) navController.getBackStackEntry("onboarding")
+                    else backStackEntry
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(vmEntry)
                 PinSetupScreen(
                     navController = navController,
                     biometricAuth = biometricAuth,
