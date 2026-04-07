@@ -22,6 +22,13 @@ data class TransactionEntity(
         if (this === other) return true
         if (other !is TransactionEntity) return false
         return txid == other.txid
+            && confirmations == other.confirmations
+            && amount == other.amount
+            && blockHeight == other.blockHeight
     }
-    override fun hashCode() = txid.hashCode()
+    override fun hashCode(): Int {
+        var result = txid.hashCode()
+        result = 31 * result + confirmations
+        return result
+    }
 }

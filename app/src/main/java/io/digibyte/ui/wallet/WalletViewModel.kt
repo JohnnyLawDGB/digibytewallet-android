@@ -121,10 +121,13 @@ class WalletViewModel @Inject constructor(
                 // Poll transactions
                 var currentHeight = NativeBridge.getLastBlockHeight()
                 val estHeight = NativeBridge.getEstimatedBlockHeight()
-                // Use the highest available height — last synced, estimated (network),
-                // or persisted from the previous session.
                 if (estHeight > currentHeight) currentHeight = estHeight
                 val txDetails = NativeBridge.getTransactionDetails()
+                // Log every ~60s for debugging
+                if (System.currentTimeMillis() % 60000 < 5000) {
+                    android.util.Log.d("WalletVM", "heights: last=$currentHeight est=$estHeight peers=${NativeBridge.getPeerCount()}")
+                    txDetails.trim().lines().take(5).forEach { android.util.Log.d("WalletVM", "tx: $it") }
+                }
                 if (txDetails.isNotEmpty()) {
                     // First pass: find the highest tx block height as a floor.
                     // This ensures confirmations are computed correctly even before
