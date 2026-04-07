@@ -15,8 +15,12 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import io.digibyte.core.AppUpdate
+import io.digibyte.core.UpdateChecker
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
+import io.digibyte.ui.components.UpdateDialog
+import okhttp3.OkHttpClient
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.digiscope.DigiScopeClient
 import io.digibyte.core.security.BiometricAuth
@@ -41,6 +45,7 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var walletConfigDao: WalletConfigDao
     @Inject lateinit var digiScopeClient: DigiScopeClient
+    @Inject lateinit var okHttpClient: OkHttpClient
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -110,6 +115,22 @@ class MainActivity : FragmentActivity() {
                                 Text("Not now")
                             }
                         }
+                    )
+                }
+
+                // Update check
+                var pendingUpdate by remember { mutableStateOf<AppUpdate?>(null) }
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    val currentVersion = try {
+                        packageManager.getPackageInfo(packageName, 0).versionName ?: "0"
+                    } catch (e: Exception) { "0" }
+                    val update = UpdateChecker(okHttpClient).checkForUpdate(currentVersion)
+                    if (update != null) pendingUpdate = update
+                }
+                if (pendingUpdate != null) {
+                    UpdateDialog(
+                        update = pendingUpdate!!,
+                        onDismiss = { pendingUpdate = null }
                     )
                 }
 
