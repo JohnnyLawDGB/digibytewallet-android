@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.1.1](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.1.0...v3.1.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* DigiRunner game shows during ALL sync states, not just Syncing ([4b31448](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/4b31448aeea6018ed89881b580cbea63f81c18e8))
+* double PIN prompt — startDestination computed once, not on state change ([08e3fcf](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/08e3fcfc959ba486759558fa5ad5f54a9c2a3eb9))
+* rescan resets hasReachedSynced so progress + DigiRunner show ([bb97e79](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/bb97e791ddafaf16a63e3ba860b0089b69283782))
+* sync progress visible on new wallets — poll-driven state updates ([6782c46](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/6782c46b597f4336924d78f8f35dcc52cb3d1922))
+* SyncService starts on wallet screen arrival, not just startDestination ([e2fe10c](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/e2fe10c478e3a946119cb0aea50e403955bc0b28))
+* visible sync progress — start from block ~20M, show block height always ([98c5721](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/98c5721ff40cc3c911c9119a33f4441291ca76e9))
+
 ## [3.1.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.0.16...v3.1.0) (2026-04-07)
 
 
