@@ -101,8 +101,10 @@ fun AppNavigation(
     // Observe wallet state to gate navigation
     val walletState by walletManager.walletState.collectAsState()
 
-    // Determine start destination based on wallet state at launch
-    val startDestination = remember(walletState) {
+    // Determine start destination ONCE at launch — do not recompute
+    // when walletState changes mid-session (causes double PIN prompt).
+    val startDestination = remember {
+        val walletState = walletManager.walletState.value
         val hasPin = try { pinManager.hasPin() } catch (e: Exception) {
             android.util.Log.e("AppNavigation", "hasPin() failed: ${e.message}")
             false
