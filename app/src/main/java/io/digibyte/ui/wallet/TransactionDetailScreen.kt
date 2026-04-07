@@ -3,6 +3,8 @@ package io.digibyte.ui.wallet
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -206,6 +208,23 @@ private fun TransactionDetailContent(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // View on block explorer
+        Button(
+            onClick = {
+                val url = "https://chainz.cryptoid.info/dgb/tx.dws?${tx.txid}"
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DigiByteAccent)
+        ) {
+            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("View on Explorer", fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedButton(
             onClick = onNavigateBack,
