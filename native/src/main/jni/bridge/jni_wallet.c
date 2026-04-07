@@ -217,11 +217,10 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     g_seedValid = 1;
     g_mpk = mpk;
     g_mpkValid = 1;
-    /* Set creation time to 24 hours ago so the wallet scans recent blocks.
-     * This ensures: (1) any DGB sent during wallet setup is detected,
-     * (2) the UI shows meaningful sync progress instead of jumping to "Connected",
-     * (3) the bloom filter rescan covers recent block history. */
-    g_walletCreationTime = (uint32_t)(time(NULL) - 86400);
+    /* Set creation time to block ~20,000,000 (Feb 2025) so new wallets
+     * show meaningful sync progress with DigiRunner game. Scanning ~3M
+     * blocks takes ~20-30 minutes — good balance of UX and security. */
+    g_walletCreationTime = 1738368000;  /* 2025-02-01 00:00:00 UTC */
     g_peerManagerNeedsRecreate = 1;
 
     secure_zero(seed, sizeof(seed));

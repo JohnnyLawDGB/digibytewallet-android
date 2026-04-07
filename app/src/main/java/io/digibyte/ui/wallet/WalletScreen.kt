@@ -401,14 +401,33 @@ private fun SyncIndicator(syncState: SyncState) {
             )
         }
         else -> {
-            // Idle — show peer count if available
+            // Idle or between sync states — show whatever info we have
             val peers = peerCount.intValue
-            if (peers > 0) {
-                Text(
-                    text = "Connecting · $peers peers",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = DigiByteAccent.copy(alpha = 0.85f)
-                )
+            val block = blockHeight.longValue
+            val text = when {
+                peers > 0 && block > 0 -> "Syncing · $peers peers · Block $block"
+                peers > 0 -> "Connecting · $peers peers"
+                else -> null
+            }
+            if (text != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (block > 0) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 2.dp,
+                            color = DigiByteAccent
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DigiByteAccent.copy(alpha = 0.85f)
+                    )
+                }
             }
         }
     }
