@@ -2,6 +2,12 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+detekt {
+    config.setFrom("$rootDir/config/detekt.yml")
+    buildUponDefaultConfig = true
 }
 
 android {

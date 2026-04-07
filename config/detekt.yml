@@ -1,0 +1,31 @@
+build:
+  maxIssues: 9999  # Report only — tighten as we fix issues
+
+exceptions:
+  TooGenericExceptionThrown:
+    active: false
+  TooGenericExceptionCaught:
+    active: false
+  SwallowedException:
+    active: false
+
+complexity:
+  LongMethod:
+    threshold: 100
+  LongParameterList:
+    functionThreshold: 10
+    constructorThreshold: 10
+  TooManyFunctions:
+    thresholdInFiles: 30
+    thresholdInClasses: 30
+
+style:
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    maxLineLength: 150
+  WildcardImport:
+    active: false
+  UnusedPrivateMember:
+    active: false
+
