@@ -15,7 +15,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.digibyte.core.db.entity.TransactionEntity
-import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
 import java.text.NumberFormat
@@ -31,32 +30,16 @@ fun TransactionItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Self-send: nearly all DGB comes back (only the fee leaves).
-    // Regular send with change also has received > 0, so check if the
-    // net loss (sent - received) is just the fee (< 1 DGB threshold).
-    val netLoss = tx.sent - tx.received
-    val isSelfSend = tx.sent > 0 && tx.received > 0 && netLoss > 0 && netLoss < 100_000_000L
-    val isSend = !isSelfSend && tx.amount < 0
-
-    // For self-sends, amount = received - sent = -(fee). Show the fee
-    // since that's the only DGB that actually left the wallet.
-    val amountAbs = if (isSelfSend) tx.fee else kotlin.math.abs(tx.amount)
+    val isSend = tx.amount < 0
+    val amountAbs = kotlin.math.abs(tx.amount)
     val dgb = amountAbs / 100_000_000.0
     val amountFormatted = NumberFormat.getInstance().apply {
         maximumFractionDigits = 8
         minimumFractionDigits = 2
     }.format(dgb)
 
-    val amountColor: Color = when {
-        isSelfSend -> DigiByteAccent
-        isSend     -> DigiByteRed
-        else       -> DigiByteGreen
-    }
-    val amountPrefix = when {
-        isSelfSend -> "Fee: "
-        isSend     -> "- "
-        else       -> "+ "
-    }
+    val amountColor: Color = if (isSend) DigiByteRed else DigiByteGreen
+    val amountPrefix = if (isSend) "- " else "+ "
 
     val dateStr = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
         .format(Date(tx.timestamp * 1000L))
@@ -83,30 +66,16 @@ fun TransactionItem(
             // Direction icon
             Surface(
                 shape = CircleShape,
-                color = when {
-                    isSelfSend -> DigiByteAccent.copy(alpha = 0.15f)
-                    isSend     -> DigiByteRed.copy(alpha = 0.15f)
-                    else       -> DigiByteGreen.copy(alpha = 0.15f)
-                },
+                color = if (isSend) DigiByteRed.copy(alpha = 0.15f)
+                        else DigiByteGreen.copy(alpha = 0.15f),
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Icon(
-                        imageVector = when {
-                            isSelfSend -> Icons.Default.ArrowDownward
-                            isSend     -> Icons.Default.ArrowUpward
-                            else       -> Icons.Default.ArrowDownward
-                        },
-                        contentDescription = when {
-                            isSelfSend -> "Self-transfer"
-                            isSend     -> "Sent"
-                            else       -> "Received"
-                        },
-                        tint = when {
-                            isSelfSend -> DigiByteAccent
-                            isSend     -> DigiByteRed
-                            else       -> DigiByteGreen
-                        },
+                        imageVector = if (isSend) Icons.Default.ArrowUpward
+                                      else Icons.Default.ArrowDownward,
+                        contentDescription = if (isSend) "Sent" else "Received",
+                        tint = if (isSend) DigiByteRed else DigiByteGreen,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -117,11 +86,7 @@ fun TransactionItem(
             // Description + address + date
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = when {
-                        isSelfSend -> "Sent to self"
-                        isSend     -> "Sent"
-                        else       -> "Received"
-                    },
+                    text = if (isSend) "Sent" else "Received",
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
