@@ -161,10 +161,10 @@ fun AppNavigation(
             }
         }
     ) { padding ->
-        // Start sync service ONCE when the wallet is unlocked — not per-tab
+        // Start sync service when wallet screen is reached — from any path
         var syncStarted by remember { mutableStateOf(false) }
-        LaunchedEffect(startDestination) {
-            if (startDestination == "wallet" && !syncStarted) {
+        LaunchedEffect(currentRoute) {
+            if (currentRoute == Screen.Wallet.route && !syncStarted) {
                 syncStarted = true
                 startSyncService()
             }

@@ -75,28 +75,39 @@ class DigiScopeClient(
     suspend fun quickLogin(): Boolean = withContext(Dispatchers.IO) {
         try {
             // 1. Request challenge
+            android.util.Log.i("DigiScope", "quickLogin: requesting challenge")
             val challengeReq = Request.Builder()
                 .url("$BASE_URL/auth/digiid/challenge")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
             val challengeResp = client.newCall(challengeReq).execute()
-            if (!challengeResp.isSuccessful) return@withContext false
+            if (!challengeResp.isSuccessful) {
+                android.util.Log.e("DigiScope", "quickLogin: challenge failed HTTP ${challengeResp.code}")
+                return@withContext false
+            }
 
             val challengeJson = JSONObject(challengeResp.body?.string() ?: return@withContext false)
             val uri = challengeJson.optString("uri", null) ?: return@withContext false
+            android.util.Log.i("DigiScope", "quickLogin: got challenge, signing")
 
             // 2. Sign with wallet key
             val signResult = io.digibyte.core.bridge.NativeBridge.signMessage(uri, 0)
-                ?: return@withContext false
+            if (signResult == null) {
+                android.util.Log.e("DigiScope", "quickLogin: signMessage returned null — wallet locked?")
+                return@withContext false
+            }
             val parts = signResult.split("|", limit = 2)
             if (parts.size != 2) return@withContext false
             val address = parts[0]
             val signature = parts[1]
+            android.util.Log.i("DigiScope", "quickLogin: signed with $address, submitting callback")
 
             // 3. Submit to callback
             val token = login(address, signature, uri)
+            android.util.Log.i("DigiScope", "quickLogin: token=${if (token != null) "received" else "null"}")
             token != null
         } catch (e: Exception) {
+            android.util.Log.e("DigiScope", "quickLogin: exception: ${e.message}", e)
             false
         }
     }
@@ -119,9 +130,11 @@ class DigiScopeClient(
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
+            val responseBody = response.body?.string()
+            android.util.Log.i("DigiScope", "login callback: HTTP ${response.code} body=${responseBody?.take(300)}")
+            if (!response.isSuccessful || responseBody == null) return@withContext null
 
-            val responseJson = JSONObject(response.body?.string() ?: return@withContext null)
+            val responseJson = JSONObject(responseBody)
             // Backend returns sessionToken (not token)
             val token = responseJson.optString("sessionToken",
                 responseJson.optString("token", null))
