@@ -217,7 +217,11 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     g_seedValid = 1;
     g_mpk = mpk;
     g_mpkValid = 1;
-    g_walletCreationTime = (uint32_t)time(NULL);
+    /* Set creation time to 24 hours ago so the wallet scans recent blocks.
+     * This ensures: (1) any DGB sent during wallet setup is detected,
+     * (2) the UI shows meaningful sync progress instead of jumping to "Connected",
+     * (3) the bloom filter rescan covers recent block history. */
+    g_walletCreationTime = (uint32_t)(time(NULL) - 86400);
     g_peerManagerNeedsRecreate = 1;
 
     secure_zero(seed, sizeof(seed));

@@ -105,6 +105,38 @@ class SyncService : Service() {
                     android.util.Log.i("SyncService", "No peers connected, reconnecting")
                     NativeBridge.startSync()
                 }
+                // If peers are connected and we have a block height but
+                // onSyncComplete never fired (new wallet at chain tip),
+                // mark as synced so the UI shows "Connected".
+                if (peers > 0 && !hasReachedSynced) {
+                    val height = NativeBridge.getLastBlockHeight()
+                    val estHeight = NativeBridge.getEstimatedBlockHeight()
+                    // Push sync progress to UI — the C core doesn't always fire
+                    // onSyncProgress during header downloads.
+                    if (height > 0 && estHeight > 0 && height < estHeight - 5) {
+                        val progress = height.toFloat() / estHeight.toFloat()
+                        walletManager.updateSyncState(
+                            io.digibyte.core.model.SyncState.Syncing(progress, height)
+                        )
+                    }
+                    // If we're at the chain tip, mark complete
+                    if (height > 0 && (estHeight == 0L || height >= estHeight - 5)) {
+                        hasReachedSynced = true
+                        walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
+                        getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                            .edit().putBoolean("has_synced", true).apply()
+                        android.util.Log.i("SyncService", "At chain tip (height=$height est=$estHeight) — marking complete")
+                        // Persist transactions
+                        serviceScope.launch(Dispatchers.IO) {
+                            val txData = NativeBridge.getSerializedTransactions()
+                            if (txData != null) {
+                                val hex = bytesToHex(txData)
+                                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                    .edit().putString("saved_transactions", hex).apply()
+                            }
+                        }
+                    }
+                }
                 updateNotification(NativeBridge.getSyncProgress(), peers)
             }
         }
