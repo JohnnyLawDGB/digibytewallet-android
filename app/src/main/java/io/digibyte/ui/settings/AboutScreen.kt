@@ -4,6 +4,8 @@ package io.digibyte.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -75,14 +77,10 @@ fun AboutScreen(navController: NavController) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        // DGB text logo — no Bitcoin icon
-                        Text(
-                            text = "DGB",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 2.sp
-                            ),
-                            color = DigiByteAccent
+                        Image(
+                            painter = painterResource(id = io.digibyte.R.drawable.dgb_symbol),
+                            contentDescription = "DigiByte",
+                            modifier = Modifier.size(64.dp)
                         )
                         Text(
                             text = "DigiByte Wallet",

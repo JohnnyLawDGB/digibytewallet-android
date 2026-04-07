@@ -73,6 +73,13 @@ fun SyncOverlay(
 
         is SyncState.Rescanning -> {
             var showGame by remember { mutableStateOf(true) }
+            val blockHeight = remember { mutableLongStateOf(0L) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    blockHeight.longValue = io.digibyte.core.bridge.NativeBridge.getLastBlockHeight()
+                    kotlinx.coroutines.delay(2000L)
+                }
+            }
 
             Column(modifier = modifier) {
                 if (showGame) {
@@ -99,8 +106,9 @@ fun SyncOverlay(
                         .padding(horizontal = 16.dp)
                 )
 
+                val block = blockHeight.longValue
                 Text(
-                    text = "Verifying transactions\u2026",
+                    text = if (block > 0) "Scanning blockchain — Block $block" else "Verifying transactions\u2026",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
