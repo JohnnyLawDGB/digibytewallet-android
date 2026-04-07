@@ -22,6 +22,11 @@ import io.digibyte.ui.theme.DigiByteBlue
 
 @Composable
 fun SettingsScreen(navController: NavController) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+    } catch (e: Exception) { "unknown" }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -91,7 +96,7 @@ fun SettingsScreen(navController: NavController) {
         item {
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "DigiByte Wallet v3.0.0-beta",
+                text = "DigiByte Wallet v$versionName",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF546E7A),
                 modifier = Modifier

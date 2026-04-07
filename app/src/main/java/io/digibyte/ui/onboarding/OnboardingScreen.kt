@@ -1,5 +1,6 @@
 package io.digibyte.ui.onboarding
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -173,26 +175,11 @@ private fun WordCountToggle(selected: Int, onSelect: (Int) -> Unit) {
 @Composable
 fun DigiByteLogoHeader() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        // Geometric diamond/hexagon representing DigiByte logo
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(DigiByteBlue, DigiByteNavy)
-                    ),
-                    shape = RoundedCornerShape(20.dp)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "DGB",
-                color = Color.White,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 22.sp,
-                letterSpacing = 1.sp
-            )
-        }
+        Image(
+            painter = painterResource(id = io.digibyte.R.drawable.dgb_symbol),
+            contentDescription = "DigiByte",
+            modifier = Modifier.size(80.dp)
+        )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = "DigiByte Wallet",
