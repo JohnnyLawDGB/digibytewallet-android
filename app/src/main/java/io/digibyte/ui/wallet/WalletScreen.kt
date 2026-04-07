@@ -143,6 +143,7 @@ fun WalletScreen(
                     priceUsd = p.priceUsd,
                     change24h = p.change24h,
                     source = p.source,
+                    pricePhp = p.pricePhp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
@@ -234,6 +235,7 @@ private fun PriceFeedCard(
     priceUsd: Double,
     change24h: Double,
     source: String,
+    pricePhp: Double = 0.0,
     modifier: Modifier = Modifier
 ) {
     val priceFormatted = NumberFormat.getNumberInstance(Locale.US).apply {
@@ -273,6 +275,17 @@ private fun PriceFeedCard(
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                if (pricePhp > 0) {
+                    val phpFormatted = NumberFormat.getNumberInstance(Locale.US).apply {
+                        minimumFractionDigits = 4
+                        maximumFractionDigits = 4
+                    }.format(pricePhp)
+                    Text(
+                        text = "₱$phpFormatted",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(

@@ -14,8 +14,8 @@ android {
         applicationId = "io.digibyte"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3014
-        versionName = "3.0.14-beta"
+        versionCode = 3016
+        versionName = "3.0.16-beta"
     }
 
     // Match native module flavors

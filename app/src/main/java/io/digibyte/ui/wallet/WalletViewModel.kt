@@ -58,7 +58,15 @@ class WalletViewModel @Inject constructor(
         val dgb = sats / 100_000_000.0
         val fiat = dgb * priceData.priceUsd
         val fmt = NumberFormat.getCurrencyInstance(Locale.US)
-        fmt.format(fiat)
+        val usd = fmt.format(fiat)
+        if (priceData.pricePhp > 0) {
+            val php = dgb * priceData.pricePhp
+            val phpFmt = NumberFormat.getNumberInstance().apply {
+                minimumFractionDigits = 2
+                maximumFractionDigits = 2
+            }
+            "$usd · ₱${phpFmt.format(php)}"
+        } else usd
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "$ --")
 
     init {

@@ -17,7 +17,8 @@ data class PriceData(
     val priceUsd: Double,
     val change24h: Double,
     val source: String,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val pricePhp: Double = 0.0
 )
 
 /**
@@ -129,14 +130,15 @@ class PriceProvider(
     private fun fetchFromCoinGecko(): PriceData {
         val body = fetcher.fetch(
             "https://api.coingecko.com/api/v3/simple/price" +
-            "?ids=digibyte&vs_currencies=usd&include_24hr_change=true"
+            "?ids=digibyte&vs_currencies=usd,php&include_24hr_change=true"
         )
         val json = JSONObject(body).getJSONObject("digibyte")
         return PriceData(
             priceUsd = json.getDouble("usd"),
             change24h = json.optDouble("usd_24h_change", 0.0),
             source = "coingecko",
-            updatedAt = System.currentTimeMillis()
+            updatedAt = System.currentTimeMillis(),
+            pricePhp = json.optDouble("php", 0.0)
         )
     }
 
