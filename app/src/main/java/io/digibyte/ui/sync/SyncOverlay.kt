@@ -1,8 +1,6 @@
 package io.digibyte.ui.sync
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,13 +13,10 @@ import io.digibyte.ui.theme.DigiByteBlue
 /**
  * SyncOverlay — shown inside the WalletScreen while the node is syncing.
  *
- * When syncing it shows:
- *  1. The DigiRunner mini-game (tap to jump, collect DGB coins)
- *  2. A "Skip game" button to collapse to progress-bar-only view
- *  3. A LinearProgressIndicator + block-height text (always visible)
- *
- * When idle/complete it shows a "Play DigiRunner" button so the user
- * can launch the standalone game at any time.
+ * Shows:
+ *  1. The DigiRunner mini-game during any non-Complete state
+ *  2. Progress bar + block height
+ *  3. "Play DigiRunner" button when fully synced
  */
 @Composable
 fun SyncOverlay(
@@ -31,111 +26,87 @@ fun SyncOverlay(
     onShowLeaderboard: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    when (syncState) {
-        is SyncState.Syncing -> {
-            var showGame by remember { mutableStateOf(true) }
+    val isComplete = syncState is SyncState.Complete
 
-            Column(modifier = modifier) {
-                if (showGame) {
-                    DigiRunnerGame(
-                        syncProgress = syncState.progress,
-                        onScoreSubmit = onScoreSubmit,
-                        onShowLeaderboard = onShowLeaderboard,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    TextButton(
-                        onClick = { showGame = false },
-                        modifier = Modifier.padding(start = 8.dp)
-                    ) {
-                        Text(
-                            text  = "Skip game",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                }
+    if (!isComplete && syncState !is SyncState.Failed) {
+        // Active sync — show game + progress
+        var showGame by remember { mutableStateOf(true) }
 
-                // Progress bar — always visible while syncing
-                LinearProgressIndicator(
-                    progress = { syncState.progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                )
-
-                Text(
-                    text     = "Syncing: ${(syncState.progress * 100).toInt()}%  —  Block ${syncState.blockHeight}",
-                    style    = MaterialTheme.typography.bodySmall,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+        // Poll block height for progress display
+        val blockHeight = remember { mutableLongStateOf(0L) }
+        val estHeight = remember { mutableLongStateOf(0L) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                blockHeight.longValue = io.digibyte.core.bridge.NativeBridge.getLastBlockHeight()
+                estHeight.longValue = io.digibyte.core.bridge.NativeBridge.getEstimatedBlockHeight()
+                kotlinx.coroutines.delay(2000L)
             }
         }
 
-        is SyncState.Rescanning -> {
-            var showGame by remember { mutableStateOf(true) }
-            val blockHeight = remember { mutableLongStateOf(0L) }
-            LaunchedEffect(Unit) {
-                while (true) {
-                    blockHeight.longValue = io.digibyte.core.bridge.NativeBridge.getLastBlockHeight()
-                    kotlinx.coroutines.delay(2000L)
-                }
-            }
+        val progress = if (estHeight.longValue > 0 && blockHeight.longValue > 0) {
+            (blockHeight.longValue.toFloat() / estHeight.longValue.toFloat()).coerceIn(0f, 1f)
+        } else if (syncState is SyncState.Syncing) {
+            syncState.progress
+        } else 0f
 
-            Column(modifier = modifier) {
-                if (showGame) {
-                    DigiRunnerGame(
-                        syncProgress = 0.9f,
-                        onScoreSubmit = onScoreSubmit,
-                        onShowLeaderboard = onShowLeaderboard,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    TextButton(
-                        onClick = { showGame = false },
-                        modifier = Modifier.padding(start = 8.dp)
-                    ) {
-                        Text(
-                            text = "Skip game",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                }
-
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                )
-
-                val block = blockHeight.longValue
-                Text(
-                    text = if (block > 0) "Scanning blockchain — Block $block" else "Verifying transactions\u2026",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-            }
+        val block = blockHeight.longValue.let {
+            if (it > 0) it
+            else if (syncState is SyncState.Syncing) syncState.blockHeight
+            else 0L
         }
 
-        // Not syncing — show Play DigiRunner button
-        else -> {
-            Box(
-                modifier = modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                OutlinedButton(
-                    onClick = onPlayGame,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = DigiByteBlue
-                    )
+        Column(modifier = modifier) {
+            if (showGame) {
+                DigiRunnerGame(
+                    syncProgress = progress,
+                    onScoreSubmit = onScoreSubmit,
+                    onShowLeaderboard = onShowLeaderboard,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TextButton(
+                    onClick = { showGame = false },
+                    modifier = Modifier.padding(start = 8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.SportsEsports,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                    Text(
+                        text = "Skip game",
+                        style = MaterialTheme.typography.labelSmall
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Play DigiRunner")
                 }
+            }
+
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            )
+
+            val statusText = when {
+                block > 0 && estHeight.longValue > 0 ->
+                    "Syncing: ${(progress * 100).toInt()}% — Block $block"
+                block > 0 -> "Scanning blockchain — Block $block"
+                else -> "Connecting to network\u2026"
+            }
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
+    } else {
+        // Fully synced — show Play DigiRunner button
+        Box(
+            modifier = modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            OutlinedButton(
+                onClick = onPlayGame,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = DigiByteBlue
+                )
+            ) {
+                Text("\uD83C\uDFAE  Play DigiRunner")
             }
         }
     }
