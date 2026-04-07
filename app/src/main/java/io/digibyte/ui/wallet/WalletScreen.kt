@@ -74,7 +74,8 @@ fun WalletScreen(
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
                         dgbAmount = WalletViewModel.formatSatoshis(balance),
-                        isSynced = syncState is SyncState.Complete
+                        isSynced = syncState is SyncState.Complete,
+                        onFiatTap = { viewModel.cycleCurrency() }
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -275,17 +276,6 @@ private fun PriceFeedCard(
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                if (pricePhp > 0) {
-                    val phpFormatted = NumberFormat.getNumberInstance(Locale.US).apply {
-                        minimumFractionDigits = 4
-                        maximumFractionDigits = 4
-                    }.format(pricePhp)
-                    Text(
-                        text = "₱$phpFormatted",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(

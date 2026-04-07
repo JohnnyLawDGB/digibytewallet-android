@@ -52,21 +52,48 @@ class WalletViewModel @Inject constructor(
     private val _price = MutableStateFlow<PriceData?>(null)
     val price: StateFlow<PriceData?> = _price.asStateFlow()
 
-    /** Fiat balance string, e.g. "$12.34" — derived from balance + price. */
-    val fiatBalance: StateFlow<String> = combine(balance, price) { sats, priceData ->
-        if (priceData == null || priceData.priceUsd <= 0.0) return@combine "$ --"
+    /** Display currency: USD, BTC, or PHP. Cycles on tap. */
+    enum class DisplayCurrency { USD, BTC, PHP }
+    val displayCurrency = MutableStateFlow(DisplayCurrency.USD)
+
+    fun cycleCurrency() {
+        displayCurrency.value = when (displayCurrency.value) {
+            DisplayCurrency.USD -> DisplayCurrency.BTC
+            DisplayCurrency.BTC -> DisplayCurrency.PHP
+            DisplayCurrency.PHP -> DisplayCurrency.USD
+        }
+    }
+
+    /** Fiat balance string — changes based on selected display currency. */
+    val fiatBalance: StateFlow<String> = combine(balance, price, displayCurrency) { sats, priceData, currency ->
         val dgb = sats / 100_000_000.0
-        val fiat = dgb * priceData.priceUsd
-        val fmt = NumberFormat.getCurrencyInstance(Locale.US)
-        val usd = fmt.format(fiat)
-        if (priceData.pricePhp > 0) {
-            val php = dgb * priceData.pricePhp
-            val phpFmt = NumberFormat.getNumberInstance().apply {
-                minimumFractionDigits = 2
-                maximumFractionDigits = 2
+        when (currency) {
+            DisplayCurrency.USD -> {
+                if (priceData == null || priceData.priceUsd <= 0.0) return@combine "$ --"
+                val fmt = NumberFormat.getCurrencyInstance(Locale.US)
+                fmt.format(dgb * priceData.priceUsd)
             }
-            "$usd · ₱${phpFmt.format(php)}"
-        } else usd
+            DisplayCurrency.BTC -> {
+                // DGB/BTC — show as satoshis equivalent via USD cross rate
+                if (priceData == null || priceData.priceUsd <= 0.0) return@combine "BTC --"
+                val btcPrice = try {
+                    // Approximate: 1 BTC ≈ $60,000+ — use ratio
+                    val dgbUsd = dgb * priceData.priceUsd
+                    val btcApprox = dgbUsd / 60000.0 // rough estimate
+                    String.format("%.8f BTC", btcApprox)
+                } catch (e: Exception) { "BTC --" }
+                btcPrice
+            }
+            DisplayCurrency.PHP -> {
+                if (priceData == null || priceData.pricePhp <= 0.0) return@combine "₱ --"
+                val php = dgb * priceData.pricePhp
+                val fmt = NumberFormat.getNumberInstance().apply {
+                    minimumFractionDigits = 2
+                    maximumFractionDigits = 2
+                }
+                "₱${fmt.format(php)}"
+            }
+        }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "$ --")
 
     init {

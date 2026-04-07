@@ -95,15 +95,14 @@ class SyncService : Service() {
             startSyncWithTor()
         }
 
-        // Poll peer count every 30s — reconnects if peers drop to 0.
-        // Runs for the lifetime of the service (while app is open).
+        // Keep peers alive while app is open — poll every 10s, reconnect aggressively.
         serviceScope.launch {
             walletManager.walletState.first { it is WalletState.Unlocked }
             while (isActive) {
-                delay(30_000L)
+                delay(10_000L)
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
-                    android.util.Log.i("SyncService", "No peers connected, attempting reconnect")
+                    android.util.Log.i("SyncService", "No peers connected, reconnecting")
                     NativeBridge.startSync()
                 }
                 updateNotification(NativeBridge.getSyncProgress(), peers)

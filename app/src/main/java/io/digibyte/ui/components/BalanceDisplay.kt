@@ -1,5 +1,6 @@
 package io.digibyte.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,6 +25,7 @@ fun BalanceDisplay(
     fiatAmount: String,
     dgbAmount: String,
     isSynced: Boolean = true,
+    onFiatTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val fiatColor = if (isSynced)
@@ -47,7 +49,8 @@ fun BalanceDisplay(
                 fontSize = 42.sp
             ),
             color = fiatColor,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = if (onFiatTap != null) Modifier.clickable { onFiatTap() } else Modifier
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(

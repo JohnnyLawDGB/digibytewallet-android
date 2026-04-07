@@ -75,11 +75,14 @@ fun AboutScreen(navController: NavController) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            Icons.Default.CurrencyBitcoin,
-                            contentDescription = null,
-                            tint = DigiByteAccent,
-                            modifier = Modifier.size(48.dp)
+                        // DGB text logo — no Bitcoin icon
+                        Text(
+                            text = "DGB",
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 2.sp
+                            ),
+                            color = DigiByteAccent
                         )
                         Text(
                             text = "DigiByte Wallet",
@@ -183,8 +186,8 @@ fun AboutScreen(navController: NavController) {
                         icon = Icons.Default.Gavel,
                         iconTint = Color(0xFF8899AA),
                         label = "Licenses",
-                        subtitle = "Open source licenses used in this app",
-                        onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android/blob/main/LICENSES.md") }
+                        subtitle = "MIT License — open source",
+                        onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android/blob/phase1-modernization/LICENSE") }
                     )
                     SettingsRowDivider()
                     AboutLinkRow(
