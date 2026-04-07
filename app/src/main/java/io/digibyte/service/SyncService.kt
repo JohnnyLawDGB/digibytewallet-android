@@ -201,12 +201,12 @@ class SyncService : Service() {
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
             // progress == -1 is a signal from C core that a rescan is starting.
             if (progress < 0f) {
+                hasReachedSynced = false // rescan resets sync status
                 walletManager.updateSyncState(SyncState.Rescanning)
                 return
             }
 
-            // Once we've reached synced, don't revert to Syncing/Rescanning.
-            // The only way back is via the -1 rescan signal above.
+            // After fully synced (headers + rescan), only update on new blocks
             if (hasReachedSynced) return
 
             walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
