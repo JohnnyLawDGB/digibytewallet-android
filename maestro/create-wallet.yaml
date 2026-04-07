@@ -1,0 +1,13 @@
+appId: io.digibyte
+name: "Create wallet — seed generation + display"
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Secure your DGB"
+- tapOn: "Create New Wallet"
+
+# Seed display screen (FLAG_SECURE blocks screenshots but assertions work)
+- assertVisible:
+    text: "Your Recovery Phrase"
+- assertVisible:
+    text: "I have written these down"

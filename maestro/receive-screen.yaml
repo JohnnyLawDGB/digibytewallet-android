@@ -1,0 +1,14 @@
+appId: io.digibyte
+name: "Receive screen — address display"
+tags:
+  - requires-wallet
+---
+# This flow requires an already-created wallet with PIN set.
+# Run after create-wallet flow completes on a non-fresh device.
+- launchApp
+- assertVisible: "Receive"
+- tapOn: "Receive"
+
+# Receive screen should show a DGB address
+- assertVisible:
+    text: "dgb1.*"

@@ -1,0 +1,12 @@
+appId: io.digibyte
+name: "Recover wallet — mnemonic input screen"
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Secure your DGB"
+- tapOn: "Recover Existing Wallet"
+
+# Recovery screen
+- assertVisible: "Recover Wallet"
+- assertVisible: "Enter your seed phrase to restore your wallet."
+- assertVisible: "Continue"

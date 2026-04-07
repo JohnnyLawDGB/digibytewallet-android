@@ -1,0 +1,10 @@
+appId: io.digibyte
+name: "Fresh install launches without crash"
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Secure your DGB"
+- assertVisible: "Create New Wallet"
+- assertVisible: "Recover Existing Wallet"
+- assertVisible: "12 words"
+- assertVisible: "24 words"
