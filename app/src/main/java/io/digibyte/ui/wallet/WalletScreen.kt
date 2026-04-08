@@ -330,6 +330,12 @@ private fun TorIndicator(torState: TorState) {
 
 @Composable
 private fun SyncIndicator(syncState: SyncState) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = remember {
+        try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "" }
+        catch (e: Exception) { "" }
+    }
+
     // Live peer count — polled alongside balance in WalletViewModel
     val peerCount = remember { mutableIntStateOf(0) }
     val blockHeight = remember { mutableLongStateOf(0L) }
@@ -364,10 +370,11 @@ private fun SyncIndicator(syncState: SyncState) {
         is SyncState.Complete -> {
             val peers = peerCount.intValue
             val block = blockHeight.longValue
+            val v = if (versionName.isNotEmpty()) " · v$versionName" else ""
             val statusText = when {
-                peers > 0 && block > 0 -> "Connected · $peers peers · Block $block"
-                peers > 0 -> "Connected · $peers peers"
-                else -> "Connected"
+                peers > 0 && block > 0 -> "Connected · $peers peers · Block $block$v"
+                peers > 0 -> "Connected · $peers peers$v"
+                else -> "Connected$v"
             }
             Text(
                 text = statusText,
