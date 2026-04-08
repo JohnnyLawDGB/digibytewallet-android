@@ -29,6 +29,11 @@ import io.digibyte.ui.theme.DigiByteGreen
 fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
+    // Refresh profile every time this tab becomes visible
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.loadProfile()
+    }
+
     val profileState by viewModel.profileState.collectAsStateWithLifecycle()
     val handleInput by viewModel.handleInput.collectAsStateWithLifecycle()
     val handleAvailable by viewModel.handleAvailable.collectAsStateWithLifecycle()
