@@ -47,9 +47,15 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var digiScopeClient: DigiScopeClient
     @Inject lateinit var okHttpClient: OkHttpClient
 
+    /** Pending Digi-ID URI from a deep link — processed after PIN unlock. */
+    var pendingDigiIdUri: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Capture digiid:// deep link from launching intent
+        handleDigiIdIntent(intent)
 
         // Handle new install vs Phase 1 upgrade Tor defaults.
         // Runs on IO thread; UI state is surfaced via showTorUpgradeDialog flag.
@@ -191,5 +197,18 @@ class MainActivity : FragmentActivity() {
     internal fun startSyncService() {
         val intent = Intent(this, SyncService::class.java)
         ContextCompat.startForegroundService(this, intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDigiIdIntent(intent)
+    }
+
+    private fun handleDigiIdIntent(intent: Intent?) {
+        val uri = intent?.data?.toString()
+        if (uri != null && uri.startsWith("digiid://")) {
+            pendingDigiIdUri = uri
+            android.util.Log.i("MainActivity", "Captured Digi-ID deep link: $uri")
+        }
     }
 }

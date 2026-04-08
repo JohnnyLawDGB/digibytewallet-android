@@ -168,6 +168,16 @@ fun AppNavigation(
                 syncStarted = true
                 startSyncService()
             }
+            // Handle pending Digi-ID deep link after reaching wallet screen
+            if (currentRoute == Screen.Wallet.route) {
+                val activity = context as? io.digibyte.MainActivity
+                val pendingUri = activity?.pendingDigiIdUri
+                if (pendingUri != null) {
+                    activity.pendingDigiIdUri = null
+                    val encoded = java.net.URLEncoder.encode(pendingUri, "UTF-8")
+                    navController.navigate("digiid_confirm/$encoded")
+                }
+            }
         }
 
         NavHost(
