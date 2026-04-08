@@ -588,7 +588,7 @@ class DigiScopeClient(
         id = obj.optInt("id"),
         content = obj.getString("content"),
         from = parseUserInfo(obj.optJSONObject("from")),
-        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+        timestamp = parseDatetimeToMs(obj.optString("created_at", obj.optString("timestamp", ""))),
         signature = obj.optString("signature", "")
     )
 

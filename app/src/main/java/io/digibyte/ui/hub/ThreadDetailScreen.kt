@@ -54,6 +54,7 @@ fun ThreadDetailScreen(
     var showReplyInput by remember { mutableStateOf(false) }
 
     Scaffold(
+        modifier = Modifier.imePadding(),
         topBar = {
             TopAppBar(
                 title = {

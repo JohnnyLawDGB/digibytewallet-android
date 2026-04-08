@@ -38,6 +38,7 @@ fun CreateThreadScreen(
     val canPost = title.isNotBlank() && content.isNotBlank() && !isCreating
 
     Scaffold(
+        modifier = Modifier.imePadding(),
         topBar = {
             TopAppBar(
                 title = { Text("New Thread", color = Color.White) },
