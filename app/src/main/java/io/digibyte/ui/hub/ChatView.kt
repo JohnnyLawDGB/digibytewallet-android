@@ -95,6 +95,7 @@ fun ChatScreen(
         Box(modifier = Modifier.weight(1f)) {
             MessageList(
                 messages = messages,
+                myAddress = viewModel.myAddress,
                 onLoadMore = { viewModel.loadMoreHistory() },
                 onTapHandle = { userInfo -> tipTarget = userInfo }
             )
@@ -292,6 +293,7 @@ private fun ChannelChipRow(
 @Composable
 private fun MessageList(
     messages: List<ChatMessage>,
+    myAddress: String,
     onLoadMore: () -> Unit,
     onTapHandle: (UserInfo) -> Unit
 ) {
@@ -344,6 +346,7 @@ private fun MessageList(
         items(messages, key = { it.id }) { message ->
             MessageBubble(
                 message = message,
+                isMe = message.from.address == myAddress,
                 onTapHandle = onTapHandle
             )
         }
@@ -355,16 +358,19 @@ private fun MessageList(
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
+    isMe: Boolean = false,
     onTapHandle: (UserInfo) -> Unit
 ) {
     val isEnigma = message.from.handle?.equals(ENIGMA_HANDLE, ignoreCase = true) == true
 
     val bubbleColor = when {
+        isMe     -> Color(0xFF1A3A5C) // darker blue for own messages
         isEnigma -> EnigmaPurpleLight
         else     -> MaterialTheme.colorScheme.surfaceVariant
     }
 
     val handleColor = when {
+        isMe     -> Color(0xFF4CAF50) // green for "You"
         isEnigma -> EnigmaPurple
         else     -> DigiByteAccent
     }
@@ -373,6 +379,7 @@ private fun MessageBubble(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 3.dp),
+        horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top
     ) {
         // Enigma bot icon / avatar placeholder
@@ -400,10 +407,11 @@ private fun MessageBubble(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                val handle = message.from.handle
-                    ?: message.from.address.let { addr ->
-                        if (addr.length > 14) "${addr.take(6)}…${addr.takeLast(6)}" else addr
-                    }
+                val handle = if (isMe) "You"
+                    else message.from.handle
+                        ?: message.from.address.let { addr ->
+                            if (addr.length > 14) "${addr.take(6)}…${addr.takeLast(6)}" else addr
+                        }
 
                 Text(
                     text = handle,

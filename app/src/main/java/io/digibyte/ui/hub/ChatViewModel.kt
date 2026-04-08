@@ -29,6 +29,9 @@ class ChatViewModel @Inject constructor(
     private val cachedMessageDao: CachedMessageDao
 ) : ViewModel() {
 
+    // ── Current user's address (for identifying own messages) ──────────────
+    val myAddress: String = NativeBridge.getReceiveAddress(0, 0) ?: ""
+
     // ── Channels ──────────────────────────────────────────────────────────
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
