@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.2.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.1.1...v3.2.0) (2026-04-08)
+
+
+### Features
+
+* show version in status bar when synced ([bb7049e](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/bb7049e86cd9eaac05bea189e16ae16f5bd84ecb))
+
+
+### Bug Fixes
+
+* complete BIP39 word list — was missing 1807 of 2048 words ([1bc336d](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/1bc336d98c5360dce7794f4f491a28e5c14aa5cc))
+* persist currency preference across restarts ([2f1540b](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/2f1540b255e755d60e770e60603a6845610bbd35))
+* view recovery phrase actually decrypts and shows the seed words ([69de7cc](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/69de7cc5522d0be1397e5202ecbb04b76071db51))
+* wipeWallet clears saved transactions and stops sync ([5000f62](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/5000f621a0ce5ad9704e40126deb5410f7c12280))
+
 ## [3.1.1](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.1.0...v3.1.1) (2026-04-07)
 
 
