@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.1](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.3.0...v3.3.1) (2026-04-08)
+
+
+### Documentation
+
+* Tor integration design spec — kmp-tor with SOCKS5 proxy ([048b002](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/048b002b85d5baf2d259cf98b3de88c327f9cbea))
+
 ## [3.3.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.2.0...v3.3.0) (2026-04-08)
 
 
