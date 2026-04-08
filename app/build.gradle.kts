@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 30016 // x-release-please-version-code
-        versionName = "3.2.0" // x-release-please-version
+        versionName = "3.3.0" // x-release-please-version
     }
 
     // Match native module flavors

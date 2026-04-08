@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.3.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.2.0...v3.3.0) (2026-04-08)
+
+
+### Features
+
+* Digi-ID deep link forwarding after PIN unlock ([d0b234e](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/d0b234e7a2a1b787f4541617cdfb11291615e14e))
+* own messages right-aligned with distinct styling in chat ([0e76bd8](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/0e76bd8e25487c6c14da575722f3a6a009b47d61))
+
+
+### Bug Fixes
+
+* keyboard covers chat input + chat timestamps wrong ([c454abe](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/c454abe4997667f856ef93a9b6e2571a8fdd2b40))
+* profile refreshes every time Profile tab is visited ([97330bd](https://github.com/JohnnyLawDGB/digibytewallet-android/commit/97330bd9fc51cabff94291a2f27c7c289c2c87e1))
+
 ## [3.2.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.1.1...v3.2.0) (2026-04-08)
 
 
