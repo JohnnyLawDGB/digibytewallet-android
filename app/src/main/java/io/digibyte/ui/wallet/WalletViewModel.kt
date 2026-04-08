@@ -52,9 +52,13 @@ class WalletViewModel @Inject constructor(
     private val _price = MutableStateFlow<PriceData?>(null)
     val price: StateFlow<PriceData?> = _price.asStateFlow()
 
-    /** Display currency: USD, BTC, or PHP. Cycles on tap. */
+    /** Display currency: USD, BTC, or PHP. Persisted to SharedPreferences. */
     enum class DisplayCurrency { USD, BTC, PHP }
-    val displayCurrency = MutableStateFlow(DisplayCurrency.USD)
+    val displayCurrency = MutableStateFlow(
+        try {
+            DisplayCurrency.valueOf(prefs.getString("display_currency", "USD") ?: "USD")
+        } catch (e: Exception) { DisplayCurrency.USD }
+    )
 
     fun cycleCurrency() {
         displayCurrency.value = when (displayCurrency.value) {
@@ -62,6 +66,7 @@ class WalletViewModel @Inject constructor(
             DisplayCurrency.BTC -> DisplayCurrency.PHP
             DisplayCurrency.PHP -> DisplayCurrency.USD
         }
+        prefs.edit().putString("display_currency", displayCurrency.value.name).apply()
     }
 
     /** Fiat balance string — changes based on selected display currency. */
