@@ -229,12 +229,19 @@ class WalletManager(
      * Wipe the wallet — delete everything.
      */
     suspend fun wipeWallet() {
+        // Stop sync and disconnect peers before destroying wallet
+        NativeBridge.stopSync()
         NativeBridge.lockSession()
         // Clear seed ciphertext FIRST — if process dies after this but before
         // key deletion, hasSavedWallet()=false so no orphaned state.
-        // (MEDIUM-4: ordering prevents permanent funds loss on partial failure)
-        prefs.edit().clear().commit()  // commit (sync) not apply (async) — must complete
+        prefs.edit().clear().commit()
         clearSyncData()
+        // Clear saved transactions so they don't reappear on next wallet
+        context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+            .edit().remove("saved_transactions").remove("has_synced").commit()
+        // Clear bloom peer cache
+        context.getSharedPreferences("dgb_bloom_peers", android.content.Context.MODE_PRIVATE)
+            .edit().clear().commit()
         utxoManager.clearAll()
         keyStoreManager.deleteKey()
         _walletState.value = WalletState.NoWallet
