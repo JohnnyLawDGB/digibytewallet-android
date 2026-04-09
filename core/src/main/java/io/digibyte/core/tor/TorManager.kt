@@ -2,11 +2,23 @@ package io.digibyte.core.tor
 
 import android.content.Context
 import android.util.Log
+import io.matthewnelson.kmp.tor.resource.exec.tor.ResourceLoaderTorExec
+import io.matthewnelson.kmp.tor.runtime.Action
+import io.matthewnelson.kmp.tor.runtime.RuntimeEvent
+import io.matthewnelson.kmp.tor.runtime.TorRuntime
+import io.matthewnelson.kmp.tor.runtime.core.OnEvent
+import io.matthewnelson.kmp.tor.runtime.core.OnFailure
+import io.matthewnelson.kmp.tor.runtime.core.OnSuccess
+import io.matthewnelson.kmp.tor.runtime.core.TorEvent
+import io.matthewnelson.kmp.tor.runtime.core.config.TorOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import io.matthewnelson.kmp.tor.runtime.TorState as KmpTorState
 
 sealed class TorState {
     data object Disabled : TorState()
@@ -17,10 +29,11 @@ sealed class TorState {
 }
 
 /**
- * Manages Tor lifecycle.
+ * Manages Tor lifecycle via kmp-tor exec mode.
  *
- * Kotlin 2.2 upgrade complete — tor-android dependency can now be enabled.
- * Uncomment the dependency in core/build.gradle.kts and implement start().
+ * Tor runs as a separate process — if it crashes, the wallet continues
+ * functioning normally. SyncService calls [start] before sync when
+ * [isEnabled] is true, and falls back to direct connections on failure.
  */
 class TorManager(private val context: Context) {
     private val _state = MutableStateFlow<TorState>(TorState.Disabled)
@@ -39,26 +52,126 @@ class TorManager(private val context: Context) {
         get() = prefs.getBoolean("upgrade_prompt_shown", false)
         set(value) { prefs.edit().putBoolean("upgrade_prompt_shown", value).apply() }
 
+    private val runtime: TorRuntime by lazy {
+        val env = TorRuntime.Environment.Builder(
+            workDirectory = context.filesDir.resolve("tor"),
+            cacheDirectory = context.cacheDir.resolve("tor"),
+            loader = ResourceLoaderTorExec::getOrCreate
+        )
+
+        TorRuntime.Builder(env) {
+            val executor = OnEvent.Executor.Immediate
+
+            // Map kmp-tor daemon state → our TorState + bootstrap progress
+            // ConfigCallback lambda receives (TorConfig.BuilderScope, TorRuntime.Environment)
+            // RuntimeEvent observer lambdas receive the event payload as 'it'
+            observerStatic(RuntimeEvent.STATE, executor) { kmpState ->
+                when (val daemon = kmpState.daemon) {
+                    is KmpTorState.Daemon.On -> {
+                        // bootstrap is a Byte (0–100), treat as unsigned
+                        val progress = daemon.bootstrap.toInt() and 0xFF
+                        _bootstrapProgress.value = progress
+                        if (progress < 100 && _state.value !is TorState.Connected) {
+                            _state.value = TorState.Connecting
+                        }
+                    }
+                    is KmpTorState.Daemon.Starting -> {
+                        _state.value = TorState.Starting
+                    }
+                    is KmpTorState.Daemon.Off -> {
+                        // Only reset to Disabled if we didn't already set Failed
+                        if (_state.value !is TorState.Failed) {
+                            _state.value = TorState.Disabled
+                            _bootstrapProgress.value = 0
+                        }
+                    }
+                    is KmpTorState.Daemon.Stopping -> { /* transient — ignore */ }
+                }
+            }
+
+            // Capture SOCKS port once Tor has listeners
+            observerStatic(RuntimeEvent.LISTENERS, executor) { listeners ->
+                val addr = listeners.socks.firstOrNull()
+                if (addr != null) {
+                    _state.value = TorState.Connected(addr.port.value)
+                    _bootstrapProgress.value = 100
+                    Log.i(TAG, "Tor connected — SOCKS5 on 127.0.0.1:${addr.port.value}")
+                }
+            }
+
+            observerStatic(RuntimeEvent.ERROR, executor) { t ->
+                Log.e(TAG, "Tor runtime error", t)
+            }
+
+            // Non-persistent config: SocksPort=auto, SafeSocks=1
+            // ConfigCallback.invoke is an extension on TorConfig.BuilderScope,
+            // so 'this' inside the lambda is TorConfig.BuilderScope.
+            // configure() is a MEMBER EXTENSION — call it as option.configure { ... }
+            config {
+                TorOption.__SocksPort.configure { auto() }
+                TorOption.SafeSocks.configure(true)
+            }
+
+            required(TorEvent.ERR)
+            required(TorEvent.WARN)
+        }
+    }
+
+    /**
+     * Start the Tor daemon and wait for a SOCKS port.
+     * Returns [TorState.Connected] on success or [TorState.Failed] on error/timeout.
+     * Safe to call multiple times — returns immediately if already connected.
+     */
     suspend fun start(): TorState = withContext(Dispatchers.IO) {
         if (_state.value is TorState.Connected) return@withContext _state.value
 
         _state.value = TorState.Starting
         _bootstrapProgress.value = 0
 
-        // TODO: Enable tor-android dependency and implement real Tor startup
-        // The Kotlin 2.2 upgrade is complete — tor-android:0.4.9.5.1 now compiles.
-        // Next step: uncomment dependency, bind to TorService, get SOCKS port.
-        _state.value = TorState.Failed("Tor integration in progress — wallet functions normally without it")
-        Log.i("TorManager", "Tor not yet integrated — Kotlin 2.2 prerequisite complete")
-        _state.value
+        try {
+            // startDaemonAsync is a member extension on Action.Companion.
+            // Bring the companion into scope so the extension resolves.
+            with(Action.Companion) { runtime.startDaemonAsync() }
+
+            // Wait up to 90s for Connected or Failed (Tor bootstrap can be slow)
+            val result = withTimeoutOrNull(BOOTSTRAP_TIMEOUT_MS) {
+                _state.first { it is TorState.Connected || it is TorState.Failed }
+            }
+
+            if (result == null) {
+                _state.value = TorState.Failed("Bootstrap timed out (${BOOTSTRAP_TIMEOUT_MS / 1000}s)")
+                Log.w(TAG, "Tor bootstrap timed out")
+            }
+
+            _state.value
+        } catch (e: Exception) {
+            val reason = e.message ?: "Unknown error"
+            _state.value = TorState.Failed(reason)
+            Log.e(TAG, "Failed to start Tor: $reason", e)
+            _state.value
+        }
     }
 
+    /**
+     * Stop the Tor daemon. Non-blocking — fires stop request and returns.
+     * State resets to [TorState.Disabled] immediately.
+     */
     fun stop() {
         _bootstrapProgress.value = 0
         _state.value = TorState.Disabled
+        runtime.enqueue(
+            Action.StopDaemon,
+            OnFailure { Log.w(TAG, "Stop failed", it) },
+            OnSuccess.noOp()
+        )
     }
 
     fun isRunning(): Boolean = _state.value is TorState.Connected
 
     fun getSocksPort(): Int? = (_state.value as? TorState.Connected)?.socksPort
+
+    companion object {
+        private const val TAG = "TorManager"
+        private const val BOOTSTRAP_TIMEOUT_MS = 90_000L
+    }
 }
