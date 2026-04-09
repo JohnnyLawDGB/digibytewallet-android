@@ -54,8 +54,9 @@ class TorManager(private val context: Context) {
 
     // I2: Nullable backing field instead of `by lazy` so stop() can skip
     // initialization when start() was never called. Uses double-checked locking
-    // (same guarantee as the default `lazy` delegate).
-    private var _runtime: TorRuntime? = null
+    // (same guarantee as the default `lazy` delegate — `@Volatile` is required
+    // for DCLP correctness per JLS 17.4 on weak-memory platforms like ARM).
+    @Volatile private var _runtime: TorRuntime? = null
     private val runtimeLock = Any()
     private val runtime: TorRuntime
         get() = _runtime ?: synchronized(runtimeLock) {
