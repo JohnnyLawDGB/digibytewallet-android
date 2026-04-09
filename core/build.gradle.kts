@@ -62,9 +62,11 @@ dependencies {
     // Argon2 for PIN hashing
     implementation("org.signal:argon2:13.1")
 
-    // Tor — requires Kotlin 2.2+ upgrade first (see ROADMAP.md Phase 3.2)
-    // implementation("info.guardianproject:tor-android:0.4.9.5.1")
-    // implementation("info.guardianproject:jtorctl:0.4.5.7")
+    // Tor via kmp-tor (exec mode — Tor runs in a separate process)
+    val kmpTorRuntime = "2.4.0"
+    val kmpTorResource = "408.16.4"
+    implementation("io.matthewnelson.kmp-tor:runtime:$kmpTorRuntime")
+    implementation("io.matthewnelson.kmp-tor:resource-exec-tor:$kmpTorResource")
 
     // EncryptedSharedPreferences for PIN storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
