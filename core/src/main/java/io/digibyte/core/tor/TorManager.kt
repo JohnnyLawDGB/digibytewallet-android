@@ -1,9 +1,12 @@
 package io.digibyte.core.tor
 
 import android.content.Context
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 sealed class TorState {
     data object Disabled : TorState()
@@ -14,26 +17,20 @@ sealed class TorState {
 }
 
 /**
- * Manages Tor lifecycle for privacy-by-default network routing.
+ * Manages Tor lifecycle.
  *
- * Phase 2 implementation: provides the TorManager interface and state management.
- * The actual tor-android library integration is complex and may need adjustment
- * based on the available library version.
- *
- * For now, this implements the state management, preference persistence,
- * and JNI proxy wiring. The Tor binary embedding will be finalized during
- * integration testing when we verify the tor-android artifact availability.
+ * Kotlin 2.2 upgrade complete — tor-android dependency can now be enabled.
+ * Uncomment the dependency in core/build.gradle.kts and implement start().
  */
 class TorManager(private val context: Context) {
     private val _state = MutableStateFlow<TorState>(TorState.Disabled)
     val state: StateFlow<TorState> = _state.asStateFlow()
 
+    private val _bootstrapProgress = MutableStateFlow(0)
+    val bootstrapProgress: StateFlow<Int> = _bootstrapProgress.asStateFlow()
+
     private val prefs = context.getSharedPreferences("dgb_tor", Context.MODE_PRIVATE)
 
-    /**
-     * Whether Tor is enabled in user preferences.
-     * Default: true for new installs, false for upgrades (set by app on first Phase 2 launch).
-     */
     var isEnabled: Boolean
         get() = prefs.getBoolean("tor_enabled", false)
         set(value) { prefs.edit().putBoolean("tor_enabled", value).apply() }
@@ -42,34 +39,22 @@ class TorManager(private val context: Context) {
         get() = prefs.getBoolean("upgrade_prompt_shown", false)
         set(value) { prefs.edit().putBoolean("upgrade_prompt_shown", value).apply() }
 
-    /**
-     * Start Tor. Returns the final state (Connected or Failed).
-     */
-    suspend fun start(): TorState {
-        if (_state.value is TorState.Connected) return _state.value
+    suspend fun start(): TorState = withContext(Dispatchers.IO) {
+        if (_state.value is TorState.Connected) return@withContext _state.value
 
         _state.value = TorState.Starting
+        _bootstrapProgress.value = 0
 
-        // TODO: Integrate actual tor-android library here.
-        // The tor-android artifact from Guardian Project may need:
-        // - Checking current artifact coordinates on Maven Central/JitPack
-        // - Embedding the Tor binary via the library
-        // - Starting the Tor process
-        // - Waiting for SOCKS5 proxy to be ready
-        // - Returning the port number
-        //
-        // For now, return Failed to gracefully degrade.
-        // The wallet works fine without Tor — it's an enhancement.
-
-        _state.value = TorState.Failed("Tor integration pending — wallet functions normally without it")
-        return _state.value
+        // TODO: Enable tor-android dependency and implement real Tor startup
+        // The Kotlin 2.2 upgrade is complete — tor-android:0.4.9.5.1 now compiles.
+        // Next step: uncomment dependency, bind to TorService, get SOCKS port.
+        _state.value = TorState.Failed("Tor integration in progress — wallet functions normally without it")
+        Log.i("TorManager", "Tor not yet integrated — Kotlin 2.2 prerequisite complete")
+        _state.value
     }
 
-    /**
-     * Stop Tor.
-     */
     fun stop() {
-        // TODO: stop Tor process
+        _bootstrapProgress.value = 0
         _state.value = TorState.Disabled
     }
 

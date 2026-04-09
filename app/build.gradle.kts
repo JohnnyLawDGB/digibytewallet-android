@@ -51,6 +51,10 @@ android {
         }
     }
 
+    packaging {
+        jniLibs.useLegacyPackaging = true
+    }
+
     lint {
         abortOnError = false
         checkReleaseBuilds = false
@@ -85,8 +89,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.51.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    implementation("com.google.dagger:hilt-android:2.56.2")
+    ksp("com.google.dagger:hilt-android-compiler:2.56.2")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // ZXing for QR code generation + scanning
@@ -108,7 +112,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Room runtime (needed so app module can reference WalletDatabase from :core)
-    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-runtime:2.7.1")
 
     // WorkManager + Hilt integration (for SyncWorker background sync job)
     implementation("androidx.work:work-runtime-ktx:2.9.1")

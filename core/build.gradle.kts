@@ -46,7 +46,7 @@ dependencies {
     implementation(project(":native"))
 
     // Room + SQLCipher
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.7.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
@@ -61,6 +61,10 @@ dependencies {
 
     // Argon2 for PIN hashing
     implementation("org.signal:argon2:13.1")
+
+    // Tor — requires Kotlin 2.2+ upgrade first (see ROADMAP.md Phase 3.2)
+    // implementation("info.guardianproject:tor-android:0.4.9.5.1")
+    // implementation("info.guardianproject:jtorctl:0.4.5.7")
 
     // EncryptedSharedPreferences for PIN storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
