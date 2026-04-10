@@ -127,11 +127,15 @@ class SettingsViewModel @Inject constructor(
             _config.value = updated
         }
         if (enabled) {
-            viewModelScope.launch {
-                torManager.start()
-            }
+            // Use startAsync() — TorManager's own scope survives ViewModel
+            // destruction. Bootstrap takes 10-30s; viewModelScope would cancel
+            // it if the user navigates away from Settings.
+            torManager.startAsync()
         } else {
             torManager.stop()
+            // Clear SOCKS proxy immediately so the C core reconnects directly.
+            // Without this, peer connections keep trying the dead proxy until restart.
+            NativeBridge.clearSocksProxy()
         }
     }
 

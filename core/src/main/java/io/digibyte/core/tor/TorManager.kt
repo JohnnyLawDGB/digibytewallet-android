@@ -11,11 +11,14 @@ import io.matthewnelson.kmp.tor.runtime.core.OnFailure
 import io.matthewnelson.kmp.tor.runtime.core.OnSuccess
 import io.matthewnelson.kmp.tor.runtime.core.TorEvent
 import io.matthewnelson.kmp.tor.runtime.core.config.TorOption
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import io.matthewnelson.kmp.tor.runtime.TorState as KmpTorState
@@ -36,6 +39,11 @@ sealed class TorState {
  * [isEnabled] is true, and falls back to direct connections on failure.
  */
 class TorManager(private val context: Context) {
+    // Internal scope for fire-and-forget starts from the UI. Survives
+    // ViewModel destruction — Tor bootstrap takes 10-30s and must not be
+    // cancelled when the user navigates away from Settings.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private val _state = MutableStateFlow<TorState>(TorState.Disabled)
     val state: StateFlow<TorState> = _state.asStateFlow()
 
@@ -189,6 +197,15 @@ class TorManager(private val context: Context) {
             Log.e(TAG, "Failed to start Tor: $reason", e)
             _state.value
         }
+    }
+
+    /**
+     * Fire-and-forget start for UI callers (Settings toggle).
+     * Launches [start] in TorManager's own scope so it survives ViewModel
+     * destruction. State updates are observed via [state] StateFlow.
+     */
+    fun startAsync() {
+        scope.launch { start() }
     }
 
     /**
