@@ -96,10 +96,14 @@ Core wallet functionality is production-tested on mainnet: send, receive, SPV sy
 - **Challenge:** DigiByte's ~20M blocks need checkpointed filter headers for mobile
 - **Prerequisite:** Enable `blockfilterindex=1` + `peerblockfilters=1` on digiscope.me node, measure filter sizes
 
-### 3.2 Tor Privacy Verification
-- Tor routing exists but privacy guarantees are unverified
-- Verify: no DNS leaks, no cleartext fallback, correct circuit isolation
-- Combine with BIP157/158 — Tor hides which node you connect to, compact filters hide which addresses you hold
+### 3.2 Tor Integration ✅
+- kmp-tor 2.4.0 exec mode — Tor runs as a separate process for crash isolation
+- TorManager wraps TorRuntime with StateFlow lifecycle, 90s bootstrap timeout
+- P2P peers routed via SOCKS5 (`NativeBridge.setSocksProxy`), HTTP via OkHttp proxy
+- DNS leak prevention: custom Dns resolver + SafeSocks 1 + OkHttp unresolved SOCKS addressing
+- User toggle in Network Info → Privacy, wallet badge when connected
+- Graceful degradation: wallet syncs directly if Tor fails
+- **Remaining:** verify no DNS leaks on-device, test circuit isolation, combine with BIP157/158
 
 ### 3.3 Dandelion++ Integration (v9.26)
 - Transaction broadcast privacy — obscures which node originated a transaction
