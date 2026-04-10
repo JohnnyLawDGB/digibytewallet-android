@@ -21,6 +21,8 @@ import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import javax.inject.Inject
 
 /**
@@ -46,6 +48,7 @@ class SyncService : Service() {
     @Inject lateinit var peerDao: PeerDao
     @Inject lateinit var assetManager: AssetManager
     @Inject lateinit var torManager: TorManager
+    @Inject lateinit var okHttpClient: OkHttpClient
 
     /** True if Tor proxy was successfully wired before this sync session started. */
     @Volatile private var torProxyActive: Boolean = false
@@ -392,28 +395,24 @@ class SyncService : Service() {
             return
         }
 
-        // Try to fetch fresh peers from the seeder API (non-blocking best-effort)
+        // Fetch fresh peers via the DI OkHttpClient — routes through Tor when active,
+        // preventing IP leaks to api.digiscope.me.
         try {
-            val url = java.net.URL(BLOOM_SEEDER_URL)
-            val conn = url.openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            conn.requestMethod = "GET"
-
-            if (conn.responseCode == 200) {
-                val json = conn.inputStream.bufferedReader().readText()
-                prefs.edit()
-                    .putString("peers_json", json)
-                    .putLong("last_fetch", now)
-                    .apply()
-                injectPeersFromJson(json)
-                android.util.Log.i("SyncService", "Fetched bloom peers from seeder API")
-            } else {
-                // API error — use cached data if available
-                if (cachedJson != null) injectPeersFromJson(cachedJson)
-                android.util.Log.w("SyncService", "Bloom seeder API returned ${conn.responseCode}")
+            val request = Request.Builder().url(BLOOM_SEEDER_URL).build()
+            okHttpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val json = response.body!!.string()
+                    prefs.edit()
+                        .putString("peers_json", json)
+                        .putLong("last_fetch", now)
+                        .apply()
+                    injectPeersFromJson(json)
+                    android.util.Log.i("SyncService", "Fetched bloom peers from seeder API")
+                } else {
+                    if (cachedJson != null) injectPeersFromJson(cachedJson)
+                    android.util.Log.w("SyncService", "Bloom seeder API returned ${response.code}")
+                }
             }
-            conn.disconnect()
         } catch (e: Exception) {
             // Network error — use cached data if available
             if (cachedJson != null) injectPeersFromJson(cachedJson)
