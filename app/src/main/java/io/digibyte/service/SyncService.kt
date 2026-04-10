@@ -105,7 +105,8 @@ class SyncService : Service() {
                 delay(10_000L)
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
-                    android.util.Log.i("SyncService", "No peers connected, reconnecting")
+                    android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
+                    injectBloomPeers()
                     NativeBridge.startSync()
                 }
                 // If peers are connected and we have a block height but
