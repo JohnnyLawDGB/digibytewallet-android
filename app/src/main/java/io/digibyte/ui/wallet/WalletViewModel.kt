@@ -164,8 +164,10 @@ class WalletViewModel @Inject constructor(
                             )
                         } else null
                     }
-                    if (txList != _transactions.value) {
-                        _transactions.value = txList
+                    // Sort newest first — native bridge returns unordered
+                    val sorted = txList.sortedByDescending { it.timestamp }
+                    if (sorted != _transactions.value) {
+                        _transactions.value = sorted
                     }
                 }
 

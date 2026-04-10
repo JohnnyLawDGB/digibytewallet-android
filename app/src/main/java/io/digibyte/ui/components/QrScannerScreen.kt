@@ -216,37 +216,41 @@ private fun CameraPreviewWithZxing(
         onDispose { analysisExecutor.shutdown() }
     }
 
+    // Use a callback instead of blocking .get() — avoids hanging on Android 15+
+    // where camera service initialization can be slow.
     LaunchedEffect(Unit) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        val cameraProvider = cameraProviderFuture.get()
+        cameraProviderFuture.addListener({
+            try {
+                val cameraProvider = cameraProviderFuture.get()
 
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
+                val preview = Preview.Builder().build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
 
-        val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(Size(1280, 720))
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also { analysis ->
-                analysis.setAnalyzer(analysisExecutor, ZxingAnalyzer { result ->
-                    if (scanned.compareAndSet(false, true)) {
-                        mainHandler.post { onScanResult(result) }
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setTargetResolution(Size(1280, 720))
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { analysis ->
+                        analysis.setAnalyzer(analysisExecutor, ZxingAnalyzer { result ->
+                            if (scanned.compareAndSet(false, true)) {
+                                mainHandler.post { onScanResult(result) }
+                            }
+                        })
                     }
-                })
-            }
 
-        try {
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                imageAnalysis
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Camera bind failed", e)
-        }
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    imageAnalysis
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Camera bind failed", e)
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     AndroidView(
@@ -271,17 +275,31 @@ private class ZxingAnalyzer(private val onResult: (String) -> Unit) : ImageAnaly
         try {
             val plane = image.planes[0]
             val buffer: ByteBuffer = plane.buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
             val rowStride = plane.rowStride
+            val width = image.width
+            val height = image.height
+
+            // On some devices (especially Android 15+), rowStride > width due to
+            // memory alignment padding. Strip padding so ZXing gets clean pixel rows.
+            val bytes: ByteArray
+            val dataWidth: Int
+            if (rowStride == width) {
+                bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                dataWidth = width
+            } else {
+                // Copy row-by-row, skipping stride padding
+                bytes = ByteArray(width * height)
+                for (row in 0 until height) {
+                    buffer.position(row * rowStride)
+                    buffer.get(bytes, row * width, width)
+                }
+                dataWidth = width
+            }
+
             val source = PlanarYUVLuminanceSource(
-                bytes,
-                rowStride,
-                image.height,
-                0, 0,
-                image.width,
-                image.height,
-                false
+                bytes, dataWidth, height,
+                0, 0, width, height, false
             )
             val bitmap = BinaryBitmap(HybridBinarizer(source))
             val result = reader.decodeWithState(bitmap)
