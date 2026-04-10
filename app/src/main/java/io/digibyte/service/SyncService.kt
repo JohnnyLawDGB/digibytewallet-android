@@ -52,6 +52,8 @@ class SyncService : Service() {
 
     /** True if Tor proxy was successfully wired before this sync session started. */
     @Volatile private var torProxyActive: Boolean = false
+    /** Consecutive poll cycles with 0 peers while Tor proxy is active. */
+    private var torReconnectFailures = 0
 
     /**
      * SupervisorJob so that a child coroutine failure never cancels the
@@ -105,9 +107,34 @@ class SyncService : Service() {
                 delay(10_000L)
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
+                    // If Tor proxy is active and we've failed to connect for
+                    // several cycles, the SOCKS port is likely dead (Tor daemon
+                    // crashed but kmp-tor state wasn't updated). Clear the proxy
+                    // so the C core can connect directly, then try to restart Tor.
+                    if (torProxyActive) {
+                        torReconnectFailures++
+                        if (torReconnectFailures >= MAX_TOR_RECONNECT_FAILURES) {
+                            android.util.Log.w("SyncService",
+                                "Tor proxy appears dead ($torReconnectFailures failures) — clearing proxy, connecting directly")
+                            // Stop the daemon first so start() actually restarts
+                            // (otherwise start() sees Connected state and returns
+                            // the stale port immediately).
+                            torManager.stop()
+                            NativeBridge.clearSocksProxy()
+                            torProxyActive = false
+                            torReconnectFailures = 0
+                            // Don't auto-restart Tor — just stay on direct connections.
+                            // The user can re-enable Tor from Settings if they want to
+                            // try again. Auto-restart would re-set the proxy and kill
+                            // the working direct connections.
+                            android.util.Log.i("SyncService", "Continuing without Tor — user can re-enable from Settings")
+                        }
+                    }
                     android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
                     injectBloomPeers()
                     NativeBridge.startSync()
+                } else if (torProxyActive) {
+                    torReconnectFailures = 0 // reset on successful peer connection
                 }
                 // If peers are connected and we have a block height but
                 // onSyncComplete never fired (new wallet at chain tip),
@@ -512,5 +539,7 @@ class SyncService : Service() {
         private const val BLOOM_SEEDER_URL = "https://api.digiscope.me/api/peers/bloom"
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
+        /** Clear Tor proxy after this many consecutive 0-peer poll cycles. */
+        private const val MAX_TOR_RECONNECT_FAILURES = 3
     }
 }
