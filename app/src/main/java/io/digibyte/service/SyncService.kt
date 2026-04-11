@@ -133,8 +133,14 @@ class SyncService : Service() {
                     android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
                     injectBloomPeers()
                     NativeBridge.startSync()
-                } else if (torProxyActive) {
-                    torReconnectFailures = 0 // reset on successful peer connection
+                } else {
+                    if (torProxyActive) torReconnectFailures = 0
+                    // Peers connected but sync may have stalled (download peer
+                    // disconnected, remaining peers aren't driving the sync).
+                    // Kick startSync to reassign a download peer.
+                    if (!hasReachedSynced && NativeBridge.getSyncProgress() < 1.0f) {
+                        NativeBridge.startSync()
+                    }
                 }
                 // If peers are connected and we have a block height but
                 // onSyncComplete never fired (new wallet at chain tip),
