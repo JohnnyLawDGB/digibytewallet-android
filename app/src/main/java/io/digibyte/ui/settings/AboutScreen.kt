@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 
@@ -35,6 +36,10 @@ fun AboutScreen(navController: NavController) {
     val versionName = try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
     } catch (e: Exception) { "unknown" }
+
+    val derivationPath = try {
+        NativeBridge.getDerivationPath()
+    } catch (_: Exception) { "m/84'/20'/0'" }
 
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -113,8 +118,8 @@ fun AboutScreen(navController: NavController) {
                     SettingsRowDivider()
                     WalletInfoRow(
                         label = "HD Path",
-                        value = "m/44'/20'/0'",
-                        description = "The derivation path used to generate your addresses. 44 = BIP44 standard, 20 = DigiByte coin type (SLIP44), 0 = first account. This ensures any BIP44-compatible wallet can restore your addresses from the same seed phrase. Compatible with Ian Coleman's BIP39 tool."
+                        value = derivationPath,
+                        description = "The derivation path used to generate your addresses. 84 = BIP84 standard, 20 = DigiByte coin type (SLIP44), 0 = first account. This ensures any BIP84-compatible wallet can restore your addresses from the same seed phrase. Compatible with Ian Coleman's BIP39 tool."
                     )
                     SettingsRowDivider()
                     WalletInfoRow(

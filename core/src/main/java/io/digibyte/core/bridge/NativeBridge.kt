@@ -134,4 +134,11 @@ object NativeBridge {
 
     /** Returns the raw script bytes of the first OP_RETURN output, or null if none. */
     external fun getOpReturnData(rawTx: ByteArray): ByteArray?
+
+    // === BIP84 Derivation ===
+    /** Returns the BIP84 derivation path string, e.g. "m/84'/20'/0'" */
+    external fun getDerivationPath(): String
+
+    /** Returns true if the wallet has UTXOs on the legacy m/0H key tree */
+    external fun hasLegacyFunds(): Boolean
 }
