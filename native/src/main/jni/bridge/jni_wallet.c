@@ -119,8 +119,8 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
     BRBIP39DeriveKey(seed, phraseChars, NULL);
     (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
 
-    /* Derive master public key */
-    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+    /* Derive master public key (BIP84: m/84'/20'/0') */
+    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
 
     /* Create wallet with no initial transactions */
     if (g_wallet) {
@@ -198,7 +198,7 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     BRBIP39DeriveKey(seed, phraseChars, NULL);
     secure_zero(phraseChars, sizeof(phraseChars));
 
-    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
 
     if (g_wallet) {
         LOGW("createWalletFromBytes: wallet already exists, freeing old one");
@@ -254,7 +254,8 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
     BRBIP39DeriveKey(seed, phraseChars, NULL);
     (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
 
-    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+    BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
 
     if (g_wallet) {
         BRWalletFree(g_wallet);
@@ -262,25 +263,26 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
     }
 
     /* Use saved transactions if available — wallet starts with full history
-     * so balance is immediately spendable without waiting for rescan. */
+     * so balance is immediately spendable without waiting for rescan.
+     * Dual scan covers both BIP84 (m/84'/20'/0') and legacy (m/0H) paths. */
     extern BRTransaction **g_savedTransactions;
     extern size_t g_savedTransactionCount;
 
     if (g_savedTransactions && g_savedTransactionCount > 0) {
         LOGI("recoverWallet: restoring with %zu saved transactions", g_savedTransactionCount);
-        g_wallet = BRWalletNew(g_savedTransactions, g_savedTransactionCount, mpk);
+        g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
     } else {
-        g_wallet = BRWalletNew(NULL, 0, mpk);
+        g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
     }
     if (!g_wallet) {
-        LOGE("recoverWallet: BRWalletNew failed");
+        LOGE("recoverWallet: BRWalletNewDual failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
 
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
-    g_mpk = mpk;
+    g_mpk = mpkBIP84;
     g_mpkValid = 1;
 
     secure_zero(seed, sizeof(seed));
@@ -341,7 +343,8 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
     BRBIP39DeriveKey(seed, phraseChars, NULL);
     secure_zero(phraseChars, sizeof(phraseChars));
 
-    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+    BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
 
     if (g_wallet) {
         BRWalletFree(g_wallet);
@@ -353,19 +356,19 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
 
     if (g_savedTransactions && g_savedTransactionCount > 0) {
         LOGI("recoverWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
-        g_wallet = BRWalletNew(g_savedTransactions, g_savedTransactionCount, mpk);
+        g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
     } else {
-        g_wallet = BRWalletNew(NULL, 0, mpk);
+        g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
     }
     if (!g_wallet) {
-        LOGE("recoverWalletFromBytes: BRWalletNew failed");
+        LOGE("recoverWalletFromBytes: BRWalletNewDual failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
 
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
-    g_mpk = mpk;
+    g_mpk = mpkBIP84;
     g_mpkValid = 1;
 
     secure_zero(seed, sizeof(seed));
@@ -609,4 +612,24 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
     return result;
+}
+
+/* ---------- getDerivationPath ---------- */
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getDerivationPath(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    return (*env)->NewStringUTF(env, "m/84'/20'/0'");
+}
+
+/* ---------- hasLegacyFunds ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_hasLegacyFunds(JNIEnv *env, jobject thiz)
+{
+    (void)env;
+    (void)thiz;
+    if (!g_wallet) return JNI_FALSE;
+    return BRWalletHasLegacyFunds(g_wallet) ? JNI_TRUE : JNI_FALSE;
 }
