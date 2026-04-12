@@ -14,8 +14,8 @@ tags:
 
 # Wallet Info section
 - assertVisible: "Wallet Info"
-- assertVisible: "HD Wallet (BIP44)"
-- assertVisible: "m/44'/20'/0'"
+- assertVisible: "HD Wallet (BIP84)"
+- assertVisible: "m/84'/20'/0'"
 - assertVisible: "SegWit (Bech32)"
 - assertVisible: "Mainnet"
 - assertVisible: "Self-Custodial"

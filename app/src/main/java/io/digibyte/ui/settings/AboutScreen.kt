@@ -112,7 +112,7 @@ fun AboutScreen(navController: NavController) {
                 SettingsCategory(title = "Wallet Info") {
                     WalletInfoRow(
                         label = "Wallet Type",
-                        value = "HD Wallet (BIP44)",
+                        value = "HD Wallet (BIP84)",
                         description = "Hierarchical Deterministic wallet created from a seed phrase. Can generate many addresses from one backup — like having unlimited account numbers from one master key."
                     )
                     SettingsRowDivider()
