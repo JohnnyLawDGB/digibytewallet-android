@@ -116,6 +116,21 @@ class WalletManager(
                 saveSeedFingerprint(seedBytes)
             }
 
+            // BIP84 upgrade detection: if an existing wallet was created before BIP84,
+            // clear saved blocks so a full rescan occurs with the wider bloom filter.
+            // Without this, received transactions on legacy addresses are missed because
+            // the old sync data was built with a narrower bloom filter.
+            val migrationPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+            if (!migrationPrefs.getBoolean("bip84_migrated", false)) {
+                android.util.Log.i("WalletManager", "BIP84 upgrade detected — clearing sync data for rescan")
+                migrationPrefs.edit()
+                    .remove("saved_blocks")
+                    .remove("saved_peers")
+                    .putBoolean("has_synced", false)
+                    .putBoolean("bip84_migrated", true)
+                    .apply()
+            }
+
             // Load saved transactions BEFORE creating wallet — recoverWallet uses them
             // so the wallet starts with full tx history and balance is immediately spendable.
             val syncPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
