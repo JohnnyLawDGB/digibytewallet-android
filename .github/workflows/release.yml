@@ -69,25 +69,43 @@ jobs:
         if: success()
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          APK_PATH: ${{ steps.checksum.outputs.apk_path }}
+          APK_HASH: ${{ steps.checksum.outputs.hash }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          APK_PATH="${{ steps.checksum.outputs.apk_path }}"
-          APK_HASH="${{ steps.checksum.outputs.hash }}"
-          FILENAME="digibyte-wallet-${TAG}-beta.apk"
+          FILENAME="digibyte-wallet-${TAG}.apk"
 
           mkdir -p ~/.ssh
-          echo "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan digiscope.me >> ~/.ssh/known_hosts 2>/dev/null
 
           scp -i ~/.ssh/deploy_key "$APK_PATH" "root@digiscope.me:/var/www/digiscope-downloads/${FILENAME}"
 
           ssh -i ~/.ssh/deploy_key root@digiscope.me bash -s "$TAG" "$FILENAME" "$APK_HASH" << 'DEPLOY'
+            set -e
             TAG="$1"; FILENAME="$2"; HASH="$3"
             cd /var/www/digiscope-downloads
-            sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+-beta/${TAG}-beta/g" index.html
-            sed -i "s/digibyte-wallet-v[0-9]\+\.[0-9]\+\.[0-9]\+-beta\.apk/${FILENAME}/g" index.html
-            sed -i "s/[a-f0-9]\{64\}/${HASH}/" index.html
+
+            # Scoped mechanical updates. Each regex is anchored to a specific UI
+            # element so free-body-text version mentions (e.g. "upgrade from
+            # v3.4.0" inside release notes) are never accidentally rewritten.
+            # Release notes content itself stays as-committed in the tagged revision.
+            VER_RE='v[0-9]\+\.[0-9]\+\.[0-9]\+'
+            sed -i "s|digibyte-wallet-${VER_RE}\.apk|${FILENAME}|g"              index.html
+            sed -i "s|<div class=\"ver\">${VER_RE}|<div class=\"ver\">${TAG}|"   index.html
+            sed -i "s|Download APK (${VER_RE})|Download APK (${TAG})|"           index.html
+            sed -i "s|What's New in ${VER_RE}|What's New in ${TAG}|"             index.html
+            sed -i "s|/releases/tag/${VER_RE}|/releases/tag/${TAG}|"             index.html
+            sed -i "s|[a-f0-9]\{64\}|${HASH}|"                                   index.html
+
+            # Point "latest" symlink at the new APK so
+            # /downloads/digibyte-wallet-latest.apk always resolves to the most
+            # recent release.
+            ln -sf "/var/www/digiscope-downloads/${FILENAME}" digibyte-wallet-latest.apk
+
+            # Re-expose everything via the public downloads dir
+            # (frontend deploys wipe symlinks).
             mkdir -p /var/www/digiscope/downloads
             ln -sf /var/www/digiscope-downloads/* /var/www/digiscope/downloads/
           DEPLOY
