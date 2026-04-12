@@ -116,17 +116,18 @@ class WalletManager(
                 saveSeedFingerprint(seedBytes)
             }
 
-            // BIP84 upgrade detection: if an existing wallet was created before BIP84,
-            // clear saved blocks so a full rescan occurs with the wider bloom filter.
-            // Without this, received transactions on legacy addresses are missed because
-            // the old sync data was built with a narrower bloom filter.
+            // BIP84 upgrade detection: mark migration complete.
+            // Do NOT clear saved blocks or force a rescan — saved transactions
+            // already have correct parent/child relationships from the bulk-add.
+            // A forced rescan corrupts send transaction amounts because
+            // _BRWalletUpdateBalance rebuilds the UTXO chain incrementally,
+            // causing BRWalletAmountSentByTx to return wrong values mid-rescan.
+            // The wider bloom filter (830 addresses) takes effect naturally
+            // on the next sync cycle without needing a full rescan.
             val migrationPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
             if (!migrationPrefs.getBoolean("bip84_migrated", false)) {
-                android.util.Log.i("WalletManager", "BIP84 upgrade detected — clearing sync data for rescan")
+                android.util.Log.i("WalletManager", "BIP84 upgrade detected — marking migration (no rescan)")
                 migrationPrefs.edit()
-                    .remove("saved_blocks")
-                    .remove("saved_peers")
-                    .putBoolean("has_synced", false)
                     .putBoolean("bip84_migrated", true)
                     .apply()
             }
