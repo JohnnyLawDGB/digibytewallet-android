@@ -43,7 +43,8 @@ fun SendScreen(
     onNavigateBack: () -> Unit,
     prefillAddress: String = "",
     onScanQr: ((String) -> Unit) -> Unit = {},
-    viewModel: SendViewModel = hiltViewModel()
+    viewModel: SendViewModel = hiltViewModel(),
+    walletViewModel: WalletViewModel = hiltViewModel()
 ) {
     // Pre-fill address from QR scan
     LaunchedEffect(prefillAddress) {
@@ -64,6 +65,8 @@ fun SendScreen(
     val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val validationError by viewModel.validationError.collectAsStateWithLifecycle()
+    val peerCount by walletViewModel.peerCount.collectAsStateWithLifecycle()
+    val hasPeers = peerCount > 0
 
     var inputIsDgb by remember { mutableStateOf(true) }
 
@@ -328,6 +331,34 @@ fun SendScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
+        // ── Peer connectivity banner ──────────────────────────────────────
+        // If the SPV peer manager has zero peers, a broadcast would never
+        // propagate — the tx would sit in the local wallet marked "sent"
+        // with nothing to relay it. Gate the button and say so explicitly.
+        if (!hasPeers) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x33FFAA00), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.CloudOff,
+                    contentDescription = null,
+                    tint = Color(0xFFFFAA00),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "No DigiByte peers connected — can't broadcast right now. Reconnecting…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFFCC66)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         // ── Confirm button ────────────────────────────────────────────────
         val isSending = sendState is SendState.Sending
         Button(
@@ -335,7 +366,7 @@ fun SendScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            enabled = !isSending,
+            enabled = !isSending && hasPeers,
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary

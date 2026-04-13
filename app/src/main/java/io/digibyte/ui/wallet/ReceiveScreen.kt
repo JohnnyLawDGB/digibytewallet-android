@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.ui.components.QrCodeDisplay
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 
@@ -36,6 +38,8 @@ fun ReceiveScreen(
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
+    val hasPeers = peerCount > 0
 
     // Address format: 0=legacy(D), 2=bech32(dgb1q) — default to bech32
     var addressFormat by remember { mutableIntStateOf(2) }
@@ -91,7 +95,35 @@ fun ReceiveScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Informational banner when SPV has no connected peers. The address
+        // is still safe to share — incoming transactions settle on chain
+        // regardless — but the user should know that balance and
+        // confirmation updates won't flow until peers reconnect.
+        if (!hasPeers) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x33FFAA00), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.CloudOff,
+                    contentDescription = null,
+                    tint = Color(0xFFFFAA00),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "No peers connected. Incoming transactions won't appear here until the wallet reconnects.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFFCC66)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // QR code
         Card(

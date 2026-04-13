@@ -42,6 +42,13 @@ class WalletViewModel @Inject constructor(
     private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
     val transactions: StateFlow<List<TransactionEntity>> = _transactions.asStateFlow()
 
+    /** Live SPV peer count from the C core peer manager. Updated on the
+     *  same 5s cadence as balance/tx polling. SendScreen uses this to gate
+     *  the Review & Send button (broadcasting with zero peers silently
+     *  strands the tx locally) and ReceiveScreen shows a soft warning. */
+    private val _peerCount = MutableStateFlow(0)
+    val peerCount: StateFlow<Int> = _peerCount.asStateFlow()
+
     /** SPV sync state propagated from WalletManager. */
     val syncState: StateFlow<SyncState> = walletManager.syncState
 
@@ -123,6 +130,11 @@ class WalletViewModel @Inject constructor(
                     }
                 }
 
+                // Poll peer count — publish to the StateFlow so Send/Receive
+                // screens can gate their UI on live connectivity.
+                val peers = NativeBridge.getPeerCount()
+                if (peers != _peerCount.value) _peerCount.value = peers
+
                 // Poll transactions
                 var currentHeight = NativeBridge.getLastBlockHeight()
                 val estHeight = NativeBridge.getEstimatedBlockHeight()
@@ -130,7 +142,7 @@ class WalletViewModel @Inject constructor(
                 val txDetails = NativeBridge.getTransactionDetails()
                 // Log every ~60s for debugging
                 if (System.currentTimeMillis() % 60000 < 5000) {
-                    android.util.Log.d("WalletVM", "heights: last=$currentHeight est=$estHeight peers=${NativeBridge.getPeerCount()}")
+                    android.util.Log.d("WalletVM", "heights: last=$currentHeight est=$estHeight peers=$peers")
                     txDetails.trim().lines().take(5).forEach { android.util.Log.d("WalletVM", "tx: $it") }
                 }
                 if (txDetails.isNotEmpty()) {
