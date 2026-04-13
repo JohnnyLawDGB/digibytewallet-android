@@ -101,10 +101,18 @@ class SyncService : Service() {
         }
 
         // Keep peers alive while app is open — poll every 10s, reconnect aggressively.
+        //
+        // The loop body is wrapped in try/catch because it runs for the life of
+        // the service and a single uncaught throwable (e.g. a native call
+        // returning an unexpected state during a Doze transition) would exit
+        // the while loop, leaving the service nominally alive but no longer
+        // maintaining peer connectivity — the "permanently stuck with 0 peers"
+        // state users have hit after extended backgrounding.
         serviceScope.launch {
             walletManager.walletState.first { it is WalletState.Unlocked }
             while (isActive) {
                 delay(10_000L)
+                try {
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
                     // If Tor proxy is active and we've failed to connect for
@@ -175,6 +183,12 @@ class SyncService : Service() {
                     }
                 }
                 updateNotification(NativeBridge.getSyncProgress(), peers)
+                } catch (t: Throwable) {
+                    // Swallow and continue. Losing a single 10s tick is fine;
+                    // killing the poll forever is not. Log with stack so the
+                    // underlying issue is still visible in bug reports.
+                    android.util.Log.e("SyncService", "peer-keepalive tick threw — continuing", t)
+                }
             }
         }
 

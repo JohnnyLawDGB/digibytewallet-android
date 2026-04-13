@@ -19,6 +19,7 @@ import io.digibyte.core.AppUpdate
 import io.digibyte.core.UpdateChecker
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.ui.components.UpdateDialog
 import okhttp3.OkHttpClient
 import io.digibyte.core.db.dao.WalletConfigDao
@@ -164,6 +165,36 @@ class MainActivity : FragmentActivity() {
         // in memory so SyncService can continue syncing in the background.
         if (walletManager.walletState.value is WalletState.Unlocked) {
             walletManager.lockUi()
+        }
+    }
+
+    /**
+     * Defensive reconnect on foreground return.
+     *
+     * The SyncService runs a 10s peer-keepalive loop that should already
+     * re-inject bloom peers and call startSync when peerCount drops to 0
+     * (commit b1d26f2f). In practice users have hit a state where the app
+     * has been backgrounded for hours, returns with 0 peers, and doesn't
+     * recover on its own — likely the keepalive coroutine stalling through
+     * Doze or dying silently on an uncaught throwable.
+     *
+     * As a user-visible recovery path: any time the activity comes to
+     * foreground with the wallet unlocked and peerCount == 0, call
+     * startSync() directly. The native bridge's startSync re-injects the
+     * priority peer list and invokes BRPeerManagerConnect, which is
+     * idempotent — safe to call when already connected. This gives the
+     * user "reopen the app to reconnect" as a reliable escape hatch
+     * alongside the keepalive's try/catch hardening in SyncService.
+     */
+    override fun onResume() {
+        super.onResume()
+        if (walletManager.walletState.value !is WalletState.Unlocked) return
+        val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { -1 }
+        if (peers == 0) {
+            android.util.Log.i("MainActivity", "onResume with peerCount=0 — kicking startSync")
+            try { NativeBridge.startSync() } catch (t: Throwable) {
+                android.util.Log.w("MainActivity", "startSync kick failed", t)
+            }
         }
     }
 
