@@ -27,10 +27,14 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      - name: Decode keystore
-        run: echo "$KEYSTORE_B64" | base64 -d > app/release.jks
+      - name: Decode keystores
         env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          RELEASE_KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          DEBUG_KS_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$RELEASE_KS_B64" | base64 -d > app/release.jks
+          printf '%s' "$DEBUG_KS_B64"   | base64 -d > /tmp/debug.keystore
+          ls -la app/release.jks /tmp/debug.keystore
 
       - name: Build signed release APK
         env:
@@ -38,6 +42,50 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: dgb-wallet-release
         run: ./gradlew :native:assembleMainnetRelease :app:assembleMainnetRelease
+
+      # Rotate from the Android debug key (which signed every previously
+      # distributed APK through v3.5.7) to the release key, using APK Signing
+      # Scheme v3 lineage. Existing installs upgrade cleanly on API 28+; API
+      # 26/27 devices with the debug signature also accept the update via
+      # the v1/v2 signature written by the first signer.
+      - name: Re-sign APK with debug→release signing lineage
+        env:
+          RELEASE_KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
+          DEBUG_KS_PW:   ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -rV | head -1)"
+          APK="app/build/outputs/apk/mainnet/release/app-mainnet-release.apk"
+          echo "Using $APKSIGNER"
+          echo "APK: $APK"
+
+          "$APKSIGNER" rotate \
+              --out /tmp/lineage.bin \
+              --old-signer \
+                  --ks /tmp/debug.keystore \
+                  --ks-key-alias androiddebugkey \
+                  --ks-pass env:DEBUG_KS_PW \
+                  --key-pass env:DEBUG_KS_PW \
+              --new-signer \
+                  --ks app/release.jks \
+                  --ks-key-alias dgb-wallet-release \
+                  --ks-pass env:RELEASE_KS_PW \
+                  --key-pass env:RELEASE_KS_PW
+
+          "$APKSIGNER" sign \
+              --ks /tmp/debug.keystore \
+              --ks-key-alias androiddebugkey \
+              --ks-pass env:DEBUG_KS_PW \
+              --key-pass env:DEBUG_KS_PW \
+              --next-signer \
+                  --ks app/release.jks \
+                  --ks-key-alias dgb-wallet-release \
+                  --ks-pass env:RELEASE_KS_PW \
+                  --key-pass env:RELEASE_KS_PW \
+              --lineage /tmp/lineage.bin \
+              "$APK"
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | head -40
 
       - name: Compute SHA-256
         id: checksum
