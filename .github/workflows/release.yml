@@ -63,7 +63,7 @@ jobs:
             **SHA-256:** `${{ steps.checksum.outputs.hash }}`
 
             Download from [digiscope.me/downloads/](https://digiscope.me/downloads/) or install the APK below. Requires Android 8.0+.
-          prerelease: true
+          prerelease: false
 
       - name: Deploy to VPS
         if: success()
