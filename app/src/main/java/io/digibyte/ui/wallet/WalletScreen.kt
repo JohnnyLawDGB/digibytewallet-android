@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.digibyte.core.model.SyncProgressInfo
+import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.tor.TorState
 import io.digibyte.ui.components.BalanceDisplay
@@ -50,6 +52,7 @@ fun WalletScreen(
     val syncState by viewModel.syncState.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
+    val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier
@@ -120,6 +123,23 @@ fun WalletScreen(
                     label = "Assets",
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateAssets
+                )
+            }
+        }
+
+        // ── Verbose sync status card ──────────────────────────────────────
+        // Shown while connecting / syncing. Shows current vs target block,
+        // ETA based on observed scan rate, count of transactions found so
+        // far during this scan, running balance accumulated so far, and
+        // an honesty banner about the recovery scan window.
+        if (syncProgressInfo.isWorking) {
+            item {
+                SyncProgressCard(
+                    info = syncProgressInfo,
+                    runningBalanceDisplay = WalletViewModel.formatSatoshis(syncProgressInfo.runningBalanceSat),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
         }
@@ -196,6 +216,144 @@ fun WalletScreen(
 }
 
 // ── Sub-composables ──────────────────────────────────────────────────────────
+
+@Composable
+private fun SyncProgressCard(
+    info: SyncProgressInfo,
+    runningBalanceDisplay: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Stage-specific headline.
+            val (icon, headline) = when (info.stage) {
+                SyncStage.Connecting -> Icons.Filled.CloudSync to
+                    "Connecting to DigiByte network"
+                SyncStage.Syncing -> Icons.Filled.Search to
+                    "Scanning for your transactions"
+                SyncStage.Synced -> Icons.Filled.CheckCircle to "Up to date"
+                SyncStage.Failed -> Icons.Filled.ErrorOutline to "Sync failed"
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = DigiByteAccent,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = headline,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Block X of Y, where data is meaningful.
+            if (info.targetBlock > 0 && info.currentBlock > 0) {
+                Text(
+                    text = "Block ${formatThousands(info.currentBlock)} of ${formatThousands(info.targetBlock)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB8C5D6)
+                )
+            }
+
+            // Progress bar — meaningful only during Syncing.
+            if (info.stage == SyncStage.Syncing) {
+                LinearProgressIndicator(
+                    progress = { info.progressFraction.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp),
+                    color = DigiByteAccent,
+                    trackColor = Color(0xFF273956)
+                )
+            }
+
+            // ETA + percent line.
+            if (info.stage == SyncStage.Syncing) {
+                val pct = (info.progressFraction * 100).toInt()
+                val eta = info.etaSeconds?.let { formatEta(it) } ?: "estimating…"
+                Text(
+                    text = "$pct% complete · $eta remaining",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF8FA1B8)
+                )
+            }
+
+            // Running totals — what the scan has surfaced so far.
+            if (info.matchCount > 0 || info.runningBalanceSat > 0) {
+                Text(
+                    text = "Found ${info.matchCount} transaction${if (info.matchCount != 1) "s" else ""}, $runningBalanceDisplay so far",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB8C5D6)
+                )
+            }
+
+            // Scan-window honesty banner — only when a recovery date is set
+            // AND we're still syncing. Tells the user explicitly that older
+            // history isn't included in this scan.
+            val recoveryTs = info.recoveryFromTimestamp
+            if (recoveryTs != null && info.stage != SyncStage.Synced) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x33FFAA00), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFFAA00),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Showing transactions from ${formatRecoveryDate(recoveryTs)} onward. " +
+                                "Earlier history is not being recovered.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFFCC66)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatThousands(value: Long): String {
+    return NumberFormat.getNumberInstance(Locale.US).format(value)
+}
+
+private fun formatEta(seconds: Long): String {
+    if (seconds <= 0) return "estimating…"
+    return when {
+        seconds < 60 -> "~${seconds}s"
+        seconds < 3600 -> "~${seconds / 60} min"
+        else -> {
+            val hours = seconds / 3600
+            val mins = (seconds % 3600) / 60
+            if (mins == 0L) "~${hours}h" else "~${hours}h ${mins}m"
+        }
+    }
+}
+
+private fun formatRecoveryDate(unixSeconds: Long): String {
+    val sdf = java.text.SimpleDateFormat("MMMM yyyy", Locale.US)
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return sdf.format(java.util.Date(unixSeconds * 1000))
+}
 
 @Composable
 private fun WalletActionButton(

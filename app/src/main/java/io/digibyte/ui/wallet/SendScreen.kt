@@ -66,7 +66,10 @@ fun SendScreen(
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val validationError by viewModel.validationError.collectAsStateWithLifecycle()
     val peerCount by walletViewModel.peerCount.collectAsStateWithLifecycle()
+    val syncProgressInfo by walletViewModel.syncProgressInfo.collectAsStateWithLifecycle()
     val hasPeers = peerCount > 0
+    val isFullySynced = syncProgressInfo.stage == io.digibyte.core.model.SyncStage.Synced
+    val canSend = hasPeers && isFullySynced
 
     var inputIsDgb by remember { mutableStateOf(true) }
 
@@ -357,6 +360,32 @@ fun SendScreen(
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
+        } else if (!isFullySynced) {
+            // Wallet has peers but the bloom-filter rescan hasn't finished
+            // yet. Sending now would build the tx against an incomplete
+            // UTXO set — change calculation, fee estimate, and even basic
+            // balance can be wrong until the scan reaches chain tip.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x33FFAA00), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.HourglassEmpty,
+                    contentDescription = null,
+                    tint = Color(0xFFFFAA00),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Wait for sync to finish before sending — your full balance is still being recovered.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFFCC66)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // ── Confirm button ────────────────────────────────────────────────
@@ -366,7 +395,7 @@ fun SendScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            enabled = !isSending && hasPeers,
+            enabled = !isSending && canSend,
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary

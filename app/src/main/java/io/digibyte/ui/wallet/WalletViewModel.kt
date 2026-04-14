@@ -10,8 +10,13 @@ import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.WalletManager
 import io.digibyte.core.db.dao.TransactionDao
+import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.TransactionEntity
+import io.digibyte.core.model.SyncProgressInfo
+import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.delay
@@ -28,7 +33,8 @@ class WalletViewModel @Inject constructor(
     private val transactionDao: TransactionDao,
     private val walletManager: WalletManager,
     private val priceProvider: PriceProvider,
-    private val torManager: TorManager
+    private val torManager: TorManager,
+    private val walletConfigDao: WalletConfigDao
 ) : ViewModel() {
 
     private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
@@ -51,6 +57,94 @@ class WalletViewModel @Inject constructor(
 
     /** SPV sync state propagated from WalletManager. */
     val syncState: StateFlow<SyncState> = walletManager.syncState
+
+    /** The wallet's stored creation/recovery timestamp. Null until loaded
+     *  (or when the wallet was created on this device fresh, not recovered).
+     *  Drives the scan-window honesty banner — if non-null and we're still
+     *  syncing, the UI tells the user explicitly that transactions older
+     *  than this date are not being recovered. */
+    private val _recoveryFromTimestamp = MutableStateFlow<Long?>(null)
+    val recoveryFromTimestamp: StateFlow<Long?> = _recoveryFromTimestamp.asStateFlow()
+
+    /** Live block height — polled in pollNativeBalance. */
+    private val _currentBlock = MutableStateFlow(0L)
+    private val _targetBlock = MutableStateFlow(0L)
+
+    /** Rolling samples of (timestamp_ms, blockHeight) for ETA computation.
+     *  Capped at 24 entries (~2 minutes at 5s cadence), oldest evicted. */
+    private val scanSamples = ArrayDeque<Pair<Long, Long>>()
+
+    /** Composite UI-facing sync progress object — consumed by WalletScreen
+     *  to render the verbose during-scan UI (stage / progress / ETA /
+     *  match count / running balance / scan-window banner). */
+    val syncProgressInfo: StateFlow<SyncProgressInfo> = combine(
+        syncState,
+        _peerCount,
+        _balance,
+        _transactions,
+        _currentBlock,
+        _targetBlock,
+        _recoveryFromTimestamp
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        val state = values[0] as SyncState
+        val peers = values[1] as Int
+        val balance = values[2] as Long
+        val txs = values[3] as List<TransactionEntity>
+        val current = values[4] as Long
+        val target = values[5] as Long
+        val recoveryTs = values[6] as Long?
+
+        val stage = when {
+            state is SyncState.Failed -> SyncStage.Failed
+            state is SyncState.Complete -> SyncStage.Synced
+            peers <= 0 -> SyncStage.Connecting
+            else -> SyncStage.Syncing
+        }
+
+        val progress = when {
+            state is SyncState.Complete -> 1.0f
+            state is SyncState.Syncing -> state.progress
+            else -> 0.0f
+        }
+
+        // ETA: compute from rolling samples. Need ≥ 2 samples spanning > 10s
+        // and a positive block-rate, otherwise null.
+        val eta: Long? = computeEta(current, target)
+
+        SyncProgressInfo(
+            stage = stage,
+            currentBlock = current,
+            targetBlock = target,
+            progressFraction = progress.coerceIn(0f, 1f),
+            matchCount = txs.size,
+            runningBalanceSat = balance,
+            etaSeconds = eta,
+            peerCount = peers,
+            recoveryFromTimestamp = recoveryTs
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly,
+        SyncProgressInfo(SyncStage.Connecting, 0, 0, 0f, 0, 0, null, 0, null))
+
+    /** Linear-projection ETA from rolling block-rate. Null when we don't
+     *  have enough data (less than two samples > 10s apart, or rate
+     *  trending zero). */
+    private fun computeEta(current: Long, target: Long): Long? {
+        if (target <= 0 || current <= 0 || current >= target) return null
+        val now = System.currentTimeMillis()
+        val samples = scanSamples.toList()
+        if (samples.size < 2) return null
+        val first = samples.first()
+        val elapsedMs = now - first.first
+        if (elapsedMs < 10_000L) return null
+        val blocksAdvanced = current - first.second
+        if (blocksAdvanced <= 0) return null
+        val blocksPerMs = blocksAdvanced.toDouble() / elapsedMs
+        if (blocksPerMs <= 0) return null
+        val remaining = (target - current).toDouble()
+        val msRemaining = remaining / blocksPerMs
+        return (msRemaining / 1000.0).toLong()
+    }
 
     /** Live Tor state — used by WalletScreen to show the Tor indicator badge. */
     val torState: StateFlow<TorState> = torManager.state
@@ -111,6 +205,23 @@ class WalletViewModel @Inject constructor(
     init {
         fetchPricePeriodically()
         pollNativeBalance()
+        loadRecoveryTimestamp()
+    }
+
+    /** One-shot fetch of the wallet's stored creation/recovery timestamp,
+     *  feeding the scan-window banner. */
+    private fun loadRecoveryTimestamp() {
+        viewModelScope.launch {
+            val cfg = withContext(Dispatchers.IO) { walletConfigDao.get() }
+            // creationTimestamp is the value the user picked on the
+            // recovery date screen (or "now" for fresh wallets). For a
+            // fresh wallet, treat values within the last few minutes as
+            // "no scan window concern" — the wallet doesn't have older
+            // history that would be missed.
+            val ts = cfg?.creationTimestamp ?: 0L
+            val nowSec = System.currentTimeMillis() / 1000
+            _recoveryFromTimestamp.value = if (ts > 0 && (nowSec - ts) > 600) ts else null
+        }
     }
 
     /** Poll the C core for balance and transactions every 5 seconds.
@@ -139,6 +250,16 @@ class WalletViewModel @Inject constructor(
                 var currentHeight = NativeBridge.getLastBlockHeight()
                 val estHeight = NativeBridge.getEstimatedBlockHeight()
                 if (estHeight > currentHeight) currentHeight = estHeight
+
+                // Publish raw block heights for the verbose sync UI, and
+                // record a rolling sample for ETA computation. Cap at 24
+                // entries (~2 minutes of history at the 5s poll cadence).
+                _currentBlock.value = currentHeight
+                _targetBlock.value = if (estHeight > 0) estHeight else currentHeight
+                if (currentHeight > 0) {
+                    scanSamples.addLast(System.currentTimeMillis() to currentHeight)
+                    while (scanSamples.size > 24) scanSamples.removeFirst()
+                }
                 val txDetails = NativeBridge.getTransactionDetails()
                 // Log every ~60s for debugging
                 if (System.currentTimeMillis() % 60000 < 5000) {
