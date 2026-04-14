@@ -74,6 +74,25 @@ class WalletViewModel @Inject constructor(
      *  Capped at 24 entries (~2 minutes at 5s cadence), oldest evicted. */
     private val scanSamples = ArrayDeque<Pair<Long, Long>>()
 
+    /** The wall-clock time we last observed the wallet's block height
+     *  advance. SyncService can prematurely mark state=Complete when
+     *  connected peers briefly agree on a stale tip (they've all seen
+     *  the same height during an initial announce burst). The bloom
+     *  filter rescan keeps running in the background past that point
+     *  and eventually finds the user's real history — but our UI had
+     *  already hidden the progress indicator because stage=Synced.
+     *  Tracking "last advancement time" lets us surface Syncing as long
+     *  as blocks are still being processed, regardless of what
+     *  SyncState says. */
+    @Volatile private var lastBlockAdvanceTs: Long = 0L
+
+    /** Latched "we were Complete at some point" flag. Gates the
+     *  anti-flash balance guard: before first Complete we protect the
+     *  UI from flashing to 0 during initial discovery; after first
+     *  Complete we always trust the native balance so sends actually
+     *  debit the displayed amount. */
+    @Volatile private var hasReachedSyncedOnce: Boolean = false
+
     /** Composite UI-facing sync progress object — consumed by WalletScreen
      *  to render the verbose during-scan UI (stage / progress / ETA /
      *  match count / running balance / scan-window banner). */
@@ -101,6 +120,11 @@ class WalletViewModel @Inject constructor(
             peers <= 0 -> SyncStage.Connecting
             else -> SyncStage.Syncing
         }
+
+        // Latch hasReachedSyncedOnce — gates the anti-flash balance
+        // guard in pollNativeBalance so that post-sync sends correctly
+        // debit the shown balance.
+        if (stage == SyncStage.Synced) hasReachedSyncedOnce = true
 
         val progress = when {
             state is SyncState.Complete -> 1.0f
@@ -232,10 +256,23 @@ class WalletViewModel @Inject constructor(
                 // Poll balance
                 val nativeBalance = NativeBridge.getBalance()
                 if (nativeBalance != _balance.value) {
-                    // Don't overwrite cached balance with 0 — the rescan
-                    // hasn't found transactions yet. Only update when we
-                    // have a real balance or the native balance is higher.
-                    if (nativeBalance > 0 || _balance.value == 0L) {
+                    // Anti-flash guard — ONLY during the initial rescan
+                    // before we've ever been synced. The C core can
+                    // briefly report balance=0 while merkleblocks are
+                    // still in-flight during the very first load; we
+                    // don't want the UI to blink from the persisted
+                    // last_balance down to 0 and back up.
+                    //
+                    // But once the wallet has reached Complete at least
+                    // once, trust the native balance authoritatively —
+                    // otherwise a genuine send whose inputs correctly
+                    // reduce the UTXO set gets stuck at the old (higher)
+                    // value forever, making balance look permanently
+                    // inflated. That was the original user's "4 DGB
+                    // shown but all spent" symptom.
+                    val hasBeenSynced = hasReachedSyncedOnce
+                    val guardBlocks = !hasBeenSynced && nativeBalance == 0L && _balance.value > 0
+                    if (!guardBlocks) {
                         _balance.value = nativeBalance
                         prefs.edit().putLong("last_balance", nativeBalance).apply()
                     }
