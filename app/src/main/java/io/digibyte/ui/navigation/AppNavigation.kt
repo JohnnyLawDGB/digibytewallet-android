@@ -73,6 +73,7 @@ private val fullScreenRoutes = setOf(
     "settings_network",
     "settings_display",
     "settings_about",
+    "settings_reconcile",
     "settings_view_seed",
     "assets",
     "asset_detail/{assetId}",
@@ -391,6 +392,10 @@ fun AppNavigation(
 
             composable("settings_about") {
                 AboutScreen(navController = navController)
+            }
+
+            composable("settings_reconcile") {
+                io.digibyte.ui.settings.ReconcileScreen(navController = navController)
             }
 
             composable("settings_view_seed") {

@@ -633,3 +633,41 @@ Java_io_digibyte_core_bridge_NativeBridge_hasLegacyFunds(JNIEnv *env, jobject th
     if (!g_wallet) return JNI_FALSE;
     return BRWalletHasLegacyFunds(g_wallet) ? JNI_TRUE : JNI_FALSE;
 }
+
+/* ---------- dumpAllAddresses ---------- */
+/* Diagnostic: returns all wallet addresses (BIP84 external + internal + all
+ * legacy chains) as a newline-separated string for on-chain cross-checking.
+ * Used to answer "is a missing UTXO on an address we're not scanning?" */
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_dumpAllAddresses(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t count = BRWalletAllAddrs(g_wallet, NULL, 0);
+    if (count == 0) return (*env)->NewStringUTF(env, "");
+
+    BRAddress *addrs = (BRAddress *)malloc(sizeof(BRAddress) * count);
+    if (!addrs) return (*env)->NewStringUTF(env, "");
+    count = BRWalletAllAddrs(g_wallet, addrs, count);
+
+    /* Each address is up to ~62 chars for bech32; reserve 80/address for safety */
+    size_t cap = count * 80 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(addrs); return (*env)->NewStringUTF(env, ""); }
+    size_t off = 0;
+    for (size_t i = 0; i < count; i++) {
+        size_t len = strnlen(addrs[i].s, sizeof(addrs[i].s));
+        if (off + len + 2 >= cap) break;
+        memcpy(buf + off, addrs[i].s, len);
+        off += len;
+        buf[off++] = '\n';
+    }
+    buf[off] = '\0';
+
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    free(addrs);
+    return result;
+}

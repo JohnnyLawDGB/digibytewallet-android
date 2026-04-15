@@ -82,6 +82,18 @@ fun SettingsScreen(navController: NavController) {
         }
 
         item {
+            SettingsCategory(title = "Recovery") {
+                SettingsRow(
+                    icon = Icons.Default.CloudSync,
+                    iconTint = Color(0xFF26C6DA),
+                    title = "Scan for missing funds",
+                    subtitle = "Query a DGB node for UTXOs on wallet addresses",
+                    onClick = { navController.navigate("settings_reconcile") }
+                )
+            }
+        }
+
+        item {
             SettingsCategory(title = "Info") {
                 SettingsRow(
                     icon = Icons.Default.Info,

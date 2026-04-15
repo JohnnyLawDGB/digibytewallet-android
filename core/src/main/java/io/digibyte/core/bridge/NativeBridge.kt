@@ -141,4 +141,21 @@ object NativeBridge {
 
     /** Returns true if the wallet has UTXOs on the legacy m/0H key tree */
     external fun hasLegacyFunds(): Boolean
+
+    /** Diagnostic: returns all wallet addresses (BIP84 external + internal +
+     *  legacy chains) newline-separated, for on-chain cross-checking when
+     *  debugging "expected balance higher than detected" scenarios. */
+    external fun dumpAllAddresses(): String
+
+    /** Injects a node-verified transaction into the wallet. Used by the
+     *  chain reconciliation service to repair state when the SPV bloom
+     *  scan misses a tx but we see it on-chain. Caller must merkle-proof
+     *  verify against trusted headers first. Returns true if the tx was
+     *  registered (new + belongs to wallet), false otherwise (dup, bad
+     *  parse, unsigned, or foreign). */
+    external fun registerRawTransaction(
+        rawTx: ByteArray,
+        blockHeight: Long,
+        blockTimestamp: Long
+    ): Boolean
 }

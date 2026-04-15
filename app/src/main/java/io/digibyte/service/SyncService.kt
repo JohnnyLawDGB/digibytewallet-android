@@ -164,13 +164,39 @@ class SyncService : Service() {
                         )
                     }
                     // If we're at the chain tip, mark complete (don't require peers > 0 —
-                    // peers may connect, sync blocks, and disconnect between polls)
-                    if (height > 0 && estHeight > 0 && height >= estHeight - 5) {
+                    // peers may connect, sync blocks, and disconnect between polls).
+                    //
+                    // Sanity floor: the highest hardcoded checkpoint in
+                    // BRChainParams.h is block 23,187,000 — any real chain tip
+                    // must be at or past that. If connected peers are all
+                    // reporting a stale/low tip (e.g. a freshly-reconnected
+                    // cohort that hasn't caught up to their peers' latest
+                    // blocks yet), `estHeight` will be below this floor and
+                    // we must NOT declare sync complete. Doing so stops the
+                    // bloom-filter rescan and strands user transactions in
+                    // blocks we never actually scanned — the "recovered
+                    // wallet shows $0.00 forever" symptom.
+                    //
+                    // Bump LATEST_CHECKPOINT_HEIGHT when the submodule adds
+                    // a newer BRMainNetCheckpoints entry.
+                    val atRealTip = height >= LATEST_CHECKPOINT_HEIGHT &&
+                                    height >= estHeight - 5
+                    if (height > 0 && estHeight > 0 && atRealTip) {
                         hasReachedSynced = true
                         walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
                         getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
                             .edit().putBoolean("has_synced", true).apply()
                         android.util.Log.i("SyncService", "At chain tip (height=$height est=$estHeight) — marking complete")
+                    } else if (height > 0 && estHeight > 0 &&
+                               height >= estHeight - 5 &&
+                               height < LATEST_CHECKPOINT_HEIGHT) {
+                        // Peers claim we're at tip but the tip is below the
+                        // known checkpoint floor. Don't mark complete; log
+                        // once per poll for diagnostic visibility.
+                        android.util.Log.i("SyncService",
+                            "peers report tip=$estHeight, below checkpoint floor " +
+                            "$LATEST_CHECKPOINT_HEIGHT — NOT marking complete, " +
+                            "continuing to sync past stale peers")
                         // Persist transactions
                         serviceScope.launch(Dispatchers.IO) {
                             val txData = NativeBridge.getSerializedTransactions()
@@ -333,6 +359,18 @@ class SyncService : Service() {
         }
 
         override fun onSyncComplete() {
+            // Defense in depth for the same eclipse-attack / stale-peer scenario
+            // the poll loop guards against: if the C core fires syncStopped while
+            // our known height is below the checkpoint floor, all connected peers
+            // are lying or behind — don't latch Complete, let the bloom rescan
+            // keep running until a real tip peer appears.
+            val height = NativeBridge.getLastBlockHeight()
+            if (height > 0 && height < LATEST_CHECKPOINT_HEIGHT) {
+                android.util.Log.w("SyncService",
+                    "onSyncComplete fired at height=$height, below checkpoint " +
+                    "floor $LATEST_CHECKPOINT_HEIGHT — ignoring (stale peers)")
+                return
+            }
             hasReachedSynced = true
             walletManager.updateSyncState(SyncState.Complete)
             // Persist sync-complete so restarts don't flash "Syncing 0%"
@@ -561,5 +599,19 @@ class SyncService : Service() {
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** Clear Tor proxy after this many consecutive 0-peer poll cycles. */
         private const val MAX_TOR_RECONNECT_FAILURES = 3
+
+        /**
+         * Sanity floor for "we've reached the chain tip." The highest
+         * hardcoded checkpoint in
+         * native/src/main/jni/digibytewallet-core/BRChainParams.h is
+         * block 23,187,000. Any real chain tip must be at or past that;
+         * peers claiming a lower tip are lagging or dishonest and must
+         * NOT cause us to declare sync complete (which stops the bloom
+         * rescan and strands user transactions in unscanned blocks).
+         *
+         * Update this when a newer BRMainNetCheckpoints entry is added
+         * to the submodule.
+         */
+        private const val LATEST_CHECKPOINT_HEIGHT = 23_187_000L
     }
 }

@@ -216,6 +216,73 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
     return (*env)->NewStringUTF(env, txidHex);
 }
 
+/* ---------- registerRawTransaction ----------
+ *
+ * Injects a node-verified transaction into the wallet. Used by
+ * ChainReconciliationService when a UTXO appears on one of our addresses
+ * on-chain but was missed by the SPV bloom scan (stale peers, merkleblock
+ * drops, etc.).
+ *
+ * The caller is responsible for merkle-proof-verifying the tx against a
+ * block header the wallet already trusts — this function only validates
+ * that the tx is signed, parses correctly, and belongs to the wallet
+ * (BRWalletRegisterTransaction does the ownership check).
+ *
+ * Returns JNI_TRUE if the tx was added, JNI_FALSE otherwise (duplicate,
+ * unsigned, parse failure, or tx not associated with any wallet key). */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
+                                                                  jbyteArray rawTx,
+                                                                  jlong blockHeight,
+                                                                  jlong blockTimestamp) {
+    (void)thiz;
+    if (!g_wallet || !rawTx) return JNI_FALSE;
+
+    jsize txLen = (*env)->GetArrayLength(env, rawTx);
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, rawTx, NULL);
+    if (!txBytes || txLen <= 0) return JNI_FALSE;
+
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
+
+    if (!tx) {
+        LOGE("registerRawTransaction: failed to parse raw tx");
+        return JNI_FALSE;
+    }
+    if (!BRTransactionIsSigned(tx)) {
+        LOGE("registerRawTransaction: tx is not signed");
+        BRTransactionFree(tx);
+        return JNI_FALSE;
+    }
+
+    /* Fast-path duplicate check — avoids the memory leak in
+     * BRWalletRegisterTransaction's duplicate branch. */
+    BRTransaction *existing = BRWalletTransactionForHash(g_wallet, tx->txHash);
+    if (existing) {
+        LOGD("registerRawTransaction: duplicate, skipping");
+        BRTransactionFree(tx);
+        return JNI_FALSE;
+    }
+
+    tx->blockHeight = (uint32_t)blockHeight;
+    tx->timestamp = (uint32_t)blockTimestamp;
+
+    int ok = BRWalletRegisterTransaction(g_wallet, tx);
+    if (!ok) {
+        /* Not owned by any wallet address — free to avoid leak.
+         * BRWalletRegisterTransaction's non-wallet path leaves tx orphaned
+         * unless blockHeight == TX_UNCONFIRMED (in which case the wallet
+         * tracks it). For confirmed txs that don't match, we free. */
+        if (tx->blockHeight != TX_UNCONFIRMED) BRTransactionFree(tx);
+        LOGW("registerRawTransaction: tx not associated with wallet");
+        return JNI_FALSE;
+    }
+    LOGI("registerRawTransaction: registered tx at height=%ld ts=%ld",
+         (long)blockHeight, (long)blockTimestamp);
+    return JNI_TRUE;
+}
+
 /* ---------- getEstimatedFee ---------- */
 
 JNIEXPORT jlong JNICALL

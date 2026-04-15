@@ -314,12 +314,12 @@ val recoveryDateOptions: List<RecoveryDateOption> = listOf(
     RecoveryDateOption(
         label = "2026",
         subtitle = "Jan 2026 onwards",
-        timestamp = 1735689600L  // 2026-01-01 00:00:00 UTC
+        timestamp = 1767225600L  // 2026-01-01 00:00:00 UTC
     ),
     RecoveryDateOption(
         label = "2025",
         subtitle = "Jan 2025 – Dec 2025",
-        timestamp = 1735689600L - 365 * 86400L  // 2025-01-01
+        timestamp = 1735689600L  // 2025-01-01 00:00:00 UTC
     ),
     RecoveryDateOption(
         label = "2024",
