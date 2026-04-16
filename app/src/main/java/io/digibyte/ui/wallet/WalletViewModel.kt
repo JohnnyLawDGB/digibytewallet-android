@@ -93,6 +93,16 @@ class WalletViewModel @Inject constructor(
      *  debit the displayed amount. */
     @Volatile private var hasReachedSyncedOnce: Boolean = false
 
+    /** First wall-clock time we observed peers=0 in the current stall.
+     *  0 means "not currently stalled". Set to `now` on the first zero,
+     *  reset to 0 when peers recover. */
+    @Volatile private var peersZeroSinceMs: Long = 0L
+
+    /** Last time we poked SyncService because of a stall. Rate-limits
+     *  watchdog-triggered restarts to avoid a hot loop when the service
+     *  keeps dying. */
+    @Volatile private var lastWatchdogKickMs: Long = 0L
+
     /** Composite UI-facing sync progress object — consumed by WalletScreen
      *  to render the verbose during-scan UI (stage / progress / ETA /
      *  match count / running balance / scan-window banner). */
@@ -248,6 +258,50 @@ class WalletViewModel @Inject constructor(
         }
     }
 
+    /** Process-death watchdog. Poked on every balance-poll tick. If the
+     *  peer count has been 0 for [STALL_THRESHOLD_MS] continuously we
+     *  assume SyncService has been reaped (OOM kill, aggressive OEM task
+     *  manager, etc.) and kick startForegroundService to bring it back.
+     *
+     *  The UI process is clearly alive when this runs — it's the one
+     *  polling — so even if the service is dead this call can still
+     *  schedule its recreation. SyncService.onStartCommand is idempotent
+     *  (the early-return on `syncAlreadyLaunched` is per-instance, so a
+     *  fresh instance will re-wire everything).
+     *
+     *  Rate-limited by [WATCHDOG_COOLDOWN_MS] so that if the service keeps
+     *  dying we don't hot-loop. */
+    private fun checkPeerWatchdog(peers: Int) {
+        val now = System.currentTimeMillis()
+        if (peers > 0) {
+            if (peersZeroSinceMs != 0L) peersZeroSinceMs = 0L
+            return
+        }
+        if (peersZeroSinceMs == 0L) {
+            peersZeroSinceMs = now
+            return
+        }
+        val stalledMs = now - peersZeroSinceMs
+        val cooledDown = now - lastWatchdogKickMs > WATCHDOG_COOLDOWN_MS
+        if (stalledMs >= STALL_THRESHOLD_MS && cooledDown) {
+            lastWatchdogKickMs = now
+            android.util.Log.w(
+                "WalletVM",
+                "watchdog: peers=0 for ${stalledMs / 1000}s — kicking SyncService"
+            )
+            try {
+                val intent = android.content.Intent(
+                    application,
+                    io.digibyte.service.SyncService::class.java
+                )
+                androidx.core.content.ContextCompat
+                    .startForegroundService(application, intent)
+            } catch (t: Throwable) {
+                android.util.Log.e("WalletVM", "watchdog: startForegroundService threw", t)
+            }
+        }
+    }
+
     /** Poll the C core for balance and transactions every 5 seconds.
      *  The C core tracks these from SPV sync — Room DB is secondary. */
     private fun pollNativeBalance() {
@@ -282,6 +336,14 @@ class WalletViewModel @Inject constructor(
                 // screens can gate their UI on live connectivity.
                 val peers = NativeBridge.getPeerCount()
                 if (peers != _peerCount.value) _peerCount.value = peers
+
+                // Process-death watchdog — see docs/bugs/peer-keepalive-proc-death.md.
+                // If peers has been 0 for a sustained window, SyncService may have
+                // been OOM-reaped while the UI process stayed alive (confirmed via
+                // am_finish_activity "proc died" logs). Poke the service via
+                // startForegroundService so Android recreates it; the service is
+                // idempotent so this is a no-op if it's already running.
+                checkPeerWatchdog(peers)
 
                 // Poll transactions
                 var currentHeight = NativeBridge.getLastBlockHeight()
@@ -361,6 +423,12 @@ class WalletViewModel @Inject constructor(
         walletManager.getReceiveAddress(index, format = format)
 
     companion object {
+        /** Peer-count=0 must persist this long before the watchdog fires. */
+        private const val STALL_THRESHOLD_MS = 60_000L
+
+        /** Minimum gap between consecutive watchdog kicks. */
+        private const val WATCHDOG_COOLDOWN_MS = 90_000L
+
         /**
          * Format satoshis to a human-readable DGB string with up to 8 decimal places.
          * Example: 123456789012 → "1,234.56789012 DGB"

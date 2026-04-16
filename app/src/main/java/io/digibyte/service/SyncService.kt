@@ -575,6 +575,15 @@ class SyncService : Service() {
             .setProgress(100, pct, indeterminate)
             .setOngoing(true)
             .setSilent(true)
+            // MIN priority keeps the notification off the lock screen / status
+            // bar as much as the platform allows while still signalling to the
+            // OS that this is a persistent, active foreground task. Raising to
+            // DEFAULT made aggressive OEM killers (notably Samsung's) less
+            // likely to reap the process, but we went with MIN for user-facing
+            // invisibility — if process death continues in the field we can
+            // revisit. See docs/bugs/peer-keepalive-proc-death.md.
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
