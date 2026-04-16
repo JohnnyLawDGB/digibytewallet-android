@@ -91,10 +91,18 @@ jobs:
         id: checksum
         run: |
           APK=$(find app/build/outputs/apk/mainnet/release -name '*.apk' | head -1)
-          HASH=$(sha256sum "$APK" | cut -d' ' -f1)
-          echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
+          # Rename to versioned filename so the GitHub-release asset is
+          # recognizable when users download it (previously it was always
+          # app-mainnet-release.apk regardless of version).
+          TAG="${GITHUB_REF#refs/tags/}"
+          DIR=$(dirname "$APK")
+          VERSIONED="$DIR/digibyte-wallet-${TAG}.apk"
+          cp "$APK" "$VERSIONED"
+          HASH=$(sha256sum "$VERSIONED" | cut -d' ' -f1)
+          echo "apk_path=$VERSIONED" >> "$GITHUB_OUTPUT"
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "SHA-256: $HASH"
+          echo "Asset: digibyte-wallet-${TAG}.apk"
 
       - name: Extract version
         id: version
