@@ -469,64 +469,130 @@ class SyncService : Service() {
      * C core's peer list. Uses a cached response (SharedPreferences) and
      * refreshes from the network at most once per hour.
      */
+    /**
+     * Inject a batch of bloom-serving peers into the native peer manager.
+     *
+     * Pool strategy (avoids hammering the seeder every 10s on a flaky network):
+     *   1. Maintain a persistent pool of every bloom peer we've ever been
+     *      told about, stored as JSON in SharedPreferences.
+     *   2. Each call rotates a cursor through the pool and injects
+     *      [BLOOM_BATCH_SIZE] peers starting at that cursor. The native
+     *      core dedupes by (ip, port) so re-injecting the same peer is a
+     *      no-op there.
+     *   3. Fetch fresh from the seeder ONLY when the pool is stale
+     *      (> 1 hour old), empty, or we've fully rotated through it
+     *      without connecting. This keeps SyncService usable even if
+     *      api.digiscope.me is briefly down — the pool from any previous
+     *      session is still usable.
+     */
     private fun injectBloomPeers() {
         val prefs = getSharedPreferences("dgb_bloom_peers", MODE_PRIVATE)
-        val cachedJson = prefs.getString("peers_json", null)
-        val lastFetch = prefs.getLong("last_fetch", 0L)
         val now = System.currentTimeMillis()
 
-        // Use cached peers if fresh enough (< 1 hour old)
-        if (cachedJson != null && now - lastFetch < BLOOM_REFRESH_INTERVAL_MS) {
-            injectPeersFromJson(cachedJson)
-            return
+        val existing = prefs.getString("peer_pool", null)
+        val pool: MutableList<Pair<String, Int>> =
+            if (existing != null) parsePool(existing) else mutableListOf()
+        val lastFetch = prefs.getLong("last_fetch", 0L)
+
+        val stale = now - lastFetch > BLOOM_REFRESH_INTERVAL_MS
+        if (stale || pool.isEmpty()) {
+            val fresh = fetchFromSeeder()
+            if (fresh != null && fresh.isNotEmpty()) {
+                // Merge: add any peer we haven't seen before.
+                val seen = pool.toSet()
+                for (p in fresh) if (!seen.contains(p)) pool.add(p)
+                prefs.edit()
+                    .putString("peer_pool", serializePool(pool))
+                    .putLong("last_fetch", now)
+                    .apply()
+                android.util.Log.i(
+                    "SyncService",
+                    "Fetched bloom peers: ${fresh.size} new, pool now ${pool.size}"
+                )
+            } else if (pool.isEmpty()) {
+                android.util.Log.w(
+                    "SyncService",
+                    "Bloom seeder empty and no cached pool — wallet may struggle to connect"
+                )
+                return
+            }
         }
 
-        // Fetch fresh peers via the DI OkHttpClient — routes through Tor when active,
-        // preventing IP leaks to api.digiscope.me.
-        try {
+        if (pool.isEmpty()) return
+
+        // Rotate cursor; inject a contiguous slice starting there.
+        val cursor = prefs.getInt("pool_cursor", 0).coerceAtLeast(0) % pool.size
+        val batchSize = BLOOM_BATCH_SIZE.coerceAtMost(pool.size)
+        for (i in 0 until batchSize) {
+            val (ip, port) = pool[(cursor + i) % pool.size]
+            NativeBridge.injectPeerByIp(ip, port)
+        }
+        val newCursor = (cursor + batchSize) % pool.size
+        prefs.edit().putInt("pool_cursor", newCursor).apply()
+
+        android.util.Log.i(
+            "SyncService",
+            "Injected $batchSize peers (cursor $cursor→$newCursor, pool=${pool.size})"
+        )
+    }
+
+    /** Try the seeder once. Returns the parsed peer list or null on failure. */
+    private fun fetchFromSeeder(): List<Pair<String, Int>>? {
+        return try {
             val request = Request.Builder().url(BLOOM_SEEDER_URL).build()
             okHttpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val json = response.body!!.string()
-                    prefs.edit()
-                        .putString("peers_json", json)
-                        .putLong("last_fetch", now)
-                        .apply()
-                    injectPeersFromJson(json)
-                    android.util.Log.i("SyncService", "Fetched bloom peers from seeder API")
+                    parsePeersJson(response.body!!.string())
                 } else {
-                    if (cachedJson != null) injectPeersFromJson(cachedJson)
                     android.util.Log.w("SyncService", "Bloom seeder API returned ${response.code}")
+                    null
                 }
             }
         } catch (e: Exception) {
-            // Network error — use cached data if available
-            if (cachedJson != null) injectPeersFromJson(cachedJson)
             android.util.Log.w("SyncService", "Bloom seeder API unreachable: ${e.message}")
+            null
         }
     }
 
-    /**
-     * Parse the seeder JSON response and inject each peer into the C core.
-     * Expected format: {"peers": [{"ip": "1.2.3.4", "port": 12024, ...}], ...}
-     */
-    private fun injectPeersFromJson(json: String) {
-        try {
+    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024}, ...]} */
+    private fun parsePeersJson(json: String): List<Pair<String, Int>> {
+        return try {
             val root = org.json.JSONObject(json)
-            val peers = root.getJSONArray("peers")
-            var count = 0
-            for (i in 0 until peers.length()) {
-                val peer = peers.getJSONObject(i)
-                val ip = peer.getString("ip")
-                val port = peer.optInt("port", 12024)
-                NativeBridge.injectPeerByIp(ip, port)
-                count++
+            val arr = root.getJSONArray("peers")
+            val out = ArrayList<Pair<String, Int>>(arr.length())
+            for (i in 0 until arr.length()) {
+                val peer = arr.getJSONObject(i)
+                out.add(peer.getString("ip") to peer.optInt("port", 12024))
             }
-            if (count > 0) {
-                android.util.Log.i("SyncService", "Injected $count bloom peers from seeder")
-            }
+            out
         } catch (e: Exception) {
             android.util.Log.w("SyncService", "Failed to parse bloom peer JSON: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Pool is stored as a compact JSON array of "ip:port" strings. */
+    private fun serializePool(pool: List<Pair<String, Int>>): String {
+        val arr = org.json.JSONArray()
+        for ((ip, port) in pool) arr.put("$ip:$port")
+        return arr.toString()
+    }
+
+    private fun parsePool(json: String): MutableList<Pair<String, Int>> {
+        return try {
+            val arr = org.json.JSONArray(json)
+            val out = ArrayList<Pair<String, Int>>(arr.length())
+            for (i in 0 until arr.length()) {
+                val s = arr.getString(i)
+                val colon = s.lastIndexOf(':')
+                if (colon > 0) {
+                    val port = s.substring(colon + 1).toIntOrNull() ?: 12024
+                    out.add(s.substring(0, colon) to port)
+                }
+            }
+            out
+        } catch (e: Exception) {
+            mutableListOf()
         }
     }
 
@@ -606,6 +672,10 @@ class SyncService : Service() {
         private const val BLOOM_SEEDER_URL = "https://api.digiscope.me/api/peers/bloom"
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
+        /** How many peers to inject per call. The C peer manager caps its
+         *  own connections at 5, so injecting more is a pool of candidates
+         *  for the peer manager to pick from rather than concurrent connections. */
+        private const val BLOOM_BATCH_SIZE = 20
         /** Clear Tor proxy after this many consecutive 0-peer poll cycles. */
         private const val MAX_TOR_RECONNECT_FAILURES = 3
 
