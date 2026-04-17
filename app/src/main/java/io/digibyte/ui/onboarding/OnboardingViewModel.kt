@@ -21,7 +21,8 @@ import javax.inject.Inject
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val walletManager: WalletManager,
-    private val pinManager: PinManager
+    private val pinManager: PinManager,
+    private val recoveryScanService: io.digibyte.core.recovery.RecoveryScanService,
 ) : ViewModel() {
 
     // In-memory mnemonic — cleared after wallet creation
@@ -72,6 +73,36 @@ class OnboardingViewModel @Inject constructor(
         _recoveryTimestamp = timestamp
     }
 
+    // ── Universal Restore scan state ─────────────────────────────────────────
+    //
+    // Holds the most recent multi-path scan result so RecoveryScanScreen can
+    // show it without re-running the scan on config change, and so
+    // RecoveryDateScreen / WalletScreen can consult it for "we found funds
+    // on legacy paths" sweep context.
+
+    private val _scanResults = kotlinx.coroutines.flow.MutableStateFlow<
+            io.digibyte.core.recovery.RecoveryScanService.State
+            >(io.digibyte.core.recovery.RecoveryScanService.State.Idle)
+    val scanResults: kotlinx.coroutines.flow.StateFlow<
+            io.digibyte.core.recovery.RecoveryScanService.State
+            > = _scanResults.asStateFlow()
+
+    /** Run the multi-path derivation scan against the currently-entered
+     *  mnemonic. Results land in [scanResults]. Safe to call from the UI
+     *  and observe reactively. */
+    fun runRecoveryScan(passphrase: String? = null) {
+        val phrase = _mnemonic.joinToString(" ")
+        if (phrase.isBlank()) {
+            _scanResults.value = io.digibyte.core.recovery.RecoveryScanService
+                .State.Failed("No mnemonic entered")
+            return
+        }
+        viewModelScope.launch {
+            val result = recoveryScanService.scan(phrase, passphrase)
+            _scanResults.value = result
+        }
+    }
+
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
@@ -99,6 +130,46 @@ class OnboardingViewModel @Inject constructor(
             val success = withContext(Dispatchers.Default) {
                 walletManager.recoverWallet(phrase, ts)
             }
+
+            // Universal Restore sweep — if the pre-recovery scan found funds
+            // on non-native paths, now that the wallet exists we can derive
+            // a fresh BIP84 destination and broadcast the sweep(s).
+            if (success) {
+                val scan = _scanResults.value
+                if (scan is io.digibyte.core.recovery.RecoveryScanService.State.Done &&
+                    scan.nonNativeWithFunds.isNotEmpty()) {
+                    try {
+                        val destAddr = io.digibyte.core.bridge.NativeBridge
+                            .getReceiveAddress(0, format = 2)
+                        if (!destAddr.isNullOrEmpty()) {
+                            val sweeper = io.digibyte.core.recovery.LegacySweepService()
+                            val result = sweeper.sweep(
+                                mnemonic = phrase,
+                                passphrase = null,
+                                nonNativeResults = scan.nonNativeWithFunds,
+                                destAddress = destAddr,
+                            )
+                            android.util.Log.i(
+                                "OnboardingVM",
+                                "sweep done: swept=${result.totalSweptSat}sat " +
+                                "across ${result.outcomes.size} profiles"
+                            )
+                            for (o in result.outcomes) {
+                                android.util.Log.i(
+                                    "OnboardingVM",
+                                    "sweep ${o.profile.label}: " +
+                                    "txid=${o.txid} amount=${o.sweptSat} " +
+                                    "error=${o.failureReason}"
+                                )
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        android.util.Log.e("OnboardingVM",
+                            "Legacy sweep threw — wallet recovery itself succeeded", t)
+                    }
+                }
+            }
+
             wipeMnemonicFromMemory()
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Recovery failed")
             onResult(success)

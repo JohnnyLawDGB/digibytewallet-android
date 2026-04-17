@@ -162,6 +162,19 @@ object AppModule {
         TransactionBuilder(cs, um)
 
     @Provides @Singleton
+    fun provideDgbNodeClient(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+    ): io.digibyte.core.reconcile.DgbNodeClient =
+        io.digibyte.core.reconcile.DgbNodeClient(context, client)
+
+    @Provides @Singleton
+    fun provideRecoveryScanService(
+        nodeClient: io.digibyte.core.reconcile.DgbNodeClient,
+    ): io.digibyte.core.recovery.RecoveryScanService =
+        io.digibyte.core.recovery.RecoveryScanService(nodeClient)
+
+    @Provides @Singleton
     fun provideWalletManager(@ApplicationContext context: Context, ksm: KeyStoreManager, um: UtxoManager): WalletManager =
         WalletManager(context, ksm, um)
 

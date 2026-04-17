@@ -173,7 +173,11 @@ fun MnemonicInputScreen(
                     }
 
                     viewModel.setRecoveryMnemonic(phrase)
-                    navController.navigate("recovery_date")
+                    // Universal Restore: scan every known derivation path
+                    // BEFORE the date picker. Surfaces funds on non-native
+                    // paths (BIP44, BIP49, legacy m/0H w/ either HMAC) so we
+                    // know to sweep them during recovery.
+                    navController.navigate("recovery_scan")
                 },
                 modifier = Modifier
                     .fillMaxWidth()

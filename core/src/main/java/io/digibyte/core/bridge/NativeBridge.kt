@@ -158,4 +158,66 @@ object NativeBridge {
         blockHeight: Long,
         blockTimestamp: Long
     ): Boolean
+
+    // ── Universal Restore — stateless key derivation ──────────────────────────
+    //
+    // These functions probe arbitrary derivation paths during seed restore
+    // (BIP44 DGB, BIP44 wrong-coin, BIP49, legacy m/0H with "Bitcoin seed" or
+    // "DigiByte seed" HMAC). They do NOT touch wallet state and are safe to
+    // call before a wallet is created. Seeds are zeroed in native memory
+    // before the native buffer is released.
+
+    /** Derive the 64-byte BIP39 seed from a mnemonic + optional passphrase.
+     *  Caller must `fill(0)` the returned ByteArray when done. */
+    external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: String?): ByteArray?
+
+    /** Derive external + internal addresses under a hardened path prefix.
+     *  Returns external[0..gapExternal-1] followed by internal[0..gapInternal-1].
+     *  Empty strings at positions where derivation failed (rare).
+     *  [addressFormat]: 0=P2PKH (D-prefix), 1=P2WPKH bech32 (dgb1q...),
+     *  2=P2SH-P2WPKH (S-prefix wrapped segwit). */
+    external fun deriveAddresses(
+        seedBytes: ByteArray,
+        hmacKey: String,
+        prefixPath: IntArray,
+        gapExternal: Int,
+        gapInternal: Int,
+        addressFormat: Int
+    ): Array<String>?
+
+    /** Derive a WIF-encoded private key at an arbitrary full path. Used by
+     *  the legacy-path sweeper when signing inputs from non-native
+     *  derivation addresses. Returns null on bad input. */
+    external fun derivePrivateKeyWIF(
+        seedBytes: ByteArray,
+        hmacKey: String,
+        fullPath: IntArray
+    ): String?
+
+    /** Build and sign a sweep transaction that moves all listed UTXOs into a
+     *  single output to [destAddress]. Used by LegacySweepService after the
+     *  Universal Restore scan finds funds on non-native derivation paths.
+     *
+     *  All arrays must be the same length (one entry per input UTXO).
+     *  [prefixPath] is the hardened derivation prefix for the source path;
+     *  per-input [chainIndices] and [addressIndices] complete each full path.
+     *  [scriptPubKeysHex] is the scriptPubKey of each UTXO (hex-encoded).
+     *
+     *  Returns the signed tx as a hex string, or null on any failure
+     *  (bad parse, sign mismatch, dust threshold, or unsupported script
+     *  type — notably BIP49 P2SH-P2WPKH inputs are NOT yet handled by the
+     *  underlying BRTransactionSign). */
+    external fun buildAndSignLegacySweep(
+        seedBytes: ByteArray,
+        hmacKey: String,
+        prefixPath: IntArray,
+        txidsHex: Array<String>,
+        vouts: IntArray,
+        amounts: LongArray,
+        chainIndices: IntArray,
+        addressIndices: IntArray,
+        scriptPubKeysHex: Array<String>,
+        destAddress: String,
+        feePerKb: Long,
+    ): String?
 }

@@ -135,6 +135,7 @@ class DgbNodeClient(
                 amountSatoshi = u.getLong("amountSatoshi"),
                 address = u.getString("address"),
                 blockHeight = u.getLong("height"),
+                scriptPubKeyHex = u.optString("scriptPubKey", "").ifEmpty { null },
             )
         }
 
@@ -160,6 +161,10 @@ data class UtxoEntry(
     val amountSatoshi: Long,
     val address: String,
     val blockHeight: Long,
+    /** Hex-encoded scriptPubKey, needed by the legacy-path sweeper to
+     *  tell BRTransaction how each input is locked. Null for older
+     *  backend responses; falls back to null-safe paths. */
+    val scriptPubKeyHex: String? = null,
 )
 
 /** Raw parent-tx entry — hex + block metadata needed for registration. */
