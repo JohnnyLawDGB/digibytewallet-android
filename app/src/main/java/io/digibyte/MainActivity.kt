@@ -20,6 +20,7 @@ import io.digibyte.core.UpdateChecker
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.reconcile.PostUpgradeReconciler
 import io.digibyte.ui.components.UpdateDialog
 import okhttp3.OkHttpClient
 import io.digibyte.core.db.dao.WalletConfigDao
@@ -32,6 +33,8 @@ import io.digibyte.service.SyncService
 import io.digibyte.ui.navigation.AppNavigation
 import io.digibyte.ui.theme.DigiByteTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -69,6 +72,17 @@ class MainActivity : FragmentActivity() {
         // user sees live sync progress as soon as the wallet screen renders.
         if (walletManager.walletState.value is WalletState.Unlocked) {
             startSyncService()
+        }
+
+        // Silently run post-upgrade reconcile once per version bump.
+        // Waits for the first Unlocked state (biometric auto-unlock or PIN),
+        // then hands off to PostUpgradeReconciler which internally debounces
+        // for peer connectivity before hitting the node.
+        lifecycleScope.launch {
+            walletManager.walletState
+                .filterIsInstance<WalletState.Unlocked>()
+                .first()
+            PostUpgradeReconciler.runIfNeeded(applicationContext)
         }
 
         setContent {
