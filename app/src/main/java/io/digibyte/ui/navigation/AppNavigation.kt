@@ -418,34 +418,55 @@ fun AppNavigation(
             }
 
             // ── Send flow ─────────────────────────────────────────────────────
+            // Share the Wallet route's WalletViewModel so peerCount/syncState
+            // are live on entry — preventing the "not connected" banner from
+            // flashing while a fresh VM's 5s poll catches up.
             composable(
                 "send?address={address}",
                 arguments = listOf(navArgument("address") { defaultValue = "" })
             ) { backStackEntry ->
                 val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 SendScreen(
                     biometricAuth = biometricAuth,
                     onNavigateBack = { navController.popBackStack() },
                     prefillAddress = prefillAddress,
                     onScanQr = { callback ->
                         navController.navigate("qr_scanner")
-                    }
+                    },
+                    walletViewModel = sharedWalletVm
                 )
             }
 
             // ── Receive flow ──────────────────────────────────────────────────
-            composable("receive") {
+            composable("receive") { backStackEntry ->
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 ReceiveScreen(
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    viewModel = sharedWalletVm
                 )
             }
 
             // ── Transaction detail ────────────────────────────────────────────
             composable("transaction_detail/{txid}") { backStackEntry ->
                 val txid = backStackEntry.arguments?.getString("txid") ?: ""
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 TransactionDetailScreen(
                     txid = txid,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    viewModel = sharedWalletVm
                 )
             }
 
