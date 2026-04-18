@@ -6,7 +6,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
 **Branch:** `phase1-modernization`
-**Version:** v3.0.12-beta
+**Version:** v3.5.16
 **Test device:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28)
 
 ## Module Structure
