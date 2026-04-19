@@ -48,6 +48,7 @@ fun AssetSendScreen(
     }
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
+    val sendState by viewModel.sendState.collectAsStateWithLifecycle()
 
     var recipientAddress by remember { mutableStateOf("") }
     var quantityInput by remember { mutableStateOf("") }
@@ -56,6 +57,15 @@ fun AssetSendScreen(
     var addressError by remember { mutableStateOf<String?>(null) }
     var quantityError by remember { mutableStateOf<String?>(null) }
 
+    // Close confirm dialog once the send either succeeds or fails so the
+    // user sees the terminal state banner rendered below the form.
+    LaunchedEffect(sendState) {
+        if (sendState is AssetViewModel.SendState.Success ||
+            sendState is AssetViewModel.SendState.Failure) {
+            showConfirmDialog = false
+        }
+    }
+
     // ── Confirmation dialog ───────────────────────────────────────────────
     if (showConfirmDialog && asset != null) {
         AssetSendConfirmDialog(
@@ -63,11 +73,18 @@ fun AssetSendScreen(
             recipientAddress = recipientAddress,
             quantityInput = quantityInput,
             feeTierLabel = feeTierLabel(selectedFeeTier),
+            sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
-                // sendAsset() is a stub — show informational snackbar instead of broadcasting
-                showConfirmDialog = false
+                viewModel.sendAssetTransfer(
+                    toAddress = recipientAddress,
+                    quantityInput = quantityInput,
+                    feeSats = estimatedFeeSats(selectedFeeTier),
+                )
             },
-            onCancel = { showConfirmDialog = false }
+            onCancel = {
+                showConfirmDialog = false
+                viewModel.resetSendState()
+            }
         )
     }
 
@@ -93,36 +110,25 @@ fun AssetSendScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // ── "Coming soon" banner ─────────────────────────────────────────
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = DigiByteAccent.copy(alpha = 0.10f)
+        // ── Terminal result banner (success / failure) ───────────────────
+        when (val s = sendState) {
+            is AssetViewModel.SendState.Success -> SendResultBanner(
+                success = true,
+                title = "Transaction broadcast",
+                detail = "txid ${s.txid.take(12)}…${s.txid.takeLast(8)}",
+                onDismiss = { viewModel.resetSendState() }
             )
-        ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Info,
-                    contentDescription = null,
-                    tint = DigiByteAccent,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Asset sending coming soon. The UI flow is complete — transaction " +
-                           "broadcasting will be enabled in the next release.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DigiByteAccent,
-                    lineHeight = 18.sp
-                )
-            }
+            is AssetViewModel.SendState.Failure -> SendResultBanner(
+                success = false,
+                title = "Send failed",
+                detail = s.message,
+                onDismiss = { viewModel.resetSendState() }
+            )
+            else -> {}
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
+        if (sendState !is AssetViewModel.SendState.Idle) {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // ── Asset info header ────────────────────────────────────────────
         asset?.let { ownedAsset ->
@@ -356,6 +362,7 @@ private fun AssetSendConfirmDialog(
     recipientAddress: String,
     quantityInput: String,
     feeTierLabel: String,
+    sending: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -395,27 +402,6 @@ private fun AssetSendConfirmDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider()
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Coming soon note
-                Card(
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = DigiByteAccent.copy(alpha = 0.10f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Asset sending is coming soon. Your transaction details have been " +
-                               "validated but will not be broadcast yet.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = DigiByteAccent,
-                        modifier = Modifier.padding(10.dp),
-                        textAlign = TextAlign.Center,
-                        lineHeight = 17.sp
-                    )
-                }
-
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
@@ -433,18 +419,75 @@ private fun AssetSendConfirmDialog(
                 ) {
                     OutlinedButton(
                         onClick = onCancel,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = !sending,
                     ) {
                         Text("Cancel")
                     }
                     Button(
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f),
+                        enabled = !sending,
                         colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
                     ) {
-                        Text("Confirm", fontWeight = FontWeight.Bold)
+                        if (sending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White,
+                            )
+                        } else {
+                            Text("Confirm", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+// ── Terminal result banner (success/failure) ────────────────────────────────
+
+@Composable
+private fun SendResultBanner(
+    success: Boolean,
+    title: String,
+    detail: String,
+    onDismiss: () -> Unit,
+) {
+    val bg = if (success) DigiByteGreen.copy(alpha = 0.15f) else DigiByteRed.copy(alpha = 0.15f)
+    val accent = if (success) DigiByteGreen else DigiByteRed
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = bg),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (success) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = accent,
+                )
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 16.sp,
+                )
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = accent)
             }
         }
     }
@@ -524,4 +567,20 @@ private fun feeTierSatPerKb(tier: Int) = when (tier) {
     1 -> 5_000L
     2 -> 20_000L
     else -> 5_000L
+}
+
+/**
+ * Conservative total-sats fee estimate for a typical single-recipient
+ * asset transfer. Accounts for:
+ *   - 2 inputs × ~150 bytes (1 asset UTXO + 1 DGB fee UTXO)
+ *   - 3 outputs × ~34 bytes (marker + OP_RETURN + change)
+ *   - ~10 bytes fixed overhead
+ * Total ~410 bytes. Upper bound to 500 bytes for safety.
+ * Partial transfers (when we support asset change) may bump the output
+ * count; the coin selector will reject if we actually underfund.
+ */
+private fun estimatedFeeSats(tier: Int): Long {
+    val satPerKb = feeTierSatPerKb(tier)
+    val estSize = 500L
+    return (estSize * satPerKb / 1000L).coerceAtLeast(1_000L)
 }
