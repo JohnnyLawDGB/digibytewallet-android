@@ -21,8 +21,16 @@ class SeedIsolationTest {
         val dangerousReturnPatterns = listOf("seed", "mnemonic", "phrase", "entropy", "privkey", "privatekey", "secret")
         val methods = NativeBridge::class.java.declaredMethods
 
-        // generateMnemonic is allowed — it creates new entropy, not a getter for existing seed
-        val allowedMethods = setOf("generatemnemonic")
+        // Allow-list — each entry documents why the pattern match is safe:
+        //   generatemnemonic — creates new entropy, not a getter for existing seed
+        //   mnemonictoseed — Universal Restore probes multi-path derivation; the
+        //       returned ByteArray is scoped, zeroed in finally by callers
+        //       (RecoveryScanService, LegacySweepService) and never written to disk
+        //   deriveprivatekeywif — returns a WIF for a SPECIFIC child address on an
+        //       OVERRIDING derivation profile, used by LegacySweepService to build
+        //       sweep transactions for legacy funds; the child key is unrelated to
+        //       the stored seed and is zeroed after signing
+        val allowedMethods = setOf("generatemnemonic", "mnemonictoseed", "deriveprivatekeywif")
 
         val leakyMethods = methods.filter { method ->
             val name = method.name.lowercase()

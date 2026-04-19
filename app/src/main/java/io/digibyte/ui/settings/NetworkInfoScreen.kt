@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,12 +33,12 @@ fun NetworkInfoScreen(
     navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val syncState by viewModel.syncState.collectAsState()
-    val peerCount by viewModel.peerCount.collectAsState()
-    val lastBlock by viewModel.lastBlockHeight.collectAsState()
-    val estimatedHeight by viewModel.estimatedHeight.collectAsState()
-    val torEnabled by viewModel.torEnabled.collectAsState()
-    val torState by viewModel.torState.collectAsState()
+    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
+    val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
+    val lastBlock by viewModel.lastBlockHeight.collectAsStateWithLifecycle()
+    val estimatedHeight by viewModel.estimatedHeight.collectAsStateWithLifecycle()
+    val torEnabled by viewModel.torEnabled.collectAsStateWithLifecycle()
+    val torState by viewModel.torState.collectAsStateWithLifecycle()
 
     // Refresh network stats when this screen is opened
     LaunchedEffect(Unit) { viewModel.refreshNetworkStats() }

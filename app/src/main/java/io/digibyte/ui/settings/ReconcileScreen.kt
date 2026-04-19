@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,7 +44,7 @@ fun ReconcileScreen(navController: NavController) {
     val service = remember { ChainReconciliationService(client) }
     val scope = rememberCoroutineScope()
 
-    val state by service.state.collectAsState()
+    val state by service.state.collectAsStateWithLifecycle()
     var endpoint by remember { mutableStateOf(client.endpoint()) }
     var editingEndpoint by remember { mutableStateOf(false) }
 

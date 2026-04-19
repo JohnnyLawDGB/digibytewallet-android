@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -101,7 +102,7 @@ fun AppNavigation(
     val currentRoute = currentBackStack?.destination?.route
 
     // Observe wallet state to gate navigation
-    val walletState by walletManager.walletState.collectAsState()
+    val walletState by walletManager.walletState.collectAsStateWithLifecycle()
 
     // Determine start destination ONCE at launch — do not recompute
     // when walletState changes mid-session (causes double PIN prompt).
