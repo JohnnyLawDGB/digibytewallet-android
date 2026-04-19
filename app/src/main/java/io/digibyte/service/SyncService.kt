@@ -42,6 +42,11 @@ class SyncService : Service() {
 
     private var syncAlreadyLaunched = false
 
+    /** Tracks the peer-keepalive coroutine so onStartCommand can resurrect it
+     *  when the watchdog re-kicks us after the loop died silently (Doze,
+     *  unhandled JNI throwable, SupervisorJob child cancellation). */
+    private var keepaliveJob: Job? = null
+
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var utxoManager: UtxoManager
     @Inject lateinit var transactionDao: TransactionDao
@@ -82,9 +87,18 @@ class SyncService : Service() {
         // Must call startForeground within 5 seconds — do it first thing.
         startForeground(NOTIFICATION_ID, buildNotification(progress = 0f, peerCount = 0))
 
-        // Only launch sync ONCE — service may receive multiple onStartCommand calls
-        // from redundant startForegroundService() invocations.
-        if (syncAlreadyLaunched) return START_STICKY
+        // On repeat onStartCommand (watchdog kick, sticky-restart), resurrect
+        // the peer-keepalive coroutine if it died silently. Without this the
+        // service stays nominally alive with its foreground notification but
+        // no one is restoring peer connections — users see "0 peers forever"
+        // while the watchdog fruitlessly re-kicks the same running service.
+        if (syncAlreadyLaunched) {
+            if (keepaliveJob?.isActive != true) {
+                android.util.Log.w("SyncService", "keepalive coroutine not active — respawning")
+                keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+            }
+            return START_STICKY
+        }
         syncAlreadyLaunched = true
 
         // Restore persisted sync state so progress callbacks don't revert
@@ -101,18 +115,27 @@ class SyncService : Service() {
         }
 
         // Keep peers alive while app is open — poll every 10s, reconnect aggressively.
-        //
-        // The loop body is wrapped in try/catch because it runs for the life of
-        // the service and a single uncaught throwable (e.g. a native call
-        // returning an unexpected state during a Doze transition) would exit
-        // the while loop, leaving the service nominally alive but no longer
-        // maintaining peer connectivity — the "permanently stuck with 0 peers"
-        // state users have hit after extended backgrounding.
-        serviceScope.launch {
-            walletManager.walletState.first { it is WalletState.Unlocked }
-            while (isActive) {
-                delay(10_000L)
-                try {
+        keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+
+        return START_STICKY
+    }
+
+    /**
+     * Peer-keepalive poll loop. Extracted from onStartCommand so it can be
+     * re-launched if the original coroutine dies.
+     *
+     * The loop body is wrapped in try/catch because it runs for the life of
+     * the service and a single uncaught throwable (e.g. a native call
+     * returning an unexpected state during a Doze transition) would exit
+     * the while loop, leaving the service nominally alive but no longer
+     * maintaining peer connectivity — the "permanently stuck with 0 peers"
+     * state users have hit after extended backgrounding.
+     */
+    private suspend fun runPeerKeepalive() = coroutineScope {
+        walletManager.walletState.first { it is WalletState.Unlocked }
+        while (isActive) {
+            delay(10_000L)
+            try {
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
                     // If Tor proxy is active and we've failed to connect for
@@ -217,9 +240,6 @@ class SyncService : Service() {
                 }
             }
         }
-
-        return START_STICKY
-    }
 
     /**
      * If Tor is enabled, attempt to start Tor and wire the SOCKS5 proxy before

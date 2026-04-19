@@ -44,9 +44,11 @@ fun ReceiveScreen(
     // Address format: 0=legacy(D), 2=bech32(dgb1q) — default to bech32
     var addressFormat by remember { mutableIntStateOf(2) }
 
-    val address = remember(addressFormat) {
-        viewModel.getReceiveAddress(0, addressFormat) ?: "Address unavailable"
-    }
+    // Pre-derive both formats once so toggling the chip doesn't re-run the
+    // JNI key-derivation path. format 0 = legacy D-prefix, format 2 = bech32.
+    val legacyAddress = remember { viewModel.getReceiveAddress(0, 0) ?: "Address unavailable" }
+    val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
+    val address = if (addressFormat == 0) legacyAddress else bech32Address
 
     // Optional amount for the QR URI
     var amountInput by remember { mutableStateOf("") }

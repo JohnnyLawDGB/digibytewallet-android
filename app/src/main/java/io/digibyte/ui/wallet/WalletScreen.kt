@@ -507,7 +507,10 @@ private fun SyncIndicator(syncState: SyncState) {
 
     when (syncState) {
         is SyncState.Syncing -> {
-            val pct = (syncState.progress * 100).toInt()
+            // Header intentionally omits the percent — SyncProgressCard in
+            // the body is the single source of sync-progress percent. Two
+            // percentages from flows that update on different ticks caused
+            // visible bouncing (40% vs 99%) against each other.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -519,7 +522,7 @@ private fun SyncIndicator(syncState: SyncState) {
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Syncing $pct% · ${peerCount.intValue} peers · Block ${syncState.blockHeight}",
+                    text = "Syncing · ${peerCount.intValue} peers · Block ${syncState.blockHeight}",
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent.copy(alpha = 0.85f)
                 )

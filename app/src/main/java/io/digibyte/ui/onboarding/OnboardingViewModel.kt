@@ -108,8 +108,11 @@ class OnboardingViewModel @Inject constructor(
         val phrase = _mnemonic.joinToString(" ")
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
-            pinManager.clearPin()
             val success = withContext(Dispatchers.Default) {
+                // clearPin touches EncryptedSharedPreferences (Android Keystore);
+                // keep it on the worker dispatcher with the rest of the heavy work
+                // so the PIN-confirm callback doesn't stall the main thread.
+                pinManager.clearPin()
                 walletManager.createWallet(phrase)
             }
             wipeMnemonicFromMemory()
@@ -124,10 +127,12 @@ class OnboardingViewModel @Inject constructor(
         val ts = _recoveryTimestamp
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
-            // Clear any stale PIN from a previous install so the user
-            // is routed to PIN setup, not the unlock screen.
-            pinManager.clearPin()
             val success = withContext(Dispatchers.Default) {
+                // Clear any stale PIN from a previous install so the user
+                // is routed to PIN setup, not the unlock screen. Done inside
+                // the worker dispatcher so the Keystore-backed prefs write
+                // never lands on the main thread.
+                pinManager.clearPin()
                 walletManager.recoverWallet(phrase, ts)
             }
 

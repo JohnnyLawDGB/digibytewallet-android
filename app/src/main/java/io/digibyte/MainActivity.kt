@@ -206,8 +206,13 @@ class MainActivity : FragmentActivity() {
         val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { -1 }
         if (peers == 0) {
             android.util.Log.i("MainActivity", "onResume with peerCount=0 — kicking startSync")
-            try { NativeBridge.startSync() } catch (t: Throwable) {
-                android.util.Log.w("MainActivity", "startSync kick failed", t)
+            // startSync opens sockets via BRPeerManagerConnect and can block for
+            // seconds under network conditions — onResume must return quickly to
+            // avoid an ANR, so dispatch to IO.
+            lifecycleScope.launch(Dispatchers.IO) {
+                try { NativeBridge.startSync() } catch (t: Throwable) {
+                    android.util.Log.w("MainActivity", "startSync kick failed", t)
+                }
             }
         }
     }

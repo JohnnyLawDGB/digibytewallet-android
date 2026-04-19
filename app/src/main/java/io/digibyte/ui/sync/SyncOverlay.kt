@@ -13,10 +13,14 @@ import io.digibyte.ui.theme.DigiByteBlue
 /**
  * SyncOverlay — shown inside the WalletScreen while the node is syncing.
  *
- * Shows:
- *  1. The DigiRunner mini-game during any non-Complete state
- *  2. Progress bar + block height
- *  3. "Play DigiRunner" button when fully synced
+ * During active sync: renders only the DigiRunner mini-game. The verbose
+ * block / percent / ETA / match-count readout lives in [SyncProgressCard],
+ * which is the single source of truth for user-facing sync progress. Having
+ * a second progress bar here (with its own 2s poll cadence) caused two
+ * numbers to bounce against each other because peer tip churn and polling
+ * skew produced different snapshots of the same underlying state.
+ *
+ * When synced: renders the "Play DigiRunner" button.
  */
 @Composable
 fun SyncOverlay(
@@ -29,31 +33,14 @@ fun SyncOverlay(
     val isComplete = syncState is SyncState.Complete
 
     if (!isComplete && syncState !is SyncState.Failed) {
-        // Active sync — show game + progress
         var showGame by remember { mutableStateOf(true) }
 
-        // Poll block height for progress display
-        val blockHeight = remember { mutableLongStateOf(0L) }
-        val estHeight = remember { mutableLongStateOf(0L) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                blockHeight.longValue = io.digibyte.core.bridge.NativeBridge.getLastBlockHeight()
-                estHeight.longValue = io.digibyte.core.bridge.NativeBridge.getEstimatedBlockHeight()
-                kotlinx.coroutines.delay(2000L)
-            }
-        }
-
-        val progress = if (estHeight.longValue > 0 && blockHeight.longValue > 0) {
-            (blockHeight.longValue.toFloat() / estHeight.longValue.toFloat()).coerceIn(0f, 1f)
-        } else if (syncState is SyncState.Syncing) {
-            syncState.progress
+        // Game uses the authoritative syncState.progress directly; no separate
+        // native polling so the physics-gated progress animation can't drift
+        // against SyncProgressCard's percent.
+        val progress = if (syncState is SyncState.Syncing) {
+            syncState.progress.coerceIn(0f, 1f)
         } else 0f
-
-        val block = blockHeight.longValue.let {
-            if (it > 0) it
-            else if (syncState is SyncState.Syncing) syncState.blockHeight
-            else 0L
-        }
 
         Column(modifier = modifier) {
             if (showGame) {
@@ -73,26 +60,8 @@ fun SyncOverlay(
                     )
                 }
             }
-
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-            )
-
-            val statusText = when {
-                block > 0 && estHeight.longValue > 0 ->
-                    "Syncing: ${(progress * 100).toInt()}% — Block $block"
-                block > 0 -> "Scanning blockchain — Block $block"
-                else -> "Connecting to network\u2026"
-            }
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            )
+            // Progress bar and status text intentionally removed — see
+            // SyncProgressCard in WalletScreen for the live readout.
         }
     } else {
         // Fully synced — show Play DigiRunner button

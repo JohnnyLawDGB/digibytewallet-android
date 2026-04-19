@@ -1,8 +1,11 @@
 package io.digibyte.ui.onboarding
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,6 +28,7 @@ import androidx.navigation.NavController
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
+import kotlinx.coroutines.launch
 
 @Composable
 fun MnemonicInputScreen(
@@ -198,6 +202,7 @@ fun MnemonicInputScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WordInputField(
     index: Int,
@@ -214,6 +219,12 @@ private fun WordInputField(
         else emptyList()
     }
 
+    // Brings the focused field into view when the soft keyboard appears.
+    // imePadding alone reserves space at the bottom but doesn't scroll the
+    // focused field into the visible window; the requester does that.
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+
     Column(modifier = modifier) {
         OutlinedTextField(
             value = value,
@@ -223,7 +234,13 @@ private fun WordInputField(
             label = { Text("${index + 1}", fontSize = 11.sp) },
             modifier = Modifier
                 .fillMaxWidth()
-                .onFocusChanged { state -> if (state.isFocused) onFocused() },
+                .bringIntoViewRequester(bringIntoView)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        onFocused()
+                        scope.launch { bringIntoView.bringIntoView() }
+                    }
+                },
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,

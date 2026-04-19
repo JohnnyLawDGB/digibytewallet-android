@@ -33,7 +33,9 @@ import io.digibyte.core.security.BiometricResult
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 private const val PIN_LENGTH = 6
@@ -93,19 +95,27 @@ fun PinSetupScreen(
                                                     // The mnemonic is still in the ViewModel
                                                     // from the seed display/verify flow.
                                                     val afterWalletReady: (Boolean) -> Unit = { success ->
-                                                        isPinSaving = false
                                                         if (success) {
-                                                            // Kick off sync now that wallet is created.
-                                                            // SyncService may be waiting for isWalletLoaded().
-                                                            io.digibyte.core.bridge.NativeBridge.startSync()
-                                                            if (biometricAvailable && activity != null) {
-                                                                step = PinStep.BIOMETRIC
-                                                            } else {
-                                                                navController.navigate("wallet") {
-                                                                    popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                                            // Kick off sync on the IO dispatcher — BRPeerManagerConnect
+                                                            // opens sockets and can block for seconds on a cold start,
+                                                            // which will ANR this callback chain if it runs on Main.
+                                                            scope.launch {
+                                                                withContext(Dispatchers.IO) {
+                                                                    runCatching {
+                                                                        io.digibyte.core.bridge.NativeBridge.startSync()
+                                                                    }
+                                                                }
+                                                                isPinSaving = false
+                                                                if (biometricAvailable && activity != null) {
+                                                                    step = PinStep.BIOMETRIC
+                                                                } else {
+                                                                    navController.navigate("wallet") {
+                                                                        popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                                                    }
                                                                 }
                                                             }
                                                         } else {
+                                                            isPinSaving = false
                                                             errorMessage = "Wallet creation failed. Please try again."
                                                             currentInput = ""
                                                             step = PinStep.ENTER
