@@ -135,21 +135,12 @@ fun AssetDetailScreen(
                 ) {
                     // Large icon
                     val iconColor = assetIconColors[colorIndex]
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(iconColor.copy(alpha = 0.18f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = iconColor
-                        )
-                    }
+                    AssetIcon(
+                        imageUrl = meta?.imageUrl,
+                        firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A',
+                        iconColor = iconColor,
+                        size = 72.dp
+                    )
 
                     Spacer(modifier = Modifier.height(12.dp))
 

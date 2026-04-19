@@ -176,23 +176,12 @@ private fun AssetCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ── Icon / thumbnail ─────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(iconColor.copy(alpha = 0.18f))
-                    .border(1.5.dp, iconColor.copy(alpha = 0.5f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = firstLetter.toString(),
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp
-                    ),
-                    color = iconColor
-                )
-            }
+            AssetIcon(
+                imageUrl = asset.metadata?.imageUrl,
+                firstLetter = firstLetter,
+                iconColor = iconColor,
+                size = 56.dp
+            )
 
             Spacer(modifier = Modifier.height(10.dp))
 

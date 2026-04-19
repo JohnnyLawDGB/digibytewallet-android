@@ -15,8 +15,8 @@ android {
         applicationId = "io.digibyte"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30038 // x-release-please-version-code
-        versionName = "3.5.20" // x-release-please-version
+        versionCode = 30039 // x-release-please-version-code
+        versionName = "3.5.21" // x-release-please-version
     }
 
     // Match native module flavors
@@ -111,6 +111,10 @@ dependencies {
     // OkHttp (needed so Hilt/KSP can resolve OkHttpClient in NetworkModule + AppModule)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // Coil — Compose-native async image loading with a custom IPFS fetcher
+    // that routes ipfs:// URIs through our hash-verifying IpfsClient.
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
     // Room runtime (needed so app module can reference WalletDatabase from :core)
     implementation("androidx.room:room-runtime:2.7.1")
 
@@ -118,4 +122,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("androidx.hilt:hilt-work:1.2.0")
     ksp("androidx.hilt:hilt-compiler:1.2.0")
+
+    // Unit test deps (:app)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("io.mockk:mockk:1.13.12")
 }
