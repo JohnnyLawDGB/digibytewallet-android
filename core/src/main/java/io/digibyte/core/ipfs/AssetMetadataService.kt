@@ -34,49 +34,67 @@ import org.json.JSONObject
  */
 class AssetMetadataService(
     private val ipfsClient: IpfsClient,
-    private val assetMetadataDao: AssetMetadataDao
+    private val assetMetadataDao: AssetMetadataDao,
+    /** Optional fallback network client that queries digiasset_core instances
+     *  (digiscope.me proxy, api.digiassets.net) when the IPFS fetch fails or
+     *  no CID is available. Nullable so tests can construct without one. */
+    private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient? = null,
 ) {
     /**
      * Return metadata for [assetId], fetching from IPFS via [metadataCid] if not cached.
      *
+     * Resolution order:
+     *  1. Room cache (immutable — CID content-addressed).
+     *  2. IPFS via [metadataCid] if supplied, verified against its multihash.
+     *  3. [assetNetworkClient] — digiasset_core instances that already have
+     *     the metadata pinned and parsed server-side. Survives the case where
+     *     public IPFS gateways are slow/down AND the CID wasn't cached locally.
+     *
      * @param assetId     The DigiAsset identifier.
      * @param metadataCid Optional IPFS CID of the JSON metadata document.
-     * @return [AssetMetadata] on success, `null` if no CID is provided or all gateways fail.
+     * @return [AssetMetadata] on success, `null` if every resolver failed.
      */
     suspend fun getMetadata(assetId: String, metadataCid: String?): AssetMetadata? {
         // Always check the local cache first — CIDs are immutable, cache is permanent
         val cached = assetMetadataDao.getMetadata(assetId)
         if (cached != null) return cached.toModel()
 
-        // Nothing to fetch without a CID
-        if (metadataCid == null) return null
-
         return withContext(Dispatchers.IO) {
-            // Fetch from IPFS and verify hash
-            val bytes = ipfsClient.fetchVerified(metadataCid) ?: return@withContext null
-
-            val json = try {
-                JSONObject(String(bytes, Charsets.UTF_8))
-            } catch (_: Exception) {
-                return@withContext null  // not valid JSON
+            // Pass 1: IPFS via CID (if we have one)
+            if (metadataCid != null) {
+                val bytes = ipfsClient.fetchVerified(metadataCid)
+                if (bytes != null) {
+                    val json = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
+                    if (json != null) {
+                        return@withContext storeFromJson(assetId, metadataCid, json)
+                    }
+                }
             }
 
-            val entity = AssetMetadataEntity(
-                assetId = assetId,
-                name = json.optString("name").takeIf { it.isNotEmpty() },
-                symbol = json.optString("symbol").takeIf { it.isNotEmpty() },
-                description = json.optString("description").takeIf { it.isNotEmpty() },
-                decimals = json.optInt("decimals", 0),
-                totalSupply = json.optLong("totalSupply", 0L),
-                issuerAddress = json.optString("issuerAddress").takeIf { it.isNotEmpty() },
-                metadataCid = metadataCid,
-                imageUrl = json.optString("image").takeIf { it.isNotEmpty() },
-                cachedAt = System.currentTimeMillis()
-            )
-
-            assetMetadataDao.insert(entity)
-            entity.toModel()
+            // Pass 2: digiasset_core network fallback
+            val netClient = assetNetworkClient ?: return@withContext null
+            val remote = runCatching { netClient.getAssetData(assetId) }.getOrNull() ?: return@withContext null
+            val ipfsMap = remote.ipfs ?: return@withContext null
+            val json = JSONObject(ipfsMap)
+            storeFromJson(assetId, metadataCid ?: remote.cid, json)
         }
+    }
+
+    private suspend fun storeFromJson(assetId: String, cid: String?, json: JSONObject): AssetMetadata {
+        val entity = AssetMetadataEntity(
+            assetId = assetId,
+            name = json.optString("name").takeIf { it.isNotEmpty() },
+            symbol = json.optString("symbol").takeIf { it.isNotEmpty() },
+            description = json.optString("description").takeIf { it.isNotEmpty() },
+            decimals = json.optInt("decimals", 0),
+            totalSupply = json.optLong("totalSupply", 0L),
+            issuerAddress = json.optString("issuerAddress").takeIf { it.isNotEmpty() },
+            metadataCid = cid,
+            imageUrl = json.optString("image").takeIf { it.isNotEmpty() },
+            cachedAt = System.currentTimeMillis(),
+        )
+        assetMetadataDao.insert(entity)
+        return entity.toModel()
     }
 
     // -------------------------------------------------------------------------

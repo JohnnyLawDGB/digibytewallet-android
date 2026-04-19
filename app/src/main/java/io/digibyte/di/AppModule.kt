@@ -189,8 +189,26 @@ object AppModule {
     fun provideIpfsClient(client: OkHttpClient): IpfsClient = IpfsClient(client)
 
     @Provides @Singleton
-    fun provideAssetMetadataService(ipfsClient: IpfsClient, dao: AssetMetadataDao): AssetMetadataService =
-        AssetMetadataService(ipfsClient, dao)
+    fun provideAssetMetadataService(
+        ipfsClient: IpfsClient,
+        dao: AssetMetadataDao,
+        assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
+    ): AssetMetadataService =
+        AssetMetadataService(ipfsClient, dao, assetNetworkClient)
+
+    /** Multi-endpoint asset network client with per-endpoint circuit breaker.
+     *  Priority order: our own cert-pinned proxy first, then the DigiByte Core
+     *  team's official endpoint. Future: add user-configured override. */
+    @Provides @Singleton
+    fun provideAssetNetworkClient(
+        okHttpClient: OkHttpClient,
+    ): io.digibyte.core.asset.network.AssetNetworkClient =
+        io.digibyte.core.asset.network.MultiEndpointAssetClient(
+            endpoints = listOf(
+                io.digibyte.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
+                io.digibyte.core.asset.network.DigiAssetsNetClient(baseClient = okHttpClient),
+            )
+        )
 
     @Provides @Singleton
     fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao, digiScopeClient: DigiScopeClient): DigiIdManager =
