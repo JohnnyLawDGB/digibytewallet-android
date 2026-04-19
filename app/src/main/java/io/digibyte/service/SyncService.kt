@@ -47,6 +47,12 @@ class SyncService : Service() {
      *  unhandled JNI throwable, SupervisorJob child cancellation). */
     private var keepaliveJob: Job? = null
 
+    /** Consecutive poll ticks observing `height at chain tip`. We only flip
+     *  to SyncState.Complete after a grace window of stability so the UI
+     *  doesn't falsely declare "synced" while merkleblocks for recent blocks
+     *  are still in flight. See TIP_GRACE_POLLS. */
+    private var atTipConsecutivePolls = 0
+
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var utxoManager: UtxoManager
     @Inject lateinit var transactionDao: TransactionDao
@@ -204,12 +210,30 @@ class SyncService : Service() {
                     // a newer BRMainNetCheckpoints entry.
                     val atRealTip = height >= LATEST_CHECKPOINT_HEIGHT &&
                                     height >= estHeight - 5
+                    if (!atRealTip) atTipConsecutivePolls = 0
                     if (height > 0 && estHeight > 0 && atRealTip) {
-                        hasReachedSynced = true
-                        walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
-                        getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
-                            .edit().putBoolean("has_synced", true).apply()
-                        android.util.Log.i("SyncService", "At chain tip (height=$height est=$estHeight) — marking complete")
+                        // Require TIP_GRACE_POLLS consecutive at-tip observations
+                        // before declaring complete. Header height can reach the
+                        // chain tip while per-block merkleblocks matching the
+                        // bloom filter are still being delivered; premature
+                        // Complete state causes the UI to show stale balance
+                        // until the user restarts the app. Real-world repro
+                        // observed 2026-04-19: wallet marked complete while
+                        // the block containing an outgoing spend was still
+                        // being scanned, leaving the wallet showing a balance
+                        // ~2 DGB higher than actual on-chain state.
+                        atTipConsecutivePolls++
+                        if (atTipConsecutivePolls >= TIP_GRACE_POLLS) {
+                            hasReachedSynced = true
+                            walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
+                            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                .edit().putBoolean("has_synced", true).apply()
+                            android.util.Log.i(
+                                "SyncService",
+                                "At chain tip (height=$height est=$estHeight) for " +
+                                    "${atTipConsecutivePolls * 10}s — marking complete"
+                            )
+                        }
                     } else if (height > 0 && estHeight > 0 &&
                                height >= estHeight - 5 &&
                                height < LATEST_CHECKPOINT_HEIGHT) {
@@ -712,5 +736,12 @@ class SyncService : Service() {
          * to the submodule.
          */
         private const val LATEST_CHECKPOINT_HEIGHT = 23_187_000L
+
+        /** How many consecutive 10s polls we must observe `atRealTip` before
+         *  we flip to SyncState.Complete. Headers can reach tip while per-block
+         *  merkleblocks are still being delivered; a grace window prevents the
+         *  UI from declaring sync complete while outgoing-spend merkleblocks
+         *  are still in flight. 3 polls * 10s = 30s. */
+        private const val TIP_GRACE_POLLS = 3
     }
 }

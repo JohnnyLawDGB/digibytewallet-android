@@ -78,9 +78,16 @@ class ChainReconciliationService(
                 return@withContext done
             }
 
-            // Deduplicate parent-tx fetches — UTXOs from the same tx share
-            // one raw-tx entry; we only need to register each parent tx once.
-            val uniqueTxids = result.utxos.map { it.txid }.toSet()
+            // Register every tx the backend returned, not just the parents
+            // of current UTXOs. The backend's ElectrumX history includes
+            // *spending* txs too — without registering those, BRWallet never
+            // learns that a UTXO it thinks is unspent was already consumed
+            // in a block the bloom scan missed, and displays a balance
+            // higher than the real on-chain state forever. Reproduced
+            // 2026-04-19: wallet showed 1.999887 DGB after the user spent
+            // most of it; real balance was 0.045 because the spending tx's
+            // merkleblock was never delivered to this SPV client.
+            val uniqueTxids = result.rawTxs.keys.toList()
             var imported = 0
             var alreadyKnown = 0
             val totalBalance = result.utxos.sumOf { it.amountSatoshi }
