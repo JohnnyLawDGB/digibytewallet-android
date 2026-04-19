@@ -130,31 +130,122 @@ class AssetManager(
     }
 
     /**
-     * Build and sign an asset transfer transaction.
+     * Build, sign, and broadcast a DigiAsset transfer transaction.
      *
-     * Full implementation deferred to Task 8. Requires:
-     *  - Selecting asset UTXOs + DGB fee UTXOs via [io.digibyte.core.CoinSelector].
-     *  - Constructing the OP_RETURN with transfer encoding.
-     *  - Creating 700-sat marker outputs for each asset recipient.
-     *  - Signing via the C core (NativeBridge.signTransaction).
+     * Output layout (DA convention):
+     *   [0] Recipient marker — 700 sats to [toAddress]
+     *   [1] OP_RETURN       —   0 sats, carries the DA transfer payload
+     *   [2] DGB change      —   0 or N sats to a change address (if > dust)
+     *
+     * @param assetId    The DigiAsset identifier to transfer.
+     * @param quantity   Asset quantity in internal (smallest-unit) integers.
+     *                   The caller must scale from user-entered decimals
+     *                   using the asset's divisibility before calling.
+     * @param toAddress  Recipient DigiByte address.
+     * @param feeSats    Total DGB fee in satoshis. Caller can derive this
+     *                   from tx-size estimate × sat/byte.
      */
     suspend fun sendAsset(
         assetId: String,
         quantity: Long,
         toAddress: String,
-        feePerKb: Long
+        feeSats: Long,
     ): TxResult {
-        if (!NativeBridge.isValidAddress(toAddress)) {
-            return TxResult.Error("Invalid DigiByte address")
-        }
-        if (quantity <= 0) {
-            return TxResult.Error("Quantity must be positive")
+        if (!NativeBridge.isValidAddress(toAddress)) return TxResult.Error("Invalid DigiByte address")
+        if (quantity <= 0) return TxResult.Error("Quantity must be positive")
+        if (feeSats < 0) return TxResult.Error("Fee must be non-negative")
+
+        // 1. Load spendable UTXOs.
+        val assetUtxos = utxoDao.getAssetUtxosByIdNow(assetId)
+        val dgbUtxos = utxoDao.getSpendableDigiByteUtxosNow()
+        if (assetUtxos.isEmpty()) return TxResult.Error("No UTXOs for asset $assetId")
+
+        // 2. Selection. Single recipient for now = one 700-sat marker.
+        val markerSats = io.digibyte.core.asset.send.DA_MARKER_SATS
+        val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
+            assetUtxos = assetUtxos,
+            dgbUtxos = dgbUtxos,
+            assetNeeded = quantity,
+            feeSats = feeSats,
+            markerOutputSats = markerSats,
+        )
+        val ok = when (selection) {
+            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
+                return TxResult.Error("Not enough asset: need ${selection.required}, have ${selection.available}")
+            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
+                return TxResult.Error("Not enough DGB for fee: need ${selection.required}, have ${selection.available}")
+            is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
         }
 
-        // TODO: Build asset transfer transaction (Task 8)
-        // This requires selecting asset UTXOs + DGB fee UTXOs,
-        // constructing the OP_RETURN with transfer encoding,
-        // creating 700-sat marker outputs, and signing via C core.
-        return TxResult.Error("Asset sending not yet implemented")
+        // 3. Reject asset change for now — MVP is full-UTXO transfers only.
+        //    When we support partial transfers, emit a sender-owned marker
+        //    at the last non-OP_RETURN output per the last-output rule.
+        if (ok.assetChangeQty > 0) {
+            return TxResult.Error("Partial transfers not supported yet — pick exact-match asset UTXOs")
+        }
+
+        // 4. Encode the DA OP_RETURN transfer payload. Recipient is output
+        //    index 0, which is where the encoder references it.
+        val opReturnScript = try {
+            DigiAssetEncoder.encodeSimpleTransfer(version = 3, recipientOutputIndex = 0, quantity = quantity)
+        } catch (e: Exception) {
+            return TxResult.Error("Encode failed: ${e.message}")
+        }
+
+        // 5. Build the output list [marker, OP_RETURN, optional change].
+        val allInputs = ok.assetInputs + ok.dgbInputs
+        val outAddresses = mutableListOf<String>()
+        val outAmounts = mutableListOf<Long>()
+        val outScripts = mutableListOf<String>()
+
+        outAddresses += toAddress
+        outAmounts += markerSats
+        outScripts += ""
+
+        outAddresses += ""   // empty address = use raw script below (OP_RETURN)
+        outAmounts += 0L
+        outScripts += opReturnScript.toHex()
+
+        val dgbChange = ok.dgbChangeSats
+        if (dgbChange > DGB_CHANGE_DUST_THRESHOLD) {
+            val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
+                ?: return TxResult.Error("Could not derive change address")
+            outAddresses += changeAddr
+            outAmounts += dgbChange
+            outScripts += ""
+        }
+
+        // 6. Native build + sign + broadcast.
+        val signedHex = NativeBridge.buildAndSignAssetTransferTx(
+            inputTxidsHex = allInputs.map { it.txid }.toTypedArray(),
+            inputVouts = allInputs.map { it.vout }.toIntArray(),
+            inputAmounts = allInputs.map { it.satoshis }.toLongArray(),
+            inputScriptPubKeysHex = allInputs.map { it.scriptPubKey.toHex() }.toTypedArray(),
+            outputAddresses = outAddresses.toTypedArray(),
+            outputAmounts = outAmounts.toLongArray(),
+            outputScriptsHex = outScripts.toTypedArray(),
+        ) ?: return TxResult.Error("Native build/sign failed")
+
+        val signedBytes = signedHex.hexToByteArray() ?: return TxResult.Error("Bad signed-tx hex")
+        val txid = NativeBridge.publishTransaction(signedBytes)
+            ?: return TxResult.Error("Broadcast failed — check peer connection")
+
+        return TxResult.Success(txid)
+    }
+
+    private fun ByteArray.toHex(): String =
+        joinToString("") { "%02x".format(it) }
+
+    private fun String.hexToByteArray(): ByteArray? {
+        if (length % 2 != 0) return null
+        return try {
+            ByteArray(length / 2) { substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+        } catch (_: Exception) { null }
+    }
+
+    private companion object {
+        /** DGB change below this floor is folded into the fee (avoids
+         *  creating an indistinguishable-from-marker output). */
+        const val DGB_CHANGE_DUST_THRESHOLD = 1000L
     }
 }

@@ -1,6 +1,6 @@
 # DigiByte Wallet — Roadmap
 
-Current version: **v3.5.24** (April 2026). This roadmap supersedes the
+Current version: **v3.5.25** (April 2026). This roadmap supersedes the
 feature-ordered roadmap previously in this file. It is reorganized around
 what actually makes this wallet different from a BlueWallet-style SPV client:
 **no trusted third party in the data path**.

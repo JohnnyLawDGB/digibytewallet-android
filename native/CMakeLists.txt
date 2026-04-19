@@ -100,6 +100,7 @@ add_library(
         src/main/jni/bridge/jni_wallet_sign.c
         src/main/jni/bridge/jni_transaction_persist.c
         src/main/jni/bridge/jni_derive.c
+        src/main/jni/bridge/jni_asset_send.c
         # Old bridge files retained for reference but NOT compiled:
         # src/main/jni/bridge/core.c
         # src/main/jni/bridge/wallet.c

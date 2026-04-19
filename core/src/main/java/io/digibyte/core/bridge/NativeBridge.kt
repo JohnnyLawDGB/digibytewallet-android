@@ -207,6 +207,28 @@ object NativeBridge {
      *  (bad parse, sign mismatch, dust threshold, or unsupported script
      *  type — notably BIP49 P2SH-P2WPKH inputs are NOT yet handled by the
      *  underlying BRTransactionSign). */
+    /** Build, sign, and serialize a DigiAsset transfer transaction from
+     *  pre-selected inputs and pre-constructed outputs (including the
+     *  DA OP_RETURN). Asset inputs MUST come first in the inputs list —
+     *  the DA instruction stream walks inputs in order.
+     *
+     *  outputAddresses[i] may be the empty string ("") to indicate that
+     *  outputScriptsHex[i] is the raw scriptPubKey to use for that output
+     *  (e.g. for the OP_RETURN). Otherwise the address is resolved via
+     *  BRAddressScriptPubKey and outputScriptsHex[i] is ignored.
+     *
+     *  Returns signed tx hex, or null on any failure (invalid address,
+     *  hex parse error, signing failure, etc.). */
+    external fun buildAndSignAssetTransferTx(
+        inputTxidsHex: Array<String>,
+        inputVouts: IntArray,
+        inputAmounts: LongArray,
+        inputScriptPubKeysHex: Array<String>,
+        outputAddresses: Array<String>,
+        outputAmounts: LongArray,
+        outputScriptsHex: Array<String>,
+    ): String?
+
     external fun buildAndSignLegacySweep(
         seedBytes: ByteArray,
         hmacKey: String,

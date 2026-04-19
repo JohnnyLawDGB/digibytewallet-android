@@ -12,6 +12,14 @@ interface UtxoDao {
     @Query("SELECT * FROM utxos WHERE is_asset = 1 AND spent = 0")
     fun getAssetUtxos(): Flow<List<UtxoEntity>>
 
+    /** One-shot suspend reads used by sendAsset (Flow variants cache too aggressively
+     *  when consumed via .first() for single-use selection). */
+    @Query("SELECT * FROM utxos WHERE is_asset = 0 AND spent = 0")
+    suspend fun getSpendableDigiByteUtxosNow(): List<UtxoEntity>
+
+    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_id = :assetId")
+    suspend fun getAssetUtxosByIdNow(assetId: String): List<UtxoEntity>
+
     @Query("SELECT COALESCE(SUM(satoshis), 0) FROM utxos WHERE is_asset = 0 AND spent = 0")
     fun getDigiByteBalance(): Flow<Long>
 

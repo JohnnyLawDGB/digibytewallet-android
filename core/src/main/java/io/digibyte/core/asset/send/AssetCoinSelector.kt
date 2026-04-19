@@ -2,6 +2,10 @@ package io.digibyte.core.asset.send
 
 import io.digibyte.core.db.entity.UtxoEntity
 
+/** DigiAsset spec's per-recipient marker output value — 700 satoshis,
+ *  matching BRDigiAsset.h:39 DA_ASSET_DUST_AMOUNT. */
+const val DA_MARKER_SATS: Long = 700L
+
 /**
  * Pure selection logic for DigiAsset transfer transactions.
  *
