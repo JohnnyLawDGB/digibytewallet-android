@@ -1,6 +1,7 @@
 package io.digibyte.core.reconcile
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.util.Log
 import kotlinx.coroutines.delay
@@ -26,21 +27,44 @@ import kotlinx.coroutines.delay
  */
 object PostUpgradeReconciler {
     private const val TAG = "PostUpgradeReconcile"
-    private const val PREFS = "dgb_reconcile"
-    private const val KEY_LAST_VERSION = "last_version_code_reconciled"
+    const val PREFS = "dgb_reconcile"
+    const val KEY_LAST_VERSION = "last_version_code_reconciled"
 
     /** Give SPV a few seconds to connect peers + settle headers before we
      *  hand the node the wallet's full address set. */
-    private const val STARTUP_DELAY_MS = 10_000L
+    internal const val STARTUP_DELAY_MS = 10_000L
 
     @Volatile private var inFlight = false
 
+    /**
+     * Pure version-gate decision. Exposed for testing and any caller that
+     * wants to check without actually running reconcile.
+     *
+     * Returns true iff [currentVersionCode] is valid (>0) and strictly
+     * greater than [lastReconciledVersionCode]. Downgrades and equal
+     * versions are no-ops.
+     */
+    fun shouldRun(lastReconciledVersionCode: Int, currentVersionCode: Int): Boolean =
+        currentVersionCode > 0 && lastReconciledVersionCode < currentVersionCode
+
     suspend fun runIfNeeded(context: Context) {
+        runIfNeeded(context) { ctx -> ChainReconciliationService(DgbNodeClient(ctx)) }
+    }
+
+    /**
+     * Testable overload that lets callers inject a service factory so the
+     * network-facing ChainReconciliationService can be stubbed in unit tests.
+     * Production call site uses the no-arg overload above.
+     */
+    internal suspend fun runIfNeeded(
+        context: Context,
+        serviceFactory: (Context) -> ChainReconciliationService,
+    ) {
         if (inFlight) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val current = currentVersionCode(context)
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
-        if (current == 0 || last >= current) {
+        if (!shouldRun(last, current)) {
             Log.d(TAG, "no reconcile needed (last=$last current=$current)")
             return
         }
@@ -48,7 +72,7 @@ object PostUpgradeReconciler {
         try {
             Log.i(TAG, "auto-reconcile v$last -> v$current; waiting ${STARTUP_DELAY_MS}ms for peers")
             delay(STARTUP_DELAY_MS)
-            val service = ChainReconciliationService(DgbNodeClient(context))
+            val service = serviceFactory(context)
             when (val result = service.reconcile()) {
                 is ChainReconciliationService.State.Done -> {
                     Log.i(
@@ -58,7 +82,7 @@ object PostUpgradeReconciler {
                             "utxos=${result.utxosSeenOnChain} " +
                             "addresses=${result.scannedAddresses}"
                     )
-                    prefs.edit().putInt(KEY_LAST_VERSION, current).apply()
+                    persistVersion(prefs, current)
                 }
                 is ChainReconciliationService.State.Failed -> {
                     Log.w(TAG, "reconcile failed: ${result.reason} — will retry next launch")
@@ -72,6 +96,10 @@ object PostUpgradeReconciler {
         }
     }
 
+    private fun persistVersion(prefs: SharedPreferences, versionCode: Int) {
+        prefs.edit().putInt(KEY_LAST_VERSION, versionCode).apply()
+    }
+
     private fun currentVersionCode(context: Context): Int = try {
         val info: PackageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
         @Suppress("DEPRECATION")
@@ -79,5 +107,10 @@ object PostUpgradeReconciler {
     } catch (t: Throwable) {
         Log.w(TAG, "failed to read versionCode", t)
         0
+    }
+
+    /** Visible for tests only — reset in-flight guard. */
+    internal fun resetInFlightForTest() {
+        inFlight = false
     }
 }
