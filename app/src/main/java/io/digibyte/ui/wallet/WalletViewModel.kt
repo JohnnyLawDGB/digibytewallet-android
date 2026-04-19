@@ -15,6 +15,7 @@ import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.network.ChainTipFetcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.digibyte.core.tor.TorManager
@@ -70,6 +71,14 @@ class WalletViewModel @Inject constructor(
     private val _currentBlock = MutableStateFlow(0L)
     private val _targetBlock = MutableStateFlow(0L)
 
+    /** Authoritative chain tip fetched from api.digiscope.me. Used as the
+     *  progress denominator so the UI percent anchors to a stable value
+     *  rather than peer-quorum estimated_height (which churns as peers
+     *  come and go with different tip claims mid-sync). 0 means unknown;
+     *  callers fall back to [_targetBlock] in that case. Refreshed every
+     *  30 s from [fetchChainTipPeriodically]. */
+    private val _externalTip = MutableStateFlow(0L)
+
     /** Rolling samples of (timestamp_ms, blockHeight) for ETA computation.
      *  Capped at 24 entries (~2 minutes at 5s cadence), oldest evicted. */
     private val scanSamples = ArrayDeque<Pair<Long, Long>>()
@@ -113,7 +122,8 @@ class WalletViewModel @Inject constructor(
         _transactions,
         _currentBlock,
         _targetBlock,
-        _recoveryFromTimestamp
+        _recoveryFromTimestamp,
+        _externalTip
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val state = values[0] as SyncState
@@ -123,6 +133,13 @@ class WalletViewModel @Inject constructor(
         val current = values[4] as Long
         val target = values[5] as Long
         val recoveryTs = values[6] as Long?
+        val externalTip = values[7] as Long
+
+        // Prefer the authoritative external tip when available; fall back to
+        // the peer-quorum target only when the fetch has never succeeded
+        // (offline, DNS, etc). Never let the effective target regress — once
+        // we've seen the real tip we trust it over any lower peer claim.
+        val effectiveTarget = if (externalTip > target) externalTip else target
 
         val stage = when {
             state is SyncState.Failed -> SyncStage.Failed
@@ -138,18 +155,20 @@ class WalletViewModel @Inject constructor(
 
         val progress = when {
             state is SyncState.Complete -> 1.0f
+            current > 0 && effectiveTarget > 0 ->
+                (current.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
             state is SyncState.Syncing -> state.progress
             else -> 0.0f
         }
 
         // ETA: compute from rolling samples. Need ≥ 2 samples spanning > 10s
         // and a positive block-rate, otherwise null.
-        val eta: Long? = computeEta(current, target)
+        val eta: Long? = computeEta(current, effectiveTarget)
 
         SyncProgressInfo(
             stage = stage,
             currentBlock = current,
-            targetBlock = target,
+            targetBlock = effectiveTarget,
             progressFraction = progress.coerceIn(0f, 1f),
             matchCount = txs.size,
             runningBalanceSat = balance,
@@ -240,6 +259,20 @@ class WalletViewModel @Inject constructor(
         fetchPricePeriodically()
         pollNativeBalance()
         loadRecoveryTimestamp()
+        fetchChainTipPeriodically()
+    }
+
+    /** Refresh the authoritative chain tip every 30 seconds. On failure the
+     *  stored value is left unchanged so a momentary network blip doesn't
+     *  regress the progress denominator to 0. */
+    private fun fetchChainTipPeriodically() {
+        viewModelScope.launch {
+            while (true) {
+                val tip = ChainTipFetcher.fetch()
+                if (tip > 0L) _externalTip.value = tip
+                delay(30_000L)
+            }
+        }
     }
 
     /** One-shot fetch of the wallet's stored creation/recovery timestamp,
