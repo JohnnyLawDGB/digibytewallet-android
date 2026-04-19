@@ -58,6 +58,7 @@ class SyncService : Service() {
     @Inject lateinit var transactionDao: TransactionDao
     @Inject lateinit var peerDao: PeerDao
     @Inject lateinit var assetManager: AssetManager
+    @Inject lateinit var assetHistoryBackfill: io.digibyte.core.asset.AssetHistoryBackfill
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var okHttpClient: OkHttpClient
 
@@ -118,6 +119,14 @@ class SyncService : Service() {
         // Launch Tor-aware startup asynchronously.
         serviceScope.launch {
             startSyncWithTor()
+        }
+
+        // Run the v5 per-asset-history backfill exactly once per install.
+        // Fast path is a single correlated SQL statement against the utxos
+        // table; fallback pass decodes orphaned rows' rawBytes OP_RETURN.
+        serviceScope.launch {
+            runCatching { assetHistoryBackfill.runIfNeeded() }
+                .onFailure { android.util.Log.w("SyncService", "backfill threw", it) }
         }
 
         // Keep peers alive while app is open — poll every 10s, reconnect aggressively.
@@ -460,6 +469,10 @@ class SyncService : Service() {
         override fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean) {
             // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
             // and ensures all Room writes are serialised through the supervisor job.
+            if (assetId.isBlank()) {
+                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=$txHash, skipping insert")
+                return
+            }
             serviceScope.launch {
                 // Upsert the transaction record marked as an asset tx.
                 // amount is stored as positive (receive) or negative (send).
@@ -473,17 +486,10 @@ class SyncService : Service() {
                         toAddress     = "",
                         fromAddress   = "",
                         confirmations = 0,
-                        isAssetTx     = true
+                        isAssetTx     = true,
+                        assetId       = assetId
                     )
                 )
-
-                // Queue an IPFS metadata fetch for this asset id.
-                // AssetMetadataService checks its local cache first (no redundant fetches).
-                // The CID is not available from the callback directly — the C core knows the
-                // asset id but not the metadata CID at this point.  We hand off to
-                // AssetMetadataService with a null CID; it will no-op until the CID is
-                // learned later (e.g. via processAssetUtxo once the full tx is confirmed).
-                assetManager.getAssetHistory(assetId) // touches the DAO, warms the flow
             }
         }
         override fun onSaveBlocks(data: ByteArray, replace: Int) {

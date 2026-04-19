@@ -71,12 +71,12 @@ class AssetManager(
      * Flow of asset transactions.
      *
      * Currently returns all transactions flagged as asset transactions in order of
-     * descending timestamp. The [assetId] parameter is accepted for API stability;
-     * per-asset filtering will be added once the schema gains an assetId column (Task 7+).
+     * descending timestamp for the given [assetId]. Filters by the assetId
+     * column added in MIGRATION_4_5; rows predating that migration are
+     * attributed by AssetHistoryBackfill via a UTXO-join + rawBytes decode.
      */
-    fun getAssetHistory(assetId: String): Flow<List<TransactionEntity>> {
-        return transactionDao.getAssetTransactions()
-    }
+    fun getAssetHistory(assetId: String): Flow<List<TransactionEntity>> =
+        transactionDao.getAssetTransactions(assetId)
 
     /**
      * Attempt to parse [rawTx] for embedded DigiAsset data.

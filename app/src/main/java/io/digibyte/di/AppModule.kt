@@ -215,4 +215,15 @@ object AppModule {
         metadataDao: AssetMetadataDao,
         metadataService: AssetMetadataService
     ): AssetManager = AssetManager(utxoDao, transactionDao, metadataDao, metadataService)
+
+    @Provides @Singleton
+    fun provideAssetHistoryBackfill(
+        @ApplicationContext context: Context,
+        transactionDao: TransactionDao,
+    ): io.digibyte.core.asset.AssetHistoryBackfill =
+        io.digibyte.core.asset.AssetHistoryBackfill(
+            context,
+            transactionDao,
+            io.digibyte.core.asset.DigiAssetDecoder()
+        )
 }
