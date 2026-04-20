@@ -47,6 +47,14 @@ class SyncService : Service() {
      *  unhandled JNI throwable, SupervisorJob child cancellation). */
     private var keepaliveJob: Job? = null
 
+    /** Wall-clock timestamp of the last keepalive tick. Used by the respawn
+     *  check so we detect coroutines that are nominally `isActive=true` but
+     *  have been frozen by Doze for so long that the peer-keepalive has
+     *  effectively stopped running. Without this, a stuck-in-delay coroutine
+     *  never triggers respawn because Job.isActive stays true throughout
+     *  Doze suspension. */
+    @Volatile private var lastKeepaliveTickMs: Long = 0L
+
     /** Consecutive poll ticks observing `height at chain tip`. We only flip
      *  to SyncState.Complete after a grace window of stability so the UI
      *  doesn't falsely declare "synced" while merkleblocks for recent blocks
@@ -100,8 +108,23 @@ class SyncService : Service() {
         // no one is restoring peer connections — users see "0 peers forever"
         // while the watchdog fruitlessly re-kicks the same running service.
         if (syncAlreadyLaunched) {
+            val now = System.currentTimeMillis()
+            val stale = lastKeepaliveTickMs > 0L &&
+                (now - lastKeepaliveTickMs) > KEEPALIVE_STALE_THRESHOLD_MS
             if (keepaliveJob?.isActive != true) {
                 android.util.Log.w("SyncService", "keepalive coroutine not active — respawning")
+                keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+            } else if (stale) {
+                // Coroutine reports active but hasn't ticked in a long time —
+                // Doze froze it without cancelling. Cancel the old job so we
+                // don't end up with two loops fighting, then respawn.
+                val gap = (now - lastKeepaliveTickMs) / 1000L
+                android.util.Log.w(
+                    "SyncService",
+                    "keepalive stale: no tick in ${gap}s — cancelling + respawning"
+                )
+                keepaliveJob?.cancel()
+                lastKeepaliveTickMs = 0L
                 keepaliveJob = serviceScope.launch { runPeerKeepalive() }
             }
             return START_STICKY
@@ -150,6 +173,9 @@ class SyncService : Service() {
         walletManager.walletState.first { it is WalletState.Unlocked }
         while (isActive) {
             delay(10_000L)
+            // Stamp every tick so onStartCommand can detect a frozen-by-Doze
+            // coroutine that's still nominally active and respawn it.
+            lastKeepaliveTickMs = System.currentTimeMillis()
             try {
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
@@ -749,5 +775,11 @@ class SyncService : Service() {
          *  UI from declaring sync complete while outgoing-spend merkleblocks
          *  are still in flight. 3 polls * 10s = 30s. */
         private const val TIP_GRACE_POLLS = 3
+
+        /** If the keepalive hasn't stamped a tick in this long, we assume
+         *  Doze or a similar platform-level pause froze it. onStartCommand
+         *  cancels the old job and respawns. Chosen to be > 5× the normal
+         *  10s tick to avoid respawn thrash under short GC pauses etc. */
+        private const val KEEPALIVE_STALE_THRESHOLD_MS = 60_000L
     }
 }
