@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -104,12 +105,33 @@ fun AssetListScreen(
                         lineHeight = 22.sp
                     )
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "Browse assets on the marketplace",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = DigiByteAccent,
-                        textAlign = TextAlign.Center
-                    )
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://digiscope.me/assets/create"),
+                                )
+                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(intent)
+                            }
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = DigiByteAccent,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Create DigiAsset on digiscope.me",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
             }
         } else {
