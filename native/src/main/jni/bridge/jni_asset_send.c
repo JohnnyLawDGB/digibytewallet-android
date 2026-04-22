@@ -53,6 +53,32 @@ static void bytes_to_hex_local(const uint8_t *bytes, size_t n, char *out) {
 }
 
 /**
+ * Resolve a DigiByte address (legacy D... or bech32 dgb1q...) into its
+ * scriptPubKey bytes. Exposed for the asset-UTXO refresh path which
+ * receives listunspent results containing addresses but not scripts;
+ * the scriptPubKey is needed to spend the UTXO later via
+ * buildAndSignAssetTransferTx. Returns null for invalid addresses.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_addressToScriptPubKey(
+    JNIEnv *env, jobject thiz, jstring address)
+{
+    (void)thiz;
+    if (!address) return NULL;
+    const char *addrStr = (*env)->GetStringUTFChars(env, address, NULL);
+    if (!addrStr) return NULL;
+    uint8_t scriptBuf[64];
+    size_t scriptLen = BRAddressScriptPubKey(scriptBuf, sizeof(scriptBuf), addrStr);
+    (*env)->ReleaseStringUTFChars(env, address, addrStr);
+    if (scriptLen == 0) return NULL;
+    jbyteArray result = (*env)->NewByteArray(env, (jsize)scriptLen);
+    if (result) {
+        (*env)->SetByteArrayRegion(env, result, 0, (jsize)scriptLen, (jbyte *)scriptBuf);
+    }
+    return result;
+}
+
+/**
  * Build, sign, and serialize a DigiAsset transfer transaction.
  *
  * Inputs:

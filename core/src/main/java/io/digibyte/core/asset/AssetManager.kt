@@ -133,14 +133,17 @@ class AssetManager(
                 // One logical UtxoEntity per (txid, vout, assetId). In the
                 // common case there's exactly one asset per UTXO; the inner
                 // loop handles the rare multi-asset marker.
+                // Resolve scriptPubKey from the address so the UTXO is
+                // fully spendable by the send flow without a second lookup.
+                // If derivation fails (invalid address format), fall back
+                // to empty bytes — the row still displays correctly; send
+                // would fail gracefully with a typed error at that layer.
+                val scriptPubKey = NativeBridge.addressToScriptPubKey(u.address) ?: ByteArray(0)
                 utxoDao.insertAll(listOf(
                     UtxoEntity(
                         txid = u.txid,
                         vout = u.vout,
-                        // scriptPubKey is needed for spending but not display.
-                        // Left empty here; send flow resolves from the wallet's
-                        // own address derivation before building the tx.
-                        scriptPubKey = ByteArray(0),
+                        scriptPubKey = scriptPubKey,
                         satoshis = u.satoshis,
                         blockHeight = u.confirmedHeight,
                         isAsset = true,

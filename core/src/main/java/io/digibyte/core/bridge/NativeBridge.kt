@@ -207,6 +207,12 @@ object NativeBridge {
      *  (bad parse, sign mismatch, dust threshold, or unsupported script
      *  type — notably BIP49 P2SH-P2WPKH inputs are NOT yet handled by the
      *  underlying BRTransactionSign). */
+    /** Resolve a DigiByte address (legacy D... or bech32 dgb1q...) into its
+     *  scriptPubKey bytes. Used by the asset-UTXO refresh path to populate
+     *  UtxoEntity.scriptPubKey from listunspent responses that only carry
+     *  the address string. Returns null for invalid addresses. */
+    external fun addressToScriptPubKey(address: String): ByteArray?
+
     /** Build, sign, and serialize a DigiAsset transfer transaction from
      *  pre-selected inputs and pre-constructed outputs (including the
      *  DA OP_RETURN). Asset inputs MUST come first in the inputs list —
