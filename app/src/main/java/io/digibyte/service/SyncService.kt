@@ -171,11 +171,28 @@ class SyncService : Service() {
      */
     private suspend fun runPeerKeepalive() = coroutineScope {
         walletManager.walletState.first { it is WalletState.Unlocked }
+        var tickCount = 0L
         while (isActive) {
             delay(10_000L)
             // Stamp every tick so onStartCommand can detect a frozen-by-Doze
             // coroutine that's still nominally active and respawn it.
             lastKeepaliveTickMs = System.currentTimeMillis()
+            tickCount++
+            // Every 3rd tick (~30s), refresh asset UTXOs against the node's
+            // authoritative listunspent view. SPV bloom filters are known to
+            // miss asset transactions (cracked-filter / merkleblock-drop
+            // conditions documented in project memory), so we can't rely on
+            // onAssetDetected alone — a manual Scan tap shouldn't be required
+            // just to see a new asset land. 30s is a reasonable cadence: DGB
+            // blocks come every ~15s, so this catches new asset receives
+            // within ~2 blocks while not hammering the backend. Skipped when
+            // peers=0 (we're offline; refresh would fail anyway).
+            if (tickCount % 3L == 0L && NativeBridge.getPeerCount() > 0) {
+                launch {
+                    runCatching { assetManager.refreshAssetUtxosFromNetwork() }
+                        .onFailure { android.util.Log.d("SyncService", "asset refresh threw", it) }
+                }
+            }
             try {
                 val peers = NativeBridge.getPeerCount()
                 if (peers == 0) {
@@ -516,6 +533,13 @@ class SyncService : Service() {
                         assetId       = assetId
                     )
                 )
+                // Refresh the UTXO table so the asset shows up in the Assets
+                // tab immediately. onAssetDetected only gives us the txHash +
+                // assetId + quantity — we need the vout, sats, and metadata
+                // for a complete UtxoEntity, and listunspent is the cheapest
+                // authoritative source.
+                runCatching { assetManager.refreshAssetUtxosFromNetwork() }
+                    .onFailure { android.util.Log.d("SyncService", "refresh-after-detect threw", it) }
             }
         }
         override fun onSaveBlocks(data: ByteArray, replace: Int) {
