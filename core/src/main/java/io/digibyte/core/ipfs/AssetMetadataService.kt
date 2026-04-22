@@ -55,9 +55,15 @@ class AssetMetadataService(
      * @return [AssetMetadata] on success, `null` if every resolver failed.
      */
     suspend fun getMetadata(assetId: String, metadataCid: String?): AssetMetadata? {
-        // Always check the local cache first — CIDs are immutable, cache is permanent
+        // Cache-first for real (content-addressed) metadata — CIDs are
+        // immutable, so a cached entry with a real name is always valid.
+        // Bare placeholder rows (name==null) are treated as "not yet
+        // fetched"; returning them here would short-circuit the IPFS pull
+        // and leave the user staring at an anonymous colored-letter icon
+        // forever. Refetch when we have a CID to actually fetch from.
         val cached = assetMetadataDao.getMetadata(assetId)
-        if (cached != null) return cached.toModel()
+        if (cached != null && cached.name != null) return cached.toModel()
+        if (cached != null && metadataCid == null) return cached.toModel()
 
         return withContext(Dispatchers.IO) {
             // Pass 1: IPFS via CID (if we have one)
@@ -80,11 +86,22 @@ class AssetMetadataService(
         }
     }
 
-    private suspend fun storeFromJson(assetId: String, cid: String?, json: JSONObject): AssetMetadata {
-        // Accept both flat `issuerAddress` and nested `issuer.address` shapes.
-        // digiassetX-style metadata nests; older DigiAsset tools used the flat form.
+    private suspend fun storeFromJson(assetId: String, cid: String?, jsonRaw: JSONObject): AssetMetadata {
+        // Canonical DigiAsset metadata wraps everything in {"data": {...}}.
+        // Some older tools produce the same fields at top-level. Unwrap if
+        // present so downstream code only sees the asset-level shape.
+        val json = jsonRaw.optJSONObject("data") ?: jsonRaw
+
+        // Name field — canonical schema uses "assetName", older tools use "name".
+        val name = json.optString("assetName").takeIf { it.isNotEmpty() }
+            ?: json.optString("name").takeIf { it.isNotEmpty() }
+
+        // Issuer — canonical schema has "issuer" as a string (the issuer's
+        // name). Older tools used "issuerAddress" flat or "issuer.address"
+        // nested. Store whichever we find; display code handles it.
         val issuer = json.optString("issuerAddress").takeIf { it.isNotEmpty() }
             ?: json.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() }
+            ?: json.optString("issuer").takeIf { it.isNotEmpty() }
 
         // Image may live under several keys depending on the issuer tool:
         //   "image" — canonical, what our AssetImageResolver expects
@@ -113,7 +130,7 @@ class AssetMetadataService(
 
         val entity = AssetMetadataEntity(
             assetId = assetId,
-            name = json.optString("name").takeIf { it.isNotEmpty() },
+            name = name,
             symbol = json.optString("symbol").takeIf { it.isNotEmpty() }
                 ?: json.optString("ticker").takeIf { it.isNotEmpty() },
             description = json.optString("description").takeIf { it.isNotEmpty() },

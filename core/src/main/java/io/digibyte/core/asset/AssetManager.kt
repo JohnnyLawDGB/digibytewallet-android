@@ -153,32 +153,49 @@ class AssetManager(
                 ))
                 upserted++
 
-                // Prime the metadata cache so the Assets tab renders
-                // name/decimals/issuer immediately. Metadata CID comes
-                // back empty on some assets; in that case we still record
-                // the bare name-less entry so the UI at least shows the
-                // assetId + decimals from the node.
+                // Metadata cache handling — there's a subtle ordering
+                // requirement here: AssetMetadataService.getMetadata returns
+                // the cached entity if one exists (correct for immutable
+                // content-addressed data), which means if we insert a
+                // *bare* placeholder first, the IPFS fetch gets short-
+                // circuited and the user never sees the real name/image.
+                //
+                // So: only insert a bare placeholder when we have NO CID
+                // to fetch (node didn't supply one). If we do have a CID,
+                // hand off to metadataService — it'll fetch + parse + insert
+                // the richer entity via its own code path. We also do NOT
+                // overwrite a rich cache entry that already exists from a
+                // prior successful fetch.
                 val existing = metadataDao.getMetadata(asset.assetId)
-                if (existing == null) {
-                    metadataDao.insert(
-                        io.digibyte.core.db.entity.AssetMetadataEntity(
-                            assetId = asset.assetId,
-                            name = null,
-                            symbol = null,
-                            description = null,
-                            decimals = asset.decimals,
-                            totalSupply = 0L,
-                            issuerAddress = asset.issuerAddress,
-                            metadataCid = asset.metadataCid,
-                            imageUrl = null,
-                            cachedAt = System.currentTimeMillis(),
+                val hasRichCache = existing?.name != null
+                val cid = asset.metadataCid
+                when {
+                    hasRichCache -> Unit  // keep the real metadata
+
+                    cid != null -> {
+                        // Non-blocking fetch; writes richer entity on success.
+                        metadataService.getMetadata(asset.assetId, cid)
+                    }
+
+                    existing == null -> {
+                        // No CID to fetch and no cache entry yet — insert a
+                        // minimal row so the UI at least shows assetId +
+                        // decimals + issuer.
+                        metadataDao.insert(
+                            io.digibyte.core.db.entity.AssetMetadataEntity(
+                                assetId = asset.assetId,
+                                name = null,
+                                symbol = null,
+                                description = null,
+                                decimals = asset.decimals,
+                                totalSupply = 0L,
+                                issuerAddress = asset.issuerAddress,
+                                metadataCid = null,
+                                imageUrl = null,
+                                cachedAt = System.currentTimeMillis(),
+                            )
                         )
-                    )
-                }
-                // If a CID is present and we don't yet have richer metadata,
-                // fire-and-forget an IPFS fetch (non-blocking).
-                asset.metadataCid?.let { cid ->
-                    metadataService.getMetadata(asset.assetId, cid)
+                    }
                 }
             }
         }

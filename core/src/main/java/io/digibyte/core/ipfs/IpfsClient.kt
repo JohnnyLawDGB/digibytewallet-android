@@ -23,11 +23,17 @@ class IpfsClient(
     private val gateways: List<String> = DEFAULT_GATEWAYS
 ) {
     companion object {
-        /** Ordered list of trustless IPFS gateways to try. */
+        /** Ordered list of IPFS gateways to try. Our own digiscope.me proxy
+         *  is tried first — it resolves anything pinned on the local IPFS
+         *  node (including freshly-minted test assets) without depending on
+         *  DHT propagation to public gateways, which can take minutes or
+         *  never happen at all for small pins. Public trustless gateways
+         *  follow as the sovereign fallback. */
         val DEFAULT_GATEWAYS = listOf(
-            "https://trustless-gateway.link",
-            "https://dweb.link",
-            "https://ipfs.io"
+            "https://api.digiscope.me/api/ipfs/{cid}",  // local pin proxy, serves raw bytes
+            "https://trustless-gateway.link/ipfs/{cid}?format=raw",
+            "https://dweb.link/ipfs/{cid}?format=raw",
+            "https://ipfs.io/ipfs/{cid}?format=raw"
         )
 
         /** Maximum allowed response body size (5 MiB). */
@@ -35,6 +41,8 @@ class IpfsClient(
 
         /** Per-request timeout in milliseconds (used by the shared OkHttpClient). */
         const val TIMEOUT_MS = 15_000L
+
+        private const val TAG = "IpfsClient"
     }
 
     /**
@@ -45,11 +53,16 @@ class IpfsClient(
      * Returns `null` if all gateways fail or return unverifiable content.
      */
     suspend fun fetchVerified(cid: String): ByteArray? = withContext(Dispatchers.IO) {
+        android.util.Log.i(TAG, "fetchVerified: cid=$cid")
         for (gateway in gateways) {
             val result = tryGateway(gateway, cid)
-            if (result != null) return@withContext result
+            if (result != null) {
+                android.util.Log.i(TAG, "fetchVerified: OK via $gateway (${result.size}b)")
+                return@withContext result
+            }
         }
-        null  // all gateways failed or returned bad data
+        android.util.Log.w(TAG, "fetchVerified: all gateways failed for $cid")
+        null
     }
 
     // -------------------------------------------------------------------------
@@ -58,29 +71,46 @@ class IpfsClient(
 
     private fun tryGateway(gateway: String, cid: String): ByteArray? {
         return try {
-            val url = "$gateway/ipfs/$cid?format=raw"
+            // Gateway template may contain `{cid}` placeholder. Legacy entries
+            // without one get the traditional `/ipfs/<cid>?format=raw` suffix.
+            val url = if (gateway.contains("{cid}")) {
+                gateway.replace("{cid}", cid)
+            } else {
+                "$gateway/ipfs/$cid?format=raw"
+            }
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.ipld.raw")
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
+                if (!response.isSuccessful) {
+                    android.util.Log.d(TAG, "tryGateway: $gateway → HTTP ${response.code} for $cid")
+                    return null
+                }
 
                 val body = response.body ?: return null
 
-                // Reject oversized content before buffering
                 val contentLength = body.contentLength()
-                if (contentLength > MAX_RESPONSE_SIZE) return null
+                if (contentLength > MAX_RESPONSE_SIZE) {
+                    android.util.Log.w(TAG, "tryGateway: $gateway → oversized ($contentLength b) for $cid")
+                    return null
+                }
 
                 val bytes = body.bytes()
                 if (bytes.size.toLong() > MAX_RESPONSE_SIZE) return null
 
-                // Critical: verify the hash matches the CID before trusting the bytes
-                if (cidVerifier.verify(cid, bytes)) bytes else null
+                if (cidVerifier.verify(cid, bytes)) {
+                    bytes
+                } else {
+                    android.util.Log.w(TAG, "tryGateway: $gateway → hash MISMATCH for $cid (${bytes.size}b)")
+                    null
+                }
             }
-        } catch (_: Exception) {
-            null  // network error — try next gateway
+        } catch (e: Exception) {
+            android.util.Log.d(TAG, "tryGateway: $gateway threw for $cid — ${e.javaClass.simpleName}: ${e.message}")
+            null
         }
     }
+
 }
