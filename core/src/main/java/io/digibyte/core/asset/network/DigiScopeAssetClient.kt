@@ -1,8 +1,10 @@
 package io.digibyte.core.asset.network
 
 import okhttp3.CertificatePinner
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -77,6 +79,60 @@ class DigiScopeAssetClient(
         )
     }
 
+    override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? {
+        if (addresses.isEmpty()) return emptyList()
+        val body = JSONObject().apply {
+            put("addresses", JSONArray(addresses))
+        }.toString()
+        val json = postJson("$baseUrl/assets/unspent", body) as? JSONObject ?: return null
+        if (json.has("error")) return null
+        val utxosArr = json.optJSONArray("utxos") ?: return emptyList()
+        val out = mutableListOf<AssetUtxoResponse>()
+        for (i in 0 until utxosArr.length()) {
+            val u = utxosArr.optJSONObject(i) ?: continue
+            val assetsArr = u.optJSONArray("assets") ?: continue
+            val assets = mutableListOf<AssetUtxoResponse.AssetCarried>()
+            for (j in 0 until assetsArr.length()) {
+                val a = assetsArr.optJSONObject(j) ?: continue
+                assets += AssetUtxoResponse.AssetCarried(
+                    assetId = a.optString("assetId"),
+                    assetIndex = a.optLong("assetIndex", 0L),
+                    count = a.optLong("count", 0L),
+                    decimals = a.optInt("decimals", 0),
+                    issuerAddress = a.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() },
+                    metadataCid = a.optString("cid").takeIf { it.isNotEmpty() },
+                )
+            }
+            if (assets.isEmpty()) continue
+            out += AssetUtxoResponse(
+                address = u.optString("address"),
+                txid = u.optString("txid"),
+                vout = u.optInt("vout", 0),
+                satoshis = u.optLong("digibyte", 0L),
+                confirmedHeight = assets.firstOrNull()?.let { a ->
+                    u.optJSONArray("assets")?.optJSONObject(0)?.optLong("height", 0L) ?: 0L
+                } ?: 0L,
+                assets = assets,
+            )
+        }
+        return out
+    }
+
+    private fun postJson(url: String, bodyJson: String): Any? = try {
+        val req = Request.Builder()
+            .url(url)
+            .post(bodyJson.toRequestBody(JSON_MT))
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val body = resp.body?.string() ?: return null
+            if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+
     private fun getJson(url: String): Any? = try {
         val req = Request.Builder().url(url).get().build()
         client.newCall(req).execute().use { resp ->
@@ -100,5 +156,6 @@ class DigiScopeAssetClient(
 
     companion object {
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
+        private val JSON_MT = "application/json; charset=utf-8".toMediaType()
     }
 }

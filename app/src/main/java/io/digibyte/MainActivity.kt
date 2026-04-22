@@ -50,6 +50,7 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var walletConfigDao: WalletConfigDao
     @Inject lateinit var digiScopeClient: DigiScopeClient
     @Inject lateinit var okHttpClient: OkHttpClient
+    @Inject lateinit var assetManager: io.digibyte.core.asset.AssetManager
 
     /** Pending Digi-ID URI from a deep link — processed after PIN unlock. */
     var pendingDigiIdUri: String? = null
@@ -82,7 +83,7 @@ class MainActivity : FragmentActivity() {
             walletManager.walletState
                 .filterIsInstance<WalletState.Unlocked>()
                 .first()
-            PostUpgradeReconciler.runIfNeeded(applicationContext)
+            PostUpgradeReconciler.runIfNeeded(applicationContext, assetManager)
         }
 
         setContent {

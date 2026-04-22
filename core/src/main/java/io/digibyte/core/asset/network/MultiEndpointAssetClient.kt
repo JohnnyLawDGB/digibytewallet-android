@@ -50,6 +50,9 @@ class MultiEndpointAssetClient(
     override suspend fun getSyncState(): SyncStateResponse? =
         tryEach("getSyncState") { it.getSyncState() }
 
+    override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? =
+        tryEach("getAssetUtxos") { it.getAssetUtxos(addresses) }
+
     private suspend fun <T> tryEach(label: String, block: suspend (AssetNetworkClient) -> T?): T? {
         require(endpoints.isNotEmpty()) { "MultiEndpointAssetClient requires at least one endpoint" }
         val now = System.currentTimeMillis()

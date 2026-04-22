@@ -80,6 +80,14 @@ class DigiAssetsNetClient(
         return out
     }
 
+    override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? {
+        // api.digiassets.net/v3 doesn't currently expose an equivalent of
+        // listunspent; DigiScopeAssetClient is the authoritative source.
+        // Returning null lets MultiEndpointAssetClient's rotation try the
+        // next endpoint rather than counting this as a hard failure.
+        return null
+    }
+
     override suspend fun getSyncState(): SyncStateResponse? {
         // digiassets.net exposes /status with a slightly different shape; if
         // the call or field names shift, we treat this client as unavailable

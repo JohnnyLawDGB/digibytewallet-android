@@ -231,8 +231,15 @@ object AppModule {
         utxoDao: UtxoDao,
         transactionDao: TransactionDao,
         metadataDao: AssetMetadataDao,
-        metadataService: AssetMetadataService
-    ): AssetManager = AssetManager(utxoDao, transactionDao, metadataDao, metadataService)
+        metadataService: AssetMetadataService,
+        assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
+    ): AssetManager = AssetManager(
+        utxoDao = utxoDao,
+        transactionDao = transactionDao,
+        metadataDao = metadataDao,
+        metadataService = metadataService,
+        assetNetworkClient = assetNetworkClient,
+    )
 
     @Provides @Singleton
     fun provideAssetHistoryBackfill(

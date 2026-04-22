@@ -34,6 +34,37 @@ interface AssetNetworkClient {
      *  behind to answer reliably; callers should treat that as "unavailable"
      *  and rotate. */
     suspend fun getSyncState(): SyncStateResponse?
+
+    /** Return the asset-bearing UTXOs currently held by any of [addresses].
+     *  Used to bridge the gap where SPV bloom scans miss the incoming tx —
+     *  reconcile can walk this list, populate the local utxos table with
+     *  is_asset=1 rows, and the Assets tab renders immediately without
+     *  waiting for an SPV re-sync. Returns null on failure. */
+    suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>?
+}
+
+/** One asset-bearing UTXO as reported by digiasset_core's listunspent. */
+data class AssetUtxoResponse(
+    val address: String,
+    val txid: String,
+    val vout: Int,
+    /** DGB value of this output, in satoshis. Typically 700 for asset markers. */
+    val satoshis: Long,
+    val confirmedHeight: Long,
+    /** Assets carried by this output. A single marker output may carry
+     *  multiple asset types in advanced DA cases; most real-world UTXOs
+     *  carry exactly one. */
+    val assets: List<AssetCarried>,
+) {
+    data class AssetCarried(
+        val assetId: String,
+        val assetIndex: Long,
+        /** Asset quantity as an integer in the asset's internal units. */
+        val count: Long,
+        val decimals: Int,
+        val issuerAddress: String?,
+        val metadataCid: String?,
+    )
 }
 
 /** Minimal projection of the `getassetdata` response — richer fields can be

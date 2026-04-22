@@ -47,8 +47,16 @@ object PostUpgradeReconciler {
     fun shouldRun(lastReconciledVersionCode: Int, currentVersionCode: Int): Boolean =
         currentVersionCode > 0 && lastReconciledVersionCode < currentVersionCode
 
-    suspend fun runIfNeeded(context: Context) {
-        runIfNeeded(context) { ctx -> ChainReconciliationService(DgbNodeClient(ctx)) }
+    /**
+     * Production overload. [assetManager] is optional — when provided, the
+     * reconcile also refreshes the local utxos table's asset rows so the
+     * Assets tab doesn't require an app restart after an import.
+     */
+    suspend fun runIfNeeded(
+        context: Context,
+        assetManager: io.digibyte.core.asset.AssetManager? = null,
+    ) {
+        runIfNeeded(context) { ctx -> ChainReconciliationService(DgbNodeClient(ctx), assetManager) }
     }
 
     /**

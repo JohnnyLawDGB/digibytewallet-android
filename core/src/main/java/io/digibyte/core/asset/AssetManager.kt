@@ -31,7 +31,8 @@ class AssetManager(
     private val transactionDao: TransactionDao,
     private val metadataDao: AssetMetadataDao,
     private val metadataService: AssetMetadataService,
-    private val decoder: DigiAssetDecoder = DigiAssetDecoder()
+    private val decoder: DigiAssetDecoder = DigiAssetDecoder(),
+    private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient? = null,
 ) {
 
     /**
@@ -88,6 +89,97 @@ class AssetManager(
     fun parseTransaction(rawTx: ByteArray): AssetData? {
         val opReturn = NativeBridge.getOpReturnData(rawTx) ?: return null
         return decoder.decode(opReturn)?.toAssetData()
+    }
+
+    /**
+     * Resync the local `utxos` table's asset rows against the authoritative
+     * on-chain state. Walks every derived wallet address, queries the
+     * [assetNetworkClient]'s `listunspent`-equivalent endpoint, upserts a
+     * UtxoEntity with is_asset=1 for each returned asset UTXO, and also
+     * primes the AssetMetadata cache with the server-side-resolved
+     * name/decimals/issuer for any asset we don't have metadata for yet.
+     *
+     * This closes a long-standing gap: before this method existed,
+     * processAssetUtxo had zero callers, so the Assets tab showed "No
+     * DigiAssets found" even for wallets that genuinely held assets.
+     * SPV's onAssetDetected callback and ChainReconciliationService's
+     * registerRawTransaction both populate transactions but not utxos;
+     * this pass fills the utxos side by trusting the node's indexed view.
+     *
+     * Safe to call repeatedly. Idempotent — Room insert uses REPLACE on
+     * the (txid, vout) primary key.
+     *
+     * Returns the count of asset UTXOs upserted, or null if no network
+     * client is configured or all endpoints failed.
+     */
+    suspend fun refreshAssetUtxosFromNetwork(): Int? {
+        val client = assetNetworkClient ?: return null
+        val addresses = NativeBridge.dumpAllAddresses()
+            .trim().lines().filter { it.isNotBlank() }
+        if (addresses.isEmpty()) return null
+
+        // Batch to respect the 500-addresses-per-request server cap.
+        val utxos = mutableListOf<io.digibyte.core.asset.network.AssetUtxoResponse>()
+        for (chunk in addresses.chunked(500)) {
+            val resp = client.getAssetUtxos(chunk) ?: return null
+            utxos += resp
+        }
+
+        if (utxos.isEmpty()) return 0
+
+        var upserted = 0
+        for (u in utxos) {
+            for (asset in u.assets) {
+                // One logical UtxoEntity per (txid, vout, assetId). In the
+                // common case there's exactly one asset per UTXO; the inner
+                // loop handles the rare multi-asset marker.
+                utxoDao.insertAll(listOf(
+                    UtxoEntity(
+                        txid = u.txid,
+                        vout = u.vout,
+                        // scriptPubKey is needed for spending but not display.
+                        // Left empty here; send flow resolves from the wallet's
+                        // own address derivation before building the tx.
+                        scriptPubKey = ByteArray(0),
+                        satoshis = u.satoshis,
+                        blockHeight = u.confirmedHeight,
+                        isAsset = true,
+                        assetId = asset.assetId,
+                        assetQuantity = asset.count,
+                    )
+                ))
+                upserted++
+
+                // Prime the metadata cache so the Assets tab renders
+                // name/decimals/issuer immediately. Metadata CID comes
+                // back empty on some assets; in that case we still record
+                // the bare name-less entry so the UI at least shows the
+                // assetId + decimals from the node.
+                val existing = metadataDao.getMetadata(asset.assetId)
+                if (existing == null) {
+                    metadataDao.insert(
+                        io.digibyte.core.db.entity.AssetMetadataEntity(
+                            assetId = asset.assetId,
+                            name = null,
+                            symbol = null,
+                            description = null,
+                            decimals = asset.decimals,
+                            totalSupply = 0L,
+                            issuerAddress = asset.issuerAddress,
+                            metadataCid = asset.metadataCid,
+                            imageUrl = null,
+                            cachedAt = System.currentTimeMillis(),
+                        )
+                    )
+                }
+                // If a CID is present and we don't yet have richer metadata,
+                // fire-and-forget an IPFS fetch (non-blocking).
+                asset.metadataCid?.let { cid ->
+                    metadataService.getMetadata(asset.assetId, cid)
+                }
+            }
+        }
+        return upserted
     }
 
     /**

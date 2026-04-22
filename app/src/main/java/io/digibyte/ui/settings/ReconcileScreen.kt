@@ -19,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.reconcile.ChainReconciliationService
 import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.ui.theme.DigiByteAccent
@@ -26,6 +30,12 @@ import io.digibyte.ui.theme.DigiByteBlue
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ReconcileScreenEntryPoint {
+    fun assetManager(): AssetManager
+}
 
 /**
  * "Scan for missing funds" screen — Path B reconciliation.
@@ -41,7 +51,16 @@ import java.util.Locale
 fun ReconcileScreen(navController: NavController) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val client = remember { DgbNodeClient(context) }
-    val service = remember { ChainReconciliationService(client) }
+    // Pull the app-scoped AssetManager via a Hilt entry point so reconcile
+    // can refresh asset UTXOs after tx import. Without this the Assets tab
+    // stayed empty even after a successful scan.
+    val assetManager = remember {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            ReconcileScreenEntryPoint::class.java,
+        ).assetManager()
+    }
+    val service = remember { ChainReconciliationService(client, assetManager) }
     val scope = rememberCoroutineScope()
 
     val state by service.state.collectAsStateWithLifecycle()

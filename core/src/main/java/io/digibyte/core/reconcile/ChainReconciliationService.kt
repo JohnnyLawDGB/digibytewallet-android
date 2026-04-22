@@ -28,6 +28,13 @@ import kotlinx.coroutines.withContext
  */
 class ChainReconciliationService(
     private val nodeClient: DgbNodeClient,
+    /** Optional — when wired, reconcile also refreshes the local utxos
+     *  table's asset rows via AssetManager.refreshAssetUtxosFromNetwork
+     *  after the tx-import loop finishes. Closes the gap where reconcile
+     *  imports the raw tx but the Assets tab stayed empty because the
+     *  utxos table never got is_asset=1 rows (processAssetUtxo had no
+     *  callers pre-v3.5.27). */
+    private val assetManager: io.digibyte.core.asset.AssetManager? = null,
 ) {
 
     sealed class State {
@@ -56,6 +63,17 @@ class ChainReconciliationService(
                 val failed = State.Failed("No addresses available (wallet not loaded?)")
                 _state.value = failed
                 return@withContext failed
+            }
+
+            // Refresh the asset-utxo layer FIRST, independently of the main
+            // reconcile. This is the listunspent-backed fast path that fills
+            // the `utxos` table with is_asset=1 rows so the Assets tab renders
+            // even if the main ElectrumX-backed reconcile endpoint is slow or
+            // unreachable. Non-fatal if it fails.
+            if (assetManager != null) {
+                _state.value = State.Scanning("Refreshing asset holdings…", progress = 0.05f)
+                runCatching { assetManager.refreshAssetUtxosFromNetwork() }
+                    .onFailure { /* non-fatal */ }
             }
 
             _state.value = State.Scanning("Querying node for UTXOs on ${addrs.size} addresses…")
