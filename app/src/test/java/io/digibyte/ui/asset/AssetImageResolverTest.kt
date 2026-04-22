@@ -112,7 +112,14 @@ class AssetImageResolverTest {
     @Test
     fun `garbage string returns null`() {
         assertNull(AssetImageResolver.resolve("notacid"))
-        assertNull(AssetImageResolver.resolve("data:image/png;base64,iVBOR"))
         assertNull(AssetImageResolver.resolve("file:///tmp/foo.png"))
+    }
+
+    @Test
+    fun `data URI passes through as string`() {
+        // Issuance tools embed tiny thumbnails inline as base64 data URIs so
+        // they don't need to pin separately to IPFS. Coil decodes natively.
+        val inline = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+        assertEquals(inline, AssetImageResolver.resolve(inline))
     }
 }

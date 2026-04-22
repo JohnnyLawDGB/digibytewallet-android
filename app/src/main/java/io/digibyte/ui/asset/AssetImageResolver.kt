@@ -32,6 +32,10 @@ object AssetImageResolver {
         val trimmed = raw.trim()
         return when {
             trimmed.startsWith("https://") || trimmed.startsWith("http://") -> trimmed
+            // data: URIs carry the image inline (base64 or raw), used by
+            // issuance tools that skip IPFS for small thumbnails. Coil
+            // handles data:image/... natively.
+            trimmed.startsWith("data:") -> trimmed
             trimmed.startsWith("ipfs://") -> Uri.parse(trimmed)
             trimmed.startsWith("/ipfs/") -> Uri.parse("ipfs://${trimmed.removePrefix("/ipfs/")}")
             isCid(trimmed) -> Uri.parse("ipfs://$trimmed")

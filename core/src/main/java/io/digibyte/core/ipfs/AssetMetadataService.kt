@@ -81,16 +81,47 @@ class AssetMetadataService(
     }
 
     private suspend fun storeFromJson(assetId: String, cid: String?, json: JSONObject): AssetMetadata {
+        // Accept both flat `issuerAddress` and nested `issuer.address` shapes.
+        // digiassetX-style metadata nests; older DigiAsset tools used the flat form.
+        val issuer = json.optString("issuerAddress").takeIf { it.isNotEmpty() }
+            ?: json.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() }
+
+        // Image may live under several keys depending on the issuer tool:
+        //   "image" — canonical, what our AssetImageResolver expects
+        //   "imageUrl" / "image_url" — common web-tool variants
+        //   "icon" — Neblio-style
+        //   "urls"[…]{"name":"icon",…} — DA3 urls array (take first icon entry)
+        val imageUrl = json.optString("image").takeIf { it.isNotEmpty() }
+            ?: json.optString("imageUrl").takeIf { it.isNotEmpty() }
+            ?: json.optString("image_url").takeIf { it.isNotEmpty() }
+            ?: json.optString("icon").takeIf { it.isNotEmpty() }
+            ?: run {
+                val urls = json.optJSONArray("urls") ?: return@run null
+                var out: String? = null
+                for (i in 0 until urls.length()) {
+                    val u = urls.optJSONObject(i) ?: continue
+                    val name = u.optString("name").lowercase()
+                    if (name == "icon" || name == "image" || name.endsWith(".png") ||
+                        name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".gif") ||
+                        name.endsWith(".svg") || name.endsWith(".webp")) {
+                        out = u.optString("url").takeIf { it.isNotEmpty() }
+                        if (out != null) break
+                    }
+                }
+                out
+            }
+
         val entity = AssetMetadataEntity(
             assetId = assetId,
             name = json.optString("name").takeIf { it.isNotEmpty() },
-            symbol = json.optString("symbol").takeIf { it.isNotEmpty() },
+            symbol = json.optString("symbol").takeIf { it.isNotEmpty() }
+                ?: json.optString("ticker").takeIf { it.isNotEmpty() },
             description = json.optString("description").takeIf { it.isNotEmpty() },
             decimals = json.optInt("decimals", 0),
             totalSupply = json.optLong("totalSupply", 0L),
-            issuerAddress = json.optString("issuerAddress").takeIf { it.isNotEmpty() },
+            issuerAddress = issuer,
             metadataCid = cid,
-            imageUrl = json.optString("image").takeIf { it.isNotEmpty() },
+            imageUrl = imageUrl,
             cachedAt = System.currentTimeMillis(),
         )
         assetMetadataDao.insert(entity)
