@@ -53,6 +53,9 @@ class MultiEndpointAssetClient(
     override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? =
         tryEach("getAssetUtxos") { it.getAssetUtxos(addresses) }
 
+    override suspend fun getRawTransaction(txHashHex: String): ByteArray? =
+        tryEach("getRawTransaction") { it.getRawTransaction(txHashHex) }
+
     private suspend fun <T> tryEach(label: String, block: suspend (AssetNetworkClient) -> T?): T? {
         require(endpoints.isNotEmpty()) { "MultiEndpointAssetClient requires at least one endpoint" }
         val now = System.currentTimeMillis()

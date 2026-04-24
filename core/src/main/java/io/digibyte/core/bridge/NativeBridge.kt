@@ -124,6 +124,12 @@ object NativeBridge {
     /** Get number of transactions known to the C core wallet. */
     external fun getTransactionCount(): Int
 
+    /** Returns every wallet-known transaction hash (display-order hex).
+     *  Used by AssetManager.sweepKnownTransactionsForAssets to backfill
+     *  asset rows for transactions we've already ingested. Unlike
+     *  [getTransactionDetails] there's no 50-recent cap. */
+    external fun getAllTransactionHashes(): Array<String>?
+
     /** Get transaction details as pipe-separated string.
      *  Format per line: "txHash|amount|fee|blockHeight|timestamp" */
     external fun getTransactionDetails(): String
@@ -134,6 +140,39 @@ object NativeBridge {
 
     /** Returns the raw script bytes of the first OP_RETURN output, or null if none. */
     external fun getOpReturnData(rawTx: ByteArray): ByteArray?
+
+    /** Walks the outputs of a wallet-known transaction and returns each as
+     *  "vout|satoshis|scriptHex". Returns null if the wallet hasn't seen
+     *  this txid or [txHashHex] is malformed. Used by native asset
+     *  detection on SPV receive to avoid round-tripping raw bytes. */
+    external fun getTransactionOutputsForHash(txHashHex: String): Array<String>?
+
+    /** Walks the inputs of a wallet-known transaction and returns each as
+     *  "prevTxidHex|prevVout" (display-order hex). Used by asset-id
+     *  derivation for issuance txs (we need the first input's outpoint)
+     *  and by the future M3 parent-walk to recurse toward issuance. */
+    external fun getTransactionInputsForHash(txHashHex: String): Array<String>?
+
+    /** Returns the full serialized bytes of a wallet-known transaction, or
+     *  null if the txid isn't in BRWallet. Fast-path for the M3 parent-walk —
+     *  when a parent tx happens to be our own send, avoids a network
+     *  round-trip. */
+    external fun getSerializedTransactionForHash(txHashHex: String): ByteArray?
+
+    /** Derive a DigiAsset v3 asset ID from its issuance transaction's first
+     *  input outpoint. Locked path only (common case — matches La/Lh/Ld
+     *  prefixes); unlocked path requires the spent output's scriptPubKey
+     *  and returns null until M3 parent-walk is wired.
+     *
+     *  @param aggregation  0 = aggregatable, 1 = hybrid, 2 = dispersed
+     *  @param divisibility 0..7 (decimal places from issuance flags) */
+    external fun deriveIssuanceAssetId(
+        firstInputTxidHex: String,
+        firstInputVout: Int,
+        locked: Boolean,
+        aggregation: Int,
+        divisibility: Int,
+    ): String?
 
     // === BIP84 Derivation ===
     /** Returns the BIP84 derivation path string, e.g. "m/84'/20'/0'" */

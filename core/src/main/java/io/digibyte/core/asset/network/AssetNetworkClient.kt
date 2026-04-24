@@ -41,6 +41,19 @@ interface AssetNetworkClient {
      *  is_asset=1 rows, and the Assets tab renders immediately without
      *  waiting for an SPV re-sync. Returns null on failure. */
     suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>?
+
+    /** Fetch the raw serialized bytes of a transaction by its display-order
+     *  txid hex. Used by M3 parent-walk resolution — given a DigiAsset
+     *  transfer's input txid, we need the parent transaction's OP_RETURN
+     *  and inputs to continue walking toward the issuance.
+     *
+     *  Note this is equivalent to a full node's `getrawtransaction <txid>`
+     *  call; a thin server endpoint can simply forward the JSON-RPC. Full
+     *  SPV `getdata` is a future implementation of the same primitive.
+     *
+     *  Returns raw tx bytes on success, null if the endpoint doesn't know
+     *  this txid or the request failed. */
+    suspend fun getRawTransaction(txHashHex: String): ByteArray?
 }
 
 /** One asset-bearing UTXO as reported by digiasset_core's listunspent. */

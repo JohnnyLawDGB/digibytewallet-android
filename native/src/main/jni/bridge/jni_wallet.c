@@ -550,6 +550,50 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionCount(JNIEnv *env, jobje
     return (jint)BRWalletTransactions(g_wallet, NULL, 0);
 }
 
+/* ---------- getAllTransactionHashes ---------- */
+
+/*
+ * public static native String[] getAllTransactionHashes();
+ *
+ * Returns every wallet-known transaction's display-order hex txid.
+ * Unlike getTransactionDetails() this does not truncate to 50 and
+ * does not compute balances, making it cheap enough to use as input
+ * to a full native-asset-detection sweep after sync completion.
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_wallet) return NULL;
+
+    size_t txCount = BRWalletTransactions(g_wallet, NULL, 0);
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    if (!stringClass) return NULL;
+    jobjectArray result = (*env)->NewObjectArray(env, (jsize)txCount, stringClass, NULL);
+    if (!result) return NULL;
+    if (txCount == 0) return result;
+
+    BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
+    if (!txs) return result;
+    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+
+    for (size_t i = 0; i < txCount; i++) {
+        BRTransaction *tx = txs[i];
+        if (!tx) continue;
+        char hashHex[65];
+        for (int j = 0; j < 32; j++) {
+            sprintf(&hashHex[j * 2], "%02x", tx->txHash.u8[31 - j]);
+        }
+        hashHex[64] = '\0';
+        jstring s = (*env)->NewStringUTF(env, hashHex);
+        if (s) {
+            (*env)->SetObjectArrayElement(env, result, (jsize)i, s);
+            (*env)->DeleteLocalRef(env, s);
+        }
+    }
+    free(txs);
+    return result;
+}
+
 /* ---------- getTransactionDetails ----------
  * Returns a pipe-separated string for each transaction:
  * "txHash|amount|fee|blockHeight|timestamp|sent|received\n..."

@@ -14,4 +14,16 @@ interface AssetMetadataDao {
 
     @Query("SELECT * FROM asset_metadata")
     fun getAllMetadata(): Flow<List<AssetMetadataEntity>>
+
+    /** Merge on-chain issuance facts (totalSupply, decimals) into a row
+     *  without disturbing IPFS-sourced fields (name, description, imageUrl).
+     *  Creates the row if missing via the separate INSERT-OR-IGNORE path;
+     *  existing IPFS cache hits keep their human-facing data intact. */
+    @Query("UPDATE asset_metadata SET totalSupply = :totalSupply, decimals = :decimals WHERE assetId = :assetId")
+    suspend fun updateChainFacts(assetId: String, totalSupply: Long, decimals: Int)
+
+    /** Insert a chain-facts-only row for assets without IPFS metadata yet.
+     *  IGNORE conflict so we don't overwrite a richer existing entry. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertChainFacts(metadata: AssetMetadataEntity)
 }

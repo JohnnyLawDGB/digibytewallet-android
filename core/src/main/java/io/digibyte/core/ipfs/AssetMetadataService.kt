@@ -41,6 +41,23 @@ class AssetMetadataService(
     private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient? = null,
 ) {
     /**
+     * In-memory negative cache — CIDs for which every resolver failed
+     * recently. Asset detection sweeps run every 30s; without this,
+     * each sweep kicks off an IPFS fetch for every unresolved asset,
+     * which spirals into a retry storm against every gateway when
+     * they're all down. An entry lives [NEGATIVE_CACHE_TTL_MS] before
+     * we try again. Cleared on process restart (intentional — gives
+     * IPFS a chance to recover without the user having to do anything).
+     */
+    private val recentlyFailed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private companion object {
+        /** 10 minutes. Long enough to stop hammering broken gateways;
+         *  short enough that a proxy recovery is picked up naturally
+         *  on the next sweep after the interval passes. */
+        const val NEGATIVE_CACHE_TTL_MS = 10L * 60_000L
+    }
+    /**
      * Return metadata for [assetId], fetching from IPFS via [metadataCid] if not cached.
      *
      * Resolution order:
@@ -65,6 +82,15 @@ class AssetMetadataService(
         if (cached != null && cached.name != null) return cached.toModel()
         if (cached != null && metadataCid == null) return cached.toModel()
 
+        // Negative-cache short-circuit: if we tried this CID recently and every
+        // gateway failed, don't hammer them again for NEGATIVE_CACHE_TTL_MS.
+        val now = System.currentTimeMillis()
+        val negativeKey = metadataCid ?: assetId
+        val lastFail = recentlyFailed[negativeKey]
+        if (lastFail != null && (now - lastFail) < NEGATIVE_CACHE_TTL_MS) {
+            return null
+        }
+
         return withContext(Dispatchers.IO) {
             // Pass 1: IPFS via CID (if we have one)
             if (metadataCid != null) {
@@ -72,17 +98,27 @@ class AssetMetadataService(
                 if (bytes != null) {
                     val json = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
                     if (json != null) {
+                        recentlyFailed.remove(negativeKey)
                         return@withContext storeFromJson(assetId, metadataCid, json)
                     }
                 }
             }
 
             // Pass 2: digiasset_core network fallback
-            val netClient = assetNetworkClient ?: return@withContext null
-            val remote = runCatching { netClient.getAssetData(assetId) }.getOrNull() ?: return@withContext null
-            val ipfsMap = remote.ipfs ?: return@withContext null
-            val json = JSONObject(ipfsMap)
-            storeFromJson(assetId, metadataCid ?: remote.cid, json)
+            val netClient = assetNetworkClient
+            if (netClient != null) {
+                val remote = runCatching { netClient.getAssetData(assetId) }.getOrNull()
+                val ipfsMap = remote?.ipfs
+                if (remote != null && ipfsMap != null) {
+                    recentlyFailed.remove(negativeKey)
+                    val json = JSONObject(ipfsMap)
+                    return@withContext storeFromJson(assetId, metadataCid ?: remote.cid, json)
+                }
+            }
+
+            // Everything failed — mark for suppression until TTL expires.
+            recentlyFailed[negativeKey] = System.currentTimeMillis()
+            null
         }
     }
 

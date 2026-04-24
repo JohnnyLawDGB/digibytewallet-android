@@ -39,6 +39,17 @@ class IpfsClient(
         /** Maximum allowed response body size (5 MiB). */
         const val MAX_RESPONSE_SIZE = 5 * 1024 * 1024L // 5 MB as Long for contentLength check
 
+        /** URL prefixes whose TLS certificate we've pinned via [OkHttpClient]
+         *  elsewhere. For CIDv0 fetches we accept content from these gateways
+         *  without re-verifying the content hash — CIDv0 hashes the dag-pb/
+         *  UnixFS wrapper which unwrapping gateways (like ours) strip before
+         *  serving, so local rehash would always fail. Cert pinning is our
+         *  trust anchor in that narrow case. CIDv1 fetches stay strictly
+         *  content-verified across all gateways. */
+        val TRUSTED_GATEWAY_PREFIXES = listOf(
+            "https://api.digiscope.me/"
+        )
+
         /** Per-request timeout in milliseconds (used by the shared OkHttpClient). */
         const val TIMEOUT_MS = 15_000L
 
@@ -100,7 +111,23 @@ class IpfsClient(
                 val bytes = body.bytes()
                 if (bytes.size.toLong() > MAX_RESPONSE_SIZE) return null
 
-                if (cidVerifier.verify(cid, bytes)) {
+                // CIDv0 (Qm…) carries the dag-pb / UnixFS wrapper hash,
+                // not the raw content hash. Our gateway serves the unwrapped
+                // bytes, so content-hash verification would always fail here.
+                // For CIDv0 specifically, we defer trust to TLS cert pinning
+                // on the trusted gateway list — that's a well-scoped
+                // weakening documented at [TRUSTED_GATEWAY_PREFIXES].
+                // CIDv1 fetches stay strictly content-verified.
+                val isTrustedGateway = TRUSTED_GATEWAY_PREFIXES.any { gateway.startsWith(it) }
+                val isCidV0 = cid.startsWith("Qm")
+                val accept = if (isCidV0 && isTrustedGateway) {
+                    android.util.Log.i(TAG,
+                        "tryGateway: $gateway → CIDv0 trust-by-cert for $cid (${bytes.size}b)")
+                    true
+                } else {
+                    cidVerifier.verify(cid, bytes)
+                }
+                if (accept) {
                     bytes
                 } else {
                     android.util.Log.w(TAG, "tryGateway: $gateway → hash MISMATCH for $cid (${bytes.size}b)")

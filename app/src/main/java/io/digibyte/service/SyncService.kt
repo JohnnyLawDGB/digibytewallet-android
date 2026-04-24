@@ -192,6 +192,14 @@ class SyncService : Service() {
                     runCatching { assetManager.refreshAssetUtxosFromNetwork() }
                         .onFailure { android.util.Log.d("SyncService", "asset refresh threw", it) }
                 }
+                // Sovereign companion to the backend refresh above: re-scan
+                // every wallet-known tx via the Kotlin DigiAssetDecoder. Even
+                // if the backend is down (or we're running pure-SPV), asset
+                // UTXOs surface as long as SPV delivered the raw tx.
+                launch {
+                    runCatching { assetManager.sweepKnownTransactionsForAssets() }
+                        .onFailure { android.util.Log.d("SyncService", "native sweep threw", it) }
+                }
             }
             try {
                 val peers = NativeBridge.getPeerCount()
@@ -421,6 +429,18 @@ class SyncService : Service() {
 
         override fun onTransactionReceived(txHash: String, amount: Long, isReceive: Boolean) {
             serviceScope.launch {
+                // Native asset detection: run the Kotlin DigiAssetDecoder against
+                // the OP_RETURN in this tx (looked up via BRWallet). If it's a
+                // DA payload, UTXO rows for non-OP_RETURN outputs are inserted
+                // with is_asset=true and a placeholder asset-id; metadata fetch
+                // via IPFS is kicked off on the same path. Happens regardless of
+                // backend health — our sovereign fallback.
+                val detected = runCatching {
+                    assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L)
+                }.onFailure {
+                    android.util.Log.w("SyncService", "native asset detect failed for $txHash", it)
+                }.getOrNull()
+
                 val entity = TransactionEntity(
                     txid        = txHash,
                     blockHeight = 0, // updated when block confirmed
@@ -430,7 +450,8 @@ class SyncService : Service() {
                     toAddress   = "",
                     fromAddress = "",
                     confirmations = 0,
-                    isAssetTx   = false
+                    isAssetTx   = detected != null,
+                    assetId     = detected?.assetId,
                 )
                 transactionDao.insert(entity)
             }
@@ -490,6 +511,14 @@ class SyncService : Service() {
                 // Update the notification to show connected status instead.
                 val peers = NativeBridge.getPeerCount()
                 updateNotification(1f, peers)
+
+                // Sovereign asset-detection sweep: walk every known tx through
+                // the Kotlin DigiAssetDecoder now that the wallet is fully
+                // loaded. Any asset UTXOs we own become visible in the
+                // Assets tab without touching the backend. Safe to run
+                // repeatedly — UtxoDao.insertAll is REPLACE-on-PK.
+                runCatching { assetManager.sweepKnownTransactionsForAssets() }
+                    .onFailure { android.util.Log.w("SyncService", "native asset sweep failed", it) }
             }
         }
 

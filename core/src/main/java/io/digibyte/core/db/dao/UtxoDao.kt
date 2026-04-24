@@ -29,6 +29,18 @@ interface UtxoDao {
     @Query("UPDATE utxos SET spent = 1 WHERE txid = :txid AND vout = :vout")
     suspend fun markSpent(txid: String, vout: Int)
 
+    /** Rewrite the placeholder asset_id of every UTXO row matching [oldAssetId]
+     *  once M3 parent-walk resolves it to a real DigiAsset id. Safe no-op if
+     *  no rows match (e.g. the placeholder was already replaced). */
+    @Query("UPDATE utxos SET asset_id = :newAssetId WHERE asset_id = :oldAssetId")
+    suspend fun replaceAssetId(oldAssetId: String, newAssetId: String)
+
+    /** Fetch the current asset_id for a (txid, vout) if any. Used by the
+     *  sweep path to avoid clobbering a previously-resolved real asset-id
+     *  with a fresh "unresolved:…" placeholder. */
+    @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND vout = :vout LIMIT 1")
+    suspend fun getAssetIdAt(txid: String, vout: Int): String?
+
     @Query("DELETE FROM utxos")
     suspend fun deleteAll()
 

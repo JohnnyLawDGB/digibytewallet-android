@@ -88,6 +88,13 @@ class DigiAssetsNetClient(
         return null
     }
 
+    override suspend fun getRawTransaction(txHashHex: String): ByteArray? {
+        // api.digiassets.net doesn't expose a raw-tx endpoint either; same
+        // fall-through semantics — return null so MultiEndpointAssetClient
+        // tries the next endpoint.
+        return null
+    }
+
     override suspend fun getSyncState(): SyncStateResponse? {
         // digiassets.net exposes /status with a slightly different shape; if
         // the call or field names shift, we treat this client as unavailable

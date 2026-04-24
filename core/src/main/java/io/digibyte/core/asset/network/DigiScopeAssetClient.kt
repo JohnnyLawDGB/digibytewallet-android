@@ -118,6 +118,24 @@ class DigiScopeAssetClient(
         return out
     }
 
+    override suspend fun getRawTransaction(txHashHex: String): ByteArray? {
+        // Backend exposes `GET /tx/raw/:txid` which proxies `getrawtransaction`
+        // on the underlying digibyted RPC. Returns either hex in a JSON field
+        // or a 404 if the txid isn't known. We accept both wrappers defensively
+        // because the server's been reshuffled a couple of times.
+        val json = getJson("$baseUrl/tx/raw/$txHashHex") as? JSONObject ?: return null
+        if (json.has("error")) return null
+        val hex = json.optString("hex").takeIf { it.isNotEmpty() }
+            ?: json.optString("rawtx").takeIf { it.isNotEmpty() }
+            ?: return null
+        return runCatching { hex.hexToByteArray() }.getOrNull()
+    }
+
+    private fun String.hexToByteArray(): ByteArray {
+        require(length % 2 == 0) { "odd hex length" }
+        return ByteArray(length / 2) { substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    }
+
     private fun postJson(url: String, bodyJson: String): Any? = try {
         val req = Request.Builder()
             .url(url)

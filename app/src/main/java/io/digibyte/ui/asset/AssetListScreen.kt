@@ -171,11 +171,23 @@ private fun AssetCard(
     asset: OwnedAsset,
     onClick: () -> Unit
 ) {
+    // "unresolved:<txid>" is the M1.1 placeholder for assets we've detected
+    // natively but can't yet derive a real asset-id for (transfers, pre-M3).
+    // Render a friendly short label instead of the raw placeholder.
+    val isUnresolved = asset.assetId.startsWith("unresolved:")
     val displayName = asset.metadata?.name
-        ?: asset.assetId.take(8) + "…"
+        ?: if (isUnresolved) {
+            "DigiAsset " + asset.assetId.substringAfter("unresolved:").take(6)
+        } else {
+            asset.assetId.take(8) + "…"
+        }
 
     val symbol = asset.metadata?.symbol
     val firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A'
+
+    // Subtitle replaces symbol when we have no metadata. Gives the user a
+    // concrete "why can't I see the name" signal instead of silent empty.
+    val subtitle = symbol ?: if (asset.metadata == null) "metadata offline" else null
 
     // Pick a deterministic accent color based on the asset ID hash
     val colorIndex = (asset.assetId.hashCode() and 0x7FFFFFFF) % assetIconColors.size
@@ -217,12 +229,13 @@ private fun AssetCard(
                 overflow = TextOverflow.Ellipsis
             )
 
-            // ── Symbol ───────────────────────────────────────────────
-            if (!symbol.isNullOrBlank()) {
+            // ── Subtitle (symbol when known, offline hint otherwise) ─────
+            if (!subtitle.isNullOrBlank()) {
                 Text(
-                    text = symbol,
+                    text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = DigiByteAccent,
+                    color = if (subtitle == symbol) DigiByteAccent
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
             }
