@@ -88,9 +88,7 @@ fun UpdateDialog(
 
                 // Release notes link
                 TextButton(
-                    onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.htmlUrl)))
-                    },
+                    onClick = { io.digibyte.ui.util.openExternalUrl(context, update.htmlUrl) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("View Full Release Notes", color = DigiByteAccent)

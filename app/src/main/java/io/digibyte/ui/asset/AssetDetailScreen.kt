@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.OwnedAsset
 import io.digibyte.ui.theme.DigiByteAccent
+import io.digibyte.ui.util.openExternalUrl
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
@@ -264,10 +265,7 @@ fun AssetDetailScreen(
             ) {
                 // Marketplace button
                 OutlinedButton(
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(MARKETPLACE_URL))
-                        context.startActivity(intent)
-                    },
+                    onClick = { openExternalUrl(context, MARKETPLACE_URL) },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(

@@ -108,14 +108,9 @@ fun AssetListScreen(
                     val context = androidx.compose.ui.platform.LocalContext.current
                     OutlinedButton(
                         onClick = {
-                            runCatching {
-                                val intent = android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse("https://digiscope.me/assets/create"),
-                                )
-                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            }
+                            io.digibyte.ui.util.openExternalUrl(
+                                context, "https://digiscope.me/assets/create",
+                            )
                         },
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = DigiByteAccent,

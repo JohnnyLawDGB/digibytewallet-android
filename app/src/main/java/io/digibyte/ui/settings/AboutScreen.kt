@@ -41,10 +41,7 @@ fun AboutScreen(navController: NavController) {
         NativeBridge.getDerivationPath()
     } catch (_: Exception) { "m/84'/20'/0'" }
 
-    fun openUrl(url: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        context.startActivity(intent)
-    }
+    fun openUrl(url: String) = io.digibyte.ui.util.openExternalUrl(context, url)
 
     Scaffold(
         topBar = {

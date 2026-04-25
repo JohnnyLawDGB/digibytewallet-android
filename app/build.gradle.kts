@@ -105,6 +105,12 @@ dependencies {
     // Core KTX
     implementation("androidx.core:core-ktx:1.15.0")
 
+    // Chrome Custom Tabs — for opening external URLs (marketplace, block
+    // explorers, release downloads) in a Chrome-overlay tab with a clear
+    // close affordance that returns to the wallet, instead of dropping the
+    // user into a separate browser task with no way back.
+    implementation("androidx.browser:browser:1.8.0")
+
     // Material 3 for XML theme (Theme.Material3.DayNight.NoActionBar)
     implementation("com.google.android.material:material:1.12.0")
 

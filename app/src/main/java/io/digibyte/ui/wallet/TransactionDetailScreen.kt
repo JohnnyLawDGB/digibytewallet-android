@@ -212,8 +212,9 @@ private fun TransactionDetailContent(
         // View on block explorer
         Button(
             onClick = {
-                val url = "https://chainz.cryptoid.info/dgb/tx.dws?${tx.txid}"
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                io.digibyte.ui.util.openExternalUrl(
+                    context, "https://chainz.cryptoid.info/dgb/tx.dws?${tx.txid}",
+                )
             },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
