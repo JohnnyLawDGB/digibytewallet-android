@@ -692,14 +692,17 @@ class AssetManager(
         val dgbUtxos = utxoDao.getSpendableDigiByteUtxosNow()
         if (assetUtxos.isEmpty()) return TxResult.Error("No UTXOs for asset $assetId")
 
-        // 2. Selection. Single recipient for now = one 700-sat marker.
+        // 2. Budget for two markers (recipient + possible asset-change). If
+        //    selection turns out exact-match, the extra 700 sats falls into
+        //    DGB change naturally — slight pessimism, simpler code.
         val markerSats = io.digibyte.core.asset.send.DA_MARKER_SATS
+        val twoMarkerSats = markerSats * 2
         val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
             assetUtxos = assetUtxos,
             dgbUtxos = dgbUtxos,
             assetNeeded = quantity,
             feeSats = feeSats,
-            markerOutputSats = markerSats,
+            markerOutputSats = twoMarkerSats,
         )
         val ok = when (selection) {
             is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
@@ -709,22 +712,35 @@ class AssetManager(
             is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
         }
 
-        // 3. Reject asset change for now — MVP is full-UTXO transfers only.
-        //    When we support partial transfers, emit a sender-owned marker
-        //    at the last non-OP_RETURN output per the last-output rule.
-        if (ok.assetChangeQty > 0) {
-            return TxResult.Error("Partial transfers not supported yet — pick exact-match asset UTXOs")
-        }
+        val hasAssetChange = ok.assetChangeQty > 0L
 
-        // 4. Encode the DA OP_RETURN transfer payload. Recipient is output
-        //    index 0, which is where the encoder references it.
+        // 3. Output layout. Recipient marker at vout 0, OP_RETURN at vout 1,
+        //    optional asset-change marker at vout 2, optional DGB change at
+        //    the next free vout. Transfer instructions reference these vouts
+        //    directly so we have to commit to the layout before encoding.
+        val recipientVout = 0
+        val assetChangeVout = if (hasAssetChange) 2 else -1
+
+        // 4. Build transfer instructions: walk asset inputs in order,
+        //    distributing each input's units into the recipient first then
+        //    the change marker. `skip=true` on the LAST instruction pulling
+        //    from a non-final input advances the decoder to the next input.
+        val instructions = buildTransferInstructions(
+            assetInputs = ok.assetInputs,
+            quantityToRecipient = quantity,
+            assetChangeQty = ok.assetChangeQty,
+            recipientVout = recipientVout,
+            assetChangeVout = assetChangeVout,
+        ) ?: return TxResult.Error("Could not build transfer instructions")
+
         val opReturnScript = try {
-            DigiAssetEncoder.encodeSimpleTransfer(version = 3, recipientOutputIndex = 0, quantity = quantity)
+            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
         } catch (e: Exception) {
             return TxResult.Error("Encode failed: ${e.message}")
         }
 
-        // 5. Build the output list [marker, OP_RETURN, optional change].
+        // 5. Build the output list — order locked to match the vout
+        //    references baked into the transfer instructions above.
         val allInputs = ok.assetInputs + ok.dgbInputs
         val outAddresses = mutableListOf<String>()
         val outAmounts = mutableListOf<Long>()
@@ -737,6 +753,17 @@ class AssetManager(
         outAddresses += ""   // empty address = use raw script below (OP_RETURN)
         outAmounts += 0L
         outScripts += opReturnScript.toHex()
+
+        if (hasAssetChange) {
+            // Use change index 1 to keep this distinct from the DGB change
+            // address — small privacy win + makes the wallet's own asset
+            // marker easier to identify in tx history.
+            val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
+                ?: return TxResult.Error("Could not derive asset-change address")
+            outAddresses += assetChangeAddr
+            outAmounts += markerSats
+            outScripts += ""
+        }
 
         val dgbChange = ok.dgbChangeSats
         if (dgbChange > DGB_CHANGE_DUST_THRESHOLD) {
@@ -763,6 +790,70 @@ class AssetManager(
             ?: return TxResult.Error("Broadcast failed — check peer connection")
 
         return TxResult.Success(txid)
+    }
+
+    /**
+     * Build the DA TRANSFER instruction list for a single-recipient send
+     * with optional asset change.
+     *
+     * Walks the chosen asset inputs in order. Each input contributes its
+     * full quantity, distributed first toward the recipient (until [quantity
+     * ToRecipient] is exhausted), then toward the asset-change marker. The
+     * last instruction pulling from a non-final input is marked `skip=true`
+     * so the decoder advances to the next input.
+     *
+     * Returns null only if the input set's combined quantity doesn't match
+     * `quantityToRecipient + assetChangeQty` — programmer error, never user
+     * error (the coin selector enforces sums).
+     */
+    private fun buildTransferInstructions(
+        assetInputs: List<UtxoEntity>,
+        quantityToRecipient: Long,
+        assetChangeQty: Long,
+        recipientVout: Int,
+        assetChangeVout: Int,
+    ): List<DigiAssetEncoder.TransferInstruction>? {
+        val totalIn = assetInputs.sumOf { it.assetQuantity }
+        if (totalIn != quantityToRecipient + assetChangeQty) return null
+
+        val out = mutableListOf<DigiAssetEncoder.TransferInstruction>()
+        var qtyRemaining = quantityToRecipient
+        var changeRemaining = assetChangeQty
+
+        for ((idx, input) in assetInputs.withIndex()) {
+            val isLastInput = idx == assetInputs.lastIndex
+            var inputRemaining = input.assetQuantity
+
+            // Allocate toward recipient first.
+            if (inputRemaining > 0 && qtyRemaining > 0) {
+                val take = minOf(inputRemaining, qtyRemaining)
+                out += DigiAssetEncoder.TransferInstruction(
+                    skip = false, range = false, percent = false,
+                    outputIndex = recipientVout, amount = take,
+                )
+                qtyRemaining -= take
+                inputRemaining -= take
+            }
+
+            // Then toward asset change.
+            if (inputRemaining > 0 && changeRemaining > 0 && assetChangeVout >= 0) {
+                val take = minOf(inputRemaining, changeRemaining)
+                out += DigiAssetEncoder.TransferInstruction(
+                    skip = false, range = false, percent = false,
+                    outputIndex = assetChangeVout, amount = take,
+                )
+                changeRemaining -= take
+                inputRemaining -= take
+            }
+
+            // Mark the last instruction pulling from this input with skip=true
+            // (except on the final input — skip is a no-op there).
+            if (!isLastInput && out.isNotEmpty()) {
+                val last = out.removeAt(out.lastIndex)
+                out += last.copy(skip = true)
+            }
+        }
+        return out
     }
 
     private fun ByteArray.toHex(): String =
