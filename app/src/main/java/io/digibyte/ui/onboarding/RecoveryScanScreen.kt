@@ -92,14 +92,24 @@ fun RecoveryScanScreen(
                         viewModel.runRecoveryScan(passphrase = null)
                     }
 
-                is RecoveryScanService.State.Done -> DoneBody(
-                    state = s,
-                    onContinue = {
+                is RecoveryScanService.State.Done -> {
+                    val onContinue = {
                         navController.navigate("recovery_date") {
                             popUpTo("recovery_scan") { inclusive = true }
                         }
                     }
-                )
+                    // Auto-advance when there's nothing to show. The Done body
+                    // is informative when funds were found OR when the backend
+                    // was unreachable (so the user knows SPV is the fallback);
+                    // for a clean empty result it's pure friction.
+                    val shouldAutoAdvance =
+                        s.totalBalanceSat == 0L && !s.allBackendUnreachable
+                    if (shouldAutoAdvance) {
+                        LaunchedEffect(Unit) { onContinue() }
+                    } else {
+                        DoneBody(state = s, onContinue = onContinue)
+                    }
+                }
             }
         }
     }
@@ -183,18 +193,29 @@ private fun DoneBody(state: RecoveryScanService.State.Done, onContinue: () -> Un
         ) {
             Column {
                 Text(
-                    if (state.totalBalanceSat > 0) "Funds found"
-                    else "No funds detected yet",
-                    color = if (state.totalBalanceSat > 0) Color(0xFF6BE8A3) else Color.White,
+                    when {
+                        state.totalBalanceSat > 0 -> "Funds found"
+                        state.allBackendUnreachable -> "Couldn't reach reconcile node"
+                        else -> "No funds detected yet"
+                    },
+                    color = when {
+                        state.totalBalanceSat > 0 -> Color(0xFF6BE8A3)
+                        state.allBackendUnreachable -> Color(0xFFFFCC66)
+                        else -> Color.White
+                    },
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (state.totalBalanceSat > 0)
-                        "${fmt.format(totalDgb)} DGB across ${state.results.count { it.totalSat > 0 }} path(s)"
-                    else
-                        "SPV sync will keep looking after you continue — this scan only queries currently-unspent outputs.",
+                    when {
+                        state.totalBalanceSat > 0 ->
+                            "${fmt.format(totalDgb)} DGB across ${state.results.count { it.totalSat > 0 }} path(s)"
+                        state.allBackendUnreachable ->
+                            "SPV will discover any funds on this seed during sync — the fast-path scan was unavailable. You can continue safely."
+                        else ->
+                            "SPV sync will keep looking after you continue — this scan only queries currently-unspent outputs."
+                    },
                     color = Color(0xFFB0BEC5),
                     fontSize = 13.sp,
                 )
@@ -246,11 +267,15 @@ private fun ProfileCard(
             .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.Top) {
+            // CheckCircle when funds exist; FiberManualRecord (filled dot)
+            // when empty so the row reads as informational rather than as
+            // a radio button waiting for selection.
             Icon(
-                if (hasFunds) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                if (hasFunds) Icons.Default.CheckCircle else Icons.Default.FiberManualRecord,
                 contentDescription = null,
                 tint = if (hasFunds) DigiByteAccent else Color(0xFF546E7A),
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(if (hasFunds) 20.dp else 10.dp)
+                    .padding(top = if (hasFunds) 0.dp else 5.dp),
             )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {

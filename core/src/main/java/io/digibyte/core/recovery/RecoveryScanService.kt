@@ -5,8 +5,6 @@ import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.core.reconcile.ReconcileResult
 import io.digibyte.core.reconcile.UtxoEntry
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +36,15 @@ class RecoveryScanService(
             val nonNativeWithFunds: List<ProfileResult> =
                 results.filter { !it.profile.isNative && it.totalSat > 0 }
             val nativeResult: ProfileResult? = results.firstOrNull { it.profile.isNative }
+
+            /** True iff every profile that we tried to reach the backend for
+             *  came back as `reachableBackend=false`. UI uses this to show
+             *  "Couldn't reach reconcile endpoint" rather than misleading
+             *  "No funds detected". */
+            val allBackendUnreachable: Boolean =
+                results.isNotEmpty() &&
+                results.filter { it.addresses.isNotEmpty() }
+                    .all { !it.reachableBackend }
         }
         data class Failed(val reason: String) : State()
     }
@@ -47,6 +54,10 @@ class RecoveryScanService(
         val addresses: List<String>,
         val utxos: List<UtxoEntry>,
         val rawTxs: Map<String, io.digibyte.core.reconcile.RawTxEntry>,
+        /** False when the reconcile call returned null (network/timeout/etc.).
+         *  Distinguishes "we asked and got nothing" from "we never got an
+         *  answer" — critical for honest UX during backend outages. */
+        val reachableBackend: Boolean = true,
     ) {
         val totalSat: Long = utxos.sumOf { it.amountSatoshi }
     }
@@ -98,21 +109,36 @@ class RecoveryScanService(
                 0.4f
             )
 
-            val results = coroutineScope {
-                profileAddrs.mapIndexed { i, (profile, addrs) ->
-                    async {
-                        if (addrs.isEmpty()) {
-                            ProfileResult(profile, addrs, emptyList(), emptyMap())
-                        } else {
-                            val r: ReconcileResult? = nodeClient.reconcileAddresses(addrs)
-                            if (r == null) {
-                                ProfileResult(profile, addrs, emptyList(), emptyMap())
-                            } else {
-                                ProfileResult(profile, addrs, r.utxos, r.rawTxs)
-                            }
-                        }
+            // Serialize per-profile reconciles. Backend dev's note 2026-04-25:
+            // the digiscope reconcile endpoint serializes requests internally
+            // and rejects concurrent ones with HTTP 429. Firing 6 profiles in
+            // parallel from one wallet was both slower (queue + retries) and
+            // poisoned the backend's circuit breaker. One at a time is faster
+            // in practice and friendlier to the shared infra.
+            val results = mutableListOf<ProfileResult>()
+            for ((i, pair) in profileAddrs.withIndex()) {
+                val (profile, addrs) = pair
+                _state.value = State.Scanning(
+                    "Reconciling profile ${i + 1}/${profileAddrs.size}: ${profile.label}",
+                    0.4f + (0.5f * i / profileAddrs.size.coerceAtLeast(1)),
+                )
+                val result = if (addrs.isEmpty()) {
+                    // No addresses derived for this profile (rare: BIP49 etc.
+                    // when JNI returns empty). Treat as "checked, empty"
+                    // rather than backend-failure.
+                    ProfileResult(profile, addrs, emptyList(), emptyMap(), reachableBackend = true)
+                } else {
+                    val r: ReconcileResult? = nodeClient.reconcileAddresses(addrs)
+                    if (r == null) {
+                        ProfileResult(
+                            profile, addrs, emptyList(), emptyMap(),
+                            reachableBackend = false,
+                        )
+                    } else {
+                        ProfileResult(profile, addrs, r.utxos, r.rawTxs, reachableBackend = true)
                     }
-                }.map { it.await() }
+                }
+                results.add(result)
             }
 
             val done = State.Done(results)

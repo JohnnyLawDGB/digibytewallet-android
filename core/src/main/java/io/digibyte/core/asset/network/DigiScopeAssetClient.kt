@@ -25,8 +25,11 @@ class DigiScopeAssetClient(
     override val endpointLabel: String = "digiscope.me"
 
     private val client: OkHttpClient = baseClient.newBuilder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        // Belt-and-suspenders: digiasset_core's listunspent + getrawtransaction
+        // RPCs can run 20-40s under load even with the watchdog in place.
+        // Per backend dev's note 2026-04-25.
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .certificatePinner(
             CertificatePinner.Builder()
                 .add("api.digiscope.me", "sha256/VDo86Ks/QFE3kVoOXkmNVWTovKKNMFQsBd4KGvoP8OU=")
