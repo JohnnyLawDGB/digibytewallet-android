@@ -183,10 +183,12 @@ class TorManager(private val context: Context) {
                 result == null -> {
                     _state.value = TorState.Failed("Bootstrap timed out (${BOOTSTRAP_TIMEOUT_MS / 1000}s)")
                     Log.w(TAG, "Tor bootstrap timed out")
+                    teardownAfterFailure()
                 }
                 result is TorState.Disabled -> {
                     _state.value = TorState.Failed("Tor daemon stopped before reaching bootstrap 100%")
                     Log.w(TAG, "Tor daemon went down during startup")
+                    teardownAfterFailure()
                 }
             }
 
@@ -195,8 +197,36 @@ class TorManager(private val context: Context) {
             val reason = e.message ?: "Unknown error"
             _state.value = TorState.Failed(reason)
             Log.e(TAG, "Failed to start Tor: $reason", e)
+            teardownAfterFailure()
             _state.value
         }
+    }
+
+    /**
+     * On any startup failure path (timeout, daemon went down before
+     * bootstrap, exception during startDaemonAsync), make sure the
+     * kmp-tor runtime is fully torn down. Without this, the runtime
+     * instance retains its `NetworkObserver` registration with
+     * ConnectivityManager — and Android pins our app's UID to a
+     * routing table that no longer has a default route, producing
+     * `ENETUNREACH` on every subsequent connect (observed 2026-04-25
+     * on API 35 emulator after SELinux denials killed Tor's exec
+     * helper). Stop the daemon and drop the runtime reference so a
+     * later [start] rebuilds it with a fresh network binding.
+     */
+    private fun teardownAfterFailure() {
+        val rt = _runtime ?: return
+        try {
+            rt.enqueue(
+                Action.StopDaemon,
+                OnFailure { Log.w(TAG, "post-failure stop failed", it) },
+                OnSuccess.noOp(),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "teardownAfterFailure: enqueue threw", e)
+        }
+        synchronized(runtimeLock) { _runtime = null }
+        _bootstrapProgress.value = 0
     }
 
     /**

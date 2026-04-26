@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -220,10 +221,20 @@ private fun WordInputField(
     }
 
     // Brings the focused field into view when the soft keyboard appears.
-    // imePadding alone reserves space at the bottom but doesn't scroll the
-    // focused field into the visible window; the requester does that.
+    // Doing it on focus alone fires BEFORE the keyboard finishes animating
+    // up, so the requested position is wrong by the time IME is fully
+    // visible — we re-trigger every time the IME bottom inset changes
+    // (initial show, autocomplete state changes, configuration changes).
     val bringIntoView = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+
+    LaunchedEffect(isFocused, imeBottomPx) {
+        if (isFocused && imeBottomPx > 0) {
+            bringIntoView.bringIntoView()
+        }
+    }
 
     Column(modifier = modifier) {
         OutlinedTextField(
@@ -238,6 +249,8 @@ private fun WordInputField(
                 .onFocusChanged { state ->
                     if (state.isFocused) {
                         onFocused()
+                        // Initial fire — covers the case where the keyboard
+                        // is already up (focus moves between fields).
                         scope.launch { bringIntoView.bringIntoView() }
                     }
                 },
