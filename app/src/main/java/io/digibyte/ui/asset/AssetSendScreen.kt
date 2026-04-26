@@ -73,6 +73,7 @@ fun AssetSendScreen(
             recipientAddress = recipientAddress,
             quantityInput = quantityInput,
             feeTierLabel = feeTierLabel(selectedFeeTier),
+            feeSats = estimatedFeeSats(selectedFeeTier),
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
                 viewModel.sendAssetTransfer(
@@ -257,6 +258,28 @@ fun AssetSendScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 },
+                trailingIcon = {
+                    // Max — convenience for sending the entire balance.
+                    // Renders the user's quantity in the asset's display
+                    // decimals so the input round-trips through the same
+                    // scale-to-internal logic the ViewModel uses on submit.
+                    TextButton(
+                        onClick = {
+                            quantityInput = formatBalanceForInput(
+                                ownedAsset.quantity, decimals,
+                            )
+                            quantityError = null
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            "MAX",
+                            color = DigiByteAccent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                        )
+                    }
+                },
                 suffix = {
                     Text(
                         text = ownedAsset.metadata?.symbol ?: "tokens",
@@ -311,7 +334,18 @@ fun AssetSendScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── DGB cost preview ─────────────────────────────────────────
+            // Updates as the user types quantity / changes fee tier so the
+            // DGB outflow is visible before the confirm dialog ever opens.
+            CostPreviewCard(
+                quantityInput = quantityInput,
+                ownedAsset = ownedAsset,
+                feeSats = estimatedFeeSats(selectedFeeTier),
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
 
             // ── Review button ─────────────────────────────────────────────
             Button(
@@ -362,6 +396,7 @@ private fun AssetSendConfirmDialog(
     recipientAddress: String,
     quantityInput: String,
     feeTierLabel: String,
+    feeSats: Long,
     sending: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
@@ -399,6 +434,13 @@ private fun AssetSendConfirmDialog(
                 // Full address — never truncated per security requirement
                 AssetConfirmRow(label = "To", value = recipientAddress)
                 AssetConfirmRow(label = "DGB Fee Tier", value = feeTierLabel)
+
+                Spacer(modifier = Modifier.height(12.dp))
+                CostPreviewCard(
+                    quantityInput = quantityInput,
+                    ownedAsset = asset,
+                    feeSats = feeSats,
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider()
@@ -584,3 +626,141 @@ private fun estimatedFeeSats(tier: Int): Long {
     val estSize = 500L
     return (estSize * satPerKb / 1000L).coerceAtLeast(1_000L)
 }
+
+private const val DA_MARKER_SATS_UI: Long = 700L
+
+/** Render an internal-units quantity back to a decimal string suitable
+ *  for the OutlinedTextField. Keeps round-trip parity with the
+ *  ViewModel's `scaleToInternalUnits` so MAX → submit is exact. */
+private fun formatBalanceForInput(quantity: Long, decimals: Int): String {
+    if (decimals <= 0) return quantity.toString()
+    val scaled = java.math.BigDecimal(quantity).movePointLeft(decimals).stripTrailingZeros()
+    // BigDecimal.toString may produce "1E+1" for trailing zeros; toPlainString avoids that.
+    return scaled.toPlainString()
+}
+
+/**
+ * Card showing the DGB outflow breakdown for the in-progress send.
+ *
+ * Mirrors the math the AssetCoinSelector + sendAsset path uses on submit:
+ *   - 1 marker (700 sats) for the recipient
+ *   - 1 marker (700 sats) for asset change, only if the user is sending
+ *     less than their full balance for this asset
+ *   - The selected fee tier's estimated network fee
+ *
+ * Doesn't account for DGB-fee-input contribution (the 700 sats already in
+ * the asset UTXO partly funds the markers); that's a wash from the user's
+ * perspective and complicates the display, so we surface gross outflow.
+ */
+@Composable
+private fun CostPreviewCard(
+    quantityInput: String,
+    ownedAsset: io.digibyte.core.model.OwnedAsset,
+    feeSats: Long,
+) {
+    val decimals = ownedAsset.metadata?.decimals ?: 0
+    val typedInternalQty = parseQuantityToInternal(quantityInput, decimals)
+
+    // Asset change emitted iff user is sending less than their full balance
+    // (and the input parsed as a valid positive number).
+    val needsAssetChange = typedInternalQty != null &&
+        typedInternalQty in 1 until ownedAsset.quantity
+    val markerCount = if (needsAssetChange) 2 else 1
+    val markerSats = DA_MARKER_SATS_UI * markerCount
+    val totalSats = markerSats + feeSats
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Text(
+                text = "DGB cost preview",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            CostRow("Recipient marker", "${formatSats(DA_MARKER_SATS_UI)} sats")
+            if (needsAssetChange) {
+                CostRow("Asset-change marker", "${formatSats(DA_MARKER_SATS_UI)} sats")
+            }
+            CostRow("Network fee (est.)", "≈ ${formatSats(feeSats)} sats")
+            Spacer(modifier = Modifier.height(6.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(6.dp))
+            CostRow(
+                label = "Total DGB",
+                value = "≈ ${formatSats(totalSats)} sats (${formatDgb(totalSats)} DGB)",
+                emphasize = true,
+            )
+            // Partial-transfer hint — shows the user the change UTXO they'll
+            // hold after the send so the new partial path doesn't surprise.
+            if (needsAssetChange && typedInternalQty != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                val keptInternal = ownedAsset.quantity - typedInternalQty
+                val symbol = ownedAsset.metadata?.symbol ?: "units"
+                Text(
+                    text = "${formatAssetQuantity(keptInternal, decimals)} $symbol stays in your wallet",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteAccent,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CostRow(label: String, value: String, emphasize: Boolean = false) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (emphasize) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (emphasize) FontWeight.SemiBold else FontWeight.Normal,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (emphasize) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (emphasize) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+/** Parse a user's decimal string to internal asset units. Mirrors
+ *  AssetViewModel.scaleToInternalUnits but lives in the Composable layer
+ *  so the cost preview can react before the user hits Review. Returns
+ *  null on any parse error, including more decimals than the asset
+ *  supports. */
+private fun parseQuantityToInternal(input: String, decimals: Int): Long? {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return null
+    val decimal = trimmed.toBigDecimalOrNull() ?: return null
+    if (decimal.signum() < 0) return null
+    if (decimal.scale() > decimals) return null
+    val scaled = decimal.movePointRight(decimals)
+        .setScale(0, java.math.RoundingMode.UNNECESSARY)
+    return try {
+        scaled.longValueExact()
+    } catch (_: ArithmeticException) {
+        null
+    }
+}
+
+private fun formatSats(sats: Long): String = "%,d".format(sats)
+private fun formatDgb(sats: Long): String =
+    java.text.DecimalFormat("0.########").format(sats / 100_000_000.0)
