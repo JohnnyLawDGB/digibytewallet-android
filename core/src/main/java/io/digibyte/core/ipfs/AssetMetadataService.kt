@@ -51,11 +51,54 @@ class AssetMetadataService(
      */
     private val recentlyFailed = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-    private companion object {
+    internal companion object {
         /** 10 minutes. Long enough to stop hammering broken gateways;
          *  short enough that a proxy recovery is picked up naturally
          *  on the next sweep after the interval passes. */
         const val NEGATIVE_CACHE_TTL_MS = 10L * 60_000L
+
+        /** Display-text caps. Generous enough for any legit asset's
+         *  name / symbol / description; tight enough that a 10MB
+         *  attacker-controlled string can't bloat the local DB. */
+        const val MAX_SHORT_TEXT_LEN = 200
+        const val MAX_LONG_TEXT_LEN = 2000
+        const val MAX_IMAGE_URL_LEN = 2048
+
+        /**
+         * Strip control chars + RTL/BiDi overrides + cap length.
+         *
+         * Why:
+         *  - U+202E LEFT-TO-RIGHT OVERRIDE (and friends U+202A..U+202E,
+         *    U+2066..U+2069) is the classic homoglyph attack vector — they
+         *    flip text direction so "MyEvil-\u202Egnp.token" renders as
+         *    "MyEvil-token.png" in the UI. Strip them.
+         *  - Control chars (C0 + DEL + C1) have no place in a display
+         *    name and confuse logging / clipboard / TTY logs.
+         *  - Length cap prevents DB bloat from intentional megabyte
+         *    names — issuer-controlled IPFS metadata is fully attacker-
+         *    controlled in the worst case.
+         *
+         * Internal so the security test suite can verify the predicate
+         * directly without standing up Room + IPFS infrastructure.
+         */
+        internal fun sanitize(input: String?, maxLen: Int, allowNewlines: Boolean): String? {
+            if (input.isNullOrBlank()) return null
+            val cleaned = input.filter { ch -> isDisplaySafe(ch) || (allowNewlines && ch == '\n') }
+            if (cleaned.isBlank()) return null
+            return cleaned.take(maxLen)
+        }
+
+        internal fun isDisplaySafe(ch: Char): Boolean {
+            val code = ch.code
+            // C0 control range
+            if (code < 0x20) return false
+            // DEL + C1 control range
+            if (code in 0x7F..0x9F) return false
+            // BiDi overrides + isolates that flip text direction
+            if (code in 0x202A..0x202E) return false  // LRE/RLE/PDF/LRO/RLO
+            if (code in 0x2066..0x2069) return false  // LRI/RLI/FSI/PDI
+            return true
+        }
     }
     /**
      * Return metadata for [assetId], fetching from IPFS via [metadataCid] if not cached.
@@ -129,15 +172,19 @@ class AssetMetadataService(
         val json = jsonRaw.optJSONObject("data") ?: jsonRaw
 
         // Name field — canonical schema uses "assetName", older tools use "name".
-        val name = json.optString("assetName").takeIf { it.isNotEmpty() }
-            ?: json.optString("name").takeIf { it.isNotEmpty() }
+        val name = sanitizeShortText(
+            json.optString("assetName").takeIf { it.isNotEmpty() }
+                ?: json.optString("name").takeIf { it.isNotEmpty() }
+        )
 
         // Issuer — canonical schema has "issuer" as a string (the issuer's
         // name). Older tools used "issuerAddress" flat or "issuer.address"
         // nested. Store whichever we find; display code handles it.
-        val issuer = json.optString("issuerAddress").takeIf { it.isNotEmpty() }
-            ?: json.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() }
-            ?: json.optString("issuer").takeIf { it.isNotEmpty() }
+        val issuer = sanitizeShortText(
+            json.optString("issuerAddress").takeIf { it.isNotEmpty() }
+                ?: json.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() }
+                ?: json.optString("issuer").takeIf { it.isNotEmpty() }
+        )
 
         // Image may live under several keys depending on the issuer tool:
         //   "image" — canonical, what our AssetImageResolver expects
@@ -167,19 +214,34 @@ class AssetMetadataService(
         val entity = AssetMetadataEntity(
             assetId = assetId,
             name = name,
-            symbol = json.optString("symbol").takeIf { it.isNotEmpty() }
-                ?: json.optString("ticker").takeIf { it.isNotEmpty() },
-            description = json.optString("description").takeIf { it.isNotEmpty() },
-            decimals = json.optInt("decimals", 0),
-            totalSupply = json.optLong("totalSupply", 0L),
+            symbol = sanitizeShortText(
+                json.optString("symbol").takeIf { it.isNotEmpty() }
+                    ?: json.optString("ticker").takeIf { it.isNotEmpty() }
+            ),
+            description = sanitizeLongText(
+                json.optString("description").takeIf { it.isNotEmpty() }
+            ),
+            // Protocol caps divisibility at 0..7. Anything else is either
+            // a buggy issuer or an attack — clamp to 0 rather than letting
+            // negative or huge values flow into pow(10, decimals) downstream
+            // (CostPreviewCard does this and would produce Infinity).
+            decimals = json.optInt("decimals", 0).coerceIn(0, 7),
+            // Negative totalSupply is meaningless and would break UI math.
+            totalSupply = json.optLong("totalSupply", 0L).coerceAtLeast(0L),
             issuerAddress = issuer,
             metadataCid = cid,
-            imageUrl = imageUrl,
+            // imageUrl is bounds-checked at render time by AssetImageResolver
+            // (refuses non-http(s)/ipfs schemes) but cap length here too so
+            // a 10MB string doesn't end up in the row.
+            imageUrl = imageUrl?.takeIf { it.length <= MAX_IMAGE_URL_LEN },
             cachedAt = System.currentTimeMillis(),
         )
         assetMetadataDao.insert(entity)
         return entity.toModel()
     }
+
+    private fun sanitizeShortText(input: String?): String? = sanitize(input, MAX_SHORT_TEXT_LEN, allowNewlines = false)
+    private fun sanitizeLongText(input: String?): String? = sanitize(input, MAX_LONG_TEXT_LEN, allowNewlines = true)
 
     // -------------------------------------------------------------------------
     // Mapping
