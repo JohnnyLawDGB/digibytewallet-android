@@ -160,10 +160,12 @@ digibytewallet-android/
 
 ## Security
 
+- **Bug bounty (up to 100,000 DGB):** [BUG-BOUNTY.md](BUG-BOUNTY.md)
+- **Responsible disclosure:** [SECURITY.md](SECURITY.md)
 - **Threat model:** [THREAT_MODEL.md](THREAT_MODEL.md)
 - **Crypto inventory:** [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md)
 - **Reproducible builds:** [VERIFICATION.md](VERIFICATION.md)
-- **Responsible disclosure:** [SECURITY.md](SECURITY.md)
+- **Audit summary:** [security/AUDIT-SUMMARY.md](security/AUDIT-SUMMARY.md)
 
 ### Key Security Properties
 - Seed encrypted at rest with Android Keystore (TEE/Strongbox)

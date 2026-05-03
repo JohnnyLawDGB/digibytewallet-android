@@ -1,7 +1,7 @@
 # DigiByte Wallet — Bug Bounty Program
 
 **Effective:** 2026-05-03
-**Maximum reward:** USD $100,000
+**Maximum reward:** 100,000 DGB
 **Scope version:** v3.5.31 and later
 
 This program rewards security researchers who report verifiable vulnerabilities
@@ -30,7 +30,7 @@ v3.5.30 but is fixed in v3.5.31, it's eligible only if the bug existed
 The bounty pays for **exploitable** security vulnerabilities. Examples of
 issues that have qualified, ranked by severity:
 
-#### Critical — funds and seed compromise — up to $100,000
+#### Critical — funds and seed compromise — up to 100,000 DGB
 
 - Extraction of the BIP39 seed or any derived private key without explicit
   user authentication
@@ -43,7 +43,7 @@ issues that have qualified, ranked by severity:
 - Memory disclosure of `g_seed` or any derived signing key from a
   non-rooted device
 
-#### High — funds at rest, asset misattribution — up to $50,000
+#### High — funds at rest, asset misattribution — up to 50,000 DGB
 
 - Coin-selector or signing-path bug that lets a network adversary cause a
   user's send to go to an attacker-controlled address
@@ -53,7 +53,7 @@ issues that have qualified, ranked by severity:
   asset A as asset B in a way that materially misleads the user
 - PIN bypass without seed extraction (unauthorized in-app actions)
 
-#### Medium — auth bypass, privacy leak — up to $15,000
+#### Medium — auth bypass, privacy leak — up to 15,000 DGB
 
 - Biometric prompt bypassable on standard Android configurations
 - Clear-text leak of wallet addresses, transaction history, or balance to
@@ -65,7 +65,7 @@ issues that have qualified, ranked by severity:
 - Persistent denial of sync (peer-driven SPV crash that requires app
   reinstall to recover)
 
-#### Low — DoS, info disclosure — up to $3,000
+#### Low — DoS, info disclosure — up to 3,000 DGB
 
 - App crashes triggerable by a malicious peer or asset issuer that don't
   require user interaction beyond normal use
@@ -90,10 +90,13 @@ determined by:
 - **Quality of report** — clear PoC + exact reproduction steps + suggested fix is worth more than a vague write-up
 
 A novel critical-tier finding with a working PoC against the latest release on
-a stock Pixel 7 running Android 15: $100,000.
+a stock Pixel 7 running Android 15: 100,000 DGB.
 
 A theoretical critical-tier finding without a PoC: scored as Medium until a PoC
 lands.
+
+Payment is in DGB to an address you provide. We do not pay in fiat or other
+cryptocurrencies — this is the DigiByte Wallet bounty, paid in DigiByte.
 
 ---
 
@@ -187,7 +190,7 @@ Reports without these elements are returned for missing information:
   fix ships in a release. We will name you in the release notes unless you
   request anonymity.
 - **Payment** — within 30 days of public disclosure (or earlier if the fix
-  ships before disclosure). Paid in DGB or USDT, your choice.
+  ships before disclosure). Paid in DGB to an address you provide.
 
 ### Eligibility
 
@@ -240,4 +243,4 @@ will be listed here.
 ## Change Log
 
 - **2026-05-03 — Program launched.** Initial scope: v3.5.31 and later.
-  Maximum reward $100,000.
+  Maximum reward 100,000 DGB.
