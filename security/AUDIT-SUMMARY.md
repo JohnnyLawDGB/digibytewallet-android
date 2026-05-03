@@ -162,10 +162,102 @@ The confirmation screen displays the raw callback URL but doesn't highlight that
 security/
 ├── AUDIT-SUMMARY.md                    ← This file
 ├── reports/
-│   └── mobsf-report.json               ← MobSF static analysis (full)
+│   ├── mobsf-report.json               ← MobSF v3.0.1 (initial)
+│   └── mobsf-report-v3.5.30.json       ← MobSF v3.5.30 (pre-bounty)
 └── tests/ (in core/src/test/java/io/digibyte/core/security/)
     ├── SeedIsolationTest.kt
     ├── ManifestSecurityTest.kt
     ├── NetworkLeakTest.kt
     └── NativeMemorySecurityTest.kt
 ```
+
+---
+
+## v3.5.30 MobSF Re-scan — 2026-05-02 (pre-bug-bounty)
+
+**APK:** `digibyte-wallet-v3.5.30.apk` (53 MB, hash 7d3c1b5f23aa…)
+**MobSF App Security Score:** 67/100
+
+### Triage
+
+| Severity | Count | Status |
+|----------|-------|--------|
+| HIGH | 1 | Known-tradeoff (signing strategy) |
+| WARNING | 11 | 1 fixed, 10 false-positive or third-party |
+| INFO | 2 | Expected (logging, clipboard) |
+| SECURE | 5 | Positive findings |
+
+### HIGH
+
+**Application signed with debug certificate.** This is the documented signing
+strategy: CI signs with a release key but the lineage starts from a debug
+certificate (Scheme v3 lineage in `release.yml`). MobSF's heuristic flags any
+debug-cert ancestor as HIGH; the signature itself is release-grade. Not a fix
+candidate without breaking signature continuity for existing installs.
+
+### WARNING — fixed
+
+**Insecure RNG in `SeedVerifyScreen.buildQuestions()`** — `java.util.Random`
+seeded the BIP39-quiz decoy selection + answer shuffle. An on-device attacker
+who knew the screen-render millisecond could partially reproduce the shuffle.
+The user reveals those positions by tapping correct answers anyway, so impact
+is bounded, but `SecureRandom` is a free upgrade. **Fixed in v3.5.31.**
+
+### WARNING — false positive or third-party (no action)
+
+- **AndroidX work/profileinstaller exported components** (3 findings) —
+  `androidx.work.SystemJobService`, `DiagnosticsReceiver`,
+  `ProfileInstallReceiver` are exported with system-protected permissions
+  (`BIND_JOB_SERVICE`, `DUMP`). Required by AndroidX itself; permission
+  protection is signature-level. Cannot be unexposed without breaking the
+  libraries.
+- **`networkSecurityConfig` trusts system CAs** — by design. Cert pinning
+  is targeted to specific endpoints (`api.digiscope.me`); broad TLS
+  validation against system CAs is the correct fallback for everything else.
+- **minSdk=26 known-vulnerable Android version** — accepted tradeoff for
+  Galaxy Note 8 / API 26 device support. Documented in `CLAUDE.md`.
+- **SQLite raw SQL** — Room generates raw SQL; user input goes through
+  parameter binding. No injection surface.
+- **Hardcoded sensitive info — flagged files** — Coil cache, Room
+  entities, derivation profiles, AppModule. All structural code, no
+  actual secrets. MobSF's heuristic flags hex strings > 16 chars or any
+  URL constant.
+- **Hardcoded secrets list** — entirely public mathematical constants
+  (secp256k1/P-256/P-384 curve generators, group orders) embedded in
+  Tor / ZXing / OkHttp dependencies, plus our intentional cert pin SHA
+  (`sha256/y7xVm0TVJNah…`) which is public by design.
+- **Temp file creation** — Tor work directory, IPFS cache. Required.
+- **IP address disclosure** — bloom-seeder's hardcoded peer IPs. Public
+  DGB node IPs by definition.
+
+### INFO
+
+- **Logging present** — top hits are `com.journeyapps.barcodescanner.*`
+  (3rd-party QR library). Our own logging avoids seed/private-key
+  material; addresses, txids, and asset IDs in logs are public chain data.
+- **Clipboard usage** — receive-address copy + txid copy. Standard
+  wallet UX; user-initiated only.
+
+### SECURE (positive findings)
+
+- Clear-text traffic disabled globally
+- Tap-jacking protection on confirm dialogs (`filterTouchesWhenObscured`)
+- Cert pinning to `api.digiscope.me`
+- Root detection capabilities present
+- No third-party trackers or analytics
+
+### Action items closed by this scan
+
+- v3.5.30 inherits the 4 CRITICAL remediations from v3.0.1 (above)
+- Pre-bounty surface tightening: scheme-whitelist on external URLs,
+  metadata sanitization (BiDi/control-char strip), 51-case security
+  test suite — all landed in v3.5.30
+- Insecure RNG fix landing in v3.5.31
+
+### Outstanding (future work, not bug-bounty blockers)
+
+- Drozer scan for IPC/intent attack surface — would catch any unintended
+  exposures from Custom Tabs / deep-link wiring
+- JaCoCo coverage report on the security test paths
+- Native (C core) fuzzing via AFL++ on `BRTransactionParse`,
+  `BRWalletRegisterTransaction`, OP_RETURN parsing in `BRDigiAsset.c`
