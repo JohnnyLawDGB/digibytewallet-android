@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.util.Log
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Silently runs [ChainReconciliationService.reconcile] once per version bump
@@ -30,11 +33,41 @@ object PostUpgradeReconciler {
     const val PREFS = "dgb_reconcile"
     const val KEY_LAST_VERSION = "last_version_code_reconciled"
 
+    /** Persisted flag: true iff the most recent attempted reconcile failed
+     *  AND the version-gate still says we should run. Cleared on Done.
+     *  Survives process death so the UI can surface the banner across
+     *  app restarts. */
+    const val KEY_LAST_FAILED = "last_attempt_failed"
+
     /** Give SPV a few seconds to connect peers + settle headers before we
      *  hand the node the wallet's full address set. */
     internal const val STARTUP_DELAY_MS = 10_000L
 
     @Volatile private var inFlight = false
+
+    /** Hot StateFlow for the failed-reconcile banner. WalletViewModel
+     *  collects this and renders a yellow banner + Retry button when true.
+     *  Initialised from the persisted pref on first read so a cold
+     *  process restart still shows the warning. */
+    private val _lastAttemptFailed = MutableStateFlow(false)
+    val lastAttemptFailed: StateFlow<Boolean> = _lastAttemptFailed.asStateFlow()
+
+    /** Hydrate the StateFlow from persisted state. Call once on app
+     *  startup (before the wallet UI subscribes) so the banner reflects
+     *  a failure from a prior process. */
+    fun hydrateFailedFlag(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        _lastAttemptFailed.value = prefs.getBoolean(KEY_LAST_FAILED, false)
+    }
+
+    /** Manually clear the failed flag — invoked after a successful manual
+     *  reconcile run from Settings → Recovery → Scan, or after the user
+     *  taps "Dismiss" on the banner. */
+    fun clearFailedFlag(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_LAST_FAILED, false).apply()
+        _lastAttemptFailed.value = false
+    }
 
     /**
      * Pure version-gate decision. Exposed for testing and any caller that
@@ -91,14 +124,21 @@ object PostUpgradeReconciler {
                             "addresses=${result.scannedAddresses}"
                     )
                     persistVersion(prefs, current)
+                    setFailedFlag(prefs, false)
                 }
                 is ChainReconciliationService.State.Failed -> {
                     Log.w(TAG, "reconcile failed: ${result.reason} — will retry next launch")
+                    setFailedFlag(prefs, true)
                 }
-                else -> Log.w(TAG, "reconcile returned unexpected state: $result")
+                else -> {
+                    Log.w(TAG, "reconcile returned unexpected state: $result")
+                    setFailedFlag(prefs, true)
+                }
             }
         } catch (t: Throwable) {
             Log.w(TAG, "post-upgrade reconcile threw", t)
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            setFailedFlag(prefs, true)
         } finally {
             inFlight = false
         }
@@ -106,6 +146,11 @@ object PostUpgradeReconciler {
 
     private fun persistVersion(prefs: SharedPreferences, versionCode: Int) {
         prefs.edit().putInt(KEY_LAST_VERSION, versionCode).apply()
+    }
+
+    private fun setFailedFlag(prefs: SharedPreferences, failed: Boolean) {
+        prefs.edit().putBoolean(KEY_LAST_FAILED, failed).apply()
+        _lastAttemptFailed.value = failed
     }
 
     private fun currentVersionCode(context: Context): Int = try {

@@ -212,7 +212,19 @@ fun ReconcileScreen(navController: NavController) {
             val busy = state is ChainReconciliationService.State.Scanning
 
             Button(
-                onClick = { scope.launch { service.reconcile() } },
+                onClick = {
+                    scope.launch {
+                        val result = service.reconcile()
+                        // Clear the post-upgrade banner flag if this manual
+                        // run got us a successful reconcile — same pref the
+                        // auto-trigger writes to, so a Done here also
+                        // dismisses the WalletScreen banner.
+                        if (result is ChainReconciliationService.State.Done) {
+                            io.digibyte.core.reconcile.PostUpgradeReconciler
+                                .clearFailedFlag(context)
+                        }
+                    }
+                },
                 enabled = !busy,
                 modifier = Modifier
                     .fillMaxWidth()

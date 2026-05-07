@@ -53,6 +53,7 @@ fun WalletScreen(
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
+    val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier
@@ -89,6 +90,21 @@ fun WalletScreen(
                     // Tor indicator — only visible when Tor is connected
                     TorIndicator(torState)
                 }
+            }
+        }
+
+        // Failed-reconcile banner: shown when PostUpgradeReconciler fired
+        // and couldn't reach the backend. Without this, the user just sees
+        // a wrong/stale balance and has no signal that anything went wrong —
+        // exact scenario reported on 2026-05-07 ("wallet functional but
+        // balance not reflecting"). Banner sits between the balance area
+        // and the action row so it's unmissable but not in-flow with txs.
+        if (reconcileFailed) {
+            item {
+                ReconcileFailedBanner(
+                    onRetry = { viewModel.retryPostUpgradeReconcile() },
+                    onDismiss = { viewModel.dismissReconcileFailedBanner() },
+                )
             }
         }
 
@@ -595,6 +611,67 @@ private fun SyncIndicator(syncState: SyncState) {
                         style = MaterialTheme.typography.labelSmall,
                         color = DigiByteAccent.copy(alpha = 0.85f)
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Amber banner shown above the action row when the post-upgrade reconcile
+ * couldn't reach the backend. Replaces the silent "wrong balance + no idea
+ * why" failure mode reported 2026-05-07.
+ */
+@androidx.compose.runtime.Composable
+private fun ReconcileFailedBanner(
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0x33FFCC66),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Balance refresh failed",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFD580),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "We couldn't reach the reconcile node after this upgrade. " +
+                       "Your balance shown may be out of date.",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    onClick = onRetry,
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = DigiByteAccent,
+                    ),
+                ) { Text("Retry now") }
+                androidx.compose.material3.OutlinedButton(onClick = onDismiss) {
+                    Text("Dismiss")
                 }
             }
         }

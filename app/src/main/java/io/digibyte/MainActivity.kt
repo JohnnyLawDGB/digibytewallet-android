@@ -79,6 +79,10 @@ class MainActivity : FragmentActivity() {
         // Waits for the first Unlocked state (biometric auto-unlock or PIN),
         // then hands off to PostUpgradeReconciler which internally debounces
         // for peer connectivity before hitting the node.
+        //
+        // hydrateFailedFlag here so the UI banner reflects a prior-process
+        // failure even before this new attempt has had time to resolve.
+        PostUpgradeReconciler.hydrateFailedFlag(applicationContext)
         lifecycleScope.launch {
             walletManager.walletState
                 .filterIsInstance<WalletState.Unlocked>()

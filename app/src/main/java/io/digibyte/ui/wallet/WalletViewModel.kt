@@ -35,7 +35,8 @@ class WalletViewModel @Inject constructor(
     private val walletManager: WalletManager,
     private val priceProvider: PriceProvider,
     private val torManager: TorManager,
-    private val walletConfigDao: WalletConfigDao
+    private val walletConfigDao: WalletConfigDao,
+    private val assetManager: io.digibyte.core.asset.AssetManager,
 ) : ViewModel() {
 
     private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
@@ -201,6 +202,31 @@ class WalletViewModel @Inject constructor(
 
     /** Live Tor state — used by WalletScreen to show the Tor indicator badge. */
     val torState: StateFlow<TorState> = torManager.state
+
+    /** True iff the most recent post-upgrade reconcile attempt failed.
+     *  WalletScreen renders an amber banner with a Retry button when set —
+     *  surfaces silent reconcile failures (network down, backend overloaded,
+     *  endpoint stripped by a redeploy) that would otherwise leave the user
+     *  staring at a wrong/zero balance with no idea why. */
+    val postUpgradeReconcileFailed: StateFlow<Boolean> =
+        io.digibyte.core.reconcile.PostUpgradeReconciler.lastAttemptFailed
+
+    /** Manually retry the post-upgrade reconcile from the banner's button.
+     *  Same code path as the auto trigger — if it succeeds, the flag clears
+     *  and the banner disappears. */
+    fun retryPostUpgradeReconcile() {
+        viewModelScope.launch {
+            io.digibyte.core.reconcile.PostUpgradeReconciler.runIfNeeded(
+                application, assetManager,
+            )
+        }
+    }
+
+    /** Dismiss the banner without running reconcile — user explicitly
+     *  acknowledges the warning. Won't suppress future failures. */
+    fun dismissReconcileFailedBanner() {
+        io.digibyte.core.reconcile.PostUpgradeReconciler.clearFailedFlag(application)
+    }
 
     /** Latest price data from PriceProvider (null until first fetch). */
     private val _price = MutableStateFlow<PriceData?>(null)
