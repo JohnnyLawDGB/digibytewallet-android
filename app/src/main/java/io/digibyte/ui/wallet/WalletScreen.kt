@@ -84,8 +84,10 @@ fun WalletScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Sync state indicator
-                    SyncIndicator(syncState)
+                    // Sync state indicator — fed from syncProgressInfo (the
+                    // same source the inline card uses) so the two can never
+                    // disagree about block / progress / target.
+                    SyncIndicator(syncProgressInfo)
 
                     // Tor indicator — only visible when Tor is connected
                     TorIndicator(torState)
@@ -299,9 +301,14 @@ private fun SyncProgressCard(
             // ETA + percent line.
             if (info.stage == SyncStage.Syncing) {
                 val pct = (info.progressFraction * 100).toInt()
-                val eta = info.etaSeconds?.let { formatEta(it) } ?: "estimating…"
+                val etaSeconds = info.etaSeconds
+                val text = when {
+                    pct >= 100 -> "Finishing up — verifying recent blocks"
+                    etaSeconds != null -> "$pct% complete · ${formatEta(etaSeconds)} remaining"
+                    else -> "$pct% complete · estimating…"
+                }
                 Text(
-                    text = "$pct% complete · $eta remaining",
+                    text = text,
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF8FA1B8)
                 )
@@ -503,30 +510,24 @@ private fun TorIndicator(torState: TorState) {
 }
 
 @Composable
-private fun SyncIndicator(syncState: SyncState) {
+private fun SyncIndicator(info: SyncProgressInfo) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val versionName = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "" }
         catch (e: Exception) { "" }
     }
 
-    // Live peer count — polled alongside balance in WalletViewModel
-    val peerCount = remember { mutableIntStateOf(0) }
-    val blockHeight = remember { mutableLongStateOf(0L) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            peerCount.intValue = io.digibyte.core.bridge.NativeBridge.getPeerCount()
-            blockHeight.longValue = io.digibyte.core.bridge.NativeBridge.getLastBlockHeight()
-            kotlinx.coroutines.delay(5000L)
-        }
-    }
-
-    when (syncState) {
-        is SyncState.Syncing -> {
-            // Header intentionally omits the percent — SyncProgressCard in
-            // the body is the single source of sync-progress percent. Two
-            // percentages from flows that update on different ticks caused
-            // visible bouncing (40% vs 99%) against each other.
+    when (info.stage) {
+        SyncStage.Syncing -> {
+            val pct = (info.progressFraction * 100).toInt()
+            // Header shows the same percent the card shows — they're sourced
+            // from the same syncProgressInfo so they can't disagree. When
+            // progress hits 100 but stage is still Syncing (final wrap-up),
+            // show "Finishing up" instead of "100%".
+            val status = when {
+                pct >= 100 -> "Finishing up · ${info.peerCount} peers"
+                else -> "Syncing · ${info.peerCount} peers · ${pct}%"
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -538,19 +539,18 @@ private fun SyncIndicator(syncState: SyncState) {
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Syncing · ${peerCount.intValue} peers · Block ${syncState.blockHeight}",
+                    text = status,
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent.copy(alpha = 0.85f)
                 )
             }
         }
-        is SyncState.Complete -> {
-            val peers = peerCount.intValue
-            val block = blockHeight.longValue
+        SyncStage.Synced -> {
             val v = if (versionName.isNotEmpty()) " · v$versionName" else ""
             val statusText = when {
-                peers > 0 && block > 0 -> "Connected · $peers peers · Block $block$v"
-                peers > 0 -> "Connected · $peers peers$v"
+                info.peerCount > 0 && info.currentBlock > 0 ->
+                    "Connected · ${info.peerCount} peers · Block ${formatThousands(info.currentBlock)}$v"
+                info.peerCount > 0 -> "Connected · ${info.peerCount} peers$v"
                 else -> "Connected$v"
             }
             Text(
@@ -559,7 +559,18 @@ private fun SyncIndicator(syncState: SyncState) {
                 color = Color(0xFF4CAF50).copy(alpha = 0.85f)
             )
         }
-        is SyncState.Rescanning -> {
+        SyncStage.Failed -> {
+            Text(
+                text = "Disconnected · ${info.peerCount} peers",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
+            )
+        }
+        SyncStage.Connecting -> {
+            val text = if (info.peerCount > 0)
+                "Connecting · ${info.peerCount} peers"
+            else
+                "Connecting…"
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -571,47 +582,10 @@ private fun SyncIndicator(syncState: SyncState) {
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Rescanning · ${peerCount.intValue} peers",
+                    text = text,
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent.copy(alpha = 0.85f)
                 )
-            }
-        }
-        is SyncState.Failed -> {
-            Text(
-                text = "Disconnected · 0 peers",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
-            )
-        }
-        else -> {
-            // Idle or between sync states — show whatever info we have
-            val peers = peerCount.intValue
-            val block = blockHeight.longValue
-            val text = when {
-                peers > 0 && block > 0 -> "Syncing · $peers peers · Block $block"
-                peers > 0 -> "Connecting · $peers peers"
-                else -> null
-            }
-            if (text != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    if (block > 0) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(12.dp),
-                            strokeWidth = 2.dp,
-                            color = DigiByteAccent
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                    }
-                    Text(
-                        text = text,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = DigiByteAccent.copy(alpha = 0.85f)
-                    )
-                }
             }
         }
     }
