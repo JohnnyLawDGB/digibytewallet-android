@@ -95,13 +95,19 @@ fun WalletScreen(
             }
         }
 
-        // Failed-reconcile banner: shown ONLY after sync has settled.
-        // Showing it during an in-progress sync is misleading — SPV's bloom
-        // rescan may yet recover the missed txs on its own, and the banner
-        // would just confuse a user whose wallet is actively working. Wait
-        // for SyncState.Complete + the failed flag to both be true so the
-        // banner reflects a steady-state "we tried, it didn't work" status.
-        if (reconcileFailed && syncState is SyncState.Complete) {
+        // Failed-reconcile banner: shown ONLY when there's evidence the
+        // displayed balance might actually be wrong. Reports 2026-05-08 of
+        // the banner firing on wallets whose balance was visibly correct
+        // (5000 DGB, recent confirmed tx, sync at tip) — academically the
+        // reconcile DID fail, but the user can see they're fine, so the
+        // banner just adds anxiety. Now requires:
+        //   - sync settled (SyncState.Complete) so we're not pre-empting
+        //     SPV's own recovery,
+        //   - reconcile failed flag set,
+        //   - AND balance == 0 (the actual symptom users complained about).
+        // A wallet with non-zero balance is its own evidence of working,
+        // even if the reconcile insurance step didn't run.
+        if (reconcileFailed && syncState is SyncState.Complete && balance == 0L) {
             item {
                 ReconcileFailedBanner(
                     onRetry = { viewModel.retryPostUpgradeReconcile() },
