@@ -111,13 +111,30 @@ class DgbNodeClient(
             .post(payload.toString().toRequestBody(JSON.toMediaType()))
             .build()
 
-        return runCatching {
+        return try {
             client(url).newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@runCatching null
-                val body = resp.body?.string() ?: return@runCatching null
+                if (!resp.isSuccessful) {
+                    android.util.Log.w(
+                        "DgbNodeClient",
+                        "reconcile $url returned HTTP ${resp.code} ${resp.message}"
+                    )
+                    return null
+                }
+                val body = resp.body?.string()
+                if (body == null) {
+                    android.util.Log.w("DgbNodeClient", "reconcile $url empty body")
+                    return null
+                }
                 parseReconcileResponse(body)
             }
-        }.getOrNull()
+        } catch (t: Throwable) {
+            android.util.Log.w(
+                "DgbNodeClient",
+                "reconcile $url threw ${t::class.java.simpleName}: ${t.message}",
+                t
+            )
+            null
+        }
     }
 
     private fun parseReconcileResponse(body: String): ReconcileResult? {

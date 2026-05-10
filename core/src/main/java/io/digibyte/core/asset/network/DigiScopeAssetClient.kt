@@ -145,11 +145,26 @@ class DigiScopeAssetClient(
             .post(bodyJson.toRequestBody(JSON_MT))
             .build()
         client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            val body = resp.body?.string() ?: return null
+            if (!resp.isSuccessful) {
+                android.util.Log.w(
+                    "DigiScopeAssetClient",
+                    "POST $url returned HTTP ${resp.code} ${resp.message}"
+                )
+                return null
+            }
+            val body = resp.body?.string()
+            if (body == null) {
+                android.util.Log.w("DigiScopeAssetClient", "POST $url empty body")
+                return null
+            }
             if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
         }
-    } catch (_: Throwable) {
+    } catch (t: Throwable) {
+        android.util.Log.w(
+            "DigiScopeAssetClient",
+            "POST $url threw ${t::class.java.simpleName}: ${t.message}",
+            t
+        )
         null
     }
 
@@ -157,11 +172,26 @@ class DigiScopeAssetClient(
     private fun getJson(url: String): Any? = try {
         val req = Request.Builder().url(url).get().build()
         client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            val body = resp.body?.string() ?: return null
+            if (!resp.isSuccessful) {
+                android.util.Log.w(
+                    "DigiScopeAssetClient",
+                    "GET $url returned HTTP ${resp.code} ${resp.message}"
+                )
+                return null
+            }
+            val body = resp.body?.string()
+            if (body == null) {
+                android.util.Log.w("DigiScopeAssetClient", "GET $url empty body")
+                return null
+            }
             if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
         }
-    } catch (_: Throwable) {
+    } catch (t: Throwable) {
+        android.util.Log.w(
+            "DigiScopeAssetClient",
+            "GET $url threw ${t::class.java.simpleName}: ${t.message}",
+            t
+        )
         null
     }
 
