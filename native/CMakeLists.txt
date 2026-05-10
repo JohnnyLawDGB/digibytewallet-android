@@ -36,6 +36,8 @@ add_library(
         src/main/jni/digibytewallet-core/BRGCSFilter.h
         src/main/jni/digibytewallet-core/BRCompactFilterChain.c
         src/main/jni/digibytewallet-core/BRCompactFilterChain.h
+        src/main/jni/digibytewallet-core/BRWalletFilterElements.c
+        src/main/jni/digibytewallet-core/BRWalletFilterElements.h
         src/main/jni/digibytewallet-core/BRInt.h
         src/main/jni/digibytewallet-core/BRKey.c
         src/main/jni/digibytewallet-core/BRKey.h
