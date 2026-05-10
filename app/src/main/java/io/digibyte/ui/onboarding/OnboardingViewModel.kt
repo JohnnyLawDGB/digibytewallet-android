@@ -109,10 +109,10 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
             val success = withContext(Dispatchers.Default) {
-                // clearPin touches EncryptedSharedPreferences (Android Keystore);
-                // keep it on the worker dispatcher with the rest of the heavy work
-                // so the PIN-confirm callback doesn't stall the main thread.
-                pinManager.clearPin()
+                // Do NOT clearPin here — PinSetupScreen calls setPin() right
+                // before this, and clearing afterward wipes the freshly-set
+                // PIN. (recoverWallet keeps its clearPin because it runs
+                // before pin_setup, replacing any stale-from-prior-install PIN.)
                 walletManager.createWallet(phrase)
             }
             wipeMnemonicFromMemory()
