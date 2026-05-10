@@ -385,6 +385,34 @@ class SyncService : Service() {
         // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
         injectBloomPeers()
 
+        // ─── BIP 158 opt-in ──────────────────────────────────────────────────────
+        // Default sync mode is BLOOM_ONLY; only takes effect once a user (or a
+        // tester via adb) flips dgb_settings/sync_mode. When enabled, we:
+        //   1. push the mode to the C core so the peer manager hooks CF callbacks
+        //   2. restore any previously-persisted filter-header chain
+        //   3. enable auto-cfilter-fetch starting at wallet birth height
+        val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
+        val syncMode = settings.getInt("sync_mode", NativeBridge.SyncMode.BLOOM_ONLY)
+        NativeBridge.setSyncMode(syncMode)
+        if (syncMode != NativeBridge.SyncMode.BLOOM_ONLY) {
+            val savedFilters = prefs.getString("saved_filter_headers", null)
+            if (savedFilters != null) {
+                val bytes = savedFilters.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val ok = NativeBridge.setCompactFilterChain(bytes)
+                android.util.Log.i("SyncService",
+                    "BIP158: restored filter chain (${bytes.size} bytes, ok=$ok)")
+            }
+            // Birth height defaults to the most-recent block we know about, so a
+            // fresh enable scans forward from "now" rather than re-downloading
+            // history. Recovery flows can override by writing dgb_settings/cf_birth_height.
+            val tip = NativeBridge.getLastBlockHeight()
+            val birthHeight = settings.getLong("cf_birth_height", maxOf(0L, tip - 100L))
+            NativeBridge.enableAutoCompactFilterFetch(birthHeight)
+            android.util.Log.i("SyncService",
+                "BIP158: mode=$syncMode, auto-fetch from height $birthHeight (tip=$tip)")
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
         // If wallet previously completed sync, show Connected immediately.
         // The peer manager will catch up the last few blocks silently.
         if (hasReachedSynced) {
@@ -589,6 +617,17 @@ class SyncService : Service() {
                     .edit().putString("saved_peers", hex).apply()
             }
         }
+
+        override fun onSaveFilterHeaders(data: ByteArray) {
+            // BIP 158 filter-header chain advanced. Persist hex-encoded for
+            // restore on next wallet open. Fires only when sync mode != BLOOM_ONLY.
+            val copy = data.copyOf()
+            serviceScope.launch(Dispatchers.IO) {
+                val hex = bytesToHex(copy)
+                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    .edit().putString("saved_filter_headers", hex).apply()
+            }
+        }
     }
 
     // ── Bloom peer discovery ────────────────────────────────────────────────────
@@ -668,26 +707,31 @@ class SyncService : Service() {
     /** Try the seeder once. Returns the parsed peer list or null on failure. */
     private fun fetchFromSeeder(): List<Pair<String, Int>>? {
         return try {
-            val request = Request.Builder().url(BLOOM_SEEDER_URL).build()
+            val request = Request.Builder().url(SEEDER_URL).build()
             okHttpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     parsePeersJson(response.body!!.string())
                 } else {
-                    android.util.Log.w("SyncService", "Bloom seeder API returned ${response.code}")
+                    android.util.Log.w("SyncService", "Seeder API returned ${response.code}")
                     null
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w("SyncService", "Bloom seeder API unreachable: ${e.message}")
+            android.util.Log.w("SyncService", "Seeder API unreachable: ${e.message}")
             null
         }
     }
 
-    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024}, ...]} */
+    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024, ...}], "capability":"filter|bloom|filter+bloom", ...}
+     *  We extract only ip+port for the BIP 37 path; the capability field is logged so we can
+     *  confirm fallthrough behavior in production. C2 (BIP 158) will inspect per-peer fields. */
     private fun parsePeersJson(json: String): List<Pair<String, Int>> {
         return try {
             val root = org.json.JSONObject(json)
+            val capability = root.optString("capability", "unknown")
             val arr = root.getJSONArray("peers")
+            android.util.Log.i("SyncService",
+                "Seeder response: capability=$capability, ${arr.length()} peer(s)")
             val out = ArrayList<Pair<String, Int>>(arr.length())
             for (i in 0 until arr.length()) {
                 val peer = arr.getJSONObject(i)
@@ -695,7 +739,7 @@ class SyncService : Service() {
             }
             out
         } catch (e: Exception) {
-            android.util.Log.w("SyncService", "Failed to parse bloom peer JSON: ${e.message}")
+            android.util.Log.w("SyncService", "Failed to parse seeder peer JSON: ${e.message}")
             emptyList()
         }
     }
@@ -797,8 +841,11 @@ class SyncService : Service() {
         const val ERR_NO_PEERS     = 1001
         /** Peers not seen in 24 hours are pruned from the DB. */
         private const val PEER_STALE_SECONDS = 86_400L
-        /** Bloom seeder API URL — returns bloom-capable peers as JSON. */
-        private const val BLOOM_SEEDER_URL = "https://api.digiscope.me/api/peers/bloom"
+        /** Capability-aware seeder API. Returns filter-capable peers when available,
+         *  falling through to bloom-capable peers when not. The wallet's existing
+         *  parser ignores the extra per-peer fields (peer_capability, capabilities,
+         *  services_hex, etc.) since it only reads ip + port. */
+        private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** How many peers to inject per call. The C peer manager caps its

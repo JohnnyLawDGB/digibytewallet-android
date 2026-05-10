@@ -74,6 +74,7 @@ private val fullScreenRoutes = setOf(
     "settings_security",
     "settings_network",
     "settings_display",
+    "settings_sync_mode",
     "settings_about",
     "settings_reconcile",
     "settings_view_seed",
@@ -400,6 +401,10 @@ fun AppNavigation(
 
             composable("settings_display") {
                 DisplaySettingsScreen(navController = navController)
+            }
+
+            composable("settings_sync_mode") {
+                io.digibyte.ui.settings.SyncModeScreen(navController = navController)
             }
 
             composable("settings_about") {

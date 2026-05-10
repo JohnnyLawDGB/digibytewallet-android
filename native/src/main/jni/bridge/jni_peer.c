@@ -8,6 +8,7 @@
  */
 
 #include "jni_bridge.h"
+#include "BRCompactFilterChain.h"
 
 /* ---------- setSocksProxy / clearSocksProxy ---------- */
 
@@ -141,6 +142,7 @@ static void bridge_txStatusUpdate(void *info) {
 /* Cached method IDs for save callbacks */
 static jmethodID g_mid_onSaveBlocks = NULL;
 static jmethodID g_mid_onSavePeers = NULL;
+static jmethodID g_mid_onSaveFilterHeaders = NULL;
 
 static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
                                size_t blocksCount, uint64_t *memIntegrityCheck) {
@@ -655,4 +657,138 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedPeers(JNIEnv *env, jobject th
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
     LOGI("loadSavedPeers: loaded %zu peers from persistent storage", g_savedPeersCount);
     return (jint)g_savedPeersCount;
+}
+
+/* ---------- BIP 158 bridge ---------- */
+
+static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *chain) {
+    (void)info;
+    if (!chain) return;
+
+    JNIEnv *env = jni_get_env();
+    if (!env || !g_callbackHandler) {
+        LOGD("bridge_saveFilterHeaders: no JNI env, skipping persist");
+        return;
+    }
+
+    if (!g_mid_onSaveFilterHeaders) {
+        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
+        g_mid_onSaveFilterHeaders = (*env)->GetMethodID(env, cls, "onSaveFilterHeaders", "([B)V");
+        (*env)->DeleteLocalRef(env, cls);
+        if (!g_mid_onSaveFilterHeaders) {
+            LOGW("bridge_saveFilterHeaders: onSaveFilterHeaders method not found");
+            return;
+        }
+    }
+
+    size_t need = BRCompactFilterChainSerialize(chain, NULL, 0);
+    if (need == 0) return;
+    uint8_t *buf = malloc(need);
+    if (!buf) return;
+    size_t got = BRCompactFilterChainSerialize(chain, buf, need);
+    if (got != need) { free(buf); return; }
+
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)got);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)got, (jbyte *)buf);
+    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveFilterHeaders, jbuf);
+    (*env)->DeleteLocalRef(env, jbuf);
+    free(buf);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz, jint mode) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) {
+        LOGW("setSyncMode: no peer manager (call after wallet load + before startSync)");
+        return;
+    }
+    BRSyncMode m = (BRSyncMode)mode;
+    BRPeerManagerSetSyncMode(g_peerManager, m);
+    LOGI("setSyncMode: mode=%d", (int)mode);
+
+    /* Register the filter-headers persistence callback the first time the
+     * caller opts in. Safe to call repeatedly. */
+    if (m != BR_SYNC_MODE_BLOOM_ONLY) {
+        BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getSyncMode(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) return 0;
+    return (jint)BRPeerManagerGetSyncMode(g_peerManager);
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCompactFilterChain(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_peerManager) return NULL;
+
+    const BRCompactFilterChain *chain = BRPeerManagerGetCompactFilterChain(g_peerManager);
+    if (!chain) return NULL;
+
+    size_t need = BRCompactFilterChainSerialize(chain, NULL, 0);
+    if (need == 0) return NULL;
+    uint8_t *buf = malloc(need);
+    if (!buf) return NULL;
+    size_t got = BRCompactFilterChainSerialize(chain, buf, need);
+    if (got != need) { free(buf); return NULL; }
+
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)got);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)got, (jbyte *)buf);
+    free(buf);
+    return jbuf;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data) {
+    (void)thiz;
+    if (!g_peerManager || !data) return JNI_FALSE;
+
+    jsize len = (*env)->GetArrayLength(env, data);
+    if (len <= 0) return JNI_FALSE;
+    jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
+    if (!buf) return JNI_FALSE;
+
+    BRCompactFilterChain *chain = BRCompactFilterChainDeserialize((const uint8_t *)buf, (size_t)len);
+    (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+    if (!chain) {
+        LOGW("setCompactFilterChain: deserialize failed (len=%d)", (int)len);
+        return JNI_FALSE;
+    }
+
+    /* Ownership transfers to the peer manager. */
+    BRPeerManagerSetCompactFilterChain(g_peerManager, chain);
+    LOGI("setCompactFilterChain: restored chain (%d bytes)", (int)len);
+    return JNI_TRUE;
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_requestCompactFilters(JNIEnv *env, jobject thiz,
+                                                                jlong startHeight, jlong stopHeight) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) return 0;
+    if (startHeight < 0 || stopHeight < 0) return 0;
+    size_t n = BRPeerManagerRequestCompactFilters(g_peerManager,
+                                                  (uint32_t)startHeight, (uint32_t)stopHeight);
+    return (jlong)n;
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_enableAutoCompactFilterFetch(JNIEnv *env, jobject thiz,
+                                                                       jlong startHeight) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) return;
+    if (startHeight < 0) startHeight = 0;
+    BRPeerManagerEnableAutoCompactFilterFetch(g_peerManager, (uint32_t)startHeight);
+    LOGI("enableAutoCompactFilterFetch: startHeight=%ld", (long)startHeight);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) return;
+    BRPeerManagerDisableAutoCompactFilterFetch(g_peerManager);
+    LOGI("disableAutoCompactFilterFetch");
 }

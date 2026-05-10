@@ -59,7 +59,7 @@ class SyncWorker @AssistedInject constructor(
             cachedJson
         } else {
             try {
-                val url = java.net.URL(BLOOM_SEEDER_URL)
+                val url = java.net.URL(SEEDER_URL)
                 val conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 5000
@@ -87,8 +87,9 @@ class SyncWorker @AssistedInject constructor(
         /** Duration the background sync job holds the peer connection open. */
         private const val SYNC_DURATION_MS = 30_000L
 
-        /** Bloom seeder API URL. */
-        private const val BLOOM_SEEDER_URL = "https://api.digiscope.me/api/peers/bloom"
+        /** Capability-aware seeder API. Returns filter-capable peers when available,
+         *  falling through to bloom peers when not. */
+        private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
 
         /** Unique work name used with ExistingPeriodicWorkPolicy.KEEP. */
         const val WORK_NAME = "dgb_background_sync"

@@ -287,4 +287,42 @@ object NativeBridge {
         destAddress: String,
         feePerKb: Long,
     ): String?
+
+    // ---------- BIP 158 sync mode ----------
+    // All BIP 158 functions below are inert until setSyncMode is called with
+    // a mode other than BLOOM_ONLY. Default remains BLOOM_ONLY so existing
+    // wallets see no behavior change.
+
+    /** Sync mode constants — keep in sync with BRSyncMode in BRPeerManager.h */
+    object SyncMode {
+        const val BLOOM_ONLY = 0            // legacy BIP 37 SPV
+        const val COMPACT_FILTERS_ONLY = 1  // BIP 157/158 only
+        const val BOTH = 2                  // both paths in parallel
+    }
+
+    /** Must be called after the peer manager exists (after wallet load) and
+     *  before startSync. Switching modes mid-sync requires a stop+start. */
+    external fun setSyncMode(mode: Int)
+    external fun getSyncMode(): Int
+
+    /** Serialize the in-memory filter-header chain. Returns null if no chain
+     *  exists yet or sync mode is BLOOM_ONLY. Persist this blob to durable
+     *  storage so it can be restored via setCompactFilterChain on next open. */
+    external fun getCompactFilterChain(): ByteArray?
+
+    /** Restore a previously persisted filter-header chain. Returns false on
+     *  malformed input. Must be called before startSync. */
+    external fun setCompactFilterChain(data: ByteArray): Boolean
+
+    /** Ask any connected filter-capable peer for cfilters over an inclusive
+     *  height range. Returns number of blocks actually requested (capped at
+     *  MAX_CFILTERS_RESULTS = 1000). */
+    external fun requestCompactFilters(startHeight: Long, stopHeight: Long): Long
+
+    /** Enable automatic cfilter requesting. Every successful cfheaders batch
+     *  triggers a cfilter request for the new range starting at
+     *  max(startHeight, lastRequested+1), capped at MAX_CFILTERS_RESULTS.
+     *  Pass the wallet's birth height (0 to scan from genesis). */
+    external fun enableAutoCompactFilterFetch(startHeight: Long)
+    external fun disableAutoCompactFilterFetch()
 }
