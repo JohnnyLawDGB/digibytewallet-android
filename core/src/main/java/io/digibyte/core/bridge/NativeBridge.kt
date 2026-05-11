@@ -305,6 +305,16 @@ object NativeBridge {
     external fun setSyncMode(mode: Int)
     external fun getSyncMode(): Int
 
+    /** Mid-run privacy-fallback: flips to BLOOM_ONLY AND pushes a bloom
+     *  filterload to every currently-connected peer (peers that handshook
+     *  while in compact-filters mode never received our filter). Called by
+     *  the sync watchdog when filter peers don't make progress within 120s. */
+    external fun fallbackToBloom()
+
+    /** Current cfheaders chain tip height (0 if no headers received yet).
+     *  Used by the watchdog to detect "no BIP158 progress." */
+    external fun getCFChainTipHeight(): Int
+
     /** Serialize the in-memory filter-header chain. Returns null if no chain
      *  exists yet or sync mode is BLOOM_ONLY. Persist this blob to durable
      *  storage so it can be restored via setCompactFilterChain on next open. */

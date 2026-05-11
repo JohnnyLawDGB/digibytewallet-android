@@ -211,6 +211,12 @@ class WalletViewModel @Inject constructor(
     val postUpgradeReconcileFailed: StateFlow<Boolean> =
         io.digibyte.core.reconcile.PostUpgradeReconciler.lastAttemptFailed
 
+    /** True iff the BIP158 watchdog gave up this session and forced bloom
+     *  fallback. Tells the UI to surface a "privacy degraded" banner.
+     *  Resets on every process start so each launch re-tries filters. */
+    val bloomFallbackActive: StateFlow<Boolean> =
+        io.digibyte.service.SyncService.bloomFallbackActive
+
     /** Manually retry the post-upgrade reconcile from the banner's button.
      *  Same code path as the auto trigger — if it succeeds, the flag clears
      *  and the banner disappears. */

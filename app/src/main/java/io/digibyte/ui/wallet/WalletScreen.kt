@@ -54,6 +54,7 @@ fun WalletScreen(
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
+    val bloomFallback by viewModel.bloomFallbackActive.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier
@@ -113,6 +114,15 @@ fun WalletScreen(
                     onRetry = { viewModel.retryPostUpgradeReconcile() },
                     onDismiss = { viewModel.dismissReconcileFailedBanner() },
                 )
+            }
+        }
+
+        // BIP158 → bloom fallback notice. Watchdog flips this when filter
+        // peers didn't make cfheaders progress within 120s; we tell the user
+        // their session lost privacy for now but will retry filters next launch.
+        if (bloomFallback) {
+            item {
+                BloomFallbackBanner()
             }
         }
 
@@ -654,6 +664,55 @@ private fun ReconcileFailedBanner(
                     Text("Dismiss")
                 }
             }
+        }
+    }
+}
+
+/**
+ * Shown when the BIP158 watchdog gave up reaching filter peers and fell
+ * back to bloom for the session. Bloom leaks the wallet address set to
+ * each connected peer — telling the user this happened lets them stop
+ * the session (force-close) if they care about that privacy guarantee.
+ * Next app launch tries filters first again.
+ */
+@androidx.compose.runtime.Composable
+private fun BloomFallbackBanner() {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0x33FFCC66),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Privacy degraded for this session",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFD580),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Block filter peers were unreachable, so the wallet fell back " +
+                       "to bloom filters. Your addresses are visible to peers until " +
+                       "you restart the app.",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+            )
         }
     }
 }

@@ -75,6 +75,9 @@ class SyncService : Service() {
     /** Consecutive poll cycles with 0 peers while Tor proxy is active. */
     private var torReconnectFailures = 0
 
+    /** Tracks BIP158 watchdog so we don't spawn two on a sync restart. */
+    private var bip158WatchdogJob: Job? = null
+
     /**
      * SupervisorJob so that a child coroutine failure never cancels the
      * parent — important because Room insert failures must not tear down sync.
@@ -326,6 +329,64 @@ class SyncService : Service() {
         }
 
     /**
+     * BIP 158 watchdog. The wallet defaults to COMPACT_FILTERS_ONLY for
+     * privacy — wallet addresses never leave the device. But the filter-
+     * peer pool is small (the seeder currently advertises ~3 peers), so
+     * if all of them are unreachable through Tor or down, the wallet
+     * would otherwise sit "Connecting…" forever.
+     *
+     * This watchdog waits BIP158_FALLBACK_TIMEOUT_MS after sync start; if
+     * the cfheaders chain hasn't progressed past the configured birth
+     * height, it flips syncMode to BLOOM_ONLY in the C core and pushes a
+     * bloom filterload to every connected peer (NativeBridge.fallbackToBloom).
+     * The Kotlin StateFlow `bloomFallbackActive` flips true so the UI can
+     * surface a "privacy degraded" banner. We DO NOT persist this choice —
+     * next launch tries filters first again.
+     */
+    private fun startBip158Watchdog(birthHeight: Long) {
+        bip158WatchdogJob?.cancel()
+        // Snapshot cfTip at watchdog start — the watchdog falls back if BOTH
+        // (a) cfTip didn't advance from this baseline AND (b) the chain has
+        // somewhere to go (lastBlock is meaningfully ahead of cfTip). This
+        // handles three cases:
+        //   - Fresh wallet: cfTip starts at 0; if it stays at 0 with tip
+        //     >> 0, peers aren't serving filters → fallback.
+        //   - Restored chain: cfTip starts at the saved value; if it stays
+        //     stuck while lastBlock advances, fallback.
+        //   - Already at tip: cfTip == lastBlock → no progress expected,
+        //     don't fallback.
+        val cfTipAtStart = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
+        bip158WatchdogJob = serviceScope.launch {
+            kotlinx.coroutines.delay(BIP158_FALLBACK_TIMEOUT_MS)
+            val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
+                NativeBridge.SyncMode.BLOOM_ONLY
+            }
+            if (mode == NativeBridge.SyncMode.BLOOM_ONLY) return@launch
+            val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
+            val blockTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+            // "Significantly behind tip" = more than 100 blocks. Above that
+            // gap we expect filter sync to be visibly advancing. If it isn't,
+            // peers are unreachable / unresponsive on the CF wire.
+            val gap = blockTip - cfTipNow.toLong()
+            val advanced = cfTipNow > cfTipAtStart
+            if (advanced || gap <= 100) {
+                android.util.Log.i("SyncService",
+                    "BIP158 watchdog: healthy (cfTip $cfTipAtStart→$cfTipNow, blockTip=$blockTip, gap=$gap)")
+                return@launch
+            }
+            android.util.Log.w("SyncService",
+                "BIP158 watchdog: no cfheaders progress after ${BIP158_FALLBACK_TIMEOUT_MS}ms " +
+                "(cfTip stuck at $cfTipNow, blockTip=$blockTip, gap=$gap) — falling back to bloom")
+            try {
+                NativeBridge.fallbackToBloom()
+                _bloomFallbackActive.value = true
+            } catch (t: Throwable) {
+                android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
+            }
+        }
+    }
+
+    /**
      * If Tor is enabled, attempt to start Tor and wire the SOCKS5 proxy before
      * calling startSync(). If Tor fails or is disabled, clear any stale proxy
      * and start sync directly — graceful degradation is critical.
@@ -385,14 +446,14 @@ class SyncService : Service() {
         // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
         injectBloomPeers()
 
-        // ─── BIP 158 opt-in ──────────────────────────────────────────────────────
-        // Default sync mode is BLOOM_ONLY; only takes effect once a user (or a
-        // tester via adb) flips dgb_settings/sync_mode. When enabled, we:
-        //   1. push the mode to the C core so the peer manager hooks CF callbacks
-        //   2. restore any previously-persisted filter-header chain
-        //   3. enable auto-cfilter-fetch starting at wallet birth height
+        // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
+        // Default sync mode is COMPACT_FILTERS_ONLY for new installs and any user
+        // who hasn't explicitly chosen otherwise — wallet addresses never leave
+        // the device. A 120s watchdog falls back to BLOOM_ONLY for THIS session
+        // if filter peers don't make progress; the choice resets on next launch
+        // so we try filters again. Users can override in Settings → Sync Mode.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-        val syncMode = settings.getInt("sync_mode", NativeBridge.SyncMode.BLOOM_ONLY)
+        val syncMode = settings.getInt("sync_mode", NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
         NativeBridge.setSyncMode(syncMode)
         if (syncMode != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedFilters = prefs.getString("saved_filter_headers", null)
@@ -410,6 +471,7 @@ class SyncService : Service() {
             NativeBridge.enableAutoCompactFilterFetch(birthHeight)
             android.util.Log.i("SyncService",
                 "BIP158: mode=$syncMode, auto-fetch from height $birthHeight (tip=$tip)")
+            startBip158Watchdog(birthHeight)
         }
         // ─────────────────────────────────────────────────────────────────────────
 
@@ -854,6 +916,21 @@ class SyncService : Service() {
         private const val BLOOM_BATCH_SIZE = 20
         /** Clear Tor proxy after this many consecutive 0-peer poll cycles. */
         private const val MAX_TOR_RECONNECT_FAILURES = 3
+        /** How long to wait for BIP158 cfheaders progress before falling back
+         *  to bloom for this session. The pool is thin (3 filter peers) so we
+         *  need a generous window for Tor bootstrap + slow handshakes; 120s
+         *  was the user-chosen ceiling. */
+        private const val BIP158_FALLBACK_TIMEOUT_MS = 120_000L
+
+        /** Process-wide flag set when the BIP158 watchdog falls back to
+         *  bloom for the current session. The wallet UI collects this to
+         *  surface a "privacy degraded" banner. Resets to false on every
+         *  process start (companion-object lifecycle == process lifecycle)
+         *  so the next launch re-tries filters first. */
+        val bloomFallbackActive: kotlinx.coroutines.flow.StateFlow<Boolean>
+            get() = _bloomFallbackActive
+        private val _bloomFallbackActive =
+            kotlinx.coroutines.flow.MutableStateFlow(false)
 
         /**
          * Sanity floor for "we've reached the chain tip." The highest
