@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.digibyte.core.OutgoingTxStore
 import io.digibyte.core.PriceData
 import io.digibyte.core.PriceProvider
 import io.digibyte.core.bridge.NativeBridge
@@ -37,6 +38,7 @@ class WalletViewModel @Inject constructor(
     private val torManager: TorManager,
     private val walletConfigDao: WalletConfigDao,
     private val assetManager: io.digibyte.core.asset.AssetManager,
+    private val outgoingTxStore: OutgoingTxStore,
 ) : ViewModel() {
 
     private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
@@ -446,17 +448,37 @@ class WalletViewModel @Inject constructor(
                             val txHeight = parts[3].toLongOrNull() ?: 0L
                             val confs = if (txHeight > 0 && currentHeight >= txHeight)
                                 (currentHeight - txHeight + 1).toInt() else 0
+                            val txid = parts[0]
+                            val nativeAmount = parts[1].toLongOrNull() ?: 0L
+                            val nativeFee = parts[2].toLongOrNull() ?: 0L
+                            val nativeSent = if (parts.size >= 7) parts[5].toLongOrNull() ?: 0L else 0L
+                            val nativeReceived = if (parts.size >= 7) parts[6].toLongOrNull() ?: 0L else 0L
+
+                            // BRWalletAmountSentByTx returns 0 when the parent UTXO txs
+                            // aren't in BRWallet->allTx (Universal-Restore wallets and
+                            // post-bloom-fallback re-downloads hit this). The C wallet
+                            // then reports amount = received - sent = +change, so the UI
+                            // mis-categorizes the user's send as a receive. The locally
+                            // recorded broadcast is authoritative for what WE sent.
+                            val recorded = outgoingTxStore.lookup(txid)
+                            val applyOverride = recorded != null && nativeSent == 0L
+                            val amount = if (applyOverride) -recorded!!.sentSats else nativeAmount
+                            val fee = if (applyOverride) recorded!!.feeSats else nativeFee
+                            val toAddress = if (applyOverride) recorded!!.toAddress else ""
+                            val sent = if (applyOverride) recorded!!.sentSats else nativeSent
+                            val received = nativeReceived
+
                             TransactionEntity(
-                                txid = parts[0],
-                                amount = parts[1].toLongOrNull() ?: 0L,
-                                fee = parts[2].toLongOrNull() ?: 0L,
+                                txid = txid,
+                                amount = amount,
+                                fee = fee,
                                 blockHeight = txHeight,
                                 timestamp = parts[4].toLongOrNull() ?: 0L,
-                                toAddress = "",
+                                toAddress = toAddress,
                                 fromAddress = "",
                                 confirmations = confs,
-                                sent = if (parts.size >= 7) parts[5].toLongOrNull() ?: 0L else 0L,
-                                received = if (parts.size >= 7) parts[6].toLongOrNull() ?: 0L else 0L,
+                                sent = sent,
+                                received = received,
                                 isAssetTx = false
                             )
                         } else null

@@ -345,43 +345,105 @@ class SyncService : Service() {
      */
     private fun startBip158Watchdog(birthHeight: Long) {
         bip158WatchdogJob?.cancel()
-        // Snapshot cfTip at watchdog start — the watchdog falls back if BOTH
-        // (a) cfTip didn't advance from this baseline AND (b) the chain has
-        // somewhere to go (lastBlock is meaningfully ahead of cfTip). This
-        // handles three cases:
-        //   - Fresh wallet: cfTip starts at 0; if it stays at 0 with tip
-        //     >> 0, peers aren't serving filters → fallback.
-        //   - Restored chain: cfTip starts at the saved value; if it stays
-        //     stuck while lastBlock advances, fallback.
-        //   - Already at tip: cfTip == lastBlock → no progress expected,
-        //     don't fallback.
-        val cfTipAtStart = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
+        // Polls every BIP158_WATCHDOG_POLL_MS, falls back if the cfheaders
+        // chain isn't keeping pace with the block chain. Three exit cases:
+        //   1. Mode flipped to BLOOM (manual override or already fallen back)
+        //   2. cfTip caught up to within 100 blocks of blockTip → healthy
+        //   3. blockTip is meaningfully ahead AND no cf progress between
+        //      polls → fallback to bloom.
+        //
+        // A one-shot timer at +120s isn't enough: at startup blockTip is
+        // often still at the saved-blocks tip (headers haven't synced yet)
+        // and cfTip matches it after the persisted chain restore, so the
+        // gap looks healthy. Headers catch up later, opening a gap the
+        // one-shot already missed. The poll fires until one of the exit
+        // conditions holds.
+        //
+        // Must be invoked AFTER NativeBridge.startSync(); otherwise the
+        // peer manager doesn't exist and getCFChainTipHeight returns 0.
         bip158WatchdogJob = serviceScope.launch {
-            kotlinx.coroutines.delay(BIP158_FALLBACK_TIMEOUT_MS)
-            val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
-                NativeBridge.SyncMode.BLOOM_ONLY
-            }
-            if (mode == NativeBridge.SyncMode.BLOOM_ONLY) return@launch
-            val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
-            val blockTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
-            // "Significantly behind tip" = more than 100 blocks. Above that
-            // gap we expect filter sync to be visibly advancing. If it isn't,
-            // peers are unreachable / unresponsive on the CF wire.
-            val gap = blockTip - cfTipNow.toLong()
-            val advanced = cfTipNow > cfTipAtStart
-            if (advanced || gap <= 100) {
-                android.util.Log.i("SyncService",
-                    "BIP158 watchdog: healthy (cfTip $cfTipAtStart→$cfTipNow, blockTip=$blockTip, gap=$gap)")
-                return@launch
-            }
-            android.util.Log.w("SyncService",
-                "BIP158 watchdog: no cfheaders progress after ${BIP158_FALLBACK_TIMEOUT_MS}ms " +
-                "(cfTip stuck at $cfTipNow, blockTip=$blockTip, gap=$gap) — falling back to bloom")
-            try {
-                NativeBridge.fallbackToBloom()
-                _bloomFallbackActive.value = true
-            } catch (t: Throwable) {
-                android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
+            val startedAt = System.currentTimeMillis()
+            var lastCfTip = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
+            val cfTipAtStart = lastCfTip
+            val blockTipAtStart = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+            while (true) {
+                kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
+                val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
+                    NativeBridge.SyncMode.BLOOM_ONLY
+                }
+                if (mode == NativeBridge.SyncMode.BLOOM_ONLY) {
+                    android.util.Log.i("SyncService",
+                        "BIP158 watchdog: mode is BLOOM_ONLY, stopping poll")
+                    return@launch
+                }
+                val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
+                val blockTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+                val gap = blockTip - cfTipNow.toLong()
+                val elapsedMs = System.currentTimeMillis() - startedAt
+                val cfAdvancedSinceStart = cfTipNow > cfTipAtStart
+                val blockAdvancedSinceStart = blockTip > blockTipAtStart
+
+                // Healthy = cfTip has actually moved past where we started AND
+                // is keeping pace with blockTip. gap<=100 with cfTip pinned to
+                // the saved-blocks tip is "stuck at restore," not "synced."
+                if (gap <= 100 && cfAdvancedSinceStart) {
+                    android.util.Log.i("SyncService",
+                        "BIP158 watchdog: healthy (cfTip $cfTipAtStart→$cfTipNow, " +
+                        "blockTip=$blockTip, gap=$gap, after ${elapsedMs}ms)")
+                    return@launch
+                }
+
+                val advanced = cfTipNow > lastCfTip
+                lastCfTip = cfTipNow
+
+                // If block sync hasn't moved either, peers haven't connected
+                // yet — keep waiting (don't penalize BIP158 for stalled peers).
+                if (!blockAdvancedSinceStart) {
+                    if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
+                        android.util.Log.w("SyncService",
+                            "BIP158 watchdog: no block progress after ${elapsedMs}ms " +
+                            "(blockTip stuck at $blockTip) — falling back to bloom so " +
+                            "non-filter peers can extend the chain")
+                        try {
+                            NativeBridge.fallbackToBloom()
+                            _bloomFallbackActive.value = true
+                        } catch (t: Throwable) {
+                            android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
+                        }
+                        return@launch
+                    }
+                    android.util.Log.d("SyncService",
+                        "BIP158 watchdog: peers stalled (cfTip=$cfTipNow, blockTip=$blockTip, " +
+                        "elapsed=${elapsedMs}ms) — waiting")
+                    continue
+                }
+
+                if (advanced) {
+                    android.util.Log.d("SyncService",
+                        "BIP158 watchdog: progressing (cfTip=$cfTipNow, blockTip=$blockTip, " +
+                        "gap=$gap, elapsed=${elapsedMs}ms) — keeping poll alive")
+                    continue
+                }
+
+                // Block chain has moved past start but cfheaders have not.
+                // This is the real "BIP158 stuck" case — fall back once we
+                // pass the grace window.
+                if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
+                    android.util.Log.w("SyncService",
+                        "BIP158 watchdog: no cfheaders progress after ${elapsedMs}ms " +
+                        "(cfTip stuck at $cfTipNow, blockTip advanced to $blockTip, gap=$gap) " +
+                        "— falling back to bloom")
+                    try {
+                        NativeBridge.fallbackToBloom()
+                        _bloomFallbackActive.value = true
+                    } catch (t: Throwable) {
+                        android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
+                    }
+                    return@launch
+                }
+                android.util.Log.d("SyncService",
+                    "BIP158 watchdog: gap=$gap, cfTip stuck at $cfTipNow while " +
+                    "blockTip=$blockTip, elapsed=${elapsedMs}ms — waiting for cf progress")
             }
         }
     }
@@ -466,12 +528,20 @@ class SyncService : Service() {
             // Birth height defaults to the most-recent block we know about, so a
             // fresh enable scans forward from "now" rather than re-downloading
             // history. Recovery flows can override by writing dgb_settings/cf_birth_height.
-            val tip = NativeBridge.getLastBlockHeight()
+            //
+            // getLastBlockHeight() returns 0 here because the peer manager isn't
+            // built until startSync(). Read the saved-blocks tip directly for
+            // repeat launches, and fall back to the wallet's birth checkpoint
+            // for fresh wallets — the C-side clamp in
+            // BRPeerManagerEnableAutoCompactFilterFetch will snap the value
+            // up further if the in-memory window can't resolve it.
+            val savedTip = NativeBridge.getSavedBlocksTip()
+            val tip = if (savedTip > 0) savedTip else NativeBridge.getWalletBirthCheckpointHeight()
             val birthHeight = settings.getLong("cf_birth_height", maxOf(0L, tip - 100L))
             NativeBridge.enableAutoCompactFilterFetch(birthHeight)
             android.util.Log.i("SyncService",
-                "BIP158: mode=$syncMode, auto-fetch from height $birthHeight (tip=$tip)")
-            startBip158Watchdog(birthHeight)
+                "BIP158: mode=$syncMode, auto-fetch from height $birthHeight " +
+                "(savedTip=$savedTip, anchor=$tip)")
         }
         // ─────────────────────────────────────────────────────────────────────────
 
@@ -483,8 +553,28 @@ class SyncService : Service() {
             walletManager.updateSyncState(SyncState.Syncing(0f, 0))
         }
 
-        // Start SPV sync — will use saved blocks/peers if loaded
+        // Start SPV sync — will use saved blocks/peers if loaded.
+        // Side effect: creates the peer manager and applies pending BIP 158
+        // state (sync mode, filter chain, auto-fetch), so cfTip becomes
+        // queryable immediately after this returns.
         NativeBridge.startSync()
+
+        // Watchdog must snapshot cfTip AFTER startSync — otherwise it reads
+        // 0 (no peer manager yet), compares against the restored chain at
+        // +120s, and falsely declares progress. Without fallback firing in
+        // the no-filter-peer case, the wallet sits with no bloom loaded and
+        // silently misses every incoming tx.
+        val syncModeNow = settings.getInt("sync_mode", NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
+        if (syncModeNow != NativeBridge.SyncMode.BLOOM_ONLY) {
+            val savedTipForWatchdog = NativeBridge.getSavedBlocksTip()
+            val anchorForWatchdog = if (savedTipForWatchdog > 0) savedTipForWatchdog
+                                    else NativeBridge.getWalletBirthCheckpointHeight()
+            val birthHeightForWatchdog = settings.getLong(
+                "cf_birth_height",
+                maxOf(0L, anchorForWatchdog - 100L)
+            )
+            startBip158Watchdog(birthHeightForWatchdog)
+        }
     }
 
     override fun onDestroy() {
@@ -919,8 +1009,15 @@ class SyncService : Service() {
         /** How long to wait for BIP158 cfheaders progress before falling back
          *  to bloom for this session. The pool is thin (3 filter peers) so we
          *  need a generous window for Tor bootstrap + slow handshakes; 120s
-         *  was the user-chosen ceiling. */
+         *  was the user-chosen ceiling. Past this deadline, a poll interval
+         *  with no cf progress AND a real cfTip→blockTip gap triggers
+         *  fallbackToBloom. */
         private const val BIP158_FALLBACK_TIMEOUT_MS = 120_000L
+
+        /** Poll cadence for the BIP158 watchdog. Tight enough to catch a
+         *  freshly-opened cfTip→blockTip gap shortly after headers catch
+         *  past the saved-blocks tip, loose enough to avoid log spam. */
+        private const val BIP158_WATCHDOG_POLL_MS = 15_000L
 
         /** Process-wide flag set when the BIP158 watchdog falls back to
          *  bloom for the current session. The wallet UI collects this to

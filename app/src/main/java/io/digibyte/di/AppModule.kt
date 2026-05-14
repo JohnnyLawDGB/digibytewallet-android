@@ -158,8 +158,16 @@ object AppModule {
     fun provideCoinSelector(): CoinSelector = CoinSelector()
 
     @Provides @Singleton
-    fun provideTransactionBuilder(cs: CoinSelector, um: UtxoManager): TransactionBuilder =
-        TransactionBuilder(cs, um)
+    fun provideOutgoingTxStore(@ApplicationContext context: Context): io.digibyte.core.OutgoingTxStore =
+        io.digibyte.core.OutgoingTxStore(context)
+
+    @Provides @Singleton
+    fun provideTransactionBuilder(
+        cs: CoinSelector,
+        um: UtxoManager,
+        outgoing: io.digibyte.core.OutgoingTxStore,
+    ): TransactionBuilder =
+        TransactionBuilder(cs, um, outgoing)
 
     @Provides @Singleton
     fun provideDgbNodeClient(

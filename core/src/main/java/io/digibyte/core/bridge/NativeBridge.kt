@@ -88,6 +88,24 @@ object NativeBridge {
     /** Get last synced block height. */
     external fun getLastBlockHeight(): Long
 
+    /**
+     * Highest block height in the in-memory saved-blocks set, or 0 if none
+     * loaded. Safe to call before startSync() (does not require the peer
+     * manager). Use this — not getLastBlockHeight() — when picking a BIP 158
+     * birth height during onStartCommand, where the peer manager doesn't
+     * yet exist.
+     */
+    external fun getSavedBlocksTip(): Long
+
+    /**
+     * Height of the latest hardcoded chain checkpoint that's at least a week
+     * before the loaded wallet's creation timestamp. Returns 0 if no wallet
+     * is loaded. Mirrors the SPV chain-download anchor — use this as the
+     * BIP 158 birth height for fresh wallets that haven't persisted any
+     * blocks yet.
+     */
+    external fun getWalletBirthCheckpointHeight(): Long
+
     /** Register callback handler for native events. */
     external fun setCallbackHandler(handler: NativeCallback)
 

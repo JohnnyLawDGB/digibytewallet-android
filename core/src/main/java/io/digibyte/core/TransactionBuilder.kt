@@ -10,7 +10,8 @@ sealed class TxResult {
 
 class TransactionBuilder(
     private val coinSelector: CoinSelector,
-    private val utxoManager: UtxoManager
+    private val utxoManager: UtxoManager,
+    private val outgoingTxStore: OutgoingTxStore,
 ) {
     /**
      * Build, sign, and broadcast a transaction.
@@ -47,6 +48,22 @@ class TransactionBuilder(
         val txid = NativeBridge.publishTransaction(signedTx)
             ?: return TxResult.Error("Failed to broadcast transaction")
 
+        // Record the outgoing tx so the activity list can categorize it as
+        // "Sent" even if BRWalletAmountSentByTx later returns 0 because the
+        // parent UTXO txs aren't in BRWallet->allTx. Best-effort: a stored
+        // tx hash is only useful for the activity-list override and never
+        // affects on-chain state, so failures here are silent.
+        val feeSats = estimateFee(signedTx.size, feePerKb)
+        outgoingTxStore.record(
+            txid = txid,
+            sentSats = amountSatoshis,
+            feeSats = feeSats,
+            toAddress = toAddress,
+        )
+
         return TxResult.Success(txid)
     }
+
+    private fun estimateFee(signedSize: Int, feePerKb: Long): Long =
+        (signedSize.toLong() * feePerKb + 999L) / 1000L
 }

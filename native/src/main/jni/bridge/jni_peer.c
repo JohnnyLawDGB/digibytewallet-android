@@ -528,6 +528,54 @@ Java_io_digibyte_core_bridge_NativeBridge_getLastBlockHeight(JNIEnv *env, jobjec
     return (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
 }
 
+/* ---------- getSavedBlocksTip ----------
+ *
+ * Highest height in the in-memory saved-blocks set, or 0 if none loaded.
+ * Unlike getLastBlockHeight(), does not depend on the peer manager — safe
+ * to call between loadSavedBlocks() and startSync(). SyncService uses this
+ * to pick the BIP 158 birth height before the peer manager exists.
+ */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    if (!g_savedBlocks || g_savedBlocksCount == 0) return 0;
+    uint32_t maxHeight = 0;
+    for (size_t i = 0; i < g_savedBlocksCount; i++) {
+        if (g_savedBlocks[i] && g_savedBlocks[i]->height > maxHeight) {
+            maxHeight = g_savedBlocks[i]->height;
+        }
+    }
+    return (jlong)maxHeight;
+}
+
+/* ---------- getWalletBirthCheckpointHeight ----------
+ *
+ * Height of the latest hardcoded checkpoint whose timestamp is at least a
+ * week before g_walletCreationTime, mirroring the SPV chain-download
+ * anchor in BRPeerManagerNewEx. Returns 0 if no wallet is loaded. Used as
+ * the BIP 158 birth-height anchor for fresh wallets that have not yet
+ * persisted any blocks.
+ */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    if (!g_wallet || g_walletCreationTime == 0) return 0;
+
+    uint32_t result = 0;
+    const BRChainParams *params = &BRMainNetParams;
+    for (size_t i = 0; i < params->checkpointsCount; i++) {
+        if (i == 0 ||
+            params->checkpoints[i].timestamp + 7*24*60*60 < g_walletCreationTime) {
+            result = params->checkpoints[i].height;
+        }
+    }
+    return (jlong)result;
+}
+
 /* ---------- setCallbackHandler ---------- */
 
 JNIEXPORT void JNICALL
@@ -710,7 +758,13 @@ static void _applyPendingBip158State(void) {
 
     if (g_pendingAutoFetchEnabled) {
         BRPeerManagerEnableAutoCompactFilterFetch(g_peerManager, g_pendingAutoFetchStart);
-        LOGI("BIP158: applied pending auto-fetch from height %u", g_pendingAutoFetchStart);
+        uint32_t actual = BRPeerManagerGetAutoFetchCFiltersStart(g_peerManager);
+        if (actual != g_pendingAutoFetchStart) {
+            LOGI("BIP158: applied pending auto-fetch — requested %u, clamped to %u (in-memory window)",
+                 g_pendingAutoFetchStart, actual);
+        } else {
+            LOGI("BIP158: applied pending auto-fetch from height %u", actual);
+        }
         g_pendingAutoFetchEnabled = 0;
         g_pendingAutoFetchStart = 0;
     }
