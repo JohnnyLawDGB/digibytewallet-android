@@ -206,6 +206,16 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
     }
     txidHex[64] = '\0';
 
+    /* Register the tx into the wallet *before* publish so it's in
+     * BRWalletTransactions() the moment publishTransaction returns —
+     * otherwise the Kotlin-side save-after-broadcast hook can race the
+     * peer relay-back path and persist a stale snapshot. The peer's
+     * relay-back later calls BRWalletRegisterTransaction again, which
+     * is idempotent (BRWallet.c:1111). Timestamp must be set first
+     * because _BRWalletInsertTx orders by timestamp. */
+    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
+    BRWalletRegisterTransaction(g_wallet, tx);
+
     /* Publish — note: BRPeerManagerPublishTx takes ownership of tx, do NOT free it */
     PublishContext ctx = { .error = 0, .done = 0 };
     BRPeerManagerPublishTx(g_peerManager, tx, &ctx, publish_callback);

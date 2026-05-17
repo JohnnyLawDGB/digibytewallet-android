@@ -162,12 +162,17 @@ object AppModule {
         io.digibyte.core.OutgoingTxStore(context)
 
     @Provides @Singleton
+    fun provideWalletTxPersister(@ApplicationContext context: Context): io.digibyte.core.WalletTxPersister =
+        io.digibyte.core.WalletTxPersister(context)
+
+    @Provides @Singleton
     fun provideTransactionBuilder(
         cs: CoinSelector,
         um: UtxoManager,
         outgoing: io.digibyte.core.OutgoingTxStore,
+        persister: io.digibyte.core.WalletTxPersister,
     ): TransactionBuilder =
-        TransactionBuilder(cs, um, outgoing)
+        TransactionBuilder(cs, um, outgoing, persister)
 
     @Provides @Singleton
     fun provideDgbNodeClient(

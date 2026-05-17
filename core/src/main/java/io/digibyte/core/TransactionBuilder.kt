@@ -12,6 +12,7 @@ class TransactionBuilder(
     private val coinSelector: CoinSelector,
     private val utxoManager: UtxoManager,
     private val outgoingTxStore: OutgoingTxStore,
+    private val walletTxPersister: WalletTxPersister,
 ) {
     /**
      * Build, sign, and broadcast a transaction.
@@ -60,6 +61,14 @@ class TransactionBuilder(
             feeSats = feeSats,
             toAddress = toAddress,
         )
+
+        // Snapshot the wallet's tx set to disk synchronously so a
+        // force-stop or crash immediately after broadcast doesn't drop
+        // the just-sent tx from the persisted state. The companion
+        // C-side change (publishTransaction → BRWalletRegisterTransaction)
+        // guarantees getSerializedTransactions sees this tx by the time
+        // persist() runs.
+        walletTxPersister.persist()
 
         return TxResult.Success(txid)
     }
