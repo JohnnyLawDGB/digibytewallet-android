@@ -55,6 +55,7 @@ fun WalletScreen(
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
     val bloomFallback by viewModel.bloomFallbackActive.collectAsStateWithLifecycle()
+    val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier
@@ -123,6 +124,17 @@ fun WalletScreen(
         if (bloomFallback) {
             item {
                 BloomFallbackBanner()
+            }
+        }
+
+        // Tor → clearnet fallback notice. Watchdog flips this when Tor
+        // never reached bootstrap-complete (or reached it but routed nothing)
+        // and the wallet was forced to dial peers directly. Same session
+        // lifecycle as bloomFallback — resets on next launch so each app
+        // start retries Tor before degrading.
+        if (torFailure) {
+            item {
+                TorFailureBanner()
             }
         }
 
@@ -710,6 +722,48 @@ private fun BloomFallbackBanner() {
                 text = "Block filter peers were unreachable, so the wallet fell back " +
                        "to bloom filters. Your addresses are visible to peers until " +
                        "you restart the app.",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+            )
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun TorFailureBanner() {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0x33FFCC66),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Tor unavailable — using direct connections",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFD580),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Tor didn't reach the network in time so the wallet is " +
+                       "connecting directly to peers for this session. Your IP " +
+                       "is visible to peers until you restart the app.",
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )

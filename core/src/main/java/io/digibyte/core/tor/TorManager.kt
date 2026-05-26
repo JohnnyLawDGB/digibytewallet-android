@@ -148,15 +148,28 @@ class TorManager(private val context: Context) {
         if (current is TorState.Connected) return@withContext current
         // Already in progress — wait for the existing bootstrap rather than
         // restarting (which would reset progress and race on startDaemonAsync).
+        // Bounded by BOOTSTRAP_TIMEOUT_MS so a stale Starting state from a
+        // previous run that never reached terminal can't block this call
+        // forever — otherwise every subsequent start() inherits the wedge.
         if (current is TorState.Starting || current is TorState.Connecting) {
-            return@withContext _state.first {
-                it is TorState.Connected ||
-                it is TorState.Failed ||
-                it is TorState.Disabled
-            }.let { terminal ->
-                if (terminal is TorState.Disabled)
+            val terminal = withTimeoutOrNull(BOOTSTRAP_TIMEOUT_MS) {
+                _state.first {
+                    it is TorState.Connected ||
+                    it is TorState.Failed ||
+                    it is TorState.Disabled
+                }
+            }
+            return@withContext when {
+                terminal == null -> {
+                    _state.value = TorState.Failed(
+                        "Bootstrap timed out (${BOOTSTRAP_TIMEOUT_MS / 1000}s) while awaiting in-progress start"
+                    )
+                    teardownAfterFailure()
+                    _state.value
+                }
+                terminal is TorState.Disabled ->
                     TorState.Failed("Tor daemon stopped before reaching bootstrap 100%")
-                else terminal
+                else -> terminal
             }
         }
 

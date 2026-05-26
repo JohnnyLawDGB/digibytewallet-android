@@ -364,7 +364,26 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
     const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
     if (!ip) return;
 
+    /* Update g_savedPeers for the cold-start case when peer manager doesn't
+     * exist yet — _injectPriorityPeer dedupes and prepends. */
     _injectPriorityPeer(ip, (uint16_t)port);
+
+    /* If the peer manager is already alive, ALSO add to its live candidate
+     * pool. Without this, post-startup injections accumulate in g_savedPeers
+     * which is only consumed once at manager creation — the keepalive ends
+     * up calling injectPeerByIp on every tick with zero effect, leaving the
+     * wallet stuck at 0 peers when the initial peer set fails to dial. */
+    if (g_peerManager) {
+        UInt128 addr = UINT128_ZERO;
+        struct in_addr ip4;
+        if (inet_pton(AF_INET, ip, &ip4) == 1) {
+            /* Build IPv4-mapped IPv6 address (::ffff:x.x.x.x) */
+            addr.u16[5] = 0xffff;
+            addr.u32[3] = ip4.s_addr;
+            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port,
+                                  SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM);
+        }
+    }
 
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);
 }

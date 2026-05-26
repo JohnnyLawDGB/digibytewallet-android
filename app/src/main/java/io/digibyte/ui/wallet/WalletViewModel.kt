@@ -219,6 +219,12 @@ class WalletViewModel @Inject constructor(
     val bloomFallbackActive: StateFlow<Boolean> =
         io.digibyte.service.SyncService.bloomFallbackActive
 
+    /** True iff the Tor watchdog gave up this session and forced a clearnet
+     *  fallback. Tells the UI to surface a "Tor unavailable" banner. Resets
+     *  on every process start so each launch re-tries Tor. */
+    val torFailureActive: StateFlow<Boolean> =
+        io.digibyte.service.SyncService.torFailureActive
+
     /** Manually retry the post-upgrade reconcile from the banner's button.
      *  Same code path as the auto trigger — if it succeeds, the flag clears
      *  and the banner disappears. */

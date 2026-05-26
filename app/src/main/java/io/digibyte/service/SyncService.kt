@@ -147,6 +147,15 @@ class SyncService : Service() {
             startSyncWithTor()
         }
 
+        // Watchdog for Tor-bootstrap or Tor-SOCKS failure. If Tor never reaches
+        // Connected — OR reaches Connected but routes nothing — peers stay at 0
+        // and the wallet shows "Connecting…" forever. After TOR_FALLBACK_TIMEOUT_MS
+        // with Tor enabled but no peers, this forces a clearnet fallback so the
+        // user isn't stranded. Sister to the existing BIP158→bloom watchdog.
+        if (torManager.isEnabled) {
+            serviceScope.launch { runTorFallbackWatchdog() }
+        }
+
         // Run the v5 per-asset-history backfill exactly once per install.
         // Fast path is a single correlated SQL statement against the utxos
         // table; fallback pass decodes orphaned rows' rawBytes OP_RETURN.
@@ -223,6 +232,10 @@ class SyncService : Service() {
                             NativeBridge.clearSocksProxy()
                             torProxyActive = false
                             torReconnectFailures = 0
+                            // Surface the degradation to the UI so the user knows
+                            // they're no longer routed through Tor — same banner
+                            // the bootstrap-failure watchdog raises.
+                            _torFailureActive.value = true
                             // Don't auto-restart Tor — just stay on direct connections.
                             // The user can re-enable Tor from Settings if they want to
                             // try again. Auto-restart would re-set the proxy and kill
@@ -449,6 +462,51 @@ class SyncService : Service() {
     }
 
     /**
+     * Tor watchdog. Runs in parallel with startSyncWithTor(). If Tor was
+     * enabled but the wallet is still at 0 peers after TOR_FALLBACK_TIMEOUT_MS,
+     * force a clearnet fallback: stop the daemon, clear the C-core SOCKS
+     * proxy, set torProxyActive=false, raise torFailureActive=true (for the
+     * UI banner), then re-inject peers + startSync so the connection attempts
+     * actually go direct. Covers both (a) Tor never reaching Connected at
+     * all (kmp-tor hung in Starting forever), and (b) Tor reaching Connected
+     * but routing through SOCKS still failing to dial any peers.
+     *
+     * Exits silently once peers > 0 — the bloom-fallback watchdog already
+     * handles BIP158→bloom; this one is solely about clearnet degradation.
+     */
+    private suspend fun runTorFallbackWatchdog() {
+        val startedAt = System.currentTimeMillis()
+        while (true) {
+            kotlinx.coroutines.delay(10_000L)
+            // Healthy — peers connected. Nothing more to do.
+            if (NativeBridge.getPeerCount() > 0) return
+            // User toggled Tor off via Settings; let the keepalive path handle it.
+            if (!torManager.isEnabled) return
+
+            val elapsedMs = System.currentTimeMillis() - startedAt
+            if (elapsedMs < TOR_FALLBACK_TIMEOUT_MS) continue
+
+            android.util.Log.w(
+                "SyncService",
+                "Tor watchdog: peers still 0 after ${elapsedMs}ms with tor_enabled — " +
+                "forcing clearnet fallback so the user isn't stranded"
+            )
+            try {
+                torManager.stop()
+            } catch (t: Throwable) {
+                android.util.Log.w("SyncService", "Tor watchdog: stop threw", t)
+            }
+            NativeBridge.clearSocksProxy()
+            torProxyActive = false
+            torReconnectFailures = 0
+            _torFailureActive.value = true
+            injectBloomPeers()
+            NativeBridge.startSync()
+            return
+        }
+    }
+
+    /**
      * If Tor is enabled, attempt to start Tor and wire the SOCKS5 proxy before
      * calling startSync(). If Tor fails or is disabled, clear any stale proxy
      * and start sync directly — graceful degradation is critical.
@@ -463,9 +521,15 @@ class SyncService : Service() {
                 NativeBridge.setSocksProxy("127.0.0.1", torResult.socksPort)
                 torProxyActive = true
             } else {
-                // Tor failed to start — clear any stale proxy and fall through.
+                // Tor failed to start — clear any stale proxy, surface the
+                // failure to the UI banner, fall through to clearnet sync.
+                android.util.Log.w(
+                    "SyncService",
+                    "Tor start failed: $torResult — falling back to clearnet"
+                )
                 NativeBridge.clearSocksProxy()
                 torProxyActive = false
+                _torFailureActive.value = true
             }
         } else {
             // Tor disabled — ensure no stale proxy from a previous session.
@@ -1028,6 +1092,24 @@ class SyncService : Service() {
             get() = _bloomFallbackActive
         private val _bloomFallbackActive =
             kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        /** Process-wide flag set when the Tor watchdog gives up waiting for
+         *  bootstrap and forces a clearnet fallback. The wallet UI collects
+         *  this to surface a "Tor unavailable" banner. Same lifecycle as
+         *  bloomFallbackActive — resets on every process start so the next
+         *  launch re-tries Tor. */
+        val torFailureActive: kotlinx.coroutines.flow.StateFlow<Boolean>
+            get() = _torFailureActive
+        private val _torFailureActive =
+            kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        /** How long to wait for Tor to bring up peer connectivity before
+         *  forcing a clearnet fallback. Covers both (a) Tor never reaching
+         *  Connected at all, and (b) Tor reaching Connected but routing
+         *  through SOCKS failing to dial any peers. Chosen to be a bit longer
+         *  than TorManager's own BOOTSTRAP_TIMEOUT_MS (90s) so the manager's
+         *  own timeout fires first when applicable. */
+        private const val TOR_FALLBACK_TIMEOUT_MS = 120_000L
 
         /**
          * Sanity floor for "we've reached the chain tip." The highest
