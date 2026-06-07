@@ -379,6 +379,11 @@ class SyncService : Service() {
             var lastCfTip = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
             val cfTipAtStart = lastCfTip
             val blockTipAtStart = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+            // Per-poll block-progress tracking so the watchdog can tell "headers
+            // still importing toward the tip" (stay on filters) from "block sync
+            // has stalled" (fall back so bloom can progress).
+            var lastBlockTip = blockTipAtStart
+            var lastBlockProgressMs = startedAt
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
                 val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
@@ -394,7 +399,6 @@ class SyncService : Service() {
                 val gap = blockTip - cfTipNow.toLong()
                 val elapsedMs = System.currentTimeMillis() - startedAt
                 val cfAdvancedSinceStart = cfTipNow > cfTipAtStart
-                val blockAdvancedSinceStart = blockTip > blockTipAtStart
 
                 // Healthy = cfTip has actually moved past where we started AND
                 // is keeping pace with blockTip. gap<=100 with cfTip pinned to
@@ -409,28 +413,16 @@ class SyncService : Service() {
                 val advanced = cfTipNow > lastCfTip
                 lastCfTip = cfTipNow
 
-                // If block sync hasn't moved either, peers haven't connected
-                // yet — keep waiting (don't penalize BIP158 for stalled peers).
-                if (!blockAdvancedSinceStart) {
-                    if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
-                        android.util.Log.w("SyncService",
-                            "BIP158 watchdog: no block progress after ${elapsedMs}ms " +
-                            "(blockTip stuck at $blockTip) — falling back to bloom so " +
-                            "non-filter peers can extend the chain")
-                        try {
-                            NativeBridge.fallbackToBloom()
-                            _bloomFallbackActive.value = true
-                        } catch (t: Throwable) {
-                            android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
-                        }
-                        return@launch
-                    }
-                    android.util.Log.d("SyncService",
-                        "BIP158 watchdog: peers stalled (cfTip=$cfTipNow, blockTip=$blockTip, " +
-                        "elapsed=${elapsedMs}ms) — waiting")
-                    continue
-                }
+                val nowMs = System.currentTimeMillis()
+                // Per-poll block progress — NOT since-start. The post-first-sync
+                // bloom rescan resets blockTip to a checkpoint BELOW its start
+                // value, so a since-start check misreads an actively-climbing
+                // rescan as "stalled." Refresh the progress timestamp on each climb.
+                val blockClimbing = blockTip > lastBlockTip
+                if (blockClimbing) lastBlockProgressMs = nowMs
+                lastBlockTip = blockTip
 
+                // cfheaders is actively riding the header chain — healthy.
                 if (advanced) {
                     android.util.Log.d("SyncService",
                         "BIP158 watchdog: progressing (cfTip=$cfTipNow, blockTip=$blockTip, " +
@@ -438,14 +430,47 @@ class SyncService : Service() {
                     continue
                 }
 
-                // Block chain has moved past start but cfheaders have not.
-                // This is the real "BIP158 stuck" case — fall back once we
-                // pass the grace window.
+                // cfheaders didn't advance this poll. Whether that's a failure
+                // depends on block-header sync. cfheaders can only advance once
+                // headers climb ABOVE the filter frontier (cfTip); the bloom
+                // rescan resets blockTip far BELOW the persisted cfTip, so on a
+                // deep-behind wallet headers take minutes to climb back. Staying
+                // on filters while headers import lets cfheaders ride along once
+                // they pass the frontier — abandoning here is the bug that made
+                // BIP158 always fall back.
+                val estHeight = try { NativeBridge.getEstimatedBlockHeight() } catch (_: Throwable) { 0L }
+                val blocksCaughtUp = estHeight > 0L && blockTip >= estHeight - BLOCK_CATCHUP_GRACE
+
+                if (!blocksCaughtUp) {
+                    val stalledMs = nowMs - lastBlockProgressMs
+                    if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS) {
+                        android.util.Log.d("SyncService",
+                            "BIP158 watchdog: header sync still catching up to tip " +
+                            "(blockTip=$blockTip, est=$estHeight, cfTip=$cfTipNow) — " +
+                            "staying on filters (elapsed=${elapsedMs}ms)")
+                        continue
+                    }
+                    android.util.Log.w("SyncService",
+                        "BIP158 watchdog: block sync stalled below tip for ${stalledMs}ms " +
+                        "(blockTip=$blockTip, est=$estHeight, cfTip stuck at $cfTipNow) " +
+                        "— falling back to bloom")
+                    try {
+                        NativeBridge.fallbackToBloom()
+                        _bloomFallbackActive.value = true
+                    } catch (t: Throwable) {
+                        android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
+                    }
+                    return@launch
+                }
+
+                // Headers are caught up to the network tip but cfheaders still
+                // isn't advancing — genuine filter-peer/decode failure. Fall back
+                // once past the grace window.
                 if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
                     android.util.Log.w("SyncService",
-                        "BIP158 watchdog: no cfheaders progress after ${elapsedMs}ms " +
-                        "(cfTip stuck at $cfTipNow, blockTip advanced to $blockTip, gap=$gap) " +
-                        "— falling back to bloom")
+                        "BIP158 watchdog: headers caught up (blockTip=$blockTip) but no " +
+                        "cfheaders progress after ${elapsedMs}ms (cfTip stuck at $cfTipNow, " +
+                        "gap=$gap) — falling back to bloom")
                     try {
                         NativeBridge.fallbackToBloom()
                         _bloomFallbackActive.value = true
@@ -456,7 +481,7 @@ class SyncService : Service() {
                 }
                 android.util.Log.d("SyncService",
                     "BIP158 watchdog: gap=$gap, cfTip stuck at $cfTipNow while " +
-                    "blockTip=$blockTip, elapsed=${elapsedMs}ms — waiting for cf progress")
+                    "blockTip=$blockTip (caught up) — awaiting cf progress")
             }
         }
     }
@@ -1077,6 +1102,13 @@ class SyncService : Service() {
          *  with no cf progress AND a real cfTip→blockTip gap triggers
          *  fallbackToBloom. */
         private const val BIP158_FALLBACK_TIMEOUT_MS = 120_000L
+
+        /** How close blockTip must be to the peers' estimated network height
+         *  to consider block-header sync "caught up." While headers are still
+         *  importing toward the tip (a deep-behind wallet or post-rescan
+         *  checkpoint reset), cfheaders legitimately can't advance — the
+         *  watchdog stays on filters instead of falling back to bloom. */
+        private const val BLOCK_CATCHUP_GRACE = 50L
 
         /** Poll cadence for the BIP158 watchdog. Tight enough to catch a
          *  freshly-opened cfTip→blockTip gap shortly after headers catch
