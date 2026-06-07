@@ -384,6 +384,10 @@ class SyncService : Service() {
             // has stalled" (fall back so bloom can progress).
             var lastBlockTip = blockTipAtStart
             var lastBlockProgressMs = startedAt
+            // Re-anchor recovery is attempted at most once per sync session so a
+            // poll landing before the first re-anchored cfheaders append (cfTip
+            // not yet jumped) can't re-fire it every poll.
+            var reanchoredThisSession = false
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
                 val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
@@ -464,9 +468,33 @@ class SyncService : Service() {
                 }
 
                 // Headers are caught up to the network tip but cfheaders still
-                // isn't advancing — genuine filter-peer/decode failure. Fall back
-                // once past the grace window.
+                // isn't advancing. Before falling back to bloom, try a one-time
+                // re-anchor: a legacy wallet can have cfTip persisted far below the
+                // block floor (the gap was never re-downloaded), which retention
+                // can't bridge. Re-anchoring discards the stuck chain and restarts
+                // filters at the floor. The skipped gap was already bloom-scanned —
+                // gated on hasReachedSynced, which is that guarantee.
                 if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
+                    if (hasReachedSynced && !reanchoredThisSession) {
+                        val reanchored = try {
+                            NativeBridge.reanchorCompactFilterChainAtFloor()
+                        } catch (t: Throwable) {
+                            android.util.Log.e("SyncService", "BIP158 watchdog: re-anchor threw", t)
+                            false
+                        }
+                        if (reanchored) {
+                            reanchoredThisSession = true
+                            // Kotlin owns SharedPreferences: drop the stale chain so a
+                            // kill before the first re-anchored append can't restore
+                            // the stuck cfTip.
+                            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                .edit().remove("saved_filter_headers").apply()
+                            android.util.Log.i("SyncService",
+                                "BIP158 watchdog: re-anchored filter chain at block floor " +
+                                "(cfTip was $cfTipNow, below floor) — staying on filters")
+                            continue
+                        }
+                    }
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: headers caught up (blockTip=$blockTip) but no " +
                         "cfheaders progress after ${elapsedMs}ms (cfTip stuck at $cfTipNow, " +
