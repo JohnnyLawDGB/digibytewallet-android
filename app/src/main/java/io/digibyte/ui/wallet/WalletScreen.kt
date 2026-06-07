@@ -719,9 +719,9 @@ private fun BloomFallbackBanner() {
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Block filter peers were unreachable, so the wallet fell back " +
-                       "to bloom filters. Your addresses are visible to peers until " +
-                       "you restart the app.",
+                text = "Compact-filter (private) sync was unavailable this session, so " +
+                       "the wallet fell back to bloom filters — your addresses are " +
+                       "visible to peers. Restart the app to retry private sync.",
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
