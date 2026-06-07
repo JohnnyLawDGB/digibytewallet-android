@@ -388,12 +388,39 @@ class SyncService : Service() {
             // poll landing before the first re-anchored cfheaders append (cfTip
             // not yet jumped) can't re-fire it every poll.
             var reanchoredThisSession = false
+            // Transient block-stall recovery: drop to bloom so any peer extends the
+            // chain, then switch back to compact filters once caught up. Capped per
+            // session so a flaky connection can't flap bloom↔filters forever.
+            var blockStallRecoveries = 0
+            var bloomRecoveryActive = false
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
                 val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
                     NativeBridge.SyncMode.BLOOM_ONLY
                 }
                 if (mode == NativeBridge.SyncMode.BLOOM_ONLY) {
+                    if (bloomRecoveryActive) {
+                        // We dropped to bloom to recover a block-header stall. Wait for
+                        // block sync to catch up to the network tip, then switch back to
+                        // compact filters and resume monitoring (cfTip is preserved
+                        // across the switch — fallbackToBloom never freed the chain).
+                        val bTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+                        val bEst = try { NativeBridge.getEstimatedBlockHeight() } catch (_: Throwable) { 0L }
+                        if (bEst > 0L && bTip >= bEst - BLOCK_CATCHUP_GRACE) {
+                            try {
+                                NativeBridge.setSyncMode(NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
+                            } catch (t: Throwable) {
+                                android.util.Log.e("SyncService", "BIP158 watchdog: switch-back to filters threw", t)
+                            }
+                            bloomRecoveryActive = false
+                            lastBlockTip = bTip
+                            lastBlockProgressMs = System.currentTimeMillis()
+                            android.util.Log.i("SyncService",
+                                "BIP158 watchdog: block sync caught up via bloom — switching back to " +
+                                "compact filters (recovery $blockStallRecoveries/$MAX_BLOCK_STALL_RECOVERIES)")
+                        }
+                        continue   // switched back, or still catching up — keep polling
+                    }
                     android.util.Log.i("SyncService",
                         "BIP158 watchdog: mode is BLOOM_ONLY, stopping poll")
                     return@launch
@@ -454,10 +481,22 @@ class SyncService : Service() {
                             "staying on filters (elapsed=${elapsedMs}ms)")
                         continue
                     }
+                    if (blockStallRecoveries < MAX_BLOCK_STALL_RECOVERIES) {
+                        blockStallRecoveries++
+                        android.util.Log.w("SyncService",
+                            "BIP158 watchdog: block sync stalled below tip for ${stalledMs}ms " +
+                            "(blockTip=$blockTip, est=$estHeight) — bloom recovery " +
+                            "$blockStallRecoveries/$MAX_BLOCK_STALL_RECOVERIES, will retry filters once caught up")
+                        try { NativeBridge.fallbackToBloom() } catch (t: Throwable) {
+                            android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
+                        }
+                        bloomRecoveryActive = true
+                        lastBlockProgressMs = System.currentTimeMillis()   // fresh stall window
+                        continue   // NO banner — recover via bloom, switch back once caught up
+                    }
                     android.util.Log.w("SyncService",
-                        "BIP158 watchdog: block sync stalled below tip for ${stalledMs}ms " +
-                        "(blockTip=$blockTip, est=$estHeight, cfTip stuck at $cfTipNow) " +
-                        "— falling back to bloom")
+                        "BIP158 watchdog: block sync stalled $blockStallRecoveries times — " +
+                        "staying on bloom for the session (blockTip=$blockTip, est=$estHeight)")
                     try {
                         NativeBridge.fallbackToBloom()
                         _bloomFallbackActive.value = true
@@ -1137,6 +1176,10 @@ class SyncService : Service() {
          *  checkpoint reset), cfheaders legitimately can't advance — the
          *  watchdog stays on filters instead of falling back to bloom. */
         private const val BLOCK_CATCHUP_GRACE = 50L
+
+        /** Max transient block-stall → bloom → back-to-filters recovery cycles per
+         *  session. After this many, stay on bloom and surface the privacy banner. */
+        private const val MAX_BLOCK_STALL_RECOVERIES = 3
 
         /** Poll cadence for the BIP158 watchdog. Tight enough to catch a
          *  freshly-opened cfTip→blockTip gap shortly after headers catch
