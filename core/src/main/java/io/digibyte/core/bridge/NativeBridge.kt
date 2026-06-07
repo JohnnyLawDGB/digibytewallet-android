@@ -333,6 +333,10 @@ object NativeBridge {
      *  Used by the watchdog to detect "no BIP158 progress." */
     external fun getCFChainTipHeight(): Int
 
+    /** Re-anchor the compact-filter chain at the block floor when cfTip is stuck
+     *  below the downloaded chain (legacy deficit). Returns true if re-anchored. */
+    external fun reanchorCompactFilterChainAtFloor(): Boolean
+
     /** Serialize the in-memory filter-header chain. Returns null if no chain
      *  exists yet or sync mode is BLOOM_ONLY. Persist this blob to durable
      *  storage so it can be restored via setCompactFilterChain on next open. */

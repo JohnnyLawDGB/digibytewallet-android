@@ -866,6 +866,18 @@ Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobje
     return (jint)BRPeerManagerCFChainTipHeight(g_peerManager);
 }
 
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) {
+        LOGI("reanchorCompactFilterChainAtFloor: peer manager not created — ignoring");
+        return JNI_FALSE;
+    }
+    int r = BRPeerManagerReanchorCompactFilterChainAtFloor(g_peerManager);
+    if (r) LOGI("reanchorCompactFilterChainAtFloor: re-anchored filter chain at block floor");
+    return r ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getCompactFilterChain(JNIEnv *env, jobject thiz) {
     (void)thiz;
