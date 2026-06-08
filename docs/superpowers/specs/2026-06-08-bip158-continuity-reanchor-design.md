@@ -162,6 +162,40 @@ cfheaders response → Append continuity check
 - **Chain unit test** (`BRCompactFilterChainTests`): a chain whose tip diverges from an incoming batch's `prevFilterHeader` returns `0` from `BRCompactFilterChainAppend` (the continuity signal the recovery keys on). The discard+recreate-at-floor data-structure path is already covered by `test_reanchor_restart_at_higher_start`.
 - **Device (primary)**: the Note8 reboot repro. Expected: on restart the divergent chain triggers `peers disagree … re-anchoring`, the chain re-syncs from the recent floor, cfheaders advances, and the wallet **stays on compact filters — no privacy banner** and no filter-peer disconnect storm. The manager-level recovery has no unit harness, so this is device-verified (consistent with prior BIP158 watchdog/re-anchor work).
 
+## Refinement — active probe + alignment guard (implemented & device-verified 2026-06-08)
+
+Device testing on the Note8 revealed the K=2 threshold was unreachable with passive
+peer rotation alone: after the persisted divergent chain restores, the block rescan
+resets the block tip *below* cfTip, so the cfheaders driver goes dormant (`next > tip`)
+and never polls a 2nd distinct peer. The disagreement count stalled at 1/2 and the
+watchdog fell back to bloom every session (the user's reboot banner).
+
+Two additions fixed it (both in `_peerRelayedCFHeaders`, no JNI/Kotlin change):
+
+1. **Active probe** (`_BRPeerManagerProbeOtherFilterPeersForCFHeaders`). On the *first*
+   continuity mismatch (one disagreer recorded, still below K), immediately replay the
+   exact `getcfheaders` the current peer just answered to every *other* connected
+   filter peer not already in the disagreed set. Their replies are continuity-checked
+   against our divergent tip too, so distinct disagreers reach K within ~one round trip
+   instead of never. Gated on a fresh add below K and deduped inside the probe, so it
+   can't storm.
+
+2. **Height-alignment guard** (top of `_peerRelayedCFHeaders`). Compute the batch's
+   claimed start (`stopHeight − count + 1`) and reject any response whose start ≠ where
+   the chain expects the next batch. This kills the race where a stale probe reply for
+   the *old* contested range lands after the re-anchor has already moved the chain start
+   to the block floor — without it, the lazy-create path would anchor a fresh chain at
+   the floor but fill it with the contested range's hashes, mislabeling their heights.
+   Enforced only when the stop block is known and the batch is non-empty.
+
+**On-device verification (Note8, 2026-06-08):** divergent chain restored at cfTip
+23633666 → first mismatch from peer A → active probe to peer B → "2 peers disagree …
+re-anchoring (attempt 1/3)" in ~73 ms → re-anchor to block floor 23630123 → alignment
+guard rejected the stale in-flight probe reply (`batch start 23633667 != expected
+23630123 — stale/misaligned, ignoring`) → chain rebuilt cleanly → `watchdog: healthy
+(gap=0)` → sync complete **on compact filters, no bloom fallback, no privacy banner**.
+A subsequent relaunch with the now-clean persisted chain went healthy in 15 s.
+
 ## Out of scope (separate follow-ups)
 
 - Anchor cross-verification via `getcfcheckpt` (prevent divergence client-side).

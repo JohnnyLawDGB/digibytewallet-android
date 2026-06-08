@@ -421,7 +421,14 @@ class WalletViewModel @Inject constructor(
                 // Poll transactions
                 var currentHeight = NativeBridge.getLastBlockHeight()
                 val estHeight = NativeBridge.getEstimatedBlockHeight()
-                if (estHeight > currentHeight) currentHeight = estHeight
+                // Do NOT clamp currentHeight up to estHeight. During catch-up est
+                // is always ahead of the real last block, so clamping pinned the
+                // displayed "Block X of Y" to the network tip — the UI showed a
+                // frozen "23,637,113 of 23,637,113 / 100%" while the real scan
+                // climbed underneath, making sync look locked up. It also flat-lined
+                // the ETA samples. Publish the true last-block height so the bar,
+                // percent, and ETA all move honestly. (Completion shows 100% via
+                // SyncState.Complete, not via current==target.)
 
                 // Publish raw block heights for the verbose sync UI, and
                 // record a rolling sample for ETA computation. Cap at 24
