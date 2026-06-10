@@ -9,6 +9,59 @@
 
 This audit covers the security posture of the DigiByte Android wallet with focus on seed isolation, JNI boundary safety, network leak prevention, and manifest configuration. The wallet stores a BIP39 mnemonic encrypted with AES-256-GCM via Android Keystore.
 
+> The audit below is the v3.0.1 baseline. Incremental **changed-surface audits**
+> are appended in dated sections — see the v3.6.6 section immediately following.
+
+---
+
+## Changed-Surface Audit — v3.6.6 (2026-06-10)
+
+Diff range `v3.5.42 → v3.6.6` (releases v3.6.0–v3.6.6). Method: targeted
+changed-surface review (JNI boundary, native parsing, intents, crypto, deps) +
+MobSF v4.5.0 static scan. **APK SHA256:** `9d10f935d18a3f1abcb2ad9ac20134d647b01af92244ca59ce1057b9303fa285`.
+
+**Outcome: no new exploitable vulnerability introduced. One pre-existing P0-class
+bug was found and fixed mid-cycle.**
+
+### P0 — found & fixed (this cycle)
+- **Remote DoS: stack-VLA overflow in peer-message construction** (`BRPeer.c`,
+  `BRPeerSendMessage` / `BRPeerSendGetdata` / `BRPeerSendGetdataBlocks`). A
+  malicious peer's oversized `inv` drives a block re-request getdata to ~1.8 MB
+  built in a stack VLA → peer-thread stack overflow → SIGSEGV. Symbolicated from a
+  real Galaxy S25 Ultra crash. **Fixed v3.6.6**: heap-allocate payloads > 64 KB
+  (`PEER_MSG_STACK_BUF`); re-verified for malloc-fail / double-free / leak /
+  bounds. Device-verified 0 crashes. Funds never at risk (availability only).
+
+### P1 — accepted tradeoffs (tracked)
+- **Sync default = BOTH reduces address privacy.** BOTH runs bloom (BIP37) in
+  parallel with compact filters, leaking a probabilistic address set to
+  bloom-serving peers — the exposure BIP158 avoids. Deliberate
+  coverage-vs-privacy choice during the filter-network rollout. Mitigation:
+  Settings → Sync Mode → Compact filters for strict address privacy.
+- **Tor no-exec = process-isolation regression.** In-process `libtor` processes
+  adversarial Tor-network data in the same address space as the unlocked seed
+  (exec mode isolated it in a child process). Mitigated: Tor is **off by default**
+  as of v3.6.6 (opt-in only), seed is a zeroed `ByteArray`, and same-UID exec
+  isolation on Android was already limited. Tracked in ROADMAP.md (fix no-exec
+  SOCKS routing or remove in-app Tor; the SOCKS peer-routing is itself broken).
+
+### P2 — informational / already-mitigated
+`isValidMnemonic` / `MnemonicInputScreen` mnemonic `String` copies (existing
+onboarding pattern); SOCKS5 handshake response parse is memory-safe
+(`rem <= sizeof(buf)` guard); BIP158 cfheaders probe/re-anchor bounded (array
+writes guarded, re-anchor budget capped — worst case a malicious filter peer
+griefs a session to bloom fallback); `getTransactionDetails` newest-100 buffer
+over-sized + `snprintf`-bounded; `useLegacyPackaging=false` + exec→no-exec is
+security-**positive** (libs mmap'd read-only, no extracted executable).
+
+### MobSF v3.6.6 (score 68/100, no drop from the 67 baseline)
+Exactly the catalogued false-positive set — zero new signal. 1 HIGH (debug-cert
+v3 lineage), 10 WARNING all known (`android_sql_raw_query` is SQLCipher-internal
+`net/zetetic/*`; `android_hardcoded` = Coil + derivation paths / pref-keys /
+cert-pins, verified no real secret). **Binary analysis: every native lib incl.
+the modified `libcore-lib.so` has NX + PIE + stack canary** — the VLA heap fix did
+not weaken hardening. Report: `reports/mobsf-report-v3.6.6.json`.
+
 ## Findings Summary
 
 | Severity | Count | Status |
@@ -163,7 +216,9 @@ security/
 ├── AUDIT-SUMMARY.md                    ← This file
 ├── reports/
 │   ├── mobsf-report.json               ← MobSF v3.0.1 (initial)
-│   └── mobsf-report-v3.5.30.json       ← MobSF v3.5.30 (pre-bounty)
+│   ├── mobsf-report-v3.5.30.json       ← MobSF v3.5.30 (pre-bounty)
+│   ├── mobsf-report-v3.6.6.json        ← MobSF v3.6.6 (changed-surface audit, score 68)
+│   └── mobsf-scorecard-v3.6.6.json     ← MobSF v3.6.6 scorecard
 └── tests/ (in core/src/test/java/io/digibyte/core/security/)
     ├── SeedIsolationTest.kt
     ├── ManifestSecurityTest.kt
