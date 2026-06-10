@@ -619,7 +619,13 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
     buf[0] = '\0';
     size_t pos = 0;
 
-    for (size_t i = 0; i < txCount && i < 50; i++) { /* limit to 50 most recent */
+    /* BRWalletTransactions returns txs sorted by date OLDEST-FIRST (BRWallet.c).
+     * To cap at the 100 MOST RECENT we must start near the end of the array, not
+     * at index 0 — otherwise a wallet with >100 txs keeps its oldest 100 and drops
+     * every new send past the cap (balance still updates because it sums all txs,
+     * but the new tx never appears in the list). Start offset = txCount-100. */
+    size_t startIdx = (txCount > 100) ? (txCount - 100) : 0;
+    for (size_t i = startIdx; i < txCount; i++) { /* the 100 most recent */
         BRTransaction *tx = txs[i];
         if (!tx) continue;
 

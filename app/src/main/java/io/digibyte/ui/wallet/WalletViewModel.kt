@@ -449,16 +449,25 @@ class WalletViewModel @Inject constructor(
                     // First pass: find the highest tx block height as a floor.
                     // This ensures confirmations are computed correctly even before
                     // the peer manager loads saved blocks and reports a chain tip.
+                    // Exclude unconfirmed txs: their blockHeight is TX_UNCONFIRMED
+                    // (native INT32_MAX = 2_147_483_647). A pending send would
+                    // otherwise poison this floor and the height/progress readout
+                    // would jump to ~2.1 billion. Real block heights are ~23M.
                     val txHeights = txDetails.trim().lines().mapNotNull { line ->
                         line.split("|").getOrNull(3)?.toLongOrNull()
-                    }.filter { it > 0 }
+                    }.filter { it > 0 && it < Int.MAX_VALUE.toLong() }
                     val maxTxHeight = txHeights.maxOrNull() ?: 0L
                     if (maxTxHeight > currentHeight) currentHeight = maxTxHeight
 
                     val txList = txDetails.trim().lines().mapNotNull { line ->
                         val parts = line.split("|")
                         if (parts.size >= 5) {
-                            val txHeight = parts[3].toLongOrNull() ?: 0L
+                            // Normalize the unconfirmed sentinel (TX_UNCONFIRMED =
+                            // INT32_MAX from native) to 0 so confs computes as 0 and
+                            // the detail screen's "blockHeight > 0 ? height : Pending"
+                            // shows "Pending" rather than "2147483647".
+                            val rawHeight = parts[3].toLongOrNull() ?: 0L
+                            val txHeight = if (rawHeight in 1 until Int.MAX_VALUE.toLong()) rawHeight else 0L
                             val confs = if (txHeight > 0 && currentHeight >= txHeight)
                                 (currentHeight - txHeight + 1).toInt() else 0
                             val txid = parts[0]
@@ -496,8 +505,16 @@ class WalletViewModel @Inject constructor(
                             )
                         } else null
                     }
-                    // Sort newest first — native bridge returns unordered
-                    val sorted = txList.sortedByDescending { it.timestamp }
+                    // Most recent on top. Primary key is timestamp (native maps an
+                    // unconfirmed tx's 0 timestamp to now, so a fresh send sorts
+                    // above all confirmed history); blockHeight breaks ties between
+                    // txs sharing a timestamp. Not "pending first" — a restored
+                    // wallet briefly loads old txs as unconfirmed, and that would
+                    // float years-old history to the top until they re-confirm.
+                    val sorted = txList.sortedWith(
+                        compareByDescending<TransactionEntity> { it.timestamp }
+                            .thenByDescending { it.blockHeight }
+                    )
                     if (sorted != _transactions.value) {
                         _transactions.value = sorted
                     }
