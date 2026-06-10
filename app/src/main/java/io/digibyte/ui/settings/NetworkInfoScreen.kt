@@ -38,6 +38,7 @@ fun NetworkInfoScreen(
     val lastBlock by viewModel.lastBlockHeight.collectAsStateWithLifecycle()
     val estimatedHeight by viewModel.estimatedHeight.collectAsStateWithLifecycle()
     val torEnabled by viewModel.torEnabled.collectAsStateWithLifecycle()
+    val dandelionEnabled by viewModel.dandelionEnabled.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
 
     // Refresh network stats when this screen is opened
@@ -216,6 +217,25 @@ fun NetworkInfoScreen(
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.White,
                                     checkedTrackColor = Color(0xFF7C4DFF)
+                                )
+                            )
+                        }
+                    )
+
+                    SettingsRow(
+                        icon = Icons.Default.AltRoute,
+                        iconTint = Color(0xFF26A69A),
+                        title = "Dandelion broadcast",
+                        subtitle = "Hides which peer first saw your transaction. Falls back " +
+                            "to a normal broadcast if no Dandelion node is reachable.",
+                        onClick = { viewModel.setDandelionEnabled(!dandelionEnabled) },
+                        trailing = {
+                            Switch(
+                                checked = dandelionEnabled,
+                                onCheckedChange = { viewModel.setDandelionEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF26A69A)
                                 )
                             )
                         }

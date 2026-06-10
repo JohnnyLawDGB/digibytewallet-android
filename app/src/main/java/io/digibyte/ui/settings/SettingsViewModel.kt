@@ -1,10 +1,13 @@
 package io.digibyte.ui.settings
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.digibyte.core.WalletManager
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.WalletConfigEntity
 import io.digibyte.core.model.SyncState
@@ -24,6 +27,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val walletManager: WalletManager,
     private val pinManager: PinManager,
     private val walletConfigDao: WalletConfigDao,
@@ -59,6 +63,25 @@ class SettingsViewModel @Inject constructor(
     /** Whether Tor routing is currently enabled in user preferences. */
     private val _torEnabled = MutableStateFlow(torManager.isEnabled)
     val torEnabled: StateFlow<Boolean> = _torEnabled.asStateFlow()
+
+    // ── Dandelion broadcast privacy ───────────────────────────────────────────
+    /** Whether Dandelion stem submission is enabled (default on). Persisted to the
+     *  dgb_dandelion pref so SyncService.injectDandelionPeers reads it on sync start. */
+    private val _dandelionEnabled = MutableStateFlow(
+        context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
+            .getBoolean("enabled", true)
+    )
+    val dandelionEnabled: StateFlow<Boolean> = _dandelionEnabled.asStateFlow()
+
+    /** Toggle Dandelion stem submission: persist the pref, update the C-core gate,
+     *  and mirror the Kotlin-side Broadcaster flag. */
+    fun setDandelionEnabled(enabled: Boolean) {
+        _dandelionEnabled.value = enabled
+        Broadcaster.dandelionEnabled = enabled
+        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) { /* applied on next sync */ }
+        context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
+            .edit().putBoolean("enabled", enabled).apply()
+    }
 
     // ── Action results ────────────────────────────────────────────────────────
     private val _wipeResult = MutableStateFlow<WipeResult?>(null)
