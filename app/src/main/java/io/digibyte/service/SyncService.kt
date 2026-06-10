@@ -726,6 +726,10 @@ class SyncService : Service() {
         // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
         injectBloomPeers()
 
+        // Inject + mark Dandelion-capable peers so broadcasts can stem-submit.
+        // No-op (sends flood) until the seeder advertises any.
+        injectDandelionPeers()
+
         // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
         // Default sync mode is COMPACT_FILTERS_ONLY for new installs and any user
         // who hasn't explicitly chosen otherwise — wallet addresses never leave
@@ -1074,10 +1078,46 @@ class SyncService : Service() {
         )
     }
 
-    /** Try the seeder once. Returns the parsed peer list or null on failure. */
-    private fun fetchFromSeeder(): List<Pair<String, Int>>? {
+    /** Fetch the seeder's Dandelion-capable peers, connect them, and mark each
+     *  Dandelion-capable in the core so a broadcast can stem to one. The VPS
+     *  priority peer is covered because the seeder tags it (see the dandelion spec).
+     *  No capable peer → sends transparently flood (no privacy, still delivered). */
+    private fun injectDandelionPeers() {
+        val enabled = getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", true)
+        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) {}
+        if (!enabled) return
+
+        val prefs = getSharedPreferences("dgb_dandelion_peers", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val cached = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
+        val lastFetch = prefs.getLong("last_fetch", 0L)
+        val pool: List<Pair<String, Int>> =
+            if (now - lastFetch > BLOOM_REFRESH_INTERVAL_MS || cached.isEmpty()) {
+                val fresh = fetchFromSeeder("dandelion")
+                if (!fresh.isNullOrEmpty()) {
+                    prefs.edit().putString("peer_pool", serializePool(fresh))
+                        .putLong("last_fetch", now).apply()
+                    fresh
+                } else cached
+            } else cached
+
+        if (pool.isEmpty()) {
+            android.util.Log.i("SyncService", "Dandelion: no capable peers advertised — sends will flood")
+            return
+        }
+        for ((ip, port) in pool) {
+            NativeBridge.injectPeerByIp(ip, port)   // connect it (so it joins the pool)
+            NativeBridge.addDandelionPeer(ip)        // mark it Dandelion-capable
+        }
+        android.util.Log.i("SyncService", "Dandelion: injected + marked ${pool.size} capable peer(s)")
+    }
+
+    /** Try the seeder once. Returns the parsed peer list or null on failure.
+     *  [capability] filters the seeder pool (e.g. "dandelion"); null = default pool. */
+    private fun fetchFromSeeder(capability: String? = null): List<Pair<String, Int>>? {
+        val url = if (capability != null) "$SEEDER_URL?capability=$capability" else SEEDER_URL
         return try {
-            val request = Request.Builder().url(SEEDER_URL).build()
+            val request = Request.Builder().url(url).build()
             okHttpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     parsePeersJson(response.body!!.string())
