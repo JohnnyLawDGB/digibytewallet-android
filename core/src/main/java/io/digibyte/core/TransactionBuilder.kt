@@ -1,6 +1,7 @@
 package io.digibyte.core
 
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.entity.UtxoEntity
 
 sealed class TxResult {
@@ -46,7 +47,7 @@ class TransactionBuilder(
             ?: return TxResult.Error("Failed to sign transaction")
 
         // Broadcast via C core
-        val txid = NativeBridge.publishTransaction(signedTx)
+        val txid = Broadcaster.broadcast(signedTx)
             ?: return TxResult.Error("Failed to broadcast transaction")
 
         // Record the outgoing tx so the activity list can categorize it as

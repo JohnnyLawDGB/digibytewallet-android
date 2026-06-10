@@ -2,6 +2,7 @@ package io.digibyte.core.asset
 
 import io.digibyte.core.TxResult
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.dao.AssetBalance
 import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.dao.TransactionDao
@@ -786,7 +787,7 @@ class AssetManager(
         ) ?: return TxResult.Error("Native build/sign failed")
 
         val signedBytes = signedHex.hexToByteArray() ?: return TxResult.Error("Bad signed-tx hex")
-        val txid = NativeBridge.publishTransaction(signedBytes)
+        val txid = Broadcaster.broadcast(signedBytes)
             ?: return TxResult.Error("Broadcast failed — check peer connection")
 
         return TxResult.Success(txid)

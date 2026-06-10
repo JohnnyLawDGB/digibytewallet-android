@@ -1,6 +1,7 @@
 package io.digibyte.core.recovery
 
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.dandelion.Broadcaster
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -150,7 +151,7 @@ class LegacySweepService {
                 "signed hex malformed (self-check failed)"
             )
 
-        val txid = NativeBridge.publishTransaction(txBytes)
+        val txid = Broadcaster.broadcast(txBytes)
         return SweepOutcome(
             profile = profile,
             txHex = signedHex,
