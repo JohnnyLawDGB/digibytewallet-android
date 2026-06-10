@@ -2,7 +2,7 @@ package io.digibyte.core.tor
 
 import android.content.Context
 import android.util.Log
-import io.matthewnelson.kmp.tor.resource.exec.tor.ResourceLoaderTorExec
+import io.matthewnelson.kmp.tor.resource.noexec.tor.ResourceLoaderTorNoExec
 import io.matthewnelson.kmp.tor.runtime.Action
 import io.matthewnelson.kmp.tor.runtime.RuntimeEvent
 import io.matthewnelson.kmp.tor.runtime.TorRuntime
@@ -32,9 +32,12 @@ sealed class TorState {
 }
 
 /**
- * Manages Tor lifecycle via kmp-tor exec mode.
+ * Manages Tor lifecycle via kmp-tor no-exec mode (Tor loaded in-process via
+ * dlopen of libtorjni.so, not exec'd as a child process). No-exec is required
+ * for our uncompressed native-lib packaging (16 KB page-size compatibility) and
+ * avoids the SELinux exec-from-data-dir denials newer Android (15/16) enforces.
  *
- * Tor runs as a separate process — if it crashes, the wallet continues
+ * Tor runs in-process but on its own threads — if it fails, the wallet continues
  * functioning normally. SyncService calls [start] before sync when
  * [isEnabled] is true, and falls back to direct connections on failure.
  */
@@ -75,7 +78,7 @@ class TorManager(private val context: Context) {
         val env = TorRuntime.Environment.Builder(
             workDirectory = context.filesDir.resolve("tor"),
             cacheDirectory = context.cacheDir.resolve("tor"),
-            loader = ResourceLoaderTorExec::getOrCreate
+            loader = ResourceLoaderTorNoExec::getOrCreate
         )
 
         return TorRuntime.Builder(env) {
