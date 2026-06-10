@@ -422,6 +422,11 @@ class SyncService : Service() {
             // poll landing before the first re-anchored cfheaders append (cfTip
             // not yet jumped) can't re-fire it every poll.
             var reanchoredThisSession = false
+            // Wall-clock of the last re-anchor, for the rebuild grace window. A
+            // re-anchor frees the stuck chain (getCFChainTipHeight() then reads 0
+            // until the first cfheaders response rebuilds it); the grace keeps the
+            // watchdog from reading that transient 0 as "dead" and degrading to bloom.
+            var reanchorAtMs = 0L
             // Transient block-stall recovery: drop to bloom so any peer extends the
             // chain, then switch back to compact filters once caught up. Capped per
             // session so a flaky connection can't flap bloom↔filters forever.
@@ -548,24 +553,44 @@ class SyncService : Service() {
                 // filters at the floor. The skipped gap was already bloom-scanned —
                 // gated on hasReachedSynced, which is that guarantee.
                 if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
-                    if (hasReachedSynced && !reanchoredThisSession) {
-                        val reanchored = try {
-                            NativeBridge.reanchorCompactFilterChainAtFloor()
-                        } catch (t: Throwable) {
-                            android.util.Log.e("SyncService", "BIP158 watchdog: re-anchor threw", t)
-                            false
+                    when (decidePostTimeoutAction(hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs)) {
+                        PostTimeoutAction.REANCHOR -> {
+                            val reanchored = try {
+                                NativeBridge.reanchorCompactFilterChainAtFloor()
+                            } catch (t: Throwable) {
+                                android.util.Log.e("SyncService", "BIP158 watchdog: re-anchor threw", t)
+                                false
+                            }
+                            if (reanchored) {
+                                reanchoredThisSession = true
+                                reanchorAtMs = nowMs
+                                // Kotlin owns SharedPreferences: drop the stale chain so a
+                                // kill before the first re-anchored append can't restore
+                                // the stuck cfTip.
+                                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                    .edit().remove("saved_filter_headers").apply()
+                                android.util.Log.i("SyncService",
+                                    "BIP158 watchdog: re-anchored filter chain at block floor " +
+                                    "(cfTip was $cfTipNow, below floor) — staying on filters")
+                                continue
+                            }
+                            // re-anchor returned false (cfTip not actually below the
+                            // floor) — nothing left to try; degrade to bloom below.
                         }
-                        if (reanchored) {
-                            reanchoredThisSession = true
-                            // Kotlin owns SharedPreferences: drop the stale chain so a
-                            // kill before the first re-anchored append can't restore
-                            // the stuck cfTip.
-                            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
-                                .edit().remove("saved_filter_headers").apply()
-                            android.util.Log.i("SyncService",
-                                "BIP158 watchdog: re-anchored filter chain at block floor " +
-                                "(cfTip was $cfTipNow, below floor) — staying on filters")
+                        PostTimeoutAction.AWAIT_REANCHOR -> {
+                            // The re-anchor freed the stuck chain; getCFChainTipHeight()
+                            // reads 0 until the first cfheaders response lazily rebuilds
+                            // it. Don't read that rebuild window as a dead chain — keep
+                            // polling until the append lands (caught by the `advanced`
+                            // check above) or the grace window expires.
+                            android.util.Log.d("SyncService",
+                                "BIP158 watchdog: awaiting first cfheaders append after " +
+                                "re-anchor (${nowMs - reanchorAtMs}/${REANCHOR_GRACE_MS}ms) — " +
+                                "staying on filters")
                             continue
+                        }
+                        PostTimeoutAction.FALLBACK_BLOOM -> {
+                            // fall through to the bloom degrade below
                         }
                     }
                     android.util.Log.w("SyncService",
