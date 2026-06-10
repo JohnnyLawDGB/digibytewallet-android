@@ -54,6 +54,24 @@ object NativeBridge {
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
     external fun publishTransaction(signedTx: ByteArray): String?
 
+    // === Dandelion++ broadcast-origin privacy ===
+    /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
+     *  successful stem, or null if no capable peer was available (caller floods via
+     *  [publishTransaction]). */
+    external fun publishTransactionStem(signedTx: ByteArray): String?
+    /** Embargo fallback: flood a previously stem-submitted tx to all peers. */
+    external fun fluffTransaction(txid: String)
+    /** Number of connected peers that have relayed the given tx back (0 = not yet
+     *  propagated) — used to decide whether the embargo must self-fluff. */
+    external fun getRelayCount(txid: String): Int
+    /** Enable/disable Dandelion stem submission (default on in the core). */
+    external fun setDandelionEnabled(enabled: Boolean)
+    /** Mark a peer (by IP) as Dandelion-capable — sourced from the seeder + the
+     *  priority peer; there is no service bit to detect it from the handshake. */
+    external fun addDandelionPeer(ip: String)
+    /** True if Dandelion is enabled AND a connected peer is Dandelion-capable. */
+    external fun hasDandelionPeer(): Boolean
+
     // === Fee estimation ===
     /** Get estimated fee in sat/KB. priority: 0=high(next block), 1=medium, 2=low(economy). */
     external fun getEstimatedFee(priority: Int): Long

@@ -849,6 +849,41 @@ Java_io_digibyte_core_bridge_NativeBridge_getSyncMode(JNIEnv *env, jobject thiz)
 }
 
 JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setDandelionEnabled(JNIEnv *env, jobject thiz, jboolean enabled) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) {
+        LOGI("setDandelionEnabled: peer manager not created — ignoring (re-applied on sync start)");
+        return;
+    }
+    BRPeerManagerSetDandelionEnabled(g_peerManager, enabled ? 1 : 0);
+    LOGI("setDandelionEnabled: %d", enabled ? 1 : 0);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_addDandelionPeer(JNIEnv *env, jobject thiz, jstring ipStr) {
+    (void)thiz;
+    if (!g_peerManager || !ipStr) return;
+    const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
+    if (!ip) return;
+    struct in_addr ip4;
+    if (inet_pton(AF_INET, ip, &ip4) == 1) {
+        UInt128 addr = UINT128_ZERO;
+        addr.u16[5] = 0xffff;          /* IPv4-mapped IPv6 (::ffff:x.x.x.x) */
+        addr.u32[3] = ip4.s_addr;
+        BRPeerManagerAddDandelionPeer(g_peerManager, addr);
+        LOGI("addDandelionPeer: %s", ip);
+    }
+    (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_hasDandelionPeer(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) return JNI_FALSE;
+    return BRPeerManagerHasDandelionPeer(g_peerManager) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_fallbackToBloom(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     if (!g_peerManager) {

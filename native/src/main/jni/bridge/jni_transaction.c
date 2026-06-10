@@ -226,6 +226,81 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
     return (*env)->NewStringUTF(env, txidHex);
 }
 
+/* ---------- Dandelion stem / fluff / relay-count ---------- */
+
+/* Parse a 64-char display txid (reversed byte order) into an internal UInt256. */
+static UInt256 _u256FromTxidHex(const char *hex) {
+    UInt256 h = UINT256_ZERO;
+    for (int i = 0; i < 32; i++) {
+        unsigned byte = 0;
+        if (sscanf(hex + i * 2, "%2x", &byte) != 1) return UINT256_ZERO;
+        h.u8[31 - i] = (uint8_t)byte; /* reverse: display -> internal */
+    }
+    return h;
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
+                                                                 jbyteArray signedTx) {
+    (void)thiz;
+    if (!g_wallet || !g_peerManager || !signedTx) return NULL;
+    /* Fast no-op when no capable peer is connected — caller floods via
+       publishTransaction. Avoids parsing/registering a tx we won't stem. */
+    if (!BRPeerManagerHasDandelionPeer(g_peerManager)) return NULL;
+
+    jsize txLen = (*env)->GetArrayLength(env, signedTx);
+    if (txLen <= 0) return NULL;
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, signedTx, NULL);
+    if (!txBytes) return NULL;
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, signedTx, txBytes, JNI_ABORT);
+    if (!tx) { LOGE("publishTransactionStem: parse failed"); return NULL; }
+
+    UInt256 txHash = tx->txHash;
+    char txidHex[65];
+    for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
+    txidHex[64] = '\0';
+
+    /* Register before broadcast (same coherence rule as publishTransaction). */
+    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
+    BRWalletRegisterTransaction(g_wallet, tx);
+
+    /* NULL info/callback: a stem callback would be async and the stack-ctx pattern
+       in publishTransaction is UAF-prone; Kotlin monitors via getRelayCount. */
+    int stemmed = BRPeerManagerStemPublishTx(g_peerManager, tx, NULL, NULL);
+    if (!stemmed) {
+        /* Rare race: the capable peer dropped after the check above. The tx is
+           registered but unbroadcast — flood it so it isn't stranded. */
+        BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);
+        LOGW("publishTransactionStem: no stem peer at submit — flooded instead (txid=%s)", txidHex);
+    } else {
+        LOGD("publishTransactionStem: stemmed txid=%s", txidHex);
+    }
+    return (*env)->NewStringUTF(env, txidHex);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_fluffTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    if (!g_peerManager || !jtxid) return;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return;
+    if (strlen(txid) == 64) BRPeerManagerFluffTx(g_peerManager, _u256FromTxidHex(txid));
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    if (!g_peerManager || !jtxid) return 0;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return 0;
+    jint count = (strlen(txid) == 64)
+        ? (jint)BRPeerManagerRelayCount(g_peerManager, _u256FromTxidHex(txid)) : 0;
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return count;
+}
+
 /* ---------- registerRawTransaction ----------
  *
  * Injects a node-verified transaction into the wallet. Used by
