@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
@@ -178,7 +179,18 @@ fun MnemonicInputScreen(
                         return@Button
                     }
 
-                    viewModel.setRecoveryMnemonic(phrase)
+                    // Normalize to canonical form (lowercase, single-spaced) and verify
+                    // the BIP39 checksum. All-valid-words but bad-checksum means a
+                    // typo'd or made-up phrase — accepting it silently builds no wallet
+                    // and leaves sync stuck at "Connecting" forever. Reject it here.
+                    val normalizedPhrase = phraseWords.joinToString(" ") { it.trim().lowercase() }
+                    if (!NativeBridge.isValidMnemonic(normalizedPhrase)) {
+                        validationError =
+                            "This recovery phrase isn't valid. Double-check each word and its order."
+                        return@Button
+                    }
+
+                    viewModel.setRecoveryMnemonic(normalizedPhrase)
                     // Universal Restore: scan every known derivation path
                     // BEFORE the date picker. Surfaces funds on non-native
                     // paths (BIP44, BIP49, legacy m/0H w/ either HMAC) so we

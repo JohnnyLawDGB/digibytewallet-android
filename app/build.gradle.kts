@@ -15,8 +15,8 @@ android {
         applicationId = "io.digibyte"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30064 // x-release-please-version-code
-        versionName = "3.6.3" // x-release-please-version
+        versionCode = 30065 // x-release-please-version-code
+        versionName = "3.6.4" // x-release-please-version
     }
 
     // Match native module flavors
@@ -52,7 +52,14 @@ android {
     }
 
     packaging {
-        jniLibs.useLegacyPackaging = true
+        // Store native libs UNCOMPRESSED and page-aligned so the dynamic linker
+        // can mmap them directly from the APK. Required for 16 KB page-size
+        // devices (Android 15+/newer flagships): with legacy (compressed)
+        // packaging the libs aren't 16 KB-aligned in the APK and the app trips
+        // the "isn't 16 KB compatible" check — on a real 16 KB device the native
+        // SPV engine fails to load and the wallet hangs at "Connecting". Paired
+        // with the -Wl,-z,max-page-size=16384 ELF alignment in native/CMakeLists.
+        jniLibs.useLegacyPackaging = false
     }
 
     lint {

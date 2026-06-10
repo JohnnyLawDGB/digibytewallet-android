@@ -12,6 +12,11 @@ object NativeBridge {
     /** Generate BIP39 mnemonic. entropyBits: 128 = 12 words, 256 = 24 words */
     external fun generateMnemonic(entropyBits: Int): String?
 
+    /** Validate a BIP39 recovery phrase, including the checksum (not just wordlist
+     *  membership). Returns false for phrases whose words are all valid but whose
+     *  checksum doesn't match — i.e. a typo'd/invalid seed. Touches no wallet state. */
+    external fun isValidMnemonic(phrase: String): Boolean
+
     /** Create wallet from mnemonic phrase. Returns true on success. */
     external fun createWallet(phrase: String): Boolean
 

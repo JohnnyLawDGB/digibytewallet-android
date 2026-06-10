@@ -93,6 +93,24 @@ Java_io_digibyte_core_bridge_NativeBridge_generateMnemonic(JNIEnv *env, jobject 
     return result;
 }
 
+/* ---------- isValidMnemonic ----------
+ * Validates a BIP39 recovery phrase including the checksum (the last word
+ * encodes a checksum over the entropy). Returns false for phrases that are the
+ * right length and use real wordlist words but fail the checksum — the exact
+ * case where a typo'd/made-up phrase would otherwise be accepted, build no
+ * wallet, and leave sync stuck at "Connecting" forever. Lets the UI reject it
+ * at input time. Does NOT create or touch any wallet state. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isValidMnemonic(JNIEnv *env, jobject thiz, jstring phrase) {
+    (void)thiz;
+    if (!phrase) return JNI_FALSE;
+    const char *phraseChars = (*env)->GetStringUTFChars(env, phrase, NULL);
+    if (!phraseChars) return JNI_FALSE;
+    int valid = BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars);
+    (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
+    return valid ? JNI_TRUE : JNI_FALSE;
+}
+
 /* ---------- createWallet ---------- */
 
 JNIEXPORT jboolean JNICALL

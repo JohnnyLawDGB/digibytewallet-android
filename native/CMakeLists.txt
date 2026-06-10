@@ -125,3 +125,11 @@ target_link_libraries(
         android
         log
 )
+
+# 16 KB page-size compatibility (Android 15+ / newer flagships boot with 16 KB
+# memory pages; e.g. Galaxy S25 Ultra on Android 16). Without 16 KB-aligned LOAD
+# segments the dynamic linker rejects/mis-maps the lib on those devices, so the
+# native SPV engine never starts and the wallet hangs at "Connecting" with 0
+# peers. Force max-page-size=16384 so segments are aligned for both 4 KB and
+# 16 KB devices. (NDK r28 defaults to this; we set it explicitly for older NDKs.)
+target_link_options(core-lib PRIVATE "-Wl,-z,max-page-size=16384")
