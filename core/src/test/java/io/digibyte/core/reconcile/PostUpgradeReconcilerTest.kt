@@ -73,7 +73,9 @@ class PostUpgradeReconcilerTest {
 
     @Test
     fun `runIfNeeded writes pref on Done and schedules no retry`() = runTest {
-        val harness = MockHarness(storedVersion = 0, currentVersion = 30034)
+        // Real upgrade (last>0) so the reconcile actually runs — a fresh install
+        // (last==0) skips it (see the dedicated fresh-install test below).
+        val harness = MockHarness(storedVersion = 30033, currentVersion = 30034)
         val service = mockk<ChainReconciliationService>()
         coEvery { service.reconcile() } returns ChainReconciliationService.State.Done(
             scannedAddresses = 430,
@@ -92,7 +94,9 @@ class PostUpgradeReconcilerTest {
 
     @Test
     fun `runIfNeeded does NOT persist version on Failed (next launch will retry)`() = runTest {
-        val harness = MockHarness(storedVersion = 0, currentVersion = 30034)
+        // Real upgrade (last>0) so the reconcile runs and we can observe the
+        // no-persist-on-failure behavior (a fresh install would skip entirely).
+        val harness = MockHarness(storedVersion = 30033, currentVersion = 30034)
         val service = mockk<ChainReconciliationService>()
         coEvery { service.reconcile() } returns ChainReconciliationService.State.Failed("network down")
 
@@ -104,7 +108,8 @@ class PostUpgradeReconcilerTest {
 
     @Test
     fun `runIfNeeded swallows thrown exceptions without persisting`() = runTest {
-        val harness = MockHarness(storedVersion = 0, currentVersion = 30034)
+        // Real upgrade (last>0) so the reconcile runs and can throw.
+        val harness = MockHarness(storedVersion = 30033, currentVersion = 30034)
         val service = mockk<ChainReconciliationService>()
         coEvery { service.reconcile() } throws RuntimeException("rpc timeout")
 
@@ -112,6 +117,23 @@ class PostUpgradeReconcilerTest {
         PostUpgradeReconciler.runIfNeeded(harness.context) { service }
 
         verify(exactly = 0) { harness.editor.putInt(any(), any()) }
+    }
+
+    @Test
+    fun `runIfNeeded on fresh install (last=0) stamps baseline and skips the reconcile`() = runTest {
+        // A fresh install has no prior baseline to reconcile from (the wallet was
+        // just created/restored). Running a doomed post-upgrade reconcile here set
+        // the failed flag and false-fired the "Balance refresh failed" banner on
+        // brand-new wallets. So: stamp the baseline, skip the reconcile entirely.
+        val harness = MockHarness(storedVersion = 0, currentVersion = 30034)
+        val service = mockk<ChainReconciliationService>()
+        coEvery { service.reconcile() } throws AssertionError("service must not be called on a fresh install")
+
+        PostUpgradeReconciler.runIfNeeded(harness.context) { service }
+
+        // Baseline stamped so genuine FUTURE upgrades still reconcile.
+        verify { harness.editor.putInt(PostUpgradeReconciler.KEY_LAST_VERSION, 30034) }
+        verify { harness.editor.apply() }
     }
 
     @Test
