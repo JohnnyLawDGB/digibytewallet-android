@@ -105,6 +105,20 @@ object PostUpgradeReconciler {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val current = currentVersionCode(context)
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
+        // Fresh install (no prior baseline): there is no "post-upgrade" discrepancy
+        // to fix — the wallet was just created (empty) or restored (restore has its
+        // own funds-fetching path). Running the reconcile here means a doomed HTTP
+        // attempt that fails on the startup race / empty wallet, sets the failed
+        // flag, and raises a false "Balance refresh failed" banner on every new
+        // install (the banner then re-appears after dismiss because the failed
+        // reconcile retries each launch). Stamp the baseline so genuine FUTURE
+        // upgrades still reconcile, and skip now. Also clear any stale failed flag.
+        if (last == 0) {
+            persistVersion(prefs, current)
+            setFailedFlag(prefs, false)
+            Log.d(TAG, "fresh install — baseline stamped at v$current, no reconcile")
+            return
+        }
         if (!shouldRun(last, current)) {
             Log.d(TAG, "no reconcile needed (last=$last current=$current)")
             return

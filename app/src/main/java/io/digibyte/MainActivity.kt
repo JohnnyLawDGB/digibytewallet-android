@@ -29,6 +29,7 @@ import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.tor.TorManager
+import io.digibyte.core.tor.TorState
 import io.digibyte.service.SyncService
 import io.digibyte.ui.navigation.AppNavigation
 import io.digibyte.ui.theme.DigiByteTheme
@@ -109,14 +110,18 @@ class MainActivity : FragmentActivity() {
                     showTorPrompt = false
                 }
 
-                // A simple mechanism to trigger the dialog: re-check the flag
-                // once the composition is ready by reading it from TorManager prefs.
-                // The flag is set in applyTorDefaults() before setContent() runs
-                // for the first launch, but LaunchedEffect ensures it re-checks.
+                // Tor is disabled by default and no longer promoted — its no-exec
+                // SOCKS peer-routing is broken (roadmapped). Suppress the legacy
+                // "enable Tor?" first-launch prompt for upgrading Phase-1 wallets:
+                // mark it shown WITHOUT offering it, so nobody is nudged into a
+                // non-functional feature. Tor remains an opt-in in Settings.
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     val cfg = withContext(Dispatchers.IO) { walletConfigDao.get() }
                     if (cfg != null && !cfg.torPromptShown) {
-                        showTorPrompt = true
+                        torManager.upgradePromptShown = true
+                        withContext(Dispatchers.IO) {
+                            walletConfigDao.upsert(cfg.copy(torPromptShown = true))
+                        }
                     }
                 }
 
@@ -209,7 +214,14 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         if (walletManager.walletState.value !is WalletState.Unlocked) return
         val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { -1 }
-        if (peers == 0) {
+        // Don't kick a direct startSync while Tor is enabled and still
+        // bootstrapping — peers would dial direct before the SOCKS proxy is wired,
+        // leaking the IP. Once Tor reaches Connected (bootstrap 100%) or fails, the
+        // proxy is set / we've degraded, and this kick connects through Tor / direct.
+        val torState = torManager.state.value
+        val torComingUp = torManager.isEnabled &&
+            (torState is TorState.Connecting || torState is TorState.Starting)
+        if (peers == 0 && !torComingUp) {
             android.util.Log.i("MainActivity", "onResume with peerCount=0 — kicking startSync")
             // startSync opens sockets via BRPeerManagerConnect and can block for
             // seconds under network conditions — onResume must return quickly to
@@ -232,14 +244,19 @@ class MainActivity : FragmentActivity() {
     private suspend fun applyTorDefaults() {
         val cfg = withContext(Dispatchers.IO) { walletConfigDao.get() }
         if (cfg == null) {
-            // New install — enable Tor by default, mark prompt as shown
-            // (no need to ask — it's privacy-by-default).
-            torManager.isEnabled = true
+            // New install — Tor OFF by default. In-app Tor (kmp-tor no-exec) has a
+            // broken SOCKS peer-routing path (the C core gets "connection refused"
+            // on the in-process listener and degrades to direct every session), so
+            // we neither enable nor promote it. Privacy by default is BIP158
+            // compact filters (address privacy); IP anonymity, for users who need
+            // it, is better served by Orbot or a system VPN. Tor stays available as
+            // an opt-in in Settings → Network Info. Re-evaluate when the no-exec
+            // SOCKS routing is fixed or Tor is removed (see ROADMAP).
+            torManager.isEnabled = false
             torManager.upgradePromptShown = true
-            // WalletConfigEntity will be created by onboarding flow; TorManager
-            // prefs already have the right value. Nothing more needed here.
         }
-        // Upgrade case: cfg != null && !cfg.torPromptShown — dialog handles it.
+        // Upgrade case: cfg != null && !cfg.torPromptShown — the LaunchedEffect in
+        // setContent() now suppresses the legacy prompt (we don't promote Tor).
         // Normal run: cfg != null && cfg.torPromptShown — nothing to do.
     }
 

@@ -53,6 +53,25 @@ class TorManager(private val context: Context) {
     private val _bootstrapProgress = MutableStateFlow(0)
     val bootstrapProgress: StateFlow<Int> = _bootstrapProgress.asStateFlow()
 
+    // The SOCKS listener port, captured from the LISTENERS event. Tor opens this
+    // listener EARLY in bootstrap (within seconds), long before it can actually
+    // route traffic (circuits aren't built until bootstrap == 100%). We therefore
+    // hold the port here and only declare TorState.Connected once BOTH the port is
+    // known AND bootstrap has reached 100 — otherwise peer dials through the proxy
+    // hang until Tor finishes bootstrapping and the connection watchdog degrades
+    // to direct before Tor was ever usable.
+    @Volatile private var _socksPort: Int? = null
+
+    /** Emit Connected only when Tor is fully bootstrapped AND its SOCKS listener
+     *  is up — i.e. actually able to route. Idempotent. */
+    private fun maybeEmitConnected() {
+        val port = _socksPort
+        if (port != null && _bootstrapProgress.value >= 100 && _state.value !is TorState.Connected) {
+            _state.value = TorState.Connected(port)
+            Log.i(TAG, "Tor connected — SOCKS5 on 127.0.0.1:$port (bootstrap 100%)")
+        }
+    }
+
     private val prefs = context.getSharedPreferences("dgb_tor", Context.MODE_PRIVATE)
 
     var isEnabled: Boolean
@@ -91,7 +110,11 @@ class TorManager(private val context: Context) {
                         // bootstrap is a Byte (0–100), treat as unsigned
                         val progress = daemon.bootstrap.toInt() and 0xFF
                         _bootstrapProgress.value = progress
-                        if (progress < 100 && _state.value !is TorState.Connected) {
+                        if (progress >= 100) {
+                            // Fully bootstrapped — declare Connected if the SOCKS
+                            // listener is already up (else LISTENERS will do it).
+                            maybeEmitConnected()
+                        } else if (_state.value !is TorState.Connected) {
                             _state.value = TorState.Connecting
                         }
                     }
@@ -99,6 +122,9 @@ class TorManager(private val context: Context) {
                         _state.value = TorState.Starting
                     }
                     is KmpTorState.Daemon.Off -> {
+                        // Daemon went down — drop the stale SOCKS port so a restart
+                        // can't falsely re-emit Connected on an old listener.
+                        _socksPort = null
                         // Only reset to Disabled if we didn't already set Failed
                         if (_state.value !is TorState.Failed) {
                             _state.value = TorState.Disabled
@@ -109,14 +135,17 @@ class TorManager(private val context: Context) {
                 }
             }
 
-            // Capture SOCKS port once Tor has listeners
+            // Capture the SOCKS port once Tor has listeners. Do NOT declare
+            // Connected here — the listener opens early in bootstrap, before Tor
+            // can route. maybeEmitConnected() gates on bootstrap == 100%. Also do
+            // NOT force bootstrapProgress to 100 (that was the bug — it made the
+            // proxy get wired before circuits existed, so peer dials hung).
             observerStatic(RuntimeEvent.LISTENERS, executor) { listeners ->
                 // addr.port is a Port value type — .value extracts the Int
                 val addr = listeners.socks.firstOrNull()
                 if (addr != null) {
-                    _state.value = TorState.Connected(addr.port.value)
-                    _bootstrapProgress.value = 100
-                    Log.i(TAG, "Tor connected — SOCKS5 on 127.0.0.1:${addr.port.value}")
+                    _socksPort = addr.port.value
+                    maybeEmitConnected()
                 }
             }
 
@@ -242,6 +271,7 @@ class TorManager(private val context: Context) {
             Log.w(TAG, "teardownAfterFailure: enqueue threw", e)
         }
         synchronized(runtimeLock) { _runtime = null }
+        _socksPort = null
         _bootstrapProgress.value = 0
     }
 

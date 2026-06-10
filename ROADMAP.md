@@ -63,8 +63,26 @@ what actually makes this wallet different from a BlueWallet-style SPV client:
   device being unlocked. PIN brute-force also has no rate-limit.
 - **Digi-ID signs with the first wallet address** (`m/44'/20'/0'/0/0`),
   not an isolated key subtree. Digi-ID compromise = wallet compromise.
-- **Tor silently falls back to clearnet on failure** (`SyncService.kt:106–124`),
-  with no user-visible warning.
+- **Tor is DISABLED by default and not promoted (v3.6.6).** The in-app kmp-tor
+  *no-exec* integration (switched from exec in v3.6.5 for 16 KB page-size
+  compatibility) has a broken SOCKS peer-routing path: the C core gets
+  `connect error: Connection refused` on Tor's in-process SOCKS listener, so 0
+  peers ever route through Tor and the wallet degrades to direct every session.
+  Root analysis (2026-06-10): the listener port reported by kmp-tor's `LISTENERS`
+  event isn't reliably accepting connections, compounded by SOCKS-port churn
+  across the degrade→reconnect cycle (each restart gets a new auto-assigned port,
+  stranding the C core on a stale one). Today's session DID land correct adjacent
+  fixes that stay in for when Tor returns: bootstrap-100%-gated `Connected`
+  (don't wire the proxy before circuits exist), a reactive Tor-state observer
+  (re-wire + clear the banner on reconnect), keepalive/onResume deferral so peers
+  don't dial direct before the proxy, and `MAX_TOR_RECONNECT_FAILURES` 3→15.
+  **Roadmap decision:** either (a) fix no-exec SOCKS routing — pin a fixed
+  `SocksPort`, verify the listener accepts before declaring usable, retry on
+  ECONNREFUSED; or (b) remove in-app Tor entirely (drops the large libtor.so /
+  libtorjni.so, kills the 16 KB/SELinux/no-exec headaches) and document Orbot /
+  system VPN as the IP-anonymity path. In-app privacy stays: BIP158 compact
+  filters (address privacy, default) + Dandelion++ (tx-origin privacy, Phase 3).
+  Tor remains an opt-in toggle in Settings → Network Info for advanced users.
 
 The gap between "sovereign for signing" and "sovereign for data" is the
 central thing this roadmap closes.

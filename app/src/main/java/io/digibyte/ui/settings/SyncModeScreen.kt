@@ -33,7 +33,7 @@ fun SyncModeScreen(navController: NavController) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
     var selected by remember {
-        mutableStateOf(prefs.getInt(KEY_SYNC_MODE, NativeBridge.SyncMode.BLOOM_ONLY))
+        mutableStateOf(prefs.getInt(KEY_SYNC_MODE, NativeBridge.SyncMode.BOTH)) // default: Both (block preferred, bloom as parallel safety net)
     }
 
     val snackbarHostState = remember { SnackbarHostState() }

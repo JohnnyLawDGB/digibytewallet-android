@@ -156,6 +156,27 @@ class SyncService : Service() {
             serviceScope.launch { runTorFallbackWatchdog() }
         }
 
+        // Reactively track live Tor state. Whenever Tor reaches Connected — the
+        // initial bootstrap OR a user re-enabling it from Settings after a
+        // degraded session — re-wire its SOCKS proxy into the C core and clear
+        // any stale "Tor unavailable" banner. Without this the banner raised on a
+        // bootstrap-timeout degradation stays up forever even after Tor recovers
+        // (reported: disable→re-enable reconnects Tor but the banner persists).
+        serviceScope.launch {
+            torManager.state.collect { st ->
+                if (st is TorState.Connected && torManager.isEnabled) {
+                    NativeBridge.setSocksProxy("127.0.0.1", st.socksPort)
+                    torProxyActive = true
+                    torReconnectFailures = 0
+                    if (_torFailureActive.value) {
+                        _torFailureActive.value = false
+                        android.util.Log.i("SyncService",
+                            "Tor reconnected — re-wired SOCKS proxy, cleared degradation banner")
+                    }
+                }
+            }
+        }
+
         // Run the v5 per-asset-history backfill exactly once per install.
         // Fast path is a single correlated SQL statement against the utxos
         // table; fallback pass decodes orphaned rows' rawBytes OP_RETURN.
@@ -243,9 +264,22 @@ class SyncService : Service() {
                             android.util.Log.i("SyncService", "Continuing without Tor — user can re-enable from Settings")
                         }
                     }
-                    android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
-                    injectBloomPeers()
-                    NativeBridge.startSync()
+                    // Workflow guard: if Tor is enabled and still coming up (proxy
+                    // not yet wired and we haven't degraded), do NOT connect peers
+                    // yet. They would dial DIRECT before the SOCKS proxy is set —
+                    // leaking the IP — and the C core won't re-route an
+                    // already-connected peer when setSocksProxy lands later. Wait
+                    // for the Tor-state observer / startSyncWithTor to wire the proxy
+                    // (only emitted at bootstrap 100%), then connect through it.
+                    val torComingUp = torManager.isEnabled && !torProxyActive && !_torFailureActive.value
+                    if (torComingUp) {
+                        android.util.Log.d("SyncService",
+                            "Tor enabled but proxy not ready — deferring peer connect to avoid a direct-before-Tor leak")
+                    } else {
+                        android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
+                        injectBloomPeers()
+                        NativeBridge.startSync()
+                    }
                 } else {
                     if (torProxyActive) torReconnectFailures = 0
                     // Peers connected but sync may have stalled (download peer
@@ -612,6 +646,9 @@ class SyncService : Service() {
                 // Wire the SOCKS5 proxy into the C core before connecting to peers.
                 NativeBridge.setSocksProxy("127.0.0.1", torResult.socksPort)
                 torProxyActive = true
+                // Tor came up cleanly — clear any stale "Tor unavailable" banner
+                // left over from a previous degraded session.
+                _torFailureActive.value = false
             } else {
                 // Tor failed to start — clear any stale proxy, surface the
                 // failure to the UI banner, fall through to clearnet sync.
@@ -671,7 +708,7 @@ class SyncService : Service() {
         // if filter peers don't make progress; the choice resets on next launch
         // so we try filters again. Users can override in Settings → Sync Mode.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-        val syncMode = settings.getInt("sync_mode", NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
+        val syncMode = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH)
         NativeBridge.setSyncMode(syncMode)
         if (syncMode != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedFilters = prefs.getString("saved_filter_headers", null)
@@ -720,7 +757,7 @@ class SyncService : Service() {
         // +120s, and falsely declares progress. Without fallback firing in
         // the no-filter-peer case, the wallet sits with no bloom loaded and
         // silently misses every incoming tx.
-        val syncModeNow = settings.getInt("sync_mode", NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
+        val syncModeNow = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH)
         if (syncModeNow != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedTipForWatchdog = NativeBridge.getSavedBlocksTip()
             val anchorForWatchdog = if (savedTipForWatchdog > 0) savedTipForWatchdog
@@ -1160,8 +1197,17 @@ class SyncService : Service() {
          *  own connections at 5, so injecting more is a pool of candidates
          *  for the peer manager to pick from rather than concurrent connections. */
         private const val BLOOM_BATCH_SIZE = 20
-        /** Clear Tor proxy after this many consecutive 0-peer poll cycles. */
-        private const val MAX_TOR_RECONNECT_FAILURES = 3
+        /** Clear the Tor proxy and degrade to direct after this many consecutive
+         *  0-peer keepalive cycles (10s each = 150s). Must be GENEROUS: peers dial
+         *  through Tor's onion circuits far slower than direct (first circuit +
+         *  per-peer SOCKS dial routinely exceeds a minute), and a healthy Tor
+         *  connection must NOT be torn down just because peers are still
+         *  establishing. The old value of 3 (30s) killed Tor ~27s after it
+         *  connected on boot, forcing a manual re-enable. The dedicated
+         *  runTorFallbackWatchdog (TOR_FALLBACK_TIMEOUT_MS = 120s) is the primary
+         *  fallback for a genuinely-dead daemon; this is a longer mid-session
+         *  backstop that fires only after Tor has had ample time to route. */
+        private const val MAX_TOR_RECONNECT_FAILURES = 15
         /** How long to wait for BIP158 cfheaders progress before falling back
          *  to bloom for this session. The pool is thin (3 filter peers) so we
          *  need a generous window for Tor bootstrap + slow handshakes; 120s
