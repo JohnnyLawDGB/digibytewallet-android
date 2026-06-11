@@ -205,6 +205,10 @@ class SyncService : Service() {
     private suspend fun runPeerKeepalive() = coroutineScope {
         walletManager.walletState.first { it is WalletState.Unlocked }
         var tickCount = 0L
+        // Consecutive 10s ticks observed with 0 peers. The light reconnect
+        // (re-inject + startSync) can't dig a stuck manager out, so after
+        // ZERO_PEER_RECREATE_THRESHOLD ticks we escalate to a clean recreate.
+        var zeroPeerStreak = 0
         while (isActive) {
             delay(10_000L)
             // Stamp every tick so onStartCommand can detect a frozen-by-Doze
@@ -276,11 +280,20 @@ class SyncService : Service() {
                         android.util.Log.d("SyncService",
                             "Tor enabled but proxy not ready — deferring peer connect to avoid a direct-before-Tor leak")
                     } else {
+                        zeroPeerStreak++
+                        if (zeroPeerStreak >= ZERO_PEER_RECREATE_THRESHOLD) {
+                            android.util.Log.w("SyncService",
+                                "0 peers for $zeroPeerStreak cycles — light reconnect isn't recovering, " +
+                                "forcing a clean peer-manager recreate")
+                            try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
+                            zeroPeerStreak = 0
+                        }
                         android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
                         injectBloomPeers()
                         NativeBridge.startSync()
                     }
                 } else {
+                    zeroPeerStreak = 0
                     if (torProxyActive) torReconnectFailures = 0
                     // Peers connected but sync may have stalled (download peer
                     // disconnected, remaining peers aren't driving the sync).
@@ -1351,5 +1364,11 @@ class SyncService : Service() {
          *  cancels the old job and respawns. Chosen to be > 5× the normal
          *  10s tick to avoid respawn thrash under short GC pauses etc. */
         private const val KEEPALIVE_STALE_THRESHOLD_MS = 60_000L
+
+        /** Consecutive 10s keepalive ticks at 0 peers before escalating from a light
+         *  reconnect (re-inject + startSync) to a clean peer-manager recreate
+         *  (forceReconnect). 3 ticks ≈ 30s — gives the light path a few tries first,
+         *  then digs out a manager stuck after long Doze idle. */
+        private const val ZERO_PEER_RECREATE_THRESHOLD = 3
     }
 }

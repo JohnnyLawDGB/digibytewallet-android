@@ -94,9 +94,19 @@ class SettingsViewModel @Inject constructor(
 
     fun refreshNetworkStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            _peerCount.value = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+            val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+            _peerCount.value = peers
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
+            // Wake-up: a manual refresh at 0 peers should actually reconnect, not just
+            // repaint the count. Force a clean recreate so a manager stuck after long
+            // idle re-dials (digiscope.me + cached peers are always re-injected).
+            if (peers == 0) {
+                runCatching {
+                    NativeBridge.forceReconnect()
+                    NativeBridge.startSync()
+                }
+            }
         }
     }
 

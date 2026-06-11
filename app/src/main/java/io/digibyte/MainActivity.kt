@@ -222,13 +222,19 @@ class MainActivity : FragmentActivity() {
         val torComingUp = torManager.isEnabled &&
             (torState is TorState.Connecting || torState is TorState.Starting)
         if (peers == 0 && !torComingUp) {
-            android.util.Log.i("MainActivity", "onResume with peerCount=0 — kicking startSync")
+            android.util.Log.i("MainActivity", "onResume with peerCount=0 — forcing a clean reconnect")
             // startSync opens sockets via BRPeerManagerConnect and can block for
             // seconds under network conditions — onResume must return quickly to
             // avoid an ANR, so dispatch to IO.
             lifecycleScope.launch(Dispatchers.IO) {
-                try { NativeBridge.startSync() } catch (t: Throwable) {
-                    android.util.Log.w("MainActivity", "startSync kick failed", t)
+                try {
+                    // forceReconnect first: after a long idle the existing manager is
+                    // often stuck (dead peers holding the slots) and startSync alone
+                    // (→ BRPeerManagerConnect) can't dig it out. A clean recreate does.
+                    NativeBridge.forceReconnect()
+                    NativeBridge.startSync()
+                } catch (t: Throwable) {
+                    android.util.Log.w("MainActivity", "reconnect kick failed", t)
                 }
             }
         }

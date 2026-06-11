@@ -388,6 +388,24 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);
 }
 
+/* ---------- forceReconnect ---------- */
+
+/* Flag the peer manager for a clean recreate on the next startSync(). Recovers a
+ * stuck manager (silent mass-disconnect after long Doze idle, where the dead peers
+ * still occupy the connection slots so BRPeerManagerConnect won't dial fresh ones).
+ * The caller must follow with startSync(), which tears the manager down and rebuilds
+ * a fresh one that re-dials from g_savedPeers + the digiscope.me priority peer. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_forceReconnect(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    if (!g_peerManager) {
+        LOGI("forceReconnect: no peer manager — startSync will create one");
+        return;
+    }
+    LOGI("forceReconnect: flagging peer manager for a clean recreate");
+    g_peerManagerNeedsRecreate = 1;
+}
+
 /* ---------- startSync ---------- */
 
 JNIEXPORT void JNICALL

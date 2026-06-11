@@ -90,6 +90,10 @@ object NativeBridge {
 
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
+    /** Flag the peer manager for a clean recreate on the next startSync() — recovers
+     *  from a stuck manager (0 peers that won't reconnect after long idle/Doze).
+     *  Call this immediately before startSync(). */
+    external fun forceReconnect()
 
     /** Stop SPV sync — disconnects from all peers. */
     external fun stopSync()
