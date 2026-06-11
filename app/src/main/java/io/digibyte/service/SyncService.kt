@@ -726,10 +726,6 @@ class SyncService : Service() {
         // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
         injectBloomPeers()
 
-        // Inject + mark Dandelion-capable peers so broadcasts can stem-submit.
-        // No-op (sends flood) until the seeder advertises any.
-        injectDandelionPeers()
-
         // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
         // Default sync mode is COMPACT_FILTERS_ONLY for new installs and any user
         // who hasn't explicitly chosen otherwise — wallet addresses never leave
@@ -1028,6 +1024,10 @@ class SyncService : Service() {
      *      session is still usable.
      */
     private fun injectBloomPeers() {
+        // Dandelion peers piggyback here so they're injected at every sync-start
+        // path (all of them call injectBloomPeers). Runs first so bloom's early
+        // returns can't skip it; self-throttled by its own last_fetch timer.
+        injectDandelionPeers()
         val prefs = getSharedPreferences("dgb_bloom_peers", MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
