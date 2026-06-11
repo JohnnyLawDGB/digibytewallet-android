@@ -174,6 +174,7 @@ JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
                                                               jbyteArray signedTx) {
     (void)thiz;
+    PEER_GUARD();
 
     if (!g_wallet || !g_peerManager) {
         LOGW("publishTransaction: wallet or peer manager not initialized");
@@ -243,6 +244,7 @@ JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
                                                                  jbyteArray signedTx) {
     (void)thiz;
+    PEER_GUARD();
     if (!g_wallet || !g_peerManager || !signedTx) return NULL;
     /* Fast no-op when no capable peer is connected — caller floods via
        publishTransaction. Avoids parsing/registering a tx we won't stem. */
@@ -282,6 +284,7 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jo
 JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_fluffTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
+    PEER_GUARD();
     if (!g_peerManager || !jtxid) return;
     const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
     if (!txid) return;
@@ -292,6 +295,7 @@ Java_io_digibyte_core_bridge_NativeBridge_fluffTransaction(JNIEnv *env, jobject 
 JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
+    PEER_GUARD();
     if (!g_peerManager || !jtxid) return 0;
     const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
     if (!txid) return 0;

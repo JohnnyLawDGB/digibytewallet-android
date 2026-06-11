@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <time.h>
+#include <pthread.h>
 
 /* C core headers */
 #include "BRWallet.h"
@@ -45,6 +46,39 @@ extern JavaVM *g_jvm;
 /* Wallet and peer manager — owned by the C core, managed by jni_wallet.c / jni_peer.c */
 extern BRWallet     *g_wallet;
 extern BRPeerManager *g_peerManager;
+
+/* ---------- Peer manager concurrency guard ----------
+ *
+ * g_peerManager is created, freed, and read from many threads: MainActivity
+ * onResume reconnect, SyncService's 10s keepalive, WalletViewModel pull-to-
+ * refresh wake-up, SyncWorker, the BIP158 watchdog, and the tx broadcast /
+ * Dandelion-stem path. startSync() tears the manager down (BRPeerManagerFree)
+ * and rebuilds it; without serialization a concurrent caller dereferences a
+ * pointer another thread is mid-free on → use-after-free / double-free →
+ * native SIGSEGV. Every JNI entry point that touches g_peerManager holds this
+ * recursive lock for its whole body via PEER_GUARD().
+ *
+ * IMPORTANT: the BRPeerManager callbacks (bridge_syncStarted / syncStopped /
+ * txStatusUpdate) run on the manager's OWN peer threads and MUST NOT take this
+ * lock. BRPeerManagerFree() joins those threads while a JVM thread holds the
+ * lock, so a lock attempt inside a callback would deadlock. At 0 peers no peer
+ * threads exist, which is exactly the reported crash window — pure JVM-thread
+ * contention, fully closed here.
+ *
+ * Initialized recursive in JNI_OnLoad (jni_wallet.c). */
+extern pthread_mutex_t g_peerManagerMutex;
+
+static inline void _peerManagerUnlock(int *guard) {
+    (void)guard;
+    pthread_mutex_unlock(&g_peerManagerMutex);
+}
+
+/* Acquire g_peerManagerMutex for the rest of the enclosing scope. The cleanup
+ * attribute (Clang/NDK) releases it on EVERY return path, so the many early
+ * `return`s in the guarded functions can't leak the lock. */
+#define PEER_GUARD() \
+    int _peerGuard __attribute__((cleanup(_peerManagerUnlock), unused)) = \
+        (pthread_mutex_lock(&g_peerManagerMutex), 0)
 
 /* Session seed — managed by jni_wallet.c, accessed via functions below.
  * g_seed is static to jni_wallet.c — no direct extern access. */

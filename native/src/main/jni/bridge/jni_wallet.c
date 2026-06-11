@@ -14,6 +14,7 @@
 JavaVM       *g_jvm          = NULL;
 BRWallet     *g_wallet       = NULL;
 BRPeerManager *g_peerManager = NULL;
+pthread_mutex_t g_peerManagerMutex;  /* recursive; initialized in JNI_OnLoad. Guards all g_peerManager access — see PEER_GUARD in jni_bridge.h */
 static uint8_t  g_seed[64];
 static int      g_seedValid = 0;
 BRMasterPubKey g_mpk;
@@ -36,6 +37,16 @@ jmethodID g_mid_onBalanceChanged       = NULL;
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     (void)reserved;
     g_jvm = vm;
+
+    /* Recursive mutex serializing every g_peerManager access across the bridge
+     * (jni_peer.c / jni_transaction.c / jni_wallet.c). Recursive so a future
+     * nested guarded call on the same thread can't self-deadlock. */
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_peerManagerMutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+
     LOGI("JNI_OnLoad: core-lib loaded, JVM cached");
     return JNI_VERSION_1_6;
 }

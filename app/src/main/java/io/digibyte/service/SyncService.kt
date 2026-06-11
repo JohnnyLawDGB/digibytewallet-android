@@ -101,9 +101,37 @@ class SyncService : Service() {
         createNotificationChannel()
     }
 
+    /**
+     * Android 15 (API 35) caps the cumulative runtime of dataSync foreground
+     * services at 6 hours per 24-hour window. When the budget is spent the system
+     * calls this; if we don't stop promptly it force-crashes us with a
+     * RemoteServiceException. We intentionally keep the FGS alive after sync (to
+     * hold peers while the app is open), so a long foreground session can reach the
+     * cap — drop foreground and stop. Peers reconnect via MainActivity.onResume /
+     * the watchdog the next time the user interacts, by which point the budget has
+     * reset. No-op on API < 35 (never called).
+     */
+    override fun onTimeout(startId: Int) {
+        android.util.Log.w("SyncService", "dataSync FGS 6h timeout (Android 15) — stopping service to comply")
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Must call startForeground within 5 seconds — do it first thing.
-        startForeground(NOTIFICATION_ID, buildNotification(progress = 0f, peerCount = 0))
+        // Android 15 caps dataSync FGS at 6h/24h and can deny the start once the
+        // budget is spent (ForegroundServiceStartNotAllowedException); background
+        // starts can also be rejected on 12+. If the promotion is denied, stop
+        // cleanly rather than crashing (or hitting the "did not call
+        // startForeground" kill) — the budget resets when the app is next
+        // foregrounded, and onResume / the watchdog re-kick the service then.
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(progress = 0f, peerCount = 0))
+        } catch (t: Throwable) {
+            android.util.Log.e("SyncService", "startForeground denied — stopping service to avoid a crash", t)
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         // On repeat onStartCommand (watchdog kick, sticky-restart), resurrect
         // the peer-keepalive coroutine if it died silently. Without this the
