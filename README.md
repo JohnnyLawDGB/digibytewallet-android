@@ -34,7 +34,7 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Tor by default** — All network connections routed through Tor (SOCKS5 proxy in the C core). New installs have Tor enabled by default.
 - **Multi-peer random submission** — Transactions submitted to a randomly chosen peer to obscure origin.
 - **Trusted full node relay** — Optionally connect exclusively to your own node with Dandelion++ for maximum privacy.
-- **Dandelion++ SPV stem submission** — [DIP filed](https://github.com/DigiByte-Core/dips/pull/15) to extend Dandelion++ to lightweight wallets. First-in-class for any UTXO chain.
+- **Dandelion++ SPV stem submission** — Shipped in `v3.7.0`: each broadcast stem-submits to a single Dandelion node ([DIP #15](https://github.com/DigiByte-Core/dips/pull/15)) with an embargo/fluff fallback so delivery is never sacrificed for privacy. First-in-class for any UTXO chain.
 
 ### Community Hub
 - **Real-time chat** — Channel-based messaging via WebSocket. General, Trading, Development, Assets channels.

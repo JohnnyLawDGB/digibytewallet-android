@@ -465,7 +465,7 @@ v3.5.11.
 | Multiple accounts | Not started | Phase 4 |
 | Tor as transport | Shipped | Silent-fallback gap — Phase 2 |
 | BIP 157/158 compact filters | **Not started** | **Phase 1 — the point of this roadmap** |
-| Dandelion++ broadcast privacy | Not started | Future; depends on DigiByte Core 9.26 |
+| Dandelion++ stem submission | Shipped `v3.7.0` | SPV stem-submit on the live v8.26 network (the 9.26 dependency was incorrect); seeder-tagged dandelion peers + random embargo/fluff fallback so delivery is never sacrificed |
 
 ## Versioning
 
