@@ -52,6 +52,33 @@ class WalletViewModel @Inject constructor(
     private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
     val transactions: StateFlow<List<TransactionEntity>> = _transactions.asStateFlow()
 
+    /** Pull-to-refresh spinner state for the wallet screen. */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /** Pull-to-refresh "wake up": if disconnected, force a clean peer-manager
+     *  recreate (recovers a manager stuck after long idle); either way kick
+     *  startSync to catch up to the tip. Holds the spinner until peers reconnect
+     *  or ~8s elapse. */
+    fun refresh() {
+        if (_isRefreshing.value) return
+        _isRefreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+                if (peers == 0) runCatching { NativeBridge.forceReconnect() }
+                runCatching { NativeBridge.startSync() }
+                var waited = 0
+                while (waited < 8000 &&
+                       runCatching { NativeBridge.getPeerCount() }.getOrDefault(0) == 0) {
+                    delay(500); waited += 500
+                }
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
     /** Live SPV peer count from the C core peer manager. Updated on the
      *  same 5s cadence as balance/tx polling. SendScreen uses this to gate
      *  the Review & Send button (broadcasting with zero peers silently
