@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
@@ -59,6 +60,14 @@ fun WalletScreen(
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
     val bloomFallback by viewModel.bloomFallbackActive.collectAsStateWithLifecycle()
     val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
+
+    // Report RESUMED state so the poll loop's active-screen readiness nudge only
+    // fires while the user is actually looking at this screen — never in the
+    // background or behind a pushed-over destination. Pairs with [shouldWakePeers].
+    LifecycleResumeEffect(viewModel) {
+        viewModel.setScreenActive(true)
+        onPauseOrDispose { viewModel.setScreenActive(false) }
+    }
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,

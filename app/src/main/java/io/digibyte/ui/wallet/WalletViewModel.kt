@@ -142,6 +142,18 @@ class WalletViewModel @Inject constructor(
      *  keeps dying. */
     @Volatile private var lastWatchdogKickMs: Long = 0L
 
+    /** True while the wallet Activity is in the RESUMED lifecycle state — the
+     *  user is actively looking at this screen, not backgrounded and not behind
+     *  a pushed-over destination. Drives the active-screen connection-readiness
+     *  nudge in [pollNativeBalance]; see [shouldWakePeers]. Reported from
+     *  WalletScreen via a lifecycle observer. */
+    @Volatile private var screenActive: Boolean = false
+
+    /** Reports the wallet screen's RESUMED state into the poll loop. */
+    fun setScreenActive(active: Boolean) {
+        screenActive = active
+    }
+
     /** Composite UI-facing sync progress object — consumed by WalletScreen
      *  to render the verbose during-scan UI (stage / progress / ETA /
      *  match count / running balance / scan-window banner). */
@@ -445,6 +457,29 @@ class WalletViewModel @Inject constructor(
                 // idempotent so this is a no-op if it's already running.
                 checkPeerWatchdog(peers)
 
+                // Active-screen connection readiness. While the user is actively
+                // on this screen, gently wake a dormant (0-peer) SPV manager on
+                // this ~5s tick instead of waiting on the 10s SyncService
+                // keepalive — so a send/receive isn't left waiting on a cold
+                // connection. startSync() only (no forceReconnect): the keepalive
+                // and onResume own the heavier recreate, and keeping this layer
+                // gentle means it can't add broadcast latency or re-open the
+                // v3.7.1 recreate race. Tor-guarded so we never dial direct while
+                // the SOCKS proxy is still wiring up (would leak our IP). The C
+                // core self-heals nonzero counts on its own, and startSync no-ops
+                // above 0 peers, so this only fires at exactly 0.
+                val torState = torManager.state.value
+                val torComingUp = torManager.isEnabled &&
+                    (torState is TorState.Starting || torState is TorState.Connecting)
+                if (shouldWakePeers(screenActive, torComingUp, peers)) {
+                    android.util.Log.i("WalletVM", "active screen + 0 peers — gentle startSync wake")
+                    try {
+                        NativeBridge.startSync()
+                    } catch (t: Throwable) {
+                        android.util.Log.w("WalletVM", "active-screen wake startSync threw", t)
+                    }
+                }
+
                 // Poll transactions
                 var currentHeight = NativeBridge.getLastBlockHeight()
                 val estHeight = NativeBridge.getEstimatedBlockHeight()
@@ -503,14 +538,18 @@ class WalletViewModel @Inject constructor(
                             val nativeSent = if (parts.size >= 7) parts[5].toLongOrNull() ?: 0L else 0L
                             val nativeReceived = if (parts.size >= 7) parts[6].toLongOrNull() ?: 0L else 0L
 
-                            // BRWalletAmountSentByTx returns 0 when the parent UTXO txs
-                            // aren't in BRWallet->allTx (Universal-Restore wallets and
-                            // post-bloom-fallback re-downloads hit this). The C wallet
-                            // then reports amount = received - sent = +change, so the UI
-                            // mis-categorizes the user's send as a receive. The locally
-                            // recorded broadcast is authoritative for what WE sent.
+                            // BRWalletAmountSentByTx under-counts when parent UTXO txs
+                            // aren't all in BRWallet->allTx (Universal-Restore wallets and
+                            // post-bloom-fallback re-downloads hit this). When ALL parents
+                            // are missing it returns 0 (amount = received - sent = +change,
+                            // mis-categorized as a receive); when SOME are missing it returns
+                            // a partial, undercounted sum (amount = change - partialInputs, a
+                            // wrong negative — e.g. a 5.2121 send rendered as -2.1133386).
+                            // For any tx WE broadcast, OutgoingTxStore holds the authoritative
+                            // recipient amount/fee/address, so it wins whenever a record
+                            // exists — not only the all-parents-missing (nativeSent==0) case.
                             val recorded = outgoingTxStore.lookup(txid)
-                            val applyOverride = recorded != null && nativeSent == 0L
+                            val applyOverride = recorded != null
                             val amount = if (applyOverride) -recorded!!.sentSats else nativeAmount
                             val fee = if (applyOverride) recorded!!.feeSats else nativeFee
                             val toAddress = if (applyOverride) recorded!!.toAddress else ""
