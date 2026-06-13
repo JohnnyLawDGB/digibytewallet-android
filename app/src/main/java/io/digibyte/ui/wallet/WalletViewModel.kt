@@ -417,7 +417,14 @@ class WalletViewModel @Inject constructor(
     /** Poll the C core for balance and transactions every 5 seconds.
      *  The C core tracks these from SPV sync — Room DB is secondary. */
     private fun pollNativeBalance() {
-        viewModelScope.launch {
+        // MUST run off the main thread. The native reads below (getPeerCount,
+        // getBalance, getTransactionDetails, …) take the v3.7.1 PEER_GUARD
+        // mutex. During a send the broadcast/Dandelion-stem path holds that
+        // mutex while writing to peers; a main-thread getPeerCount() then
+        // blocks behind it and ANRs the UI (observed: ~52s input stall on a
+        // test send, v3.7.2). Dispatchers.IO turns that contention into a
+        // harmless background wait — matches refresh()'s dispatcher.
+        viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 // Poll balance
                 val nativeBalance = NativeBridge.getBalance()
