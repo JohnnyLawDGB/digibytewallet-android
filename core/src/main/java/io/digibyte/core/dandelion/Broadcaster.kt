@@ -31,7 +31,7 @@ object Broadcaster {
     /** Mirrors the user's Dandelion setting; updated by the settings toggle, which
      *  also calls [NativeBridge.setDandelionEnabled] (the authoritative gate). */
     @Volatile
-    var dandelionEnabled: Boolean = true
+    var dandelionEnabled: Boolean = false
 
     /** Broadcast a signed tx. Returns the txid on success, or null on failure. */
     fun broadcast(signedTx: ByteArray): String? {

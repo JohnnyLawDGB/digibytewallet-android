@@ -154,13 +154,24 @@ class TorManager(private val context: Context) {
                 Log.e(TAG, "Tor runtime error", t)
             }
 
-            // Non-persistent config: SocksPort=auto, SafeSocks=1
+            // Non-persistent config: SocksPort=auto, SafeSocks=0.
             // ConfigCallback.invoke is an extension on TorConfig.BuilderScope,
             // so 'this' inside the lambda is TorConfig.BuilderScope.
             // configure() is a MEMBER EXTENSION — call it as option.configure { ... }
+            //
+            // SafeSocks MUST be off here. SafeSocks=1 makes Tor reject any SOCKS5
+            // request that carries a raw IP address (the "unsafe" variant that
+            // implies the app did its own DNS). The SPV C core only ever dials
+            // peers by raw IP (ATYP=IPv4/IPv6 in BRPeer.c's CONNECT), so with
+            // SafeSocks=1 Tor instantly rejected every peer dial — the handshake
+            // failed (~3ms, REP!=0), the core mapped it to ECONNREFUSED, and the
+            // wallet degraded to direct every session (device-confirmed Note 8).
+            // SafeSocks guards against local-DNS leaks, which don't apply to
+            // IP-based P2P — peers are public node addresses, not hostnames, and
+            // the seeder's HTTP already routes through this same proxy.
             config {
                 TorOption.__SocksPort.configure { auto() }
-                TorOption.SafeSocks.configure(true)
+                TorOption.SafeSocks.configure(false)
             }
 
             required(TorEvent.ERR)

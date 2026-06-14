@@ -305,6 +305,49 @@ Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thi
     return count;
 }
 
+/* ---------- removeTransaction ----------
+ * Drop a transaction (and any dependents) from the wallet, restoring the
+ * balance view. Used to clear a phantom unconfirmed send that can never confirm
+ * — a double-spend whose inputs were already spent by a confirmed tx. Guarded
+ * by a transaction-exists check so an unknown hash is a harmless no-op. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    if (!g_wallet || !jtxid) return JNI_FALSE;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return JNI_FALSE;
+    jboolean removed = JNI_FALSE;
+    if (strlen(txid) == 64) {
+        UInt256 h = _u256FromTxidHex(txid);
+        if (BRWalletTransactionForHash(g_wallet, h)) {
+            BRWalletRemoveTransaction(g_wallet, h);
+            LOGI("removeTransaction: dropped %s", txid);
+            removed = JNI_TRUE;
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return removed;
+}
+
+/* ---------- isTransactionValid ----------
+ * Returns false when the tx's inputs are already spent by another (confirmed)
+ * tx — i.e. a double-spend that can never confirm. Returns true for unknown
+ * hashes (don't act on a tx the wallet doesn't hold). */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    if (!g_wallet || !jtxid) return JNI_TRUE;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return JNI_TRUE;
+    jboolean valid = JNI_TRUE;
+    if (strlen(txid) == 64) {
+        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, _u256FromTxidHex(txid));
+        if (tx) valid = BRWalletTransactionIsValid(g_wallet, tx) ? JNI_TRUE : JNI_FALSE;
+    }
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return valid;
+}
+
 /* ---------- registerRawTransaction ----------
  *
  * Injects a node-verified transaction into the wallet. Used by

@@ -7,6 +7,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.UtxoManager
+import io.digibyte.core.OutgoingTxStore
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.asset.AssetManager
@@ -193,9 +194,36 @@ class SyncService : Service() {
         serviceScope.launch {
             torManager.state.collect { st ->
                 if (st is TorState.Connected && torManager.isEnabled) {
+                    val wasActive = torProxyActive
                     NativeBridge.setSocksProxy("127.0.0.1", st.socksPort)
                     torProxyActive = true
                     torReconnectFailures = 0
+                    // On the transition INTO Tor-routing (e.g. the user enables
+                    // Tor mid-session), drop the leftover pre-Tor clearnet peers
+                    // and re-dial through SOCKS. The C core won't re-route an
+                    // already-connected peer when the proxy lands, so without this
+                    // those direct connections keep syncing in the clear (an IP
+                    // leak) while only new dials use Tor.
+                    //
+                    // Use stopSync()+startSync(), NOT forceReconnect(): stopSync
+                    // is a plain BRPeerManagerDisconnect (drops all peers, keeps
+                    // the manager and its in-memory block chain), so startSync
+                    // then re-dials through the now-set SOCKS proxy WITHOUT a
+                    // recreate. forceReconnect frees and rebuilds the manager,
+                    // which re-floors the chain to the wallet's birth checkpoint
+                    // and forces a ~480k-block re-sync — making already-confirmed
+                    // txs briefly show unconfirmed (device-observed). Off-main
+                    // (serviceScope = Dispatchers.Default).
+                    if (!wasActive) {
+                        android.util.Log.i("SyncService",
+                            "Tor active — dropping direct peers, re-dialing through SOCKS (chain preserved)")
+                        try {
+                            NativeBridge.stopSync()
+                            NativeBridge.startSync()
+                        } catch (t: Throwable) {
+                            android.util.Log.w("SyncService", "Tor-activate reconnect threw", t)
+                        }
+                    }
                     if (_torFailureActive.value) {
                         _torFailureActive.value = false
                         android.util.Log.i("SyncService",
@@ -770,6 +798,24 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
         }
 
+        // Release the peer-manager creation gate now that saved blocks/peers are
+        // in the C core. Until this, any racing early startSync (onResume, the
+        // active-screen wake, the keepalive) is deferred — otherwise it would
+        // build the manager with no saved blocks and floor the chain at the
+        // birth checkpoint (~480k-block re-sync every launch). Called
+        // unconditionally so fresh wallets (no saved blocks) also proceed.
+        NativeBridge.markSavedBlocksLoadComplete()
+
+        // For a wallet that has synced before and is resuming at the saved tip,
+        // suppress the one-time post-first-sync rescan — it re-floors the chain
+        // to the birth checkpoint (~480k-block re-download) to catch txs a
+        // from-scratch header-only sync would miss, but a resuming wallet
+        // already did that scan in a prior session. Fresh wallets (!has_synced)
+        // still get the rescan.
+        if (hasReachedSynced) {
+            NativeBridge.markInitialSyncDone()
+        }
+
         // Inject bloom-capable peers from the seeder API before starting sync.
         // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
         injectBloomPeers()
@@ -824,6 +870,22 @@ class SyncService : Service() {
         // state (sync mode, filter chain, auto-fetch), so cfTip becomes
         // queryable immediately after this returns.
         NativeBridge.startSync()
+
+        // Dandelion durability recovery: re-broadcast any recorded send the
+        // wallet still sees as unconfirmed. A stem killed mid-embargo (process
+        // death before the in-memory fluff timer fires) strands the tx — never
+        // on-chain, never in mempool — because stem'd txs aren't in the C core's
+        // re-broadcast set. Wait for peers so the fluff can actually propagate.
+        // Wait up to 150s for peers — long enough to cover a Tor bootstrap
+        // (~90s) before the SOCKS dials land, so the recovery still fires when
+        // Tor is on.
+        serviceScope.launch {
+            var waited = 0
+            while (NativeBridge.getPeerCount() <= 0 && waited < 150_000) {
+                delay(2000L); waited += 2000
+            }
+            if (NativeBridge.getPeerCount() > 0) rebroadcastStrandedSends()
+        }
 
         // Watchdog must snapshot cfTip AFTER startSync — otherwise it reads
         // 0 (no peer manager yet), compares against the restored chain at
@@ -1134,7 +1196,10 @@ class SyncService : Service() {
      *  priority peer is covered because the seeder tags it (see the dandelion spec).
      *  No capable peer → sends transparently flood (no privacy, still delivered). */
     private fun injectDandelionPeers() {
-        val enabled = getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", true)
+        // Default OFF: Dandelion's stem→embargo→fluff strands a tx if the process
+        // dies mid-embargo. Until that's fully hardened, sends flood directly
+        // (reliable delivery). Opt-in via Settings → Network Info.
+        val enabled = getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", false)
         try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) {}
         if (!enabled) return
 
@@ -1231,6 +1296,92 @@ class SyncService : Service() {
     }
 
     // ── Hex encoding (allocation-free) ─────────────────────────────────────────
+
+    /**
+     * Re-fluff (flood-broadcast) any recorded send the wallet still sees as
+     * unconfirmed. Recovers Dandelion stems stranded by a process death during
+     * the embargo window. Idempotent: an already-propagated or confirmed tx is
+     * harmlessly re-announced; a double-spend is rejected.
+     *
+     * Retries with verification: getPeerCount counts peers that are merely
+     * connecting (not yet relay-ready, especially over Tor), so a single fluff
+     * can fire before any peer can carry it. After each fluff we wait and check
+     * getRelayCount(txid) — once the network relays it back the tx has
+     * propagated and we stop. If it never relays back after all attempts it is
+     * likely an unrecoverable double-spend (its inputs were already spent).
+     */
+    private suspend fun rebroadcastStrandedSends() {
+        val recorded = OutgoingTxStore(this).allTxids()
+        if (recorded.isEmpty()) return
+        // wallet's confirmation view: txid -> blockHeight (TX_UNCONFIRMED = INT32_MAX)
+        val heights = HashMap<String, Long>()
+        runCatching {
+            NativeBridge.getTransactionDetails().trim().lines().forEach { line ->
+                val parts = line.split("|")
+                if (parts.size >= 4) heights[parts[0]] = parts[3].toLongOrNull() ?: 0L
+            }
+        }
+        val unconfirmed = recorded.filter { txid ->
+            val h = heights[txid]
+            h == null || h <= 0L || h >= Int.MAX_VALUE.toLong()
+        }
+        val store = OutgoingTxStore(this)
+        var dropped = false
+        for (txid in unconfirmed) {
+            // Definitive double-spend: the C core marks a tx invalid when its
+            // inputs were already spent by another (confirmed) tx. Such a tx can
+            // never confirm — drop the phantom and forget the record rather than
+            // re-fluffing forever. (Only acts on this authoritative signal, never
+            // on the relay guess, so a valid-but-slow send is never dropped.)
+            if (!runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)) {
+                if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
+                    store.remove(txid)
+                    dropped = true
+                    android.util.Log.i("SyncService",
+                        "Dandelion recovery: dropped conflicted (double-spend) send $txid")
+                }
+                continue
+            }
+            // Valid but unconfirmed → RE-PUBLISH to recover a stem stranded by a
+            // process death. fluffTransaction only floods a tx already in the
+            // peer manager's in-memory publishedTx, which a restart empties — so
+            // it's a no-op for exactly this case. Fetch the raw bytes and
+            // publishTransaction instead: that re-registers the tx for broadcast
+            // (BRPeerManagerPublishTx) and floods it to all connected peers.
+            val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
+            if (raw == null) {
+                android.util.Log.w("SyncService",
+                    "Dandelion recovery: $txid not in wallet tx set — can't re-publish")
+                continue
+            }
+            var propagated = false
+            for (attempt in 1..3) {
+                runCatching { NativeBridge.publishTransaction(raw) }
+                    .onFailure { android.util.Log.w("SyncService", "re-publish $txid threw", it) }
+                delay(15_000L)
+                val relays = runCatching { NativeBridge.getRelayCount(txid) }.getOrDefault(0)
+                if (relays > 0) {
+                    android.util.Log.i("SyncService",
+                        "Dandelion recovery: $txid re-published & propagated (relays=$relays, attempt $attempt)")
+                    propagated = true
+                    break
+                }
+            }
+            if (!propagated) {
+                android.util.Log.w("SyncService",
+                    "Dandelion recovery: $txid still un-relayed after re-publish retries")
+            }
+        }
+        // Persist the wallet tx set so any drops survive a restart.
+        if (dropped) {
+            runCatching {
+                NativeBridge.getSerializedTransactions()?.let { data ->
+                    getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                        .edit().putString("saved_transactions", bytesToHex(data)).apply()
+                }
+            }
+        }
+    }
 
     /** Most recent serialized block window from [NativeCallback.onSaveBlocks],
      *  cached so [onDestroy] can flush it synchronously before teardown. The C

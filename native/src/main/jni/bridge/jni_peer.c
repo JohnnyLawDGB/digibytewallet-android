@@ -276,6 +276,15 @@ static void bridge_threadCleanup(void *info) {
 
 static BRMerkleBlock **g_savedBlocks = NULL;
 static size_t g_savedBlocksCount = 0;
+/* Gate for the peer-manager creation in startSync. Multiple callers race
+ * startSync on app open (onResume, the active-screen wake, the keepalive); the
+ * first to win used to create the manager BEFORE SyncService finished
+ * loadSavedBlocks, so it built with zero saved blocks and floored the chain at
+ * the birth checkpoint — a ~480k-block re-sync every launch. SyncService sets
+ * this via markSavedBlocksLoadComplete() once the load step is done (even for
+ * fresh wallets with no saved blocks), after which creation anchors at the
+ * saved tip. */
+static int g_savedBlocksLoadComplete = 0;
 static BRPeer *g_savedPeers = NULL;
 static size_t g_savedPeersCount = 0;
 
@@ -478,6 +487,17 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     }
 
     {
+        /* Creation gate: do NOT build the peer manager until saved blocks are
+         * loaded, or a racing early startSync (onResume / active-screen wake /
+         * keepalive) creates it empty and floors the chain at the birth
+         * checkpoint. SyncService releases the gate after its load step. The
+         * deferred call returns harmlessly; SyncService's own startSync (post
+         * load) then creates the manager anchored at the saved tip. */
+        if (!g_savedBlocksLoadComplete) {
+            LOGI("startSync: deferring manager creation until saved blocks load");
+            return;
+        }
+
         /* Prepend digiscope.me (resolved above, before the lock) so a
          * bloom-filter-enabled node is always in the pool, even if DNS seeds
          * aren't re-queried. */
@@ -750,6 +770,33 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject t
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
     LOGI("loadSavedBlocks: loaded %zu blocks from persistent storage", g_savedBlocksCount);
     return (jint)g_savedBlocksCount;
+}
+
+/* Release the startSync creation gate. SyncService calls this once its saved-
+ * blocks load step has finished (whether or not any blocks existed), so the
+ * peer manager is only ever built AFTER the saved chain is in memory and thus
+ * anchors at the saved tip instead of the birth checkpoint. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_markSavedBlocksLoadComplete(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    g_savedBlocksLoadComplete = 1;
+    LOGI("markSavedBlocksLoadComplete: peer-manager creation now permitted (savedBlocks=%zu)",
+         g_savedBlocksCount);
+}
+
+/* Suppress the one-time post-first-sync rescan (bridge_syncStopped). That
+ * rescan catches txs missed during a from-scratch header-only fast sync, but
+ * BRPeerManagerRescan re-floors lastBlock to the birth checkpoint — a ~480k
+ * block re-download. A wallet that has synced before (has_synced) already did
+ * that scan in a prior session and resumes at the saved tip, so the rescan is
+ * pointless and harmful. SyncService calls this at startup for such wallets. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_markInitialSyncDone(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    g_initialSyncDone = 1;
+    LOGI("markInitialSyncDone: post-first-sync rescan suppressed (wallet already synced)");
 }
 
 JNIEXPORT jint JNICALL

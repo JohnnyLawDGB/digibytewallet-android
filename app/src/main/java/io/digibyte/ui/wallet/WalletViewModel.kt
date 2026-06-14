@@ -183,10 +183,21 @@ class WalletViewModel @Inject constructor(
         // we've seen the real tip we trust it over any lower peer claim.
         val effectiveTarget = if (externalTip > target) externalTip else target
 
+        // Honest progress: if the real block height (current = getLastBlockHeight,
+        // before the maxTxHeight display floor) is materially behind the tip,
+        // surface a catch-up even if SyncState.Complete latched. Without this the
+        // wallet could sit "Connected" while silently re-syncing hundreds of
+        // thousands of blocks underneath — wrong confirmations, no progress bar.
+        // The threshold is well above normal tip lag (a few blocks between 15s
+        // blocks) so steady-state operation never flickers to Syncing.
+        val materiallyBehind = current > 0 && effectiveTarget > 0 &&
+            (effectiveTarget - current) > SYNC_BEHIND_THRESHOLD
+
         val stage = when {
             state is SyncState.Failed -> SyncStage.Failed
-            state is SyncState.Complete -> SyncStage.Synced
             peers <= 0 -> SyncStage.Connecting
+            materiallyBehind -> SyncStage.Syncing
+            state is SyncState.Complete -> SyncStage.Synced
             else -> SyncStage.Syncing
         }
 
@@ -196,6 +207,8 @@ class WalletViewModel @Inject constructor(
         if (stage == SyncStage.Synced) hasReachedSyncedOnce = true
 
         val progress = when {
+            materiallyBehind && effectiveTarget > 0 ->
+                (current.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
             state is SyncState.Complete -> 1.0f
             current > 0 && effectiveTarget > 0 ->
                 (current.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
@@ -613,6 +626,12 @@ class WalletViewModel @Inject constructor(
         walletManager.getReceiveAddress(index, format = format)
 
     companion object {
+        /** Blocks-behind-tip past which the UI honestly shows catch-up progress
+         *  instead of "Complete", even if SyncState.Complete latched. Well above
+         *  normal tip lag (a handful of 15s blocks) so steady state never
+         *  flickers; far below any real re-sync (hundreds of thousands). */
+        private const val SYNC_BEHIND_THRESHOLD = 100L
+
         /** Peer-count=0 must persist this long before the watchdog fires. */
         private const val STALL_THRESHOLD_MS = 60_000L
 

@@ -38,6 +38,24 @@ class OutgoingTxStore(context: Context) {
         )
     }
 
+    /** All recorded send txids. Used at startup to re-fluff any that the wallet
+     *  still sees as unconfirmed — a Dandelion stem killed mid-embargo (process
+     *  death before the fluff timer fires) otherwise strands the tx forever. */
+    fun allTxids(): Set<String> =
+        prefs.all.keys.mapNotNull { key ->
+            if (key.endsWith(".sent")) key.removeSuffix(".sent") else null
+        }.toSet()
+
+    /** Forget a recorded send (its three keys). Used after a phantom double-spend
+     *  is dropped so it isn't re-checked on the next launch. */
+    fun remove(txid: String) {
+        prefs.edit()
+            .remove("$txid.sent")
+            .remove("$txid.fee")
+            .remove("$txid.to")
+            .apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "dgb_outgoing_tx"
     }

@@ -61,6 +61,15 @@ object NativeBridge {
     external fun publishTransactionStem(signedTx: ByteArray): String?
     /** Embargo fallback: flood a previously stem-submitted tx to all peers. */
     external fun fluffTransaction(txid: String)
+
+    /** Drop a tx (and dependents) from the wallet, restoring the balance — used
+     *  to clear a phantom unconfirmed send that can never confirm (a double-spend
+     *  whose inputs a confirmed tx already used). Returns true if it was present. */
+    external fun removeTransaction(txid: String): Boolean
+
+    /** False when the tx's inputs are already spent by another (confirmed) tx —
+     *  a double-spend that can never confirm. True for valid or unknown txs. */
+    external fun isTransactionValid(txid: String): Boolean
     /** Number of connected peers that have relayed the given tx back (0 = not yet
      *  propagated) — used to decide whether the embargo must self-fluff. */
     external fun getRelayCount(txid: String): Int
@@ -162,6 +171,17 @@ object NativeBridge {
     /** Load previously saved blocks into the C core before startSync.
      *  Data format: serialized by bridge_saveBlocks in jni_peer.c */
     external fun loadSavedBlocks(data: ByteArray): Int
+
+    /** Release the startSync peer-manager creation gate. MUST be called once the
+     *  saved-blocks load step is done (even if there were none) so a racing
+     *  early startSync can't build the manager with no blocks and floor the
+     *  chain at the birth checkpoint. */
+    external fun markSavedBlocksLoadComplete()
+
+    /** Suppress the one-time post-first-sync rescan, which re-floors the chain
+     *  to the birth checkpoint. Call at startup for wallets that have synced
+     *  before (has_synced) and resume at the saved tip. */
+    external fun markInitialSyncDone()
 
     /** Load previously saved peers into the C core before startSync. */
     external fun loadSavedPeers(data: ByteArray): Int

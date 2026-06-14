@@ -69,7 +69,7 @@ class SettingsViewModel @Inject constructor(
      *  dgb_dandelion pref so SyncService.injectDandelionPeers reads it on sync start. */
     private val _dandelionEnabled = MutableStateFlow(
         context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
-            .getBoolean("enabled", true)
+            .getBoolean("enabled", false)
     )
     val dandelionEnabled: StateFlow<Boolean> = _dandelionEnabled.asStateFlow()
 
