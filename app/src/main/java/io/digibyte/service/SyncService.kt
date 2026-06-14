@@ -756,6 +756,13 @@ class SyncService : Service() {
             val blockBytes = savedBlocks.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
             val loaded = NativeBridge.loadSavedBlocks(blockBytes)
             android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
+            // Seed the monotonic persistence guard with the on-disk tip so the
+            // first save this session can't overwrite a higher persisted window
+            // with a lower one — the regression this guard exists to prevent.
+            val onDiskTip = parseSavedBlocksTopHeight(blockBytes)
+            if (onDiskTip > prefs.getLong("saved_blocks_tip", 0L)) {
+                prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
+            }
         }
         if (savedPeers != null) {
             val peerBytes = savedPeers.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
@@ -837,6 +844,10 @@ class SyncService : Service() {
     }
 
     override fun onDestroy() {
+        // Flush the latest block window synchronously before teardown so a
+        // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
+        // guard ensures this never regresses a higher persisted tip.
+        lastSavedBlocksData?.let { runCatching { persistBlocks(it, synchronous = true) } }
         NativeBridge.stopSync()
         serviceScope.cancel()
         super.onDestroy()
@@ -1011,13 +1022,12 @@ class SyncService : Service() {
             }
         }
         override fun onSaveBlocks(data: ByteArray, replace: Int) {
-            // Persist off the C core callback thread to avoid blocking peer manager
+            // Persist off the C core callback thread to avoid blocking peer manager.
+            // Cache the latest window so onDestroy can flush it synchronously, and
+            // route through persistBlocks() for the monotonic anti-regression guard.
             val copy = data.copyOf()
-            serviceScope.launch(Dispatchers.IO) {
-                val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
-                    .edit().putString("saved_blocks", hex).apply()
-            }
+            lastSavedBlocksData = copy
+            serviceScope.launch(Dispatchers.IO) { persistBlocks(copy, synchronous = false) }
         }
 
         override fun onSavePeers(data: ByteArray, replace: Int) {
@@ -1222,6 +1232,33 @@ class SyncService : Service() {
 
     // ── Hex encoding (allocation-free) ─────────────────────────────────────────
 
+    /** Most recent serialized block window from [NativeCallback.onSaveBlocks],
+     *  cached so [onDestroy] can flush it synchronously before teardown. The C
+     *  core only emits saves on 4000-block boundaries / at the tip, so this is
+     *  the last boundary window — sub-boundary catch-up isn't captured here, but
+     *  the recent bundled checkpoint makes re-syncing that gap near-instant. */
+    @Volatile private var lastSavedBlocksData: ByteArray? = null
+
+    /**
+     * Write the serialized saved-blocks window to disk behind a monotonic guard:
+     * never replace a higher persisted tip with a lower one (the bug that forced
+     * ~480k-block re-syncs). [synchronous] uses commit() for the onDestroy flush
+     * so it survives serviceScope cancellation.
+     */
+    private fun persistBlocks(data: ByteArray, synchronous: Boolean) {
+        val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        val newTop = parseSavedBlocksTopHeight(data)
+        val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
+        if (!shouldPersistBlocks(newTop, persistedTop)) {
+            android.util.Log.i("SyncService",
+                "saved_blocks: skipping regressive write (new tip $newTop < persisted $persistedTop)")
+            return
+        }
+        val editor = prefs.edit().putString("saved_blocks", bytesToHex(data))
+        if (newTop >= 0L) editor.putLong("saved_blocks_tip", newTop)
+        if (synchronous) editor.commit() else editor.apply()
+    }
+
     private val hexChars = "0123456789abcdef".toCharArray()
 
     private fun bytesToHex(bytes: ByteArray): String {
@@ -1370,7 +1407,7 @@ class SyncService : Service() {
          * Sanity floor for "we've reached the chain tip." The highest
          * hardcoded checkpoint in
          * native/src/main/jni/digibytewallet-core/BRChainParams.h is
-         * block 23,187,000. Any real chain tip must be at or past that;
+         * block 23,660,000. Any real chain tip must be at or past that;
          * peers claiming a lower tip are lagging or dishonest and must
          * NOT cause us to declare sync complete (which stops the bloom
          * rescan and strands user transactions in unscanned blocks).
@@ -1378,7 +1415,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 23_187_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 23_660_000L
 
         /** How many consecutive 10s polls we must observe `atRealTip` before
          *  we flip to SyncState.Complete. Headers can reach tip while per-block
