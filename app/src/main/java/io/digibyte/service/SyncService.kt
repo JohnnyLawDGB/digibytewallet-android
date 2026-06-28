@@ -43,6 +43,24 @@ class SyncService : Service() {
 
     private var syncAlreadyLaunched = false
 
+    /** True only once startSyncWithTor() has reached the peer-manager creation
+     *  gate release (markSavedBlocksLoadComplete). startSyncWithTor is launched
+     *  once on the first onStartCommand, but it can exit BEFORE releasing the
+     *  gate — e.g. the isWalletLoaded() poll times out because the service
+     *  started before the wallet finished unlocking. If that happens, the native
+     *  gate stays latched shut: the peer manager is never created and every
+     *  later kick (watchdog, keepalive, forceReconnect) just defers startSync
+     *  forever → permanent 0-peer wedge with no in-process recovery. We track
+     *  setup completion separately from syncAlreadyLaunched so a repeat
+     *  onStartCommand can RE-RUN startSyncWithTor until the gate is actually
+     *  released. @Volatile — written from the serviceScope coroutine, read on
+     *  the main thread in onStartCommand. */
+    @Volatile private var syncSetupComplete = false
+
+    /** Tracks the startSyncWithTor() coroutine so a repeat onStartCommand can
+     *  tell whether a re-run is already in flight before launching another. */
+    private var syncSetupJob: Job? = null
+
     /** Tracks the peer-keepalive coroutine so onStartCommand can resurrect it
      *  when the watchdog re-kicks us after the loop died silently (Doze,
      *  unhandled JNI throwable, SupervisorJob child cancellation). */
@@ -140,6 +158,20 @@ class SyncService : Service() {
         // no one is restoring peer connections — users see "0 peers forever"
         // while the watchdog fruitlessly re-kicks the same running service.
         if (syncAlreadyLaunched) {
+            // If the one-shot sync setup never reached the peer-manager creation
+            // gate release (startSyncWithTor exited early — typically the
+            // isWalletLoaded() poll timed out because we started before unlock),
+            // the native gate is latched shut and no peer manager will ever be
+            // built. Re-run startSyncWithTor here so a watchdog/keepalive kick
+            // can recover it once the wallet has loaded. Guarded so we never run
+            // two setup coroutines at once.
+            if (!syncSetupComplete && syncSetupJob?.isActive != true) {
+                android.util.Log.w(
+                    "SyncService",
+                    "sync setup never released the creation gate — re-running startSyncWithTor"
+                )
+                syncSetupJob = serviceScope.launch { startSyncWithTor() }
+            }
             val now = System.currentTimeMillis()
             val stale = lastKeepaliveTickMs > 0L &&
                 (now - lastKeepaliveTickMs) > KEEPALIVE_STALE_THRESHOLD_MS
@@ -171,10 +203,10 @@ class SyncService : Service() {
         // Wire C core → Kotlin before kicking off sync so no events are lost.
         NativeBridge.setCallbackHandler(syncCallback)
 
-        // Launch Tor-aware startup asynchronously.
-        serviceScope.launch {
-            startSyncWithTor()
-        }
+        // Launch Tor-aware startup asynchronously. Tracked in syncSetupJob so a
+        // repeat onStartCommand can re-run it if it exits before releasing the
+        // peer-manager creation gate (see the syncSetupComplete branch above).
+        syncSetupJob = serviceScope.launch { startSyncWithTor() }
 
         // Watchdog for Tor-bootstrap or Tor-SOCKS failure. If Tor never reaches
         // Connected — OR reaches Connected but routes nothing — peers stay at 0
@@ -769,7 +801,15 @@ class SyncService : Service() {
             delay(500L)
             waitCount++
             if (waitCount > 120) { // 60 seconds max wait
-                android.util.Log.w("SyncService", "Wallet not loaded after 60s — giving up")
+                // Return WITHOUT marking syncSetupComplete — the creation gate
+                // stays unreleased, so the next onStartCommand kick (watchdog/
+                // keepalive) re-runs this coroutine and tries again once the
+                // wallet has finished unlocking. Previously this gave up
+                // permanently and wedged the wallet at 0 peers forever.
+                android.util.Log.w(
+                    "SyncService",
+                    "Wallet not loaded after 60s — will retry on next kick (gate not yet released)"
+                )
                 return
             }
         }
@@ -805,6 +845,13 @@ class SyncService : Service() {
         // birth checkpoint (~480k-block re-sync every launch). Called
         // unconditionally so fresh wallets (no saved blocks) also proceed.
         NativeBridge.markSavedBlocksLoadComplete()
+
+        // The native creation gate is now released — peer-manager creation is
+        // permitted. Mark setup complete so onStartCommand stops re-running this
+        // coroutine on subsequent kicks. Set it the instant the gate opens (not
+        // at end of function) so even if later setup steps throw, the wedge-
+        // recovery re-run loop doesn't fire pointlessly.
+        syncSetupComplete = true
 
         // For a wallet that has synced before and is resuming at the saved tip,
         // suppress the one-time post-first-sync rescan — it re-floors the chain
