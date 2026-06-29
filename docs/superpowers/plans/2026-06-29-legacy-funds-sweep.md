@@ -180,7 +180,7 @@ git commit -m "feat(recovery): pluggable UtxoSource seam + reconcile-backend imp
 
 **Interfaces:**
 - Consumes: `UtxoSource` (Task 1); `NativeBridge.mnemonicToSeed(phraseBytes, passphrase): ByteArray?`, `NativeBridge.deriveAddresses(...)`.
-- Produces: `RecoveryScanService(utxoSource: UtxoSource)`; new `suspend fun scanFromSeed(seedBytes: ByteArray, passphrase: String?): State`. Existing `scan(mnemonic, passphrase): State` retained (delegates).
+- Produces: `RecoveryScanService(utxoSource: UtxoSource)`; new `suspend fun scanFromSeed(seedBytes: ByteArray): State` (NO passphrase — `seedBytes` is the already-derived 64-byte BIP39 seed; passphrase is applied at the call site). Existing `scan(mnemonic, passphrase): State` retained (delegates). `classifyDerived` returns `State.Done` without publishing the terminal `_state`; callers publish it.
 
 > Note: `scan()` invokes JNI (`mnemonicToSeed`, `deriveAddresses`) so it cannot run in a JVM unit test. This task's unit test only covers the address→UTXO **classification** by injecting a pre-derived address path. To keep that testable, factor the post-derivation classification into an internal `classifyDerived(profiles, derivedAddressesByProfile): State.Done` and test that. The JNI-backed full `scan` is covered by the instrumented test in Task 7.
 
@@ -272,7 +272,7 @@ class RecoveryScanService(
     //    (Replace the inline reconcileAddresses loop with the call above.)
 
     // 4. Add the seed-bytes variant used by the Settings entry (no mnemonic String):
-    suspend fun scanFromSeed(seedBytes: ByteArray, passphrase: String?): State {
+    suspend fun scanFromSeed(seedBytes: ByteArray): State {
         // Derive each profile's addresses directly from seedBytes via
         // NativeBridge.deriveAddresses(seedBytes, profile.hmacKey, profile.prefixPath,
         //   profile.gapExternal, profile.gapInternal, profile.addressFormat),
@@ -546,7 +546,7 @@ class RecoverFundsViewModel @Inject constructor(
                 _state.value = UiState.Error("Wallet seed unavailable"); return@launch
             }
             try {
-                when (val s = scanService.scanFromSeed(seed, passphrase = null)) {
+                when (val s = scanService.scanFromSeed(seed)) {   // seed = 64-byte BIP39 seed
                     is RecoveryScanService.State.Done -> {
                         lastFindings = s.nonNativeWithFunds
                         _state.value = if (s.allBackendUnreachable)
