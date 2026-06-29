@@ -289,6 +289,33 @@ class WalletManager(
         }
     }
 
+    /**
+     * Load the wallet's **64-byte BIP39 seed** for re-runnable recovery flows
+     * (classify / sweep). The on-disk secret is the BIP39 *mnemonic* (see
+     * [persistSeed]); this decrypts it via the existing [loadSeed] path and
+     * converts it once via [NativeBridge.mnemonicToSeed], zeroing the decrypted
+     * mnemonic bytes before returning.
+     *
+     * CRITICAL-3: the returned array is the caller's responsibility to
+     * `fill(0)` when done.
+     *
+     * @return the 64-byte BIP39 seed, or null if no wallet exists, decrypt
+     *   failed, or seed derivation failed.
+     */
+    fun loadBip39Seed(): ByteArray? {
+        val mnemonicBytes = loadSeed() ?: return null
+        return try {
+            // No passphrase: this wallet does not use a BIP39 passphrase
+            // (createWallet/recoverWallet never pass one).
+            val seed = NativeBridge.mnemonicToSeed(mnemonicBytes, null)
+            if (seed == null || seed.isEmpty()) null else seed
+        } catch (e: Exception) {
+            null
+        } finally {
+            mnemonicBytes.fill(0)
+        }
+    }
+
     // ── Sync data management ────────────────────────────────────
 
     private fun clearSyncData() {

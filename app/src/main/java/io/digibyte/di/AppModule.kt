@@ -197,6 +197,16 @@ object AppModule {
     fun provideWalletManager(@ApplicationContext context: Context, ksm: KeyStoreManager, um: UtxoManager): WalletManager =
         WalletManager(context, ksm, um)
 
+    /**
+     * Seed seam for the recovery flow. Delegates to the existing seed store via
+     * [WalletManager.loadBip39Seed], which decrypts the stored mnemonic and
+     * converts it once to the 64-byte BIP39 seed (zeroing the mnemonic). The
+     * RecoverFundsViewModel owns and zeros the returned seed.
+     */
+    @Provides @Singleton
+    fun provideSeedProvider(walletManager: WalletManager): io.digibyte.core.recovery.SeedProvider =
+        io.digibyte.core.recovery.SeedProvider { walletManager.loadBip39Seed() }
+
     @Provides @Singleton
     fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
         PriceProvider(dao, okHttpFetcher(client))
