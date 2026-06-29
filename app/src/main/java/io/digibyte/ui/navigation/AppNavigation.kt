@@ -86,7 +86,8 @@ private val fullScreenRoutes = setOf(
     "thread_detail/{threadId}",
     "create_thread",
     "digirunner",
-    "digirunner_leaderboard"
+    "digirunner_leaderboard",
+    "recover_funds"
 )
 
 @Composable
@@ -413,6 +414,10 @@ fun AppNavigation(
 
             composable("settings_reconcile") {
                 io.digibyte.ui.settings.ReconcileScreen(navController = navController)
+            }
+
+            composable("recover_funds") {
+                io.digibyte.ui.recovery.RecoverFundsScreen(navController)
             }
 
             composable("settings_view_seed") {

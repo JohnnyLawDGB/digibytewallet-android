@@ -98,6 +98,14 @@ fun SettingsScreen(navController: NavController) {
                     subtitle = "Query a DGB node for UTXOs on wallet addresses",
                     onClick = { navController.navigate("settings_reconcile") }
                 )
+                SettingsRowDivider()
+                SettingsRow(
+                    icon = Icons.Default.Savings,
+                    iconTint = Color(0xFF26C6DA),
+                    title = "Recover funds from another wallet",
+                    subtitle = "Sweep coins from old/other derivation paths into this wallet",
+                    onClick = { navController.navigate("recover_funds") }
+                )
             }
         }
 
