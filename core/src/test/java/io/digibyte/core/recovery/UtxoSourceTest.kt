@@ -17,6 +17,7 @@ class UtxoSourceTest {
         val result = source.fetchUtxos(listOf("Daddr"))
         assertEquals(1, result!!.utxos.size)
         assertEquals(100_000L, result.utxos[0].amountSatoshi)
+        assertEquals(200L, result.chainHeight)
     }
 
     @Test

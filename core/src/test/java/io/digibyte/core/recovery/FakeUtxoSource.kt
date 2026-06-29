@@ -20,6 +20,7 @@ class FakeUtxoSource(
         val utxos = addresses.flatMap { byAddress[it]?.utxos.orEmpty() }
         val rawTxs = addresses.flatMap { byAddress[it]?.rawTxs?.entries.orEmpty() }
             .associate { it.key to it.value }
-        return ReconcileResult(utxos, rawTxs, chainHeight = 0L)
+        val chainHeight = addresses.mapNotNull { byAddress[it]?.chainHeight }.maxOrNull() ?: 0L
+        return ReconcileResult(utxos, rawTxs, chainHeight)
     }
 }
