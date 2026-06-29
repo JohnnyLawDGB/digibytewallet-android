@@ -106,9 +106,7 @@ class RecoveryScanService(
             results.add(result)
         }
 
-        val done = State.Done(results)
-        _state.value = done
-        return done
+        return State.Done(results)
     }
 
     /**
@@ -118,14 +116,15 @@ class RecoveryScanService(
      */
     suspend fun scanFromSeed(
         seedBytes: ByteArray,
-        passphrase: String? = null,
     ): State = withContext(Dispatchers.IO) {
         try {
             _state.value = State.Scanning(
                 "Deriving addresses across ${profiles.size} paths…", 0.1f
             )
             val derivedByProfile = deriveAllProfiles(seedBytes)
-            classifyDerived(derivedByProfile)
+            val done = classifyDerived(derivedByProfile)
+            _state.value = done
+            done
         } catch (t: Throwable) {
             val failed = State.Failed(t.message ?: t.javaClass.simpleName)
             _state.value = failed
@@ -164,7 +163,9 @@ class RecoveryScanService(
                 0.4f
             )
 
-            classifyDerived(derivedByProfile)
+            val done = classifyDerived(derivedByProfile)
+            _state.value = done
+            done
         } catch (t: Throwable) {
             val failed = State.Failed(t.message ?: t.javaClass.simpleName)
             _state.value = failed
