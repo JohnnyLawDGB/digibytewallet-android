@@ -170,67 +170,39 @@ private fun FindingsBody(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Total header
-        item {
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = CARD)
-            ) {
-                Row(
+        if (findings.isEmpty()) {
+            // Clean empty state — no balance header, no section header
+            item {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(top = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(ACCENT.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountBalanceWallet,
-                            contentDescription = null,
-                            tint = ACCENT,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column {
-                        Text(
-                            text = "Recoverable balance",
-                            color = MUTED,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = formatSatToDgb(totalSat),
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = SUCCESS_GREEN,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "No recoverable funds found",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "This seed has no coins on other derivation paths.",
+                        color = MUTED,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
             }
-        }
-
-        // Section header
-        item {
-            Text(
-                text = "FOUND ON",
-                color = MUTED,
-                style = MaterialTheme.typography.labelSmall,
-                letterSpacing = 1.sp,
-                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-            )
-        }
-
-        // Individual finding rows
-        items(findings) { finding ->
-            val isBip49 = finding.profile.addressFormat == 2
-            FindingCard(finding = finding, isBip49 = isBip49)
-        }
-
-        if (findings.isEmpty()) {
+        } else {
+            // Total header — only shown when there are findings
             item {
                 Card(
                     shape = RoundedCornerShape(12.dp),
@@ -242,20 +214,52 @@ private fun FindingsBody(
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = SUCCESS_GREEN,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = "No recoverable funds found on other paths.",
-                            color = MUTED,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(ACCENT.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = ACCENT,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "Recoverable balance",
+                                color = MUTED,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = formatSatToDgb(totalSat),
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
+            }
+
+            // Section header
+            item {
+                Text(
+                    text = "FOUND ON",
+                    color = MUTED,
+                    style = MaterialTheme.typography.labelSmall,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                )
+            }
+
+            // Individual finding rows
+            items(findings) { finding ->
+                val isBip49 = finding.profile.addressFormat == 2
+                FindingCard(finding = finding, isBip49 = isBip49)
             }
         }
 
@@ -625,7 +629,8 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                 }
             }
 
-            if (succeeded && outcome.txid != null) {
+            if (succeeded) {
+                val txid = outcome.txid!!
                 Spacer(Modifier.height(10.dp))
                 HorizontalDivider(color = DIVIDER, thickness = 0.5.dp)
                 Spacer(Modifier.height(10.dp))
@@ -637,7 +642,7 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = outcome.txid!!,
+                    text = txid,
                     color = ACCENT,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
@@ -721,7 +726,7 @@ private fun friendlyErrorReason(reason: String): String = when {
         "Wallet seed could not be loaded. Unlock your wallet and try again."
     reason.contains("Couldn't reach", ignoreCase = true) ->
         "Could not reach the lookup service. Try again later."
-    else -> reason
+    else -> "Something went wrong — try again."
 }
 
 /** Map sweep failure reasons to friendlier copy. */
@@ -733,5 +738,5 @@ private fun friendlyFailureReason(reason: String?): String = when {
         "Could not derive keys from seed for this path."
     reason.contains("broadcast", ignoreCase = true) ->
         "Transaction broadcast failed. Try again when connected to peers."
-    else -> reason
+    else -> "Couldn't sweep this one — try again."
 }
