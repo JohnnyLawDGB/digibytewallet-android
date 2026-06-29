@@ -44,35 +44,37 @@ class LegacySweepService {
         destAddress: String,
         feePerKb: Long = 100_000L, // DGB min relay × 1 sat/byte
     ): Result = withContext(Dispatchers.IO) {
-        val outcomes = mutableListOf<SweepOutcome>()
         val phraseBytes = mnemonic.trim().lowercase().toByteArray(Charsets.UTF_8)
-        var seed: ByteArray? = null
+        var seedBytes: ByteArray? = null
         try {
-            seed = NativeBridge.mnemonicToSeed(phraseBytes, passphrase)
+            seedBytes = NativeBridge.mnemonicToSeed(phraseBytes, passphrase)
                 ?: return@withContext Result(nonNativeResults.map {
                     SweepOutcome(it.profile, null, null, 0L, 0, "seed derivation failed")
                 })
-
-            for (result in nonNativeResults) {
-                if (result.utxos.isEmpty()) continue
-
-                // P2SH-P2WPKH (BIP49) isn't yet supported by BRTransactionSign —
-                // skip and surface a clear message. All other formats work.
-                if (result.profile.addressFormat == 2) {
-                    outcomes += SweepOutcome(
-                        result.profile, null, null, 0L, result.utxos.size,
-                        "BIP49 P2SH-P2WPKH sweep not yet supported — manual recovery required",
-                    )
-                    continue
-                }
-
-                outcomes += sweepOneProfile(seed, result, destAddress, feePerKb)
-            }
-            Result(outcomes)
+            sweepFromSeed(seedBytes, nonNativeResults, destAddress, feePerKb)
         } finally {
-            seed?.fill(0)
+            seedBytes?.fill(0)
             phraseBytes.fill(0)
         }
+    }
+
+    /** Seed-bytes entry point for the already-restored (Settings) path. The caller
+     *  owns seedBytes and must zero it; we never derive a mnemonic String here. */
+    suspend fun sweepFromSeed(
+        seedBytes: ByteArray,
+        nonNativeResults: List<RecoveryScanService.ProfileResult>,
+        destAddress: String,
+        feePerKb: Long = 100_000L,
+    ): Result {
+        val outcomes = nonNativeResults.map { result ->
+            if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
+                SweepOutcome(result.profile, null, null, 0L, 0,
+                    "BIP49 P2SH-P2WPKH sweep not yet supported — manual recovery required")
+            } else {
+                sweepOneProfile(seedBytes, result, destAddress, feePerKb)
+            }
+        }
+        return Result(outcomes)
     }
 
     private fun sweepOneProfile(
