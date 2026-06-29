@@ -1,4 +1,3 @@
-// core/src/test/java/io/digibyte/core/recovery/SweepDestinationTest.kt
 package io.digibyte.core.recovery
 
 import org.junit.Assert.assertEquals
@@ -31,6 +30,27 @@ class SweepDestinationTest {
     fun external_invalidAddress_isInvalid() {
         val r = SweepDestination.External("xxx").resolve(
             nativeSupplier = { "dgb1qnative" }, validator = { false })
+        assertTrue(r is DestResolution.Invalid)
+    }
+
+    @Test
+    fun external_paddedAddress_trimsBeforeValidation() {
+        val r = SweepDestination.External("  Dgood  ").resolve(
+            nativeSupplier = { "dgb1qnative" }, validator = { it == "Dgood" })
+        assertEquals(DestResolution.Ok("Dgood"), r)
+    }
+
+    @Test
+    fun external_whitespaceOnlyAddress_isInvalid() {
+        val r = SweepDestination.External("   ").resolve(
+            nativeSupplier = { "dgb1qnative" }, validator = { true })
+        assertTrue(r is DestResolution.Invalid)
+    }
+
+    @Test
+    fun native_emptyStringSupplier_isInvalid() {
+        val r = SweepDestination.Native.resolve(
+            nativeSupplier = { "" }, validator = { true })
         assertTrue(r is DestResolution.Invalid)
     }
 }
