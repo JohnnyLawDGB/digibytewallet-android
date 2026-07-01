@@ -2,7 +2,7 @@ package io.digibyte.native_core
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.digibyte.core.bridge.NativeBridge
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -65,12 +65,12 @@ class LegacySweepDerivationTest {
         android.util.Log.i("LegacySweepDeriv", "first legacy addr = " + addrs[0])
 
         // Step 6: deterministic pin — enable after reading the logcat value above.
-        // assertEquals(EXPECTED_FIRST_LEGACY_ADDR, addrs[0])  // enable after pinning from logcat
+        assertEquals(EXPECTED_FIRST_LEGACY_ADDR, addrs[0])
     }
 
     companion object {
         // Replace with the value printed in logcat on the first emulator run,
         // then uncomment the assertEquals line above to lock in the vector.
-        const val EXPECTED_FIRST_LEGACY_ADDR = "REPLACE_AFTER_FIRST_RUN"
+        const val EXPECTED_FIRST_LEGACY_ADDR = "DGAf4MmtdP6D6QY1KREaznT3DZwxeAkWyn"
     }
 }
