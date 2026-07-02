@@ -563,7 +563,7 @@ private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    text = "Sweep complete",
+                    text = "Sweep submitted",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
@@ -589,7 +589,10 @@ private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
 
 @Composable
 private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
-    val succeeded = outcome.txid != null
+    // "succeeded" here means the broadcast was submitted (reached local relay),
+    // NOT confirmed — a PENDING tx still shows a check plus the pending caption
+    // below so we never claim confirmed success on local relay alone (#6).
+    val succeeded = outcome.broadcastState != LegacySweepService.BroadcastState.FAILED
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CARD)
@@ -648,6 +651,12 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Pending network confirmation",
+                    color = MUTED,
+                    style = MaterialTheme.typography.labelSmall
                 )
             } else if (!succeeded) {
                 Spacer(Modifier.height(8.dp))

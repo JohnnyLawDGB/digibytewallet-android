@@ -22,20 +22,34 @@ class LegacySweepService(
     private val walletTxPersister: WalletTxPersister,
 ) {
 
+    /** Acceptance state of a sweep broadcast. A returned txid means the tx
+     *  reached local relay / mempool-pending only — NOT that the network
+     *  accepted or confirmed it (bug #6). RELAYED is reserved for a future
+     *  relay-count confirmation; today a submitted sweep terminates at PENDING
+     *  and confirmation is observed later via normal BIP158/SPV sync. */
+    enum class BroadcastState { PENDING, RELAYED, FAILED }
+
     data class SweepOutcome(
         val profile: DerivationProfile,
         val txHex: String?,      // signed hex, or null if we couldn't build
-        val txid: String?,       // broadcast txid, or null on broadcast failure
+        val txid: String?,       // relay txid (PENDING), or null on broadcast failure
         val sweptSat: Long,
         val inputCount: Int,
         val failureReason: String?,
+        val broadcastState: BroadcastState,
     )
 
     data class Result(
         val outcomes: List<SweepOutcome>,
     ) {
         val totalSweptSat: Long = outcomes.sumOf { it.sweptSat }
-        val allSucceeded: Boolean = outcomes.all { it.txid != null }
+        /** True when every profile at least reached local relay (PENDING/RELAYED).
+         *  Deliberately NOT "succeeded": a PENDING tx is submitted, not confirmed
+         *  — never claim confirmed success on local relay alone (#6). */
+        val allSubmitted: Boolean =
+            outcomes.isNotEmpty() && outcomes.all { it.broadcastState != BroadcastState.FAILED }
+        /** Any tx still awaiting network relay/confirmation. */
+        val anyPending: Boolean = outcomes.any { it.broadcastState == BroadcastState.PENDING }
     }
 
     /** Sweep every non-native profile result into [destAddress].
@@ -54,7 +68,7 @@ class LegacySweepService(
         try {
             seedBytes = NativeBridge.mnemonicToSeed(phraseBytes, passphrase)
                 ?: return@withContext Result(nonNativeResults.map {
-                    SweepOutcome(it.profile, null, null, 0L, 0, "seed derivation failed")
+                    SweepOutcome(it.profile, null, null, 0L, 0, "seed derivation failed", BroadcastState.FAILED)
                 })
             sweepFromSeed(seedBytes, nonNativeResults, destAddress, feePerKb)
         } finally {
@@ -74,7 +88,8 @@ class LegacySweepService(
         val outcomes = nonNativeResults.map { result ->
             if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
                 SweepOutcome(result.profile, null, null, 0L, 0,
-                    "BIP49 P2SH-P2WPKH sweep not yet supported — manual recovery required")
+                    "BIP49 P2SH-P2WPKH sweep not yet supported — manual recovery required",
+                    BroadcastState.FAILED)
             } else {
                 sweepOneProfile(seedBytes, result, destAddress, feePerKb)
             }
@@ -117,7 +132,8 @@ class LegacySweepService(
             val script = utxo.scriptPubKeyHex
                 ?: return SweepOutcome(
                     profile, null, null, 0L, 0,
-                    "scriptPubKey missing for ${utxo.address} (old backend?)"
+                    "scriptPubKey missing for ${utxo.address} (old backend?)",
+                    BroadcastState.FAILED
                 )
 
             txids += utxo.txid
@@ -130,7 +146,7 @@ class LegacySweepService(
         }
 
         if (txids.isEmpty()) {
-            return SweepOutcome(profile, null, null, 0L, 0, "no mappable UTXOs")
+            return SweepOutcome(profile, null, null, 0L, 0, "no mappable UTXOs", BroadcastState.FAILED)
         }
 
         val signedHex = NativeBridge.buildAndSignLegacySweep(
@@ -147,7 +163,8 @@ class LegacySweepService(
             feePerKb = feePerKb,
         ) ?: return SweepOutcome(
             profile, null, null, 0L, txids.size,
-            "buildAndSignLegacySweep failed (sign mismatch or dust)"
+            "buildAndSignLegacySweep failed (sign mismatch or dust)",
+            BroadcastState.FAILED
         )
 
         // Broadcast via the existing publishTransaction JNI — it takes raw
@@ -155,7 +172,8 @@ class LegacySweepService(
         val txBytes = runCatching { hexToBytes(signedHex) }.getOrNull()
             ?: return SweepOutcome(
                 profile, signedHex, null, totalIn, txids.size,
-                "signed hex malformed (self-check failed)"
+                "signed hex malformed (self-check failed)",
+                BroadcastState.FAILED
             )
 
         val txid = Broadcaster.broadcast(txBytes)
@@ -179,7 +197,9 @@ class LegacySweepService(
             txid = txid,
             sweptSat = totalIn,
             inputCount = txids.size,
-            failureReason = if (txid == null) "publishTransaction returned null" else null,
+            failureReason = if (txid == null) "broadcast failed — no peer accepted the sweep" else null,
+            // A non-null txid is local relay only — PENDING, never confirmed (#6).
+            broadcastState = if (txid == null) BroadcastState.FAILED else BroadcastState.PENDING,
         )
     }
 
