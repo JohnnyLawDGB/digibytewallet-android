@@ -37,6 +37,9 @@ class LegacySweepService(
         val inputCount: Int,
         val failureReason: String?,
         val broadcastState: BroadcastState,
+        /** Addresses whose backend row had no scriptPubKey and were skipped
+         *  rather than aborting the profile (bug #4). Empty on a clean sweep. */
+        val skippedNoScript: List<String> = emptyList(),
     )
 
     data class Result(
@@ -104,76 +107,50 @@ class LegacySweepService(
         feePerKb: Long,
     ): SweepOutcome {
         val profile = result.profile
-        val addrs = result.addresses
+        // #3: each UTXO's (chain,index) is carried straight from its
+        // DerivedAddress — no positional reconstruction vs gapExternal, so a
+        // dropped empty slot can't sign the wrong child key. #4: a UTXO with a
+        // null scriptPubKey is collected in skippedNoScript, not fatal.
+        val inputs = assembleSweepInputs(result)
 
-        // Map each UTXO's address back to its (chain, index) within the
-        // profile's derived address list. We know the order from the
-        // deriveAddresses call: external[0..gapExternal-1] then
-        // internal[0..gapInternal-1].
-        val addrIndex: Map<String, Int> =
-            addrs.withIndex().associate { (i, a) -> a to i }
-
-        val txids = mutableListOf<String>()
-        val vouts = mutableListOf<Int>()
-        val amounts = mutableListOf<Long>()
-        val chains = mutableListOf<Int>()
-        val indices = mutableListOf<Int>()
-        val scripts = mutableListOf<String>()
-        var totalIn = 0L
-
-        for (utxo in result.utxos) {
-            val pos = addrIndex[utxo.address] ?: continue
-            val (chain, index) = if (pos < profile.gapExternal) {
-                0 to pos
-            } else {
-                1 to (pos - profile.gapExternal)
-            }
-
-            val script = utxo.scriptPubKeyHex
-                ?: return SweepOutcome(
-                    profile, null, null, 0L, 0,
-                    "scriptPubKey missing for ${utxo.address} (old backend?)",
-                    BroadcastState.FAILED
-                )
-
-            txids += utxo.txid
-            vouts += utxo.vout
-            amounts += utxo.amountSatoshi
-            chains += chain
-            indices += index
-            scripts += script
-            totalIn += utxo.amountSatoshi
-        }
-
-        if (txids.isEmpty()) {
-            return SweepOutcome(profile, null, null, 0L, 0, "no mappable UTXOs", BroadcastState.FAILED)
+        if (inputs.txids.isEmpty()) {
+            val reason = if (inputs.skippedNoScript.isNotEmpty())
+                "all ${inputs.skippedNoScript.size} UTXO(s) missing scriptPubKey (old backend?)"
+            else "no mappable UTXOs"
+            return SweepOutcome(
+                profile, null, null, 0L, 0, reason,
+                broadcastState = BroadcastState.FAILED,
+                skippedNoScript = inputs.skippedNoScript,
+            )
         }
 
         val signedHex = NativeBridge.buildAndSignLegacySweep(
             seedBytes = seed,
             hmacKey = profile.hmacKey,
             prefixPath = profile.prefixPath,
-            txidsHex = txids.toTypedArray(),
-            vouts = vouts.toIntArray(),
-            amounts = amounts.toLongArray(),
-            chainIndices = chains.toIntArray(),
-            addressIndices = indices.toIntArray(),
-            scriptPubKeysHex = scripts.toTypedArray(),
+            txidsHex = inputs.txids.toTypedArray(),
+            vouts = inputs.vouts.toIntArray(),
+            amounts = inputs.amounts.toLongArray(),
+            chainIndices = inputs.chains.toIntArray(),
+            addressIndices = inputs.indices.toIntArray(),
+            scriptPubKeysHex = inputs.scripts.toTypedArray(),
             destAddress = destAddress,
             feePerKb = feePerKb,
         ) ?: return SweepOutcome(
-            profile, null, null, 0L, txids.size,
+            profile, null, null, 0L, inputs.txids.size,
             "buildAndSignLegacySweep failed (sign mismatch or dust)",
-            BroadcastState.FAILED
+            broadcastState = BroadcastState.FAILED,
+            skippedNoScript = inputs.skippedNoScript,
         )
 
         // Broadcast via the existing publishTransaction JNI — it takes raw
         // bytes, not hex, so decode here.
         val txBytes = runCatching { hexToBytes(signedHex) }.getOrNull()
             ?: return SweepOutcome(
-                profile, signedHex, null, totalIn, txids.size,
+                profile, signedHex, null, inputs.totalIn, inputs.txids.size,
                 "signed hex malformed (self-check failed)",
-                BroadcastState.FAILED
+                broadcastState = BroadcastState.FAILED,
+                skippedNoScript = inputs.skippedNoScript,
             )
 
         val txid = Broadcaster.broadcast(txBytes)
@@ -185,7 +162,7 @@ class LegacySweepService(
             // network relays it back. Best-effort — never affects on-chain state.
             outgoingTxStore.record(
                 txid = txid,
-                sentSats = totalIn,
+                sentSats = inputs.totalIn,
                 feeSats = estimateFee(txBytes.size, feePerKb),
                 toAddress = destAddress,
             )
@@ -195,11 +172,12 @@ class LegacySweepService(
             profile = profile,
             txHex = signedHex,
             txid = txid,
-            sweptSat = totalIn,
-            inputCount = txids.size,
+            sweptSat = inputs.totalIn,
+            inputCount = inputs.txids.size,
             failureReason = if (txid == null) "broadcast failed — no peer accepted the sweep" else null,
             // A non-null txid is local relay only — PENDING, never confirmed (#6).
             broadcastState = if (txid == null) BroadcastState.FAILED else BroadcastState.PENDING,
+            skippedNoScript = inputs.skippedNoScript,
         )
     }
 
@@ -217,4 +195,54 @@ class LegacySweepService(
         }
         return out
     }
+}
+
+/** Input arrays for one sweep tx, assembled from a profile's UTXOs. Each UTXO's
+ *  (chain,index) comes straight from its [DerivedAddress] — no positional
+ *  reconstruction (bug #3 fix). UTXOs whose backend row lacks a scriptPubKey are
+ *  collected in [skippedNoScript] and skipped, not fatal to the profile (bug #4).
+ *  Pure + JNI-free so it is unit-testable. */
+internal data class SweepInputs(
+    val txids: List<String>,
+    val vouts: List<Int>,
+    val amounts: List<Long>,
+    val chains: List<Int>,
+    val indices: List<Int>,
+    val scripts: List<String>,
+    val totalIn: Long,
+    val skippedNoScript: List<String>,
+)
+
+internal fun assembleSweepInputs(
+    result: RecoveryScanService.ProfileResult,
+): SweepInputs {
+    val byAddress: Map<String, DerivedAddress> =
+        result.derivedAddresses.associateBy { it.address }
+
+    val txids = mutableListOf<String>()
+    val vouts = mutableListOf<Int>()
+    val amounts = mutableListOf<Long>()
+    val chains = mutableListOf<Int>()
+    val indices = mutableListOf<Int>()
+    val scripts = mutableListOf<String>()
+    val skipped = mutableListOf<String>()
+    var totalIn = 0L
+
+    for (utxo in result.utxos) {
+        val derived = byAddress[utxo.address] ?: continue
+        val script = utxo.scriptPubKeyHex
+        if (script == null) {
+            // #4: one missing-scriptPubKey row must not abort the whole profile.
+            skipped += utxo.address
+            continue
+        }
+        txids += utxo.txid
+        vouts += utxo.vout
+        amounts += utxo.amountSatoshi
+        chains += derived.chain      // #3: carried from derivation, not reconstructed
+        indices += derived.index
+        scripts += script
+        totalIn += utxo.amountSatoshi
+    }
+    return SweepInputs(txids, vouts, amounts, chains, indices, scripts, totalIn, skipped)
 }
