@@ -40,6 +40,8 @@ import javax.inject.Inject
 class RecoverFundsViewModel @Inject constructor(
     private val scanService: RecoveryScanService,
     private val seedProvider: SeedProvider,
+    private val outgoingTxStore: io.digibyte.core.OutgoingTxStore,
+    private val walletTxPersister: io.digibyte.core.WalletTxPersister,
 ) : ViewModel() {
 
     sealed class UiState {
@@ -119,7 +121,7 @@ class RecoverFundsViewModel @Inject constructor(
                     }
                     try {
                         val result = withContext(Dispatchers.IO) {
-                            LegacySweepService().sweepFromSeed(
+                            LegacySweepService(outgoingTxStore, walletTxPersister).sweepFromSeed(
                                 seedBytes = seed,
                                 nonNativeResults = findings,
                                 destAddress = res.address,

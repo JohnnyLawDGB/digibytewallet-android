@@ -262,12 +262,16 @@ object AppModule {
         metadataDao: AssetMetadataDao,
         metadataService: AssetMetadataService,
         assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
+        outgoing: io.digibyte.core.OutgoingTxStore,
+        persister: io.digibyte.core.WalletTxPersister,
     ): AssetManager = AssetManager(
         utxoDao = utxoDao,
         transactionDao = transactionDao,
         metadataDao = metadataDao,
         metadataService = metadataService,
         assetNetworkClient = assetNetworkClient,
+        outgoingTxStore = outgoing,
+        walletTxPersister = persister,
     )
 
     @Provides @Singleton

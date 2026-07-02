@@ -34,6 +34,8 @@ class AssetManager(
     private val metadataService: AssetMetadataService,
     private val decoder: DigiAssetDecoder = DigiAssetDecoder(),
     private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient? = null,
+    private val outgoingTxStore: io.digibyte.core.OutgoingTxStore? = null,
+    private val walletTxPersister: io.digibyte.core.WalletTxPersister? = null,
 ) {
 
     /**
@@ -789,6 +791,19 @@ class AssetManager(
         val signedBytes = signedHex.hexToByteArray() ?: return TxResult.Error("Bad signed-tx hex")
         val txid = Broadcaster.broadcast(signedBytes)
             ?: return TxResult.Error("Broadcast failed — check peer connection")
+
+        // Durability: record + persist through the same path the normal send
+        // uses so SyncService.rebroadcastStrandedSends() re-publishes this asset
+        // transfer if a force-stop within ~1s of broadcast strands the stem.
+        // Best-effort — never affects on-chain state. sentSats is the recipient
+        // DGB marker (the asset quantity isn't a DGB amount); feeSats is exact.
+        outgoingTxStore?.record(
+            txid = txid,
+            sentSats = markerSats,
+            feeSats = feeSats,
+            toAddress = toAddress,
+        )
+        walletTxPersister?.persist()
 
         return TxResult.Success(txid)
     }

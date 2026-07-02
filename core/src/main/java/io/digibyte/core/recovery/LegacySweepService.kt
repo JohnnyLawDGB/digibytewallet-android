@@ -1,5 +1,7 @@
 package io.digibyte.core.recovery
 
+import io.digibyte.core.OutgoingTxStore
+import io.digibyte.core.WalletTxPersister
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.dandelion.Broadcaster
 import kotlinx.coroutines.Dispatchers
@@ -15,7 +17,10 @@ import kotlinx.coroutines.withContext
  * enough that one-tx-per-profile is still very cheap (a few hundred
  * satoshis per sweep).
  */
-class LegacySweepService {
+class LegacySweepService(
+    private val outgoingTxStore: OutgoingTxStore,
+    private val walletTxPersister: WalletTxPersister,
+) {
 
     data class SweepOutcome(
         val profile: DerivationProfile,
@@ -154,6 +159,20 @@ class LegacySweepService {
             )
 
         val txid = Broadcaster.broadcast(txBytes)
+        if (txid != null) {
+            // Durability: route the sweep through the same OutgoingTxStore +
+            // WalletTxPersister the normal send uses so
+            // SyncService.rebroadcastStrandedSends() re-publishes it if a
+            // force-stop within ~1s of broadcast strands the stem before the
+            // network relays it back. Best-effort — never affects on-chain state.
+            outgoingTxStore.record(
+                txid = txid,
+                sentSats = totalIn,
+                feeSats = estimateFee(txBytes.size, feePerKb),
+                toAddress = destAddress,
+            )
+            walletTxPersister.persist()
+        }
         return SweepOutcome(
             profile = profile,
             txHex = signedHex,
@@ -163,6 +182,9 @@ class LegacySweepService {
             failureReason = if (txid == null) "publishTransaction returned null" else null,
         )
     }
+
+    private fun estimateFee(signedSize: Int, feePerKb: Long): Long =
+        (signedSize.toLong() * feePerKb + 999L) / 1000L
 
     private fun hexToBytes(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "hex must be even length" }
