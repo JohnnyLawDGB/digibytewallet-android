@@ -58,4 +58,5 @@ object NativeBridge {
         destAddress: String,
         feePerKb: Long,
     ): String?
+    external fun isRawTransactionSigned(rawTxHex: String): Boolean
 }

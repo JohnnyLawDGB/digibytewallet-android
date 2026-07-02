@@ -594,3 +594,52 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
     free(hex);
     return result;
 }
+
+/**
+ * Test-support: parse a serialized transaction (hex) and report whether
+ * BRTransactionIsSigned() holds. Used by the Layer-B signed-tx known-answer
+ * vector (LegacySweepSignedTxKatTest) to assert the sweep signer emits a
+ * fully-signed, consensus-shaped tx without a live wallet. Stateless; touches
+ * no native global.
+ *
+ * Kotlin signature:
+ *   external fun isRawTransactionSigned(rawTxHex: String): Boolean
+ */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
+    JNIEnv *env, jobject thiz, jstring rawTxHex)
+{
+    (void)thiz;
+    if (!rawTxHex) return JNI_FALSE;
+
+    const char *hex = (*env)->GetStringUTFChars(env, rawTxHex, NULL);
+    if (!hex) return JNI_FALSE;
+
+    size_t hexLen = strlen(hex);
+    if (hexLen == 0 || (hexLen & 1)) {
+        (*env)->ReleaseStringUTFChars(env, rawTxHex, hex);
+        return JNI_FALSE;
+    }
+
+    size_t bufLen = hexLen / 2;
+    uint8_t *buf = (uint8_t *)malloc(bufLen);
+    if (!buf) {
+        (*env)->ReleaseStringUTFChars(env, rawTxHex, hex);
+        return JNI_FALSE;
+    }
+
+    size_t n = hex_to_bytes(hex, buf, bufLen);
+    (*env)->ReleaseStringUTFChars(env, rawTxHex, hex);
+    if (n != bufLen) { free(buf); return JNI_FALSE; }
+
+    BRTransaction *tx = BRTransactionParse(buf, bufLen);
+    free(buf);
+    if (!tx) {
+        LOGW("isRawTransactionSigned: BRTransactionParse failed");
+        return JNI_FALSE;
+    }
+
+    jboolean isSigned = BRTransactionIsSigned(tx) ? JNI_TRUE : JNI_FALSE;
+    BRTransactionFree(tx);
+    return isSigned;
+}

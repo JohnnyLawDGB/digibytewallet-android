@@ -353,6 +353,12 @@ object NativeBridge {
         feePerKb: Long,
     ): String?
 
+    /**
+     * Test-support: re-parse a serialized tx (hex) and return
+     * BRTransactionIsSigned(). Used by the Layer-B signed-tx KAT.
+     */
+    external fun isRawTransactionSigned(rawTxHex: String): Boolean
+
     // ---------- BIP 158 sync mode ----------
     // All BIP 158 functions below are inert until setSyncMode is called with
     // a mode other than BLOOM_ONLY. Default remains BLOOM_ONLY so existing
