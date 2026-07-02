@@ -38,6 +38,7 @@ object NativeBridge {
     external fun loadSavedPeers(data: ByteArray): Int
     external fun createWalletFromBytes(phraseBytes: ByteArray): Boolean
     external fun recoverWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long): Boolean
+    external fun getWalletBirthCheckpointHeight(): Long
     external fun isWalletLoaded(): Boolean
     external fun dumpAllAddresses(): String
     external fun registerRawTransaction(rawTx: ByteArray, blockHeight: Long, blockTimestamp: Long): Boolean

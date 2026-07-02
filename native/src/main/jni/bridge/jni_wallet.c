@@ -246,10 +246,17 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     g_seedValid = 1;
     g_mpk = mpk;
     g_mpkValid = 1;
-    /* Set creation time to block ~20,000,000 (Feb 2025) so new wallets
-     * show meaningful sync progress with DigiRunner game. Scanning ~3M
-     * blocks takes ~20-30 minutes — good balance of UX and security. */
-    g_walletCreationTime = 1738368000;  /* 2025-02-01 00:00:00 UTC */
+    /* A freshly-created wallet has no history before now, so stamp the real
+     * creation time. getWalletBirthCheckpointHeight / BRPeerManagerNewEx then
+     * anchor the SPV + BIP158 sync to the newest checkpoint >=1 week old — a
+     * short, bounded catch-up that self-updates as checkpoints ship and never
+     * goes stale. Matches createWallet (see above).
+     *
+     * (Previously hardcoded to 2025-02-01 to give the DigiRunner sync game
+     * airtime, but a FIXED past date makes every new wallet re-scan an
+     * ever-growing span — ~3.17M blocks / ~1.5 years by mid-2026 — hunting
+     * for transactions that cannot exist before the wallet was created.) */
+    g_walletCreationTime = (uint32_t)time(NULL);  /* New wallet = now */
     g_peerManagerNeedsRecreate = 1;
 
     secure_zero(seed, sizeof(seed));
