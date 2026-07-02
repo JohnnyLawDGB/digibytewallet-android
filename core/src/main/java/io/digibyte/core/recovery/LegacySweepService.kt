@@ -92,12 +92,48 @@ class LegacySweepService(
             if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
                 SweepOutcome(result.profile, null, null, 0L, 0,
                     "BIP49 P2SH-P2WPKH sweep not yet supported — manual recovery required",
-                    BroadcastState.FAILED)
+                    broadcastState = BroadcastState.FAILED)
             } else {
-                sweepOneProfile(seedBytes, result, destAddress, feePerKb)
+                val refusal = amountProvenanceGate(result)
+                if (refusal != null) {
+                    SweepOutcome(result.profile, null, null, 0L, 0, refusal,
+                        broadcastState = BroadcastState.FAILED)
+                } else {
+                    sweepOneProfile(seedBytes, result, destAddress, feePerKb)
+                }
             }
         }
         return Result(outcomes)
+    }
+
+    /**
+     * Amount-provenance pre-sign gate (bug #2 — fund-loss defense).
+     *
+     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or
+     * under-reported amountSatoshi still signs into a consensus-valid tx that
+     * spends the REAL prevout and burns the unreported remainder to fee. We
+     * cannot verify a foreign prevout on-device without fetching it, so we
+     * apply the cheap, honest guards we CAN:
+     *   - refuse if the reconcile backend was unreachable (amounts are
+     *     unverified hints; never sign against a null reconcile result);
+     *   - refuse if ANY UTXO reports a non-positive amount — a corrupt/hostile
+     *     row, and because the sighash is amount-blind, one bad row means the
+     *     whole response's amounts are untrustworthy, so we refuse the entire
+     *     profile-sweep rather than sign a subset.
+     * Returns a human-readable refusal reason, or null when the profile's
+     * UTXOs are safe to hand to the signer. Pure — no JNI, unit-testable.
+     */
+    internal fun amountProvenanceGate(
+        result: RecoveryScanService.ProfileResult,
+    ): String? {
+        if (!result.reachableBackend) {
+            return "backend unreachable — refusing to sign against unverified input amounts"
+        }
+        val bad = result.utxos.firstOrNull { it.amountSatoshi <= 0L }
+        if (bad != null) {
+            return "non-positive amount ${bad.amountSatoshi} on ${bad.txid}:${bad.vout} — refusing sweep"
+        }
+        return null
     }
 
     private fun sweepOneProfile(
