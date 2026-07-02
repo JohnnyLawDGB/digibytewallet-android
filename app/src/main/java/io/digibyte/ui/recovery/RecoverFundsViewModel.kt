@@ -74,6 +74,12 @@ class RecoverFundsViewModel @Inject constructor(
     // on reset. (A JVM String can't be zeroed — same accepted limit as restore.)
     private var pendingForeignMnemonic: String? = null
 
+    /** Return to Idle and drop any held foreign phrase (mode switch / leaving). */
+    fun reset() {
+        pendingForeignMnemonic = null
+        _state.value = UiState.Idle
+    }
+
     fun classify() {
         _state.value = UiState.Classifying
         viewModelScope.launch {
