@@ -58,6 +58,48 @@ class RecoveryScanClassifyTest {
     }
 
     @Test
+    fun classify_partialOutage_notCached_retryReQueries() = runBlocking {
+        // Finding 3: one profile reconciles, another's backend call fails.
+        // allBackendUnreachable is false (not a TOTAL outage), but the result
+        // must NOT be cached — a retry has to re-query so the profile that
+        // failed the first time can still surface funds.
+        val goodAddr = "DCrAZfrumyKz36cDfE8YCL2fJc5eU7Ffxk"
+        val poisonAddr = "DPhx7bckLtP2RVpEwUJvkFktjhLfMKz9aB"
+        val utxo = UtxoEntry("aa".repeat(32), 0, 100_000L, goodAddr, 100L, "76a914aa88ac")
+
+        // Source that returns null (unreachable) whenever poisonAddr is queried,
+        // otherwise a normal result.
+        val source = object : UtxoSource {
+            var fetchCount = 0
+                private set
+            override suspend fun fetchUtxos(addresses: List<String>): ReconcileResult? {
+                fetchCount++
+                if (poisonAddr in addresses) return null
+                val utxos = addresses.mapNotNull { if (it == goodAddr) utxo else null }
+                return ReconcileResult(utxos, emptyMap(), 200L)
+            }
+        }
+        val profiles = DerivationProfile.BUILT_INS
+        val pGood = profiles[0]
+        val pBad = profiles.first { it != pGood }
+        val service = RecoveryScanService(source)
+
+        val derived = mapOf(
+            pGood to listOf(DerivedAddress(goodAddr, chain = 0, index = 0)),
+            pBad to listOf(DerivedAddress(poisonAddr, chain = 0, index = 0)),
+        )
+
+        val first = service.classifyDerived(derived)
+        assertFalse(first.allBackendUnreachable) // partial, not total
+        val afterFirst = source.fetchCount
+
+        // Second, structurally-identical classify: because the first was a
+        // partial outage it was NOT cached, so this re-queries the backend.
+        service.classifyDerived(derived)
+        assertTrue("partial-outage result must not be cached", source.fetchCount > afterFirst)
+    }
+
+    @Test
     fun classify_emptyUtxos_noFindings() = runBlocking {
         // Reachable backend, but the profile's address holds no UTXOs.
         val addr = "DCrAZfrumyKz36cDfE8YCL2fJc5eU7Ffxk"

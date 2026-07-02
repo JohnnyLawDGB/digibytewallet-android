@@ -65,6 +65,7 @@ class LegacySweepService(
         nonNativeResults: List<RecoveryScanService.ProfileResult>,
         destAddress: String,
         feePerKb: Long = 100_000L, // DGB min relay × 1 sat/byte
+        destIsSelf: Boolean = false,
     ): Result = withContext(Dispatchers.IO) {
         val phraseBytes = mnemonic.trim().lowercase().toByteArray(Charsets.UTF_8)
         var seedBytes: ByteArray? = null
@@ -73,7 +74,7 @@ class LegacySweepService(
                 ?: return@withContext Result(nonNativeResults.map {
                     SweepOutcome(it.profile, null, null, 0L, 0, "seed derivation failed", BroadcastState.FAILED)
                 })
-            sweepFromSeed(seedBytes, nonNativeResults, destAddress, feePerKb)
+            sweepFromSeed(seedBytes, nonNativeResults, destAddress, feePerKb, destIsSelf)
         } finally {
             seedBytes?.fill(0)
             phraseBytes.fill(0)
@@ -87,6 +88,12 @@ class LegacySweepService(
         nonNativeResults: List<RecoveryScanService.ProfileResult>,
         destAddress: String,
         feePerKb: Long = 100_000L,
+        /** True when [destAddress] is an address THIS wallet owns (the default
+         *  "recover into my own wallet" path). Recorded on the OutgoingTxStore
+         *  entry so the activity list won't misrender the balance-increasing
+         *  sweep as a large negative "Sent" (see OutgoingTxStore
+         *  .shouldApplyOutgoingOverride). External-address sweeps pass false. */
+        destIsSelf: Boolean = false,
     ): Result {
         val outcomes = nonNativeResults.map { result ->
             if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
@@ -99,7 +106,7 @@ class LegacySweepService(
                     SweepOutcome(result.profile, null, null, 0L, 0, refusal,
                         broadcastState = BroadcastState.FAILED)
                 } else {
-                    sweepOneProfile(seedBytes, result, destAddress, feePerKb)
+                    sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf)
                 }
             }
         }
@@ -141,6 +148,7 @@ class LegacySweepService(
         result: RecoveryScanService.ProfileResult,
         destAddress: String,
         feePerKb: Long,
+        destIsSelf: Boolean,
     ): SweepOutcome {
         val profile = result.profile
         // #3: each UTXO's (chain,index) is carried straight from its
@@ -196,11 +204,26 @@ class LegacySweepService(
             // SyncService.rebroadcastStrandedSends() re-publishes it if a
             // force-stop within ~1s of broadcast strands the stem before the
             // network relays it back. Best-effort — never affects on-chain state.
+            //
+            // Durability caveat (external-address sweeps only): when destIsSelf
+            // is false, the sweep has NO wallet-relevant output, so
+            // BRWalletRegisterTransaction orphans it (it isn't in the wallet's
+            // tx set) and rebroadcastStrandedSends() — which re-publishes from
+            // the wallet's serialized txs — can't re-broadcast it. The
+            // OutgoingTxStore record then lingers with no matching wallet tx.
+            // Self-transfer sweeps (destIsSelf=true) are registered normally
+            // because their output pays a wallet address, so they persist and
+            // re-broadcast like an ordinary send.
+            //
+            // isSelfTransfer tags a "recover into my own wallet" sweep so the
+            // activity list leaves the C core's receive categorization intact
+            // instead of overriding it to a negative "Sent" (Finding 1).
             outgoingTxStore.record(
                 txid = txid,
                 sentSats = inputs.totalIn,
                 feeSats = estimateFee(txBytes.size, feePerKb),
                 toAddress = destAddress,
+                isSelfTransfer = destIsSelf,
             )
             walletTxPersister.persist()
         }

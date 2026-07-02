@@ -114,6 +114,12 @@ class RecoverFundsViewModel @Inject constructor(
             is DestResolution.Invalid -> _state.value = UiState.Error(res.reason)
             is DestResolution.Ok -> {
                 _state.value = UiState.Sweeping
+                // A Native destination is this wallet's own fresh receive address,
+                // so the sweep is a self-transfer that increases the balance — tag
+                // it so the activity list keeps the C core's receive categorization
+                // instead of rendering a negative "Sent" (see OutgoingTxStore
+                // .shouldApplyOutgoingOverride). External destinations are real sends.
+                val destIsSelf = destination is SweepDestination.Native
                 viewModelScope.launch {
                     val seed = seedProvider.loadSeed() ?: run {
                         _state.value = UiState.Error("Wallet seed unavailable")
@@ -125,6 +131,7 @@ class RecoverFundsViewModel @Inject constructor(
                                 seedBytes = seed,
                                 nonNativeResults = findings,
                                 destAddress = res.address,
+                                destIsSelf = destIsSelf,
                             )
                         }
                         _state.value = UiState.Done(result.outcomes)

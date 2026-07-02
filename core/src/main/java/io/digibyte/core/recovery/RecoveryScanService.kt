@@ -132,9 +132,13 @@ class RecoveryScanService(
         }
 
         val done = State.Done(results)
-        // Only cache when the backend was actually reachable, so a retry after
-        // an outage still retries rather than serving a stale "no funds".
-        if (!done.allBackendUnreachable) {
+        // Only cache when EVERY non-empty profile was reachable, so a PARTIAL
+        // outage (some profiles reconciled, some didn't) isn't memoized — the
+        // Recover-Funds retry then re-queries and can pick up funds on the
+        // profiles that failed the first time. allBackendUnreachable (the
+        // total-outage case) is a subset of this, so it stays uncached too.
+        val allReachable = done.results.all { it.addresses.isEmpty() || it.reachableBackend }
+        if (allReachable) {
             lastClassify = ClassifyCache(derivedByProfile, done)
         }
         return done

@@ -568,8 +568,14 @@ class WalletViewModel @Inject constructor(
                             // For any tx WE broadcast, OutgoingTxStore holds the authoritative
                             // recipient amount/fee/address, so it wins whenever a record
                             // exists — not only the all-parents-missing (nativeSent==0) case.
+                            // EXCEPTION: a self-transfer sweep (recovering legacy funds into
+                            // our OWN wallet) increases the balance and the C core categorizes
+                            // it as a receive; overriding it would misrender it as a large
+                            // negative "Sent" to our own address, so those records are skipped
+                            // here (OutgoingTxStore.shouldApplyOutgoingOverride). Genuine
+                            // external sends still get the corrected negative amount.
                             val recorded = outgoingTxStore.lookup(txid)
-                            val applyOverride = recorded != null
+                            val applyOverride = OutgoingTxStore.shouldApplyOutgoingOverride(recorded)
                             val amount = if (applyOverride) -recorded!!.sentSats else nativeAmount
                             val fee = if (applyOverride) recorded!!.feeSats else nativeFee
                             val toAddress = if (applyOverride) recorded!!.toAddress else ""
