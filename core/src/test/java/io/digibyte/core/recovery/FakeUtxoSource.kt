@@ -14,7 +14,13 @@ class FakeUtxoSource(
     var lastQueried: List<String>? = null
         private set
 
+    /** Number of times [fetchUtxos] actually reached the (fake) backend.
+     *  Used by the #8 dedupe test to prove a repeated classify serves cache. */
+    var fetchCount = 0
+        private set
+
     override suspend fun fetchUtxos(addresses: List<String>): ReconcileResult? {
+        fetchCount++
         lastQueried = addresses
         if (!reachable) return null
         val utxos = addresses.flatMap { byAddress[it]?.utxos.orEmpty() }

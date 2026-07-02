@@ -68,6 +68,18 @@ class RecoveryScanService(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /** #8: RecoveryScanService is a @Singleton, so the onboarding path's
+     *  informational scan and RecoverFundsViewModel.classify share this
+     *  instance. Cache the last usable Done keyed by the derived-address set so
+     *  the second, structurally-identical classify is served without a second
+     *  round of reconcile-backend calls (the endpoint is 429-prone). A
+     *  different seed/profile produces a different key → cache miss → re-scan. */
+    private data class ClassifyCache(
+        val key: Map<DerivationProfile, List<DerivedAddress>>,
+        val done: State.Done,
+    )
+    @Volatile private var lastClassify: ClassifyCache? = null
+
     /**
      * Post-derivation classification: for each profile's already-derived
      * address list, query [utxoSource] and assemble [ProfileResult]s.
@@ -78,6 +90,12 @@ class RecoveryScanService(
     suspend fun classifyDerived(
         derivedByProfile: Map<DerivationProfile, List<DerivedAddress>>,
     ): State.Done {
+        lastClassify?.let { cached ->
+            if (cached.key == derivedByProfile) {
+                _state.value = cached.done
+                return cached.done
+            }
+        }
         val profileAddrs = derivedByProfile.entries.toList()
         val results = mutableListOf<ProfileResult>()
 
@@ -113,7 +131,13 @@ class RecoveryScanService(
             results.add(result)
         }
 
-        return State.Done(results)
+        val done = State.Done(results)
+        // Only cache when the backend was actually reachable, so a retry after
+        // an outage still retries rather than serving a stale "no funds".
+        if (!done.allBackendUnreachable) {
+            lastClassify = ClassifyCache(derivedByProfile, done)
+        }
+        return done
     }
 
     /**
