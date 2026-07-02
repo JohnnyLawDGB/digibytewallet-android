@@ -50,6 +50,11 @@ class RecoveryScanService(
     data class ProfileResult(
         val profile: DerivationProfile,
         val addresses: List<String>,
+        /** Same addresses as [addresses] but each tagged with its true
+         *  (chain,index) from derivation. The sweeper reads THIS — never the
+         *  positional index of [addresses] — so dropped empty slots can't
+         *  mis-map an input to the wrong child key (bug #3). */
+        val derivedAddresses: List<DerivedAddress>,
         val utxos: List<UtxoEntry>,
         val rawTxs: Map<String, io.digibyte.core.reconcile.RawTxEntry>,
         /** False when the reconcile call returned null (network/timeout/etc.).
@@ -71,7 +76,7 @@ class RecoveryScanService(
      * Emits per-profile [State.Scanning] progress and returns [State.Done].
      */
     suspend fun classifyDerived(
-        derivedByProfile: Map<DerivationProfile, List<String>>,
+        derivedByProfile: Map<DerivationProfile, List<DerivedAddress>>,
     ): State.Done {
         val profileAddrs = derivedByProfile.entries.toList()
         val results = mutableListOf<ProfileResult>()
@@ -83,21 +88,23 @@ class RecoveryScanService(
         // poisoned the backend's circuit breaker. One at a time is faster
         // in practice and friendlier to the shared infra.
         for ((i, entry) in profileAddrs.withIndex()) {
-            val (profile, addrs) = entry
+            val (profile, derived) = entry
+            val addrs = derived.map { it.address }
             _state.value = State.Scanning(
                 "Reconciling profile ${i + 1}/${profileAddrs.size}: ${profile.label}",
                 0.4f + (0.5f * i / profileAddrs.size.coerceAtLeast(1)),
             )
-            val result = if (addrs.isEmpty()) {
+            val result = if (derived.isEmpty()) {
                 // No addresses derived for this profile (rare: BIP49 etc.
                 // when JNI returns empty). Treat as "checked, empty"
                 // rather than backend-failure.
-                ProfileResult(profile, addrs, emptyList(), emptyMap(), reachableBackend = true)
+                ProfileResult(profile, addrs, derived, emptyList(), emptyMap(), reachableBackend = true)
             } else {
                 val fetched = utxoSource.fetchUtxos(addrs)
                 ProfileResult(
                     profile = profile,
                     addresses = addrs,
+                    derivedAddresses = derived,
                     utxos = fetched?.utxos ?: emptyList(),
                     rawTxs = fetched?.rawTxs ?: emptyMap(),
                     reachableBackend = fetched != null,
@@ -183,8 +190,8 @@ class RecoveryScanService(
      */
     private fun deriveAllProfiles(
         seedBytes: ByteArray,
-    ): Map<DerivationProfile, List<String>> {
-        val result = LinkedHashMap<DerivationProfile, List<String>>(profiles.size)
+    ): Map<DerivationProfile, List<DerivedAddress>> {
+        val result = LinkedHashMap<DerivationProfile, List<DerivedAddress>>(profiles.size)
         for (profile in profiles) {
             val arr = NativeBridge.deriveAddresses(
                 seedBytes,
@@ -194,8 +201,24 @@ class RecoveryScanService(
                 profile.gapInternal,
                 profile.addressFormat,
             ) ?: emptyArray()
-            result[profile] = arr.filter { it.isNotEmpty() }
+            result[profile] = mapDerived(arr, profile.gapExternal)
         }
         return result
     }
 }
+
+/**
+ * Tag each raw derived address with its true (chain,index) from its RAW array
+ * position — external[0..gapExternal-1] then internal[…] — and drop empty
+ * slots. Computing (chain,index) BEFORE filtering is the #3 fix: a dropped
+ * empty slot can no longer shift a surviving address onto the wrong child key.
+ * Pure + JNI-free so it is unit-testable.
+ */
+internal fun mapDerived(raw: Array<String>, gapExternal: Int): List<DerivedAddress> =
+    raw.mapIndexedNotNull { pos, addr ->
+        when {
+            addr.isEmpty() -> null
+            pos < gapExternal -> DerivedAddress(addr, chain = 0, index = pos)
+            else -> DerivedAddress(addr, chain = 1, index = pos - gapExternal)
+        }
+    }

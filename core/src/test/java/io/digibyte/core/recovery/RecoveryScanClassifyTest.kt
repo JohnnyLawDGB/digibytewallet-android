@@ -19,7 +19,7 @@ class RecoveryScanClassifyTest {
         val service = RecoveryScanService(source)
 
         val done = service.classifyDerived(
-            mapOf(legacyProfile to listOf(addr)),
+            mapOf(legacyProfile to listOf(DerivedAddress(addr, chain = 0, index = 0))),
         )
         assertEquals(1, done.nonNativeWithFunds.size)
         assertEquals(424_797_024L, done.nonNativeWithFunds[0].totalSat)
@@ -30,7 +30,7 @@ class RecoveryScanClassifyTest {
         val source = FakeUtxoSource(emptyMap(), reachable = false)
         val service = RecoveryScanService(source)
         val done = service.classifyDerived(
-            mapOf(legacyProfile to listOf("DCrAZfrumyKz36cDfE8YCL2fJc5eU7Ffxk")),
+            mapOf(legacyProfile to listOf(DerivedAddress("DCrAZfrumyKz36cDfE8YCL2fJc5eU7Ffxk", chain = 0, index = 0))),
         )
         assertTrue(done.allBackendUnreachable)
     }
