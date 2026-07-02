@@ -6,8 +6,8 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
 **Branch:** `phase1-modernization`
-**Version:** v3.5.42
-**Test device:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28)
+**Version:** v3.7.6  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
 
@@ -54,15 +54,15 @@ adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 - `ByteArray.fill(0)` in `finally` blocks on all seed paths
 - 42 security tests verify these properties
 
-### SPV Sync
-- Priority bloom peer: `digiscope.me` injected on every sync start
-- **Bloom seeder integration:** wallet fetches 10+ bloom peers from `api.digiscope.me/api/peers/bloom` on startup (cached hourly)
-- `PEER_MAX_CONNECTIONS = 5` (increased from 3)
-- Rescan locks to priority peer via `BRPeerManagerSetFixedPeer` then clears after completion
-- Block/peer persistence: async hex encoding to SharedPreferences
-- `isWalletLoaded()` JNI prevents wallet double-free on unlock
-- `hasReachedSynced` initialized from persisted `has_synced` flag
-- **Service lifecycle:** SyncService drops foreground notification after sync, peers stay connected while app is open. WorkManager SyncWorker does 30-second catch-ups every 15 min when app is backgrounded.
+- **Sync modes (`dgb_settings/sync_mode`, `NativeBridge.SyncMode`):** default is `BOTH` — bloom + BIP158 compact filters run in parallel. Other modes: `COMPACT_FILTERS_ONLY` (max address privacy) and `BLOOM_ONLY`. User-selectable in Settings → Sync Mode (`SyncModeScreen.kt`).
+- **BIP157/158 compact filters (shipped v3.5.39, default-on):** native GCS decoder + `cfheaders`/`cfilter` wire handlers + filter-header chain persistence. In the compact-filter path the wallet's address set never leaves the device. `cf_birth_height` (`dgb_settings`) bounds the scan.
+- **120s BIP158→bloom watchdog:** if filter peers make no progress, the session falls back to `BLOOM_ONLY` (resets next launch so filters are retried).
+- **Bloom path (parallel / fallback):** priority bloom peer `digiscope.me` injected on sync start; wallet fetches 10+ bloom peers from `api.digiscope.me/api/peers/bloom` (cached hourly). `PEER_MAX_CONNECTIONS = 5`.
+- **Dandelion++ (opt-in, default OFF):** stem submission to a seeder-tagged peer with Kotlin embargo→fluff fallback. Toggle in Settings → Network Info (`Broadcaster` + `SyncService.injectDandelionPeers`).
+- **Tor transport (opt-in, default OFF):** no-exec/dlopen kmp-tor, SOCKS5 into the C core (routing fixed v3.7.5, `SafeSocks=0`). Advanced toggle in Settings → Network Info.
+- Rescan locks to priority peer via `BRPeerManagerSetFixedPeer` then clears after completion.
+- `isWalletLoaded()` JNI prevents wallet double-free on unlock; `hasReachedSynced` initialized from persisted `has_synced` flag.
+- **Service lifecycle:** SyncService drops the foreground notification after sync; peers stay connected while the app is open. WorkManager SyncWorker does 30-second catch-ups every 15 min when backgrounded.
 
 ### Fee Structure
 - Single default fee: `DEFAULT_FEE_PER_KB` (100 sat/byte) — DigiByte min relay fee
@@ -107,16 +107,18 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 
 ### SharedPreferences Keys
 - `dgb_wallet_seed` — encrypted mnemonic + IV + seed fingerprint
-- `dgb_sync_data` — saved blocks (hex), saved peers (hex), has_synced flag, last_balance, saved_transactions
+- `dgb_sync_data` — saved blocks (hex), saved peers (hex), `saved_filter_headers` (compact-filter header chain, hex), has_synced flag, last_balance, saved_transactions
+- `dgb_settings` — `sync_mode` (BOTH / COMPACT_FILTERS_ONLY / BLOOM_ONLY), `cf_birth_height` (compact-filter scan floor)
 - `dgb_digiscope` — JWT session token for Hub
 - `dgb_db_key` — encrypted DB passphrase
 - `dgb_bloom_peers` — cached bloom peer list from seeder API
+- `dgb_dandelion` — `enabled` flag for Dandelion++ stem submission (default off / opt-in)
+- `dgb_dandelion_peers` — cached Dandelion-capable peer list from seeder
 - `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
 
 ### Versioning Policy
-- `3.0.X` — patch (every publish gets a bump)
-- `3.X.0` — minor (new features)
-- `X.0.0` — major (protocol changes)
+- `3.X.Y` — current line (at v3.7.6). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).
+- `X.0.0` — major: reserved for a wire-protocol change or removal of the legacy bloom path. NOTE: BIP157/158 shipped inside the 3.5.x line **without** a major bump, so the old "4.0.0 = BIP158 lands" trigger is retired — the next major needs a fresh trigger (open decision; see ROADMAP → Versioning).
 - Pre-publish test suite must pass before any release
 - Never reuse version numbers
 
@@ -133,10 +135,10 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - 42 security tests in `core/src/test/java/io/digibyte/core/security/`
 - MobSF report at `security/reports/mobsf-report.json`
 - Audit summary at `security/AUDIT-SUMMARY.md`
-- CRITICAL-1: Resolved (auth not required — app uses own PIN)
+- CRITICAL-1: Resolved as designed (auth not required — app uses own PIN). RESIDUAL (ROADMAP Phase 2): no Keystore user-auth binding + no PIN rate-limit — a compromised app process can decrypt the seed without device unlock.
 - CRITICAL-2: Resolved (g_seed static, accessor API)
 - CRITICAL-3: Resolved (ByteArray path, zeroed after use)
-- CRITICAL-4: Resolved (Digi-ID callback domain validation)
+- CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): Digi-ID still signs with the first wallet address (`m/44'/20'/0'/0/0`), not an isolated subtree — key isolation pending.
 
 ## Pre-Publish Test Suite
 - `./scripts/pre-publish-test.sh` — 8 scenarios across API 28/33/34/35
@@ -151,8 +153,11 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - Emulator AVDs: `dgb-test-api28`, `dgb-test-api33`, `dgb-test-api34`, `dgb-test-api35`
 
 ## Roadmap
-See `ROADMAP.md` for the full development plan:
-- Phase 1: Infrastructure (release signing, Maestro, code quality, F-Droid)
-- Phase 2: Features (tx detail, watch-only, DigiAsset send, coin control)
-- Phase 3: Privacy (BIP157/158, Tor, Dandelion++, v9.26)
-- Phase 4: Distribution (Play Store, hardware wallets)
+`ROADMAP.md` is authoritative and **sovereignty-first** (removing trusted third parties from the data path comes before feature breadth). The list below is a pointer only — do **not** maintain a second copy here:
+- Phase 0: Legibility (ARCHITECTURE / THREAT_MODEL / BIP-compliance docs)
+- Phase 1: Sovereign data layer — BIP157/158 (**client shipped & default since v3.5.39**; remaining: peer diversity beyond author infra + bloom-deprecation path)
+- Phase 2: Key & trust hardening (Keystore auth-binding, PIN rate-limit, Digi-ID key isolation, Tor disposition)
+- Phase 3: Feature velocity on the sovereign layer (PSBT, multisig, watch-only, coin control, RBF, WIF sweep, DigiAsset send)
+- Phase 4: Distribution + hardware (Play Store, F-Droid, Coldcard QR, NFC)
+
+The older feature-ordered "Phase 1 = Infrastructure / Phase 3 = Privacy" plan is **superseded** (ROADMAP.md:3-6). Do not sequence work from it.

@@ -477,8 +477,9 @@ class SyncService : Service() {
         }
 
     /**
-     * BIP 158 watchdog. The wallet defaults to COMPACT_FILTERS_ONLY for
-     * privacy — wallet addresses never leave the device. But the filter-
+     * BIP 158 watchdog. The wallet defaults to SyncMode.BOTH (bloom +
+     * compact filters in parallel); COMPACT_FILTERS_ONLY is user-selectable
+     * for max address privacy. But the compact-filter
      * peer pool is small (the seeder currently advertises ~3 peers), so
      * if all of them are unreachable through Tor or down, the wallet
      * would otherwise sit "Connecting…" forever.
@@ -868,9 +869,10 @@ class SyncService : Service() {
         injectBloomPeers()
 
         // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
-        // Default sync mode is COMPACT_FILTERS_ONLY for new installs and any user
-        // who hasn't explicitly chosen otherwise — wallet addresses never leave
-        // the device. A 120s watchdog falls back to BLOOM_ONLY for THIS session
+        // Default sync mode is BOTH (bloom + compact filters in parallel) for new
+        // installs and any user who hasn't explicitly chosen otherwise;
+        // COMPACT_FILTERS_ONLY (addresses never leave the device) is selectable.
+        // A 120s watchdog falls back to BLOOM_ONLY for THIS session
         // if filter peers don't make progress; the choice resets on next launch
         // so we try filters again. Users can override in Settings → Sync Mode.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)

@@ -65,8 +65,8 @@ class SettingsViewModel @Inject constructor(
     val torEnabled: StateFlow<Boolean> = _torEnabled.asStateFlow()
 
     // ── Dandelion broadcast privacy ───────────────────────────────────────────
-    /** Whether Dandelion stem submission is enabled (default on). Persisted to the
-     *  dgb_dandelion pref so SyncService.injectDandelionPeers reads it on sync start. */
+    /** Whether Dandelion stem submission is enabled (default OFF / opt-in). Persisted to
+     *  the dgb_dandelion pref so SyncService.injectDandelionPeers reads it on sync start. */
     private val _dandelionEnabled = MutableStateFlow(
         context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
             .getBoolean("enabled", false)

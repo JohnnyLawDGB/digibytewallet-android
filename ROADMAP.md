@@ -1,6 +1,6 @@
 # DigiByte Wallet — Roadmap
 
-Current version: **v3.5.26** (April 2026). This roadmap supersedes the
+Current version: **v3.7.6** (June 2026). This roadmap supersedes the
 feature-ordered roadmap previously in this file. It is reorganized around
 what actually makes this wallet different from a BlueWallet-style SPV client:
 **no trusted third party in the data path**.
@@ -33,9 +33,11 @@ what actually makes this wallet different from a BlueWallet-style SPV client:
   fetched from an explorer.
 - Recovery. BIP39 mnemonic, in-app seed backup + verify, dual-scan
   recovery covers the legacy `m/0H` tree for pre-v3.4.0 wallets.
-- Tor support. Real kmp-tor exec-mode integration with SOCKS5 into the
-  C core; peer traffic, bloom seeder fetch, and HTTP calls route through
-  it when enabled.
+- Tor support. Real kmp-tor no-exec (dlopen) integration with SOCKS5 into
+  the C core (switched from exec in v3.6.5 for 16 KB page-size support);
+  peer traffic, bloom seeder fetch, and HTTP calls route through it when
+  enabled. SOCKS routing was fixed in v3.7.5 (`SafeSocks=0`). Opt-in,
+  OFF by default.
 
 **What is not sovereign today, and this roadmap is built around:**
 - **The peer-discovery layer is a soft trusted third party.**
@@ -63,11 +65,13 @@ what actually makes this wallet different from a BlueWallet-style SPV client:
   device being unlocked. PIN brute-force also has no rate-limit.
 - **Digi-ID signs with the first wallet address** (`m/44'/20'/0'/0/0`),
   not an isolated key subtree. Digi-ID compromise = wallet compromise.
-- **Tor is DISABLED by default and not promoted (v3.6.6).** The in-app kmp-tor
-  *no-exec* integration (switched from exec in v3.6.5 for 16 KB page-size
-  compatibility) has a broken SOCKS peer-routing path: the C core gets
+- **Tor is OFF by default and opt-in (advanced) (v3.6.6+).** The in-app kmp-tor
+  *no-exec* (dlopen) integration (switched from exec in v3.6.5 for 16 KB
+  page-size compatibility) had a broken SOCKS peer-routing path: the C core got
   `connect error: Connection refused` on Tor's in-process SOCKS listener, so 0
-  peers ever route through Tor and the wallet degrades to direct every session.
+  peers routed through Tor. **Fixed in v3.7.5:** `SafeSocks=1` was rejecting
+  every raw-IP `CONNECT`; `SafeSocks=0` (`TorManager.kt`) restored routing
+  (device-verified).
   Root analysis (2026-06-10): the listener port reported by kmp-tor's `LISTENERS`
   event isn't reliably accepting connections, compounded by SOCKS-port churn
   across the degrade→reconnect cycle (each restart gets a new auto-assigned port,
@@ -76,13 +80,14 @@ what actually makes this wallet different from a BlueWallet-style SPV client:
   (don't wire the proxy before circuits exist), a reactive Tor-state observer
   (re-wire + clear the banner on reconnect), keepalive/onResume deferral so peers
   don't dial direct before the proxy, and `MAX_TOR_RECONNECT_FAILURES` 3→15.
-  **Roadmap decision:** either (a) fix no-exec SOCKS routing — pin a fixed
-  `SocksPort`, verify the listener accepts before declaring usable, retry on
-  ECONNREFUSED; or (b) remove in-app Tor entirely (drops the large libtor.so /
-  libtorjni.so, kills the 16 KB/SELinux/no-exec headaches) and document Orbot /
-  system VPN as the IP-anonymity path. In-app privacy stays: BIP158 compact
-  filters (address privacy, default) + Dandelion++ (tx-origin privacy, Phase 3).
-  Tor remains an opt-in toggle in Settings → Network Info for advanced users.
+  **Product decision (2026-07-02): keep Tor opt-in / OFF by default** — routing
+  now works, but Tor is not promoted to default-on. In-app privacy is carried by
+  BIP158 compact filters (address privacy, default) + Dandelion++ (tx-origin
+  privacy, opt-in). Tor stays an advanced toggle in Settings → Network Info;
+  Orbot / system VPN remain the recommended IP-anonymity path for most users.
+  Residual open bug: when Tor bootstrap fails there is no automatic clearnet
+  fallback (wallet can sit at 0 peers) — tracked; only affects users who
+  explicitly enable Tor.
 
 The gap between "sovereign for signing" and "sovereign for data" is the
 central thing this roadmap closes.
@@ -185,6 +190,15 @@ not research.
 ---
 
 ## Phase 1 — Sovereign data layer (BIP 157/158)
+
+> **STATUS (2026-07-02): the BIP157/158 client is SHIPPED and default as of
+> v3.5.39** — native GCS decoder, `cfheaders`/`cfilter` handlers, filter-header
+> checkpoint/persistence, and dual-mode sync (`SyncMode.BOTH` default, 120s
+> bloom-fallback watchdog) all landed and run in production. The deliverables
+> below are retained for historical rationale; the **remaining** Phase-1 work is
+> the non-client parts: peer selection by service bits, a community seeder-mesh /
+> peer diversity beyond author infrastructure, and the bloom-deprecation path
+> once enough peers advertise `NODE_COMPACT_FILTERS`.
 
 **Why this now.** This is the single change that most directly answers
 "what's the point of this wallet." It removes the plaintext address
@@ -433,7 +447,7 @@ support.
 ## Appendix — Feature inventory
 
 Baseline against a modern self-custodial wallet. Status reflects
-v3.5.11.
+v3.7.6.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -463,18 +477,19 @@ v3.5.11.
 | Hardware wallet (USB) | Out of scope | Android USB OTG fragility, QR preferred |
 | CSV export | Not started | Phase 3 small increment |
 | Multiple accounts | Not started | Phase 4 |
-| Tor as transport | Shipped | Silent-fallback gap — Phase 2 |
-| BIP 157/158 compact filters | **Not started** | **Phase 1 — the point of this roadmap** |
+| Tor as transport | Shipped (opt-in, off by default) | Routing fixed v3.7.5 (`SafeSocks=0`); no-clearnet-fallback bug residual — Phase 2 |
+| BIP 157/158 compact filters | **Shipped `v3.5.39`** | Default sync mode (`SyncMode.BOTH`: bloom + compact filters in parallel; `COMPACT_FILTERS_ONLY` selectable), 120s bloom-fallback watchdog. Remaining Phase-1 work is peer diversity + bloom deprecation, not the client. |
 | Dandelion++ stem submission | Shipped `v3.7.0` | SPV stem-submit on the live v8.26 network (the 9.26 dependency was incorrect); seeder-tagged dandelion peers + random embargo/fluff fallback so delivery is never sacrificed |
 
 ## Versioning
 
-- **3.0.X** — patch (currently — bug fixes, sovereignty hardening
-  increments that ship without UI-visible change).
-- **3.X.0** — minor (Phase 2 hardening items, Phase 3 feature drops).
-- **4.0.0** — major (BIP 157/158 lands — Phase 1 is significant
-  enough to warrant the major bump).
-- **4.X.0 / 5.0.0** — Phases 3 & 4.
+- **3.X.Y** — current line (at v3.7.6). `Y` = patch (bug fixes, sovereignty
+  hardening increments); `X` = minor (feature batches — 3.5→3.6→3.7).
+- **X.0.0** — major. RETIRED trigger: "4.0.0 = BIP157/158 lands" — BIP157/158
+  actually shipped inside the 3.5.x line (v3.5.39) without a major bump, so
+  that premise is dead. A new major trigger is an **open decision**: candidates
+  are removal of the legacy bloom path, a true wire-protocol change, or the
+  multisig/PSBT feature line. Until chosen, stay on the 3.X.Y cadence.
 
 ## What this roadmap is not
 
