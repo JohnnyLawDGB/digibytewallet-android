@@ -522,6 +522,33 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
     uint64_t fee = ((uint64_t)estSize * (uint64_t)feePerKb) / 1000;
     if (fee < 1000) fee = 1000; /* DGB min relay */
 
+    /* ── Amount-provenance fee-sanity guard (bug #2, fund-loss). ──
+     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or
+     * under-reported amounts[] still produces a VALID signature. The tx then
+     * spends the REAL on-chain prevout value and the unreported remainder
+     * (realValue - outAmount) is silently burned to fee by the network. We
+     * cannot verify a FOREIGN prevout on-device without fetching it, but we
+     * CAN refuse the pathological under-report: on a multi-input consolidation
+     * a legitimate total dwarfs the fee, so a computed fee that is >= 5% of the
+     * reported total (fee*20 >= totalIn) means the amounts are almost certainly
+     * stale/under-reported. Refuse rather than sign a lopsided sweep.
+     * Single-input sweeps are exempt — a lone small UTXO can legitimately have
+     * the fee be a meaningful fraction of its value (the dust check below still
+     * protects that case). fee*20 cannot overflow: fee is bounded by
+     * estSize*feePerKb. */
+    if (inputCount > 1 && totalIn <= fee * 20) {
+        LOGW("buildAndSignLegacySweep: fee-sanity guard tripped "
+             "(inputs=%d fee=%llu totalIn=%llu) — refusing under-reported sweep",
+             (int)inputCount, (unsigned long long)fee, (unsigned long long)totalIn);
+        for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
+        free(keys);
+        BRTransactionFree(tx);
+        (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
+        secure_zero(seedRaw, (size_t)seedLen);
+        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        return NULL;
+    }
+
     if (totalIn <= fee + 546 /* dust */) {
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
