@@ -10,6 +10,7 @@ import io.digibyte.core.recovery.RecoveryScanService
 import io.digibyte.core.recovery.SeedProvider
 import io.digibyte.core.recovery.SweepDestination
 import io.digibyte.core.recovery.resolve
+import io.digibyte.core.recovery.sweepSet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +52,7 @@ class RecoverFundsViewModel @Inject constructor(
             val findings: List<RecoveryScanService.ProfileResult>,
             val totalSat: Long,
             val backendUnreachable: Boolean,
+            val isForeign: Boolean = false,
         ) : UiState()
         data object Sweeping : UiState()
         data class Done(val outcomes: List<LegacySweepService.SweepOutcome>) : UiState()
@@ -66,6 +68,11 @@ class RecoverFundsViewModel @Inject constructor(
      * sweep outcome's `inputCount`.
      */
     private var lastFindings: List<RecoveryScanService.ProfileResult> = emptyList()
+
+    // Transient: the entered foreign phrase, held between classifyForeign and
+    // sweepForeign so the sweep re-derives the same seed. Cleared after sweep /
+    // on reset. (A JVM String can't be zeroed — same accepted limit as restore.)
+    private var pendingForeignMnemonic: String? = null
 
     fun classify() {
         _state.value = UiState.Classifying
@@ -141,6 +148,79 @@ class RecoverFundsViewModel @Inject constructor(
                         seed.fill(0)
                     }
                 }
+            }
+        }
+    }
+
+    /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
+    fun classifyForeign(mnemonic: String) {
+        val phrase = mnemonic.trim().split(Regex("\\s+")).joinToString(" ")
+        if (!NativeBridge.isValidMnemonic(phrase)) {
+            _state.value = UiState.Error("That doesn't look like a valid recovery phrase.")
+            return
+        }
+        pendingForeignMnemonic = phrase
+        _state.value = UiState.Classifying
+        viewModelScope.launch {
+            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
+                _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
+            }
+            try {
+                when (val s = withContext(Dispatchers.IO) { scanService.scanFromSeed(seed) }) {
+                    is RecoveryScanService.State.Done -> {
+                        val set = sweepSet(s, isForeign = true)      // includes native
+                        _state.value = if (s.allBackendUnreachable) {
+                            UiState.Error("Couldn't reach the lookup service — try again")
+                        } else UiState.Findings(
+                            findings = set, totalSat = set.sumOf { it.totalSat },
+                            backendUnreachable = false, isForeign = true,
+                        )
+                    }
+                    is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)
+                    else -> _state.value = UiState.Error("Scan did not complete")
+                }
+            } catch (t: Throwable) {
+                _state.value = UiState.Error(t.message ?: "Scan failed")
+            } finally {
+                seed.fill(0)
+            }
+        }
+    }
+
+    /** Sweep the previously-scanned foreign phrase into THIS wallet (native). */
+    fun sweepForeign() {
+        val phrase = pendingForeignMnemonic ?: run {
+            _state.value = UiState.Error("Enter a recovery phrase and scan first."); return
+        }
+        val findings = (_state.value as? UiState.Findings)?.findings ?: emptyList()
+        if (findings.isEmpty()) { _state.value = UiState.Error("Nothing to recover"); return }
+        val dest = SweepDestination.Native.resolve(
+            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
+            validator = { NativeBridge.isValidAddress(it) },
+        )
+        if (dest !is DestResolution.Ok) {
+            _state.value = UiState.Error("Could not get a destination address"); return
+        }
+        _state.value = UiState.Sweeping
+        viewModelScope.launch {
+            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
+                _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
+            }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    LegacySweepService(outgoingTxStore, walletTxPersister).sweepFromSeed(
+                        seedBytes = seed,
+                        nonNativeResults = findings,   // foreign: all-funded incl. native
+                        destAddress = dest.address,
+                        destIsSelf = true,             // lands in THIS wallet -> receive
+                    )
+                }
+                _state.value = UiState.Done(result.outcomes)
+            } catch (t: Throwable) {
+                _state.value = UiState.Error(t.message ?: "Sweep failed")
+            } finally {
+                seed.fill(0)
+                pendingForeignMnemonic = null
             }
         }
     }
