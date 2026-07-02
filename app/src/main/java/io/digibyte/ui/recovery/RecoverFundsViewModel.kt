@@ -11,6 +11,7 @@ import io.digibyte.core.recovery.SeedProvider
 import io.digibyte.core.recovery.SweepDestination
 import io.digibyte.core.recovery.resolve
 import io.digibyte.core.recovery.sweepSet
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -114,6 +115,8 @@ class RecoverFundsViewModel @Inject constructor(
                     is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)
                     else -> _state.value = UiState.Error("Scan did not complete")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 _state.value = UiState.Error(t.message ?: "Scan failed")
             } finally {
@@ -156,6 +159,8 @@ class RecoverFundsViewModel @Inject constructor(
                             )
                         }
                         _state.value = UiState.Done(result.outcomes)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (t: Throwable) {
                         _state.value = UiState.Error(t.message ?: "Sweep failed")
                     } finally {
@@ -193,6 +198,8 @@ class RecoverFundsViewModel @Inject constructor(
                     is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)
                     else -> _state.value = UiState.Error("Scan did not complete")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 _state.value = UiState.Error(t.message ?: "Scan failed")
             } finally {
@@ -230,6 +237,8 @@ class RecoverFundsViewModel @Inject constructor(
                     )
                 }
                 _state.value = UiState.Done(result.outcomes)
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 _state.value = UiState.Error(t.message ?: "Sweep failed")
             } finally {

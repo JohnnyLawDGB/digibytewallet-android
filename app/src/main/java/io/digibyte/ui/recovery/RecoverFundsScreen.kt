@@ -91,7 +91,14 @@ fun RecoverFundsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            ModeSelector(mode) { newMode ->
+            ModeSelector(
+                mode = mode,
+                // Disabled mid-scan/sweep so the user can't cancel a sweep that
+                // may have already broadcast — see reset()'s CancellationException
+                // note in RecoverFundsViewModel.
+                enabled = state !is RecoverFundsViewModel.UiState.Classifying &&
+                        state !is RecoverFundsViewModel.UiState.Sweeping,
+            ) { newMode ->
                 // Guard: re-tapping the already-selected chip must be a no-op.
                 // Otherwise vm.reset() fires -> Idle but LaunchedEffect(mode)
                 // doesn't restart (mode unchanged) -> own-seed screen goes
@@ -794,11 +801,12 @@ private fun friendlyFailureReason(reason: String?): String = when {
 enum class RecoverMode { ThisWallet, AnotherPhrase }
 
 @Composable
-private fun ModeSelector(mode: RecoverMode, onChange: (RecoverMode) -> Unit) {
+private fun ModeSelector(mode: RecoverMode, enabled: Boolean, onChange: (RecoverMode) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
             selected = mode == RecoverMode.ThisWallet,
             onClick = { onChange(RecoverMode.ThisWallet) },
+            enabled = enabled,
             label = { Text("This wallet") },
             colors = FilterChipDefaults.filterChipColors(
                 containerColor = CARD,
@@ -810,6 +818,7 @@ private fun ModeSelector(mode: RecoverMode, onChange: (RecoverMode) -> Unit) {
         FilterChip(
             selected = mode == RecoverMode.AnotherPhrase,
             onClick = { onChange(RecoverMode.AnotherPhrase) },
+            enabled = enabled,
             label = { Text("Another wallet's phrase") },
             colors = FilterChipDefaults.filterChipColors(
                 containerColor = CARD,
