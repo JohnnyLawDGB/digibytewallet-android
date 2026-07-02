@@ -194,4 +194,43 @@ class RecoveryScanClassifyTest {
         assertTrue(outcome.failureReason!!.contains("manual recovery", ignoreCase = true))
         assertFalse(result.allSubmitted)
     }
+
+    @Test
+    fun allWithFunds_includesNativeAndNonNative_excludesEmpty() {
+        // Two funded profiles (one native BIP84, one legacy) + one empty.
+        val native = RecoveryScanService.ProfileResult(
+            profile = DerivationProfile.BUILT_INS.first { it.isNative },
+            addresses = listOf("dgb1qnative"),
+            derivedAddresses = emptyList(),
+            utxos = listOf(utxo("dgb1qnative", 300_000_000L)),
+            rawTxs = emptyMap(),
+        )
+        val legacy = RecoveryScanService.ProfileResult(
+            profile = DerivationProfile.BUILT_INS.first { !it.isNative && it.addressFormat == 0 },
+            addresses = listOf("DLegacy"),
+            derivedAddresses = emptyList(),
+            utxos = listOf(utxo("DLegacy", 100_000_000L)),
+            rawTxs = emptyMap(),
+        )
+        val empty = RecoveryScanService.ProfileResult(
+            profile = DerivationProfile.BUILT_INS.first { !it.isNative && it.label.contains("BIP44 DGB") },
+            addresses = listOf("DEmpty"),
+            derivedAddresses = emptyList(),
+            utxos = emptyList(),
+            rawTxs = emptyMap(),
+        )
+        val done = RecoveryScanService.State.Done(listOf(native, legacy, empty))
+
+        assertEquals(2, done.allWithFunds.size)
+        assertTrue(done.allWithFunds.any { it.profile.isNative })          // native INCLUDED
+        assertTrue(done.allWithFunds.any { !it.profile.isNative })
+        assertFalse(done.allWithFunds.any { it.utxos.isEmpty() })          // empty EXCLUDED
+        // Regression: nonNativeWithFunds still excludes native.
+        assertTrue(done.nonNativeWithFunds.none { it.profile.isNative })
+    }
+
+    private fun utxo(addr: String, sat: Long) = UtxoEntry(
+        txid = "00", vout = 0, amountSatoshi = sat, address = addr,
+        blockHeight = 0L, scriptPubKeyHex = "76a90088ac",
+    )
 }
