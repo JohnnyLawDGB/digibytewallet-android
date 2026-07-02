@@ -49,13 +49,28 @@ fun SeedViewScreen(
         }
     }
 
-    // In a real implementation the mnemonic would be decrypted from KeyStoreManager.
-    // The WalletManager holds the encrypted blob; here we show a placeholder until
-    // the decryption path is wired in Phase 2. The FLAG_SECURE protection is active
-    // regardless, so screenshots are blocked even for the placeholder.
+    // Decrypt the seed from SharedPreferences via KeyStoreManager
     val words: List<String> = remember {
-        // TODO Phase 2: decrypt via keyStoreManager.decrypt(encryptedMnemonic)
-        List(12) { "••••••" }
+        try {
+            val prefs = view.context.getSharedPreferences("dgb_wallet_seed", android.content.Context.MODE_PRIVATE)
+            val ciphertextHex = prefs.getString("encrypted_seed", null)
+            val ivHex = prefs.getString("encrypted_seed_iv", null)
+            if (ciphertextHex != null && ivHex != null) {
+                val ciphertext = ciphertextHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val iv = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val decrypted = keyStoreManager.decrypt(
+                    io.digibyte.core.security.EncryptedData(ciphertext, iv)
+                )
+                val phrase = String(decrypted, Charsets.UTF_8)
+                decrypted.fill(0) // zero the ByteArray after use
+                phrase.trim().split(" ")
+            } else {
+                List(12) { "••••••" }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("SeedViewScreen", "Failed to decrypt seed: ${e.message}")
+            List(12) { "error" }
+        }
     }
 
     Column(

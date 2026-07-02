@@ -784,6 +784,134 @@ fun DrawScope.drawBTCStacks(state: GameState) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Draw 3 heart icons for remaining lives. */
+fun DrawScope.drawHearts(state: GameState) {
+    // Position: top-center, clear of branding (left) and score (right)
+    val heartW = 20f
+    val heartH = 18f
+    val spacing = 28f
+    val totalWidth = 3 * spacing
+    val startX = (size.width - totalWidth) / 2f  // centered
+    val y = 6f
+
+    for (i in 0 until 3) {
+        val cx = startX + i * spacing
+        val filled = i < state.lives
+        val color = if (filled) Color(0xFFFF4466) else Color(0xFF442233)  // red hearts, dark when lost
+
+        val path = androidx.compose.ui.graphics.Path().apply {
+            // Bottom point of heart
+            moveTo(cx + heartW / 2f, y + heartH)
+            // Left curve
+            cubicTo(
+                cx - heartW * 0.1f, y + heartH * 0.55f,
+                cx - heartW * 0.15f, y + heartH * 0.1f,
+                cx + heartW * 0.25f, y + heartH * 0.1f
+            )
+            // Top-left bump
+            cubicTo(
+                cx + heartW * 0.42f, y - heartH * 0.1f,
+                cx + heartW * 0.5f, y + heartH * 0.05f,
+                cx + heartW / 2f, y + heartH * 0.3f
+            )
+            // Top-right bump
+            cubicTo(
+                cx + heartW * 0.5f, y + heartH * 0.05f,
+                cx + heartW * 0.58f, y - heartH * 0.1f,
+                cx + heartW * 0.75f, y + heartH * 0.1f
+            )
+            // Right curve
+            cubicTo(
+                cx + heartW * 1.15f, y + heartH * 0.1f,
+                cx + heartW * 1.1f, y + heartH * 0.55f,
+                cx + heartW / 2f, y + heartH
+            )
+            close()
+        }
+
+        if (filled) {
+            drawPath(path = path, color = color)
+        } else {
+            drawPath(path = path, color = color, style = Stroke(width = 1.5f))
+        }
+    }
+}
+
+/** Draw game-over overlay with score breakdown. */
+fun DrawScope.drawGameOver(textMeasurer: TextMeasurer, state: GameState) {
+    if (!state.isGameOver) return
+
+    // Dark backdrop
+    drawRect(Color.Black.copy(alpha = 0.7f))
+
+    // Guard against tiny canvas
+    if (size.width < 100f || size.height < 50f) return
+
+    // "GAME OVER" — centered at 35% height
+    val gameOverStyle = TextStyle(
+        color = DgbBlue,
+        fontSize = 20.sp,
+        fontWeight = FontWeight.Bold
+    )
+    val gameOverMeasured = textMeasurer.measure("GAME OVER", gameOverStyle)
+    drawText(
+        textMeasurer = textMeasurer,
+        text = "GAME OVER",
+        topLeft = Offset(
+            (size.width - gameOverMeasured.size.width) / 2f,
+            size.height * 0.35f
+        ),
+        style = gameOverStyle
+    )
+
+    // Score breakdown — below GAME OVER
+    val detailStyle = TextStyle(
+        color = Color(0xFF888888),
+        fontSize = 12.sp
+    )
+    val lineSpacing = 20f
+    var lineY = size.height * 0.35f + gameOverMeasured.size.height + 12f
+
+    // Distance
+    val distText = "Distance: ${(state.scrollOffset / GamePhysics.DISTANCE_DIVISOR).toInt()}"
+    val distMeasured = textMeasurer.measure(distText, detailStyle)
+    drawText(
+        textMeasurer = textMeasurer,
+        text = distText,
+        topLeft = Offset((size.width - distMeasured.size.width) / 2f, lineY),
+        style = detailStyle
+    )
+    lineY += lineSpacing
+
+    // Coins
+    val coinsText = "Coins: ${state.score} \u00D7 5 = ${state.score * GamePhysics.COIN_SCORE_MULT}"
+    val coinsMeasured = textMeasurer.measure(coinsText, detailStyle)
+    drawText(
+        textMeasurer = textMeasurer,
+        text = coinsText,
+        topLeft = Offset((size.width - coinsMeasured.size.width) / 2f, lineY),
+        style = detailStyle
+    )
+    lineY += lineSpacing + 4f
+
+    // TOTAL
+    val totalStyle = TextStyle(
+        color = DgbLight,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold
+    )
+    val totalText = "TOTAL: ${state.finalScore}"
+    val totalMeasured = textMeasurer.measure(totalText, totalStyle)
+    drawText(
+        textMeasurer = textMeasurer,
+        text = totalText,
+        topLeft = Offset((size.width - totalMeasured.size.width) / 2f, lineY),
+        style = totalStyle
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** Draw HUD — branding, score, and sprint charge bar. */
 fun DrawScope.drawHud(textMeasurer: TextMeasurer, state: GameState) {
     // Guard: skip HUD if canvas is too small for text layout

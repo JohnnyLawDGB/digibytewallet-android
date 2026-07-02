@@ -10,8 +10,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -140,7 +142,37 @@ fun RecoveryDateScreen(
                 }
             }
 
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(20.dp))
+
+            // Honesty banner — the recovery scan starts from the chosen
+            // year forward, so any UTXO created before that year (and not
+            // yet spent) will not be included in the wallet's balance. If
+            // the user picks "I don't remember", the full chain is scanned
+            // (slow but complete).
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x33FFAA00), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = null,
+                    tint = Color(0xFFFFAA00),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Transactions older than the selected year will not be detected. " +
+                            "If your wallet may have older history, choose an earlier year — or " +
+                            "\"I don't remember\" for full coverage (slower).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFFCC66)
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
 
             Button(
                 onClick = {
@@ -168,7 +200,7 @@ fun RecoveryDateScreen(
                 )
             }
 
-            val uiState by viewModel.uiState.collectAsState()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             if (uiState is OnboardingUiState.Loading) {
                 Spacer(Modifier.height(16.dp))
                 Row(
@@ -283,12 +315,12 @@ val recoveryDateOptions: List<RecoveryDateOption> = listOf(
     RecoveryDateOption(
         label = "2026",
         subtitle = "Jan 2026 onwards",
-        timestamp = 1735689600L  // 2026-01-01 00:00:00 UTC
+        timestamp = 1767225600L  // 2026-01-01 00:00:00 UTC
     ),
     RecoveryDateOption(
         label = "2025",
         subtitle = "Jan 2025 – Dec 2025",
-        timestamp = 1735689600L - 365 * 86400L  // 2025-01-01
+        timestamp = 1735689600L  // 2025-01-01 00:00:00 UTC
     ),
     RecoveryDateOption(
         label = "2024",

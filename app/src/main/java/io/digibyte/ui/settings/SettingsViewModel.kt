@@ -1,10 +1,13 @@
 package io.digibyte.ui.settings
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.digibyte.core.WalletManager
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.WalletConfigEntity
 import io.digibyte.core.model.SyncState
@@ -24,6 +27,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val walletManager: WalletManager,
     private val pinManager: PinManager,
     private val walletConfigDao: WalletConfigDao,
@@ -60,6 +64,25 @@ class SettingsViewModel @Inject constructor(
     private val _torEnabled = MutableStateFlow(torManager.isEnabled)
     val torEnabled: StateFlow<Boolean> = _torEnabled.asStateFlow()
 
+    // ── Dandelion broadcast privacy ───────────────────────────────────────────
+    /** Whether Dandelion stem submission is enabled (default OFF / opt-in). Persisted to
+     *  the dgb_dandelion pref so SyncService.injectDandelionPeers reads it on sync start. */
+    private val _dandelionEnabled = MutableStateFlow(
+        context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
+            .getBoolean("enabled", false)
+    )
+    val dandelionEnabled: StateFlow<Boolean> = _dandelionEnabled.asStateFlow()
+
+    /** Toggle Dandelion stem submission: persist the pref, update the C-core gate,
+     *  and mirror the Kotlin-side Broadcaster flag. */
+    fun setDandelionEnabled(enabled: Boolean) {
+        _dandelionEnabled.value = enabled
+        Broadcaster.dandelionEnabled = enabled
+        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) { /* applied on next sync */ }
+        context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
+            .edit().putBoolean("enabled", enabled).apply()
+    }
+
     // ── Action results ────────────────────────────────────────────────────────
     private val _wipeResult = MutableStateFlow<WipeResult?>(null)
     val wipeResult: StateFlow<WipeResult?> = _wipeResult.asStateFlow()
@@ -71,9 +94,19 @@ class SettingsViewModel @Inject constructor(
 
     fun refreshNetworkStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            _peerCount.value = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+            val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+            _peerCount.value = peers
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
+            // Wake-up: a manual refresh at 0 peers should actually reconnect, not just
+            // repaint the count. Force a clean recreate so a manager stuck after long
+            // idle re-dials (digiscope.me + cached peers are always re-injected).
+            if (peers == 0) {
+                runCatching {
+                    NativeBridge.forceReconnect()
+                    NativeBridge.startSync()
+                }
+            }
         }
     }
 
@@ -127,11 +160,15 @@ class SettingsViewModel @Inject constructor(
             _config.value = updated
         }
         if (enabled) {
-            viewModelScope.launch {
-                torManager.start()
-            }
+            // Use startAsync() — TorManager's own scope survives ViewModel
+            // destruction. Bootstrap takes 10-30s; viewModelScope would cancel
+            // it if the user navigates away from Settings.
+            torManager.startAsync()
         } else {
             torManager.stop()
+            // Clear SOCKS proxy immediately so the C core reconnects directly.
+            // Without this, peer connections keep trying the dead proxy until restart.
+            NativeBridge.clearSocksProxy()
         }
     }
 

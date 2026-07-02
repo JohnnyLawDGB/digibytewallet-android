@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.OwnedAsset
 import io.digibyte.ui.theme.DigiByteAccent
+import io.digibyte.ui.util.openExternalUrl
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
@@ -135,21 +136,12 @@ fun AssetDetailScreen(
                 ) {
                     // Large icon
                     val iconColor = assetIconColors[colorIndex]
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(iconColor.copy(alpha = 0.18f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = iconColor
-                        )
-                    }
+                    AssetIcon(
+                        imageUrl = meta?.imageUrl,
+                        firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A',
+                        iconColor = iconColor,
+                        size = 72.dp
+                    )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -273,10 +265,7 @@ fun AssetDetailScreen(
             ) {
                 // Marketplace button
                 OutlinedButton(
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(MARKETPLACE_URL))
-                        context.startActivity(intent)
-                    },
+                    onClick = { openExternalUrl(context, MARKETPLACE_URL) },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(

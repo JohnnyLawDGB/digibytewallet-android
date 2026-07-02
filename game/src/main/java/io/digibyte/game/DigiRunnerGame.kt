@@ -1,12 +1,27 @@
 package io.digibyte.game
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.DisposableEffect
@@ -177,6 +192,9 @@ private fun maybeSpawnObstacles(state: GameState): GameState {
 @Composable
 fun DigiRunnerGame(
     syncProgress: Float = 0f,
+    standalone: Boolean = false,
+    onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
+    onShowLeaderboard: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var gameState by remember { mutableStateOf(generateInitialState()) }
@@ -191,7 +209,9 @@ fun DigiRunnerGame(
                     val deltaRaw = (frameTime - lastFrameTime) / 1000f
                     val delta = deltaRaw.coerceAtMost(0.05f)  // cap at 50 ms to avoid physics explosion
 
-                    var next = GamePhysics.update(gameState, delta, syncProgress)
+                    // Standalone uses 0.8 base speed to match the "synced" feel
+                    val effectiveProgress = if (standalone) 0.8f else syncProgress
+                    var next = GamePhysics.update(gameState, delta, effectiveProgress)
                     next = maybeSpawnCoins(next)
                     next = maybeSpawnObstacles(next)
                     gameState = next
@@ -201,36 +221,43 @@ fun DigiRunnerGame(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(360.dp)
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        when (event.type) {
-                            PointerEventType.Press -> {
-                                // Always register hold — sprint charges even mid-air,
-                                // jump fires on release only when grounded
-                                gameState = gameState.copy(isHolding = true)
-                            }
-                            PointerEventType.Release -> {
-                                if (gameState.isHolding) {
-                                    gameState = GamePhysics.chargedJump(gameState)
-                                }
+    // Shared pointer handler — consumes events during gameplay to prevent parent scroll
+    val pointerMod = Modifier.pointerInput(gameState.isGameOver) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                // Only consume during active gameplay — let buttons work on game over
+                if (!gameState.isGameOver) {
+                    event.changes.forEach { it.consume() }
+                    when (event.type) {
+                        PointerEventType.Press -> {
+                            gameState = gameState.copy(isHolding = true)
+                        }
+                        PointerEventType.Release -> {
+                            if (gameState.isHolding) {
+                                gameState = GamePhysics.chargedJump(gameState)
                             }
                         }
                     }
                 }
             }
-    ) {
-        DisposableEffect(Unit) {
-            onDispose {
-                gameState = gameState.copy(isHolding = false, holdDuration = 0f)
-            }
         }
-        Canvas(modifier = Modifier.fillMaxSize()) {
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Game canvas
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (standalone) 320.dp else 280.dp)
+                .then(pointerMod)
+        ) {
+            DisposableEffect(Unit) {
+                onDispose {
+                    gameState = gameState.copy(isHolding = false, holdDuration = 0f)
+                }
+            }
+            Canvas(modifier = Modifier.fillMaxSize()) {
             // World rendering
             drawBackground(gameState.scrollOffset)
             drawGround(gameState.scrollOffset)
@@ -239,6 +266,82 @@ fun DigiRunnerGame(
             drawDigiRobot(gameState)
             // HUD
             drawHud(textMeasurer, gameState)
+            drawHearts(gameState)
+            if (gameState.isGameOver) {
+                drawGameOver(textMeasurer, gameState)
+            }
         }
-    }
+
+        if (gameState.isGameOver) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = { gameState = generateInitialState() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0066CC))
+                ) {
+                    Text("Play Again", color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                if (onScoreSubmit != null) {
+                    OutlinedButton(onClick = {
+                        onScoreSubmit(
+                            gameState.finalScore,
+                            gameState.scrollOffset.toInt(),  // raw pixels — backend divides by 100
+                            gameState.score,
+                            gameState.lives
+                        )
+                    }) {
+                        Text("Submit Score", color = Color(0xFF4A9EFF))
+                    }
+                }
+                if (onShowLeaderboard != null) {
+                    TextButton(onClick = { onShowLeaderboard() }) {
+                        Text("Leaderboard", color = Color(0xFF4A9EFF))
+                    }
+                }
+            }
+        }
+        } // end game canvas Box
+
+        // Touch zone — high-contrast area below the game for input
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (standalone) 80.dp else 64.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = if (gameState.isHolding) listOf(
+                            Color(0xFF0A2040),  // brighter when holding
+                            Color(0xFF102850)
+                        ) else listOf(
+                            Color(0xFF0D1B35),  // visible contrast from game
+                            Color(0xFF162545)
+                        )
+                    )
+                )
+                .then(pointerMod),
+            contentAlignment = Alignment.Center
+        ) {
+            // Divider line at top for clear separation
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .align(Alignment.TopCenter)
+                    .background(Color(0xFF0066CC).copy(alpha = if (gameState.isHolding) 0.8f else 0.3f))
+            )
+            val holdingAlpha = if (gameState.isHolding) 0.9f else 0.4f
+            Text(
+                text = if (gameState.isHolding) "SPRINTING ▸▸" else "HOLD to sprint  ·  RELEASE to jump",
+                color = Color(0xFF0066CC).copy(alpha = holdingAlpha),
+                fontSize = 11.sp,
+                fontWeight = if (gameState.isHolding) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    } // end Column
 }

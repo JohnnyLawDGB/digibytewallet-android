@@ -1,31 +1,168 @@
-name: Release Build
+name: Release Build & Deploy
+
 on:
   push:
     tags: ['v*']
 
 jobs:
-  build:
+  build-sign-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Build in Docker
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Decode keystores
+        env:
+          RELEASE_KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          DEBUG_KS_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          docker build -t dgb-wallet-build docker/
-          docker run --rm -v "$(pwd)":/build dgb-wallet-build \
-            bash -c "./gradlew :app:assembleMainnetRelease"
+          printf '%s' "$RELEASE_KS_B64" | base64 -d > app/release.jks
+          printf '%s' "$DEBUG_KS_B64"   | base64 -d > /tmp/debug.keystore
+          ls -la app/release.jks /tmp/debug.keystore
+
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PATH: release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: dgb-wallet-release
+        run: ./gradlew :native:assembleMainnetRelease :app:assembleMainnetRelease
+
+      # Rotate from the Android debug key (which signed every previously
+      # distributed APK through v3.5.7) to the release key, using APK Signing
+      # Scheme v3 lineage. Existing installs upgrade cleanly on API 28+; API
+      # 26/27 devices with the debug signature also accept the update via
+      # the v1/v2 signature written by the first signer.
+      - name: Re-sign APK with debug→release signing lineage
+        env:
+          RELEASE_KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
+          DEBUG_KS_PW:   ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -rV | head -1)"
+          APK="app/build/outputs/apk/mainnet/release/app-mainnet-release.apk"
+          echo "Using $APKSIGNER"
+          echo "APK: $APK"
+
+          "$APKSIGNER" rotate \
+              --out /tmp/lineage.bin \
+              --old-signer \
+                  --ks /tmp/debug.keystore \
+                  --ks-key-alias androiddebugkey \
+                  --ks-pass env:DEBUG_KS_PW \
+                  --key-pass env:DEBUG_KS_PW \
+              --new-signer \
+                  --ks app/release.jks \
+                  --ks-key-alias dgb-wallet-release \
+                  --ks-pass env:RELEASE_KS_PW \
+                  --key-pass env:RELEASE_KS_PW
+
+          "$APKSIGNER" sign \
+              --ks /tmp/debug.keystore \
+              --ks-key-alias androiddebugkey \
+              --ks-pass env:DEBUG_KS_PW \
+              --key-pass env:DEBUG_KS_PW \
+              --next-signer \
+                  --ks app/release.jks \
+                  --ks-key-alias dgb-wallet-release \
+                  --ks-pass env:RELEASE_KS_PW \
+                  --key-pass env:RELEASE_KS_PW \
+              --lineage /tmp/lineage.bin \
+              "$APK"
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | head -40
 
       - name: Compute SHA-256
+        id: checksum
         run: |
-          sha256sum app/build/outputs/apk/mainnet/release/*.apk > checksums.sha256
-          cat checksums.sha256
+          APK=$(find app/build/outputs/apk/mainnet/release -name '*.apk' | head -1)
+          # Rename to versioned filename so the GitHub-release asset is
+          # recognizable when users download it (previously it was always
+          # app-mainnet-release.apk regardless of version).
+          TAG="${GITHUB_REF#refs/tags/}"
+          DIR=$(dirname "$APK")
+          VERSIONED="$DIR/digibyte-wallet-${TAG}.apk"
+          cp "$APK" "$VERSIONED"
+          HASH=$(sha256sum "$VERSIONED" | cut -d' ' -f1)
+          echo "apk_path=$VERSIONED" >> "$GITHUB_OUTPUT"
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "SHA-256: $HASH"
+          echo "Asset: digibyte-wallet-${TAG}.apk"
 
-      - name: Create Release
+      - name: Extract version
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            app/build/outputs/apk/mainnet/release/*.apk
-            checksums.sha256
-          draft: true
+            ${{ steps.checksum.outputs.apk_path }}
+          body: |
+            **SHA-256:** `${{ steps.checksum.outputs.hash }}`
+
+            Download from [digiscope.me/downloads/](https://digiscope.me/downloads/) or install the APK below. Requires Android 8.0+.
+          prerelease: false
+
+      - name: Deploy to VPS
+        if: success()
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          APK_PATH: ${{ steps.checksum.outputs.apk_path }}
+          APK_HASH: ${{ steps.checksum.outputs.hash }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          FILENAME="digibyte-wallet-${TAG}.apk"
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan digiscope.me >> ~/.ssh/known_hosts 2>/dev/null
+
+          scp -i ~/.ssh/deploy_key "$APK_PATH" "root@digiscope.me:/var/www/digiscope-downloads/${FILENAME}"
+
+          ssh -i ~/.ssh/deploy_key root@digiscope.me bash -s "$TAG" "$FILENAME" "$APK_HASH" << 'DEPLOY'
+            set -e
+            TAG="$1"; FILENAME="$2"; HASH="$3"
+            cd /var/www/digiscope-downloads
+
+            # Scoped mechanical updates. Each regex is anchored to a specific UI
+            # element so free-body-text version mentions (e.g. "upgrade from
+            # v3.4.0" inside release notes) are never accidentally rewritten.
+            # Release notes content itself stays as-committed in the tagged revision.
+            VER_RE='v[0-9]\+\.[0-9]\+\.[0-9]\+'
+            sed -i "s|digibyte-wallet-${VER_RE}\.apk|${FILENAME}|g"              index.html
+            sed -i "s|<div class=\"ver\">${VER_RE}|<div class=\"ver\">${TAG}|"   index.html
+            sed -i "s|Download APK (${VER_RE})|Download APK (${TAG})|"           index.html
+            sed -i "s|What's New in ${VER_RE}|What's New in ${TAG}|"             index.html
+            sed -i "s|/releases/tag/${VER_RE}|/releases/tag/${TAG}|"             index.html
+            sed -i "s|[a-f0-9]\{64\}|${HASH}|"                                   index.html
+
+            # Point "latest" symlink at the new APK so
+            # /downloads/digibyte-wallet-latest.apk always resolves to the most
+            # recent release.
+            ln -sf "/var/www/digiscope-downloads/${FILENAME}" digibyte-wallet-latest.apk
+
+            # Re-expose everything via the public downloads dir
+            # (frontend deploys wipe symlinks).
+            mkdir -p /var/www/digiscope/downloads
+            ln -sf /var/www/digiscope-downloads/* /var/www/digiscope/downloads/
+          DEPLOY
+          echo "Deployed ${TAG} to digiscope.me/downloads/"

@@ -36,4 +36,27 @@ object NativeBridge {
     external fun getTransactionDetails(): String
     external fun loadSavedBlocks(data: ByteArray): Int
     external fun loadSavedPeers(data: ByteArray): Int
+    external fun createWalletFromBytes(phraseBytes: ByteArray): Boolean
+    external fun recoverWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long): Boolean
+    external fun isWalletLoaded(): Boolean
+    external fun dumpAllAddresses(): String
+    external fun registerRawTransaction(rawTx: ByteArray, blockHeight: Long, blockTimestamp: Long): Boolean
+    external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: String?): ByteArray?
+    external fun deriveAddresses(seedBytes: ByteArray, hmacKey: String, prefixPath: IntArray, gapExternal: Int, gapInternal: Int, addressFormat: Int): Array<String>?
+    external fun derivePrivateKeyWIF(seedBytes: ByteArray, hmacKey: String, fullPath: IntArray): String?
+    external fun addressToScriptPubKey(address: String): ByteArray?
+    external fun buildAndSignLegacySweep(
+        seedBytes: ByteArray,
+        hmacKey: String,
+        prefixPath: IntArray,
+        txidsHex: Array<String>,
+        vouts: IntArray,
+        amounts: LongArray,
+        chainIndices: IntArray,
+        addressIndices: IntArray,
+        scriptPubKeysHex: Array<String>,
+        destAddress: String,
+        feePerKb: Long,
+    ): String?
+    external fun isRawTransactionSigned(rawTxHex: String): Boolean
 }

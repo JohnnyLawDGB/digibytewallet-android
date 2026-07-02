@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "baseBranches": ["phase1-modernization"],
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["androidx.compose"],
+      "groupName": "Compose BOM",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "matchPackagePatterns": ["com.google.dagger", "dagger.hilt"],
+      "groupName": "Hilt/Dagger",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "matchPackagePatterns": ["org.jetbrains.kotlin"],
+      "groupName": "Kotlin",
+      "schedule": ["before 6am on monday"]
+    }
+  ],
+  "labels": ["dependencies"]
+}

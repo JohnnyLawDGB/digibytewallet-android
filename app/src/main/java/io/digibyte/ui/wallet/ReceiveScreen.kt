@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.ui.components.QrCodeDisplay
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 
@@ -36,9 +38,17 @@ fun ReceiveScreen(
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
+    val hasPeers = peerCount > 0
 
-    // Generate fresh address — index 0 by default (production: derive from wallet gap limit)
-    val address = remember { viewModel.getReceiveAddress(0) ?: "Address unavailable" }
+    // Address format: 0=legacy(D), 2=bech32(dgb1q) — default to bech32
+    var addressFormat by remember { mutableIntStateOf(2) }
+
+    // Pre-derive both formats once so toggling the chip doesn't re-run the
+    // JNI key-derivation path. format 0 = legacy D-prefix, format 2 = bech32.
+    val legacyAddress = remember { viewModel.getReceiveAddress(0, 0) ?: "Address unavailable" }
+    val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
+    val address = if (addressFormat == 0) legacyAddress else bech32Address
 
     // Optional amount for the QR URI
     var amountInput by remember { mutableStateOf("") }
@@ -68,6 +78,7 @@ fun ReceiveScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -87,7 +98,35 @@ fun ReceiveScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Informational banner when SPV has no connected peers. The address
+        // is still safe to share — incoming transactions settle on chain
+        // regardless — but the user should know that balance and
+        // confirmation updates won't flow until peers reconnect.
+        if (!hasPeers) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x33FFAA00), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.CloudOff,
+                    contentDescription = null,
+                    tint = Color(0xFFFFAA00),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "No peers connected. Incoming transactions won't appear here until the wallet reconnects.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFFCC66)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // QR code
         Card(
@@ -140,6 +179,27 @@ fun ReceiveScreen(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Address format toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = addressFormat == 2,
+                onClick = { addressFormat = 2 },
+                label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) },
+                modifier = Modifier.padding(end = 8.dp)
+            )
+            FilterChip(
+                selected = addressFormat == 0,
+                onClick = { addressFormat = 0 },
+                label = { Text("Legacy (D…)", fontSize = 12.sp) }
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))

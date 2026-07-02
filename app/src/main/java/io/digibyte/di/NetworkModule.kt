@@ -5,7 +5,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.tor.TorManager
+import okhttp3.Dns
 import okhttp3.OkHttpClient
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ProxySelector
@@ -20,8 +22,9 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(torManager: TorManager): OkHttpClient {
-        // Use a ProxySelector so that the singleton OkHttpClient adapts dynamically
-        // when Tor connects or disconnects — no rebuild needed.
+        // Dynamic ProxySelector: routes through Tor SOCKS5 when connected,
+        // falls back to direct when Tor is off. Singleton OkHttpClient adapts
+        // automatically — no rebuild needed.
         val torProxySelector = object : ProxySelector() {
             override fun select(uri: URI?): List<Proxy> {
                 val port = torManager.getSocksPort()
@@ -33,15 +36,35 @@ object NetworkModule {
             }
 
             override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: java.io.IOException?) {
-                // No-op: OkHttp will retry or surface the error normally.
+                // No-op: OkHttp retries or surfaces the error normally.
+            }
+        }
+
+        // DNS leak prevention (defense-in-depth):
+        // OkHttp 4.x creates unresolved InetSocketAddresses for SOCKS proxy
+        // connections, meaning the hostname is sent to the SOCKS5 proxy for
+        // remote DNS resolution — no local DNS query needed. This custom Dns
+        // is a safety net in case that behavior changes in a future OkHttp
+        // version. Combined with SafeSocks 1 in torrc, DNS leaks are blocked.
+        val torDns = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                return if (torManager.getSocksPort() != null) {
+                    // Return loopback without any DNS query. OkHttp won't use this
+                    // address for SOCKS connections (it sends the hostname directly
+                    // to the proxy), but this prevents local DNS as a fallback.
+                    listOf(InetAddress.getLoopbackAddress())
+                } else {
+                    Dns.SYSTEM.lookup(hostname)
+                }
             }
         }
 
         return OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
             .proxySelector(torProxySelector)
+            .dns(torDns)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 }

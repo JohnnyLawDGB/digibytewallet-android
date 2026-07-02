@@ -14,8 +14,9 @@
 JavaVM       *g_jvm          = NULL;
 BRWallet     *g_wallet       = NULL;
 BRPeerManager *g_peerManager = NULL;
-uint8_t       g_seed[64];
-int           g_seedValid    = 0;
+pthread_mutex_t g_peerManagerMutex;  /* recursive; initialized in JNI_OnLoad. Guards all g_peerManager access — see PEER_GUARD in jni_bridge.h */
+static uint8_t  g_seed[64];
+static int      g_seedValid = 0;
 BRMasterPubKey g_mpk;
 int           g_mpkValid     = 0;
 uint32_t      g_walletCreationTime = 0;
@@ -36,6 +37,16 @@ jmethodID g_mid_onBalanceChanged       = NULL;
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     (void)reserved;
     g_jvm = vm;
+
+    /* Recursive mutex serializing every g_peerManager access across the bridge
+     * (jni_peer.c / jni_transaction.c / jni_wallet.c). Recursive so a future
+     * nested guarded call on the same thread can't self-deadlock. */
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_peerManagerMutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+
     LOGI("JNI_OnLoad: core-lib loaded, JVM cached");
     return JNI_VERSION_1_6;
 }
@@ -93,6 +104,24 @@ Java_io_digibyte_core_bridge_NativeBridge_generateMnemonic(JNIEnv *env, jobject 
     return result;
 }
 
+/* ---------- isValidMnemonic ----------
+ * Validates a BIP39 recovery phrase including the checksum (the last word
+ * encodes a checksum over the entropy). Returns false for phrases that are the
+ * right length and use real wordlist words but fail the checksum — the exact
+ * case where a typo'd/made-up phrase would otherwise be accepted, build no
+ * wallet, and leave sync stuck at "Connecting" forever. Lets the UI reject it
+ * at input time. Does NOT create or touch any wallet state. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isValidMnemonic(JNIEnv *env, jobject thiz, jstring phrase) {
+    (void)thiz;
+    if (!phrase) return JNI_FALSE;
+    const char *phraseChars = (*env)->GetStringUTFChars(env, phrase, NULL);
+    if (!phraseChars) return JNI_FALSE;
+    int valid = BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars);
+    (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
+    return valid ? JNI_TRUE : JNI_FALSE;
+}
+
 /* ---------- createWallet ---------- */
 
 JNIEXPORT jboolean JNICALL
@@ -119,8 +148,8 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
     BRBIP39DeriveKey(seed, phraseChars, NULL);
     (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
 
-    /* Derive master public key */
-    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+    /* Derive master public key (BIP84: m/84'/20'/0') */
+    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
 
     /* Create wallet with no initial transactions */
     if (g_wallet) {
@@ -165,6 +194,70 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
     return JNI_TRUE;
 }
 
+/* ---------- createWalletFromBytes ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
+                                                                  jbyteArray phraseBytes) {
+    (void)thiz;
+
+    if (!phraseBytes) {
+        LOGW("createWalletFromBytes: phraseBytes is null");
+        return JNI_FALSE;
+    }
+
+    jsize phraseLen = (*env)->GetArrayLength(env, phraseBytes);
+    if (phraseLen <= 0 || phraseLen > 1024) {
+        LOGW("createWalletFromBytes: invalid length=%d", phraseLen);
+        return JNI_FALSE;
+    }
+
+    /* Copy phrase bytes to a null-terminated C string on the stack */
+    char phraseChars[phraseLen + 1];
+    (*env)->GetByteArrayRegion(env, phraseBytes, 0, phraseLen, (jbyte *)phraseChars);
+    phraseChars[phraseLen] = '\0';
+
+    if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
+        LOGW("createWalletFromBytes: invalid BIP39 phrase");
+        secure_zero(phraseChars, sizeof(phraseChars));
+        return JNI_FALSE;
+    }
+
+    uint8_t seed[64];
+    BRBIP39DeriveKey(seed, phraseChars, NULL);
+    secure_zero(phraseChars, sizeof(phraseChars));
+
+    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+
+    if (g_wallet) {
+        LOGW("createWalletFromBytes: wallet already exists, freeing old one");
+        BRWalletFree(g_wallet);
+        g_wallet = NULL;
+    }
+
+    g_wallet = BRWalletNew(NULL, 0, mpk);
+    if (!g_wallet) {
+        LOGE("createWalletFromBytes: BRWalletNew failed");
+        secure_zero(seed, sizeof(seed));
+        return JNI_FALSE;
+    }
+
+    memcpy(g_seed, seed, sizeof(seed));
+    g_seedValid = 1;
+    g_mpk = mpk;
+    g_mpkValid = 1;
+    /* Set creation time to block ~20,000,000 (Feb 2025) so new wallets
+     * show meaningful sync progress with DigiRunner game. Scanning ~3M
+     * blocks takes ~20-30 minutes — good balance of UX and security. */
+    g_walletCreationTime = 1738368000;  /* 2025-02-01 00:00:00 UTC */
+    g_peerManagerNeedsRecreate = 1;
+
+    secure_zero(seed, sizeof(seed));
+
+    LOGI("createWalletFromBytes: wallet created successfully (creationTime=%u)", g_walletCreationTime);
+    return JNI_TRUE;
+}
+
 /* ---------- recoverWallet ---------- */
 
 JNIEXPORT jboolean JNICALL
@@ -190,23 +283,35 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
     BRBIP39DeriveKey(seed, phraseChars, NULL);
     (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
 
-    BRMasterPubKey mpk = BRBIP32MasterPubKey(seed, sizeof(seed));
+    BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
 
     if (g_wallet) {
         BRWalletFree(g_wallet);
         g_wallet = NULL;
     }
 
-    g_wallet = BRWalletNew(NULL, 0, mpk);
+    /* Use saved transactions if available — wallet starts with full history
+     * so balance is immediately spendable without waiting for rescan.
+     * Dual scan covers both BIP84 (m/84'/20'/0') and legacy (m/0H) paths. */
+    extern BRTransaction **g_savedTransactions;
+    extern size_t g_savedTransactionCount;
+
+    if (g_savedTransactions && g_savedTransactionCount > 0) {
+        LOGI("recoverWallet: restoring with %zu saved transactions", g_savedTransactionCount);
+        g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
+    } else {
+        g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
+    }
     if (!g_wallet) {
-        LOGE("recoverWallet: BRWalletNew failed");
+        LOGE("recoverWallet: BRWalletNewDual failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
 
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
-    g_mpk = mpk;
+    g_mpk = mpkBIP84;
     g_mpkValid = 1;
 
     secure_zero(seed, sizeof(seed));
@@ -231,6 +336,76 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
         }
     }
     LOGI("recoverWallet: wallet recovered, creationTime=%u", g_walletCreationTime);
+    return JNI_TRUE;
+}
+
+/* ---------- recoverWalletFromBytes ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
+                                                                   jbyteArray phraseBytes,
+                                                                   jlong creationTimestamp) {
+    (void)thiz;
+
+    if (!phraseBytes) {
+        LOGW("recoverWalletFromBytes: phraseBytes is null");
+        return JNI_FALSE;
+    }
+
+    jsize phraseLen = (*env)->GetArrayLength(env, phraseBytes);
+    if (phraseLen <= 0 || phraseLen > 1024) {
+        LOGW("recoverWalletFromBytes: invalid length=%d", phraseLen);
+        return JNI_FALSE;
+    }
+
+    char phraseChars[phraseLen + 1];
+    (*env)->GetByteArrayRegion(env, phraseBytes, 0, phraseLen, (jbyte *)phraseChars);
+    phraseChars[phraseLen] = '\0';
+
+    if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
+        LOGW("recoverWalletFromBytes: invalid BIP39 phrase");
+        secure_zero(phraseChars, sizeof(phraseChars));
+        return JNI_FALSE;
+    }
+
+    uint8_t seed[64];
+    BRBIP39DeriveKey(seed, phraseChars, NULL);
+    secure_zero(phraseChars, sizeof(phraseChars));
+
+    BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
+
+    if (g_wallet) {
+        BRWalletFree(g_wallet);
+        g_wallet = NULL;
+    }
+
+    extern BRTransaction **g_savedTransactions;
+    extern size_t g_savedTransactionCount;
+
+    if (g_savedTransactions && g_savedTransactionCount > 0) {
+        LOGI("recoverWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
+        g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
+    } else {
+        g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
+    }
+    if (!g_wallet) {
+        LOGE("recoverWalletFromBytes: BRWalletNewDual failed");
+        secure_zero(seed, sizeof(seed));
+        return JNI_FALSE;
+    }
+
+    memcpy(g_seed, seed, sizeof(seed));
+    g_seedValid = 1;
+    g_mpk = mpkBIP84;
+    g_mpkValid = 1;
+
+    secure_zero(seed, sizeof(seed));
+
+    g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
+    g_peerManagerNeedsRecreate = 1;
+
+    LOGI("recoverWalletFromBytes: wallet recovered, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }
 
@@ -277,9 +452,32 @@ Java_io_digibyte_core_bridge_NativeBridge_lockSession(JNIEnv *env, jobject thiz)
     (void)env;
     (void)thiz;
 
+    seed_zero();
+    LOGI("lockSession: seed zeroed");
+}
+
+/* ---------- Seed accessor functions ---------- */
+/* These provide controlled access to g_seed so other .c files
+ * never touch the global directly. */
+
+int seed_is_valid(void) {
+    return g_seedValid;
+}
+
+int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId) {
+    if (!g_seedValid) return 0;
+    return BRWalletSignTransaction(wallet, tx, forkId, g_seed, sizeof(g_seed));
+}
+
+int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index) {
+    if (!g_seedValid) return 0;
+    BRBIP32PrivKey(outKey, g_seed, sizeof(g_seed), chain, index);
+    return 1;
+}
+
+void seed_zero(void) {
     secure_zero(g_seed, sizeof(g_seed));
     g_seedValid = 0;
-    LOGI("lockSession: seed zeroed");
 }
 
 /* ---------- getReceiveAddress ---------- */
@@ -381,10 +579,55 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionCount(JNIEnv *env, jobje
     return (jint)BRWalletTransactions(g_wallet, NULL, 0);
 }
 
+/* ---------- getAllTransactionHashes ---------- */
+
+/*
+ * public static native String[] getAllTransactionHashes();
+ *
+ * Returns every wallet-known transaction's display-order hex txid.
+ * Unlike getTransactionDetails() this does not truncate to 50 and
+ * does not compute balances, making it cheap enough to use as input
+ * to a full native-asset-detection sweep after sync completion.
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_wallet) return NULL;
+
+    size_t txCount = BRWalletTransactions(g_wallet, NULL, 0);
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    if (!stringClass) return NULL;
+    jobjectArray result = (*env)->NewObjectArray(env, (jsize)txCount, stringClass, NULL);
+    if (!result) return NULL;
+    if (txCount == 0) return result;
+
+    BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
+    if (!txs) return result;
+    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+
+    for (size_t i = 0; i < txCount; i++) {
+        BRTransaction *tx = txs[i];
+        if (!tx) continue;
+        char hashHex[65];
+        for (int j = 0; j < 32; j++) {
+            sprintf(&hashHex[j * 2], "%02x", tx->txHash.u8[31 - j]);
+        }
+        hashHex[64] = '\0';
+        jstring s = (*env)->NewStringUTF(env, hashHex);
+        if (s) {
+            (*env)->SetObjectArrayElement(env, result, (jsize)i, s);
+            (*env)->DeleteLocalRef(env, s);
+        }
+    }
+    free(txs);
+    return result;
+}
+
 /* ---------- getTransactionDetails ----------
  * Returns a pipe-separated string for each transaction:
- * "txHash|amount|fee|blockHeight|timestamp\n..."
+ * "txHash|amount|fee|blockHeight|timestamp|sent|received\n..."
  * Amount is signed: positive = received, negative = sent.
+ * sent/received are unsigned raw values for self-send detection.
  */
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
@@ -398,14 +641,20 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
     if (!txs) return (*env)->NewStringUTF(env, "");
     txCount = BRWalletTransactions(g_wallet, txs, txCount);
 
-    /* Build result string — estimate 120 chars per tx */
-    size_t bufSize = txCount * 120 + 1;
+    /* Build result string — estimate 160 chars per tx (added sent|received fields) */
+    size_t bufSize = txCount * 160 + 1;
     char *buf = malloc(bufSize);
     if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
     buf[0] = '\0';
     size_t pos = 0;
 
-    for (size_t i = 0; i < txCount && i < 50; i++) { /* limit to 50 most recent */
+    /* BRWalletTransactions returns txs sorted by date OLDEST-FIRST (BRWallet.c).
+     * To cap at the 100 MOST RECENT we must start near the end of the array, not
+     * at index 0 — otherwise a wallet with >100 txs keeps its oldest 100 and drops
+     * every new send past the cap (balance still updates because it sums all txs,
+     * but the new tx never appears in the list). Start offset = txCount-100. */
+    size_t startIdx = (txCount > 100) ? (txCount - 100) : 0;
+    for (size_t i = startIdx; i < txCount; i++) { /* the 100 most recent */
         BRTransaction *tx = txs[i];
         if (!tx) continue;
 
@@ -427,17 +676,77 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionDetails(JNIEnv *env, job
         uint32_t ts = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
 
         int written = snprintf(buf + pos, bufSize - pos,
-            "%s|%lld|%llu|%u|%u\n",
+            "%s|%lld|%llu|%u|%u|%llu|%llu\n",
             hashHex,
             (long long)amount,
             (unsigned long long)fee,
             tx->blockHeight,
-            ts);
+            ts,
+            (unsigned long long)sent,
+            (unsigned long long)received);
         if (written > 0) pos += written;
     }
 
     free(txs);
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
+    return result;
+}
+
+/* ---------- getDerivationPath ---------- */
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getDerivationPath(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    return (*env)->NewStringUTF(env, "m/84'/20'/0'");
+}
+
+/* ---------- hasLegacyFunds ---------- */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_hasLegacyFunds(JNIEnv *env, jobject thiz)
+{
+    (void)env;
+    (void)thiz;
+    if (!g_wallet) return JNI_FALSE;
+    return BRWalletHasLegacyFunds(g_wallet) ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ---------- dumpAllAddresses ---------- */
+/* Diagnostic: returns all wallet addresses (BIP84 external + internal + all
+ * legacy chains) as a newline-separated string for on-chain cross-checking.
+ * Used to answer "is a missing UTXO on an address we're not scanning?" */
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_dumpAllAddresses(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t count = BRWalletAllAddrs(g_wallet, NULL, 0);
+    if (count == 0) return (*env)->NewStringUTF(env, "");
+
+    BRAddress *addrs = (BRAddress *)malloc(sizeof(BRAddress) * count);
+    if (!addrs) return (*env)->NewStringUTF(env, "");
+    count = BRWalletAllAddrs(g_wallet, addrs, count);
+
+    /* Each address is up to ~62 chars for bech32; reserve 80/address for safety */
+    size_t cap = count * 80 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(addrs); return (*env)->NewStringUTF(env, ""); }
+    size_t off = 0;
+    for (size_t i = 0; i < count; i++) {
+        size_t len = strnlen(addrs[i].s, sizeof(addrs[i].s));
+        if (off + len + 2 >= cap) break;
+        memcpy(buf + off, addrs[i].s, len);
+        off += len;
+        buf[off++] = '\n';
+    }
+    buf[off] = '\0';
+
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    free(addrs);
     return result;
 }

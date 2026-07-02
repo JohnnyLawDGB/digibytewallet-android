@@ -32,6 +32,12 @@ add_library(
         src/main/jni/digibytewallet-core/BRCrypto.h
         src/main/jni/digibytewallet-core/BRDigiAsset.c
         src/main/jni/digibytewallet-core/BRDigiAsset.h
+        src/main/jni/digibytewallet-core/BRGCSFilter.c
+        src/main/jni/digibytewallet-core/BRGCSFilter.h
+        src/main/jni/digibytewallet-core/BRCompactFilterChain.c
+        src/main/jni/digibytewallet-core/BRCompactFilterChain.h
+        src/main/jni/digibytewallet-core/BRWalletFilterElements.c
+        src/main/jni/digibytewallet-core/BRWalletFilterElements.h
         src/main/jni/digibytewallet-core/BRInt.h
         src/main/jni/digibytewallet-core/BRKey.c
         src/main/jni/digibytewallet-core/BRKey.h
@@ -96,6 +102,9 @@ add_library(
         src/main/jni/bridge/jni_peer.c
         src/main/jni/bridge/jni_asset.c
         src/main/jni/bridge/jni_wallet_sign.c
+        src/main/jni/bridge/jni_transaction_persist.c
+        src/main/jni/bridge/jni_derive.c
+        src/main/jni/bridge/jni_asset_send.c
         # Old bridge files retained for reference but NOT compiled:
         # src/main/jni/bridge/core.c
         # src/main/jni/bridge/wallet.c
@@ -116,3 +125,11 @@ target_link_libraries(
         android
         log
 )
+
+# 16 KB page-size compatibility (Android 15+ / newer flagships boot with 16 KB
+# memory pages; e.g. Galaxy S25 Ultra on Android 16). Without 16 KB-aligned LOAD
+# segments the dynamic linker rejects/mis-maps the lib on those devices, so the
+# native SPV engine never starts and the wallet hangs at "Connecting" with 0
+# peers. Force max-page-size=16384 so segments are aligned for both 4 KB and
+# 16 KB devices. (NDK r28 defaults to this; we set it explicitly for older NDKs.)
+target_link_options(core-lib PRIVATE "-Wl,-z,max-page-size=16384")

@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -104,12 +105,28 @@ fun AssetListScreen(
                         lineHeight = 22.sp
                     )
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "Browse assets on the marketplace",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = DigiByteAccent,
-                        textAlign = TextAlign.Center
-                    )
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    OutlinedButton(
+                        onClick = {
+                            io.digibyte.ui.util.openExternalUrl(
+                                context, "https://digiscope.me/assets/create",
+                            )
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = DigiByteAccent,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Create DigiAsset on digiscope.me",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
             }
         } else {
@@ -149,11 +166,23 @@ private fun AssetCard(
     asset: OwnedAsset,
     onClick: () -> Unit
 ) {
+    // "unresolved:<txid>" is the M1.1 placeholder for assets we've detected
+    // natively but can't yet derive a real asset-id for (transfers, pre-M3).
+    // Render a friendly short label instead of the raw placeholder.
+    val isUnresolved = asset.assetId.startsWith("unresolved:")
     val displayName = asset.metadata?.name
-        ?: asset.assetId.take(8) + "…"
+        ?: if (isUnresolved) {
+            "DigiAsset " + asset.assetId.substringAfter("unresolved:").take(6)
+        } else {
+            asset.assetId.take(8) + "…"
+        }
 
     val symbol = asset.metadata?.symbol
     val firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A'
+
+    // Subtitle replaces symbol when we have no metadata. Gives the user a
+    // concrete "why can't I see the name" signal instead of silent empty.
+    val subtitle = symbol ?: if (asset.metadata == null) "metadata offline" else null
 
     // Pick a deterministic accent color based on the asset ID hash
     val colorIndex = (asset.assetId.hashCode() and 0x7FFFFFFF) % assetIconColors.size
@@ -176,23 +205,12 @@ private fun AssetCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ── Icon / thumbnail ─────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(iconColor.copy(alpha = 0.18f))
-                    .border(1.5.dp, iconColor.copy(alpha = 0.5f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = firstLetter.toString(),
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp
-                    ),
-                    color = iconColor
-                )
-            }
+            AssetIcon(
+                imageUrl = asset.metadata?.imageUrl,
+                firstLetter = firstLetter,
+                iconColor = iconColor,
+                size = 56.dp
+            )
 
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -206,12 +224,13 @@ private fun AssetCard(
                 overflow = TextOverflow.Ellipsis
             )
 
-            // ── Symbol ───────────────────────────────────────────────
-            if (!symbol.isNullOrBlank()) {
+            // ── Subtitle (symbol when known, offline hint otherwise) ─────
+            if (!subtitle.isNullOrBlank()) {
                 Text(
-                    text = symbol,
+                    text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = DigiByteAccent,
+                    color = if (subtitle == symbol) DigiByteAccent
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
             }

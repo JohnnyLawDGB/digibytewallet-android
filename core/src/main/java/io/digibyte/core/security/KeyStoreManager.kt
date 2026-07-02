@@ -1,5 +1,6 @@
 package io.digibyte.core.security
 
+import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyStore
@@ -21,7 +22,7 @@ data class EncryptedData(val ciphertext: ByteArray, val iv: ByteArray) {
     }
 }
 
-class KeyStoreManager {
+class KeyStoreManager(private val context: Context? = null) {
     companion object {
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val KEY_ALIAS = "dgb_wallet_master"
@@ -33,6 +34,13 @@ class KeyStoreManager {
     fun createKey() {
         if (keyStore.containsAlias(KEY_ALIAS)) return
 
+        // No setUserAuthenticationRequired — the key must be usable at any
+        // point during app lifecycle without requiring a recent device unlock.
+        // Android Keystore auth binding (10-second window) has caused crashes
+        // on API 28 (UserNotAuthenticatedException), API 33 (no lock screen),
+        // and API 35 (auth state inconsistency). The app enforces its own
+        // PIN lock for access control. The seed is still AES-256-GCM encrypted
+        // with a hardware-backed key — just not bound to device unlock timing.
         val spec = KeyGenParameterSpec.Builder(
             KEY_ALIAS,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
@@ -40,9 +48,6 @@ class KeyStoreManager {
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            .setInvalidatedByBiometricEnrollment(true)
-            .setUserAuthenticationRequired(true)
-            .setUserAuthenticationValidityDurationSeconds(10) // 10s window after biometric/PIN
             .build()
 
         KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)

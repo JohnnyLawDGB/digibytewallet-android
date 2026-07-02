@@ -56,7 +56,11 @@ fun UnlockScreen(
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
             if (result is BiometricResult.Success) {
-                walletManager.restoreFromDisk()
+                if (walletManager.isWalletReady()) {
+                    walletManager.unlockFromUi()
+                } else {
+                    walletManager.restoreFromDisk()
+                }
                 navController.navigate("wallet") {
                     popUpTo("unlock") { inclusive = true }
                 }
@@ -66,7 +70,13 @@ fun UnlockScreen(
 
     fun attemptUnlock(pin: String) {
         if (pinManager.verifyPin(pin)) {
-            walletManager.restoreFromDisk()
+            // For UI-only relock (wallet already loaded in memory), just flip state.
+            // For fresh process (wallet not loaded), restore from disk on IO thread.
+            if (walletManager.isWalletReady()) {
+                walletManager.unlockFromUi()
+            } else {
+                walletManager.restoreFromDisk()
+            }
             navController.navigate("wallet") {
                 popUpTo("unlock") { inclusive = true }
             }
@@ -152,6 +162,11 @@ fun UnlockScreen(
                                 if (activity != null) {
                                     val result = biometricAuth.authenticate(activity)
                                     if (result is BiometricResult.Success) {
+                                        if (walletManager.isWalletReady()) {
+                                            walletManager.unlockFromUi()
+                                        } else {
+                                            walletManager.restoreFromDisk()
+                                        }
                                         navController.navigate("wallet") {
                                             popUpTo("unlock") { inclusive = true }
                                         }

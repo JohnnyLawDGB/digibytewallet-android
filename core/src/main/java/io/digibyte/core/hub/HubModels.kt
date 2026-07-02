@@ -47,3 +47,19 @@ sealed class WebSocketEvent {
 }
 
 enum class ConnectionState { CONNECTED, DISCONNECTED, RECONNECTING }
+
+data class LeaderboardEntry(
+    val rank: Int,
+    val handle: String,
+    val score: Int,
+    val distance: Int,
+    val coins: Int,
+    val createdAt: Long
+)
+
+data class DigiRunnerStats(
+    val bestScore: Int,
+    val bestRank: Int,
+    val totalGames: Int,
+    val totalCoins: Int
+)

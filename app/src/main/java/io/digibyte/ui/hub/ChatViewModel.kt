@@ -29,6 +29,9 @@ class ChatViewModel @Inject constructor(
     private val cachedMessageDao: CachedMessageDao
 ) : ViewModel() {
 
+    // ── Current user's address (for identifying own messages) ──────────────
+    val myAddress: String = NativeBridge.getReceiveAddress(0, 0) ?: ""
+
     // ── Channels ──────────────────────────────────────────────────────────
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
@@ -82,16 +85,15 @@ class ChatViewModel @Inject constructor(
         }
         observeWebSocketEvents()
         loadHistory(channelId = 1)
-        // Poll for login state — connects WebSocket after Digi-ID login
+        // Poll for login state — reconnects WebSocket after login or disconnect
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(2000)
+                kotlinx.coroutines.delay(5000)
                 if (digiScopeClient.isLoggedIn() &&
                     hubWebSocket.connectionState.value == ConnectionState.DISCONNECTED) {
                     hubWebSocket.connect()
                     loadChannels()
                     loadHistory(selectedChannel.value)
-                    break  // connected — stop polling
                 }
             }
         }

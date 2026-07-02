@@ -11,27 +11,35 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
+import io.digibyte.core.digiscope.DigiScopeClient
 import io.digibyte.core.model.DigiIdRequest
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
+import io.digibyte.game.DigiRunnerGame
 import io.digibyte.service.SyncService
 import io.digibyte.ui.asset.*
 import io.digibyte.ui.components.QrScannerScreen
 import io.digibyte.ui.digiid.DigiIdConfirmScreen
 import io.digibyte.ui.digiid.DigiIdScreen
+import io.digibyte.ui.hub.DigiRunnerLeaderboardScreen
 import io.digibyte.ui.onboarding.*
 import io.digibyte.ui.settings.*
 import io.digibyte.ui.hub.ChatScreen
@@ -39,6 +47,7 @@ import io.digibyte.ui.hub.CreateThreadScreen
 import io.digibyte.ui.hub.HubScreen
 import io.digibyte.ui.hub.ThreadDetailScreen
 import io.digibyte.ui.wallet.*
+import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
@@ -55,6 +64,7 @@ private val fullScreenRoutes = setOf(
     "seed_display/{wordCount}",
     "seed_verify",
     "mnemonic_input",
+    "recovery_scan",
     "recovery_date",
     "pin_setup",
     "unlock",
@@ -64,7 +74,9 @@ private val fullScreenRoutes = setOf(
     "settings_security",
     "settings_network",
     "settings_display",
+    "settings_sync_mode",
     "settings_about",
+    "settings_reconcile",
     "settings_view_seed",
     "assets",
     "asset_detail/{assetId}",
@@ -72,7 +84,10 @@ private val fullScreenRoutes = setOf(
     "qr_scanner",
     "digiid_confirm/{uri}",
     "thread_detail/{threadId}",
-    "create_thread"
+    "create_thread",
+    "digirunner",
+    "digirunner_leaderboard",
+    "recover_funds"
 )
 
 @Composable
@@ -80,7 +95,8 @@ fun AppNavigation(
     walletManager: WalletManager,
     pinManager: PinManager,
     biometricAuth: BiometricAuth,
-    keyStoreManager: KeyStoreManager
+    keyStoreManager: KeyStoreManager,
+    digiScopeClient: DigiScopeClient
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -88,15 +104,34 @@ fun AppNavigation(
     val currentRoute = currentBackStack?.destination?.route
 
     // Observe wallet state to gate navigation
-    val walletState by walletManager.walletState.collectAsState()
+    val walletState by walletManager.walletState.collectAsStateWithLifecycle()
 
-    // Determine start destination based on wallet state at launch
-    val startDestination = remember(walletState) {
-        when (walletState) {
-            is WalletState.NoWallet -> "onboarding"
-            is WalletState.Locked   -> "unlock"
-            is WalletState.Unlocked -> Screen.Wallet.route
+    // Determine start destination ONCE at launch — do not recompute
+    // when walletState changes mid-session (causes double PIN prompt).
+    val startDestination = remember {
+        val walletState = walletManager.walletState.value
+        val hasPin = try { pinManager.hasPin() } catch (e: Exception) {
+            android.util.Log.e("AppNavigation", "hasPin() failed: ${e.message}")
+            false
         }
+        val dest = when (walletState) {
+            is WalletState.NoWallet -> "onboarding"
+            is WalletState.Locked   -> {
+                if (hasPin) {
+                    "unlock"
+                } else {
+                    // Wallet exists but PIN was lost. Restore the wallet from
+                    // disk first, then route to pin_setup to set a new PIN.
+                    // The wallet is already on disk — don't go to onboarding.
+                    android.util.Log.w("AppNavigation", "Wallet exists but no PIN — restoring and routing to pin_setup")
+                    walletManager.restoreFromDisk()
+                    "pin_setup"
+                }
+            }
+            is WalletState.Unlocked -> if (!hasPin) "pin_setup" else Screen.Wallet.route
+        }
+        android.util.Log.i("AppNavigation", "startDestination=$dest walletState=$walletState hasPin=$hasPin")
+        dest
     }
 
     // Helper: start SPV sync foreground service whenever the wallet is unlocked.
@@ -131,12 +166,22 @@ fun AppNavigation(
             }
         }
     ) { padding ->
-        // Start sync service ONCE when the wallet is unlocked — not per-tab
+        // Start sync service when wallet screen is reached — from any path
         var syncStarted by remember { mutableStateOf(false) }
-        LaunchedEffect(startDestination) {
-            if (startDestination == "wallet" && !syncStarted) {
+        LaunchedEffect(currentRoute) {
+            if (currentRoute == Screen.Wallet.route && !syncStarted) {
                 syncStarted = true
                 startSyncService()
+            }
+            // Handle pending Digi-ID deep link after reaching wallet screen
+            if (currentRoute == Screen.Wallet.route) {
+                val activity = context as? io.digibyte.MainActivity
+                val pendingUri = activity?.pendingDigiIdUri
+                if (pendingUri != null) {
+                    activity.pendingDigiIdUri = null
+                    val encoded = java.net.URLEncoder.encode(pendingUri, "UTF-8")
+                    navController.navigate("digiid_confirm/$encoded")
+                }
             }
         }
 
@@ -180,6 +225,16 @@ fun AppNavigation(
                 MnemonicInputScreen(navController = navController, viewModel = sharedViewModel)
             }
 
+            composable("recovery_scan") { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                io.digibyte.ui.onboarding.RecoveryScanScreen(
+                    navController = navController, viewModel = sharedViewModel
+                )
+            }
+
             composable("recovery_date") { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry("onboarding")
@@ -189,10 +244,17 @@ fun AppNavigation(
             }
 
             composable("pin_setup") { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                // Get the shared onboarding ViewModel if we came from the onboarding
+                // flow. If pin_setup is the startDestination (wallet exists but no PIN),
+                // "onboarding" won't be on the back stack — use own entry instead.
+                val hasOnboarding = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry("onboarding") }.isSuccess
                 }
-                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                val vmEntry = remember(backStackEntry) {
+                    if (hasOnboarding) navController.getBackStackEntry("onboarding")
+                    else backStackEntry
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(vmEntry)
                 PinSetupScreen(
                     navController = navController,
                     biometricAuth = biometricAuth,
@@ -219,7 +281,16 @@ fun AppNavigation(
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
                     },
-                    onNavigateAssets = { navController.navigate("assets") }
+                    onNavigateAssets = { navController.navigate("assets") },
+                    onNavigateGame = { navController.navigate("digirunner") },
+                    onScoreSubmit = { score, distance, coins, livesRemaining ->
+                        kotlinx.coroutines.MainScope().launch {
+                            val ok = digiScopeClient.submitDigiRunnerScore(score, distance, coins, livesRemaining)
+                            val msg = if (ok) "Score submitted!" else "Score submit failed — are you logged in?"
+                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onShowLeaderboard = { navController.navigate("digirunner_leaderboard") }
                 )
             }
 
@@ -230,7 +301,10 @@ fun AppNavigation(
                     },
                     onNavigateCreateThread = {
                         navController.navigate("create_thread")
-                    }
+                    },
+                    onPlayDigiRunner = { navController.navigate("digirunner") },
+                    onViewLeaderboard = { navController.navigate("digirunner_leaderboard") },
+                    digiScopeClient = digiScopeClient
                 )
             }
 
@@ -252,6 +326,53 @@ fun AppNavigation(
                             popUpTo("create_thread") { inclusive = true }
                         }
                     }
+                )
+            }
+
+            // ── DigiRunner: standalone game ───────────────────────────────
+            composable("digirunner") {
+                val gameContext = LocalContext.current
+                val coroutineScope = rememberCoroutineScope()
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    DigiRunnerGame(
+                        standalone = true,
+                        onScoreSubmit = { score, distance, coins, livesRemaining ->
+                            coroutineScope.launch {
+                                val ok = digiScopeClient.submitDigiRunnerScore(
+                                    score, distance, coins, livesRemaining
+                                )
+                                val msg = if (ok) "Score submitted!" else "Score submit failed — are you logged in?"
+                                Toast.makeText(gameContext, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onShowLeaderboard = {
+                            navController.navigate("digirunner_leaderboard")
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Close button overlay
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close game",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+
+            // ── DigiRunner: leaderboard ───────────────────────────────────
+            composable("digirunner_leaderboard") {
+                DigiRunnerLeaderboardScreen(
+                    digiScopeClient = digiScopeClient,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
 
@@ -283,8 +404,20 @@ fun AppNavigation(
                 DisplaySettingsScreen(navController = navController)
             }
 
+            composable("settings_sync_mode") {
+                io.digibyte.ui.settings.SyncModeScreen(navController = navController)
+            }
+
             composable("settings_about") {
                 AboutScreen(navController = navController)
+            }
+
+            composable("settings_reconcile") {
+                io.digibyte.ui.settings.ReconcileScreen(navController = navController)
+            }
+
+            composable("recover_funds") {
+                io.digibyte.ui.recovery.RecoverFundsScreen(navController)
             }
 
             composable("settings_view_seed") {
@@ -296,26 +429,55 @@ fun AppNavigation(
             }
 
             // ── Send flow ─────────────────────────────────────────────────────
-            composable("send") {
+            // Share the Wallet route's WalletViewModel so peerCount/syncState
+            // are live on entry — preventing the "not connected" banner from
+            // flashing while a fresh VM's 5s poll catches up.
+            composable(
+                "send?address={address}",
+                arguments = listOf(navArgument("address") { defaultValue = "" })
+            ) { backStackEntry ->
+                val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 SendScreen(
                     biometricAuth = biometricAuth,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    prefillAddress = prefillAddress,
+                    onScanQr = { callback ->
+                        navController.navigate("qr_scanner")
+                    },
+                    walletViewModel = sharedWalletVm
                 )
             }
 
             // ── Receive flow ──────────────────────────────────────────────────
-            composable("receive") {
+            composable("receive") { backStackEntry ->
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 ReceiveScreen(
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    viewModel = sharedWalletVm
                 )
             }
 
             // ── Transaction detail ────────────────────────────────────────────
             composable("transaction_detail/{txid}") { backStackEntry ->
                 val txid = backStackEntry.arguments?.getString("txid") ?: ""
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 TransactionDetailScreen(
                     txid = txid,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    viewModel = sharedWalletVm
                 )
             }
 
@@ -359,12 +521,11 @@ fun AppNavigation(
                         }
                     },
                     onDigiByteUri = { uri ->
-                        // Navigate to send with pre-filled address (and optional amount)
-                        navController.navigate("send") {
+                        // Navigate to send with pre-filled address
+                        val encoded = Uri.encode(uri.address)
+                        navController.navigate("send?address=$encoded") {
                             popUpTo("qr_scanner") { inclusive = true }
                         }
-                        // The SendViewModel can be seeded via SavedStateHandle; for now
-                        // navigate to send — pre-fill wiring is handled in SendViewModel.
                     },
                     onInvalidQr = { reason ->
                         Toast.makeText(localContext, reason, Toast.LENGTH_SHORT).show()

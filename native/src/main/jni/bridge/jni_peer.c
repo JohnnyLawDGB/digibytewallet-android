@@ -8,6 +8,10 @@
  */
 
 #include "jni_bridge.h"
+#include "BRCompactFilterChain.h"
+
+/* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
+static void _applyPendingBip158State(void);
 
 /* ---------- setSocksProxy / clearSocksProxy ---------- */
 
@@ -141,6 +145,7 @@ static void bridge_txStatusUpdate(void *info) {
 /* Cached method IDs for save callbacks */
 static jmethodID g_mid_onSaveBlocks = NULL;
 static jmethodID g_mid_onSavePeers = NULL;
+static jmethodID g_mid_onSaveFilterHeaders = NULL;
 
 static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
                                size_t blocksCount, uint64_t *memIntegrityCheck) {
@@ -271,6 +276,15 @@ static void bridge_threadCleanup(void *info) {
 
 static BRMerkleBlock **g_savedBlocks = NULL;
 static size_t g_savedBlocksCount = 0;
+/* Gate for the peer-manager creation in startSync. Multiple callers race
+ * startSync on app open (onResume, the active-screen wake, the keepalive); the
+ * first to win used to create the manager BEFORE SyncService finished
+ * loadSavedBlocks, so it built with zero saved blocks and floored the chain at
+ * the birth checkpoint — a ~480k-block re-sync every launch. SyncService sets
+ * this via markSavedBlocksLoadComplete() once the load step is done (even for
+ * fresh wallets with no saved blocks), after which creation anchors at the
+ * saved tip. */
+static int g_savedBlocksLoadComplete = 0;
 static BRPeer *g_savedPeers = NULL;
 static size_t g_savedPeersCount = 0;
 
@@ -284,7 +298,11 @@ static size_t g_savedPeersCount = 0;
  * tries it first. Uses a recent timestamp so it sorts to the top.
  * If resolution fails, logs a warning and returns silently.
  */
-static void _injectPriorityPeer(const char *hostname, uint16_t port) {
+/* Resolve a hostname (or IP literal) to an IPv4-mapped UInt128. Touches NO
+ * shared state — safe to call WITHOUT g_peerManagerMutex. getaddrinfo() can
+ * block for the DNS resolver timeout, so hostname callers (startSync) MUST
+ * resolve before taking the lock to avoid stalling lock-contending reads. */
+static int _resolveHostToAddr(const char *hostname, UInt128 *out) {
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;  /* IPv4 — most reliable for mobile */
@@ -292,9 +310,9 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
 
     int err = getaddrinfo(hostname, NULL, &hints, &res);
     if (err != 0 || !res) {
-        LOGW("_injectPriorityPeer: failed to resolve %s: %s", hostname,
+        LOGW("_resolveHostToAddr: failed to resolve %s: %s", hostname,
              err ? gai_strerror(err) : "no results");
-        return;
+        return 0;
     }
 
     struct sockaddr_in *ipv4 = (struct sockaddr_in *)res->ai_addr;
@@ -306,7 +324,14 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
     addr.u32[3] = ip4;
 
     freeaddrinfo(res);
+    *out = addr;
+    return 1;
+}
 
+/* Prepend an already-resolved priority-peer address to g_savedPeers (dedup +
+ * timestamp bump so it sorts to the top). MUTATES g_savedPeers — the caller
+ * MUST hold g_peerManagerMutex. Fast (no DNS). */
+static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
     /* Check if already present in saved peers */
     for (size_t i = 0; i < g_savedPeersCount; i++) {
         if (UInt128Eq(g_savedPeers[i].address, addr)) {
@@ -315,7 +340,6 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
             g_savedPeers[i].services = SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM;
             g_priorityPeerAddr = addr;
             g_priorityPeerPort = port;
-            LOGI("_injectPriorityPeer: %s already in saved peers, bumped timestamp", hostname);
             return;
         }
     }
@@ -339,13 +363,75 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port) {
     g_savedPeers = newPeers;
     g_savedPeersCount = newCount;
 
-    char ipStr[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &ip4, ipStr, sizeof(ipStr));
     /* Cache for rescan locking */
     g_priorityPeerAddr = addr;
     g_priorityPeerPort = port;
+}
 
-    LOGI("_injectPriorityPeer: injected %s (%s:%u) as priority peer", hostname, ipStr, port);
+/* Resolve + prepend in one step. For IP-literal callers (injectPeerByIp) where
+ * resolution is cheap, so running it under the lock is fine. Caller holds the
+ * lock. Hostname callers should split: _resolveHostToAddr (unlocked) then
+ * _prependSavedPeerAddr (locked). */
+static void _injectPriorityPeer(const char *hostname, uint16_t port) {
+    UInt128 addr;
+    if (!_resolveHostToAddr(hostname, &addr)) return;
+    _prependSavedPeerAddr(addr, port);
+    LOGI("_injectPriorityPeer: injected %s as priority peer", hostname);
+}
+
+/* ---------- injectPeerByIp ---------- */
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
+                                                           jstring ipStr, jint port) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!ipStr) return;
+
+    const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
+    if (!ip) return;
+
+    /* Update g_savedPeers for the cold-start case when peer manager doesn't
+     * exist yet — _injectPriorityPeer dedupes and prepends. */
+    _injectPriorityPeer(ip, (uint16_t)port);
+
+    /* If the peer manager is already alive, ALSO add to its live candidate
+     * pool. Without this, post-startup injections accumulate in g_savedPeers
+     * which is only consumed once at manager creation — the keepalive ends
+     * up calling injectPeerByIp on every tick with zero effect, leaving the
+     * wallet stuck at 0 peers when the initial peer set fails to dial. */
+    if (g_peerManager) {
+        UInt128 addr = UINT128_ZERO;
+        struct in_addr ip4;
+        if (inet_pton(AF_INET, ip, &ip4) == 1) {
+            /* Build IPv4-mapped IPv6 address (::ffff:x.x.x.x) */
+            addr.u16[5] = 0xffff;
+            addr.u32[3] = ip4.s_addr;
+            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port,
+                                  SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM);
+        }
+    }
+
+    (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+}
+
+/* ---------- forceReconnect ---------- */
+
+/* Flag the peer manager for a clean recreate on the next startSync(). Recovers a
+ * stuck manager (silent mass-disconnect after long Doze idle, where the dead peers
+ * still occupy the connection slots so BRPeerManagerConnect won't dial fresh ones).
+ * The caller must follow with startSync(), which tears the manager down and rebuilds
+ * a fresh one that re-dials from g_savedPeers + the digiscope.me priority peer. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_forceReconnect(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) {
+        LOGI("forceReconnect: no peer manager — startSync will create one");
+        return;
+    }
+    LOGI("forceReconnect: flagging peer manager for a clean recreate");
+    g_peerManagerNeedsRecreate = 1;
 }
 
 /* ---------- startSync ---------- */
@@ -359,6 +445,17 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         LOGW("startSync: wallet not initialized");
         return;
     }
+
+    /* Resolve the digiscope.me priority peer BEFORE taking the lock.
+     * getaddrinfo can block for the DNS resolver timeout on a flaky network —
+     * exactly when reconnect fires — and the peer lock is contended by reads
+     * such as getPeerCount() that run on the main thread. Holding the lock
+     * across DNS would turn a brief read into an ANR. Resolution touches no
+     * shared state, so it is safe unlocked; the prepend below is under the lock. */
+    UInt128 prioAddr = UINT128_ZERO;
+    int havePrio = _resolveHostToAddr("digiscope.me", &prioAddr);
+
+    PEER_GUARD();
 
     if (g_peerManager && g_peerManagerNeedsRecreate) {
         /* Don't destroy the peer manager mid-rescan — the rescan needs it alive
@@ -390,11 +487,21 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     }
 
     {
-        /* Inject digiscope.me as a priority peer so it's always tried.
-         * Resolve the hostname and prepend to g_savedPeers before creating
-         * the peer manager. This ensures a bloom-filter-enabled node is
-         * always in the pool, even if DNS seeds aren't re-queried. */
-        _injectPriorityPeer("digiscope.me", 12024);
+        /* Creation gate: do NOT build the peer manager until saved blocks are
+         * loaded, or a racing early startSync (onResume / active-screen wake /
+         * keepalive) creates it empty and floors the chain at the birth
+         * checkpoint. SyncService releases the gate after its load step. The
+         * deferred call returns harmlessly; SyncService's own startSync (post
+         * load) then creates the manager anchored at the saved tip. */
+        if (!g_savedBlocksLoadComplete) {
+            LOGI("startSync: deferring manager creation until saved blocks load");
+            return;
+        }
+
+        /* Prepend digiscope.me (resolved above, before the lock) so a
+         * bloom-filter-enabled node is always in the pool, even if DNS seeds
+         * aren't re-queried. */
+        if (havePrio) _prependSavedPeerAddr(prioAddr, 12024);
 
         /* Create peer manager for mainnet.
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
@@ -425,6 +532,10 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
                                   bridge_savePeers,
                                   bridge_networkIsReachable,
                                   bridge_threadCleanup);
+
+        /* Apply any BIP 158 state SyncService.kt configured before this point
+         * (setSyncMode, setCompactFilterChain, enableAutoCompactFilterFetch). */
+        _applyPendingBip158State();
     }
 
     BRPeerManagerConnect(g_peerManager);
@@ -437,6 +548,7 @@ JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_stopSync(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
+    PEER_GUARD();
 
     if (g_peerManager) {
         BRPeerManagerDisconnect(g_peerManager);
@@ -450,6 +562,7 @@ JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_rescan(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
+    PEER_GUARD();
 
     if (g_peerManager) {
         LOGI("rescan: triggering BRPeerManagerRescan");
@@ -465,6 +578,7 @@ JNIEXPORT jfloat JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getSyncProgress(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
+    PEER_GUARD();
 
     if (!g_peerManager) return 0.0f;
     return (jfloat)BRPeerManagerSyncProgress(g_peerManager, 0);
@@ -476,6 +590,7 @@ JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
+    PEER_GUARD();
 
     if (!g_peerManager) return 0;
     return (jint)BRPeerManagerPeerCount(g_peerManager);
@@ -487,6 +602,7 @@ JNIEXPORT jlong JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getEstimatedBlockHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
+    PEER_GUARD();
 
     if (!g_peerManager) return 0;
     return (jlong)BRPeerManagerEstimatedBlockHeight(g_peerManager);
@@ -498,9 +614,58 @@ JNIEXPORT jlong JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getLastBlockHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
+    PEER_GUARD();
 
     if (!g_peerManager) return 0;
     return (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
+}
+
+/* ---------- getSavedBlocksTip ----------
+ *
+ * Highest height in the in-memory saved-blocks set, or 0 if none loaded.
+ * Unlike getLastBlockHeight(), does not depend on the peer manager — safe
+ * to call between loadSavedBlocks() and startSync(). SyncService uses this
+ * to pick the BIP 158 birth height before the peer manager exists.
+ */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    if (!g_savedBlocks || g_savedBlocksCount == 0) return 0;
+    uint32_t maxHeight = 0;
+    for (size_t i = 0; i < g_savedBlocksCount; i++) {
+        if (g_savedBlocks[i] && g_savedBlocks[i]->height > maxHeight) {
+            maxHeight = g_savedBlocks[i]->height;
+        }
+    }
+    return (jlong)maxHeight;
+}
+
+/* ---------- getWalletBirthCheckpointHeight ----------
+ *
+ * Height of the latest hardcoded checkpoint whose timestamp is at least a
+ * week before g_walletCreationTime, mirroring the SPV chain-download
+ * anchor in BRPeerManagerNewEx. Returns 0 if no wallet is loaded. Used as
+ * the BIP 158 birth-height anchor for fresh wallets that have not yet
+ * persisted any blocks.
+ */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    if (!g_wallet || g_walletCreationTime == 0) return 0;
+
+    uint32_t result = 0;
+    const BRChainParams *params = &BRMainNetParams;
+    for (size_t i = 0; i < params->checkpointsCount; i++) {
+        if (i == 0 ||
+            params->checkpoints[i].timestamp + 7*24*60*60 < g_walletCreationTime) {
+            result = params->checkpoints[i].height;
+        }
+    }
+    return (jlong)result;
 }
 
 /* ---------- setCallbackHandler ---------- */
@@ -607,6 +772,33 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject t
     return (jint)g_savedBlocksCount;
 }
 
+/* Release the startSync creation gate. SyncService calls this once its saved-
+ * blocks load step has finished (whether or not any blocks existed), so the
+ * peer manager is only ever built AFTER the saved chain is in memory and thus
+ * anchors at the saved tip instead of the birth checkpoint. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_markSavedBlocksLoadComplete(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    g_savedBlocksLoadComplete = 1;
+    LOGI("markSavedBlocksLoadComplete: peer-manager creation now permitted (savedBlocks=%zu)",
+         g_savedBlocksCount);
+}
+
+/* Suppress the one-time post-first-sync rescan (bridge_syncStopped). That
+ * rescan catches txs missed during a from-scratch header-only fast sync, but
+ * BRPeerManagerRescan re-floors lastBlock to the birth checkpoint — a ~480k
+ * block re-download. A wallet that has synced before (has_synced) already did
+ * that scan in a prior session and resumes at the saved tip, so the rescan is
+ * pointless and harmful. SyncService calls this at startup for such wallets. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_markInitialSyncDone(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    g_initialSyncDone = 1;
+    LOGI("markInitialSyncDone: post-first-sync rescan suppressed (wallet already synced)");
+}
+
 JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_loadSavedPeers(JNIEnv *env, jobject thiz,
                                                           jbyteArray data) {
@@ -639,4 +831,291 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedPeers(JNIEnv *env, jobject th
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
     LOGI("loadSavedPeers: loaded %zu peers from persistent storage", g_savedPeersCount);
     return (jint)g_savedPeersCount;
+}
+
+/* ---------- BIP 158 bridge ---------- */
+
+static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *chain);
+
+/* Pending state for BIP 158 setters that get called before the peer manager
+ * exists. SyncService.kt configures sync mode / chain / auto-fetch BEFORE
+ * calling startSync (which is where the peer manager is created), so without
+ * this defer-and-apply layer the setters all no-op. Applied in
+ * _applyPendingBip158State after BRPeerManagerSetCallbacks. */
+static int      g_pendingSyncMode          = BR_SYNC_MODE_BLOOM_ONLY;
+static int      g_pendingSyncModeSet       = 0;
+static uint8_t *g_pendingFilterChain       = NULL;
+static size_t   g_pendingFilterChainLen    = 0;
+static int      g_pendingAutoFetchEnabled  = 0;
+static uint32_t g_pendingAutoFetchStart    = 0;
+
+static void _applyPendingBip158State(void) {
+    if (!g_peerManager) return;
+
+    if (g_pendingSyncModeSet) {
+        BRPeerManagerSetSyncMode(g_peerManager, (BRSyncMode)g_pendingSyncMode);
+        if ((BRSyncMode)g_pendingSyncMode != BR_SYNC_MODE_BLOOM_ONLY) {
+            BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
+        }
+        LOGI("BIP158: applied pending syncMode=%d", g_pendingSyncMode);
+        g_pendingSyncModeSet = 0;
+    }
+
+    if (g_pendingFilterChain && g_pendingFilterChainLen > 0) {
+        BRCompactFilterChain *chain = BRCompactFilterChainDeserialize(g_pendingFilterChain,
+                                                                       g_pendingFilterChainLen);
+        if (chain) {
+            BRPeerManagerSetCompactFilterChain(g_peerManager, chain);
+            LOGI("BIP158: applied pending filter chain (%zu bytes)", g_pendingFilterChainLen);
+        } else {
+            LOGW("BIP158: pending filter chain failed to deserialize");
+        }
+        free(g_pendingFilterChain);
+        g_pendingFilterChain = NULL;
+        g_pendingFilterChainLen = 0;
+    }
+
+    if (g_pendingAutoFetchEnabled) {
+        BRPeerManagerEnableAutoCompactFilterFetch(g_peerManager, g_pendingAutoFetchStart);
+        uint32_t actual = BRPeerManagerGetAutoFetchCFiltersStart(g_peerManager);
+        if (actual != g_pendingAutoFetchStart) {
+            LOGI("BIP158: applied pending auto-fetch — requested %u, clamped to %u (in-memory window)",
+                 g_pendingAutoFetchStart, actual);
+        } else {
+            LOGI("BIP158: applied pending auto-fetch from height %u", actual);
+        }
+        g_pendingAutoFetchEnabled = 0;
+        g_pendingAutoFetchStart = 0;
+    }
+}
+
+static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *chain) {
+    (void)info;
+    if (!chain) return;
+
+    JNIEnv *env = jni_get_env();
+    if (!env || !g_callbackHandler) {
+        LOGD("bridge_saveFilterHeaders: no JNI env, skipping persist");
+        return;
+    }
+
+    if (!g_mid_onSaveFilterHeaders) {
+        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
+        g_mid_onSaveFilterHeaders = (*env)->GetMethodID(env, cls, "onSaveFilterHeaders", "([B)V");
+        (*env)->DeleteLocalRef(env, cls);
+        if (!g_mid_onSaveFilterHeaders) {
+            LOGW("bridge_saveFilterHeaders: onSaveFilterHeaders method not found");
+            return;
+        }
+    }
+
+    size_t need = BRCompactFilterChainSerialize(chain, NULL, 0);
+    if (need == 0) return;
+    uint8_t *buf = malloc(need);
+    if (!buf) return;
+    size_t got = BRCompactFilterChainSerialize(chain, buf, need);
+    if (got != need) { free(buf); return; }
+
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)got);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)got, (jbyte *)buf);
+    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveFilterHeaders, jbuf);
+    (*env)->DeleteLocalRef(env, jbuf);
+    free(buf);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz, jint mode) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    BRSyncMode m = (BRSyncMode)mode;
+    if (!g_peerManager) {
+        /* Defer until startSync creates the peer manager. */
+        g_pendingSyncMode = mode;
+        g_pendingSyncModeSet = 1;
+        LOGI("setSyncMode: peer manager not yet created — deferred mode=%d", (int)mode);
+        return;
+    }
+    BRPeerManagerSetSyncMode(g_peerManager, m);
+    if (m != BR_SYNC_MODE_BLOOM_ONLY) {
+        BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
+    }
+    LOGI("setSyncMode: mode=%d", (int)mode);
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getSyncMode(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jint)BRPeerManagerGetSyncMode(g_peerManager);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setDandelionEnabled(JNIEnv *env, jobject thiz, jboolean enabled) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) {
+        LOGI("setDandelionEnabled: peer manager not created — ignoring (re-applied on sync start)");
+        return;
+    }
+    BRPeerManagerSetDandelionEnabled(g_peerManager, enabled ? 1 : 0);
+    LOGI("setDandelionEnabled: %d", enabled ? 1 : 0);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_addDandelionPeer(JNIEnv *env, jobject thiz, jstring ipStr) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager || !ipStr) return;
+    const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
+    if (!ip) return;
+    struct in_addr ip4;
+    if (inet_pton(AF_INET, ip, &ip4) == 1) {
+        UInt128 addr = UINT128_ZERO;
+        addr.u16[5] = 0xffff;          /* IPv4-mapped IPv6 (::ffff:x.x.x.x) */
+        addr.u32[3] = ip4.s_addr;
+        BRPeerManagerAddDandelionPeer(g_peerManager, addr);
+        LOGI("addDandelionPeer: %s", ip);
+    }
+    (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_hasDandelionPeer(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return JNI_FALSE;
+    return BRPeerManagerHasDandelionPeer(g_peerManager) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_fallbackToBloom(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) {
+        LOGI("fallbackToBloom: peer manager not created — ignoring");
+        return;
+    }
+    BRPeerManagerFallbackToBloom(g_peerManager);
+    LOGI("fallbackToBloom: switched to BLOOM_ONLY, reloaded bloom on connected peers");
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jint)BRPeerManagerCFChainTipHeight(g_peerManager);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) {
+        LOGI("reanchorCompactFilterChainAtFloor: peer manager not created — ignoring");
+        return JNI_FALSE;
+    }
+    int r = BRPeerManagerReanchorCompactFilterChainAtFloor(g_peerManager);
+    if (r) LOGI("reanchorCompactFilterChainAtFloor: re-anchored filter chain at block floor");
+    return r ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCompactFilterChain(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return NULL;
+
+    const BRCompactFilterChain *chain = BRPeerManagerGetCompactFilterChain(g_peerManager);
+    if (!chain) return NULL;
+
+    size_t need = BRCompactFilterChainSerialize(chain, NULL, 0);
+    if (need == 0) return NULL;
+    uint8_t *buf = malloc(need);
+    if (!buf) return NULL;
+    size_t got = BRCompactFilterChainSerialize(chain, buf, need);
+    if (got != need) { free(buf); return NULL; }
+
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)got);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)got, (jbyte *)buf);
+    free(buf);
+    return jbuf;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!data) return JNI_FALSE;
+
+    jsize len = (*env)->GetArrayLength(env, data);
+    if (len <= 0) return JNI_FALSE;
+    jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
+    if (!buf) return JNI_FALSE;
+
+    if (!g_peerManager) {
+        /* Defer — store a copy until the peer manager is created in startSync. */
+        if (g_pendingFilterChain) { free(g_pendingFilterChain); }
+        g_pendingFilterChain = (uint8_t *)malloc((size_t)len);
+        if (!g_pendingFilterChain) {
+            (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+            LOGW("setCompactFilterChain: out of memory storing pending chain");
+            return JNI_FALSE;
+        }
+        memcpy(g_pendingFilterChain, buf, (size_t)len);
+        g_pendingFilterChainLen = (size_t)len;
+        (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+        LOGI("setCompactFilterChain: peer manager not yet created — deferred (%d bytes)", (int)len);
+        return JNI_TRUE;
+    }
+
+    BRCompactFilterChain *chain = BRCompactFilterChainDeserialize((const uint8_t *)buf, (size_t)len);
+    (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+    if (!chain) {
+        LOGW("setCompactFilterChain: deserialize failed (len=%d)", (int)len);
+        return JNI_FALSE;
+    }
+
+    BRPeerManagerSetCompactFilterChain(g_peerManager, chain);
+    LOGI("setCompactFilterChain: restored chain (%d bytes)", (int)len);
+    return JNI_TRUE;
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_requestCompactFilters(JNIEnv *env, jobject thiz,
+                                                                jlong startHeight, jlong stopHeight) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    if (startHeight < 0 || stopHeight < 0) return 0;
+    size_t n = BRPeerManagerRequestCompactFilters(g_peerManager,
+                                                  (uint32_t)startHeight, (uint32_t)stopHeight);
+    return (jlong)n;
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_enableAutoCompactFilterFetch(JNIEnv *env, jobject thiz,
+                                                                       jlong startHeight) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (startHeight < 0) startHeight = 0;
+    if (!g_peerManager) {
+        g_pendingAutoFetchEnabled = 1;
+        g_pendingAutoFetchStart = (uint32_t)startHeight;
+        LOGI("enableAutoCompactFilterFetch: peer manager not yet created — deferred startHeight=%ld",
+             (long)startHeight);
+        return;
+    }
+    BRPeerManagerEnableAutoCompactFilterFetch(g_peerManager, (uint32_t)startHeight);
+    LOGI("enableAutoCompactFilterFetch: startHeight=%ld", (long)startHeight);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return;
+    BRPeerManagerDisableAutoCompactFilterFetch(g_peerManager);
+    LOGI("disableAutoCompactFilterFetch");
 }

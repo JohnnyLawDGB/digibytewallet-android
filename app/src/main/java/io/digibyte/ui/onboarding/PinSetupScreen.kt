@@ -27,13 +27,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 private const val PIN_LENGTH = 6
@@ -49,6 +52,8 @@ fun PinSetupScreen(
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
+
+    val pendingLegacyRecovery by viewModel.pendingLegacyRecovery.collectAsStateWithLifecycle()
 
     var step by remember { mutableStateOf(PinStep.ENTER) }
     var firstPin by remember { mutableStateOf("") }
@@ -89,23 +94,44 @@ fun PinSetupScreen(
                                             isPinSaving = true
                                             viewModel.setPin(currentInput) { pinSuccess ->
                                                 if (pinSuccess) {
-                                                    // NOW create the wallet in the C core
-                                                    viewModel.createWallet { walletSuccess ->
-                                                        isPinSaving = false
-                                                        if (walletSuccess) {
-                                                            if (biometricAvailable && activity != null) {
-                                                                step = PinStep.BIOMETRIC
-                                                            } else {
-                                                                navController.navigate("wallet") {
-                                                                    popUpTo("onboarding") { inclusive = true }
+                                                    // Create the wallet if not already created.
+                                                    // The mnemonic is still in the ViewModel
+                                                    // from the seed display/verify flow.
+                                                    val afterWalletReady: (Boolean) -> Unit = { success ->
+                                                        if (success) {
+                                                            // Kick off sync on the IO dispatcher — BRPeerManagerConnect
+                                                            // opens sockets and can block for seconds on a cold start,
+                                                            // which will ANR this callback chain if it runs on Main.
+                                                            scope.launch {
+                                                                withContext(Dispatchers.IO) {
+                                                                    runCatching {
+                                                                        io.digibyte.core.bridge.NativeBridge.startSync()
+                                                                    }
+                                                                }
+                                                                isPinSaving = false
+                                                                if (biometricAvailable && activity != null) {
+                                                                    step = PinStep.BIOMETRIC
+                                                                } else {
+                                                                    val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
+                                                                    navController.navigate(dest) {
+                                                                        popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                                                    }
                                                                 }
                                                             }
                                                         } else {
+                                                            isPinSaving = false
                                                             errorMessage = "Wallet creation failed. Please try again."
                                                             currentInput = ""
                                                             step = PinStep.ENTER
                                                             firstPin = ""
                                                         }
+                                                    }
+                                                    // If wallet already exists (recovery flow or
+                                                    // recomposition), skip creation and proceed.
+                                                    if (io.digibyte.core.bridge.NativeBridge.isWalletLoaded()) {
+                                                        afterWalletReady(true)
+                                                    } else {
+                                                        viewModel.createWallet(afterWalletReady)
                                                     }
                                                 } else {
                                                     isPinSaving = false
@@ -148,15 +174,19 @@ fun PinSetupScreen(
                                     subtitle = "Authenticate to enable fingerprint/face unlock"
                                 )
                             }
-                            // Wallet already created before reaching biometric step
-                            navController.navigate("wallet") {
+                            // Wallet already created before reaching biometric step.
+                            // Route to RecoverFundsScreen if the recovery scan found
+                            // funds on non-native paths; otherwise go straight to wallet.
+                            val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
+                            navController.navigate(dest) {
                                 popUpTo("onboarding") { inclusive = true }
                             }
                         }
                     },
                     onSkip = {
-                        // Wallet already created before reaching biometric step
-                        navController.navigate("wallet") {
+                        // Same routing logic as onEnable.
+                        val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
+                        navController.navigate(dest) {
                             popUpTo("onboarding") { inclusive = true }
                         }
                     }

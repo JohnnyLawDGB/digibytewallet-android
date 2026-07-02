@@ -2,7 +2,7 @@
 
 A complete modernization of the official DigiByte Android wallet. Full Kotlin rewrite with Jetpack Compose, patched native C core for DigiByte Core 8.26+ compatibility, hardware-backed security, DigiAssets v2, Digi-ID authentication, privacy-by-default Tor routing, and reproducible builds.
 
-> **Status:** Active development. Phase 1 (core wallet), Phase 2 (assets, Digi-ID, IPFS, Tor), and Phase 3 (Community Hub) complete. DigiRunner v2 mini-game shipped. SPV sync stability with bloom peer priority and block persistence.
+> **Status:** Active development. Phase 1-3 complete. DigiRunner v2 with leaderboard, one-tap DigiScope login, security audit (34 tests), 120 unit tests passing. **[Download Beta APK](https://digiscope.me/downloads/)**
 
 ## What's New in v3.0
 
@@ -34,7 +34,7 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Tor by default** — All network connections routed through Tor (SOCKS5 proxy in the C core). New installs have Tor enabled by default.
 - **Multi-peer random submission** — Transactions submitted to a randomly chosen peer to obscure origin.
 - **Trusted full node relay** — Optionally connect exclusively to your own node with Dandelion++ for maximum privacy.
-- **Dandelion++ SPV stem submission** — [DIP filed](https://github.com/DigiByte-Core/dips/pull/15) to extend Dandelion++ to lightweight wallets. First-in-class for any UTXO chain.
+- **Dandelion++ SPV stem submission** — Shipped in `v3.7.0`: each broadcast stem-submits to a single Dandelion node ([DIP #15](https://github.com/DigiByte-Core/dips/pull/15)) with an embargo/fluff fallback so delivery is never sacrificed for privacy. First-in-class for any UTXO chain.
 
 ### Community Hub
 - **Real-time chat** — Channel-based messaging via WebSocket. General, Trading, Development, Assets channels.
@@ -51,12 +51,21 @@ This is not a patch — it's a ground-up rebuild of the 2021 Java wallet into a 
 - **Connected on restart** — Previously-synced wallets show "Connected" immediately, no misleading "Syncing 0%".
 
 ### DigiRunner v2
-- **Digi-Robot character** — Chrome metallic robot with LED visor, piston legs, DGB logo chest, antenna. Visor brightens on sprint, flickers red on stumble.
-- **Sprint + Crouch + Spring Jump** — Hold to sprint (1.8x speed) and crouch, release to spring jump. Longer hold = higher jump. Momentum carries through the air.
-- **3D spinning DGB coins** — Y-axis rotation with front face (official #0066CC blue, white "D"), dark back, thin edge at 90 degrees.
-- **Bitcoin stack obstacles** — 1-3 stacked orange BTC coins. Taller stacks need charged jumps. Hit one and lose 2 coins + stumble slowdown.
-- **Mario-style coin patterns** — Sprint runs, staircases, jump arcs, high clusters, mixed layouts. All heights tuned to actual jump physics.
-- **DGB moon** — Official DigiByte logo as a glowing moon over the cyber city skyline, traced from the DigiByte-Core/digibyte-logos SVG.
+- **Digi-Robot character** — Chrome metallic robot with LED visor, piston legs, DGB logo chest. Visor brightens on sprint, flickers red on stumble.
+- **Sprint + Crouch + Spring Jump** — Hold to sprint and crouch, release to spring jump. Longer hold = higher jump. Momentum carries through the air.
+- **3 hearts / game over** — Lose a heart per BTC stack hit. 0 hearts = game over with score breakdown.
+- **Combined scoring** — Distance points + coin bonus (×5). Score breakdown on game over screen.
+- **Cross-platform leaderboard** — Submit scores tied to DigiScope identity. Leaderboard in app + on [digiscope.me/digirunner](https://digiscope.me/digirunner). All Time / Weekly / Daily periods.
+- **3D spinning DGB coins** — Y-axis rotation with official brand colors. 6 Mario-style coin patterns tuned to jump physics.
+- **Bitcoin stack obstacles** — 1-3 stacked orange BTC coins. Taller stacks need charged jumps. -2 coins + stumble on hit.
+- **Progressive difficulty** — Base speed ramps up over distance. Sprint stacks on difficulty.
+- **Standalone play** — Play from Hub "Games" tab or wallet screen. Dedicated touch zone with visual cues.
+- **DGB moon** — Official DigiByte logo as a glowing moon over the cyber city skyline.
+
+### DigiScope Integration
+- **One-tap login** — "Connect to DigiScope" button in Hub profile. No QR scan needed — wallet requests challenge, signs locally, authenticates directly.
+- **Auto session management** — Expired sessions detected (401) and cleared automatically. Re-login prompts shown.
+- **PIN lock on background** — Wallet locks UI when app goes to background. SyncService continues running.
 
 ## Architecture
 
@@ -129,7 +138,7 @@ digibytewallet-android/
 ./gradlew connectedMainnetDebugAndroidTest
 ```
 
-**150+ tests, 0 failures** across:
+**154 tests, 0 failures** (120 unit + 34 security) across:
 - Native JNI bridge (mnemonic generation, address validation, asset detection, proxy)
 - Room DAO operations (UTXO segregation, asset balances, migrations v1→v2→v3)
 - Security (Keystore encrypt/decrypt, PIN hashing)
@@ -146,14 +155,17 @@ digibytewallet-android/
 | 1 — Alpha | Complete | `v3.0.0-alpha1` | Core wallet: send, receive, sync, security, DigiRunner |
 | 2 — Beta | Complete | `v3.0.0-beta1` | DigiAssets v2, Digi-ID, IPFS, Tor, DigiScope |
 | 3 — Production | Complete | `v3.0.0` | Community Hub, Digi-ID signing, DigiRunner v2, sync stability |
-| 4 — Post-launch | Planned | — | Dandelion++ SPV stem, BIP157/158 compact block filters, v9 features, asset issuance |
+| 3.5 — Hardening | Complete | `v3.0.3` | Security audit, leaderboard, one-tap login, PIN lock, balance caching |
+| 4 — Post-launch | Planned | — | Dandelion++ SPV, BIP157/158, v9.26 features, DigiAsset send/receive |
 
 ## Security
 
+- **Bug bounty (up to 100,000 DGB):** [BUG-BOUNTY.md](BUG-BOUNTY.md)
+- **Responsible disclosure:** [SECURITY.md](SECURITY.md)
 - **Threat model:** [THREAT_MODEL.md](THREAT_MODEL.md)
 - **Crypto inventory:** [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md)
 - **Reproducible builds:** [VERIFICATION.md](VERIFICATION.md)
-- **Responsible disclosure:** [SECURITY.md](SECURITY.md)
+- **Audit summary:** [security/AUDIT-SUMMARY.md](security/AUDIT-SUMMARY.md)
 
 ### Key Security Properties
 - Seed encrypted at rest with Android Keystore (TEE/Strongbox)

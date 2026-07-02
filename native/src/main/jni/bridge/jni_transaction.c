@@ -87,7 +87,7 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
         LOGW("signTransaction: wallet not initialized");
         return NULL;
     }
-    if (!g_seedValid) {
+    if (!seed_is_valid()) {
         LOGW("signTransaction: session not unlocked (no seed)");
         return NULL;
     }
@@ -116,7 +116,7 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
 
     /* Sign with wallet (uses RFC 6979 deterministic nonces internally) */
     /* forkId=0 for DigiByte (same as Bitcoin) */
-    int signed_ok = BRWalletSignTransaction(g_wallet, tx, 0, g_seed, sizeof(g_seed));
+    int signed_ok = seed_sign_transaction(g_wallet, tx, 0);
     if (!signed_ok) {
         LOGW("signTransaction: BRWalletSignTransaction failed");
         BRTransactionFree(tx);
@@ -152,28 +152,11 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
 
 /* ---------- publishTransaction ---------- */
 
-/* Publish callback context */
-typedef struct {
-    int  error;
-    int  done;
-    char txid_hex[65]; /* 32 bytes * 2 hex chars + nul */
-} PublishContext;
-
-static void publish_callback(void *info, int error) {
-    PublishContext *ctx = (PublishContext *)info;
-    ctx->error = error;
-    ctx->done = 1;
-    if (error) {
-        LOGE("publishTransaction: callback error=%d (%s)", error, strerror(error));
-    } else {
-        LOGD("publishTransaction: broadcast succeeded");
-    }
-}
-
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
                                                               jbyteArray signedTx) {
     (void)thiz;
+    PEER_GUARD();
 
     if (!g_wallet || !g_peerManager) {
         LOGW("publishTransaction: wallet or peer manager not initialized");
@@ -206,14 +189,215 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
     }
     txidHex[64] = '\0';
 
-    /* Publish — note: BRPeerManagerPublishTx takes ownership of tx, do NOT free it */
-    PublishContext ctx = { .error = 0, .done = 0 };
-    BRPeerManagerPublishTx(g_peerManager, tx, &ctx, publish_callback);
+    /* Register the tx into the wallet *before* publish so it's in
+     * BRWalletTransactions() the moment publishTransaction returns —
+     * otherwise the Kotlin-side save-after-broadcast hook can race the
+     * peer relay-back path and persist a stale snapshot. The peer's
+     * relay-back later calls BRWalletRegisterTransaction again, which
+     * is idempotent (BRWallet.c:1111). Timestamp must be set first
+     * because _BRWalletInsertTx orders by timestamp. */
+    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
+    BRWalletRegisterTransaction(g_wallet, tx);
 
-    /* The callback may be asynchronous; return txid immediately.
-       The caller can monitor status via NativeCallback events. */
+    /* Publish — BRPeerManagerPublishTx takes ownership of tx, do NOT free it.
+       Pass NULL info/callback: the callback fires asynchronously on the peer
+       thread AFTER this JNI frame returns, so a stack-local PublishContext
+       would be written cross-thread once it is out of scope — a use-after-free.
+       Kotlin already polls acceptance via getRelayCount (Broadcaster embargo +
+       SyncService.rebroadcastStrandedSends), so no native callback is needed.
+       Matches publishTransactionStem's proven NULL/NULL pattern below. */
+    BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);
+
     LOGD("publishTransaction: submitted txid=%s", txidHex);
     return (*env)->NewStringUTF(env, txidHex);
+}
+
+/* ---------- Dandelion stem / fluff / relay-count ---------- */
+
+/* Parse a 64-char display txid (reversed byte order) into an internal UInt256. */
+static UInt256 _u256FromTxidHex(const char *hex) {
+    UInt256 h = UINT256_ZERO;
+    for (int i = 0; i < 32; i++) {
+        unsigned byte = 0;
+        if (sscanf(hex + i * 2, "%2x", &byte) != 1) return UINT256_ZERO;
+        h.u8[31 - i] = (uint8_t)byte; /* reverse: display -> internal */
+    }
+    return h;
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
+                                                                 jbyteArray signedTx) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_wallet || !g_peerManager || !signedTx) return NULL;
+    /* Fast no-op when no capable peer is connected — caller floods via
+       publishTransaction. Avoids parsing/registering a tx we won't stem. */
+    if (!BRPeerManagerHasDandelionPeer(g_peerManager)) return NULL;
+
+    jsize txLen = (*env)->GetArrayLength(env, signedTx);
+    if (txLen <= 0) return NULL;
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, signedTx, NULL);
+    if (!txBytes) return NULL;
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, signedTx, txBytes, JNI_ABORT);
+    if (!tx) { LOGE("publishTransactionStem: parse failed"); return NULL; }
+
+    UInt256 txHash = tx->txHash;
+    char txidHex[65];
+    for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
+    txidHex[64] = '\0';
+
+    /* Register before broadcast (same coherence rule as publishTransaction). */
+    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
+    BRWalletRegisterTransaction(g_wallet, tx);
+
+    /* NULL info/callback: a stem callback would be async and the stack-ctx pattern
+       in publishTransaction is UAF-prone; Kotlin monitors via getRelayCount. */
+    int stemmed = BRPeerManagerStemPublishTx(g_peerManager, tx, NULL, NULL);
+    if (!stemmed) {
+        /* Rare race: the capable peer dropped after the check above. The tx is
+           registered but unbroadcast — flood it so it isn't stranded. */
+        BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);
+        LOGW("publishTransactionStem: no stem peer at submit — flooded instead (txid=%s)", txidHex);
+    } else {
+        LOGD("publishTransactionStem: stemmed txid=%s", txidHex);
+    }
+    return (*env)->NewStringUTF(env, txidHex);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_fluffTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager || !jtxid) return;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return;
+    if (strlen(txid) == 64) BRPeerManagerFluffTx(g_peerManager, _u256FromTxidHex(txid));
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager || !jtxid) return 0;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return 0;
+    jint count = (strlen(txid) == 64)
+        ? (jint)BRPeerManagerRelayCount(g_peerManager, _u256FromTxidHex(txid)) : 0;
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return count;
+}
+
+/* ---------- removeTransaction ----------
+ * Drop a transaction (and any dependents) from the wallet, restoring the
+ * balance view. Used to clear a phantom unconfirmed send that can never confirm
+ * — a double-spend whose inputs were already spent by a confirmed tx. Guarded
+ * by a transaction-exists check so an unknown hash is a harmless no-op. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    if (!g_wallet || !jtxid) return JNI_FALSE;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return JNI_FALSE;
+    jboolean removed = JNI_FALSE;
+    if (strlen(txid) == 64) {
+        UInt256 h = _u256FromTxidHex(txid);
+        if (BRWalletTransactionForHash(g_wallet, h)) {
+            BRWalletRemoveTransaction(g_wallet, h);
+            LOGI("removeTransaction: dropped %s", txid);
+            removed = JNI_TRUE;
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return removed;
+}
+
+/* ---------- isTransactionValid ----------
+ * Returns false when the tx's inputs are already spent by another (confirmed)
+ * tx — i.e. a double-spend that can never confirm. Returns true for unknown
+ * hashes (don't act on a tx the wallet doesn't hold). */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    if (!g_wallet || !jtxid) return JNI_TRUE;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return JNI_TRUE;
+    jboolean valid = JNI_TRUE;
+    if (strlen(txid) == 64) {
+        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, _u256FromTxidHex(txid));
+        if (tx) valid = BRWalletTransactionIsValid(g_wallet, tx) ? JNI_TRUE : JNI_FALSE;
+    }
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return valid;
+}
+
+/* ---------- registerRawTransaction ----------
+ *
+ * Injects a node-verified transaction into the wallet. Used by
+ * ChainReconciliationService when a UTXO appears on one of our addresses
+ * on-chain but was missed by the SPV bloom scan (stale peers, merkleblock
+ * drops, etc.).
+ *
+ * The caller is responsible for merkle-proof-verifying the tx against a
+ * block header the wallet already trusts — this function only validates
+ * that the tx is signed, parses correctly, and belongs to the wallet
+ * (BRWalletRegisterTransaction does the ownership check).
+ *
+ * Returns JNI_TRUE if the tx was added, JNI_FALSE otherwise (duplicate,
+ * unsigned, parse failure, or tx not associated with any wallet key). */
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
+                                                                  jbyteArray rawTx,
+                                                                  jlong blockHeight,
+                                                                  jlong blockTimestamp) {
+    (void)thiz;
+    if (!g_wallet || !rawTx) return JNI_FALSE;
+
+    jsize txLen = (*env)->GetArrayLength(env, rawTx);
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, rawTx, NULL);
+    if (!txBytes || txLen <= 0) return JNI_FALSE;
+
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
+
+    if (!tx) {
+        LOGE("registerRawTransaction: failed to parse raw tx");
+        return JNI_FALSE;
+    }
+    if (!BRTransactionIsSigned(tx)) {
+        LOGE("registerRawTransaction: tx is not signed");
+        BRTransactionFree(tx);
+        return JNI_FALSE;
+    }
+
+    /* Fast-path duplicate check — avoids the memory leak in
+     * BRWalletRegisterTransaction's duplicate branch. */
+    BRTransaction *existing = BRWalletTransactionForHash(g_wallet, tx->txHash);
+    if (existing) {
+        LOGD("registerRawTransaction: duplicate, skipping");
+        BRTransactionFree(tx);
+        return JNI_FALSE;
+    }
+
+    tx->blockHeight = (uint32_t)blockHeight;
+    tx->timestamp = (uint32_t)blockTimestamp;
+
+    int ok = BRWalletRegisterTransaction(g_wallet, tx);
+    if (!ok) {
+        /* Not owned by any wallet address — free to avoid leak.
+         * BRWalletRegisterTransaction's non-wallet path leaves tx orphaned
+         * unless blockHeight == TX_UNCONFIRMED (in which case the wallet
+         * tracks it). For confirmed txs that don't match, we free. */
+        if (tx->blockHeight != TX_UNCONFIRMED) BRTransactionFree(tx);
+        LOGW("registerRawTransaction: tx not associated with wallet");
+        return JNI_FALSE;
+    }
+    LOGI("registerRawTransaction: registered tx at height=%ld ts=%ld",
+         (long)blockHeight, (long)blockTimestamp);
+    return JNI_TRUE;
 }
 
 /* ---------- getEstimatedFee ---------- */
@@ -223,13 +407,10 @@ Java_io_digibyte_core_bridge_NativeBridge_getEstimatedFee(JNIEnv *env, jobject t
                                                            jint priority) {
     (void)env;
     (void)thiz;
+    (void)priority;
 
-    /* Fee tiers — DigiByte fees are simple, based on sat/KB */
-    /* priority: 0=high, 1=medium, 2=low */
-    switch (priority) {
-        case 0:  return (jlong)(DEFAULT_FEE_PER_KB * 5);   /* high: 5x default */
-        case 1:  return (jlong)(DEFAULT_FEE_PER_KB * 2);   /* medium: 2x default */
-        case 2:  return (jlong)DEFAULT_FEE_PER_KB;          /* low: default min relay */
-        default: return (jlong)DEFAULT_FEE_PER_KB;
-    }
+    /* DigiByte has 15-second blocks and no fee market.
+     * All transactions at the minimum relay fee confirm in the next block.
+     * Return DEFAULT_FEE_PER_KB (100 sat/byte) for all priority levels. */
+    return (jlong)DEFAULT_FEE_PER_KB;
 }

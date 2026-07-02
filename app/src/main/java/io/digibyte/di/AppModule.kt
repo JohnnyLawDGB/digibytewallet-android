@@ -29,7 +29,7 @@ object AppModule {
     fun provideTorManager(@ApplicationContext context: Context): TorManager = TorManager(context)
 
     @Provides @Singleton
-    fun provideKeyStoreManager(): KeyStoreManager = KeyStoreManager()
+    fun provideKeyStoreManager(@ApplicationContext context: Context): KeyStoreManager = KeyStoreManager(context)
 
     @Provides @Singleton
     fun providePinManager(@ApplicationContext context: Context): PinManager = PinManager(context)
@@ -39,42 +39,97 @@ object AppModule {
 
     @Provides @Singleton
     fun provideDatabase(@ApplicationContext context: Context, ksm: KeyStoreManager): WalletDatabase {
+        return try {
+            provideDatabaseInner(context, ksm)
+        } catch (e: Exception) {
+            // If ANYTHING fails during DB init, wipe stale data and try fresh.
+            // The wallet seed is in its own SharedPreferences — not lost.
+            android.util.Log.e("AppModule", "DB init failed, wiping stale data and retrying: ${e.message}", e)
+            wipeStaleData(context)
+            provideDatabaseInner(context, ksm)
+        }
+    }
+
+    /**
+     * Wipe all app data that can become stale across installs/upgrades:
+     * DB files, DB key prefs, PIN, sync data. The wallet seed prefs
+     * (dgb_wallet_seed) are preserved — user funds are never lost.
+     */
+    private fun wipeStaleData(context: Context) {
+        android.util.Log.w("AppModule", "Wiping stale app data (wallet seed preserved)")
+        // Delete database files
+        context.getDatabasePath("wallet.db").delete()
+        context.getDatabasePath("wallet.db-journal").delete()
+        context.getDatabasePath("wallet.db-shm").delete()
+        context.getDatabasePath("wallet.db-wal").delete()
+        // Clear DB key prefs
+        context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE).edit().clear().apply()
+        // NOTE: do NOT delete the PIN store here. Clearing the PIN locks the
+        // user out of their wallet. Only the recovery flow should clear the PIN.
+        // Clear sync data (blocks/peers will be re-downloaded)
+        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).edit().clear().apply()
+        // Clear bloom peer cache
+        context.getSharedPreferences("dgb_bloom_peers", Context.MODE_PRIVATE).edit().clear().apply()
+        // Delete stale Keystore keys
+        try {
+            val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
+            ks.load(null)
+            for (alias in listOf("dgb_db_passphrase", "dgb_wallet_master")) {
+                if (ks.containsAlias(alias)) {
+                    ks.deleteEntry(alias)
+                    android.util.Log.w("AppModule", "Deleted stale Keystore key: $alias")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AppModule", "Could not clean Keystore: ${e.message}")
+        }
+    }
+
+    private fun provideDatabaseInner(context: Context, ksm: KeyStoreManager): WalletDatabase {
         val dbFile = context.getDatabasePath("wallet.db")
         val prefs = context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE)
 
+        android.util.Log.i("AppModule", "DB init: dbExists=${dbFile.exists()} hasKey=${prefs.contains("encrypted_key")}")
+
         val passphrase: ByteArray = when {
             prefs.contains("encrypted_key") -> {
-                // Existing install: decrypt the stored random passphrase
+                // Existing install: decrypt the stored passphrase using the wallet key.
+                // The wallet key no longer requires user authentication, so this works
+                // on all API levels without UserNotAuthenticatedException.
+                android.util.Log.i("AppModule", "Decrypting stored DB passphrase")
                 val stored = prefs.getString("encrypted_key", "")!!
                 val parts = stored.split(":")
-                val encrypted = EncryptedData(
-                    ciphertext = hexToBytes(parts[0]),
-                    iv = hexToBytes(parts[1])
-                )
-                ksm.decrypt(encrypted)
+                if (parts.size != 2) throw IllegalStateException("Corrupt DB key format")
+
+                // Handle both old dedicated DB key and wallet key
+                val alias = prefs.getString("db_key_alias", null)
+                if (alias != null) {
+                    val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+                    keyStore.load(null)
+                    val key = keyStore.getKey(alias, null)
+                        ?: throw IllegalStateException("Keystore key '$alias' missing")
+                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key,
+                        javax.crypto.spec.GCMParameterSpec(128, hexToBytes(parts[1])))
+                    cipher.doFinal(hexToBytes(parts[0]))
+                } else {
+                    ksm.decrypt(EncryptedData(hexToBytes(parts[0]), hexToBytes(parts[1])))
+                }
             }
             dbFile.exists() -> {
-                // Phase 1 upgrade: DB already exists with the old hardcoded passphrase.
-                // Re-keying an SQLCipher DB through Room's abstraction layer requires
-                // low-level PRAGMA rekey calls that bypass Room's lifecycle — this is
-                // fragile and risks DB corruption. Compromise: continue using the legacy
-                // passphrase for existing installs and store a flag to document the state.
-                // Security improvement (random Keystore-derived passphrase) applies to
-                // all new installs going forward.
-                prefs.edit().putBoolean("legacy_passphrase", true).apply()
+                // Legacy DB from earlier version — use hardcoded passphrase
+                android.util.Log.i("AppModule", "Legacy DB — using hardcoded passphrase")
                 "digibyte-wallet-db".toByteArray()
             }
             else -> {
-                // New install: generate a random 32-byte passphrase, encrypt it with
-                // an Android Keystore AES-256-GCM key, and persist the encrypted blob.
+                // New install: generate random passphrase, encrypt with wallet key
+                android.util.Log.i("AppModule", "New install — generating DB passphrase")
                 ksm.createKey()
                 val newPassphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
                 val encrypted = ksm.encrypt(newPassphrase)
                 prefs.edit()
-                    .putString(
-                        "encrypted_key",
-                        "${bytesToHex(encrypted.ciphertext)}:${bytesToHex(encrypted.iv)}"
-                    )
+                    .putString("encrypted_key",
+                        "${bytesToHex(encrypted.ciphertext)}:${bytesToHex(encrypted.iv)}")
                     .apply()
                 newPassphrase
             }
@@ -103,12 +158,54 @@ object AppModule {
     fun provideCoinSelector(): CoinSelector = CoinSelector()
 
     @Provides @Singleton
-    fun provideTransactionBuilder(cs: CoinSelector, um: UtxoManager): TransactionBuilder =
-        TransactionBuilder(cs, um)
+    fun provideOutgoingTxStore(@ApplicationContext context: Context): io.digibyte.core.OutgoingTxStore =
+        io.digibyte.core.OutgoingTxStore(context)
+
+    @Provides @Singleton
+    fun provideWalletTxPersister(@ApplicationContext context: Context): io.digibyte.core.WalletTxPersister =
+        io.digibyte.core.WalletTxPersister(context)
+
+    @Provides @Singleton
+    fun provideTransactionBuilder(
+        cs: CoinSelector,
+        um: UtxoManager,
+        outgoing: io.digibyte.core.OutgoingTxStore,
+        persister: io.digibyte.core.WalletTxPersister,
+    ): TransactionBuilder =
+        TransactionBuilder(cs, um, outgoing, persister)
+
+    @Provides @Singleton
+    fun provideDgbNodeClient(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+    ): io.digibyte.core.reconcile.DgbNodeClient =
+        io.digibyte.core.reconcile.DgbNodeClient(context, client)
+
+    @Provides @Singleton
+    fun provideUtxoSource(
+        nodeClient: io.digibyte.core.reconcile.DgbNodeClient,
+    ): io.digibyte.core.recovery.UtxoSource =
+        io.digibyte.core.recovery.ReconcileBackendUtxoSource(nodeClient)
+
+    @Provides @Singleton
+    fun provideRecoveryScanService(
+        utxoSource: io.digibyte.core.recovery.UtxoSource,
+    ): io.digibyte.core.recovery.RecoveryScanService =
+        io.digibyte.core.recovery.RecoveryScanService(utxoSource)
 
     @Provides @Singleton
     fun provideWalletManager(@ApplicationContext context: Context, ksm: KeyStoreManager, um: UtxoManager): WalletManager =
         WalletManager(context, ksm, um)
+
+    /**
+     * Seed seam for the recovery flow. Delegates to the existing seed store via
+     * [WalletManager.loadBip39Seed], which decrypts the stored mnemonic and
+     * converts it once to the 64-byte BIP39 seed (zeroing the mnemonic). The
+     * RecoverFundsViewModel owns and zeros the returned seed.
+     */
+    @Provides @Singleton
+    fun provideSeedProvider(walletManager: WalletManager): io.digibyte.core.recovery.SeedProvider =
+        io.digibyte.core.recovery.SeedProvider { walletManager.loadBip39Seed() }
 
     @Provides @Singleton
     fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
@@ -121,8 +218,26 @@ object AppModule {
     fun provideIpfsClient(client: OkHttpClient): IpfsClient = IpfsClient(client)
 
     @Provides @Singleton
-    fun provideAssetMetadataService(ipfsClient: IpfsClient, dao: AssetMetadataDao): AssetMetadataService =
-        AssetMetadataService(ipfsClient, dao)
+    fun provideAssetMetadataService(
+        ipfsClient: IpfsClient,
+        dao: AssetMetadataDao,
+        assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
+    ): AssetMetadataService =
+        AssetMetadataService(ipfsClient, dao, assetNetworkClient)
+
+    /** Multi-endpoint asset network client with per-endpoint circuit breaker.
+     *  Priority order: our own cert-pinned proxy first, then the DigiByte Core
+     *  team's official endpoint. Future: add user-configured override. */
+    @Provides @Singleton
+    fun provideAssetNetworkClient(
+        okHttpClient: OkHttpClient,
+    ): io.digibyte.core.asset.network.AssetNetworkClient =
+        io.digibyte.core.asset.network.MultiEndpointAssetClient(
+            endpoints = listOf(
+                io.digibyte.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
+                io.digibyte.core.asset.network.DigiAssetsNetClient(baseClient = okHttpClient),
+            )
+        )
 
     @Provides @Singleton
     fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao, digiScopeClient: DigiScopeClient): DigiIdManager =
@@ -145,6 +260,28 @@ object AppModule {
         utxoDao: UtxoDao,
         transactionDao: TransactionDao,
         metadataDao: AssetMetadataDao,
-        metadataService: AssetMetadataService
-    ): AssetManager = AssetManager(utxoDao, transactionDao, metadataDao, metadataService)
+        metadataService: AssetMetadataService,
+        assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
+        outgoing: io.digibyte.core.OutgoingTxStore,
+        persister: io.digibyte.core.WalletTxPersister,
+    ): AssetManager = AssetManager(
+        utxoDao = utxoDao,
+        transactionDao = transactionDao,
+        metadataDao = metadataDao,
+        metadataService = metadataService,
+        assetNetworkClient = assetNetworkClient,
+        outgoingTxStore = outgoing,
+        walletTxPersister = persister,
+    )
+
+    @Provides @Singleton
+    fun provideAssetHistoryBackfill(
+        @ApplicationContext context: Context,
+        transactionDao: TransactionDao,
+    ): io.digibyte.core.asset.AssetHistoryBackfill =
+        io.digibyte.core.asset.AssetHistoryBackfill(
+            context,
+            transactionDao,
+            io.digibyte.core.asset.DigiAssetDecoder()
+        )
 }

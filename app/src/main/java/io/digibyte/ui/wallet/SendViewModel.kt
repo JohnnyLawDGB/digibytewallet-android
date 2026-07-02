@@ -23,8 +23,17 @@ sealed class SendState {
     data class Error(val message: String) : SendState()
 }
 
-/** Fee tiers in sat/KB. Used as fallback when native returns 0. */
-private val FEE_DEFAULTS = longArrayOf(100_000L, 75_000L, 50_000L)
+/** Estimated vsize for a typical 1-input P2WPKH → 2-output transaction. */
+private const val TYPICAL_TX_VSIZE = 141L
+
+/** Default fee rate: 100,000 sat/KB (100 sat/byte) — DigiByte min relay fee. */
+private const val DEFAULT_FEE_PER_KB = 100_000L
+
+sealed class FeeWarning {
+    data object None : FeeWarning()
+    data object BelowRelay : FeeWarning()
+    data object ZeroFee : FeeWarning()
+}
 
 @HiltViewModel
 class SendViewModel @Inject constructor(
@@ -46,14 +55,46 @@ class SendViewModel @Inject constructor(
     /** Amount in fiat (user text input or converted). Kept in sync with amountDgb. */
     val amountFiat = MutableStateFlow("")
 
-    /** 0 = high (Next Block), 1 = medium (5 min), 2 = low (Economy). */
-    val selectedFeeTier = MutableStateFlow(1)
+    /** Whether user has toggled custom fee mode. */
+    val isCustomFee = MutableStateFlow(false)
 
-    /** Estimated fee in satoshis for the selected tier. */
-    val feeEstimate: StateFlow<Long> = selectedFeeTier.map { tier ->
-        val native = NativeBridge.getEstimatedFee(tier)
-        if (native > 0) native else FEE_DEFAULTS[tier]
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, FEE_DEFAULTS[1])
+    /** Custom fee input in DGB (text field value). */
+    val customFeeInput = MutableStateFlow("")
+
+    /** Default fee estimate in satoshis for a typical transaction. */
+    val defaultFeeSat: Long = TYPICAL_TX_VSIZE * DEFAULT_FEE_PER_KB / 1000
+
+    /** Fee rate in sat/KB to pass to the C core. */
+    val feeRatePerKb: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
+        if (!custom) {
+            DEFAULT_FEE_PER_KB
+        } else {
+            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
+            val feeSat = (feeDgb * 100_000_000).toLong()
+            if (feeSat <= 0 || TYPICAL_TX_VSIZE <= 0) return@combine DEFAULT_FEE_PER_KB
+            (feeSat * 1000) / TYPICAL_TX_VSIZE
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_FEE_PER_KB)
+
+    /** Estimated total fee in satoshis (for display). */
+    val estimatedFeeSat: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
+        if (!custom) {
+            defaultFeeSat
+        } else {
+            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
+            (feeDgb * 100_000_000).toLong()
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, defaultFeeSat)
+
+    /** Warning state for the custom fee. */
+    val feeWarning: StateFlow<FeeWarning> = combine(isCustomFee, customFeeInput) { custom, input ->
+        if (!custom) return@combine FeeWarning.None
+        val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
+        val feeSat = (feeDgb * 100_000_000).toLong()
+        if (feeSat <= 0) return@combine FeeWarning.ZeroFee
+        val satPerVbyte = feeSat.toDouble() / TYPICAL_TX_VSIZE
+        if (satPerVbyte < 100.0) FeeWarning.BelowRelay else FeeWarning.None
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, FeeWarning.None)
 
     /** Current send flow state. */
     private val _sendState = MutableStateFlow<SendState>(SendState.Idle)
@@ -172,8 +213,7 @@ class SendViewModel @Inject constructor(
             _sendState.value = SendState.Error("Invalid amount")
             return
         }
-        val feeTier = selectedFeeTier.value
-        val feePerKb = feeEstimate.value
+        val feePerKb = feeRatePerKb.value
 
         _sendState.value = SendState.Sending
 
@@ -193,16 +233,12 @@ class SendViewModel @Inject constructor(
         _validationError.value = null
     }
 
-    /** Human-readable fee tier labels. */
-    fun feeTierLabel(tier: Int): String = when (tier) {
-        0    -> "Next Block"
-        1    -> "5 Minutes"
-        else -> "Economy"
-    }
-
-    /** sat/KB label for the tier. */
-    fun feeTierSatPerKb(tier: Int): Long {
-        val native = NativeBridge.getEstimatedFee(tier)
-        return if (native > 0) native else FEE_DEFAULTS[tier]
+    /** Toggle between default and custom fee mode. */
+    fun toggleCustomFee() {
+        val wasCustom = isCustomFee.value
+        isCustomFee.value = !wasCustom
+        if (!wasCustom) {
+            customFeeInput.value = String.format("%.8f", defaultFeeSat / 100_000_000.0)
+        }
     }
 }

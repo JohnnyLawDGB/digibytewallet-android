@@ -1,0 +1,22 @@
+appId: io.digibyte
+name: "About screen — version + wallet info"
+tags:
+  - requires-wallet
+---
+- launchApp
+- tapOn: "Settings"
+- tapOn: "About"
+
+# Version should be dynamic (not hardcoded)
+- assertVisible: "DigiByte Wallet"
+- assertVisible:
+    text: "v3\\..*"
+
+# Wallet Info section
+- assertVisible: "Wallet Info"
+- assertVisible: "HD Wallet (BIP84)"
+- assertVisible: "m/84'/20'/0'"
+- assertVisible: "SegWit (Bech32)"
+- assertVisible: "Mainnet"
+- assertVisible: "Self-Custodial"
+- assertVisible: "SPV (Bloom Filters)"

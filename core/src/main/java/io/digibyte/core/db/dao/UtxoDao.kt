@@ -12,6 +12,14 @@ interface UtxoDao {
     @Query("SELECT * FROM utxos WHERE is_asset = 1 AND spent = 0")
     fun getAssetUtxos(): Flow<List<UtxoEntity>>
 
+    /** One-shot suspend reads used by sendAsset (Flow variants cache too aggressively
+     *  when consumed via .first() for single-use selection). */
+    @Query("SELECT * FROM utxos WHERE is_asset = 0 AND spent = 0")
+    suspend fun getSpendableDigiByteUtxosNow(): List<UtxoEntity>
+
+    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_id = :assetId")
+    suspend fun getAssetUtxosByIdNow(assetId: String): List<UtxoEntity>
+
     @Query("SELECT COALESCE(SUM(satoshis), 0) FROM utxos WHERE is_asset = 0 AND spent = 0")
     fun getDigiByteBalance(): Flow<Long>
 
@@ -20,6 +28,18 @@ interface UtxoDao {
 
     @Query("UPDATE utxos SET spent = 1 WHERE txid = :txid AND vout = :vout")
     suspend fun markSpent(txid: String, vout: Int)
+
+    /** Rewrite the placeholder asset_id of every UTXO row matching [oldAssetId]
+     *  once M3 parent-walk resolves it to a real DigiAsset id. Safe no-op if
+     *  no rows match (e.g. the placeholder was already replaced). */
+    @Query("UPDATE utxos SET asset_id = :newAssetId WHERE asset_id = :oldAssetId")
+    suspend fun replaceAssetId(oldAssetId: String, newAssetId: String)
+
+    /** Fetch the current asset_id for a (txid, vout) if any. Used by the
+     *  sweep path to avoid clobbering a previously-resolved real asset-id
+     *  with a fresh "unresolved:…" placeholder. */
+    @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND vout = :vout LIMIT 1")
+    suspend fun getAssetIdAt(txid: String, vout: Int): String?
 
     @Query("DELETE FROM utxos")
     suspend fun deleteAll()

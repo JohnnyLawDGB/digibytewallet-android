@@ -15,17 +15,27 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import io.digibyte.core.AppUpdate
+import io.digibyte.core.UpdateChecker
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
+import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.reconcile.PostUpgradeReconciler
+import io.digibyte.ui.components.UpdateDialog
+import okhttp3.OkHttpClient
 import io.digibyte.core.db.dao.WalletConfigDao
+import io.digibyte.core.digiscope.DigiScopeClient
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.tor.TorManager
+import io.digibyte.core.tor.TorState
 import io.digibyte.service.SyncService
 import io.digibyte.ui.navigation.AppNavigation
 import io.digibyte.ui.theme.DigiByteTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -39,10 +49,19 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var keyStoreManager: KeyStoreManager
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var walletConfigDao: WalletConfigDao
+    @Inject lateinit var digiScopeClient: DigiScopeClient
+    @Inject lateinit var okHttpClient: OkHttpClient
+    @Inject lateinit var assetManager: io.digibyte.core.asset.AssetManager
+
+    /** Pending Digi-ID URI from a deep link — processed after PIN unlock. */
+    var pendingDigiIdUri: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Capture digiid:// deep link from launching intent
+        handleDigiIdIntent(intent)
 
         // Handle new install vs Phase 1 upgrade Tor defaults.
         // Runs on IO thread; UI state is surfaced via showTorUpgradeDialog flag.
@@ -55,6 +74,21 @@ class MainActivity : FragmentActivity() {
         // user sees live sync progress as soon as the wallet screen renders.
         if (walletManager.walletState.value is WalletState.Unlocked) {
             startSyncService()
+        }
+
+        // Silently run post-upgrade reconcile once per version bump.
+        // Waits for the first Unlocked state (biometric auto-unlock or PIN),
+        // then hands off to PostUpgradeReconciler which internally debounces
+        // for peer connectivity before hitting the node.
+        //
+        // hydrateFailedFlag here so the UI banner reflects a prior-process
+        // failure even before this new attempt has had time to resolve.
+        PostUpgradeReconciler.hydrateFailedFlag(applicationContext)
+        lifecycleScope.launch {
+            walletManager.walletState
+                .filterIsInstance<WalletState.Unlocked>()
+                .first()
+            PostUpgradeReconciler.runIfNeeded(applicationContext, assetManager)
         }
 
         setContent {
@@ -76,14 +110,18 @@ class MainActivity : FragmentActivity() {
                     showTorPrompt = false
                 }
 
-                // A simple mechanism to trigger the dialog: re-check the flag
-                // once the composition is ready by reading it from TorManager prefs.
-                // The flag is set in applyTorDefaults() before setContent() runs
-                // for the first launch, but LaunchedEffect ensures it re-checks.
+                // Tor is disabled by default and no longer promoted — its no-exec
+                // SOCKS peer-routing is broken (roadmapped). Suppress the legacy
+                // "enable Tor?" first-launch prompt for upgrading Phase-1 wallets:
+                // mark it shown WITHOUT offering it, so nobody is nudged into a
+                // non-functional feature. Tor remains an opt-in in Settings.
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     val cfg = withContext(Dispatchers.IO) { walletConfigDao.get() }
                     if (cfg != null && !cfg.torPromptShown) {
-                        showTorPrompt = true
+                        torManager.upgradePromptShown = true
+                        withContext(Dispatchers.IO) {
+                            walletConfigDao.upsert(cfg.copy(torPromptShown = true))
+                        }
                     }
                 }
 
@@ -111,12 +149,93 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
+                // Update check
+                var pendingUpdate by remember { mutableStateOf<AppUpdate?>(null) }
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    val currentVersion = try {
+                        packageManager.getPackageInfo(packageName, 0).versionName ?: "0"
+                    } catch (e: Exception) { "0" }
+                    val update = UpdateChecker(okHttpClient).checkForUpdate(currentVersion)
+                    if (update != null) pendingUpdate = update
+                }
+                if (pendingUpdate != null) {
+                    UpdateDialog(
+                        update = pendingUpdate!!,
+                        onDismiss = { pendingUpdate = null }
+                    )
+                }
+
                 AppNavigation(
                     walletManager = walletManager,
                     pinManager = pinManager,
                     biometricAuth = biometricAuth,
-                    keyStoreManager = keyStoreManager
+                    keyStoreManager = keyStoreManager,
+                    digiScopeClient = digiScopeClient
                 )
+            }
+        }
+    }
+
+    /**
+     * Lock the wallet UI when the activity goes to background.
+     * SyncService continues running but the user must re-enter PIN/biometric
+     * when they return to the app. This prevents unauthorized access if
+     * someone picks up an unlocked phone.
+     */
+    override fun onStop() {
+        super.onStop()
+        // UI-only lock — requires PIN/biometric to re-enter the app.
+        // Does NOT call NativeBridge.lockSession() — the native seed stays
+        // in memory so SyncService can continue syncing in the background.
+        if (walletManager.walletState.value is WalletState.Unlocked) {
+            walletManager.lockUi()
+        }
+    }
+
+    /**
+     * Defensive reconnect on foreground return.
+     *
+     * The SyncService runs a 10s peer-keepalive loop that should already
+     * re-inject bloom peers and call startSync when peerCount drops to 0
+     * (commit b1d26f2f). In practice users have hit a state where the app
+     * has been backgrounded for hours, returns with 0 peers, and doesn't
+     * recover on its own — likely the keepalive coroutine stalling through
+     * Doze or dying silently on an uncaught throwable.
+     *
+     * As a user-visible recovery path: any time the activity comes to
+     * foreground with the wallet unlocked and peerCount == 0, call
+     * startSync() directly. The native bridge's startSync re-injects the
+     * priority peer list and invokes BRPeerManagerConnect, which is
+     * idempotent — safe to call when already connected. This gives the
+     * user "reopen the app to reconnect" as a reliable escape hatch
+     * alongside the keepalive's try/catch hardening in SyncService.
+     */
+    override fun onResume() {
+        super.onResume()
+        if (walletManager.walletState.value !is WalletState.Unlocked) return
+        val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { -1 }
+        // Don't kick a direct startSync while Tor is enabled and still
+        // bootstrapping — peers would dial direct before the SOCKS proxy is wired,
+        // leaking the IP. Once Tor reaches Connected (bootstrap 100%) or fails, the
+        // proxy is set / we've degraded, and this kick connects through Tor / direct.
+        val torState = torManager.state.value
+        val torComingUp = torManager.isEnabled &&
+            (torState is TorState.Connecting || torState is TorState.Starting)
+        if (peers == 0 && !torComingUp) {
+            android.util.Log.i("MainActivity", "onResume with peerCount=0 — forcing a clean reconnect")
+            // startSync opens sockets via BRPeerManagerConnect and can block for
+            // seconds under network conditions — onResume must return quickly to
+            // avoid an ANR, so dispatch to IO.
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    // forceReconnect first: after a long idle the existing manager is
+                    // often stuck (dead peers holding the slots) and startSync alone
+                    // (→ BRPeerManagerConnect) can't dig it out. A clean recreate does.
+                    NativeBridge.forceReconnect()
+                    NativeBridge.startSync()
+                } catch (t: Throwable) {
+                    android.util.Log.w("MainActivity", "reconnect kick failed", t)
+                }
             }
         }
     }
@@ -131,14 +250,19 @@ class MainActivity : FragmentActivity() {
     private suspend fun applyTorDefaults() {
         val cfg = withContext(Dispatchers.IO) { walletConfigDao.get() }
         if (cfg == null) {
-            // New install — enable Tor by default, mark prompt as shown
-            // (no need to ask — it's privacy-by-default).
-            torManager.isEnabled = true
+            // New install — Tor OFF by default. In-app Tor (kmp-tor no-exec) has a
+            // broken SOCKS peer-routing path (the C core gets "connection refused"
+            // on the in-process listener and degrades to direct every session), so
+            // we neither enable nor promote it. Privacy by default is BIP158
+            // compact filters (address privacy); IP anonymity, for users who need
+            // it, is better served by Orbot or a system VPN. Tor stays available as
+            // an opt-in in Settings → Network Info. Re-evaluate when the no-exec
+            // SOCKS routing is fixed or Tor is removed (see ROADMAP).
+            torManager.isEnabled = false
             torManager.upgradePromptShown = true
-            // WalletConfigEntity will be created by onboarding flow; TorManager
-            // prefs already have the right value. Nothing more needed here.
         }
-        // Upgrade case: cfg != null && !cfg.torPromptShown — dialog handles it.
+        // Upgrade case: cfg != null && !cfg.torPromptShown — the LaunchedEffect in
+        // setContent() now suppresses the legacy prompt (we don't promote Tor).
         // Normal run: cfg != null && cfg.torPromptShown — nothing to do.
     }
 
@@ -151,5 +275,18 @@ class MainActivity : FragmentActivity() {
     internal fun startSyncService() {
         val intent = Intent(this, SyncService::class.java)
         ContextCompat.startForegroundService(this, intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDigiIdIntent(intent)
+    }
+
+    private fun handleDigiIdIntent(intent: Intent?) {
+        val uri = intent?.data?.toString()
+        if (uri != null && uri.startsWith("digiid://")) {
+            pendingDigiIdUri = uri
+            android.util.Log.i("MainActivity", "Captured Digi-ID deep link: $uri")
+        }
     }
 }

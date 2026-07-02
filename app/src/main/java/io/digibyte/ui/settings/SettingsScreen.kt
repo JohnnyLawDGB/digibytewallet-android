@@ -22,6 +22,11 @@ import io.digibyte.ui.theme.DigiByteBlue
 
 @Composable
 fun SettingsScreen(navController: NavController) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+    } catch (e: Exception) { "unknown" }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -61,6 +66,14 @@ fun SettingsScreen(navController: NavController) {
                     subtitle = "Peers, sync status, block height",
                     onClick = { navController.navigate("settings_network") }
                 )
+                SettingsRowDivider()
+                SettingsRow(
+                    icon = Icons.Default.FilterAlt,
+                    iconTint = Color(0xFF9C27B0),
+                    title = "Sync Mode",
+                    subtitle = "Bloom filter, compact filters (BIP 158), or both",
+                    onClick = { navController.navigate("settings_sync_mode") }
+                )
             }
         }
 
@@ -72,6 +85,26 @@ fun SettingsScreen(navController: NavController) {
                     title = "Display",
                     subtitle = "Fiat currency, theme",
                     onClick = { navController.navigate("settings_display") }
+                )
+            }
+        }
+
+        item {
+            SettingsCategory(title = "Recovery") {
+                SettingsRow(
+                    icon = Icons.Default.CloudSync,
+                    iconTint = Color(0xFF26C6DA),
+                    title = "Scan for missing funds",
+                    subtitle = "Query a DGB node for UTXOs on wallet addresses",
+                    onClick = { navController.navigate("settings_reconcile") }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    icon = Icons.Default.Savings,
+                    iconTint = Color(0xFF26C6DA),
+                    title = "Recover funds from another wallet",
+                    subtitle = "Sweep coins from old/other derivation paths into this wallet",
+                    onClick = { navController.navigate("recover_funds") }
                 )
             }
         }
@@ -91,7 +124,7 @@ fun SettingsScreen(navController: NavController) {
         item {
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "DigiByte Wallet v3.0.0-beta",
+                text = "DigiByte Wallet v$versionName",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF546E7A),
                 modifier = Modifier

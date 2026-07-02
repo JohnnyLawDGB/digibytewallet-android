@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 3,
-    "identityHash": "29e482ae43d31ae0a47c51d7f473e6db",
+    "identityHash": "fd7c96b1cca7a2660dc3e40a65720282",
     "entities": [
       {
         "tableName": "transactions",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`txid` TEXT NOT NULL, `blockHeight` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `amount` INTEGER NOT NULL, `fee` INTEGER NOT NULL, `toAddress` TEXT NOT NULL, `fromAddress` TEXT NOT NULL, `confirmations` INTEGER NOT NULL, `isAssetTx` INTEGER NOT NULL, `rawBytes` BLOB, PRIMARY KEY(`txid`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`txid` TEXT NOT NULL, `blockHeight` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `amount` INTEGER NOT NULL, `fee` INTEGER NOT NULL, `toAddress` TEXT NOT NULL, `fromAddress` TEXT NOT NULL, `confirmations` INTEGER NOT NULL, `sent` INTEGER NOT NULL, `received` INTEGER NOT NULL, `isAssetTx` INTEGER NOT NULL, `rawBytes` BLOB, PRIMARY KEY(`txid`))",
         "fields": [
           {
             "fieldPath": "txid",
@@ -53,6 +53,18 @@
           {
             "fieldPath": "confirmations",
             "columnName": "confirmations",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sent",
+            "columnName": "sent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "received",
+            "columnName": "received",
             "affinity": "INTEGER",
             "notNull": true
           },
@@ -531,7 +543,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '29e482ae43d31ae0a47c51d7f473e6db')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fd7c96b1cca7a2660dc3e40a65720282')"
     ]
   }
 }

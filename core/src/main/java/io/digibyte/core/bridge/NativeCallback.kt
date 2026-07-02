@@ -16,4 +16,9 @@ interface NativeCallback {
     fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean)
     fun onSaveBlocks(data: ByteArray, replace: Int)
     fun onSavePeers(data: ByteArray, replace: Int)
+    /** BIP 158 filter-header chain advanced. Persist the serialized buffer so
+     *  it can be restored via NativeBridge.setCompactFilterChain on next open.
+     *  Called on a background thread; implementations must be thread-safe.
+     *  Inert in BR_SYNC_MODE_BLOOM_ONLY (default) — never fires. */
+    fun onSaveFilterHeaders(data: ByteArray) {}
 }

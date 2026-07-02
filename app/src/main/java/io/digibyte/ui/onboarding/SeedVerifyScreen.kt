@@ -307,7 +307,12 @@ data class QuizQuestion(
 private fun buildQuestions(words: List<String>): List<QuizQuestion> {
     if (words.isEmpty()) return emptyList()
 
-    val rng = java.util.Random()
+    // SecureRandom rather than java.util.Random — neither leaks anything
+    // material (the user is about to reveal these positions by tapping
+    // the right answers anyway) but the timestamp-seeded Random would
+    // let an on-device attacker reproduce the shuffle if they knew the
+    // exact ms the screen rendered. Free defense-in-depth upgrade.
+    val rng = java.security.SecureRandom()
 
     // Spread 3 positions across the word list
     val positions: List<Int> = when {

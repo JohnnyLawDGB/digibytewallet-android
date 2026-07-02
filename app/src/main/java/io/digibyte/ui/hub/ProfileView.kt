@@ -29,6 +29,11 @@ import io.digibyte.ui.theme.DigiByteGreen
 fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
+    // Refresh profile every time this tab becomes visible
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.loadProfile()
+    }
+
     val profileState by viewModel.profileState.collectAsStateWithLifecycle()
     val handleInput by viewModel.handleInput.collectAsStateWithLifecycle()
     val handleAvailable by viewModel.handleAvailable.collectAsStateWithLifecycle()
@@ -50,7 +55,7 @@ fun ProfileScreen(
             }
 
             is ProfileState.NotLoggedIn -> {
-                NotLoggedInContent()
+                NotLoggedInContent(onQuickLogin = { viewModel.quickLogin() })
             }
 
             is ProfileState.NoHandle -> {
@@ -109,7 +114,7 @@ fun ProfileScreen(
 // ── Not logged in ──────────────────────────────────────────────────────────
 
 @Composable
-private fun NotLoggedInContent() {
+private fun NotLoggedInContent(onQuickLogin: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -166,6 +171,18 @@ private fun NotLoggedInContent() {
                 FeatureRow(Icons.Default.Paid, "Send and receive DGB tips")
             }
         }
+
+        Spacer(Modifier.height(24.dp))
+
+        Button(
+            onClick = onQuickLogin,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
+        ) {
+            Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Connect to DigiScope", color = Color.White)
+        }
     }
 }
 
@@ -207,6 +224,7 @@ private fun RegisterHandleContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)

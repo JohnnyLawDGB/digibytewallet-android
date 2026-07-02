@@ -21,7 +21,8 @@ import javax.inject.Inject
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val walletManager: WalletManager,
-    private val pinManager: PinManager
+    private val pinManager: PinManager,
+    private val recoveryScanService: io.digibyte.core.recovery.RecoveryScanService,
 ) : ViewModel() {
 
     // In-memory mnemonic — cleared after wallet creation
@@ -35,6 +36,9 @@ class OnboardingViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<OnboardingUiState>(OnboardingUiState.Idle)
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
+
+    private val _pendingLegacyRecovery = MutableStateFlow(false)
+    val pendingLegacyRecovery: StateFlow<Boolean> = _pendingLegacyRecovery.asStateFlow()
 
     fun getWordCount(): Int = _wordCount
 
@@ -72,12 +76,46 @@ class OnboardingViewModel @Inject constructor(
         _recoveryTimestamp = timestamp
     }
 
+    // ── Universal Restore scan state ─────────────────────────────────────────
+    //
+    // Holds the most recent multi-path scan result so RecoveryScanScreen can
+    // show it without re-running the scan on config change, and so
+    // RecoveryDateScreen / WalletScreen can consult it for "we found funds
+    // on legacy paths" sweep context.
+
+    private val _scanResults = kotlinx.coroutines.flow.MutableStateFlow<
+            io.digibyte.core.recovery.RecoveryScanService.State
+            >(io.digibyte.core.recovery.RecoveryScanService.State.Idle)
+    val scanResults: kotlinx.coroutines.flow.StateFlow<
+            io.digibyte.core.recovery.RecoveryScanService.State
+            > = _scanResults.asStateFlow()
+
+    /** Run the multi-path derivation scan against the currently-entered
+     *  mnemonic. Results land in [scanResults]. Safe to call from the UI
+     *  and observe reactively. */
+    fun runRecoveryScan(passphrase: String? = null) {
+        val phrase = _mnemonic.joinToString(" ")
+        if (phrase.isBlank()) {
+            _scanResults.value = io.digibyte.core.recovery.RecoveryScanService
+                .State.Failed("No mnemonic entered")
+            return
+        }
+        viewModelScope.launch {
+            val result = recoveryScanService.scan(phrase, passphrase)
+            _scanResults.value = result
+        }
+    }
+
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
             val success = withContext(Dispatchers.Default) {
+                // Do NOT clearPin here — PinSetupScreen calls setPin() right
+                // before this, and clearing afterward wipes the freshly-set
+                // PIN. (recoverWallet keeps its clearPin because it runs
+                // before pin_setup, replacing any stale-from-prior-install PIN.)
                 walletManager.createWallet(phrase)
             }
             wipeMnemonicFromMemory()
@@ -93,8 +131,25 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
             val success = withContext(Dispatchers.Default) {
+                // Clear any stale PIN from a previous install so the user
+                // is routed to PIN setup, not the unlock screen. Done inside
+                // the worker dispatcher so the Keystore-backed prefs write
+                // never lands on the main thread.
+                pinManager.clearPin()
                 walletManager.recoverWallet(phrase, ts)
             }
+
+            // If the pre-recovery scan found funds on non-native paths, signal
+            // the UI to navigate to RecoverFundsScreen after the wallet lands.
+            // No silent sweep happens here anymore — the user is shown the screen
+            // and initiates the sweep themselves.
+            if (success) {
+                val scan = _scanResults.value
+                _pendingLegacyRecovery.value =
+                    scan is io.digibyte.core.recovery.RecoveryScanService.State.Done &&
+                    scan.nonNativeWithFunds.isNotEmpty()
+            }
+
             wipeMnemonicFromMemory()
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Recovery failed")
             onResult(success)

@@ -1,12 +1,16 @@
 package io.digibyte.ui.onboarding
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,9 +26,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
+import kotlinx.coroutines.launch
 
 @Composable
 fun MnemonicInputScreen(
@@ -51,6 +57,7 @@ fun MnemonicInputScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 24.dp)
         ) {
@@ -172,8 +179,23 @@ fun MnemonicInputScreen(
                         return@Button
                     }
 
-                    viewModel.setRecoveryMnemonic(phrase)
-                    navController.navigate("recovery_date")
+                    // Normalize to canonical form (lowercase, single-spaced) and verify
+                    // the BIP39 checksum. All-valid-words but bad-checksum means a
+                    // typo'd or made-up phrase — accepting it silently builds no wallet
+                    // and leaves sync stuck at "Connecting" forever. Reject it here.
+                    val normalizedPhrase = phraseWords.joinToString(" ") { it.trim().lowercase() }
+                    if (!NativeBridge.isValidMnemonic(normalizedPhrase)) {
+                        validationError =
+                            "This recovery phrase isn't valid. Double-check each word and its order."
+                        return@Button
+                    }
+
+                    viewModel.setRecoveryMnemonic(normalizedPhrase)
+                    // Universal Restore: scan every known derivation path
+                    // BEFORE the date picker. Surfaces funds on non-native
+                    // paths (BIP44, BIP49, legacy m/0H w/ either HMAC) so we
+                    // know to sweep them during recovery.
+                    navController.navigate("recovery_scan")
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -193,6 +215,7 @@ fun MnemonicInputScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WordInputField(
     index: Int,
@@ -209,6 +232,22 @@ private fun WordInputField(
         else emptyList()
     }
 
+    // Brings the focused field into view when the soft keyboard appears.
+    // Doing it on focus alone fires BEFORE the keyboard finishes animating
+    // up, so the requested position is wrong by the time IME is fully
+    // visible — we re-trigger every time the IME bottom inset changes
+    // (initial show, autocomplete state changes, configuration changes).
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+
+    LaunchedEffect(isFocused, imeBottomPx) {
+        if (isFocused && imeBottomPx > 0) {
+            bringIntoView.bringIntoView()
+        }
+    }
+
     Column(modifier = modifier) {
         OutlinedTextField(
             value = value,
@@ -218,7 +257,15 @@ private fun WordInputField(
             label = { Text("${index + 1}", fontSize = 11.sp) },
             modifier = Modifier
                 .fillMaxWidth()
-                .onFocusChanged { state -> if (state.isFocused) onFocused() },
+                .bringIntoViewRequester(bringIntoView)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        onFocused()
+                        // Initial fire — covers the case where the keyboard
+                        // is already up (focus moves between fields).
+                        scope.launch { bringIntoView.bringIntoView() }
+                    }
+                },
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,

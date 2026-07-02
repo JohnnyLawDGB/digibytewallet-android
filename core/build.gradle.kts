@@ -2,6 +2,12 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+detekt {
+    config.setFrom("$rootDir/config/detekt.yml")
+    buildUponDefaultConfig = true
 }
 
 android {
@@ -40,7 +46,7 @@ dependencies {
     implementation(project(":native"))
 
     // Room + SQLCipher
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.7.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
@@ -55,6 +61,18 @@ dependencies {
 
     // Argon2 for PIN hashing
     implementation("org.signal:argon2:13.1")
+
+    // Tor via kmp-tor (NO-EXEC mode — Tor loaded in-process via dlopen, not
+    // exec'd as a child process). Required because we package native libs
+    // uncompressed (jniLibs.useLegacyPackaging = false) for 16 KB page-size
+    // compatibility: exec mode needs libtor.so EXTRACTED to nativeLibraryDir,
+    // which uncompressed packaging doesn't do, so exec mode fails to find it.
+    // No-exec also avoids the SELinux exec-from-data-dir denials newer Android
+    // (15/16) enforces — more robust on modern devices.
+    val kmpTorRuntime = "2.4.0"
+    val kmpTorResource = "408.16.4"
+    implementation("io.matthewnelson.kmp-tor:runtime:$kmpTorRuntime")
+    implementation("io.matthewnelson.kmp-tor:resource-noexec-tor:$kmpTorResource")
 
     // EncryptedSharedPreferences for PIN storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
