@@ -13,10 +13,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,8 +47,14 @@ fun RecoverFundsScreen(
 ) {
     val state by vm.state.collectAsState()
 
-    LaunchedEffect(Unit) {
-        if (state is RecoverFundsViewModel.UiState.Idle) vm.classify()
+    var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
+    // Not rememberSaveable: a foreign recovery phrase must not be written to
+    // Android's saved-instance-state Bundle (larger exposure surface than the
+    // in-memory-only convention used by MnemonicInputScreen.kt).
+    var phrase by remember { mutableStateOf("") }
+
+    LaunchedEffect(mode) {
+        if (mode == RecoverMode.ThisWallet && state is RecoverFundsViewModel.UiState.Idle) vm.classify()
     }
 
     Scaffold(
@@ -79,31 +87,53 @@ fun RecoverFundsScreen(
         },
         containerColor = BG
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (val s = state) {
-                is RecoverFundsViewModel.UiState.Classifying ->
-                    ScanningBody("Checking older derivation paths…")
-                is RecoverFundsViewModel.UiState.Sweeping ->
-                    ScanningBody("Sweeping…")
-                is RecoverFundsViewModel.UiState.Findings ->
-                    FindingsBody(
+            ModeSelector(
+                mode = mode,
+                // Disabled mid-scan/sweep so the user can't cancel a sweep that
+                // may have already broadcast — see reset()'s CancellationException
+                // note in RecoverFundsViewModel.
+                enabled = state !is RecoverFundsViewModel.UiState.Classifying &&
+                        state !is RecoverFundsViewModel.UiState.Sweeping,
+            ) { newMode ->
+                // Guard: re-tapping the already-selected chip must be a no-op.
+                // Otherwise vm.reset() fires -> Idle but LaunchedEffect(mode)
+                // doesn't restart (mode unchanged) -> own-seed screen goes
+                // permanently blank with no retry path.
+                if (newMode != mode) {
+                    mode = newMode
+                    phrase = ""
+                    vm.reset()
+                }
+            }
+            Box(Modifier.weight(1f)) {
+                when (val s = state) {
+                    is RecoverFundsViewModel.UiState.Classifying -> ScanningBody(
+                        if (mode == RecoverMode.ThisWallet) "Checking older derivation paths…"
+                        else "Scanning the entered phrase…"
+                    )
+                    is RecoverFundsViewModel.UiState.Sweeping -> ScanningBody("Sweeping…")
+                    is RecoverFundsViewModel.UiState.Findings -> FindingsBody(
                         findings = s.findings,
                         totalSat = s.totalSat,
-                        onSweepNative = { vm.sweep(SweepDestination.Native) },
-                        onSweepExternal = { addr -> vm.sweep(SweepDestination.External(addr)) },
+                        // Foreign: sweep to THIS wallet only (no external option shown).
+                        onSweepNative = { if (s.isForeign) vm.sweepForeign() else vm.sweep(SweepDestination.Native) },
+                        onSweepExternal = if (s.isForeign) null else { addr -> vm.sweep(SweepDestination.External(addr)) },
                     )
-                is RecoverFundsViewModel.UiState.Done ->
-                    ResultBody(s.outcomes)
-                is RecoverFundsViewModel.UiState.Error ->
-                    ErrorBody(
-                        reason = s.reason,
-                        onRetry = { vm.classify() }
-                    )
-                else -> Unit
+                    is RecoverFundsViewModel.UiState.Done -> ResultBody(s.outcomes)
+                    is RecoverFundsViewModel.UiState.Error ->
+                        if (mode == RecoverMode.AnotherPhrase)
+                            PhraseEntry(phrase, { phrase = it }, error = s.reason) { vm.classifyForeign(phrase) }
+                        else ErrorBody(reason = s.reason, onRetry = { vm.classify() })
+                    else -> // Idle
+                        if (mode == RecoverMode.AnotherPhrase)
+                            PhraseEntry(phrase, { phrase = it }, error = null) { vm.classifyForeign(phrase) }
+                        else Unit
+                }
             }
         }
     }
@@ -148,11 +178,12 @@ private fun FindingsBody(
     findings: List<RecoveryScanService.ProfileResult>,
     totalSat: Long,
     onSweepNative: () -> Unit,
-    onSweepExternal: (String) -> Unit,
+    onSweepExternal: ((String) -> Unit)?,
 ) {
     var externalExpanded by remember { mutableStateOf(false) }
     var externalAddress by remember { mutableStateOf("") }
     val trimmedAddr = externalAddress.trim()
+    val allowExternal = onSweepExternal != null
 
     // Live address validation — only check when field is non-empty
     val addressValid = remember(trimmedAddr) {
@@ -288,11 +319,22 @@ private fun FindingsBody(
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(
-                                selected = !externalExpanded,
-                                onClick = { externalExpanded = false },
-                                colors = RadioButtonDefaults.colors(selectedColor = ACCENT)
-                            )
+                            if (allowExternal) {
+                                RadioButton(
+                                    selected = !externalExpanded,
+                                    onClick = { externalExpanded = false },
+                                    colors = RadioButtonDefaults.colors(selectedColor = ACCENT)
+                                )
+                            } else {
+                                // Only option in foreign mode — read as a plain
+                                // statement rather than a pre-selected radio.
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = ACCENT,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                             Spacer(Modifier.width(8.dp))
                             Column {
                                 Text(
@@ -309,103 +351,107 @@ private fun FindingsBody(
                             }
                         }
 
-                        HorizontalDivider(color = DIVIDER, thickness = 0.5.dp)
+                        // Advanced: Send to a different address — only offered when
+                        // the caller supports an external destination (own-seed
+                        // flow). Foreign-phrase sweeps always land in this wallet.
+                        if (allowExternal) {
+                            HorizontalDivider(color = DIVIDER, thickness = 0.5.dp)
 
-                        // Advanced: Send to a different address
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            RadioButton(
-                                selected = externalExpanded,
-                                onClick = { externalExpanded = true },
-                                colors = RadioButtonDefaults.colors(selectedColor = ACCENT),
-                                modifier = Modifier.padding(top = 2.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = "Advanced ▸ Send to a different address",
-                                    color = if (externalExpanded) ACCENT else MUTED,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (externalExpanded) FontWeight.Medium else FontWeight.Normal
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                RadioButton(
+                                    selected = externalExpanded,
+                                    onClick = { externalExpanded = true },
+                                    colors = RadioButtonDefaults.colors(selectedColor = ACCENT),
+                                    modifier = Modifier.padding(top = 2.dp)
                                 )
+                                Spacer(Modifier.width(8.dp))
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = "Advanced ▸ Send to a different address",
+                                        color = if (externalExpanded) ACCENT else MUTED,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (externalExpanded) FontWeight.Medium else FontWeight.Normal
+                                    )
 
-                                AnimatedVisibility(visible = externalExpanded) {
-                                    Column {
-                                        Spacer(Modifier.height(12.dp))
-                                        OutlinedTextField(
-                                            value = externalAddress,
-                                            onValueChange = { externalAddress = it },
-                                            placeholder = {
-                                                Text(
-                                                    "DigiByte address (D…, S…, dgb1q…)",
-                                                    color = MUTED,
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                            },
-                                            singleLine = true,
-                                            keyboardOptions = KeyboardOptions(
-                                                keyboardType = KeyboardType.Ascii
-                                            ),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = ACCENT,
-                                                unfocusedBorderColor = DIVIDER,
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                cursorColor = ACCENT,
-                                            ),
-                                            trailingIcon = if (trimmedAddr.isNotEmpty()) {
-                                                {
-                                                    Icon(
-                                                        imageVector = if (addressValid == true)
-                                                            Icons.Default.CheckCircle
-                                                        else
-                                                            Icons.Default.Warning,
-                                                        contentDescription = null,
-                                                        tint = if (addressValid == true) SUCCESS_GREEN else WARNING_RED,
-                                                        modifier = Modifier.size(20.dp)
+                                    AnimatedVisibility(visible = externalExpanded) {
+                                        Column {
+                                            Spacer(Modifier.height(12.dp))
+                                            OutlinedTextField(
+                                                value = externalAddress,
+                                                onValueChange = { externalAddress = it },
+                                                placeholder = {
+                                                    Text(
+                                                        "DigiByte address (D…, S…, dgb1q…)",
+                                                        color = MUTED,
+                                                        style = MaterialTheme.typography.bodySmall
                                                     )
-                                                }
-                                            } else null,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
+                                                },
+                                                singleLine = true,
+                                                keyboardOptions = KeyboardOptions(
+                                                    keyboardType = KeyboardType.Ascii
+                                                ),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedBorderColor = ACCENT,
+                                                    unfocusedBorderColor = DIVIDER,
+                                                    focusedTextColor = Color.White,
+                                                    unfocusedTextColor = Color.White,
+                                                    cursorColor = ACCENT,
+                                                ),
+                                                trailingIcon = if (trimmedAddr.isNotEmpty()) {
+                                                    {
+                                                        Icon(
+                                                            imageVector = if (addressValid == true)
+                                                                Icons.Default.CheckCircle
+                                                            else
+                                                                Icons.Default.Warning,
+                                                            contentDescription = null,
+                                                            tint = if (addressValid == true) SUCCESS_GREEN else WARNING_RED,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                    }
+                                                } else null,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
 
-                                        // Irreversible warning — always shown when external is selected
-                                        Spacer(Modifier.height(10.dp))
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(
-                                                    WARNING_RED.copy(alpha = 0.12f),
-                                                    RoundedCornerShape(8.dp)
-                                                )
-                                                .border(
-                                                    0.5.dp,
-                                                    WARNING_RED.copy(alpha = 0.35f),
-                                                    RoundedCornerShape(8.dp)
-                                                )
-                                                .padding(10.dp),
-                                            verticalAlignment = Alignment.Top
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Warning,
-                                                contentDescription = null,
-                                                tint = WARNING_RED,
+                                            // Irreversible warning — always shown when external is selected
+                                            Spacer(Modifier.height(10.dp))
+                                            Row(
                                                 modifier = Modifier
-                                                    .size(16.dp)
-                                                    .padding(top = 1.dp)
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = "This address is NOT in your wallet — sweeps are irreversible",
-                                                color = WARNING_RED,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.Medium
-                                            )
+                                                    .fillMaxWidth()
+                                                    .background(
+                                                        WARNING_RED.copy(alpha = 0.12f),
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .border(
+                                                        0.5.dp,
+                                                        WARNING_RED.copy(alpha = 0.35f),
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .padding(10.dp),
+                                                verticalAlignment = Alignment.Top
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Warning,
+                                                    contentDescription = null,
+                                                    tint = WARNING_RED,
+                                                    modifier = Modifier
+                                                        .size(16.dp)
+                                                        .padding(top = 1.dp)
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = "This address is NOT in your wallet — sweeps are irreversible",
+                                                    color = WARNING_RED,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -417,11 +463,12 @@ private fun FindingsBody(
 
             // Sweep button
             item {
-                val canSweep = !externalExpanded || (trimmedAddr.isNotEmpty() && addressValid == true)
+                val canSweep = !allowExternal || !externalExpanded ||
+                        (trimmedAddr.isNotEmpty() && addressValid == true)
                 Button(
                     onClick = {
-                        if (externalExpanded && trimmedAddr.isNotEmpty()) {
-                            onSweepExternal(trimmedAddr)
+                        if (allowExternal && externalExpanded && trimmedAddr.isNotEmpty()) {
+                            onSweepExternal?.invoke(trimmedAddr)
                         } else {
                             onSweepNative()
                         }
@@ -748,4 +795,98 @@ private fun friendlyFailureReason(reason: String?): String = when {
     reason.contains("broadcast", ignoreCase = true) ->
         "Transaction broadcast failed. Try again when connected to peers."
     else -> "Couldn't sweep this one — try again."
+}
+
+// ── Mode selector + foreign-phrase entry ─────────────────────────────────────
+
+enum class RecoverMode { ThisWallet, AnotherPhrase }
+
+@Composable
+private fun ModeSelector(mode: RecoverMode, enabled: Boolean, onChange: (RecoverMode) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = mode == RecoverMode.ThisWallet,
+            onClick = { onChange(RecoverMode.ThisWallet) },
+            enabled = enabled,
+            label = { Text("This wallet") },
+            colors = FilterChipDefaults.filterChipColors(
+                containerColor = CARD,
+                labelColor = MUTED,
+                selectedContainerColor = ACCENT.copy(alpha = 0.20f),
+                selectedLabelColor = ACCENT,
+            ),
+        )
+        FilterChip(
+            selected = mode == RecoverMode.AnotherPhrase,
+            onClick = { onChange(RecoverMode.AnotherPhrase) },
+            enabled = enabled,
+            label = { Text("Another wallet's phrase") },
+            colors = FilterChipDefaults.filterChipColors(
+                containerColor = CARD,
+                labelColor = MUTED,
+                selectedContainerColor = ACCENT.copy(alpha = 0.20f),
+                selectedLabelColor = ACCENT,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: String?, onScan: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(
+            "Enter another wallet's recovery phrase to move its funds into this wallet. " +
+                "The phrase is used once to sign the transfer and is never saved.",
+            color = Color(0xFFB0BEC5),
+            fontSize = 13.sp
+        )
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = phrase,
+            // Lowercase per-keystroke (keep spaces) — mirrors MnemonicInputScreen's
+            // WordInputField normalization so IME auto-capitalization/autocorrect
+            // can never smuggle uppercase into a case-sensitive BIP39 check.
+            onValueChange = { onPhrase(it.lowercase()) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            label = { Text("12 or 24 word recovery phrase") },
+            isError = error != null,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Text,
+                autoCorrect = false,
+                capitalization = KeyboardCapitalization.None
+            ),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = ACCENT,
+                unfocusedBorderColor = DIVIDER,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = ACCENT,
+            ),
+            shape = RoundedCornerShape(8.dp)
+        )
+        if (error != null) {
+            Spacer(Modifier.height(6.dp))
+            // classifyForeign()'s messages are already user-friendly copy —
+            // routing them through friendlyErrorReason() (which only maps the
+            // own-seed classify() error strings) would fall through to the
+            // generic "Something went wrong" text. Show directly instead.
+            Text(error, color = WARNING_RED, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onScan,
+            enabled = phrase.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = ACCENT,
+                contentColor = Color(0xFF0A1628),
+                disabledContainerColor = ACCENT.copy(alpha = 0.35f),
+                disabledContentColor = Color.White.copy(alpha = 0.4f)
+            )
+        ) {
+            Text("Scan for funds", fontWeight = FontWeight.SemiBold)
+        }
+    }
 }

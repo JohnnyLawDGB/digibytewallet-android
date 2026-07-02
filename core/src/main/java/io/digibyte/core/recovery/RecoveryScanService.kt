@@ -35,6 +35,15 @@ class RecoveryScanService(
                 results.filter { !it.profile.isNative && it.totalSat > 0 }
             val nativeResult: ProfileResult? = results.firstOrNull { it.profile.isNative }
 
+            /** Every funded profile (native included) — the set to sweep when
+             *  recovering a DIFFERENT wallet's phrase, where the native BIP84
+             *  funds are foreign to this wallet and must be swept too. (The
+             *  own-seed path uses [nonNativeWithFunds] instead, since native
+             *  funds are already in this wallet.) BIP49 funded profiles are
+             *  included here but are deferred inside the sweeper. */
+            val allWithFunds: List<ProfileResult> =
+                results.filter { it.totalSat > 0 }
+
             /** True iff every profile that we tried to reach the backend for
              *  came back as `reachableBackend=false`. UI uses this to show
              *  "Couldn't reach reconcile endpoint" rather than misleading
