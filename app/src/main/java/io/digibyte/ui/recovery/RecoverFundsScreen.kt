@@ -47,7 +47,10 @@ fun RecoverFundsScreen(
     val state by vm.state.collectAsState()
 
     var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
-    var phrase by rememberSaveable { mutableStateOf("") }
+    // Not rememberSaveable: a foreign recovery phrase must not be written to
+    // Android's saved-instance-state Bundle (larger exposure surface than the
+    // in-memory-only convention used by MnemonicInputScreen.kt).
+    var phrase by remember { mutableStateOf("") }
 
     LaunchedEffect(mode) {
         if (mode == RecoverMode.ThisWallet && state is RecoverFundsViewModel.UiState.Idle) vm.classify()
@@ -89,9 +92,15 @@ fun RecoverFundsScreen(
                 .padding(innerPadding)
         ) {
             ModeSelector(mode) { newMode ->
-                mode = newMode
-                phrase = ""
-                vm.reset()
+                // Guard: re-tapping the already-selected chip must be a no-op.
+                // Otherwise vm.reset() fires -> Idle but LaunchedEffect(mode)
+                // doesn't restart (mode unchanged) -> own-seed screen goes
+                // permanently blank with no retry path.
+                if (newMode != mode) {
+                    mode = newMode
+                    phrase = ""
+                    vm.reset()
+                }
             }
             Box(Modifier.weight(1f)) {
                 when (val s = state) {
@@ -302,11 +311,22 @@ private fun FindingsBody(
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(
-                                selected = !externalExpanded,
-                                onClick = { externalExpanded = false },
-                                colors = RadioButtonDefaults.colors(selectedColor = ACCENT)
-                            )
+                            if (allowExternal) {
+                                RadioButton(
+                                    selected = !externalExpanded,
+                                    onClick = { externalExpanded = false },
+                                    colors = RadioButtonDefaults.colors(selectedColor = ACCENT)
+                                )
+                            } else {
+                                // Only option in foreign mode — read as a plain
+                                // statement rather than a pre-selected radio.
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = ACCENT,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                             Spacer(Modifier.width(8.dp))
                             Column {
                                 Text(
@@ -829,7 +849,11 @@ private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: Strin
         )
         if (error != null) {
             Spacer(Modifier.height(6.dp))
-            Text(friendlyErrorReason(error), color = WARNING_RED, fontSize = 12.sp)
+            // classifyForeign()'s messages are already user-friendly copy —
+            // routing them through friendlyErrorReason() (which only maps the
+            // own-seed classify() error strings) would fall through to the
+            // generic "Something went wrong" text. Show directly instead.
+            Text(error, color = WARNING_RED, fontSize = 12.sp)
         }
         Spacer(Modifier.height(12.dp))
         Button(

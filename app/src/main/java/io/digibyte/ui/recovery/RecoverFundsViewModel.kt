@@ -74,15 +74,23 @@ class RecoverFundsViewModel @Inject constructor(
     // on reset. (A JVM String can't be zeroed — same accepted limit as restore.)
     private var pendingForeignMnemonic: String? = null
 
-    /** Return to Idle and drop any held foreign phrase (mode switch / leaving). */
+    // The coroutine launched by whichever of classify/sweep/classifyForeign/
+    // sweepForeign is currently in flight. reset() cancels it so a stale scan
+    // or sweep can't complete afterwards and overwrite the Idle state it just
+    // set. Cancellation still runs each method's `finally` block, so the seed
+    // is zeroed either way.
+    private var activeJob: kotlinx.coroutines.Job? = null
+
+    /** Return to Idle, cancel any in-flight scan/sweep, and drop any held foreign phrase (mode switch / leaving). */
     fun reset() {
+        activeJob?.cancel()
         pendingForeignMnemonic = null
         _state.value = UiState.Idle
     }
 
     fun classify() {
         _state.value = UiState.Classifying
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             val seed = seedProvider.loadSeed() ?: run {
                 _state.value = UiState.Error("Wallet seed unavailable")
                 return@launch
@@ -133,7 +141,7 @@ class RecoverFundsViewModel @Inject constructor(
                 // instead of rendering a negative "Sent" (see OutgoingTxStore
                 // .shouldApplyOutgoingOverride). External destinations are real sends.
                 val destIsSelf = destination is SweepDestination.Native
-                viewModelScope.launch {
+                activeJob = viewModelScope.launch {
                     val seed = seedProvider.loadSeed() ?: run {
                         _state.value = UiState.Error("Wallet seed unavailable")
                         return@launch
@@ -167,7 +175,7 @@ class RecoverFundsViewModel @Inject constructor(
         }
         pendingForeignMnemonic = phrase
         _state.value = UiState.Classifying
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
             }
@@ -208,7 +216,7 @@ class RecoverFundsViewModel @Inject constructor(
             _state.value = UiState.Error("Could not get a destination address"); return
         }
         _state.value = UiState.Sweeping
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
             }
