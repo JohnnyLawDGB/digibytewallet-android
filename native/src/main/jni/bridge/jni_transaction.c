@@ -152,24 +152,6 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
 
 /* ---------- publishTransaction ---------- */
 
-/* Publish callback context */
-typedef struct {
-    int  error;
-    int  done;
-    char txid_hex[65]; /* 32 bytes * 2 hex chars + nul */
-} PublishContext;
-
-static void publish_callback(void *info, int error) {
-    PublishContext *ctx = (PublishContext *)info;
-    ctx->error = error;
-    ctx->done = 1;
-    if (error) {
-        LOGE("publishTransaction: callback error=%d (%s)", error, strerror(error));
-    } else {
-        LOGD("publishTransaction: broadcast succeeded");
-    }
-}
-
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
                                                               jbyteArray signedTx) {
@@ -217,12 +199,15 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
     if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
     BRWalletRegisterTransaction(g_wallet, tx);
 
-    /* Publish — note: BRPeerManagerPublishTx takes ownership of tx, do NOT free it */
-    PublishContext ctx = { .error = 0, .done = 0 };
-    BRPeerManagerPublishTx(g_peerManager, tx, &ctx, publish_callback);
+    /* Publish — BRPeerManagerPublishTx takes ownership of tx, do NOT free it.
+       Pass NULL info/callback: the callback fires asynchronously on the peer
+       thread AFTER this JNI frame returns, so a stack-local PublishContext
+       would be written cross-thread once it is out of scope — a use-after-free.
+       Kotlin already polls acceptance via getRelayCount (Broadcaster embargo +
+       SyncService.rebroadcastStrandedSends), so no native callback is needed.
+       Matches publishTransactionStem's proven NULL/NULL pattern below. */
+    BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);
 
-    /* The callback may be asynchronous; return txid immediately.
-       The caller can monitor status via NativeCallback events. */
     LOGD("publishTransaction: submitted txid=%s", txidHex);
     return (*env)->NewStringUTF(env, txidHex);
 }
