@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -842,11 +843,19 @@ private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: Strin
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = phrase,
-            onValueChange = onPhrase,
+            // Lowercase per-keystroke (keep spaces) — mirrors MnemonicInputScreen's
+            // WordInputField normalization so IME auto-capitalization/autocorrect
+            // can never smuggle uppercase into a case-sensitive BIP39 check.
+            onValueChange = { onPhrase(it.lowercase()) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
             label = { Text("12 or 24 word recovery phrase") },
             isError = error != null,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Text,
+                autoCorrect = false,
+                capitalization = KeyboardCapitalization.None
+            ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = ACCENT,
                 unfocusedBorderColor = DIVIDER,

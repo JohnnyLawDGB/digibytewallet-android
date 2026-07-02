@@ -173,7 +173,7 @@ class RecoverFundsViewModel @Inject constructor(
 
     /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
     fun classifyForeign(mnemonic: String) {
-        val phrase = mnemonic.trim().split(Regex("\\s+")).joinToString(" ")
+        val phrase = mnemonic.trim().split(Regex("\\s+")).joinToString(" ") { it.lowercase() }
         if (!NativeBridge.isValidMnemonic(phrase)) {
             _state.value = UiState.Error("That doesn't look like a valid recovery phrase.")
             return
@@ -225,7 +225,9 @@ class RecoverFundsViewModel @Inject constructor(
         _state.value = UiState.Sweeping
         activeJob = viewModelScope.launch {
             val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
-                _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
+                _state.value = UiState.Error("Could not derive keys from that phrase.")
+                pendingForeignMnemonic = null
+                return@launch
             }
             try {
                 val result = withContext(Dispatchers.IO) {
