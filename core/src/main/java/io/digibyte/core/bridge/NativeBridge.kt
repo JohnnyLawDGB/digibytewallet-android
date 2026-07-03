@@ -35,7 +35,8 @@ object NativeBridge {
     /** Lock the session — zeros all derived keys from C core memory. */
     external fun lockSession()
 
-    /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */
+    /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32/P2WPKH(dgb1q),
+     *  3=Taproot/P2TR(dgb1p) — BIP86 (m/86'/20'/0'). */
     external fun getReceiveAddress(index: Int, format: Int): String?
 
     /** Get a change address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */

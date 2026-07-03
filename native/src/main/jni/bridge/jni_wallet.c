@@ -150,6 +150,9 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
 
     /* Derive master public key (BIP84: m/84'/20'/0') */
     BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    /* Taproot (BIP86: m/86'/20'/0') twin — derived from the SAME seed as BIP84 so the
+     * P2TR receive chain shares the wallet's seed. Installed after BRWalletNew below. */
+    BRMasterPubKey mpkBIP86 = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
 
     /* Create wallet with no initial transactions */
     if (g_wallet) {
@@ -164,6 +167,9 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
+
+    /* Install the BIP86 Taproot key + pre-gen the P2TR gap windows (m/86', same seed) */
+    BRWalletSetTaprootKey(g_wallet, mpkBIP86);
 
     /* Store seed and MPK for session use */
     memcpy(g_seed, seed, sizeof(seed));
@@ -228,6 +234,8 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     secure_zero(phraseChars, sizeof(phraseChars));
 
     BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    /* Taproot (BIP86: m/86'/20'/0') twin from the SAME seed — installed after BRWalletNew. */
+    BRMasterPubKey mpkBIP86 = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
 
     if (g_wallet) {
         LOGW("createWalletFromBytes: wallet already exists, freeing old one");
@@ -241,6 +249,9 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
+
+    /* Install the BIP86 Taproot key + pre-gen the P2TR gap windows (m/86', same seed) */
+    BRWalletSetTaprootKey(g_wallet, mpkBIP86);
 
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
@@ -292,6 +303,9 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
 
     BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
     BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
+    /* Taproot (BIP86: m/86'/20'/0') twin from the SAME seed — installed after the wallet
+     * is built so the P2TR receive chain shares the wallet's seed. */
+    BRMasterPubKey mpkBIP86  = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
 
     if (g_wallet) {
         BRWalletFree(g_wallet);
@@ -315,6 +329,9 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
+
+    /* Install the BIP86 Taproot key + pre-gen the P2TR gap windows (m/86', same seed) */
+    BRWalletSetTaprootKey(g_wallet, mpkBIP86);
 
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
@@ -381,6 +398,9 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
 
     BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
     BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
+    /* Taproot (BIP86: m/86'/20'/0') twin from the SAME seed — installed after the wallet
+     * is built so the P2TR receive chain shares the wallet's seed. */
+    BRMasterPubKey mpkBIP86  = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
 
     if (g_wallet) {
         BRWalletFree(g_wallet);
@@ -401,6 +421,9 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
+
+    /* Install the BIP86 Taproot key + pre-gen the P2TR gap windows (m/86', same seed) */
+    BRWalletSetTaprootKey(g_wallet, mpkBIP86);
 
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
@@ -499,10 +522,12 @@ Java_io_digibyte_core_bridge_NativeBridge_getReceiveAddress(JNIEnv *env, jobject
         return NULL;
     }
 
-    /* format: 0=legacy, 1=p2sh-segwit (not directly supported), 2=bech32 */
-    int useSegwit = (format == 2) ? 1 : 0;
+    /* format: 0=legacy(P2PKH), 1=p2sh-segwit (not directly supported), 2=bech32(P2WPKH),
+     * 3=taproot(P2TR, dgb1p). BRWalletReceiveAddress threads its arg straight into
+     * BRWalletUnusedAddrs' scriptType (0=P2PKH, 1=P2WPKH, 2=P2TR). */
+    int scriptType = (format == 3) ? 2 : (format == 2) ? 1 : 0;
 
-    BRAddress addr = BRWalletReceiveAddress(g_wallet, useSegwit);
+    BRAddress addr = BRWalletReceiveAddress(g_wallet, scriptType);
     if (addr.s[0] == '\0') {
         LOGW("getReceiveAddress: empty address returned");
         return NULL;
