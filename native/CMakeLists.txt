@@ -32,6 +32,8 @@ add_library(
         src/main/jni/digibytewallet-core/BRCrypto.h
         src/main/jni/digibytewallet-core/BRDigiAsset.c
         src/main/jni/digibytewallet-core/BRDigiAsset.h
+        src/main/jni/digibytewallet-core/BRDigiDollar.c
+        src/main/jni/digibytewallet-core/BRDigiDollar.h
         src/main/jni/digibytewallet-core/BRGCSFilter.c
         src/main/jni/digibytewallet-core/BRGCSFilter.h
         src/main/jni/digibytewallet-core/BRCompactFilterChain.c
