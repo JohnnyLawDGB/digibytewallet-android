@@ -43,6 +43,7 @@ object NativeBridge {
     external fun getWalletBirthCheckpointHeight(): Long
     external fun isWalletLoaded(): Boolean
     external fun dumpAllAddresses(): String
+    external fun walletContainsAddress(address: String): Boolean
     external fun registerRawTransaction(rawTx: ByteArray, blockHeight: Long, blockTimestamp: Long): Boolean
     external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: String?): ByteArray?
     external fun deriveAddresses(seedBytes: ByteArray, hmacKey: String, prefixPath: IntArray, gapExternal: Int, gapInternal: Int, addressFormat: Int): Array<String>?
