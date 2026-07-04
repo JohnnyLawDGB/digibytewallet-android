@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "BRTransaction.h"
 #include "BRDigiDollar.h"
@@ -138,6 +139,48 @@ int main(void)
     BRTransactionFree(nd);
     BRTransactionFree(no);
     BRTransactionFree(bad);
+
+    // --- Task 3: BRDigiDollarOutputAmount (positional amount<->output binding).
+    // Vectors from .superpowers/sdd/task-3-brief.md. ---
+
+    uint8_t p2tr_a[34]; p2tr_a[0]=0x51; p2tr_a[1]=0x20; memset(p2tr_a+2,0xAA,32);
+    uint8_t p2tr_b[34]; p2tr_b[0]=0x51; p2tr_b[1]=0x20; memset(p2tr_b+2,0xBB,32);
+    uint8_t p2wpkh2[22]={0x00,0x14,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
+    uint8_t orr[]={0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13,0x02,0xc4,0x09}; // [5000,2500]
+
+    BRTransaction *t = BRTransactionNew(); t->version = 0x02000770;
+    BRTransactionAddOutput(t, 0, p2tr_a, 34);        // vout 0 -> DD ordinal 0 -> 5000
+    BRTransactionAddOutput(t, 0, p2tr_b, 34);        // vout 1 -> DD ordinal 1 -> 2500
+    BRTransactionAddOutput(t, 123456, p2wpkh2, 22);   // vout 2 -> nonzero -> not DD (-1)
+    BRTransactionAddOutput(t, 0, orr, sizeof(orr));  // vout 3 -> OP_RETURN -> not DD (-1)
+
+    check(BRDigiDollarOutputAmount(t, 0) == 5000, "vout0 DD ordinal 0 -> 5000");
+    check(BRDigiDollarOutputAmount(t, 1) == 2500, "vout1 DD ordinal 1 -> 2500");
+    check(BRDigiDollarOutputAmount(t, 2) == -1,   "vout2 nonzero-value -> not DD");
+    check(BRDigiDollarOutputAmount(t, 3) == -1,   "vout3 OP_RETURN -> not DD");
+    check(BRDigiDollarOutputAmount(t, 9) == -1,   "out-of-range vout -> -1");
+
+    // Skip rule: a nonzero-value P2TR (looks like 51 20 but amount!=0) must NOT consume a slot.
+    // vout0 nonzero 51-20 (mint-collateral shape), vout1 zero 51-20 -> ordinal 0 -> 5000
+    BRTransaction *s = BRTransactionNew(); s->version = 0x02000770;
+    uint8_t ors[]={0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13}; // [5000]
+    BRTransactionAddOutput(s, 999, p2tr_a, 34);      // vout0 nonzero 51-20 -> skipped, no slot
+    BRTransactionAddOutput(s, 0,   p2tr_b, 34);      // vout1 zero 51-20 -> DD ordinal 0 -> 5000
+    BRTransactionAddOutput(s, 0,   ors, sizeof(ors));
+    check(BRDigiDollarOutputAmount(s, 0) == -1,   "nonzero 51-20 is not DD");
+    check(BRDigiDollarOutputAmount(s, 1) == 5000, "first ZERO 51-20 is DD ordinal 0 -> 5000");
+
+    // A DD output whose ordinal exceeds the amount list -> -1 (never over-credit).
+    BRTransaction *x = BRTransactionNew(); x->version = 0x02000770;
+    BRTransactionAddOutput(x, 0, p2tr_a, 34);        // ordinal 0 -> 5000
+    BRTransactionAddOutput(x, 0, p2tr_b, 34);        // ordinal 1 -> no amount[1] (list is [5000])
+    BRTransactionAddOutput(x, 0, ors, sizeof(ors));  // [5000]
+    check(BRDigiDollarOutputAmount(x, 0) == 5000, "ordinal 0 -> 5000");
+    check(BRDigiDollarOutputAmount(x, 1) == -1,   "ordinal 1 with no amount slot -> -1");
+
+    BRTransactionFree(t);
+    BRTransactionFree(s);
+    BRTransactionFree(x);
 
     if (g_failures == 0) {
         printf("\nALL PASS (0 failure(s))\n");
