@@ -80,6 +80,65 @@ int main(void)
     BRTransactionFree(n2);
     BRTransactionFree(n3);
 
+    // --- Task 2: BRDigiDollarDecodeAmounts (OP_RETURN "DD" push-walker + minimal
+    // CScriptNum amount decode). Vectors from spec §7. ---
+
+    // $50 one-recipient transfer: OP_RETURN = 6a 02 44 44 01 02 02 88 13  -> [5000]
+    uint8_t or1[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13};
+    BRTransaction *a = BRTransactionNew(); a->version = 0x02000770;
+    BRTransactionAddOutput(a, 0, or1, sizeof(or1));
+    int64_t amt[8]; int n = BRDigiDollarDecodeAmounts(a, amt, 8);
+    check(n == 1 && amt[0] == 5000, "transfer OP_RETURN -> [5000]");
+
+    // $50/$25 two-recipient: ... 02 88 13 02 c4 09 -> [5000,2500]
+    uint8_t or2[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13,0x02,0xc4,0x09};
+    BRTransaction *b = BRTransactionNew(); b->version = 0x02000770;
+    BRTransactionAddOutput(b, 0, or2, sizeof(or2));
+    n = BRDigiDollarDecodeAmounts(b, amt, 8);
+    check(n == 2 && amt[0] == 5000 && amt[1] == 2500, "transfer -> [5000,2500]");
+
+    // $50/$25 + $3 change: ... 02 2c 01 -> [5000,2500,300]
+    uint8_t or3[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13,0x02,0xc4,0x09,0x02,0x2c,0x01};
+    BRTransaction *c = BRTransactionNew(); c->version = 0x02000770;
+    BRTransactionAddOutput(c, 0, or3, sizeof(or3));
+    n = BRDigiDollarDecodeAmounts(c, amt, 8);
+    check(n == 3 && amt[0]==5000 && amt[1]==2500 && amt[2]==300, "transfer -> [5000,2500,300]");
+
+    // MINT: first push only. mint OP_RETURN 6a 02 4444 01 01 02 88 13 (type 1, amount 5000) -> [5000], n==1
+    uint8_t orm[] = {0x6a,0x02,0x44,0x44,0x01,0x01,0x02,0x88,0x13};
+    BRTransaction *m = BRTransactionNew(); m->version = 0x01000770;
+    BRTransactionAddOutput(m, 0, orm, sizeof(orm));
+    n = BRDigiDollarDecodeAmounts(m, amt, 8);
+    check(n == 1 && amt[0] == 5000, "mint -> first push only [5000]");
+
+    // Negatives:
+    BRTransaction *nd = BRTransactionNew(); nd->version = 1;         // not DD
+    BRTransactionAddOutput(nd, 0, or1, sizeof(or1));
+    check(BRDigiDollarDecodeAmounts(nd, amt, 8) == -1, "non-DD tx -> -1");
+
+    // DD marker but no "DD" OP_RETURN present -> -1
+    BRTransaction *no = BRTransactionNew(); no->version = 0x02000770;
+    uint8_t p2wpkh[] = {0x00,0x14, 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
+    BRTransactionAddOutput(no, 0, p2wpkh, sizeof(p2wpkh));
+    check(BRDigiDollarDecodeAmounts(no, amt, 8) == -1, "DD marker w/o DD OP_RETURN -> -1");
+
+    // Non-minimal amount push (0x8813 padded to 88 13 00 -> non-minimal) -> -1 (fail closed)
+    uint8_t orbad[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x03,0x88,0x13,0x00};
+    BRTransaction *bad = BRTransactionNew(); bad->version = 0x02000770;
+    BRTransactionAddOutput(bad, 0, orbad, sizeof(orbad));
+    check(BRDigiDollarDecodeAmounts(bad, amt, 8) == -1, "non-minimal amount push -> -1");
+
+    // maxAmounts overflow: 3 amounts into a size-2 buffer -> -1
+    check(BRDigiDollarDecodeAmounts(c, amt, 2) == -1, "amount count > maxAmounts -> -1");
+
+    BRTransactionFree(a);
+    BRTransactionFree(b);
+    BRTransactionFree(c);
+    BRTransactionFree(m);
+    BRTransactionFree(nd);
+    BRTransactionFree(no);
+    BRTransactionFree(bad);
+
     if (g_failures == 0) {
         printf("\nALL PASS (0 failure(s))\n");
         return 0;
