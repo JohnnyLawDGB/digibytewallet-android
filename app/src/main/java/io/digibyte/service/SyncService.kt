@@ -1194,7 +1194,10 @@ class SyncService : Service() {
         val now = System.currentTimeMillis()
 
         val existing = prefs.getString("peer_pool", null)
-        val pool: MutableList<Pair<String, Int>> =
+        // Triple = (ip, port, servicesHex). servicesHex carries the seeder's
+        // capability bits (0x40 = compact filters) so filter peers are tagged
+        // when injected; 0 = unknown → native bloom-only default.
+        val pool: MutableList<Triple<String, Int, Long>> =
             if (existing != null) parsePool(existing) else mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
 
@@ -1202,9 +1205,11 @@ class SyncService : Service() {
         if (stale || pool.isEmpty()) {
             val fresh = fetchFromSeeder()
             if (fresh != null && fresh.isNotEmpty()) {
-                // Merge: add any peer we haven't seen before.
-                val seen = pool.toSet()
-                for (p in fresh) if (!seen.contains(p)) pool.add(p)
+                // Merge: add any peer we haven't seen before (dedup on ip:port,
+                // ignoring services so a re-fetch doesn't duplicate an entry
+                // whose capability bits changed).
+                val seen = pool.mapTo(HashSet()) { it.first to it.second }
+                for (p in fresh) if (seen.add(p.first to p.second)) pool.add(p)
                 prefs.edit()
                     .putString("peer_pool", serializePool(pool))
                     .putLong("last_fetch", now)
@@ -1228,8 +1233,8 @@ class SyncService : Service() {
         val cursor = prefs.getInt("pool_cursor", 0).coerceAtLeast(0) % pool.size
         val batchSize = BLOOM_BATCH_SIZE.coerceAtMost(pool.size)
         for (i in 0 until batchSize) {
-            val (ip, port) = pool[(cursor + i) % pool.size]
-            NativeBridge.injectPeerByIp(ip, port)
+            val (ip, port, services) = pool[(cursor + i) % pool.size]
+            NativeBridge.injectPeerByIp(ip, port, services)
         }
         val newCursor = (cursor + batchSize) % pool.size
         prefs.edit().putInt("pool_cursor", newCursor).apply()
@@ -1256,7 +1261,9 @@ class SyncService : Service() {
         val now = System.currentTimeMillis()
         val cached = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
-        val pool: List<Pair<String, Int>> =
+        // Triple = (ip, port, servicesHex) — Dandelion peers are also filter-
+        // capable per the seeder, so carry their services_hex through too.
+        val pool: List<Triple<String, Int, Long>> =
             if (now - lastFetch > BLOOM_REFRESH_INTERVAL_MS || cached.isEmpty()) {
                 val fresh = fetchFromSeeder("dandelion")
                 if (!fresh.isNullOrEmpty()) {
@@ -1270,16 +1277,16 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "Dandelion: no capable peers advertised — sends will flood")
             return
         }
-        for ((ip, port) in pool) {
-            NativeBridge.injectPeerByIp(ip, port)   // connect it (so it joins the pool)
-            NativeBridge.addDandelionPeer(ip)        // mark it Dandelion-capable
+        for ((ip, port, services) in pool) {
+            NativeBridge.injectPeerByIp(ip, port, services)  // connect it (so it joins the pool)
+            NativeBridge.addDandelionPeer(ip)                // mark it Dandelion-capable
         }
         android.util.Log.i("SyncService", "Dandelion: injected + marked ${pool.size} capable peer(s)")
     }
 
     /** Try the seeder once. Returns the parsed peer list or null on failure.
      *  [capability] filters the seeder pool (e.g. "dandelion"); null = default pool. */
-    private fun fetchFromSeeder(capability: String? = null): List<Pair<String, Int>>? {
+    private fun fetchFromSeeder(capability: String? = null): List<Triple<String, Int, Long>>? {
         val url = if (capability != null) "$SEEDER_URL?capability=$capability" else SEEDER_URL
         return try {
             val request = Request.Builder().url(url).build()
@@ -1297,20 +1304,23 @@ class SyncService : Service() {
         }
     }
 
-    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024, ...}], "capability":"filter|bloom|filter+bloom", ...}
-     *  We extract only ip+port for the BIP 37 path; the capability field is logged so we can
-     *  confirm fallthrough behavior in production. C2 (BIP 158) will inspect per-peer fields. */
-    private fun parsePeersJson(json: String): List<Pair<String, Int>> {
+    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024,"services_hex":"0x44d", ...}], "capability":"filter|bloom|filter+bloom", ...}
+     *  Extracts ip + port + services_hex per peer. services_hex carries the node's
+     *  advertised service bits — notably 0x40 (SERVICES_NODE_COMPACT_FILTERS) — so
+     *  the native filter-first peer selection can recognize and hold filter peers.
+     *  Absent/unparseable services_hex → 0 (native falls back to bloom-only). */
+    private fun parsePeersJson(json: String): List<Triple<String, Int, Long>> {
         return try {
             val root = org.json.JSONObject(json)
             val capability = root.optString("capability", "unknown")
             val arr = root.getJSONArray("peers")
             android.util.Log.i("SyncService",
                 "Seeder response: capability=$capability, ${arr.length()} peer(s)")
-            val out = ArrayList<Pair<String, Int>>(arr.length())
+            val out = ArrayList<Triple<String, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
                 val peer = arr.getJSONObject(i)
-                out.add(peer.getString("ip") to peer.optInt("port", 12024))
+                val services = parseSeederServicesHex(peer.optString("services_hex", ""))
+                out.add(Triple(peer.getString("ip"), peer.optInt("port", 12024), services))
             }
             out
         } catch (e: Exception) {
@@ -1319,23 +1329,26 @@ class SyncService : Service() {
         }
     }
 
-    /** Pool is stored as a compact JSON array of "ip:port" strings. */
-    private fun serializePool(pool: List<Pair<String, Int>>): String {
+    /** Pool is stored as a compact JSON array of "ip:port:servicesHex" strings
+     *  (servicesHex is lowercase hex, no 0x prefix). Seeder peers are IPv4, so
+     *  splitting on ':' is unambiguous. Legacy "ip:port" entries from older
+     *  caches parse with services = 0 (native falls back to bloom-only). */
+    private fun serializePool(pool: List<Triple<String, Int, Long>>): String {
         val arr = org.json.JSONArray()
-        for ((ip, port) in pool) arr.put("$ip:$port")
+        for ((ip, port, services) in pool) arr.put("$ip:$port:${services.toString(16)}")
         return arr.toString()
     }
 
-    private fun parsePool(json: String): MutableList<Pair<String, Int>> {
+    private fun parsePool(json: String): MutableList<Triple<String, Int, Long>> {
         return try {
             val arr = org.json.JSONArray(json)
-            val out = ArrayList<Pair<String, Int>>(arr.length())
+            val out = ArrayList<Triple<String, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
-                val s = arr.getString(i)
-                val colon = s.lastIndexOf(':')
-                if (colon > 0) {
-                    val port = s.substring(colon + 1).toIntOrNull() ?: 12024
-                    out.add(s.substring(0, colon) to port)
+                val parts = arr.getString(i).split(':')
+                if (parts.size >= 2) {
+                    val port = parts[1].toIntOrNull() ?: 12024
+                    val services = if (parts.size >= 3) (parts[2].toLongOrNull(16) ?: 0L) else 0L
+                    out.add(Triple(parts[0], port, services))
                 }
             }
             out

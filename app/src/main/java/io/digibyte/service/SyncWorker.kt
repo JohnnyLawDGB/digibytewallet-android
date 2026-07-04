@@ -77,7 +77,11 @@ class SyncWorker @AssistedInject constructor(
                 val peers = org.json.JSONObject(json).getJSONArray("peers")
                 for (i in 0 until peers.length()) {
                     val p = peers.getJSONObject(i)
-                    NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024))
+                    // services_hex (e.g. "0x44d") carries the compact-filter bit
+                    // (0x40) so filter peers are tagged; absent → 0 → native
+                    // bloom-only default.
+                    val services = parseSeederServicesHex(p.optString("services_hex", ""))
+                    NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
                 }
             } catch (_: Exception) {}
         }
