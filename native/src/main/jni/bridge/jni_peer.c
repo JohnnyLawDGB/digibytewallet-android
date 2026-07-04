@@ -293,6 +293,18 @@ static size_t g_savedPeersCount = 0;
 #include <netdb.h>
 #include <arpa/inet.h>
 
+/* Default services for an injected peer whose capability tags are unknown
+ * (servicesHex == 0, e.g. a legacy cached pool entry or the background
+ * SyncWorker): full node + bloom, matching pre-servicesHex behavior so
+ * nothing regresses. */
+#define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM)
+
+/* digiscope.me is one of our BIP157/158 filter nodes, so tag the priority
+ * peer compact-filter-capable. Without SERVICES_NODE_COMPACT_FILTERS set,
+ * BRPeerManager's filter-first selection can never pick it and the wallet
+ * falls back to holding ~1 filter peer by chance. */
+#define PRIORITY_PEER_SERVICES   (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM | SERVICES_NODE_COMPACT_FILTERS)
+
 /**
  * Resolve a hostname and prepend it to g_savedPeers so the peer manager
  * tries it first. Uses a recent timestamp so it sorts to the top.
@@ -330,14 +342,19 @@ static int _resolveHostToAddr(const char *hostname, UInt128 *out) {
 
 /* Prepend an already-resolved priority-peer address to g_savedPeers (dedup +
  * timestamp bump so it sorts to the top). MUTATES g_savedPeers — the caller
- * MUST hold g_peerManagerMutex. Fast (no DNS). */
-static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
+ * MUST hold g_peerManagerMutex. Fast (no DNS).
+ *
+ * `services` carries the peer's advertised capabilities (from the seeder's
+ * services_hex, or PRIORITY_PEER_SERVICES for digiscope.me). We OR it into an
+ * existing entry so a previously handshake-upgraded / filter-tagged peer is
+ * never downgraded by a later injection that happens to lack the bit. */
+static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services) {
     /* Check if already present in saved peers */
     for (size_t i = 0; i < g_savedPeersCount; i++) {
         if (UInt128Eq(g_savedPeers[i].address, addr)) {
             /* Already there — just bump its timestamp to the top */
             g_savedPeers[i].timestamp = (uint64_t)time(NULL);
-            g_savedPeers[i].services = SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM;
+            g_savedPeers[i].services |= services;   /* union — never downgrade */
             g_priorityPeerAddr = addr;
             g_priorityPeerPort = port;
             return;
@@ -351,7 +368,7 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
 
     /* Priority peer at index 0 */
     newPeers[0] = (BRPeer){ addr, port,
-        SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM,
+        services,
         (uint64_t)time(NULL), 0 };
 
     /* Copy existing peers after it */
@@ -372,18 +389,20 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
  * resolution is cheap, so running it under the lock is fine. Caller holds the
  * lock. Hostname callers should split: _resolveHostToAddr (unlocked) then
  * _prependSavedPeerAddr (locked). */
-static void _injectPriorityPeer(const char *hostname, uint16_t port) {
+static void _injectPriorityPeer(const char *hostname, uint16_t port, uint64_t services) {
     UInt128 addr;
     if (!_resolveHostToAddr(hostname, &addr)) return;
-    _prependSavedPeerAddr(addr, port);
-    LOGI("_injectPriorityPeer: injected %s as priority peer", hostname);
+    _prependSavedPeerAddr(addr, port, services);
+    LOGI("_injectPriorityPeer: injected %s as priority peer (services=0x%llx)",
+         hostname, (unsigned long long)services);
 }
 
 /* ---------- injectPeerByIp ---------- */
 
 JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
-                                                           jstring ipStr, jint port) {
+                                                           jstring ipStr, jint port,
+                                                           jlong servicesHex) {
     (void)thiz;
     PEER_GUARD();
     if (!ipStr) return;
@@ -391,9 +410,18 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
     const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
     if (!ip) return;
 
+    /* Tag the peer with the seeder-advertised services (services_hex). This is
+     * how a BIP157/158 filter peer (0x44d has SERVICES_NODE_COMPACT_FILTERS)
+     * gets recognized by BRPeerManager's filter-first selection so the wallet
+     * holds >=2 filter peers. servicesHex==0 (absent, e.g. SyncWorker or a
+     * legacy pool entry) falls back to the legacy bloom-only default. */
+    uint64_t services = (servicesHex != 0)
+        ? (uint64_t)servicesHex
+        : INJECT_DEFAULT_SERVICES;
+
     /* Update g_savedPeers for the cold-start case when peer manager doesn't
      * exist yet — _injectPriorityPeer dedupes and prepends. */
-    _injectPriorityPeer(ip, (uint16_t)port);
+    _injectPriorityPeer(ip, (uint16_t)port, services);
 
     /* If the peer manager is already alive, ALSO add to its live candidate
      * pool. Without this, post-startup injections accumulate in g_savedPeers
@@ -407,8 +435,7 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
             /* Build IPv4-mapped IPv6 address (::ffff:x.x.x.x) */
             addr.u16[5] = 0xffff;
             addr.u32[3] = ip4.s_addr;
-            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port,
-                                  SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM);
+            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port, services);
         }
     }
 
@@ -500,8 +527,10 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
 
         /* Prepend digiscope.me (resolved above, before the lock) so a
          * bloom-filter-enabled node is always in the pool, even if DNS seeds
-         * aren't re-queried. */
-        if (havePrio) _prependSavedPeerAddr(prioAddr, 12024);
+         * aren't re-queried. It is a BIP157/158 filter node, so tag it
+         * compact-filter-capable — otherwise BRPeerManager's filter-first
+         * selection can't pick it and the wallet holds ~1 filter peer. */
+        if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
 
         /* Create peer manager for mainnet.
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the

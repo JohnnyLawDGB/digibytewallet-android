@@ -94,8 +94,15 @@ object NativeBridge {
 
     // === Peer / sync operations ===
     /** Inject a peer by IP address into the saved peers list for priority connection.
-     *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle. */
-    external fun injectPeerByIp(ip: String, port: Int)
+     *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle.
+     *
+     *  [servicesHex] is the peer's advertised service bits (the seeder's
+     *  `services_hex`, e.g. 0x44d for a BIP157/158 filter peer where bit 0x40 =
+     *  SERVICES_NODE_COMPACT_FILTERS). Threading this through lets the native
+     *  filter-first peer selection recognize and hold filter-capable peers.
+     *  Pass 0 when unknown — the native side falls back to the legacy
+     *  NODE_NETWORK|NODE_BLOOM default so nothing regresses. */
+    external fun injectPeerByIp(ip: String, port: Int, servicesHex: Long)
 
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
