@@ -35,7 +35,7 @@
 
 ---
 
-## Task A: `BRDigiDollarAddressDecode` (TD/DD Base58Check → key) + host KAT
+## Task 1: `BRDigiDollarAddressDecode` (TD/DD Base58Check → key) + host KAT
 
 **Files:**
 - Modify: `native/src/main/jni/digibytewallet-core/BRDigiDollar.c` (add the function), `BRDigiDollar.h` (declare it)
@@ -77,7 +77,7 @@ int main(void){
 }
 ```
 
-Create `run.sh` by copying `native/src/test/host/digidollar_realtx_kat/run.sh` and pointing it at `digidollar_send_kat_main.c` (its source list — BRDigiDollar.c, BRTransaction.c, BRAddress.c, BRSet.c, BRKey.c, BRBase58.c, BRBech32.c, BRCrypto.c, BRDigiAsset.c, BRBIP32Sequence.c, BRBIP39Mnemonic.c, crypto/* — already covers this task and Tasks B/C).
+Create `run.sh` by copying `native/src/test/host/digidollar_realtx_kat/run.sh` and pointing it at `digidollar_send_kat_main.c` (its source list — BRDigiDollar.c, BRTransaction.c, BRAddress.c, BRSet.c, BRKey.c, BRBase58.c, BRBech32.c, BRCrypto.c, BRDigiAsset.c, BRBIP32Sequence.c, BRBIP39Mnemonic.c, crypto/* — already covers this task and Tasks 2/3).
 
 - [ ] **Step 2: Run to verify it fails.** `bash native/src/test/host/digidollar_send_kat/run.sh` → link error: `BRDigiDollarAddressDecode` undefined.
 
@@ -113,7 +113,7 @@ int BRDigiDollarAddressDecode(uint8_t key32[32], const char *addr, int isTestnet
 
 ---
 
-## Task B: `BRWalletCreateDigiDollarTransfer` builder + host KAT
+## Task 2: `BRWalletCreateDigiDollarTransfer` builder + host KAT
 
 **Files:**
 - Modify: `native/src/main/jni/digibytewallet-core/BRDigiDollar.c` (add internal `_ddWriteScriptNum`), `BRDigiDollar.h` (declare it non-static for the builder's TU — OR define the builder in BRWallet.c and expose `_ddWriteScriptNum` via BRDigiDollar.h)
@@ -287,7 +287,7 @@ BRTransaction *BRWalletCreateDigiDollarTransfer(BRWallet *wallet, const uint8_t 
 
 ---
 
-## Task C: sign + verify KAT (built transfer signs through the proven path)
+## Task 3: sign + verify KAT (built transfer signs through the proven path)
 
 **Files:**
 - Modify: `native/src/test/host/digidollar_send_kat/digidollar_send_kat_main.c`
@@ -314,7 +314,7 @@ BRTransaction *BRWalletCreateDigiDollarTransfer(BRWallet *wallet, const uint8_t 
 
 ---
 
-## Task D: testnet26 on-chain proof (USER-GATED funding)
+## Task 4: testnet26 on-chain proof (USER-GATED funding)
 
 **Not a code task — the end-to-end proof.** Uses the synced v9.26.3 node
 (`/home/polloloco/digibyte-9.26.3/bin/digibyte-cli -datadir=/home/polloloco/.digibyte-tn -testnet`).
