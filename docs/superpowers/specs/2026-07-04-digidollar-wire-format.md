@@ -531,7 +531,22 @@ keyed by the tweaked spender key, so the key-path signer can spend it later
 
 ## 7. Known test vectors
 
-**NONE — must confirm on testnet26.** Exhaustive greps of the entire DD test suite (C++ + functional
+**✅ REAL testnet26 golden vector CAPTURED (2026-07-05) — confirms this spec byte-for-byte.**
+DigiByte testnet26 block **83946**, transfer txid
+`3d8797cb87f6903bceeea28e6366093faec34af629e051dfda7b3a9616c5a346` (pulled from a v9.26.3 node):
+- `version = 0x02000770` (marker `0x0770`, type 2) — as pinned (§1).
+- `vout[0]` value 0, P2TR `5120 effc01…2000cd` (DD token, ordinal 0)
+- `vout[1]` value 0, P2TR `5120 55e1ba…3064a3` (DD token, ordinal 1)
+- `vout[2]` value **2.88 DGB**, P2TR `5120 55e1ba…3064a3` (DGB change, **non-zero → skipped**)
+- `vout[3]` OP_RETURN `6a 02 4444 01 02 02c409 024c1d` = `"DD"` type2 amounts **[2500, 7500]** cents — **no count field** (§2.3).
+`BRDigiDollar.c` decodes it exactly (type 2, [2500,7500], ordinal binding skips the DGB change) —
+committed as `native/src/test/host/digidollar_realtx_kat/`. **Address note (SEND-relevant):** the on-chain
+DD outputs render as standard **bech32m P2TR** (`dgbt1p…` testnet HRP), i.e. a plain zero-value taproot
+output — consistent with §3.1. Whether the SEND recipient-input format is that `dgbt1p…` bech32m or the
+`TD…` Base58Check `CDigiDollarAddress` (§4) is still to confirm against the node's DD send RPC before
+writing SEND recipient-parsing (§8 Q2) — the node is now synced, so this is resolvable.
+
+**In-tree test suite has NONE.** Exhaustive greps of the entire DD test suite (C++ + functional
 python) found **no raw serialized DD transaction hex** anywhere — only placeholder txids, x-only pubkey
 literals, and the NUMS point. There is no committed golden vector for the on-wire byte serialization of
 a DD transfer, mint, address, or OP_RETURN.
