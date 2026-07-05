@@ -2,11 +2,23 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+// Pull in the real source so the file-static _BRTransactionTaprootSighash is
+// visible for an independent sighash recompute (same pattern as
+// bip341_signtx_kat_main.c). Do NOT also compile BRTransaction.c on the clang
+// line (it would define its symbols twice) -- run.sh omits it accordingly.
+// BRWallet.c IS compiled separately and references BRTransaction's (now
+// in-this-TU) non-static symbols; the linker resolves them.
+#include "BRTransaction.c"
+
 #include "BRDigiDollar.h"
 #include "BRWallet.h"
 #include "BRBIP32Sequence.h"
 #include "BRBIP39Mnemonic.h"
 #include "BRAddress.h"
+#include "secp256k1.h"
+#include "secp256k1_extrakeys.h"
+#include "secp256k1_schnorrsig.h"
 static int g=0; static void ck(int c,const char*d){printf(c?"PASS: %s\n":"FAIL: %s\n",d); if(!c)g++;}
 
 // --- Task 2 (BRWalletCreateDigiDollarTransfer) KAT wallet setup helpers ---
@@ -119,6 +131,52 @@ int main(void){
     // conservation: decode the built tx's own DD amounts, sum == selected input DD (10000)
     int64_t a[8]; int n=BRDigiDollarDecodeAmounts(t,a,8);
     ck(n==2 && a[0]+a[1]==10000, "strict conservation: out DD == in DD (10000c)");
+
+    // ==================== Task 3: sign + verify (builder -> signed, spendable tx) ====================
+    // Reuses the exact verify pattern from bip341_signtx_kat_main.c's VALIDITY block: sign
+    // the built transfer through the real wallet path, then independently recompute the
+    // BIP-341 key-path sighash for the DD (P2TR) input and assert the witness's 64-byte
+    // Schnorr signature verifies under X(Q). This closes the loop: builder output is a
+    // real, spendable, network-valid transaction.
+    {
+        int r = BRWalletSignTransaction(w, t, 0, seed, sizeof(seed));
+        ck(r == 1, "BRWalletSignTransaction signs the DD transfer");
+        ck(BRTransactionIsSigned(t) == 1, "transfer reports fully signed");
+
+        // find the DD input: the one whose prevout scriptPubKey is the 34-byte P2TR
+        // (51 20 <32>) we set up as our DD UTXO above.
+        int ddIdx = -1;
+        for (size_t i = 0; i < t->inCount; i++) {
+            if (t->inputs[i].scriptLen == 34 && t->inputs[i].script[0] == 0x51 && t->inputs[i].script[1] == 0x20) {
+                ddIdx = (int)i;
+                break;
+            }
+        }
+        ck(ddIdx >= 0, "DD input (P2TR prevout) located in the signed transfer");
+
+        if (ddIdx >= 0) {
+            BRTxInput *ddin = &t->inputs[ddIdx];
+            ck(ddin->witness != NULL && ddin->witLen == 65 && ddin->witness[0] == 0x40,
+               "DD input carries a 1-item 64-byte taproot witness");
+
+            if (ddin->witness != NULL && ddin->witLen == 65) {
+                secp256k1_context *ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN | SECP256K1_CONTEXT_VERIFY);
+                uint8_t xq[32]; memcpy(xq, ddin->script + 2, 32);
+                secp256k1_xonly_pubkey xoQ;
+                ck(secp256k1_xonly_pubkey_parse(ctx, &xoQ, xq) == 1, "parse X(Q) from DD input's prevout script");
+
+                uint8_t sig64[64]; memcpy(sig64, &ddin->witness[1], 64);
+                UInt256 md = UINT256_ZERO;
+                size_t shLen = _BRTransactionTaprootSighash(t, NULL, 0, (size_t)ddIdx, SIGHASH_DEFAULT, &md);
+                ck(shLen > 0, "recompute BIP-341 key-path sighash for the DD input");
+                ck(secp256k1_schnorrsig_verify(ctx, sig64, md.u8, 32, &xoQ) == 1,
+                   "VALIDITY: DD input witness ACCEPTED by schnorr verify under X(Q) for the tx sighash");
+
+                secp256k1_context_destroy(ctx);
+            }
+        }
+    }
+
     // NULL cases:
     ck(BRWalletCreateDigiDollarTransfer(w, rk, 0)==NULL, "cents==0 -> NULL");
     ck(BRWalletCreateDigiDollarTransfer(w, rk, 999999)==NULL, "cents > DD balance -> NULL");

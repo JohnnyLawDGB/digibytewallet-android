@@ -42,6 +42,7 @@ clang -w -include stdint.h \
     -I "$CORE_DIR/secp256k1/include" \
     "$SCRIPT_DIR/bip341_signtx_kat_main.c" \
     "$CORE_DIR/BRWallet.c" \
+    "$CORE_DIR/BRDigiDollar.c" \
     "$CORE_DIR/BRKey.c" \
     "$CORE_DIR/BRBIP32Sequence.c" \
     "$CORE_DIR/BRBIP39Mnemonic.c" \

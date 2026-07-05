@@ -186,10 +186,13 @@ int main(void)
     // ---- Guard: a missing (zero) spent amount must be surfaced, not silently
     // hashed into a wrong digest.
     {
+        // A zero spent-amount is LEGITIMATE: a DigiDollar token input is a genuine zero-satoshi P2TR,
+        // and the BIP341 sighash correctly commits amount 0. It must NOT be rejected — only a missing
+        // prevout script (checked below) signals the caller forgot to attach data.
         uint64_t saved = tx->inputs[0].amount;
         tx->inputs[0].amount = 0;
-        check(_BRTransactionTaprootSighash(tx, NULL, 0, 4, 0x00, &out) == 0,
-              "GUARD: zero spent-amount on any input -> returns 0 (wrong-digest prevention)");
+        check(_BRTransactionTaprootSighash(tx, NULL, 0, 4, 0x00, &out) > 0,
+              "zero spent-amount (DigiDollar token input) is accepted, not rejected");
         tx->inputs[0].amount = saved;
     }
 
