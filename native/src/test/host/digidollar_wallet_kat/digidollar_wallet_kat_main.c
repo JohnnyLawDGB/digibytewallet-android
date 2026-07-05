@@ -77,6 +77,9 @@ int main(void) {
     BRWalletRegisterTransaction(w, tx);
     check(BRWalletDigiDollarBalance(w) == 5000, "DD balance credited: 5000 cents");
     check(BRWalletBalance(w) == 0, "DGB balance unaffected by DD (zero-value)");
+    check(BRWalletDigiDollarUTXOs(w, NULL, 0) == 1, "ddUtxos count == 1 after credit");
+    BRUTXO one[4];
+    check(BRWalletDigiDollarUTXOs(w, one, 4) == 1, "ddUtxos copy-out returns 1");
 
     // spend it: a tx consuming (tx->txHash, 0) — pays a foreign DD output
     uint8_t fspk[34]; fspk[0]=0x51; fspk[1]=0x20; memset(fspk+2, 0xCD, 32);
@@ -89,6 +92,7 @@ int main(void) {
     finalizeTxHash(sp);
     BRWalletRegisterTransaction(w, sp);
     check(BRWalletDigiDollarBalance(w) == 0, "DD balance 0 after spending the DD utxo");
+    check(BRWalletDigiDollarUTXOs(w, NULL, 0) == 0, "ddUtxos count == 0 after spend");
 
     BRWalletFree(w);
     printf(g_fail==0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
