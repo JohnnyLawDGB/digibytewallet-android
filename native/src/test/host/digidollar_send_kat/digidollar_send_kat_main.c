@@ -124,6 +124,69 @@ int main(void){
     ck(BRWalletCreateDigiDollarTransfer(w, rk, 999999)==NULL, "cents > DD balance -> NULL");
     BRTransactionFree(t);
 
+    // ---- wDust: a single 4050-cent DD UTXO + a DGB fee UTXO. send 4000 -> ddChange 50 (sub-$1 dust) ----
+    BRWallet *wDust = BRWalletNew(NULL, 0, mpk84);
+    ck(wDust != NULL, "wDust created");
+    BRWalletSetTaprootKey(wDust, mpk86);
+    BRAddress taD = BRWalletReceiveAddress(wDust, 2);
+    uint8_t spkD[64]; size_t spkDLen = BRAddressScriptPubKey(spkD, sizeof(spkD), taD.s);
+    UInt256 h3; memset(h3.u8, 0x33, 32);
+    BRTransaction *ddCreditDust = ddTx(spkD, spkDLen, 4050, h3, 0);
+    ddCreditDust->blockHeight = 700000;
+    finalizeTxHash(ddCreditDust);
+    BRWalletRegisterTransaction(wDust, ddCreditDust);
+    ck(BRWalletDigiDollarBalance(wDust) == 4050, "wDust setup: DD balance 4050 cents");
+    BRAddress daD = BRWalletReceiveAddress(wDust, 1);
+    uint8_t dspkD[64]; size_t dspkDLen = BRAddressScriptPubKey(dspkD, sizeof(dspkD), daD.s);
+    UInt256 h4; memset(h4.u8, 0x44, 32);
+    BRTransaction *dgbCreditDust = BRTransactionNew();
+    dgbCreditDust->version = 1;
+    BRTransactionAddInput(dgbCreditDust, h4, 0, 0, dspkD, dspkDLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
+    BRTransactionAddOutput(dgbCreditDust, 100000000, dspkD, dspkDLen);
+    dgbCreditDust->blockHeight = 700000;
+    finalizeTxHash(dgbCreditDust);
+    BRWalletRegisterTransaction(wDust, dgbCreditDust);
+    ck(BRWalletBalance(wDust) == 100000000, "wDust setup: DGB balance 1 DGB");
+
+    // sub-$1 (1..99c) DD change must fail closed (spec §5.4 top-priority): hold 4050c, send 4000 -> change 50
+    ck(BRWalletCreateDigiDollarTransfer(wDust, rk, 4000) == NULL, "0<ddChange<100 (dust) -> NULL");
+    // recipient below $1 minimum -> NULL
+    ck(BRWalletCreateDigiDollarTransfer(w, rk, 50) == NULL, "cents < 100 -> NULL");
+    // recipient above $100k max -> NULL
+    ck(BRWalletCreateDigiDollarTransfer(w, rk, 10000001) == NULL, "cents > 10000000 -> NULL");
+
+    // ---- wExact: a single 4000-cent DD UTXO + a DGB fee UTXO. send 4000 -> ddChange 0 (no DD change out) ----
+    BRWallet *wExact = BRWalletNew(NULL, 0, mpk84);
+    ck(wExact != NULL, "wExact created");
+    BRWalletSetTaprootKey(wExact, mpk86);
+    BRAddress taE = BRWalletReceiveAddress(wExact, 2);
+    uint8_t spkE[64]; size_t spkELen = BRAddressScriptPubKey(spkE, sizeof(spkE), taE.s);
+    UInt256 h5; memset(h5.u8, 0x55, 32);
+    BRTransaction *ddCreditExact = ddTx(spkE, spkELen, 4000, h5, 0);
+    ddCreditExact->blockHeight = 700000;
+    finalizeTxHash(ddCreditExact);
+    BRWalletRegisterTransaction(wExact, ddCreditExact);
+    ck(BRWalletDigiDollarBalance(wExact) == 4000, "wExact setup: DD balance 4000 cents");
+    BRAddress daE = BRWalletReceiveAddress(wExact, 1);
+    uint8_t dspkE[64]; size_t dspkELen = BRAddressScriptPubKey(dspkE, sizeof(dspkE), daE.s);
+    UInt256 h6; memset(h6.u8, 0x66, 32);
+    BRTransaction *dgbCreditExact = BRTransactionNew();
+    dgbCreditExact->version = 1;
+    BRTransactionAddInput(dgbCreditExact, h6, 0, 0, dspkE, dspkELen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
+    BRTransactionAddOutput(dgbCreditExact, 100000000, dspkE, dspkELen);
+    dgbCreditExact->blockHeight = 700000;
+    finalizeTxHash(dgbCreditExact);
+    BRWalletRegisterTransaction(wExact, dgbCreditExact);
+    ck(BRWalletBalance(wExact) == 100000000, "wExact setup: DGB balance 1 DGB");
+
+    // exact-change: hold exactly 4000c, send 4000 -> ddChange 0 -> NO DD change output (vout1 is OP_RETURN or DGB change)
+    BRTransaction *te = BRWalletCreateDigiDollarTransfer(wExact, rk, 4000);
+    ck(te != NULL, "exact-amount transfer builds");
+    ck(BRDigiDollarDecodeAmounts(te, a, 8) == 1 && a[0] == 4000, "exact: OP_RETURN has ONE amount [4000], no change");
+    BRTransactionFree(te);
+
+    BRWalletFree(wExact);
+    BRWalletFree(wDust);
     BRWalletFree(w);
     printf(g==0?"\nALL PASS\n":"\n%d FAIL\n",g); return g?1:0;
 }
