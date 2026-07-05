@@ -51,6 +51,12 @@ class SendViewModel @Inject constructor(
     private val _addressValid = MutableStateFlow<Boolean?>(null) // null = not yet validated
     val addressValid: StateFlow<Boolean?> = _addressValid.asStateFlow()
 
+    /** Is the current address valid as a DigiDollar (TD…) address? Computed
+     *  alongside [addressValid] since SendScreen reuses one address field
+     *  for both DGB and DD send modes. */
+    private val _ddAddressValid = MutableStateFlow<Boolean?>(null) // null = not yet validated
+    val ddAddressValid: StateFlow<Boolean?> = _ddAddressValid.asStateFlow()
+
     /** Amount in DGB (user text input). */
     val amountDgb = MutableStateFlow("")
 
@@ -112,6 +118,8 @@ class SendViewModel @Inject constructor(
         address.value = value.trim()
         _addressValid.value = if (value.isBlank()) null
                               else NativeBridge.isValidAddress(value.trim())
+        _ddAddressValid.value = if (value.isBlank()) null
+                              else runCatching { NativeBridge.isValidDigiDollarAddress(value.trim()) }.getOrDefault(false)
         _validationError.value = null
     }
 
