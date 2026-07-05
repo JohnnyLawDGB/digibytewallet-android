@@ -437,6 +437,7 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidDigiDollarAddress(JNIEnv *env, 
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents) {
     (void)thiz;
+    PEER_GUARD(); /* serialize g_peerManager access (v3.7.1 UAF fix); auto-releases on any return */
     if (! g_wallet || ! g_peerManager) { LOGW("sendDigiDollar: wallet/peerManager not ready"); return NULL; }
     if (! seed_is_valid()) { LOGW("sendDigiDollar: session locked (no seed)"); return NULL; }
     if (! tdAddress || cents <= 0) return NULL;
