@@ -585,9 +585,15 @@ DD token output (any):                    51 20 <32-byte x-only key>   (nValue 0
    whether a transfer with a `1..99` cent remainder is rejected by consensus (as strict `inputDD ==
    outputDD` at `validation.cpp:1234` implies) or whether some node-side tolerance exists. Until
    confirmed, our SEND enforces exact conservation and never drops dust.
-2. **⚠️ DD address string round-trip.** No real DD address exists in-tree. Confirm testnet26 addresses
-   are Base58Check `TD...` (prefix `{0xb1,0x29}`), the exact length/charset, and that no wire/consensus
-   surface expects the `dd1...` bech32 form. Reject bech32 recipients until confirmed.
+2. **✅ DD address format — RESOLVED (2026-07-05) against a real testnet26 address.** `getdigidollaraddress`
+   on a v9.26.3 node returns `TD2z1nkvxPfrny6TNBnukvzrK1kGGens8Ds4NNLWUrFPc6H8ZXoC` — Base58Check, 38 bytes
+   = 2-byte version `b1 29` ("TD" testnet, exactly §4) + 32-byte taproot output key
+   (`dcea6096993f4781402e763c9d360979c3cf66a43818c95b9087f088cf62631b`) + 4-byte double-SHA256 checksum
+   (verified). `validateaddress` REJECTS it (DD-specific encoding, not a standard address); the node's
+   `getdigidollarbalance "TD…"` accepts it. **SEND decoder:** base58check-decode → verify version
+   (`b129` testnet / `5285` mainnet "DD") → extract the 32-byte key → emit `51 20 <key>` at value 0
+   **verbatim, no re-tweak** (§3.1). The on-chain output then renders as `dgbt1p…` bech32m P2TR. No `dd1…`
+   bech32 form is used on the send path. **SEND recipient-parsing is unblocked.**
 3. **✅ Fee-input sighash — SOURCE-RESOLVED (no longer a testnet26 blocker).** Core remaps
    `SIGHASH_DEFAULT`→`SIGHASH_ALL` for BASE/WITNESS_V0 at `script/sign.cpp:51-52`, so P2WPKH fee
    witnesses carry `0x01` on-chain. Sign our P2WPKH fee inputs with SIGHASH_ALL. No live tx needed.
