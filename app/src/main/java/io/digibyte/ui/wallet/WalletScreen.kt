@@ -50,6 +50,7 @@ fun WalletScreen(
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
+    val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
@@ -97,6 +98,8 @@ fun WalletScreen(
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
                         dgbAmount = WalletViewModel.formatSatoshis(balance),
+                        ddAmount = if (ddBalance > 0L)
+                            WalletViewModel.formatDigiDollar(ddBalance) else null,
                         isSynced = syncState is SyncState.Complete,
                         onFiatTap = { viewModel.cycleCurrency() }
                     )
