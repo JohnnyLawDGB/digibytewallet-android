@@ -570,6 +570,17 @@ Java_io_digibyte_core_bridge_NativeBridge_getBalance(JNIEnv *env, jobject thiz) 
     return (jlong)BRWalletBalance(g_wallet);
 }
 
+/* ---------- getDigiDollarBalance (cents) ---------- */
+
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getDigiDollarBalance(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    if (!g_wallet) return 0;
+    return (jlong)BRWalletDigiDollarBalance(g_wallet);
+}
+
 /* ---------- isWalletLoaded ---------- */
 
 JNIEXPORT jboolean JNICALL

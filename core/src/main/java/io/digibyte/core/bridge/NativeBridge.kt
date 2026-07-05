@@ -45,6 +45,9 @@ object NativeBridge {
     /** Get current wallet balance in satoshis. */
     external fun getBalance(): Long
 
+    /** Get current DigiDollar balance in cents (USD). 0 if none. */
+    external fun getDigiDollarBalance(): Long
+
     // === Transaction operations ===
     /** Create an unsigned transaction. Returns serialized tx bytes or null on failure. */
     external fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?

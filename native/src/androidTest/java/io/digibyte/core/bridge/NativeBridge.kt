@@ -17,6 +17,7 @@ object NativeBridge {
     external fun getReceiveAddress(index: Int, format: Int): String?
     external fun getChangeAddress(index: Int, format: Int): String?
     external fun getBalance(): Long
+    external fun getDigiDollarBalance(): Long
     external fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?
     external fun signTransaction(unsignedTx: ByteArray): ByteArray?
     external fun publishTransaction(signedTx: ByteArray): String?
