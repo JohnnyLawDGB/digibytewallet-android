@@ -58,6 +58,13 @@ object NativeBridge {
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
     external fun publishTransaction(signedTx: ByteArray): String?
 
+    /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.
+     *  Returns the txid on success, or null on any failure (bad address, insufficient DD/DGB, sign/broadcast). */
+    external fun sendDigiDollar(tdAddress: String, cents: Long): String?
+
+    /** True if `addr` is a valid DigiDollar address for the current network (TD… testnet / DD… mainnet). */
+    external fun isValidDigiDollarAddress(addr: String): Boolean
+
     // === Dandelion++ broadcast-origin privacy ===
     /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
      *  successful stem, or null if no capable peer was available (caller floods via

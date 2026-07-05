@@ -21,6 +21,8 @@ object NativeBridge {
     external fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?
     external fun signTransaction(unsignedTx: ByteArray): ByteArray?
     external fun publishTransaction(signedTx: ByteArray): String?
+    external fun sendDigiDollar(tdAddress: String, cents: Long): String?
+    external fun isValidDigiDollarAddress(addr: String): Boolean
     external fun getEstimatedFee(priority: Int): Long
     external fun setSocksProxy(host: String, port: Int)
     external fun clearSocksProxy()
