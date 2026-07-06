@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.isTestnet
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.delay
 
@@ -51,6 +52,15 @@ class SyncWorker @AssistedInject constructor(
     }
 
     private fun fetchBloomPeers() {
+        if (isTestnet(applicationContext)) {
+            // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
+            // only knows mainnet peers. The native startSync() path (and
+            // SyncService.injectTestnetPeers()) already handle testnet26 peer
+            // discovery via the hardcoded peers + refreshed testnet DNS
+            // seeds; this background catch-up worker just calls startSync()
+            // without hitting the mainnet seeder.
+            return
+        }
         val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
         val cachedJson = prefs.getString("peers_json", null)
         val lastFetch = prefs.getLong("last_fetch", 0L)

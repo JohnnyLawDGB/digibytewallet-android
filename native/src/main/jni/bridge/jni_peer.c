@@ -306,6 +306,22 @@ static size_t g_savedPeersCount = 0;
  * falls back to holding ~1 filter peer by chance. */
 #define PRIORITY_PEER_SERVICES   (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM | SERVICES_NODE_COMPACT_FILTERS)
 
+/* testnet26 has no mainnet-shaped seeder infra (api.digiscope.me only knows
+ * mainnet peers), so on testnet these two hardcoded public testnet26 nodes
+ * stand in for the digiscope.me priority peer below — same mechanism, same
+ * reliability guarantee (always in the pool even if DNS seeds are sparse).
+ * Their BIP157/158 filter-capability isn't verified, so they're tagged with
+ * the generic default services rather than assumed compact-filter-capable;
+ * the refreshed testnet DNS seeds (BRTestNetParams) supply the rest of the
+ * pool. */
+#define TESTNET_PRIORITY_PEER_PORT  12033
+static const char *TESTNET_PRIORITY_PEER_IPS[] = {
+    "164.68.98.125",
+    "129.212.182.152",
+};
+#define TESTNET_PRIORITY_PEER_COUNT \
+    (sizeof(TESTNET_PRIORITY_PEER_IPS) / sizeof(TESTNET_PRIORITY_PEER_IPS[0]))
+
 /**
  * Resolve a hostname and prepend it to g_savedPeers so the peer manager
  * tries it first. Uses a recent timestamp so it sorts to the top.
@@ -474,14 +490,27 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         return;
     }
 
-    /* Resolve the digiscope.me priority peer BEFORE taking the lock.
+    /* Resolve the priority peer(s) BEFORE taking the lock.
      * getaddrinfo can block for the DNS resolver timeout on a flaky network —
      * exactly when reconnect fires — and the peer lock is contended by reads
      * such as getPeerCount() that run on the main thread. Holding the lock
      * across DNS would turn a brief read into an ANR. Resolution touches no
-     * shared state, so it is safe unlocked; the prepend below is under the lock. */
+     * shared state, so it is safe unlocked; the prepend below is under the lock.
+     *
+     * Mainnet resolves the digiscope.me hostname (unchanged). Testnet resolves
+     * the two hardcoded testnet26 IP-literal peers instead — no mainnet
+     * seeder/hostname involved at all when BRNetworkIsTestnet(). */
     UInt128 prioAddr = UINT128_ZERO;
-    int havePrio = _resolveHostToAddr("digiscope.me", &prioAddr);
+    int havePrio = 0;
+    UInt128 testnetPrioAddr[TESTNET_PRIORITY_PEER_COUNT];
+    int haveTestnetPrio[TESTNET_PRIORITY_PEER_COUNT];
+    if (BRNetworkIsTestnet()) {
+        for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
+            haveTestnetPrio[i] = _resolveHostToAddr(TESTNET_PRIORITY_PEER_IPS[i], &testnetPrioAddr[i]);
+        }
+    } else {
+        havePrio = _resolveHostToAddr("digiscope.me", &prioAddr);
+    }
 
     PEER_GUARD();
 
@@ -526,12 +555,23 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             return;
         }
 
-        /* Prepend digiscope.me (resolved above, before the lock) so a
-         * bloom-filter-enabled node is always in the pool, even if DNS seeds
-         * aren't re-queried. It is a BIP157/158 filter node, so tag it
-         * compact-filter-capable — otherwise BRPeerManager's filter-first
-         * selection can't pick it and the wallet holds ~1 filter peer. */
-        if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
+        /* Prepend the priority peer(s) (resolved above, before the lock) so a
+         * reliable node is always in the pool, even if DNS seeds aren't
+         * re-queried.
+         * Mainnet: digiscope.me — it is a BIP157/158 filter node, so tag it
+         * compact-filter-capable, otherwise BRPeerManager's filter-first
+         * selection can't pick it and the wallet holds ~1 filter peer.
+         * Testnet: the two hardcoded testnet26 peers in place of digiscope.me
+         * — no mainnet seeder/priority-peer path is touched on testnet. */
+        if (BRNetworkIsTestnet()) {
+            for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
+                if (haveTestnetPrio[i]) {
+                    _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, INJECT_DEFAULT_SERVICES);
+                }
+            }
+        } else {
+            if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
+        }
 
         /* Create peer manager for the active network (mainnet by default;
          * testnet when BRSetNetwork(1) was called at core init).

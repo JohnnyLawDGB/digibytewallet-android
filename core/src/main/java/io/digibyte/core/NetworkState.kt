@@ -29,8 +29,10 @@ import android.content.Context
 private const val NETWORK_SETTINGS_PREFS = "dgb_settings"
 private const val KEY_NETWORK_TESTNET = "dgb_network_testnet"
 
+/** `true` when the persisted network selection is testnet, else `false` (mainnet default). */
+fun isTestnet(context: Context): Boolean =
+    context.getSharedPreferences(NETWORK_SETTINGS_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(KEY_NETWORK_TESTNET, false)
+
 /** `"_testnet"` when the persisted network selection is testnet, else `""`. */
-fun networkSuffix(context: Context): String =
-    if (context.getSharedPreferences(NETWORK_SETTINGS_PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_NETWORK_TESTNET, false)
-    ) "_testnet" else ""
+fun networkSuffix(context: Context): String = if (isTestnet(context)) "_testnet" else ""

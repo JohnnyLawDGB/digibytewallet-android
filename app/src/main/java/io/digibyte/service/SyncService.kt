@@ -18,6 +18,7 @@ import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.PeerEntity
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.isTestnet
 import io.digibyte.core.networkSuffix
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
@@ -1187,6 +1188,17 @@ class SyncService : Service() {
      *      session is still usable.
      */
     private fun injectBloomPeers() {
+        if (isTestnet(this@SyncService)) {
+            // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
+            // only knows mainnet peers, so the mainnet bloom-pool fetch AND the
+            // Dandelion-capable-peer fetch (also served from that same seeder)
+            // are both skipped entirely on testnet. Inject the two hardcoded
+            // testnet26 peers instead; the refreshed testnet DNS seeds
+            // (BRTestNetParams, native) supply the rest of the pool. The
+            // mainnet branch below is unreached here and therefore unchanged.
+            injectTestnetPeers()
+            return
+        }
         // Dandelion peers piggyback here so they're injected at every sync-start
         // path (all of them call injectBloomPeers). Runs first so bloom's early
         // returns can't skip it; self-throttled by its own last_fetch timer.
@@ -1243,6 +1255,21 @@ class SyncService : Service() {
         android.util.Log.i(
             "SyncService",
             "Injected $batchSize peers (cursor $cursor→$newCursor, pool=${pool.size})"
+        )
+    }
+
+    /** Inject the two hardcoded testnet26 peers (no seeder involved — testnet26
+     *  has no mainnet-shaped seeder infra). services=0 lets the native side
+     *  fall back to its generic default (NODE_NETWORK|NODE_BLOOM); these
+     *  nodes' BIP157/158 filter-capability isn't verified so they aren't
+     *  tagged compact-filter-capable. */
+    private fun injectTestnetPeers() {
+        for (ip in TESTNET_PRIORITY_PEERS) {
+            NativeBridge.injectPeerByIp(ip, TESTNET_PRIORITY_PEER_PORT, 0L)
+        }
+        android.util.Log.i(
+            "SyncService",
+            "Testnet26: injected ${TESTNET_PRIORITY_PEERS.size} hardcoded peer(s)"
         )
     }
 
@@ -1546,8 +1573,20 @@ class SyncService : Service() {
         /** Capability-aware seeder API. Returns filter-capable peers when available,
          *  falling through to bloom-capable peers when not. The wallet's existing
          *  parser ignores the extra per-peer fields (peer_capability, capabilities,
-         *  services_hex, etc.) since it only reads ip + port. */
+         *  services_hex, etc.) since it only reads ip + port.
+         *  MAINNET ONLY — api.digiscope.me knows nothing about testnet26 peers.
+         *  Never fetched when [io.digibyte.core.isTestnet] is true; see
+         *  [injectBloomPeers]. */
         private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
+        /** Hardcoded testnet26 public peers injected in place of the mainnet
+         *  digiscope seeder pool when the wallet is running on testnet. The
+         *  native startSync() path also prepends these as the cold-start
+         *  priority peer(s) (mirroring digiscope.me on mainnet); re-injecting
+         *  them here on every reconnect attempt additionally adds them to an
+         *  already-live peer manager's candidate pool (see
+         *  NativeBridge.injectPeerByIp), same as the mainnet bloom pool does. */
+        private val TESTNET_PRIORITY_PEERS = listOf("164.68.98.125", "129.212.182.152")
+        private const val TESTNET_PRIORITY_PEER_PORT = 12033
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** How many peers to inject per call. The C peer manager caps its
