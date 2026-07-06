@@ -7,6 +7,7 @@ package io.digibyte.core.bridge
 object NativeBridge {
     init { System.loadLibrary("core-lib") }
 
+    external fun setNetwork(isTestnet: Boolean)
     external fun generateMnemonic(entropyBits: Int): String?
     external fun createWallet(phrase: String): Boolean
     external fun recoverWallet(phrase: String, creationTimestamp: Long): Boolean

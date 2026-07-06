@@ -7,6 +7,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.memory.MemoryCache
 import dagger.hilt.android.HiltAndroidApp
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.ipfs.IpfsClient
 import io.digibyte.service.SyncWorker
 import io.digibyte.ui.asset.IpfsCacheKeyer
@@ -33,7 +34,30 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        applyNetworkSelection()
         scheduleBackgroundSync()
+    }
+
+    /**
+     * Runtime mainnet/testnet selection. MUST run before anything that could
+     * create the native wallet or peer manager — BRSetNetwork() picks the
+     * chain params + address version bytes that BRWallet/BRPeerManager
+     * creation (and address derivation) consult afterward. Application
+     * .onCreate() is the earliest point in the process: it always runs
+     * before the first Activity/Service is created and before any
+     * Hilt-injected class (WalletManager, SyncService, the onboarding/unlock
+     * ViewModels) can call into NativeBridge.
+     *
+     * Reads `dgb_settings` — the network-independent settings store (also
+     * home to sync_mode / cf_birth_height) — NOT a per-network prefs file,
+     * since the network itself hasn't been selected yet at this point.
+     * Defaults to false (mainnet) so installs that never set this pref (i.e.
+     * everyone today) are behavior-identical to before this toggle existed.
+     */
+    private fun applyNetworkSelection() {
+        val settingsPrefs = getSharedPreferences("dgb_settings", MODE_PRIVATE)
+        val isTestnet = settingsPrefs.getBoolean("dgb_network_testnet", false)
+        NativeBridge.setNetwork(isTestnet)
     }
 
     /**

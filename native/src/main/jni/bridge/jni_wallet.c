@@ -8,6 +8,7 @@
  */
 
 #include "jni_bridge.h"
+#include "BRNetwork.h"
 
 /* ---------- Global state definitions ---------- */
 
@@ -120,6 +121,22 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidMnemonic(JNIEnv *env, jobject t
     int valid = BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars);
     (*env)->ReleaseStringUTFChars(env, phrase, phraseChars);
     return valid ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ---------- setNetwork ----------
+ * Runtime mainnet/testnet selection. MUST be called before any wallet or
+ * peer-manager creation — BRSetNetwork() flips the process-global consulted
+ * by BRAddress/BRKey (address version bytes) and by the peer-manager's
+ * BRChainParams selection (jni_peer.c). Defaults to mainnet (isTestnet=0)
+ * inside the C core itself (BRNetwork.c g_isTestnet = 0), so an app that
+ * never calls this — or calls it with false — behaves exactly as before this
+ * function existed. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setNetwork(JNIEnv *env, jobject thiz, jboolean isTestnet) {
+    (void)env;
+    (void)thiz;
+    BRSetNetwork(isTestnet ? 1 : 0);
+    LOGI("setNetwork: isTestnet=%d", isTestnet ? 1 : 0);
 }
 
 /* ---------- createWallet ---------- */

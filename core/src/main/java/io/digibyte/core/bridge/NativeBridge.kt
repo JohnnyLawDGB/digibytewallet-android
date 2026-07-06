@@ -8,6 +8,14 @@ package io.digibyte.core.bridge
 object NativeBridge {
     init { System.loadLibrary("core-lib") }
 
+    // === Network selection ===
+    /** Runtime mainnet/testnet selection. MUST be called before any wallet or
+     *  peer-manager creation (BRSetNetwork selects chain params + address
+     *  encoding). Default is mainnet (false) — the C core itself defaults to
+     *  mainnet even if this is never called, so existing behavior is
+     *  unchanged unless the caller explicitly passes true. */
+    external fun setNetwork(isTestnet: Boolean)
+
     // === Wallet operations ===
     /** Generate BIP39 mnemonic. entropyBits: 128 = 12 words, 256 = 24 words */
     external fun generateMnemonic(entropyBits: Int): String?
