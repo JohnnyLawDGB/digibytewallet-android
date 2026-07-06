@@ -85,6 +85,7 @@ static inline void _peerManagerUnlock(int *guard) {
 int seed_is_valid(void);
 int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId);
 int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index);
+int seed_derive_path_key(BRKey *outKey, const uint32_t *path, size_t depth);
 void seed_zero(void);
 
 /* Master public key — derived once from seed */
