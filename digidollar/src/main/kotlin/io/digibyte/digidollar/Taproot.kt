@@ -111,7 +111,7 @@ object Taproot {
             sibling,
         )
         val nums = COLLATERAL_NUMS_KEY.hexToByteArray()
-        val tweaked = ecOps.xonlyTweakAdd(nums, taggedHash("TapTweak", nums + root))
+        val tweaked = ecOps.checkedTweakAdd(nums, taggedHash("TapTweak", nums + root))
         val parity = tweaked[0].toInt()
         return (byteArrayOf((LEAF_VERSION or parity).toByte()) + nums + sibling).toHex()
     }
@@ -131,7 +131,7 @@ object Taproot {
             tapLeafHash(errLeafScript(lockHeight, ddCents, ownerKeyHex)),
         )
         val nums = COLLATERAL_NUMS_KEY.hexToByteArray()
-        val tweaked = ecOps.xonlyTweakAdd(nums, taggedHash("TapTweak", nums + root))
+        val tweaked = ecOps.checkedTweakAdd(nums, taggedHash("TapTweak", nums + root))
         return tweaked.copyOfRange(1, 33).toHex()
     }
 
@@ -144,7 +144,7 @@ object Taproot {
     fun ddTokenOutputKey(ownerKeyHex: String, ecOps: EcOps): String {
         val ownerKey = ownerKeyHex.hexToByteArray()
         require(ownerKey.size == 32) { "Owner key must be 32 bytes" }
-        val tweaked = ecOps.xonlyTweakAdd(ownerKey, taggedHash("TapTweak", ownerKey))
+        val tweaked = ecOps.checkedTweakAdd(ownerKey, taggedHash("TapTweak", ownerKey))
         return tweaked.copyOfRange(1, 33).toHex()
     }
 
@@ -163,6 +163,16 @@ object Taproot {
         sha.update(tagHash)
         sha.update(msg)
         return sha.digest()
+    }
+
+    /** Enforce the EcOps contract on results an implementation hands back:
+     *  exactly a parity byte (0/1) followed by the 32-byte x coordinate. */
+    private fun EcOps.checkedTweakAdd(xonlyKey: ByteArray, tweak: ByteArray): ByteArray {
+        val out = xonlyTweakAdd(xonlyKey, tweak)
+        require(out.size == 33 && out[0].toInt() in 0..1) {
+            "EcOps.xonlyTweakAdd must return parity(0/1) + 32-byte x, got ${out.size} bytes"
+        }
+        return out
     }
 
     private fun compareLexicographic(a: ByteArray, b: ByteArray): Int {

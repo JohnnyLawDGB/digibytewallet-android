@@ -21,6 +21,12 @@ object MintBuilder {
     /** Default Mint fee: 0.119 DGB (above the 0.1 DGB DigiDollar floor). */
     const val DEFAULT_FEE_SATS = 11_900_000L
 
+    /** Change below 0.001 DGB is folded into the fee instead of creating a
+     *  near-dust output — mirrors the digidollar-js reference (txbuild.js
+     *  CHANGE_FOLD_SATS): negligible value, guaranteed dust under any DGB
+     *  dust policy. */
+    const val CHANGE_FOLD_SATS = 100_000L
+
     /** The coin funding a Mint. */
     data class FundingUtxo(val txidHex: String, val vout: Int, val valueSats: Long)
 
@@ -63,11 +69,12 @@ object MintBuilder {
             oraclePriceMicroUsd = oraclePriceMicroUsd,
             dcaMultiplierBps = dcaMultiplierBps,
         )
-        val changeSats = fundingUtxo.valueSats - collateralSats - feeSats
-        require(changeSats >= 0) {
+        val rawChangeSats = fundingUtxo.valueSats - collateralSats - feeSats
+        require(rawChangeSats >= 0) {
             "funding (${fundingUtxo.valueSats} sats) cannot cover Collateral " +
                 "($collateralSats) + fee ($feeSats)"
         }
+        val changeSats = if (rawChangeSats < CHANGE_FOLD_SATS) 0 else rawChangeSats
 
         val unlockHeight = tipHeight + 1 + LOCK_CONFIRMATION_BUFFER_BLOCKS + tier.lockBlocks
 

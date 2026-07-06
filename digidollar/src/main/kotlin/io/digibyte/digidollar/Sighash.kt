@@ -41,6 +41,10 @@ object Sighash {
             ByteBuilder().also { b ->
                 for (p in prevouts) {
                     val spk = p.scriptPubKeyHex.hexToByteArray()
+                    // Mirrors core 1e32565: a missing prevout script is an
+                    // error, but a ZERO amount is legitimate — DigiDollar
+                    // token inputs are genuine zero-satoshi P2TR.
+                    require(spk.isNotEmpty()) { "missing prevout scriptPubKey" }
                     b.varInt(spk.size.toLong())
                     b.bytes(spk)
                 }

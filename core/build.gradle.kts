@@ -44,6 +44,7 @@ ksp {
 
 dependencies {
     implementation(project(":native"))
+    api(project(":digidollar")) // pure-JVM DigiDollar protocol layer (EcOps seam wired here)
 
     // Room + SQLCipher
     val roomVersion = "2.7.1"

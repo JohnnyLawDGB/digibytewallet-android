@@ -69,7 +69,7 @@ class SighashTest {
 
     @Test
     fun `script-path digest verifies the Core signature with the untweaked Owner key`() {
-        val meta = MintMetadata.parse(
+        val meta = CrossCheckParse.mint(
             redeemMint.getJSONArray("vout").getJSONObject(2)
                 .getJSONObject("scriptPubKey").getString("hex"),
         )

@@ -19,7 +19,7 @@ class TaprootTest {
         val redeem = fixture("redeem-tx.json")
         val witness = redeem.getJSONArray("vin").getJSONObject(0)
             .getJSONArray("txinwitness")
-        val mintMeta = MintMetadata.parse(
+        val mintMeta = CrossCheckParse.mint(
             fixture("redeem-mint-tx.json").getJSONArray("vout").getJSONObject(2)
                 .getJSONObject("scriptPubKey").getString("hex"),
         )
@@ -40,7 +40,7 @@ class TaprootTest {
         val redeem = fixture("redeem-tx.json")
         val witness = redeem.getJSONArray("vin").getJSONObject(0)
             .getJSONArray("txinwitness")
-        val mintMeta = MintMetadata.parse(
+        val mintMeta = CrossCheckParse.mint(
             fixture("redeem-mint-tx.json").getJSONArray("vout").getJSONObject(2)
                 .getJSONObject("scriptPubKey").getString("hex"),
         )
@@ -61,7 +61,7 @@ class TaprootTest {
         for (name in listOf("mint-tx.json", "redeem-mint-tx.json")) {
             val mint = fixture(name)
             val vouts = mint.getJSONArray("vout")
-            val meta = MintMetadata.parse(
+            val meta = CrossCheckParse.mint(
                 vouts.getJSONObject(2).getJSONObject("scriptPubKey").getString("hex"),
             )
 

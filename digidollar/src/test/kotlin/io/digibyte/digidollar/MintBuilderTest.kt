@@ -21,7 +21,7 @@ class MintBuilderTest {
     @Test
     fun `unsigned Mint build matches the witness-stripped Core fixture`() {
         val mint = fixture("mint-tx.json")
-        val meta = MintMetadata.parse(
+        val meta = CrossCheckParse.mint(
             mint.getJSONArray("vout").getJSONObject(2)
                 .getJSONObject("scriptPubKey").getString("hex"),
         )
@@ -88,6 +88,45 @@ class MintBuilderTest {
         // 1,000 sats cannot cover a $100 mint's collateral.
         assertFailsWith<IllegalArgumentException> {
             base(10_000, MintBuilder.FundingUtxo("00".repeat(32), 0, 1_000))
+        }
+    }
+
+    // digidollar-js parity: change under 0.001 DGB never becomes an output —
+    // it folds into the fee, and the change vout is omitted entirely.
+    @Test
+    fun `near-dust change folds into the fee instead of creating an output`() {
+        val collateral = Collateral.requiredSats(
+            ddCents = 10_000,
+            tier = LockTiers.byIndex(3),
+            oraclePriceMicroUsd = 13_420,
+        )
+        val built = MintBuilder.buildUnsigned(
+            fundingUtxo = MintBuilder.FundingUtxo(
+                "00".repeat(32),
+                0,
+                collateral + MintBuilder.DEFAULT_FEE_SATS + MintBuilder.CHANGE_FOLD_SATS - 1,
+            ),
+            ddCents = 10_000,
+            tier = LockTiers.byIndex(3),
+            oraclePriceMicroUsd = 13_420,
+            tipHeight = 651,
+            feeSats = MintBuilder.DEFAULT_FEE_SATS,
+            ownerKeyHex = "c20a139635a064cbfb7ee7c8f1d4362de68f5d6b02e8cf1f6906f0c0e760c034",
+            changePubKeyHash160Hex = "73123cca91a2700b75fc7191b62351742c4bf8dd",
+            ecOps = BouncyCastleEcOps,
+        )
+        assertEquals(0, built.changeSats)
+        assertEquals(3, built.tx.outputs.size) // collateral, DD token, OP_RETURN — no change vout
+    }
+
+    @Test
+    fun `a malformed EcOps result is rejected, not silently mis-sliced`() {
+        val truncatingEcOps = EcOps { key, _ -> key } // 32 bytes, no parity byte
+        assertFailsWith<IllegalArgumentException> {
+            Taproot.ddTokenOutputKey(
+                "c20a139635a064cbfb7ee7c8f1d4362de68f5d6b02e8cf1f6906f0c0e760c034",
+                truncatingEcOps,
+            )
         }
     }
 }
