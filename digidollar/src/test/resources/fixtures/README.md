@@ -17,6 +17,7 @@ authority: byte-parity against these fixtures is this module's release gate
 | `transfer-tx.json` | Transfer: $30 to recipient + $70 DigiDollar change |
 | `redeem-mint-tx.json` | Mint at tier 0 (1 hour) — tier index encoded as empty CScriptNum push |
 | `redeem-tx.json` | Redemption of that Mint: exact burn, **no OP_RETURN**, script-path spend |
+| `spend-tx.json` | Ordinary (non-DigiDollar) P2WPKH spend, nVersion 2 — the negative control for envelope detection |
 
 ## Address-field caveat
 

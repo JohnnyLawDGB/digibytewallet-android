@@ -23,4 +23,9 @@ kotlin { jvmToolchain(17) }
 dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
+    // Fixture JSON parsing in tests only.
+    testImplementation("org.json:json:20240303")
+    // JVM secp256k1 point math for the EcOps test double — production uses
+    // the native signer via NativeBridge (ADR-0001); main source stays EC-free.
+    testImplementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 }
