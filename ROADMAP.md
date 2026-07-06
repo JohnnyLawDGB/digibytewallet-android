@@ -401,6 +401,21 @@ rework. Each item here is sized as an independent increment.
   code (`core/…/asset/AssetManager.kt:44`) gets its send path finished.
   Design spec already exists at
   `docs/superpowers/specs/2026-04-03-digiasset-send-design.md`.
+- **DigiDollar (started 2026-07, ahead of Phase 2 completion by explicit
+  decision).** DigiByte's USD-pegged stablecoin (Core v9.26.4 softfork;
+  testnet-active, mainnet pending). SPV-native detection (no indexer —
+  the wallet's BIP86 P2TR scripts join the filter-element set), Kotlin
+  transaction construction validated byte-for-byte against the
+  dgb-support differential fixtures, signing kept in the C core behind
+  new Schnorr seed accessors. Upstream shipped Transfer (send/detect/UI,
+  in C) at v3.9.0; the remaining Kotlin-built half is Mint + Redemption,
+  which gate each other (ADR-0003 amendment — Mint without Redemption is
+  a Collateral trap), runtime-gated on softfork status per network. Decisions:
+  `docs/adr/0001..0003`; vocabulary: `CONTEXT.md`. Brings the taproot
+  stack (BIP340/341/342/86, bech32m) into the wallet as a side effect —
+  a prerequisite investment other Phase 3 items can later build on.
+  Parallel infra track: v9.26.4 testnet node + price/status endpoints
+  on digiscope.me. Effort: L.
 
 **Files that change:** many across `app/…/ui/` and `core/…/`. New
 packages for PSBT, multisig, descriptors.
@@ -468,6 +483,7 @@ v3.7.6.
 | Digi-ID | Shipped | Key isolation pending — Phase 2 |
 | Multisig | Not started | Phase 3 (deliberately) |
 | PSBT (BIP 174) | Not started | Phase 3 foundation |
+| DigiDollar (mint/transfer/redeem) | In progress (2026-07) | Phase 3, testnet-gated; mainnet unlock = 4.0.0 |
 | NFC | Not started | Phase 4 |
 | Watch-only (xpub) | Not started | Phase 3 |
 | Coin control | Not started | Phase 3 |
@@ -487,9 +503,9 @@ v3.7.6.
   hardening increments); `X` = minor (feature batches — 3.5→3.6→3.7).
 - **X.0.0** — major. RETIRED trigger: "4.0.0 = BIP157/158 lands" — BIP157/158
   actually shipped inside the 3.5.x line (v3.5.39) without a major bump, so
-  that premise is dead. A new major trigger is an **open decision**: candidates
-  are removal of the legacy bloom path, a true wire-protocol change, or the
-  multisig/PSBT feature line. Until chosen, stay on the 3.X.Y cadence.
+  that premise is dead. DECIDED (2026-07): **4.0.0 = the release that unlocks
+  DigiDollar on mainnet at softfork activation.** Testnet-gated DigiDollar
+  releases ride the 3.9.x+ minor line until then (upstream is at v3.9.0).
 
 ## What this roadmap is not
 

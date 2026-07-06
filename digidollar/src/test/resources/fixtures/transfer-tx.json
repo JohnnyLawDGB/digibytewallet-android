@@ -1,0 +1,91 @@
+{
+    "result": {
+        "txid": "9b3069da419ca4858158a9a5ee78832ec447e6841472286f23120b5e787af7ee",
+        "hash": "4ef531961115b3d406582fa8e7a160136bd861f0a13c0593129a7122c707b04b",
+        "version": 33556336,
+        "size": 364,
+        "vsize": 264,
+        "weight": 1054,
+        "locktime": 0,
+        "digidollar": {
+            "type": "TRANSFER",
+            "type_id": 2,
+            "flags": 0,
+            "flags_hex": "0x00"
+        },
+        "vin": [
+            {
+                "txid": "e9dcc4fc435a17dbde8a837332401f00f4e4da12c268e18d7104702237a4cd55",
+                "vout": 1,
+                "scriptSig": {
+                    "asm": "",
+                    "hex": ""
+                },
+                "txinwitness": [
+                    "6695c4a96708596115bae81cdfdf1cd5ddccc8aa204cbf569223dddeb8bc2afdd882bd49ecc1064196d83692c8df637cf25fcf5f6a1debdd71a1ba5b53da5cc8"
+                ],
+                "sequence": 4294967295
+            },
+            {
+                "txid": "2647661cc0668fa875503494abc7ddb6f810845b29b032889b0eb81c393df571",
+                "vout": 1,
+                "scriptSig": {
+                    "asm": "",
+                    "hex": ""
+                },
+                "txinwitness": [
+                    "bb68a7692b0ddc4000862fc59d08bbe6b4592d7b6b050c40a6917aa738f4759671c167cc6aaa5e61864fb5c5d8c244a5389059007c5f2d5fcd8a16c5fae8df0e"
+                ],
+                "sequence": 4294967295
+            }
+        ],
+        "vout": [
+            {
+                "value": 0.0,
+                "n": 0,
+                "scriptPubKey": {
+                    "asm": "1 0a2791463b6936a1887c8d173dd819225d23945e649a95a74cdf95b022cb93ca",
+                    "desc": "rawtr(0a2791463b6936a1887c8d173dd819225d23945e649a95a74cdf95b022cb93ca)#p22hcmu9",
+                    "hex": "51200a2791463b6936a1887c8d173dd819225d23945e649a95a74cdf95b022cb93ca",
+                    "address": "dgbrt1ppgnez33mdym2rzru35tnmkqeyfwj89z7vjdftf6vm72mqgktj09qfa0hzq",
+                    "type": "witness_v1_taproot"
+                }
+            },
+            {
+                "value": 0.0,
+                "n": 1,
+                "scriptPubKey": {
+                    "asm": "1 0b1869065a47f4d36a8061e10b6942de58a132db1c1c5b5f7c8f7f4909a4d14a",
+                    "desc": "rawtr(0b1869065a47f4d36a8061e10b6942de58a132db1c1c5b5f7c8f7f4909a4d14a)#v88vc6kg",
+                    "hex": "51200b1869065a47f4d36a8061e10b6942de58a132db1c1c5b5f7c8f7f4909a4d14a",
+                    "address": "dgbrt1ppvvxjpj6gl6dx65qv8ssk62zmev2zvkmrsw9khmu3al5jzdy699qlll4as",
+                    "type": "witness_v1_taproot"
+                }
+            },
+            {
+                "value": 14.36990756,
+                "n": 2,
+                "scriptPubKey": {
+                    "asm": "0 8589652f45ebd5ed557f633120688d42fb866b25",
+                    "desc": "addr(dgbrt1qskyk2t69a02764tlvvcjq6ydgtacv6e9nxuw5t)#hg8te7gf",
+                    "hex": "00148589652f45ebd5ed557f633120688d42fb866b25",
+                    "address": "dgbrt1qskyk2t69a02764tlvvcjq6ydgtacv6e9nxuw5t",
+                    "type": "witness_v0_keyhash"
+                }
+            },
+            {
+                "value": 0.0,
+                "n": 3,
+                "scriptPubKey": {
+                    "asm": "OP_RETURN 17476 2 3000 7000",
+                    "desc": "raw(6a024444010202b80b02581b)#whm60tkg",
+                    "hex": "6a024444010202b80b02581b",
+                    "type": "nulldata"
+                }
+            }
+        ],
+        "hex": "7007000200010255cda437227004718de168c212dae4f4001f403273838adedb175a43fcc4dce90100000000ffffffff71f53d391cb80e9b8832b0295b8410f8b6ddc7ab94345075a88f66c01c6647260100000000ffffffff0400000000000000002251200a2791463b6936a1887c8d173dd819225d23945e649a95a74cdf95b022cb93ca00000000000000002251200b1869065a47f4d36a8061e10b6942de58a132db1c1c5b5f7c8f7f4909a4d14a24bda655000000001600148589652f45ebd5ed557f633120688d42fb866b2500000000000000000c6a024444010202b80b02581b01406695c4a96708596115bae81cdfdf1cd5ddccc8aa204cbf569223dddeb8bc2afdd882bd49ecc1064196d83692c8df637cf25fcf5f6a1debdd71a1ba5b53da5cc80140bb68a7692b0ddc4000862fc59d08bbe6b4592d7b6b050c40a6917aa738f4759671c167cc6aaa5e61864fb5c5d8c244a5389059007c5f2d5fcd8a16c5fae8df0e00000000"
+    },
+    "error": null,
+    "id": "t"
+}
