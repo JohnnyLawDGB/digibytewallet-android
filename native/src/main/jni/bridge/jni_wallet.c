@@ -522,6 +522,16 @@ int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index) {
     return 1;
 }
 
+/* Arbitrary-path derivation with the standard "Bitcoin seed" HMAC key.
+ * Used by the DigiDollar taproot signer for BIP86 Owner keys
+ * (m/86'/coin'/account'/chain/index). Apply BIP32_HARD in `path` for
+ * hardened segments. */
+int seed_derive_path_key(BRKey *outKey, const uint32_t *path, size_t depth) {
+    if (!g_seedValid) return 0;
+    BRBIP32PrivKeyArrayPath(outKey, g_seed, sizeof(g_seed), "Bitcoin seed", path, depth);
+    return 1;
+}
+
 void seed_zero(void) {
     secure_zero(g_seed, sizeof(g_seed));
     g_seedValid = 0;
