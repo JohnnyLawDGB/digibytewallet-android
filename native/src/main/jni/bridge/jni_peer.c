@@ -306,16 +306,27 @@ static size_t g_savedPeersCount = 0;
  * falls back to holding ~1 filter peer by chance. */
 #define PRIORITY_PEER_SERVICES   (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM | SERVICES_NODE_COMPACT_FILTERS)
 
+/* testnet26 priority peers serve compact filters, not bloom — tag them
+ * compact-filter-capable (no bloom) so filter-first selection dials them and
+ * the relaxed testnet accept gate keeps them. */
+#define TESTNET_PRIORITY_PEER_SERVICES (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
+
 /* testnet26 has no mainnet-shaped seeder infra (api.digiscope.me only knows
  * mainnet peers), so on testnet these two hardcoded public testnet26 nodes
  * stand in for the digiscope.me priority peer below — same mechanism, same
  * reliability guarantee (always in the pool even if DNS seeds are sparse).
- * Their BIP157/158 filter-capability isn't verified, so they're tagged with
- * the generic default services rather than assumed compact-filter-capable;
- * the refreshed testnet DNS seeds (BRTestNetParams) supply the rest of the
- * pool. */
+ * testnet26 nodes serve BIP157/158 compact filters (NODE_COMPACT_FILTERS)
+ * rather than bloom — bloom is deprecated/off by default on modern Core, so
+ * the SPV core only keeps a testnet peer that serves compact filters (see the
+ * relaxed accept gate in BRPeerManager.c). 95.111.238.51 is a verified
+ * compact-filter testnet26 node (the testnet analog of the mainnet digiscope
+ * filter peer); it is listed first. The other two are kept as connectivity
+ * fallbacks. They are tagged compact-filter-capable so filter-first selection
+ * dials them; the real service bits from each peer's version message govern
+ * retention. */
 #define TESTNET_PRIORITY_PEER_PORT  12033
 static const char *TESTNET_PRIORITY_PEER_IPS[] = {
+    "95.111.238.51",
     "164.68.98.125",
     "129.212.182.152",
 };
@@ -566,7 +577,7 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         if (BRNetworkIsTestnet()) {
             for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
                 if (haveTestnetPrio[i]) {
-                    _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, INJECT_DEFAULT_SERVICES);
+                    _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, TESTNET_PRIORITY_PEER_SERVICES);
                 }
             }
         } else {

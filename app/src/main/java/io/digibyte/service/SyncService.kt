@@ -1258,14 +1258,15 @@ class SyncService : Service() {
         )
     }
 
-    /** Inject the two hardcoded testnet26 peers (no seeder involved — testnet26
-     *  has no mainnet-shaped seeder infra). services=0 lets the native side
-     *  fall back to its generic default (NODE_NETWORK|NODE_BLOOM); these
-     *  nodes' BIP157/158 filter-capability isn't verified so they aren't
-     *  tagged compact-filter-capable. */
+    /** Inject the hardcoded testnet26 peers (no seeder involved — testnet26
+     *  has no mainnet-shaped seeder infra). testnet26 nodes serve BIP157/158
+     *  compact filters, not bloom, so tag them NODE_NETWORK|NODE_COMPACT_FILTERS
+     *  (0x41) — filter-first selection dials them and the relaxed testnet accept
+     *  gate keeps a compact-filter peer even without bloom. 95.111.238.51 is a
+     *  verified compact-filter node (listed first). */
     private fun injectTestnetPeers() {
         for (ip in TESTNET_PRIORITY_PEERS) {
-            NativeBridge.injectPeerByIp(ip, TESTNET_PRIORITY_PEER_PORT, 0L)
+            NativeBridge.injectPeerByIp(ip, TESTNET_PRIORITY_PEER_PORT, TESTNET_PEER_SERVICES)
         }
         android.util.Log.i(
             "SyncService",
@@ -1585,8 +1586,11 @@ class SyncService : Service() {
          *  them here on every reconnect attempt additionally adds them to an
          *  already-live peer manager's candidate pool (see
          *  NativeBridge.injectPeerByIp), same as the mainnet bloom pool does. */
-        private val TESTNET_PRIORITY_PEERS = listOf("164.68.98.125", "129.212.182.152")
+        private val TESTNET_PRIORITY_PEERS = listOf("95.111.238.51", "164.68.98.125", "129.212.182.152")
         private const val TESTNET_PRIORITY_PEER_PORT = 12033
+        /** NODE_NETWORK (0x01) | NODE_COMPACT_FILTERS (0x40) — testnet26 nodes
+         *  serve BIP157/158 filters, not bloom. */
+        private const val TESTNET_PEER_SERVICES = 0x41L
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** How many peers to inject per call. The C peer manager caps its
