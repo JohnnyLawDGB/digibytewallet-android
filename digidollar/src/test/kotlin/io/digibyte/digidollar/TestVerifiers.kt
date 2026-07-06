@@ -7,6 +7,7 @@ import org.bouncycastle.crypto.params.ECPublicKeyParameters
 import org.bouncycastle.crypto.signers.ECDSASigner
 
 /** BIP340 Schnorr verification over BouncyCastle points — tests only. */
+@Suppress("ReturnCount") // verification is guard-clause style by nature
 object TestSchnorr {
 
     private val params = CustomNamedCurves.getByName("secp256k1")
@@ -37,6 +38,7 @@ object TestSchnorr {
 }
 
 /** ECDSA verification (DER, low-level) over BouncyCastle — tests only. */
+@Suppress("ReturnCount") // verification is guard-clause style by nature
 object TestEcdsa {
 
     private val params = CustomNamedCurves.getByName("secp256k1")

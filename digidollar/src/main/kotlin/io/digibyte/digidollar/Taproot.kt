@@ -20,6 +20,7 @@ fun interface EcOps {
  * fixtures (the redeem fixture's witness carries the actual leaf script
  * and control block Core accepted).
  */
+@Suppress("TooManyFunctions") // one cohesive BIP341 surface; splitting hides the structure
 object Taproot {
 
     /** BIP341 NUMS internal key for Collateral outputs — key-path spends
