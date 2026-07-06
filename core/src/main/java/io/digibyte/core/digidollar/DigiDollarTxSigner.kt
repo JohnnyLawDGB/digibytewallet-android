@@ -36,6 +36,7 @@ object DigiDollarTxSigner {
      * [NativeBridge.listWalletUtxos]). Returns the fully-signed tx bytes.
      */
     fun signMint(unsigned: MintBuilder.UnsignedMint, fundingPrevout: TxOutput): ByteArray {
+        requireP2wpkh(fundingPrevout, "Mint funding")
         val bytes = WalletSignerFormat.serialize(unsigned.tx, mapOf(0 to fundingPrevout))
         val signed = checkNotNull(NativeBridge.signTransaction(bytes)) {
             "wallet signer rejected the Mint (locked session or foreign funding input)"
@@ -87,6 +88,7 @@ object DigiDollarTxSigner {
         })
 
         val feeIndex = inputCount - 1
+        requireP2wpkh(unsigned.prevouts[feeIndex], "Redemption fee")
         val bytes = WalletSignerFormat.serialize(
             witnessed,
             mapOf(feeIndex to unsigned.prevouts[feeIndex]),
@@ -96,6 +98,19 @@ object DigiDollarTxSigner {
         }
         checkStrippedParity(unsigned.tx.serialize(), signed)
         return signed
+    }
+
+    /**
+     * The wallet-signed input must be native P2WPKH: legacy P2PKH and
+     * wrapped-segwit UTXOs (which [NativeBridge.listWalletUtxos] can also
+     * return on wallets holding legacy-chain coins) sign with a non-empty
+     * scriptSig and would only fail later at the parity check, looking like
+     * signer corruption. Callers filter their UTXO pick to `0014…` scripts.
+     */
+    private fun requireP2wpkh(prevout: TxOutput, role: String) {
+        require(prevout.scriptPubKeyHex.length == 44 && prevout.scriptPubKeyHex.startsWith("0014")) {
+            "$role input must be a native P2WPKH UTXO (0014…), got: ${prevout.scriptPubKeyHex}"
+        }
     }
 
     /** X-only output key from a `5120…` P2TR prevout script. */
