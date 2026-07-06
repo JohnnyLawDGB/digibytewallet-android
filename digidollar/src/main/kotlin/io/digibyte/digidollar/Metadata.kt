@@ -15,6 +15,22 @@ data class MintMetadata(
     val lockTier: Int,
     val ownerKeyHex: String,
 ) {
+    /** Build this Mint metadata as an OP_RETURN scriptPubKey (hex). */
+    fun build(): String {
+        val ownerKey = ownerKeyHex.hexToByteArray()
+        require(ownerKey.size == 32) { "Owner key must be 32 bytes" }
+        return ScriptPushData.buildOpReturn(
+            listOf(
+                MAGIC,
+                byteArrayOf(DigiDollarTxType.MINT.code.toByte()),
+                ScriptNum.encode(ddCents),
+                ScriptNum.encode(unlockHeight.toLong()),
+                ScriptNum.encode(lockTier.toLong()),
+                ownerKey,
+            ),
+        )
+    }
+
     companion object {
         /** Parse a Mint OP_RETURN scriptPubKey (hex). */
         fun parse(scriptHex: String): MintMetadata {
@@ -37,6 +53,71 @@ data class MintMetadata(
     }
 }
 
+/**
+ * Transfer metadata: one amount per zero-value DigiDollar output, in output
+ * order (recipients first, DigiDollar change last). Consensus pairs the
+ * amounts with the outputs positionally.
+ */
+data class TransferMetadata(val amountsCents: List<Long>) {
+
+    /** Build this Transfer metadata as an OP_RETURN scriptPubKey (hex). */
+    fun build(): String {
+        require(amountsCents.isNotEmpty()) { "at least one DigiDollar amount required" }
+        require(amountsCents.all { it > 0 }) { "DigiDollar amounts must be positive" }
+        val parts = listOf(MAGIC, byteArrayOf(DigiDollarTxType.TRANSFER.code.toByte())) +
+            amountsCents.map { ScriptNum.encode(it) }
+        return ScriptPushData.buildOpReturn(parts)
+    }
+
+    companion object {
+        /** Parse a Transfer OP_RETURN scriptPubKey (hex). */
+        fun parse(scriptHex: String): TransferMetadata {
+            val pushes = ScriptPushData.read(scriptHex)
+            require(pushes.size >= 3 && pushes[0].contentEquals(MAGIC)) {
+                "not a DigiDollar metadata script"
+            }
+            require(pushes[1].size == 1 && pushes[1][0].toInt() == DigiDollarTxType.TRANSFER.code) {
+                "not a Transfer metadata script"
+            }
+            return TransferMetadata(pushes.drop(2).map { ScriptNum.decode(it) })
+        }
+    }
+}
+
+/**
+ * Redemption metadata: the DigiDollar change amount. Present only when a
+ * Redemption burns more DigiDollar than the Mint's amount; exact burns
+ * carry no OP_RETURN at all.
+ */
+data class RedemptionMetadata(val ddChangeCents: Long) {
+
+    /** Build this Redemption metadata as an OP_RETURN scriptPubKey (hex). */
+    fun build(): String {
+        require(ddChangeCents > 0) { "DigiDollar change must be positive" }
+        return ScriptPushData.buildOpReturn(
+            listOf(
+                MAGIC,
+                byteArrayOf(DigiDollarTxType.REDEMPTION.code.toByte()),
+                ScriptNum.encode(ddChangeCents),
+            ),
+        )
+    }
+
+    companion object {
+        /** Parse a Redemption OP_RETURN scriptPubKey (hex). */
+        fun parse(scriptHex: String): RedemptionMetadata {
+            val pushes = ScriptPushData.read(scriptHex)
+            require(pushes.size == 3 && pushes[0].contentEquals(MAGIC)) {
+                "not a DigiDollar metadata script"
+            }
+            require(pushes[1].size == 1 && pushes[1][0].toInt() == DigiDollarTxType.REDEMPTION.code) {
+                "not a Redemption metadata script"
+            }
+            return RedemptionMetadata(ScriptNum.decode(pushes[2]))
+        }
+    }
+}
+
 private val MAGIC = byteArrayOf(0x44, 0x44) // "DD"
 
 /** CScriptNum: minimal signed little-endian, zero = empty. */
@@ -48,6 +129,20 @@ internal object ScriptNum {
             value = (value shl 8) or (bytes[i].toLong() and 0xff)
         }
         return value
+    }
+
+    /** Minimal LE encoding; zero is empty; sign-padded when the top bit is set. */
+    fun encode(value: Long): ByteArray {
+        require(value >= 0) { "negative value" }
+        if (value == 0L) return ByteArray(0)
+        val out = mutableListOf<Byte>()
+        var v = value
+        while (v > 0) {
+            out.add((v and 0xff).toByte())
+            v = v ushr 8
+        }
+        if (out.last().toInt() and 0x80 != 0) out.add(0x00)
+        return out.toByteArray()
     }
 }
 
@@ -69,6 +164,17 @@ internal object ScriptPushData {
             i += 1 + len
         }
         return pushes
+    }
+
+    /** OP_RETURN followed by direct-length pushes of each part, as hex. */
+    fun buildOpReturn(pushes: List<ByteArray>): String {
+        val out = mutableListOf<Byte>(0x6a)
+        for (push in pushes) {
+            require(push.size <= 75) { "push too large for a direct-length opcode" }
+            out.add(push.size.toByte())
+            out.addAll(push.asList())
+        }
+        return out.toByteArray().toHex()
     }
 }
 

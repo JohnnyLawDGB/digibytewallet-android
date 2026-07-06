@@ -1,5 +1,11 @@
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    id("io.gitlab.arturbosch.detekt")
+}
+
+detekt {
+    config.setFrom("$rootDir/config/detekt.yml")
+    buildUponDefaultConfig = true
 }
 
 // Pure-protocol DigiDollar module (ADR-0001): deterministic functions only.
