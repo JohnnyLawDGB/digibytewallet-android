@@ -22,9 +22,9 @@ object MintBuilder {
     const val DEFAULT_FEE_SATS = 11_900_000L
 
     /** Change below 0.001 DGB is folded into the fee instead of creating a
-     *  near-dust output — mirrors the digidollar-js reference (txbuild.js
-     *  CHANGE_FOLD_SATS): negligible value, guaranteed dust under any DGB
-     *  dust policy. */
+     *  near-dust output — the dust policy digidollar-js applies in its
+     *  spend builder (txbuild.js CHANGE_FOLD_SATS), adopted here for every
+     *  builder: negligible value, guaranteed dust under any DGB policy. */
     const val CHANGE_FOLD_SATS = 100_000L
 
     /** The coin funding a Mint. */
