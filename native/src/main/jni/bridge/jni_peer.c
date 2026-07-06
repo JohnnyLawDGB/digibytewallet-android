@@ -9,6 +9,7 @@
 
 #include "jni_bridge.h"
 #include "BRCompactFilterChain.h"
+#include "BRNetwork.h"
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
@@ -532,18 +533,23 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * selection can't pick it and the wallet holds ~1 filter peer. */
         if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
 
-        /* Create peer manager for mainnet.
+        /* Create peer manager for the active network (mainnet by default;
+         * testnet when BRSetNetwork(1) was called at core init).
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
          * peer manager starts syncing from the checkpoint nearest to when the
          * wallet was created — not from BIP39_CREATION_TIME (Dec 2017). */
         uint32_t syncFromTime = g_walletCreationTime ? g_walletCreationTime : (uint32_t)time(NULL);
-        LOGI("startSync: creating peer manager (syncFromTime=%u, savedBlocks=%zu, savedPeers=%zu)",
-             syncFromTime, g_savedBlocksCount, g_savedPeersCount);
-        g_peerManager = BPPeerManagerMainNetNew(g_wallet, syncFromTime,
-                                                 g_savedBlocks, g_savedBlocksCount,
-                                                 g_savedPeers, g_savedPeersCount);
+        LOGI("startSync: creating peer manager (testnet=%d, syncFromTime=%u, savedBlocks=%zu, savedPeers=%zu)",
+             BRNetworkIsTestnet(), syncFromTime, g_savedBlocksCount, g_savedPeersCount);
+        g_peerManager = BRNetworkIsTestnet()
+            ? BPPeerManagerTestNetNew(g_wallet, syncFromTime,
+                                      g_savedBlocks, g_savedBlocksCount,
+                                      g_savedPeers, g_savedPeersCount)
+            : BPPeerManagerMainNetNew(g_wallet, syncFromTime,
+                                      g_savedBlocks, g_savedBlocksCount,
+                                      g_savedPeers, g_savedPeersCount);
         if (!g_peerManager) {
-            LOGE("startSync: BPPeerManagerMainNetNew failed");
+            LOGE("startSync: peer manager creation failed (testnet=%d)", BRNetworkIsTestnet());
             return;
         }
 
@@ -687,7 +693,7 @@ Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv 
     if (!g_wallet || g_walletCreationTime == 0) return 0;
 
     uint32_t result = 0;
-    const BRChainParams *params = &BRMainNetParams;
+    const BRChainParams *params = BRNetworkIsTestnet() ? &BRTestNetParams : &BRMainNetParams;
     for (size_t i = 0; i < params->checkpointsCount; i++) {
         if (i == 0 ||
             params->checkpoints[i].timestamp + 7*24*60*60 < g_walletCreationTime) {
