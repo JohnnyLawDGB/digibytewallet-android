@@ -34,8 +34,12 @@ object Collateral {
     ): Long {
         require(ddCents > 0) { "DigiDollar amount must be positive, got $ddCents" }
         require(oraclePriceMicroUsd > 0) { "Oracle price must be positive, got $oraclePriceMicroUsd" }
+        require(dcaMultiplierBps > 0) { "DCA multiplier must be positive, got $dcaMultiplierBps" }
 
         // Core dca.cpp ApplyDCA: effectiveRatio = ceil(baseRatio * bps / 10000)
+        // UNPROVEN vs Core for bps != 10000: the only Core-anchored vector has
+        // DCA as a no-op (healthy system). Needs a regtest vector with an
+        // unhealthy DCA before mint amounts computed off this path are trusted.
         val effectiveRatio = ceilDiv(
             tier.ratioPercent.toBigInteger() * dcaMultiplierBps.toBigInteger(),
             DCA_BPS_SCALE.toBigInteger(),

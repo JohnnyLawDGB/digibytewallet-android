@@ -13,7 +13,7 @@ class MetadataTest {
 
     @Test
     fun `parses the Core mint fixture OP_RETURN`() {
-        val meta = MintMetadata.parse(mintFixtureScript)
+        val meta = CrossCheckParse.mint(mintFixtureScript)
         assertEquals(10_000, meta.ddCents)
         assertEquals(1_037_552, meta.unlockHeight)
         assertEquals(3, meta.lockTier)
@@ -42,7 +42,7 @@ class MetadataTest {
 
     @Test
     fun `tier zero round-trips through the empty-push encoding`() {
-        val meta = MintMetadata.parse(tierZeroFixtureScript)
+        val meta = CrossCheckParse.mint(tierZeroFixtureScript)
         assertEquals(10_000, meta.ddCents)
         assertEquals(1_064, meta.unlockHeight)
         assertEquals(0, meta.lockTier)
@@ -55,7 +55,7 @@ class MetadataTest {
 
     @Test
     fun `transfer fixture OP_RETURN round-trips with positional amounts`() {
-        val meta = TransferMetadata.parse(transferFixtureScript)
+        val meta = CrossCheckParse.transfer(transferFixtureScript)
         assertEquals(listOf(3_000L, 7_000L), meta.amountsCents)
         assertEquals(transferFixtureScript, meta.build())
     }
@@ -65,7 +65,7 @@ class MetadataTest {
     @Test
     fun `redemption change metadata round-trips and rejects non-positive change`() {
         val meta = RedemptionMetadata(ddChangeCents = 2_500)
-        assertEquals(meta, RedemptionMetadata.parse(meta.build()))
+        assertEquals(meta, CrossCheckParse.redemption(meta.build()))
         assertFailsWith<IllegalArgumentException> {
             RedemptionMetadata(ddChangeCents = 0).build()
         }
@@ -77,7 +77,7 @@ class MetadataTest {
     fun `amounts round-trip across the sign-padding boundaries`() {
         for (cents in listOf(1L, 127L, 128L, 255L, 256L, 32_767L, 32_768L, 8_388_607L, 8_388_608L)) {
             val script = TransferMetadata(listOf(cents)).build()
-            assertEquals(listOf(cents), TransferMetadata.parse(script).amountsCents)
+            assertEquals(listOf(cents), CrossCheckParse.transfer(script).amountsCents)
         }
         assertEquals("6a0244440102017f", TransferMetadata(listOf(127)).build())
         assertEquals("6a024444010202" + "8000", TransferMetadata(listOf(128)).build())
@@ -85,8 +85,33 @@ class MetadataTest {
 
     @Test
     fun `parsers reject scripts of the wrong DigiDollar type`() {
-        assertFailsWith<IllegalArgumentException> { MintMetadata.parse(transferFixtureScript) }
-        assertFailsWith<IllegalArgumentException> { TransferMetadata.parse(mintFixtureScript) }
-        assertFailsWith<IllegalArgumentException> { RedemptionMetadata.parse(mintFixtureScript) }
+        assertFailsWith<IllegalArgumentException> { CrossCheckParse.mint(transferFixtureScript) }
+        assertFailsWith<IllegalArgumentException> { CrossCheckParse.transfer(mintFixtureScript) }
+        assertFailsWith<IllegalArgumentException> { CrossCheckParse.redemption(mintFixtureScript) }
+    }
+
+    // CScriptNum decode conformance (Core rules): 8-byte length bound, sign
+    // bit in the top bit of the last byte, minimal encoding required.
+    @Test
+    fun `decode enforces CScriptNum length, sign, and minimality rules`() {
+        assertEquals(-1L, ScriptNum.decode(byteArrayOf(0x81.toByte())))
+        assertEquals(-129L, ScriptNum.decode(byteArrayOf(0x81.toByte(), 0x80.toByte())))
+        // 9 bytes would silently overflow Long — must throw instead
+        assertFailsWith<IllegalArgumentException> { ScriptNum.decode(ByteArray(9) { 1 }) }
+        // trailing 0x00 without a preceding sign-bit byte is non-minimal
+        assertFailsWith<IllegalArgumentException> { ScriptNum.decode(byteArrayOf(0x01, 0x00)) }
+        // zero is the empty push, never a literal 0x00 byte
+        assertFailsWith<IllegalArgumentException> { ScriptNum.decode(byteArrayOf(0x00)) }
+        // 0x80 0x00 IS minimal (+128 needs the sign-padding byte)
+        assertEquals(128L, ScriptNum.decode(byteArrayOf(0x80.toByte(), 0x00)))
+    }
+
+    @Test
+    fun `mint metadata rejects out-of-range fields at construction`() {
+        val key = "c20a139635a064cbfb7ee7c8f1d4362de68f5d6b02e8cf1f6906f0c0e760c034"
+        assertFailsWith<IllegalArgumentException> { MintMetadata(0, 1_037_552, 3, key) }
+        assertFailsWith<IllegalArgumentException> { MintMetadata(10_000, 0, 3, key) }
+        assertFailsWith<IllegalArgumentException> { MintMetadata(10_000, 1_037_552, 10, key) }
+        assertFailsWith<IllegalArgumentException> { MintMetadata(10_000, 1_037_552, -1, key) }
     }
 }

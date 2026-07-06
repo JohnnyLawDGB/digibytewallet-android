@@ -9,7 +9,7 @@ class EnvelopeTest {
     // nVersion from fixtures/mint-tx.json — a Core-built regtest Mint.
     @Test
     fun `mint fixture nVersion parses as a DigiDollar Mint`() {
-        assertEquals(DigiDollarTxType.MINT, DigiDollarVersion.parse(16779120))
+        assertEquals(DigiDollarTxType.MINT, CrossCheckParse.version(16779120))
     }
 
     // Fixture nVersions: mint-tx.json, transfer-tx.json, redeem-tx.json.
@@ -22,10 +22,10 @@ class EnvelopeTest {
 
     @Test
     fun `plain and malformed nVersions parse as not DigiDollar`() {
-        assertNull(DigiDollarVersion.parse(2)) // ordinary spend (spend-tx.json)
-        assertNull(DigiDollarVersion.parse(1))
-        assertNull(DigiDollarVersion.parse(0x04000770)) // marker but unknown type code
-        assertNull(DigiDollarVersion.parse(0x00000770)) // marker but type code zero
-        assertNull(DigiDollarVersion.parse(0x01000771)) // wrong marker
+        assertNull(CrossCheckParse.version(2)) // ordinary spend (spend-tx.json)
+        assertNull(CrossCheckParse.version(1))
+        assertNull(CrossCheckParse.version(0x04000770)) // marker but unknown type code
+        assertNull(CrossCheckParse.version(0x00000770)) // marker but type code zero
+        assertNull(CrossCheckParse.version(0x01000771)) // wrong marker
     }
 }

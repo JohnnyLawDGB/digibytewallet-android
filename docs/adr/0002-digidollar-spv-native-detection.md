@@ -1,5 +1,15 @@
 # DigiDollar detection is SPV-native; only the Oracle price comes from an API
 
+## Amendment (2026-07, upstream reconciliation)
+
+Confirmed by upstream's implementation: `JohnnyLawDGB/digibytewallet-android` v3.9.0
+ships exactly this shape — DigiDollar detection and balance computation in the C SPV
+layer (nVersion + OP_RETURN parsing on matched transactions), no indexer. One delta from
+the text below: upstream addresses DigiDollar outputs with **Base58Check DD…/TD…/RD…
+addresses encoding the final tweaked output key** (never bech32m, and a decoded DD-address
+key is used as-is — re-tweaking it is a fund-loss bug). Detection remains filter-based and
+address-private either way.
+
 ## Context
 
 The wallet must detect DigiDollar outputs it owns and compute DigiDollar balances and Positions.

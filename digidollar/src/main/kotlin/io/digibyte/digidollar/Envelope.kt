@@ -13,17 +13,14 @@ enum class DigiDollarTxType(val code: Int) {
 /**
  * DigiDollar nVersion envelope: marker 0x0770 in the low 16 bits, tx type in
  * the top byte.
+ *
+ * Build-only: detection/parsing of incoming transactions is the C core's job
+ * (upstream ships a golden-vector-proven decoder). The test source set keeps
+ * a parse cross-check ([CrossCheckParse]) against the Core-built fixtures.
  */
 object DigiDollarVersion {
 
-    private const val MARKER = 0x0770
-
-    /** The DigiDollar tx type of [version], or null if not DigiDollar-marked. */
-    fun parse(version: Int): DigiDollarTxType? {
-        if (version and 0xffff != MARKER) return null
-        val code = (version ushr 24) and 0xff
-        return DigiDollarTxType.entries.firstOrNull { it.code == code }
-    }
+    internal const val MARKER = 0x0770
 
     /** The nVersion for a DigiDollar transaction of the given [type]. */
     fun build(type: DigiDollarTxType): Int = (type.code shl 24) or MARKER

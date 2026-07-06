@@ -8,6 +8,11 @@ package io.digibyte.digidollar
  * Layout: OP_RETURN, push2 "DD" (0x4444), push1 type code, then typed
  * fields. Integers are CScriptNum minimal signed little-endian (zero is an
  * empty push); all pushes are direct-length opcodes (0–75 bytes).
+ *
+ * Build-only: this wallet constructs Mint and Redemption transactions in
+ * Kotlin; Transfer construction and ALL incoming-metadata parsing belong to
+ * the C core (upstream's golden-vector-proven decoder). The test source set
+ * keeps parse cross-checks ([CrossCheckParse]) against the Core fixtures.
  */
 data class MintMetadata(
     val ddCents: Long,
@@ -15,6 +20,12 @@ data class MintMetadata(
     val lockTier: Int,
     val ownerKeyHex: String,
 ) {
+    init {
+        require(ddCents > 0) { "DigiDollar amount must be positive, got $ddCents" }
+        require(unlockHeight > 0) { "unlock height must be positive, got $unlockHeight" }
+        require(lockTier in LockTiers.ALL.indices) { "unknown Lock tier index: $lockTier" }
+    }
+
     /** Build this Mint metadata as an OP_RETURN scriptPubKey (hex). */
     fun build(): String {
         val ownerKey = ownerKeyHex.hexToByteArray()
@@ -29,58 +40,6 @@ data class MintMetadata(
                 ownerKey,
             ),
         )
-    }
-
-    companion object {
-        /** Parse a Mint OP_RETURN scriptPubKey (hex). */
-        fun parse(scriptHex: String): MintMetadata {
-            val pushes = ScriptPushData.read(scriptHex)
-            require(pushes.size == 6 && pushes[0].contentEquals(MAGIC)) {
-                "not a DigiDollar metadata script"
-            }
-            require(pushes[1].size == 1 && pushes[1][0].toInt() == DigiDollarTxType.MINT.code) {
-                "not a Mint metadata script"
-            }
-            val ownerKey = pushes[5]
-            require(ownerKey.size == 32) { "Owner key must be 32 bytes" }
-            return MintMetadata(
-                ddCents = ScriptNum.decode(pushes[2]),
-                unlockHeight = ScriptNum.decode(pushes[3]).toInt(),
-                lockTier = ScriptNum.decode(pushes[4]).toInt(),
-                ownerKeyHex = ownerKey.toHex(),
-            )
-        }
-    }
-}
-
-/**
- * Transfer metadata: one amount per zero-value DigiDollar output, in output
- * order (recipients first, DigiDollar change last). Consensus pairs the
- * amounts with the outputs positionally.
- */
-data class TransferMetadata(val amountsCents: List<Long>) {
-
-    /** Build this Transfer metadata as an OP_RETURN scriptPubKey (hex). */
-    fun build(): String {
-        require(amountsCents.isNotEmpty()) { "at least one DigiDollar amount required" }
-        require(amountsCents.all { it > 0 }) { "DigiDollar amounts must be positive" }
-        val parts = listOf(MAGIC, byteArrayOf(DigiDollarTxType.TRANSFER.code.toByte())) +
-            amountsCents.map { ScriptNum.encode(it) }
-        return ScriptPushData.buildOpReturn(parts)
-    }
-
-    companion object {
-        /** Parse a Transfer OP_RETURN scriptPubKey (hex). */
-        fun parse(scriptHex: String): TransferMetadata {
-            val pushes = ScriptPushData.read(scriptHex)
-            require(pushes.size >= 3 && pushes[0].contentEquals(MAGIC)) {
-                "not a DigiDollar metadata script"
-            }
-            require(pushes[1].size == 1 && pushes[1][0].toInt() == DigiDollarTxType.TRANSFER.code) {
-                "not a Transfer metadata script"
-            }
-            return TransferMetadata(pushes.drop(2).map { ScriptNum.decode(it) })
-        }
     }
 }
 
@@ -102,33 +61,31 @@ data class RedemptionMetadata(val ddChangeCents: Long) {
             ),
         )
     }
-
-    companion object {
-        /** Parse a Redemption OP_RETURN scriptPubKey (hex). */
-        fun parse(scriptHex: String): RedemptionMetadata {
-            val pushes = ScriptPushData.read(scriptHex)
-            require(pushes.size == 3 && pushes[0].contentEquals(MAGIC)) {
-                "not a DigiDollar metadata script"
-            }
-            require(pushes[1].size == 1 && pushes[1][0].toInt() == DigiDollarTxType.REDEMPTION.code) {
-                "not a Redemption metadata script"
-            }
-            return RedemptionMetadata(ScriptNum.decode(pushes[2]))
-        }
-    }
 }
 
-private val MAGIC = byteArrayOf(0x44, 0x44) // "DD"
+internal val MAGIC = byteArrayOf(0x44, 0x44) // "DD"
 
 /** CScriptNum: minimal signed little-endian, zero = empty. */
 internal object ScriptNum {
 
+    /** Decode a CScriptNum, enforcing Core's rules: at most 8 bytes, minimal
+     *  encoding (no redundant trailing 0x00/0x80), top bit of the last byte
+     *  is the sign. */
     fun decode(bytes: ByteArray): Long {
-        var value = 0L
-        for (i in bytes.indices.reversed()) {
-            value = (value shl 8) or (bytes[i].toLong() and 0xff)
+        require(bytes.size <= 8) { "script number too large: ${bytes.size} bytes" }
+        if (bytes.isEmpty()) return 0
+        val last = bytes.last().toInt() and 0xff
+        if (last and 0x7f == 0) {
+            require(bytes.size > 1 && bytes[bytes.size - 2].toInt() and 0x80 != 0) {
+                "non-minimal script number encoding"
+            }
         }
-        return value
+        var magnitude = 0L
+        for (i in bytes.indices.reversed()) {
+            val b = bytes[i].toInt() and 0xff
+            magnitude = (magnitude shl 8) or (if (i == bytes.size - 1) (b and 0x7f).toLong() else b.toLong())
+        }
+        return if (last and 0x80 != 0) -magnitude else magnitude
     }
 
     /** Minimal LE encoding; zero is empty; sign-padded when the top bit is set. */

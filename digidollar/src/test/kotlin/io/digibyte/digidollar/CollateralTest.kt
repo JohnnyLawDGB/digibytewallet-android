@@ -21,6 +21,10 @@ class CollateralTest {
 
     // An unhealthy system surcharges collateral: 12,000 bps on tier 3 gives
     // effective ratio ceil(350 * 12000 / 10000) = 420%.
+    // KNOWN GAP: this expected value was computed from the same Kotlin
+    // formula, NOT from Core — it guards against regressions only. A
+    // Core/regtest-anchored unhealthy-DCA vector is still needed (the only
+    // Core-proven case above has DCA as a no-op).
     @Test
     fun `DCA multiplier surcharges the effective ratio with ceiling math`() {
         val sats = Collateral.requiredSats(
@@ -43,6 +47,15 @@ class CollateralTest {
         }
         assertFailsWith<IllegalArgumentException> {
             Collateral.requiredSats(ddCents = 10_000, tier = tier, oraclePriceMicroUsd = 0)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            // zero/negative DCA would zero out or negate the collateral
+            Collateral.requiredSats(
+                ddCents = 10_000,
+                tier = tier,
+                oraclePriceMicroUsd = 13_420,
+                dcaMultiplierBps = 0,
+            )
         }
         assertFailsWith<IllegalArgumentException> {
             // $100k at 1000% against a 1-micro-USD price: far beyond 21B DGB.

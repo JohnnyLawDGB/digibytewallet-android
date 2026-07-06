@@ -1,5 +1,15 @@
 # Mint, Redemption, and Transfer ship together
 
+## Amendment (2026-07, upstream reconciliation)
+
+Upstream shipped Transfer (send + detection + UI) alone at v3.9.0, so the trio no longer
+binds Transfer — receiving and sending DigiDollar without Mint is the "read-only-plus"
+variant of the permitted incremental path: funds received can always be sent onward, and
+no Collateral is at stake. The gate is re-bound to the remaining pair: **Mint (#11) and
+Redemption (#13) gate each other** — no release exposes Mint until Redemption works and
+passes the correctness gate, because Mint without Redemption is the one-way Collateral
+trap this ADR exists to prevent.
+
 ## Context
 
 DigiDollar reaches users as three operations: Mint (lock DGB Collateral, create DigiDollar),

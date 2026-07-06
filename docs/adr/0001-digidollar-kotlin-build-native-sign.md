@@ -1,5 +1,21 @@
 # DigiDollar transactions: Kotlin builds the bytes, C signs the digests
 
+## Amendment (2026-07, upstream reconciliation)
+
+Upstream (`JohnnyLawDGB/digibytewallet-android` develop, v3.9.0) shipped Transfer
+construction, signing, and SPV detection **in C** (`sendDigiDollar`, golden-vector-proven
+metadata decoder) while this ADR was in flight. The split is therefore re-scoped:
+
+- **Kotlin builds Mint and Redemption** (the halves upstream lacks: collateral math, Lock
+  tiers, MAST/control-block, Mint/Redemption metadata) — C signs their digests via the
+  seed accessors, unchanged from the original decision.
+- **C builds AND signs Transfer** — the Kotlin Transfer/envelope/metadata *parsing* layer
+  is demoted to test-only cross-verification against the Core fixtures and upstream's decoder.
+- The secp256k1 submodule bump is obsolete: upstream vendored secp v0.4.1 (schnorrsig +
+  extrakeys enabled in the BRKey.c amalgamation), which provides every symbol the signer needs.
+
+The original text below stands as the record of the pre-reconciliation decision.
+
 ## Context
 
 DigiDollar (DigiByte Core v9.26.4 softfork) requires taproot machinery this wallet has none of:

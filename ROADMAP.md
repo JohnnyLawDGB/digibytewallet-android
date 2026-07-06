@@ -407,8 +407,10 @@ rework. Each item here is sized as an independent increment.
   the wallet's BIP86 P2TR scripts join the filter-element set), Kotlin
   transaction construction validated byte-for-byte against the
   dgb-support differential fixtures, signing kept in the C core behind
-  new Schnorr seed accessors. Mint, Transfer, and Redemption ship
-  together, runtime-gated on softfork status per network. Decisions:
+  new Schnorr seed accessors. Upstream shipped Transfer (send/detect/UI,
+  in C) at v3.9.0; the remaining Kotlin-built half is Mint + Redemption,
+  which gate each other (ADR-0003 amendment — Mint without Redemption is
+  a Collateral trap), runtime-gated on softfork status per network. Decisions:
   `docs/adr/0001..0003`; vocabulary: `CONTEXT.md`. Brings the taproot
   stack (BIP340/341/342/86, bech32m) into the wallet as a side effect —
   a prerequisite investment other Phase 3 items can later build on.
@@ -503,7 +505,7 @@ v3.7.6.
   actually shipped inside the 3.5.x line (v3.5.39) without a major bump, so
   that premise is dead. DECIDED (2026-07): **4.0.0 = the release that unlocks
   DigiDollar on mainnet at softfork activation.** Testnet-gated DigiDollar
-  releases ride the 3.8.x minor line until then.
+  releases ride the 3.9.x+ minor line until then (upstream is at v3.9.0).
 
 ## What this roadmap is not
 
