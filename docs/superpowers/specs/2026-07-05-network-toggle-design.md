@@ -77,12 +77,21 @@ wallet load → sync the target chain). Restart-to-apply avoids a fragile in-pro
 wallet + peer manager + native chain state mid-run (which risks the v3.7.1-class UAF races). (An
 in-place switch is possible later if desired — §7.)
 
-### 4.6 testnet26 peer discovery
-When `BRNetworkIsTestnet()`: the peer manager uses the C core's **testnet DNS seeds**
-(`testnetseed.digibyte.io/.link/.services`, already in the testnet chain params) instead of the
-digiscope bloom seeder. Additionally inject a **hardcoded testnet26 priority peer** (a known reachable
-9.26 testnet node) so first sync is reliable even if the DNS seeds are sparse. The mainnet path
-(digiscope seeder + `digiscope.me` priority peer) is unchanged.
+### 4.6 testnet26 chain params — MUST be refreshed (the core's are a DEAD old testnet)
+**Critical finding (2026-07-06):** the core's `BRTestNetParams` points at a dead old testnet
+(genesis `2a0f89ab…`/port 12026/magic `0xeeb791d1`) and `jni_peer.c:690` HARDCODES
+`&BRMainNetParams` — so the toggle is NOT just a `#if`→runtime refactor; `BRTestNetParams` must be
+**refreshed to the live testnet26** and the peer manager must SELECT it at runtime. Correct values
+(from my synced v9.26.3 node — see reference memory `reference_testnet26_chain_params`):
+- genesis[0]: `0c9af936f28f7bd0e90c8f6235399063a026ed267bb53da398313b5d7aa55d82`, time 1780156800, bits 0x1e0ffff0
+- port **12033**; magic **`0xe2b8d1fc`** (inferred `fc d1 b8 e2`→LE; **verify by connecting**)
+- DNS seeds `testnetseed.digibyte.io/.link/.services`; checkpoint height 80000 `66b32ade…` (time 1783178076, bits 0x1e020dd4)
+- hardcode public peers `164.68.98.125:12033` / `129.212.182.152:12033` as fallback.
+
+When `BRNetworkIsTestnet()`: the peer manager is created with the refreshed `BRTestNetParams` (its
+DNS seeds + magic + port) instead of the digiscope bloom seeder path, plus the hardcoded testnet
+peers injected so first sync is reliable. The mainnet path (digiscope seeder + `digiscope.me`
+priority peer) is unchanged.
 
 ### 4.7 UI
 Settings → an **Advanced / Developer** section (rendered only when `BuildConfig.DEBUG` or the
@@ -115,8 +124,13 @@ seed → SyncService uses testnet seeds/peer → syncs testnet26 → DD features
 4. **State on first switch:** fresh per-network state (assumed) vs migrating anything.
 
 ## 8. Suggested phase order (for the plan)
-A. C core: `BRSetNetwork`/`BRNetworkIsTestnet` + convert the ~20 `#if BITCOIN_TESTNET` sites to runtime — host KAT (both networks from one build).
-B. JNI `setNetwork` + startup wiring (read `dgb_network` before wallet init).
-C. Per-network state namespacing (prefs suffix + per-network DB), shared seed/PIN.
-D. testnet26 peer discovery (testnet DNS seeds + hardcoded priority peer).
-E. Settings Advanced network toggle (dev-gated) + confirm + restart + TESTNET badge.
+A. **Refresh `BRTestNetParams` to live testnet26** (genesis `0c9af936…`, port 12033, magic
+   `0xe2b8d1fc`, `testnetseed.digibyte.*` seeds, height-80000 checkpoint) + fix the param-selection
+   sites (`jni_peer.c:690`, `BRPeerManager` testnet-manager creators) to pick by `BRNetworkIsTestnet()`.
+   Verify the magic by actually connecting to testnet26 peers.
+B. C core: `BRSetNetwork`/`BRNetworkIsTestnet` + convert the ~15 `#if BITCOIN_TESTNET` address/key/merkle
+   sites to runtime — host KAT (both networks' addresses from one build).
+C. JNI `setNetwork` + startup wiring (read `dgb_network` before wallet init).
+D. Per-network state namespacing (prefs suffix + per-network DB), shared seed/PIN.
+E. testnet26 peer injection (hardcoded public peers `164.68.98.125:12033` / `129.212.182.152:12033`).
+F. Settings Advanced network toggle (dev-gated) + confirm + restart + TESTNET badge.
