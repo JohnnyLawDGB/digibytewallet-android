@@ -840,3 +840,82 @@ Java_io_digibyte_core_bridge_NativeBridge_walletContainsAddress(JNIEnv *env, job
     (*env)->ReleaseStringUTFChars(env, address, addrChars);
     return contained ? JNI_TRUE : JNI_FALSE;
 }
+
+/* ---------- listWalletUtxos / listDigiDollarUtxos ---------- */
+/* Wallet UTXO listings for Kotlin-built DigiDollar transactions (ADR-0001:
+ * Kotlin builds the bytes, C signs). One UTXO per line as
+ * "txid:vout:amount:scriptPubKeyHex" — txid in display order, amount in
+ * satoshis for DGB entries and USD cents for DigiDollar token entries.
+ * wallet->utxos already excludes asset and DD-token outputs (BRWallet.c
+ * balance update), so every DGB entry is safe to spend as Mint funding or
+ * a Redemption fee input. */
+
+#include "BRDigiDollar.h"
+
+static size_t _utxo_append_line(char *buf, size_t off, size_t cap, const BRUTXO *u,
+                                const BRTransaction *tx, int64_t amount)
+{
+    const BRTxOutput *o = &tx->outputs[u->n];
+    size_t need = 64 + 1 + 10 + 1 + 20 + 1 + o->scriptLen * 2 + 2;
+
+    if (off + need >= cap) return off; /* never truncate mid-line */
+    off += (size_t)sprintf(buf + off, "%s:%u:%lld:", u256hex(UInt256Reverse(u->hash)),
+                           u->n, (long long)amount);
+    for (size_t k = 0; k < o->scriptLen; k++) {
+        off += (size_t)sprintf(buf + off, "%02x", o->script[k]);
+    }
+    buf[off++] = '\n';
+    buf[off] = '\0';
+    return off;
+}
+
+typedef size_t (*_utxo_lister)(BRWallet *wallet, BRUTXO *utxos, size_t utxosCount);
+
+static jstring _utxo_lines(JNIEnv *env, _utxo_lister list, int ddCents)
+{
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t count = list(g_wallet, NULL, 0);
+    if (count == 0) return (*env)->NewStringUTF(env, "");
+
+    BRUTXO *utxos = (BRUTXO *)malloc(sizeof(BRUTXO) * count);
+    if (!utxos) return (*env)->NewStringUTF(env, "");
+    count = list(g_wallet, utxos, count);
+
+    /* txid+vout+amount+separators ≈ 100; scripts are ≤ 34 bytes (68 hex) for
+     * every standard output the wallet tracks */
+    size_t cap = count * 200 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(utxos); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+
+    size_t off = 0;
+    for (size_t i = 0; i < count; i++) {
+        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, utxos[i].hash);
+
+        if (!tx || utxos[i].n >= tx->outCount) continue;
+        int64_t amount = ddCents ? BRDigiDollarOutputAmount(tx, utxos[i].n)
+                                 : (int64_t)tx->outputs[utxos[i].n].amount;
+        if (ddCents && amount < 0) continue; /* not actually a DD output */
+        off = _utxo_append_line(buf, off, cap, &utxos[i], tx, amount);
+    }
+
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    free(utxos);
+    return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_listWalletUtxos(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    return _utxo_lines(env, BRWalletUTXOs, 0);
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarUtxos(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    return _utxo_lines(env, BRWalletDigiDollarUTXOs, 1);
+}

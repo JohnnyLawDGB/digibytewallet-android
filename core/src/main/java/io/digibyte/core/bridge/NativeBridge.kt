@@ -474,4 +474,16 @@ object NativeBridge {
      *  (0/1) followed by the 32-byte x coordinate of xonlyKey + tweak*G.
      *  Public-key math only — no secrets involved. */
     external fun ddXOnlyTweakAdd(xonlyKey: ByteArray, tweak: ByteArray): ByteArray?
+
+    // ---- Wallet UTXO listings (Kotlin-built DigiDollar transactions) ----
+
+    /** Wallet DGB UTXOs (asset and DD-token outputs excluded by the core's
+     *  balance update), one per line as "txid:vout:amountSats:scriptPubKeyHex"
+     *  with the txid in display order. Used to pick the Mint funding input
+     *  and the Redemption fee input. Empty string if no wallet or no UTXOs. */
+    external fun listWalletUtxos(): String
+
+    /** DigiDollar token UTXOs (zero-satoshi P2TR, cents-denominated), one per
+     *  line as "txid:vout:cents:scriptPubKeyHex". Empty string if none. */
+    external fun listDigiDollarUtxos(): String
 }
