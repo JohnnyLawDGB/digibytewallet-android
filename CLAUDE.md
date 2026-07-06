@@ -118,7 +118,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 
 ### Versioning Policy
 - `3.X.Y` — current line (at v3.7.6). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).
-- `X.0.0` — major: reserved for a wire-protocol change or removal of the legacy bloom path. NOTE: BIP157/158 shipped inside the 3.5.x line **without** a major bump, so the old "4.0.0 = BIP158 lands" trigger is retired — the next major needs a fresh trigger (open decision; see ROADMAP → Versioning).
+- `X.0.0` — major: DECIDED (2026-07) — 4.0.0 is the release that unlocks DigiDollar on mainnet at softfork activation (see ROADMAP → Versioning). Testnet-gated DigiDollar work rides the 3.8.x line.
 - Pre-publish test suite must pass before any release
 - Never reuse version numbers
 
