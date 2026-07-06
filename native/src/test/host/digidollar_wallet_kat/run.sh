@@ -50,6 +50,7 @@ clang -w -include stdint.h \
     "$CORE_DIR/BRTransaction.c" \
     "$CORE_DIR/BRDigiDollar.c" \
     "$CORE_DIR/BRKey.c" \
+    "$CORE_DIR/BRNetwork.c" \
     "$CORE_DIR/BRBIP32Sequence.c" \
     "$CORE_DIR/BRBIP39Mnemonic.c" \
     "$CORE_DIR/BRAddress.c" \

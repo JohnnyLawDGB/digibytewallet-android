@@ -42,6 +42,7 @@ clang -w -include stdint.h \
     "$CORE_DIR/BRAddress.c" \
     "$CORE_DIR/BRSet.c" \
     "$CORE_DIR/BRKey.c" \
+    "$CORE_DIR/BRNetwork.c" \
     "$CORE_DIR/BRBase58.c" \
     "$CORE_DIR/BRBech32.c" \
     "$CORE_DIR/BRCrypto.c" \

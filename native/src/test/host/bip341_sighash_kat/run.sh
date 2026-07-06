@@ -37,6 +37,7 @@ clang -w -include stdint.h \
     "$SCRIPT_DIR/bip341_sighash_kat_main.c" \
     "$CORE_DIR/BRAddress.c" \
     "$CORE_DIR/BRKey.c" \
+    "$CORE_DIR/BRNetwork.c" \
     "$CORE_DIR/BRCrypto.c" \
     "$CORE_DIR/BRBase58.c" \
     "$CORE_DIR/BRBech32.c" \
