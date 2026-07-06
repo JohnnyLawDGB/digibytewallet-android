@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.delay
 
 /**
@@ -39,7 +40,7 @@ class SyncWorker @AssistedInject constructor(
             val txData = NativeBridge.getSerializedTransactions()
             if (txData != null) {
                 val hex = txData.joinToString("") { "%02x".format(it) }
-                applicationContext.getSharedPreferences("dgb_sync_data", 0)
+                applicationContext.getSharedPreferences("dgb_sync_data" + networkSuffix(applicationContext), 0)
                     .edit().putString("saved_transactions", hex).apply()
             }
             NativeBridge.stopSync()
@@ -50,7 +51,7 @@ class SyncWorker @AssistedInject constructor(
     }
 
     private fun fetchBloomPeers() {
-        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers", 0)
+        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
         val cachedJson = prefs.getString("peers_json", null)
         val lastFetch = prefs.getLong("last_fetch", 0L)
         val now = System.currentTimeMillis()

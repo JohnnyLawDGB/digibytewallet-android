@@ -18,6 +18,7 @@ import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.PeerEntity
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.networkSuffix
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
@@ -197,7 +198,7 @@ class SyncService : Service() {
 
         // Restore persisted sync state so progress callbacks don't revert
         // "Connected" back to "Syncing 0%" on restart near the chain tip.
-        hasReachedSynced = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        hasReachedSynced = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
             .getBoolean("has_synced", false)
 
         // Wire C core → Kotlin before kicking off sync so no events are lost.
@@ -437,7 +438,7 @@ class SyncService : Service() {
                         if (atTipConsecutivePolls >= TIP_GRACE_POLLS) {
                             hasReachedSynced = true
                             walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
-                            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                            getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                 .edit().putBoolean("has_synced", true).apply()
                             android.util.Log.i(
                                 "SyncService",
@@ -460,7 +461,7 @@ class SyncService : Service() {
                             val txData = NativeBridge.getSerializedTransactions()
                             if (txData != null) {
                                 val hex = bytesToHex(txData)
-                                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                     .edit().putString("saved_transactions", hex).apply()
                             }
                         }
@@ -669,7 +670,7 @@ class SyncService : Service() {
                                 // Kotlin owns SharedPreferences: drop the stale chain so a
                                 // kill before the first re-anchored append can't restore
                                 // the stuck cfTip.
-                                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                     .edit().remove("saved_filter_headers").apply()
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
@@ -817,7 +818,7 @@ class SyncService : Service() {
         android.util.Log.i("SyncService", "Wallet ready, starting sync (waited ${waitCount * 500}ms)")
 
         // Load saved blocks and peers from previous session before syncing
-        val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val savedBlocks = prefs.getString("saved_blocks", null)
         val savedPeers = prefs.getString("saved_peers", null)
 
@@ -1052,7 +1053,7 @@ class SyncService : Service() {
             hasReachedSynced = true
             walletManager.updateSyncState(SyncState.Complete)
             // Persist sync-complete so restarts don't flash "Syncing 0%"
-            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+            getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                 .edit().putBoolean("has_synced", true).apply()
             // Persist transactions and drop the foreground notification.
             // Peers stay connected so the user can send/receive while the app
@@ -1062,7 +1063,7 @@ class SyncService : Service() {
                 val txData = NativeBridge.getSerializedTransactions()
                 if (txData != null) {
                     val hex = bytesToHex(txData)
-                    getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                         .edit().putString("saved_transactions", hex).apply()
                     android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
                 }
@@ -1145,7 +1146,7 @@ class SyncService : Service() {
             val copy = data.copyOf()
             serviceScope.launch(Dispatchers.IO) {
                 val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                     .edit().putString("saved_peers", hex).apply()
             }
         }
@@ -1156,7 +1157,7 @@ class SyncService : Service() {
             val copy = data.copyOf()
             serviceScope.launch(Dispatchers.IO) {
                 val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                     .edit().putString("saved_filter_headers", hex).apply()
             }
         }
@@ -1190,7 +1191,7 @@ class SyncService : Service() {
         // path (all of them call injectBloomPeers). Runs first so bloom's early
         // returns can't skip it; self-throttled by its own last_fetch timer.
         injectDandelionPeers()
-        val prefs = getSharedPreferences("dgb_bloom_peers", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
         val existing = prefs.getString("peer_pool", null)
@@ -1257,7 +1258,7 @@ class SyncService : Service() {
         try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) {}
         if (!enabled) return
 
-        val prefs = getSharedPreferences("dgb_dandelion_peers", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_dandelion_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val cached = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
@@ -1438,7 +1439,7 @@ class SyncService : Service() {
         if (dropped) {
             runCatching {
                 NativeBridge.getSerializedTransactions()?.let { data ->
-                    getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                         .edit().putString("saved_transactions", bytesToHex(data)).apply()
                 }
             }
@@ -1459,7 +1460,7 @@ class SyncService : Service() {
      * so it survives serviceScope cancellation.
      */
     private fun persistBlocks(data: ByteArray, synchronous: Boolean) {
-        val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
         val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
         if (!shouldPersistBlocks(newTop, persistedTop)) {

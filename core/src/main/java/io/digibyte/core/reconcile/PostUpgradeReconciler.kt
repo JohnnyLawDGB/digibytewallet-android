@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.util.Log
+import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,7 +57,7 @@ object PostUpgradeReconciler {
      *  startup (before the wallet UI subscribes) so the banner reflects
      *  a failure from a prior process. */
     fun hydrateFailedFlag(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
         _lastAttemptFailed.value = prefs.getBoolean(KEY_LAST_FAILED, false)
     }
 
@@ -64,7 +65,7 @@ object PostUpgradeReconciler {
      *  reconcile run from Settings → Recovery → Scan, or after the user
      *  taps "Dismiss" on the banner. */
     fun clearFailedFlag(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_LAST_FAILED, false).apply()
         _lastAttemptFailed.value = false
     }
@@ -102,7 +103,7 @@ object PostUpgradeReconciler {
         serviceFactory: (Context) -> ChainReconciliationService,
     ) {
         if (inFlight) return
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
         val current = currentVersionCode(context)
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
         // Fresh install (no prior baseline): there is no "post-upgrade" discrepancy
@@ -151,7 +152,7 @@ object PostUpgradeReconciler {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "post-upgrade reconcile threw", t)
-            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
             setFailedFlag(prefs, true)
         } finally {
             inFlight = false

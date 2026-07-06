@@ -17,6 +17,7 @@ import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.network.ChainTipFetcher
+import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.digibyte.core.tor.TorManager
@@ -41,7 +42,7 @@ class WalletViewModel @Inject constructor(
     private val outgoingTxStore: OutgoingTxStore,
 ) : ViewModel() {
 
-    private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
+    private val prefs = application.getSharedPreferences("dgb_sync_data" + networkSuffix(application), 0)
 
     /** Live balance in satoshis — polls C core every 5 seconds.
      *  Initialized from last-known snapshot so the UI isn't blank on restart. */

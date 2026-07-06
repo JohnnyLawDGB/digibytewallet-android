@@ -54,22 +54,29 @@ object AppModule {
      * Wipe all app data that can become stale across installs/upgrades:
      * DB files, DB key prefs, PIN, sync data. The wallet seed prefs
      * (dgb_wallet_seed) are preserved — user funds are never lost.
+     *
+     * Only wipes the CURRENTLY SELECTED network's DB + sync-data + bloom-peer
+     * cache (via [networkSuffix]) — a mainnet DB init failure must not touch
+     * a testnet DB file/prefs that happen to also exist on disk, and vice
+     * versa. `dgb_db_key` stays unsuffixed/shared (same passphrase encrypts
+     * either network's DB file).
      */
     private fun wipeStaleData(context: Context) {
         android.util.Log.w("AppModule", "Wiping stale app data (wallet seed preserved)")
+        val dbFileName = "wallet${networkSuffix(context)}.db"
         // Delete database files
-        context.getDatabasePath("wallet.db").delete()
-        context.getDatabasePath("wallet.db-journal").delete()
-        context.getDatabasePath("wallet.db-shm").delete()
-        context.getDatabasePath("wallet.db-wal").delete()
+        context.getDatabasePath(dbFileName).delete()
+        context.getDatabasePath("$dbFileName-journal").delete()
+        context.getDatabasePath("$dbFileName-shm").delete()
+        context.getDatabasePath("$dbFileName-wal").delete()
         // Clear DB key prefs
         context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE).edit().clear().apply()
         // NOTE: do NOT delete the PIN store here. Clearing the PIN locks the
         // user out of their wallet. Only the recovery flow should clear the PIN.
         // Clear sync data (blocks/peers will be re-downloaded)
-        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE).edit().clear().apply()
         // Clear bloom peer cache
-        context.getSharedPreferences("dgb_bloom_peers", Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences("dgb_bloom_peers" + networkSuffix(context), Context.MODE_PRIVATE).edit().clear().apply()
         // Delete stale Keystore keys
         try {
             val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
@@ -86,7 +93,12 @@ object AppModule {
     }
 
     private fun provideDatabaseInner(context: Context, ksm: KeyStoreManager): WalletDatabase {
-        val dbFile = context.getDatabasePath("wallet.db")
+        // Per-network DB file (e.g. "wallet.db" mainnet / "wallet_testnet.db"
+        // testnet) so a testnet session never opens the mainnet DB, and vice
+        // versa. dgb_db_key stays unsuffixed/shared — the same passphrase
+        // encrypts either network's DB file, no cross-network trust issue.
+        val dbFileName = "wallet${networkSuffix(context)}.db"
+        val dbFile = context.getDatabasePath(dbFileName)
         val prefs = context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE)
 
         android.util.Log.i("AppModule", "DB init: dbExists=${dbFile.exists()} hasKey=${prefs.contains("encrypted_key")}")
@@ -135,7 +147,7 @@ object AppModule {
             }
         }
 
-        return WalletDatabase.create(context, passphrase)
+        return WalletDatabase.create(context, passphrase, dbFileName)
     }
 
     private fun bytesToHex(bytes: ByteArray): String =

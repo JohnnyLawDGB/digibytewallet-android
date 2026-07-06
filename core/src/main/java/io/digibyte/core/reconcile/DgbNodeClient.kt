@@ -1,6 +1,7 @@
 package io.digibyte.core.reconcile
 
 import android.content.Context
+import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.CertificatePinner
@@ -56,7 +57,7 @@ class DgbNodeClient(
         .readTimeout(90, TimeUnit.SECONDS)
         .build()
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE)
 
     /** The active endpoint. Defaults to digiscope.me; can be user-overridden. */
     fun endpoint(): String =
