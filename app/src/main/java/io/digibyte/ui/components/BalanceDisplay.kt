@@ -18,12 +18,14 @@ import io.digibyte.ui.theme.DigiByteAccent
  *
  * @param fiatAmount  Pre-formatted fiat string, e.g. "$12.34"
  * @param dgbAmount   Pre-formatted DGB string, e.g. "1,234.56789012 DGB"
+ * @param ddAmount    Pre-formatted DigiDollar string e.g. "$50.00", or null to hide the line
  * @param isSynced    When false, balance is greyed out (last-known snapshot)
  */
 @Composable
 fun BalanceDisplay(
     fiatAmount: String,
     dgbAmount: String,
+    ddAmount: String? = null,
     isSynced: Boolean = true,
     onFiatTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -62,5 +64,17 @@ fun BalanceDisplay(
             color = dgbColor,
             textAlign = TextAlign.Center
         )
+        if (ddAmount != null) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = ddAmount,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp
+                ),
+                color = dgbColor,   // reuse the accent (dimmed when unsynced)
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }

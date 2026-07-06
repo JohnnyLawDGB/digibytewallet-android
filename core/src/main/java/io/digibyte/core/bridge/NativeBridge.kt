@@ -8,6 +8,14 @@ package io.digibyte.core.bridge
 object NativeBridge {
     init { System.loadLibrary("core-lib") }
 
+    // === Network selection ===
+    /** Runtime mainnet/testnet selection. MUST be called before any wallet or
+     *  peer-manager creation (BRSetNetwork selects chain params + address
+     *  encoding). Default is mainnet (false) — the C core itself defaults to
+     *  mainnet even if this is never called, so existing behavior is
+     *  unchanged unless the caller explicitly passes true. */
+    external fun setNetwork(isTestnet: Boolean)
+
     // === Wallet operations ===
     /** Generate BIP39 mnemonic. entropyBits: 128 = 12 words, 256 = 24 words */
     external fun generateMnemonic(entropyBits: Int): String?
@@ -35,7 +43,8 @@ object NativeBridge {
     /** Lock the session — zeros all derived keys from C core memory. */
     external fun lockSession()
 
-    /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */
+    /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32/P2WPKH(dgb1q),
+     *  3=Taproot/P2TR(dgb1p) — BIP86 (m/86'/20'/0'). */
     external fun getReceiveAddress(index: Int, format: Int): String?
 
     /** Get a change address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */
@@ -43,6 +52,9 @@ object NativeBridge {
 
     /** Get current wallet balance in satoshis. */
     external fun getBalance(): Long
+
+    /** Get current DigiDollar balance in cents (USD). 0 if none. */
+    external fun getDigiDollarBalance(): Long
 
     // === Transaction operations ===
     /** Create an unsigned transaction. Returns serialized tx bytes or null on failure. */
@@ -53,6 +65,13 @@ object NativeBridge {
 
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
     external fun publishTransaction(signedTx: ByteArray): String?
+
+    /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.
+     *  Returns the txid on success, or null on any failure (bad address, insufficient DD/DGB, sign/broadcast). */
+    external fun sendDigiDollar(tdAddress: String, cents: Long): String?
+
+    /** True if `addr` is a valid DigiDollar address for the current network (TD… testnet / DD… mainnet). */
+    external fun isValidDigiDollarAddress(addr: String): Boolean
 
     // === Dandelion++ broadcast-origin privacy ===
     /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
@@ -94,8 +113,15 @@ object NativeBridge {
 
     // === Peer / sync operations ===
     /** Inject a peer by IP address into the saved peers list for priority connection.
-     *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle. */
-    external fun injectPeerByIp(ip: String, port: Int)
+     *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle.
+     *
+     *  [servicesHex] is the peer's advertised service bits (the seeder's
+     *  `services_hex`, e.g. 0x44d for a BIP157/158 filter peer where bit 0x40 =
+     *  SERVICES_NODE_COMPACT_FILTERS). Threading this through lets the native
+     *  filter-first peer selection recognize and hold filter-capable peers.
+     *  Pass 0 when unknown — the native side falls back to the legacy
+     *  NODE_NETWORK|NODE_BLOOM default so nothing regresses. */
+    external fun injectPeerByIp(ip: String, port: Int, servicesHex: Long)
 
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()

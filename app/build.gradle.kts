@@ -15,8 +15,8 @@ android {
         applicationId = "io.digibyte"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30075 // x-release-please-version-code
-        versionName = "3.8.0" // x-release-please-version
+        versionCode = 30076 // x-release-please-version-code
+        versionName = "3.9.0" // x-release-please-version
     }
 
     // Match native module flavors
@@ -29,7 +29,13 @@ android {
         }
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        // Needed for BuildConfig.DEBUG / BuildConfig.FLAVOR — used to dev-gate
+        // the Settings > Advanced network toggle (mainnet release must not
+        // render it). AGP 8+ defaults this off.
+        buildConfig = true
+    }
 
     signingConfigs {
         create("release") {

@@ -7,6 +7,8 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.isTestnet
+import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.delay
 
 /**
@@ -39,7 +41,7 @@ class SyncWorker @AssistedInject constructor(
             val txData = NativeBridge.getSerializedTransactions()
             if (txData != null) {
                 val hex = txData.joinToString("") { "%02x".format(it) }
-                applicationContext.getSharedPreferences("dgb_sync_data", 0)
+                applicationContext.getSharedPreferences("dgb_sync_data" + networkSuffix(applicationContext), 0)
                     .edit().putString("saved_transactions", hex).apply()
             }
             NativeBridge.stopSync()
@@ -50,7 +52,16 @@ class SyncWorker @AssistedInject constructor(
     }
 
     private fun fetchBloomPeers() {
-        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers", 0)
+        if (isTestnet(applicationContext)) {
+            // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
+            // only knows mainnet peers. The native startSync() path (and
+            // SyncService.injectTestnetPeers()) already handle testnet26 peer
+            // discovery via the hardcoded peers + refreshed testnet DNS
+            // seeds; this background catch-up worker just calls startSync()
+            // without hitting the mainnet seeder.
+            return
+        }
+        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
         val cachedJson = prefs.getString("peers_json", null)
         val lastFetch = prefs.getLong("last_fetch", 0L)
         val now = System.currentTimeMillis()
@@ -77,7 +88,11 @@ class SyncWorker @AssistedInject constructor(
                 val peers = org.json.JSONObject(json).getJSONArray("peers")
                 for (i in 0 until peers.length()) {
                     val p = peers.getJSONObject(i)
-                    NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024))
+                    // services_hex (e.g. "0x44d") carries the compact-filter bit
+                    // (0x40) so filter peers are tagged; absent → 0 → native
+                    // bloom-only default.
+                    val services = parseSeederServicesHex(p.optString("services_hex", ""))
+                    NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
                 }
             } catch (_: Exception) {}
         }

@@ -17,6 +17,7 @@ import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.network.ChainTipFetcher
+import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.digibyte.core.tor.TorManager
@@ -41,12 +42,16 @@ class WalletViewModel @Inject constructor(
     private val outgoingTxStore: OutgoingTxStore,
 ) : ViewModel() {
 
-    private val prefs = application.getSharedPreferences("dgb_sync_data", 0)
+    private val prefs = application.getSharedPreferences("dgb_sync_data" + networkSuffix(application), 0)
 
     /** Live balance in satoshis — polls C core every 5 seconds.
      *  Initialized from last-known snapshot so the UI isn't blank on restart. */
     private val _balance = MutableStateFlow(prefs.getLong("last_balance", 0L))
     val balance: StateFlow<Long> = _balance.asStateFlow()
+
+    /** Live DigiDollar balance in cents — polled alongside the DGB balance. */
+    private val _ddBalance = MutableStateFlow(prefs.getLong("last_dd_balance", 0L))
+    val ddBalance: StateFlow<Long> = _ddBalance.asStateFlow()
 
     /** Live transaction list from C core, most-recent first. */
     private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
@@ -464,6 +469,14 @@ class WalletViewModel @Inject constructor(
                     }
                 }
 
+                // Poll DigiDollar balance (cents). Trivially trusted — DD is zero on
+                // mainnet, nonzero only on a testnet26 build that syncs real DD txs.
+                val ddCents = NativeBridge.getDigiDollarBalance()
+                if (ddCents != _ddBalance.value) {
+                    _ddBalance.value = ddCents
+                    prefs.edit().putLong("last_dd_balance", ddCents).apply()
+                }
+
                 // Poll peer count — publish to the StateFlow so Send/Receive
                 // screens can gate their UI on live connectivity.
                 val peers = NativeBridge.getPeerCount()
@@ -655,6 +668,16 @@ class WalletViewModel @Inject constructor(
                 maximumFractionDigits = 8
             }
             return "${fmt.format(dgb)} DGB"
+        }
+
+        /** DigiDollar cents → USD string. Example: 5000 → "$50.00" */
+        fun formatDigiDollar(cents: Long): String {
+            val dollars = cents / 100.0
+            val fmt = NumberFormat.getNumberInstance(Locale.US).apply {
+                minimumFractionDigits = 2
+                maximumFractionDigits = 2
+            }
+            return "$" + fmt.format(dollars)
         }
     }
 }

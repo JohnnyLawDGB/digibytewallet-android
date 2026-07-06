@@ -9,6 +9,8 @@ import io.digibyte.core.TxResult
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.DigiByteUri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
@@ -48,6 +50,12 @@ class SendViewModel @Inject constructor(
     /** Is the current address valid? */
     private val _addressValid = MutableStateFlow<Boolean?>(null) // null = not yet validated
     val addressValid: StateFlow<Boolean?> = _addressValid.asStateFlow()
+
+    /** Is the current address valid as a DigiDollar (TD…) address? Computed
+     *  alongside [addressValid] since SendScreen reuses one address field
+     *  for both DGB and DD send modes. */
+    private val _ddAddressValid = MutableStateFlow<Boolean?>(null) // null = not yet validated
+    val ddAddressValid: StateFlow<Boolean?> = _ddAddressValid.asStateFlow()
 
     /** Amount in DGB (user text input). */
     val amountDgb = MutableStateFlow("")
@@ -110,6 +118,8 @@ class SendViewModel @Inject constructor(
         address.value = value.trim()
         _addressValid.value = if (value.isBlank()) null
                               else NativeBridge.isValidAddress(value.trim())
+        _ddAddressValid.value = if (value.isBlank()) null
+                              else runCatching { NativeBridge.isValidDigiDollarAddress(value.trim()) }.getOrDefault(false)
         _validationError.value = null
     }
 
@@ -240,5 +250,56 @@ class SendViewModel @Inject constructor(
         if (!wasCustom) {
             customFeeInput.value = String.format("%.8f", defaultFeeSat / 100_000_000.0)
         }
+    }
+
+    // ── DigiDollar send mode ─────────────────────────────────────────────
+
+    enum class SendMode { DGB, DD }
+    private val _sendMode = MutableStateFlow(SendMode.DGB)
+    val sendMode: StateFlow<SendMode> = _sendMode.asStateFlow()
+    fun toggleSendMode() { _sendMode.value = if (_sendMode.value == SendMode.DGB) SendMode.DD else SendMode.DGB }
+
+    /** Live DigiDollar balance in cents — polled on the same 5s cadence as
+     *  WalletViewModel's balance poll so the toggle + amount validation
+     *  have a fresh ceiling while this screen is open. */
+    private val _ddBalance = MutableStateFlow(0L)
+    val ddBalance: StateFlow<Long> = _ddBalance.asStateFlow()
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val cents = runCatching { NativeBridge.getDigiDollarBalance() }.getOrDefault(0L)
+                if (cents != _ddBalance.value) _ddBalance.value = cents
+                delay(5_000L)
+            }
+        }
+    }
+
+    /**
+     * Execute a DigiDollar send after the caller has validated [usd] via
+     * [parseUsdToCents]/[ddAmountValid]. Mirrors [send]'s dispatcher pattern.
+     */
+    fun sendDigiDollar(tdAddress: String, usd: String, onResult: (txid: String?) -> Unit) {
+        val cents = parseUsdToCents(usd)
+        if (cents == null || !NativeBridge.isValidDigiDollarAddress(tdAddress)) { onResult(null); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val txid = runCatching { NativeBridge.sendDigiDollar(tdAddress, cents) }
+                .onFailure { android.util.Log.w("SendViewModel", "sendDigiDollar failed", it) }
+                .getOrNull()
+            onResult(txid)
+        }
+    }
+
+    companion object {
+        /** "40.50" USD -> 4050 cents; null if blank/non-numeric/negative. */
+        fun parseUsdToCents(s: String): Long? {
+            val d = s.trim().toDoubleOrNull() ?: return null
+            if (d < 0) return null
+            return Math.round(d * 100.0)
+        }
+
+        /** DD send amount valid: within consensus [100, 10000000] cents and <= held balance. */
+        fun ddAmountValid(cents: Long, ddBalance: Long): Boolean =
+            cents in 100..10_000_000 && cents <= ddBalance
     }
 }

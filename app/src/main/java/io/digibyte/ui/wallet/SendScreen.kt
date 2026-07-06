@@ -71,14 +71,26 @@ fun SendScreen(
     val isFullySynced = syncProgressInfo.stage == io.digibyte.core.model.SyncStage.Synced
     val canSend = hasPeers && isFullySynced
 
+    // ── DigiDollar send mode ──────────────────────────────────────────────
+    val sendMode by viewModel.sendMode.collectAsStateWithLifecycle()
+    val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
+    val ddAddressValid by viewModel.ddAddressValid.collectAsStateWithLifecycle()
+    // Only actually in DD mode if the wallet holds DD — guards against a
+    // stale sendMode==DD if the balance drops to 0 while this screen is open.
+    val effectiveDdMode = sendMode == SendViewModel.SendMode.DD && ddBalance > 0
+    val effectiveAddressValid = if (effectiveDdMode) ddAddressValid else addressValid
+    var ddSentTxid by remember { mutableStateOf<String?>(null) }
+    var ddSending by remember { mutableStateOf(false) }
+
     var inputIsDgb by remember { mutableStateOf(true) }
 
     // ── Success overlay ───────────────────────────────────────────────────
-    if (sendState is SendState.Success) {
+    if (sendState is SendState.Success || ddSentTxid != null) {
         SendSuccessScreen(
-            txid = (sendState as SendState.Success).txid,
+            txid = (sendState as? SendState.Success)?.txid ?: ddSentTxid!!,
             onDone = {
                 viewModel.resetState()
+                ddSentTxid = null
                 onNavigateBack()
             }
         )
@@ -131,7 +143,7 @@ fun SendScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                text = "Send DGB",
+                text = if (effectiveDdMode) "Send DigiDollar" else "Send DGB",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.weight(1f)
             )
@@ -139,15 +151,53 @@ fun SendScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // ── DGB / DigiDollar mode toggle ───────────────────────────────────
+        // Only shown once the wallet actually holds DD — otherwise the
+        // screen is exactly today's DGB send, untouched.
+        if (ddBalance > 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = { if (effectiveDdMode) viewModel.toggleSendMode() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (!effectiveDdMode) DigiByteAccent.copy(alpha = 0.15f) else Color.Transparent
+                    )
+                ) {
+                    Text(
+                        text = "DGB",
+                        fontWeight = if (!effectiveDdMode) FontWeight.Bold else FontWeight.Normal,
+                        color = if (!effectiveDdMode) DigiByteAccent else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(
+                    onClick = { if (!effectiveDdMode) viewModel.toggleSendMode() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (effectiveDdMode) DigiByteAccent.copy(alpha = 0.15f) else Color.Transparent
+                    )
+                ) {
+                    Text(
+                        text = "DigiDollar",
+                        fontWeight = if (effectiveDdMode) FontWeight.Bold else FontWeight.Normal,
+                        color = if (effectiveDdMode) DigiByteAccent else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         // ── Address input ─────────────────────────────────────────────────
         Text(
-            text = "Recipient Address",
+            text = if (effectiveDdMode) "DigiDollar address (TD…)" else "Recipient Address",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(6.dp))
 
-        val addressBorderColor = when (addressValid) {
+        val addressBorderColor = when (effectiveAddressValid) {
             true  -> DigiByteGreen
             false -> DigiByteRed
             null  -> MaterialTheme.colorScheme.outline
@@ -159,7 +209,12 @@ fun SendScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .border(1.dp, addressBorderColor, RoundedCornerShape(8.dp)),
-            placeholder = { Text("dgb1q… or D…", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    if (effectiveDdMode) "TD…" else "dgb1q… or D…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
             trailingIcon = {
                 Row {
                     // Paste
@@ -181,13 +236,13 @@ fun SendScreen(
                 }
             },
             singleLine = true,
-            isError = addressValid == false,
+            isError = effectiveAddressValid == false,
             shape = RoundedCornerShape(8.dp)
         )
 
-        if (addressValid == false) {
+        if (effectiveAddressValid == false) {
             Text(
-                text = "Invalid DigiByte address",
+                text = if (effectiveDdMode) "Invalid DigiDollar address" else "Invalid DigiByte address",
                 style = MaterialTheme.typography.labelSmall,
                 color = DigiByteRed,
                 modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -197,44 +252,13 @@ fun SendScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         // ── Amount input ──────────────────────────────────────────────────
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (effectiveDdMode) {
             Text(
                 text = "Amount",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            TextButton(onClick = { inputIsDgb = !inputIsDgb }) {
-                Text(
-                    text = if (inputIsDgb) "Switch to USD" else "Switch to DGB",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = DigiByteAccent
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        if (inputIsDgb) {
-            OutlinedTextField(
-                value = amountDgb,
-                onValueChange = { viewModel.onAmountDgbChanged(it) },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("0.00000000") },
-                suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp)
-            )
-            if (amountFiat.isNotBlank()) {
-                Text(
-                    text = "≈ $$amountFiat USD",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-                )
-            }
-        } else {
+            Spacer(modifier = Modifier.height(6.dp))
             OutlinedTextField(
                 value = amountFiat,
                 onValueChange = { viewModel.onAmountFiatChanged(it) },
@@ -245,92 +269,152 @@ fun SendScreen(
                 singleLine = true,
                 shape = RoundedCornerShape(8.dp)
             )
-            if (amountDgb.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Network fee paid in DGB",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "≈ $amountDgb DGB",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = "Amount",
+                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                    modifier = Modifier.weight(1f)
                 )
+                TextButton(onClick = { inputIsDgb = !inputIsDgb }) {
+                    Text(
+                        text = if (inputIsDgb) "Switch to USD" else "Switch to DGB",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = DigiByteAccent
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (inputIsDgb) {
+                OutlinedTextField(
+                    value = amountDgb,
+                    onValueChange = { viewModel.onAmountDgbChanged(it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("0.00000000") },
+                    suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp)
+                )
+                if (amountFiat.isNotBlank()) {
+                    Text(
+                        text = "≈ $$amountFiat USD",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                    )
+                }
+            } else {
+                OutlinedTextField(
+                    value = amountFiat,
+                    onValueChange = { viewModel.onAmountFiatChanged(it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("0.00") },
+                    prefix = { Text("$", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp)
+                )
+                if (amountDgb.isNotBlank()) {
+                    Text(
+                        text = "≈ $amountDgb DGB",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // ── Network fee ──────────────────────────────────────────────────
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Network Fee",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(onClick = { viewModel.toggleCustomFee() }) {
+        // DD sends still pay their fee in DGB, but there's no fee tier/custom
+        // input to show — the helper line above already covers it.
+        if (!effectiveDdMode) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (isCustomFee) "Default" else "Custom",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = DigiByteAccent
+                    text = "Network Fee",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { viewModel.toggleCustomFee() }) {
+                    Text(
+                        text = if (isCustomFee) "Default" else "Custom",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = DigiByteAccent
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            if (isCustomFee) {
+                OutlinedTextField(
+                    value = customFeeInput,
+                    onValueChange = { viewModel.customFeeInput.value = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("0.00014100") },
+                    suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    isError = feeWarning is FeeWarning.ZeroFee
+                )
+            } else {
+                val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
+                Text(
+                    text = String.format("%.8f DGB", defaultFeeDgb),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
-        }
 
-        Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-        if (isCustomFee) {
-            OutlinedTextField(
-                value = customFeeInput,
-                onValueChange = { viewModel.customFeeInput.value = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("0.00014100") },
-                suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp),
-                isError = feeWarning is FeeWarning.ZeroFee
-            )
-        } else {
-            val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
-            Text(
-                text = String.format("%.8f DGB", defaultFeeDgb),
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        when (feeWarning) {
-            is FeeWarning.BelowRelay -> {
-                Text(
-                    text = "⚠ Below minimum relay fee — transaction may not broadcast",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFFFA000)
-                )
+            when (feeWarning) {
+                is FeeWarning.BelowRelay -> {
+                    Text(
+                        text = "⚠ Below minimum relay fee — transaction may not broadcast",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFFA000)
+                    )
+                }
+                is FeeWarning.ZeroFee -> {
+                    Text(
+                        text = "Fee required",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DigiByteRed
+                    )
+                }
+                is FeeWarning.None -> {
+                    Text(
+                        text = "Confirms in ~15 seconds",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DigiByteGreen
+                    )
+                }
             }
-            is FeeWarning.ZeroFee -> {
+
+            // ── Validation error ──────────────────────────────────────────
+            if (validationError != null) {
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Fee required",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = validationError!!,
+                    style = MaterialTheme.typography.bodySmall,
                     color = DigiByteRed
                 )
             }
-            is FeeWarning.None -> {
-                Text(
-                    text = "Confirms in ~15 seconds",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = DigiByteGreen
-                )
-            }
-        }
-
-        // ── Validation error ──────────────────────────────────────────────
-        if (validationError != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = validationError!!,
-                style = MaterialTheme.typography.bodySmall,
-                color = DigiByteRed
-            )
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -390,43 +474,93 @@ fun SendScreen(
         }
 
         // ── Confirm button ────────────────────────────────────────────────
-        val isSending = sendState is SendState.Sending
-        Button(
-            onClick = { viewModel.requestConfirm() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            enabled = !isSending && canSend,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            )
-        ) {
-            if (isSending) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                    color = Color.White
+        if (effectiveDdMode) {
+            val ddCents = SendViewModel.parseUsdToCents(amountFiat) ?: -1L
+            val ddValid = ddAddressValid == true && SendViewModel.ddAmountValid(ddCents, ddBalance)
+            Button(
+                onClick = {
+                    ddSending = true
+                    viewModel.sendDigiDollar(address, amountFiat) { txid ->
+                        // sendDigiDollar's callback fires on a background
+                        // dispatcher — hop back to the composition's scope
+                        // (Main) before touching Compose state or Toast.
+                        coroutineScope.launch {
+                            ddSending = false
+                            if (txid != null) {
+                                ddSentTxid = txid
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "DigiDollar send failed",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                enabled = !ddSending && canSend && ddValid,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Broadcasting…")
-            } else {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
-                     modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Review & Send", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            ) {
+                if (ddSending) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Broadcasting…")
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
+                         modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Send DigiDollar", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
-        }
+        } else {
+            val isSending = sendState is SendState.Sending
+            Button(
+                onClick = { viewModel.requestConfirm() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                enabled = !isSending && canSend,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                if (isSending) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Broadcasting…")
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
+                         modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Review & Send", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
 
-        if (sendState is SendState.Error) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = (sendState as SendState.Error).message,
-                style = MaterialTheme.typography.bodySmall,
-                color = DigiByteRed,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
+            if (sendState is SendState.Error) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = (sendState as SendState.Error).message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DigiByteRed,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

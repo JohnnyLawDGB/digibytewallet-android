@@ -124,7 +124,7 @@ class WalletManager(
             // causing BRWalletAmountSentByTx to return wrong values mid-rescan.
             // The wider bloom filter (830 addresses) takes effect naturally
             // on the next sync cycle without needing a full rescan.
-            val migrationPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+            val migrationPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
             if (!migrationPrefs.getBoolean("bip84_migrated", false)) {
                 android.util.Log.i("WalletManager", "BIP84 upgrade detected — marking migration (no rescan)")
                 migrationPrefs.edit()
@@ -134,7 +134,7 @@ class WalletManager(
 
             // Load saved transactions BEFORE creating wallet — recoverWallet uses them
             // so the wallet starts with full tx history and balance is immediately spendable.
-            val syncPrefs = context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+            val syncPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
             val savedTxHex = syncPrefs.getString("saved_transactions", null)
             if (savedTxHex != null) {
                 val txBytes = hexToBytes(savedTxHex)
@@ -253,10 +253,10 @@ class WalletManager(
         prefs.edit().clear().commit()
         clearSyncData()
         // Clear saved transactions so they don't reappear on next wallet
-        context.getSharedPreferences("dgb_sync_data", android.content.Context.MODE_PRIVATE)
+        context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
             .edit().remove("saved_transactions").remove("has_synced").commit()
         // Clear bloom peer cache
-        context.getSharedPreferences("dgb_bloom_peers", android.content.Context.MODE_PRIVATE)
+        context.getSharedPreferences("dgb_bloom_peers" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
             .edit().clear().commit()
         utxoManager.clearAll()
         keyStoreManager.deleteKey()
@@ -319,7 +319,7 @@ class WalletManager(
     // ── Sync data management ────────────────────────────────────
 
     private fun clearSyncData() {
-        context.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
+        context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
             .edit().clear().apply()
     }
 

@@ -28,7 +28,7 @@ class WalletTxPersister(private val context: Context) {
     fun persist(): Boolean {
         val txData = NativeBridge.getSerializedTransactions() ?: return false
         val hex = txData.joinToString("") { "%02x".format(it) }
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return context.getSharedPreferences(PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_SAVED_TRANSACTIONS, hex)
             .commit()

@@ -32,6 +32,10 @@ add_library(
         src/main/jni/digibytewallet-core/BRCrypto.h
         src/main/jni/digibytewallet-core/BRDigiAsset.c
         src/main/jni/digibytewallet-core/BRDigiAsset.h
+        src/main/jni/digibytewallet-core/BRDigiDollar.c
+        src/main/jni/digibytewallet-core/BRDigiDollar.h
+        src/main/jni/digibytewallet-core/BRNetwork.c
+        src/main/jni/digibytewallet-core/BRNetwork.h
         src/main/jni/digibytewallet-core/BRGCSFilter.c
         src/main/jni/digibytewallet-core/BRGCSFilter.h
         src/main/jni/digibytewallet-core/BRCompactFilterChain.c
@@ -115,10 +119,12 @@ add_library(
 )
 
 include_directories(src/main/jni/digibytewallet-core/)
-include_directories(src/main/secp/secp256k1/include/)
-include_directories(src/main/secp/secp256k1/src/)
-include_directories(src/main/secp/secp256k1/)
-include_directories(src/main/secp/)
+# secp256k1 — single canonical vendored copy (bitcoin-core/secp256k1 v0.4.1),
+# amalgamation-#included by BRKey.c only. Carries modules ecdh + recovery +
+# extrakeys + schnorrsig (Taproot/BIP340 prerequisite).
+include_directories(src/main/jni/digibytewallet-core/secp256k1/include/)
+include_directories(src/main/jni/digibytewallet-core/secp256k1/src/)
+include_directories(src/main/jni/digibytewallet-core/secp256k1/)
 
 target_link_libraries(
         core-lib

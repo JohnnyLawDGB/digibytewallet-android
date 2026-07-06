@@ -9,6 +9,7 @@
 
 #include "jni_bridge.h"
 #include "BRCompactFilterChain.h"
+#include "BRNetwork.h"
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
@@ -293,6 +294,45 @@ static size_t g_savedPeersCount = 0;
 #include <netdb.h>
 #include <arpa/inet.h>
 
+/* Default services for an injected peer whose capability tags are unknown
+ * (servicesHex == 0, e.g. a legacy cached pool entry or the background
+ * SyncWorker): full node + bloom, matching pre-servicesHex behavior so
+ * nothing regresses. */
+#define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM)
+
+/* digiscope.me is one of our BIP157/158 filter nodes, so tag the priority
+ * peer compact-filter-capable. Without SERVICES_NODE_COMPACT_FILTERS set,
+ * BRPeerManager's filter-first selection can never pick it and the wallet
+ * falls back to holding ~1 filter peer by chance. */
+#define PRIORITY_PEER_SERVICES   (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM | SERVICES_NODE_COMPACT_FILTERS)
+
+/* testnet26 priority peers serve compact filters, not bloom — tag them
+ * compact-filter-capable (no bloom) so filter-first selection dials them and
+ * the relaxed testnet accept gate keeps them. */
+#define TESTNET_PRIORITY_PEER_SERVICES (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
+
+/* testnet26 has no mainnet-shaped seeder infra (api.digiscope.me only knows
+ * mainnet peers), so on testnet these two hardcoded public testnet26 nodes
+ * stand in for the digiscope.me priority peer below — same mechanism, same
+ * reliability guarantee (always in the pool even if DNS seeds are sparse).
+ * testnet26 nodes serve BIP157/158 compact filters (NODE_COMPACT_FILTERS)
+ * rather than bloom — bloom is deprecated/off by default on modern Core, so
+ * the SPV core only keeps a testnet peer that serves compact filters (see the
+ * relaxed accept gate in BRPeerManager.c). 95.111.238.51 is a verified
+ * compact-filter testnet26 node (the testnet analog of the mainnet digiscope
+ * filter peer); it is listed first. The other two are kept as connectivity
+ * fallbacks. They are tagged compact-filter-capable so filter-first selection
+ * dials them; the real service bits from each peer's version message govern
+ * retention. */
+#define TESTNET_PRIORITY_PEER_PORT  12033
+static const char *TESTNET_PRIORITY_PEER_IPS[] = {
+    "95.111.238.51",
+    "164.68.98.125",
+    "129.212.182.152",
+};
+#define TESTNET_PRIORITY_PEER_COUNT \
+    (sizeof(TESTNET_PRIORITY_PEER_IPS) / sizeof(TESTNET_PRIORITY_PEER_IPS[0]))
+
 /**
  * Resolve a hostname and prepend it to g_savedPeers so the peer manager
  * tries it first. Uses a recent timestamp so it sorts to the top.
@@ -330,14 +370,19 @@ static int _resolveHostToAddr(const char *hostname, UInt128 *out) {
 
 /* Prepend an already-resolved priority-peer address to g_savedPeers (dedup +
  * timestamp bump so it sorts to the top). MUTATES g_savedPeers — the caller
- * MUST hold g_peerManagerMutex. Fast (no DNS). */
-static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
+ * MUST hold g_peerManagerMutex. Fast (no DNS).
+ *
+ * `services` carries the peer's advertised capabilities (from the seeder's
+ * services_hex, or PRIORITY_PEER_SERVICES for digiscope.me). We OR it into an
+ * existing entry so a previously handshake-upgraded / filter-tagged peer is
+ * never downgraded by a later injection that happens to lack the bit. */
+static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services) {
     /* Check if already present in saved peers */
     for (size_t i = 0; i < g_savedPeersCount; i++) {
         if (UInt128Eq(g_savedPeers[i].address, addr)) {
             /* Already there — just bump its timestamp to the top */
             g_savedPeers[i].timestamp = (uint64_t)time(NULL);
-            g_savedPeers[i].services = SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM;
+            g_savedPeers[i].services |= services;   /* union — never downgrade */
             g_priorityPeerAddr = addr;
             g_priorityPeerPort = port;
             return;
@@ -351,7 +396,7 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
 
     /* Priority peer at index 0 */
     newPeers[0] = (BRPeer){ addr, port,
-        SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM,
+        services,
         (uint64_t)time(NULL), 0 };
 
     /* Copy existing peers after it */
@@ -372,18 +417,20 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port) {
  * resolution is cheap, so running it under the lock is fine. Caller holds the
  * lock. Hostname callers should split: _resolveHostToAddr (unlocked) then
  * _prependSavedPeerAddr (locked). */
-static void _injectPriorityPeer(const char *hostname, uint16_t port) {
+static void _injectPriorityPeer(const char *hostname, uint16_t port, uint64_t services) {
     UInt128 addr;
     if (!_resolveHostToAddr(hostname, &addr)) return;
-    _prependSavedPeerAddr(addr, port);
-    LOGI("_injectPriorityPeer: injected %s as priority peer", hostname);
+    _prependSavedPeerAddr(addr, port, services);
+    LOGI("_injectPriorityPeer: injected %s as priority peer (services=0x%llx)",
+         hostname, (unsigned long long)services);
 }
 
 /* ---------- injectPeerByIp ---------- */
 
 JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
-                                                           jstring ipStr, jint port) {
+                                                           jstring ipStr, jint port,
+                                                           jlong servicesHex) {
     (void)thiz;
     PEER_GUARD();
     if (!ipStr) return;
@@ -391,9 +438,18 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
     const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
     if (!ip) return;
 
+    /* Tag the peer with the seeder-advertised services (services_hex). This is
+     * how a BIP157/158 filter peer (0x44d has SERVICES_NODE_COMPACT_FILTERS)
+     * gets recognized by BRPeerManager's filter-first selection so the wallet
+     * holds >=2 filter peers. servicesHex==0 (absent, e.g. SyncWorker or a
+     * legacy pool entry) falls back to the legacy bloom-only default. */
+    uint64_t services = (servicesHex != 0)
+        ? (uint64_t)servicesHex
+        : INJECT_DEFAULT_SERVICES;
+
     /* Update g_savedPeers for the cold-start case when peer manager doesn't
      * exist yet — _injectPriorityPeer dedupes and prepends. */
-    _injectPriorityPeer(ip, (uint16_t)port);
+    _injectPriorityPeer(ip, (uint16_t)port, services);
 
     /* If the peer manager is already alive, ALSO add to its live candidate
      * pool. Without this, post-startup injections accumulate in g_savedPeers
@@ -407,8 +463,7 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
             /* Build IPv4-mapped IPv6 address (::ffff:x.x.x.x) */
             addr.u16[5] = 0xffff;
             addr.u32[3] = ip4.s_addr;
-            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port,
-                                  SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM);
+            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port, services);
         }
     }
 
@@ -446,14 +501,27 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         return;
     }
 
-    /* Resolve the digiscope.me priority peer BEFORE taking the lock.
+    /* Resolve the priority peer(s) BEFORE taking the lock.
      * getaddrinfo can block for the DNS resolver timeout on a flaky network —
      * exactly when reconnect fires — and the peer lock is contended by reads
      * such as getPeerCount() that run on the main thread. Holding the lock
      * across DNS would turn a brief read into an ANR. Resolution touches no
-     * shared state, so it is safe unlocked; the prepend below is under the lock. */
+     * shared state, so it is safe unlocked; the prepend below is under the lock.
+     *
+     * Mainnet resolves the digiscope.me hostname (unchanged). Testnet resolves
+     * the two hardcoded testnet26 IP-literal peers instead — no mainnet
+     * seeder/hostname involved at all when BRNetworkIsTestnet(). */
     UInt128 prioAddr = UINT128_ZERO;
-    int havePrio = _resolveHostToAddr("digiscope.me", &prioAddr);
+    int havePrio = 0;
+    UInt128 testnetPrioAddr[TESTNET_PRIORITY_PEER_COUNT];
+    int haveTestnetPrio[TESTNET_PRIORITY_PEER_COUNT];
+    if (BRNetworkIsTestnet()) {
+        for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
+            haveTestnetPrio[i] = _resolveHostToAddr(TESTNET_PRIORITY_PEER_IPS[i], &testnetPrioAddr[i]);
+        }
+    } else {
+        havePrio = _resolveHostToAddr("digiscope.me", &prioAddr);
+    }
 
     PEER_GUARD();
 
@@ -498,23 +566,41 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             return;
         }
 
-        /* Prepend digiscope.me (resolved above, before the lock) so a
-         * bloom-filter-enabled node is always in the pool, even if DNS seeds
-         * aren't re-queried. */
-        if (havePrio) _prependSavedPeerAddr(prioAddr, 12024);
+        /* Prepend the priority peer(s) (resolved above, before the lock) so a
+         * reliable node is always in the pool, even if DNS seeds aren't
+         * re-queried.
+         * Mainnet: digiscope.me — it is a BIP157/158 filter node, so tag it
+         * compact-filter-capable, otherwise BRPeerManager's filter-first
+         * selection can't pick it and the wallet holds ~1 filter peer.
+         * Testnet: the two hardcoded testnet26 peers in place of digiscope.me
+         * — no mainnet seeder/priority-peer path is touched on testnet. */
+        if (BRNetworkIsTestnet()) {
+            for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
+                if (haveTestnetPrio[i]) {
+                    _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, TESTNET_PRIORITY_PEER_SERVICES);
+                }
+            }
+        } else {
+            if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
+        }
 
-        /* Create peer manager for mainnet.
+        /* Create peer manager for the active network (mainnet by default;
+         * testnet when BRSetNetwork(1) was called at core init).
          * Use g_walletCreationTime (set by createWallet/recoverWallet) so the
          * peer manager starts syncing from the checkpoint nearest to when the
          * wallet was created — not from BIP39_CREATION_TIME (Dec 2017). */
         uint32_t syncFromTime = g_walletCreationTime ? g_walletCreationTime : (uint32_t)time(NULL);
-        LOGI("startSync: creating peer manager (syncFromTime=%u, savedBlocks=%zu, savedPeers=%zu)",
-             syncFromTime, g_savedBlocksCount, g_savedPeersCount);
-        g_peerManager = BPPeerManagerMainNetNew(g_wallet, syncFromTime,
-                                                 g_savedBlocks, g_savedBlocksCount,
-                                                 g_savedPeers, g_savedPeersCount);
+        LOGI("startSync: creating peer manager (testnet=%d, syncFromTime=%u, savedBlocks=%zu, savedPeers=%zu)",
+             BRNetworkIsTestnet(), syncFromTime, g_savedBlocksCount, g_savedPeersCount);
+        g_peerManager = BRNetworkIsTestnet()
+            ? BPPeerManagerTestNetNew(g_wallet, syncFromTime,
+                                      g_savedBlocks, g_savedBlocksCount,
+                                      g_savedPeers, g_savedPeersCount)
+            : BPPeerManagerMainNetNew(g_wallet, syncFromTime,
+                                      g_savedBlocks, g_savedBlocksCount,
+                                      g_savedPeers, g_savedPeersCount);
         if (!g_peerManager) {
-            LOGE("startSync: BPPeerManagerMainNetNew failed");
+            LOGE("startSync: peer manager creation failed (testnet=%d)", BRNetworkIsTestnet());
             return;
         }
 
@@ -658,7 +744,7 @@ Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv 
     if (!g_wallet || g_walletCreationTime == 0) return 0;
 
     uint32_t result = 0;
-    const BRChainParams *params = &BRMainNetParams;
+    const BRChainParams *params = BRNetworkIsTestnet() ? &BRTestNetParams : &BRMainNetParams;
     for (size_t i = 0; i < params->checkpointsCount; i++) {
         if (i == 0 ||
             params->checkpoints[i].timestamp + 7*24*60*60 < g_walletCreationTime) {

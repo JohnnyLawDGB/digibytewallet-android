@@ -18,6 +18,8 @@ import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.PeerEntity
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.isTestnet
+import io.digibyte.core.networkSuffix
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
@@ -197,7 +199,7 @@ class SyncService : Service() {
 
         // Restore persisted sync state so progress callbacks don't revert
         // "Connected" back to "Syncing 0%" on restart near the chain tip.
-        hasReachedSynced = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        hasReachedSynced = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
             .getBoolean("has_synced", false)
 
         // Wire C core → Kotlin before kicking off sync so no events are lost.
@@ -437,7 +439,7 @@ class SyncService : Service() {
                         if (atTipConsecutivePolls >= TIP_GRACE_POLLS) {
                             hasReachedSynced = true
                             walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
-                            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                            getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                 .edit().putBoolean("has_synced", true).apply()
                             android.util.Log.i(
                                 "SyncService",
@@ -460,7 +462,7 @@ class SyncService : Service() {
                             val txData = NativeBridge.getSerializedTransactions()
                             if (txData != null) {
                                 val hex = bytesToHex(txData)
-                                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                     .edit().putString("saved_transactions", hex).apply()
                             }
                         }
@@ -669,7 +671,7 @@ class SyncService : Service() {
                                 // Kotlin owns SharedPreferences: drop the stale chain so a
                                 // kill before the first re-anchored append can't restore
                                 // the stuck cfTip.
-                                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                     .edit().remove("saved_filter_headers").apply()
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
@@ -817,7 +819,7 @@ class SyncService : Service() {
         android.util.Log.i("SyncService", "Wallet ready, starting sync (waited ${waitCount * 500}ms)")
 
         // Load saved blocks and peers from previous session before syncing
-        val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val savedBlocks = prefs.getString("saved_blocks", null)
         val savedPeers = prefs.getString("saved_peers", null)
 
@@ -1052,7 +1054,7 @@ class SyncService : Service() {
             hasReachedSynced = true
             walletManager.updateSyncState(SyncState.Complete)
             // Persist sync-complete so restarts don't flash "Syncing 0%"
-            getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+            getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                 .edit().putBoolean("has_synced", true).apply()
             // Persist transactions and drop the foreground notification.
             // Peers stay connected so the user can send/receive while the app
@@ -1062,7 +1064,7 @@ class SyncService : Service() {
                 val txData = NativeBridge.getSerializedTransactions()
                 if (txData != null) {
                     val hex = bytesToHex(txData)
-                    getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                         .edit().putString("saved_transactions", hex).apply()
                     android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
                 }
@@ -1145,7 +1147,7 @@ class SyncService : Service() {
             val copy = data.copyOf()
             serviceScope.launch(Dispatchers.IO) {
                 val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                     .edit().putString("saved_peers", hex).apply()
             }
         }
@@ -1156,7 +1158,7 @@ class SyncService : Service() {
             val copy = data.copyOf()
             serviceScope.launch(Dispatchers.IO) {
                 val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                     .edit().putString("saved_filter_headers", hex).apply()
             }
         }
@@ -1186,15 +1188,29 @@ class SyncService : Service() {
      *      session is still usable.
      */
     private fun injectBloomPeers() {
+        if (isTestnet(this@SyncService)) {
+            // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
+            // only knows mainnet peers, so the mainnet bloom-pool fetch AND the
+            // Dandelion-capable-peer fetch (also served from that same seeder)
+            // are both skipped entirely on testnet. Inject the two hardcoded
+            // testnet26 peers instead; the refreshed testnet DNS seeds
+            // (BRTestNetParams, native) supply the rest of the pool. The
+            // mainnet branch below is unreached here and therefore unchanged.
+            injectTestnetPeers()
+            return
+        }
         // Dandelion peers piggyback here so they're injected at every sync-start
         // path (all of them call injectBloomPeers). Runs first so bloom's early
         // returns can't skip it; self-throttled by its own last_fetch timer.
         injectDandelionPeers()
-        val prefs = getSharedPreferences("dgb_bloom_peers", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
         val existing = prefs.getString("peer_pool", null)
-        val pool: MutableList<Pair<String, Int>> =
+        // Triple = (ip, port, servicesHex). servicesHex carries the seeder's
+        // capability bits (0x40 = compact filters) so filter peers are tagged
+        // when injected; 0 = unknown → native bloom-only default.
+        val pool: MutableList<Triple<String, Int, Long>> =
             if (existing != null) parsePool(existing) else mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
 
@@ -1202,9 +1218,11 @@ class SyncService : Service() {
         if (stale || pool.isEmpty()) {
             val fresh = fetchFromSeeder()
             if (fresh != null && fresh.isNotEmpty()) {
-                // Merge: add any peer we haven't seen before.
-                val seen = pool.toSet()
-                for (p in fresh) if (!seen.contains(p)) pool.add(p)
+                // Merge: add any peer we haven't seen before (dedup on ip:port,
+                // ignoring services so a re-fetch doesn't duplicate an entry
+                // whose capability bits changed).
+                val seen = pool.mapTo(HashSet()) { it.first to it.second }
+                for (p in fresh) if (seen.add(p.first to p.second)) pool.add(p)
                 prefs.edit()
                     .putString("peer_pool", serializePool(pool))
                     .putLong("last_fetch", now)
@@ -1228,8 +1246,8 @@ class SyncService : Service() {
         val cursor = prefs.getInt("pool_cursor", 0).coerceAtLeast(0) % pool.size
         val batchSize = BLOOM_BATCH_SIZE.coerceAtMost(pool.size)
         for (i in 0 until batchSize) {
-            val (ip, port) = pool[(cursor + i) % pool.size]
-            NativeBridge.injectPeerByIp(ip, port)
+            val (ip, port, services) = pool[(cursor + i) % pool.size]
+            NativeBridge.injectPeerByIp(ip, port, services)
         }
         val newCursor = (cursor + batchSize) % pool.size
         prefs.edit().putInt("pool_cursor", newCursor).apply()
@@ -1237,6 +1255,22 @@ class SyncService : Service() {
         android.util.Log.i(
             "SyncService",
             "Injected $batchSize peers (cursor $cursor→$newCursor, pool=${pool.size})"
+        )
+    }
+
+    /** Inject the hardcoded testnet26 peers (no seeder involved — testnet26
+     *  has no mainnet-shaped seeder infra). testnet26 nodes serve BIP157/158
+     *  compact filters, not bloom, so tag them NODE_NETWORK|NODE_COMPACT_FILTERS
+     *  (0x41) — filter-first selection dials them and the relaxed testnet accept
+     *  gate keeps a compact-filter peer even without bloom. 95.111.238.51 is a
+     *  verified compact-filter node (listed first). */
+    private fun injectTestnetPeers() {
+        for (ip in TESTNET_PRIORITY_PEERS) {
+            NativeBridge.injectPeerByIp(ip, TESTNET_PRIORITY_PEER_PORT, TESTNET_PEER_SERVICES)
+        }
+        android.util.Log.i(
+            "SyncService",
+            "Testnet26: injected ${TESTNET_PRIORITY_PEERS.size} hardcoded peer(s)"
         )
     }
 
@@ -1252,11 +1286,13 @@ class SyncService : Service() {
         try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) {}
         if (!enabled) return
 
-        val prefs = getSharedPreferences("dgb_dandelion_peers", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_dandelion_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val cached = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
-        val pool: List<Pair<String, Int>> =
+        // Triple = (ip, port, servicesHex) — Dandelion peers are also filter-
+        // capable per the seeder, so carry their services_hex through too.
+        val pool: List<Triple<String, Int, Long>> =
             if (now - lastFetch > BLOOM_REFRESH_INTERVAL_MS || cached.isEmpty()) {
                 val fresh = fetchFromSeeder("dandelion")
                 if (!fresh.isNullOrEmpty()) {
@@ -1270,16 +1306,16 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "Dandelion: no capable peers advertised — sends will flood")
             return
         }
-        for ((ip, port) in pool) {
-            NativeBridge.injectPeerByIp(ip, port)   // connect it (so it joins the pool)
-            NativeBridge.addDandelionPeer(ip)        // mark it Dandelion-capable
+        for ((ip, port, services) in pool) {
+            NativeBridge.injectPeerByIp(ip, port, services)  // connect it (so it joins the pool)
+            NativeBridge.addDandelionPeer(ip)                // mark it Dandelion-capable
         }
         android.util.Log.i("SyncService", "Dandelion: injected + marked ${pool.size} capable peer(s)")
     }
 
     /** Try the seeder once. Returns the parsed peer list or null on failure.
      *  [capability] filters the seeder pool (e.g. "dandelion"); null = default pool. */
-    private fun fetchFromSeeder(capability: String? = null): List<Pair<String, Int>>? {
+    private fun fetchFromSeeder(capability: String? = null): List<Triple<String, Int, Long>>? {
         val url = if (capability != null) "$SEEDER_URL?capability=$capability" else SEEDER_URL
         return try {
             val request = Request.Builder().url(url).build()
@@ -1297,20 +1333,23 @@ class SyncService : Service() {
         }
     }
 
-    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024, ...}], "capability":"filter|bloom|filter+bloom", ...}
-     *  We extract only ip+port for the BIP 37 path; the capability field is logged so we can
-     *  confirm fallthrough behavior in production. C2 (BIP 158) will inspect per-peer fields. */
-    private fun parsePeersJson(json: String): List<Pair<String, Int>> {
+    /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024,"services_hex":"0x44d", ...}], "capability":"filter|bloom|filter+bloom", ...}
+     *  Extracts ip + port + services_hex per peer. services_hex carries the node's
+     *  advertised service bits — notably 0x40 (SERVICES_NODE_COMPACT_FILTERS) — so
+     *  the native filter-first peer selection can recognize and hold filter peers.
+     *  Absent/unparseable services_hex → 0 (native falls back to bloom-only). */
+    private fun parsePeersJson(json: String): List<Triple<String, Int, Long>> {
         return try {
             val root = org.json.JSONObject(json)
             val capability = root.optString("capability", "unknown")
             val arr = root.getJSONArray("peers")
             android.util.Log.i("SyncService",
                 "Seeder response: capability=$capability, ${arr.length()} peer(s)")
-            val out = ArrayList<Pair<String, Int>>(arr.length())
+            val out = ArrayList<Triple<String, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
                 val peer = arr.getJSONObject(i)
-                out.add(peer.getString("ip") to peer.optInt("port", 12024))
+                val services = parseSeederServicesHex(peer.optString("services_hex", ""))
+                out.add(Triple(peer.getString("ip"), peer.optInt("port", 12024), services))
             }
             out
         } catch (e: Exception) {
@@ -1319,23 +1358,26 @@ class SyncService : Service() {
         }
     }
 
-    /** Pool is stored as a compact JSON array of "ip:port" strings. */
-    private fun serializePool(pool: List<Pair<String, Int>>): String {
+    /** Pool is stored as a compact JSON array of "ip:port:servicesHex" strings
+     *  (servicesHex is lowercase hex, no 0x prefix). Seeder peers are IPv4, so
+     *  splitting on ':' is unambiguous. Legacy "ip:port" entries from older
+     *  caches parse with services = 0 (native falls back to bloom-only). */
+    private fun serializePool(pool: List<Triple<String, Int, Long>>): String {
         val arr = org.json.JSONArray()
-        for ((ip, port) in pool) arr.put("$ip:$port")
+        for ((ip, port, services) in pool) arr.put("$ip:$port:${services.toString(16)}")
         return arr.toString()
     }
 
-    private fun parsePool(json: String): MutableList<Pair<String, Int>> {
+    private fun parsePool(json: String): MutableList<Triple<String, Int, Long>> {
         return try {
             val arr = org.json.JSONArray(json)
-            val out = ArrayList<Pair<String, Int>>(arr.length())
+            val out = ArrayList<Triple<String, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
-                val s = arr.getString(i)
-                val colon = s.lastIndexOf(':')
-                if (colon > 0) {
-                    val port = s.substring(colon + 1).toIntOrNull() ?: 12024
-                    out.add(s.substring(0, colon) to port)
+                val parts = arr.getString(i).split(':')
+                if (parts.size >= 2) {
+                    val port = parts[1].toIntOrNull() ?: 12024
+                    val services = if (parts.size >= 3) (parts[2].toLongOrNull(16) ?: 0L) else 0L
+                    out.add(Triple(parts[0], port, services))
                 }
             }
             out
@@ -1425,7 +1467,7 @@ class SyncService : Service() {
         if (dropped) {
             runCatching {
                 NativeBridge.getSerializedTransactions()?.let { data ->
-                    getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+                    getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                         .edit().putString("saved_transactions", bytesToHex(data)).apply()
                 }
             }
@@ -1446,7 +1488,7 @@ class SyncService : Service() {
      * so it survives serviceScope cancellation.
      */
     private fun persistBlocks(data: ByteArray, synchronous: Boolean) {
-        val prefs = getSharedPreferences("dgb_sync_data", MODE_PRIVATE)
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
         val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
         if (!shouldPersistBlocks(newTop, persistedTop)) {
@@ -1532,8 +1574,23 @@ class SyncService : Service() {
         /** Capability-aware seeder API. Returns filter-capable peers when available,
          *  falling through to bloom-capable peers when not. The wallet's existing
          *  parser ignores the extra per-peer fields (peer_capability, capabilities,
-         *  services_hex, etc.) since it only reads ip + port. */
+         *  services_hex, etc.) since it only reads ip + port.
+         *  MAINNET ONLY — api.digiscope.me knows nothing about testnet26 peers.
+         *  Never fetched when [io.digibyte.core.isTestnet] is true; see
+         *  [injectBloomPeers]. */
         private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
+        /** Hardcoded testnet26 public peers injected in place of the mainnet
+         *  digiscope seeder pool when the wallet is running on testnet. The
+         *  native startSync() path also prepends these as the cold-start
+         *  priority peer(s) (mirroring digiscope.me on mainnet); re-injecting
+         *  them here on every reconnect attempt additionally adds them to an
+         *  already-live peer manager's candidate pool (see
+         *  NativeBridge.injectPeerByIp), same as the mainnet bloom pool does. */
+        private val TESTNET_PRIORITY_PEERS = listOf("95.111.238.51", "164.68.98.125", "129.212.182.152")
+        private const val TESTNET_PRIORITY_PEER_PORT = 12033
+        /** NODE_NETWORK (0x01) | NODE_COMPACT_FILTERS (0x40) — testnet26 nodes
+         *  serve BIP157/158 filters, not bloom. */
+        private const val TESTNET_PEER_SERVICES = 0x41L
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** How many peers to inject per call. The C peer manager caps its

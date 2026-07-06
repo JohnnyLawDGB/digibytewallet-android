@@ -10,6 +10,7 @@
  */
 
 #include "jni_bridge.h"
+#include "BRDigiDollar.h"
 
 /* ---------- createTransaction ---------- */
 
@@ -413,4 +414,63 @@ Java_io_digibyte_core_bridge_NativeBridge_getEstimatedFee(JNIEnv *env, jobject t
      * All transactions at the minimum relay fee confirm in the next block.
      * Return DEFAULT_FEE_PER_KB (100 sat/byte) for all priority levels. */
     return (jlong)DEFAULT_FEE_PER_KB;
+}
+
+/* ---------- isValidDigiDollarAddress ---------- */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isValidDigiDollarAddress(JNIEnv *env, jobject thiz, jstring addr) {
+    (void)thiz;
+    if (! addr) return JNI_FALSE;
+    const char *s = (*env)->GetStringUTFChars(env, addr, NULL);
+    uint8_t key[32];
+#ifdef BITCOIN_TESTNET
+    int isTestnet = 1;
+#else
+    int isTestnet = 0;
+#endif
+    int ok = s && BRDigiDollarAddressDecode(key, s, isTestnet);
+    if (s) (*env)->ReleaseStringUTFChars(env, addr, s);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ---------- sendDigiDollar: decode TD -> build -> sign -> publish (in-memory) ---------- */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents) {
+    (void)thiz;
+    PEER_GUARD(); /* serialize g_peerManager access (v3.7.1 UAF fix); auto-releases on any return */
+    if (! g_wallet || ! g_peerManager) { LOGW("sendDigiDollar: wallet/peerManager not ready"); return NULL; }
+    if (! seed_is_valid()) { LOGW("sendDigiDollar: session locked (no seed)"); return NULL; }
+    if (! tdAddress || cents <= 0) return NULL;
+
+    const char *td = (*env)->GetStringUTFChars(env, tdAddress, NULL);
+    uint8_t key[32];
+#ifdef BITCOIN_TESTNET
+    int isTestnet = 1;
+#else
+    int isTestnet = 0;
+#endif
+    int decoded = td && BRDigiDollarAddressDecode(key, td, isTestnet);
+    if (td) (*env)->ReleaseStringUTFChars(env, tdAddress, td);
+    if (! decoded) { LOGW("sendDigiDollar: bad TD address"); return NULL; }
+
+    BRTransaction *tx = BRWalletCreateDigiDollarTransfer(g_wallet, key, (uint64_t)cents);
+    if (! tx) { LOGW("sendDigiDollar: builder returned NULL (insufficient DD/DGB or bounds)"); return NULL; }
+
+    int signed_ok = seed_sign_transaction(g_wallet, tx, 0);
+    if (! signed_ok || ! BRTransactionIsSigned(tx)) {
+        LOGW("sendDigiDollar: signing failed");
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* txid (reversed display order) before publish — BRPeerManagerPublishTx takes ownership */
+    UInt256 txHash = tx->txHash;
+    char txidHex[65];
+    for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
+    txidHex[64] = '\0';
+
+    BRWalletRegisterTransaction(g_wallet, tx);
+    BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);   /* takes ownership; do NOT free tx */
+
+    return (*env)->NewStringUTF(env, txidHex);
 }
