@@ -1,6 +1,7 @@
 package io.digibyte.ui.settings
 
 import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -81,6 +82,46 @@ class SettingsViewModel @Inject constructor(
         try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) { /* applied on next sync */ }
         context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
             .edit().putBoolean("enabled", enabled).apply()
+    }
+
+    // ── Network selection (dev-gated Advanced section; Task 6) ───────────────
+    /**
+     * Whether the persisted network selection is testnet. Read from the SAME
+     * network-independent `dgb_settings` store that DigiByteApp.onCreate()'s
+     * applyNetworkSelection() consults at process start (see
+     * io.digibyte.core.NetworkState) — this VM never touches the per-network
+     * suffixed prefs/DB, only the selector pref itself.
+     */
+    private val _networkTestnetEnabled = MutableStateFlow(
+        context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
+            .getBoolean("dgb_network_testnet", false)
+    )
+    val networkTestnetEnabled: StateFlow<Boolean> = _networkTestnetEnabled.asStateFlow()
+
+    /**
+     * Persist the network selection and restart the app so DigiByteApp
+     * .onCreate() re-reads the pref and calls NativeBridge.setNetwork()
+     * before any wallet/peer-manager state is created. A live in-place
+     * switch is out of scope (design doc §7.2 — restart-to-apply chosen).
+     *
+     * Uses commit() (not apply()) so the write is guaranteed durable on disk
+     * before Runtime.exit(0) tears down the process — apply()'s async write
+     * could otherwise race the exit and silently not persist.
+     */
+    fun setNetworkTestnet(enabled: Boolean) {
+        context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
+            .edit().putBoolean("dgb_network_testnet", enabled).commit()
+        restartApp()
+    }
+
+    /** Relaunch the app's own launcher activity in a fresh task, then kill this process. */
+    private fun restartApp() {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            context.startActivity(launchIntent)
+        }
+        Runtime.getRuntime().exit(0)
     }
 
     // ── Action results ────────────────────────────────────────────────────────

@@ -9,6 +9,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -16,16 +20,28 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import io.digibyte.BuildConfig
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 
 @Composable
-fun SettingsScreen(navController: NavController) {
+fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = hiltViewModel()) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val versionName = try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
     } catch (e: Exception) { "unknown" }
+
+    // Dev-gate: the Advanced/Developer section (network toggle) only renders
+    // in a debug build OR the digiTestnet flavor — a mainnet release build
+    // never shows it, never even composes the toggle. BuildConfig.FLAVOR is
+    // "mainnet" / "digiTestnet" per the `network` flavor dimension.
+    val isDevBuild = BuildConfig.DEBUG || BuildConfig.FLAVOR == "digiTestnet"
+    val networkTestnetEnabled by viewModel.networkTestnetEnabled.collectAsStateWithLifecycle()
+    var pendingNetworkTestnet by remember { mutableStateOf(false) }
+    var showNetworkConfirmDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -121,6 +137,40 @@ fun SettingsScreen(navController: NavController) {
             }
         }
 
+        // Dev-only: never rendered in a mainnet release build (see isDevBuild above).
+        if (isDevBuild) {
+            item {
+                SettingsCategory(title = "Advanced / Developer") {
+                    SettingsRow(
+                        icon = Icons.Default.BugReport,
+                        iconTint = Color(0xFFFF6D00),
+                        title = "Network",
+                        subtitle = if (networkTestnetEnabled)
+                            "Testnet — test chain, same recovery phrase"
+                        else
+                            "Mainnet — production chain",
+                        onClick = {
+                            pendingNetworkTestnet = !networkTestnetEnabled
+                            showNetworkConfirmDialog = true
+                        },
+                        trailing = {
+                            Switch(
+                                checked = networkTestnetEnabled,
+                                onCheckedChange = { checked ->
+                                    pendingNetworkTestnet = checked
+                                    showNetworkConfirmDialog = true
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFFF6D00)
+                                )
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
         item {
             Spacer(Modifier.height(16.dp))
             Text(
@@ -132,6 +182,46 @@ fun SettingsScreen(navController: NavController) {
                     .padding(horizontal = 4.dp),
             )
         }
+    }
+
+    // Confirm dialog — flipping the Network toggle restarts the app (design
+    // doc §4.7 / §7.2), so we gate the actual write+restart behind an explicit
+    // confirmation rather than firing it straight off the Switch/row tap.
+    if (showNetworkConfirmDialog) {
+        val goingToTestnet = pendingNetworkTestnet
+        AlertDialog(
+            onDismissRequest = { showNetworkConfirmDialog = false },
+            containerColor = Color(0xFF1A2742),
+            title = {
+                Text(
+                    text = if (goingToTestnet) "Switch to Testnet?" else "Switch to Mainnet?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = if (goingToTestnet)
+                        "The app will restart and sync the test chain. Your recovery phrase is unchanged."
+                    else
+                        "The app will restart and sync the main chain. Your recovery phrase is unchanged.",
+                    color = Color(0xFFB0BEC5)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNetworkConfirmDialog = false
+                    viewModel.setNetworkTestnet(goingToTestnet)
+                }) {
+                    Text("Restart", color = Color(0xFFFF6D00))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNetworkConfirmDialog = false }) {
+                    Text("Cancel", color = Color(0xFF8899AA))
+                }
+            }
+        )
     }
 }
 

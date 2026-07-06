@@ -19,9 +19,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.digibyte.core.isTestnet
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
@@ -62,6 +64,12 @@ fun WalletScreen(
     val bloomFallback by viewModel.bloomFallbackActive.collectAsStateWithLifecycle()
     val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
 
+    // Runtime network selection (Task 6, dev-gated toggle in Settings > Advanced).
+    // Read once — a restart is required to change it (see SettingsViewModel
+    // .setNetworkTestnet), so it can never change within a running process.
+    val context = LocalContext.current
+    val onTestnet = remember { isTestnet(context) }
+
     // Report RESUMED state so the poll loop's active-screen readiness nudge only
     // fires while the user is actually looking at this screen — never in the
     // background or behind a pushed-over destination. Pairs with [shouldWakePeers].
@@ -95,6 +103,11 @@ fun WalletScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (onTestnet) {
+                        TestnetBadge()
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
                         dgbAmount = WalletViewModel.formatSatoshis(balance),
@@ -520,6 +533,41 @@ private fun PriceFeedCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * Small badge shown at the top of the wallet header when the runtime network
+ * selection (Settings > Advanced > Network, dev-gated) is testnet — so it's
+ * never ambiguous which chain a balance/transaction belongs to. Never renders
+ * on mainnet (the default, and the only option in a mainnet release build).
+ */
+@Composable
+private fun TestnetBadge() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .background(
+                color = Color(0xFFFF6D00).copy(alpha = 0.25f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 3.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.BugReport,
+            contentDescription = "Testnet active",
+            tint = Color(0xFFFFB74D),
+            modifier = Modifier.size(12.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = "TESTNET",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFFFB74D),
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
     }
 }
 

@@ -29,7 +29,13 @@ android {
         }
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        // Needed for BuildConfig.DEBUG / BuildConfig.FLAVOR — used to dev-gate
+        // the Settings > Advanced network toggle (mainnet release must not
+        // render it). AGP 8+ defaults this off.
+        buildConfig = true
+    }
 
     signingConfigs {
         create("release") {
