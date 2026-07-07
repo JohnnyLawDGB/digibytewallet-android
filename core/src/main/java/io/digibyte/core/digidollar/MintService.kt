@@ -75,21 +75,45 @@ class MintService(
         data class Error(val message: String) : MintResult()
     }
 
-    suspend fun mint(ddCents: Long, tier: LockTier): MintResult {
+    /**
+     * Live status snapshot for the Mint UI's collateral preview. Reads the
+     * SAME status source and network [mint] computes against — same feed, no
+     * feed-mismatch drift. It is a point-in-time snapshot, so the price CAN
+     * still move between preview and Mint; [maxCollateralSats] below caps that
+     * temporal drift. Null when the endpoint is unreachable (UI shows a retry).
+     */
+    suspend fun currentStatus(): DigiDollarStatus? = statusClient.fetchStatus(testnet)
+
+    /**
+     * @param maxCollateralSats the largest collateral the caller authorized
+     *   (the previewed figure, usually with a small tolerance). If the
+     *   fresh-priced collateral exceeds it — the DGB price fell between preview
+     *   and Mint — the Mint is Blocked rather than silently locking more DGB
+     *   than the user confirmed. Defaults to no cap.
+     */
+    suspend fun mint(
+        ddCents: Long,
+        tier: LockTier,
+        maxCollateralSats: Long = Long.MAX_VALUE,
+    ): MintResult {
         if (!inFlight.compareAndSet(false, true)) {
             return MintResult.Error(
                 "A Mint is already in progress — concurrent Mints would double-spend the funding coin",
             )
         }
         try {
-            return mintLocked(ddCents, tier)
+            return mintLocked(ddCents, tier, maxCollateralSats)
         } finally {
             inFlight.set(false)
         }
     }
 
     @Suppress("ReturnCount") // sequential guard clauses ARE the flow
-    private suspend fun mintLocked(ddCents: Long, tier: LockTier): MintResult {
+    private suspend fun mintLocked(
+        ddCents: Long,
+        tier: LockTier,
+        maxCollateralSats: Long,
+    ): MintResult {
         if (!testnet) {
             return MintResult.Blocked(
                 "DigiDollar Mint is testnet-only until the 4.0.0 mainnet release",
@@ -112,6 +136,27 @@ class MintService(
                 "Mint amount must be between the consensus minimum of " +
                     "${DigiDollarLimits.MIN_MINT_CENTS} and maximum of " +
                     "${DigiDollarLimits.MAX_MINT_CENTS} cents",
+            )
+        }
+
+        // Slippage cap: the collateral is priced fresh here, but the user
+        // approved a figure computed from an earlier snapshot. If the price
+        // fell in between, requiredSats rises — block rather than lock more DGB
+        // than was confirmed. (A price RISE lowers requiredSats, always fine.)
+        val collateralSats = try {
+            Collateral.requiredSats(
+                ddCents = ddCents,
+                tier = tier,
+                oraclePriceMicroUsd = status.priceMicroUsd,
+                dcaMultiplierBps = status.dcaMultiplierBps,
+            )
+        } catch (e: IllegalArgumentException) {
+            return MintResult.Error(e.message ?: "Collateral calculation failed")
+        }
+        if (collateralSats > maxCollateralSats) {
+            return MintResult.Blocked(
+                "The DGB price moved — this Mint now needs more collateral than you " +
+                    "approved. Reopen Mint to review the new amount.",
             )
         }
 
@@ -144,12 +189,7 @@ class MintService(
         val signed: ByteArray
         val fundingUtxo: UtxoLines.Utxo
         try {
-            val neededSats = Collateral.requiredSats(
-                ddCents = ddCents,
-                tier = tier,
-                oraclePriceMicroUsd = status.priceMicroUsd,
-                dcaMultiplierBps = status.dcaMultiplierBps,
-            ) + MintBuilder.DEFAULT_FEE_SATS
+            val neededSats = collateralSats + MintBuilder.DEFAULT_FEE_SATS
 
             // Native P2WPKH only: DigiDollarTxSigner enforces the same
             // precondition (legacy inputs would only fail later, looking like

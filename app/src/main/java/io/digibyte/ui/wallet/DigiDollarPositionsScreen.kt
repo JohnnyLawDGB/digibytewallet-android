@@ -16,10 +16,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,6 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.digibyte.core.digidollar.RedemptionService
 import io.digibyte.ui.theme.DigiByteAccent
 
@@ -54,12 +61,26 @@ import io.digibyte.ui.theme.DigiByteAccent
 @Composable
 fun DigiDollarPositionsScreen(
     onBack: () -> Unit,
+    onMint: () -> Unit = {},
     viewModel: PositionsViewModel = hiltViewModel(),
 ) {
     val positions by viewModel.positions.collectAsState()
     val redeemState by viewModel.redeemState.collectAsState()
     var confirming by remember { mutableStateOf<RedemptionService.CollateralPosition?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Refresh whenever the screen resumes — a Mint on the pushed Mint screen
+    // returns here (popBackStack) to the SAME ViewModel instance, so init's
+    // one-shot refresh never re-runs; without this the just-minted Position
+    // stays hidden until a manual refresh.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(redeemState) {
         when (val s = redeemState) {
@@ -87,6 +108,18 @@ fun DigiDollarPositionsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = { viewModel.refresh() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    }
+                },
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onMint,
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("Mint") },
             )
         },
     ) { padding ->

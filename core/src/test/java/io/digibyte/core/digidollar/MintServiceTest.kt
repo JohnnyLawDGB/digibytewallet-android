@@ -436,6 +436,40 @@ class MintServiceTest {
         )
     }
 
+    // ---- slippage cap (preview-vs-actual collateral drift) ----
+
+    @Test
+    fun `blocks when fresh collateral exceeds the approved cap`() = runTest {
+        // maxCollateral one sat below the freshly-priced collateral: the price
+        // "moved" against the user since the preview, so lock is refused.
+        val result = service(wallet = fundedWallet())
+            .mint(ddCents, tier, maxCollateralSats = collateral - 1)
+        assertTrue(result is MintService.MintResult.Blocked)
+    }
+
+    @Test
+    fun `mints when fresh collateral is within the approved cap`() = runTest {
+        val result = service(wallet = fundedWallet())
+            .mint(ddCents, tier, maxCollateralSats = collateral)
+        assertTrue(result is MintService.MintResult.Success)
+    }
+
+    // ---- currentStatus (UI collateral-preview seam) ----
+
+    @Test
+    fun `currentStatus parses the live price and dca for the preview`() = runTest {
+        val status = service(wallet = fundedWallet()).currentStatus()
+        assertEquals(DigiDollarDeployment.ACTIVE, status?.deployment)
+        assertEquals(price, status?.priceMicroUsd)
+        assertEquals(10_000L, status?.dcaMultiplierBps)
+    }
+
+    @Test
+    fun `currentStatus is null when the endpoint is unusable`() = runTest {
+        val status = service(wallet = fundedWallet(), statusJson = "not json").currentStatus()
+        assertEquals(null, status)
+    }
+
     @Test
     fun `failed broadcast records nothing for the activity list`() = runTest {
         val records = mutableListOf<List<Any>>()
