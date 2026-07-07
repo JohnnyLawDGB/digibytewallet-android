@@ -19,21 +19,65 @@ class CollateralTest {
         assertEquals(2_634_128_166_915, sats)
     }
 
-    // An unhealthy system surcharges collateral: 12,000 bps on tier 3 gives
-    // effective ratio ceil(350 * 12000 / 10000) = 420%.
-    // KNOWN GAP: this expected value was computed from the same Kotlin
-    // formula, NOT from Core — it guards against regressions only. A
-    // Core/regtest-anchored unhealthy-DCA vector is still needed (the only
-    // Core-proven case above has DCA as a no-op).
+    // Core-anchored unhealthy-DCA vectors (closes the former UNPROVEN gap).
+    //
+    // Captured 2026-07-07 from DigiByte Core v9.26.4 on regtest: after minting
+    // $100 to seed DD supply, `calculatecollateralrequirement 10000 180 <price>`
+    // was called with prices that drive Core's own system-health calculation
+    // into each unhealthy band. The `wallet_collateral_dgb` Core returns (base
+    // requirement + its 1% safety margin) is asserted below, satoshi-exact.
+    // Core's discrete DCA bands are the ONLY reachable multipliers — dca.cpp
+    // HEALTH_TIERS: >=150% healthy 10000bps, 120-149% warning 12500bps,
+    // 110-119% critical 15000bps, <110% emergency 20000bps. (The old
+    // regression-only vector used 12000bps, a value Core can never emit.)
+    //
+    // calculatecollateralrequirement shares the mint builder's exact arithmetic
+    // (txbuilder.cpp: ApplyDCA -> ceil base -> ApplyCollateralSafetyMargin) and
+    // the same chain-derived health source, so its wallet_collateral IS what a
+    // real mint locks. A live mint into an unhealthy band could not be used to
+    // anchor here because reaching one by crashing the mock price trips Core's
+    // separate mint volatility freeze (minting-frozen-volatility-candidate) —
+    // orthogonal to the collateral formula. Repro: scratchpad/dca-vector.sh.
     @Test
-    fun `DCA multiplier surcharges the effective ratio with ceiling math`() {
-        val sats = Collateral.requiredSats(
-            ddCents = 10_000,
-            tier = LockTiers.byIndex(3),
-            oraclePriceMicroUsd = 13_420,
-            dcaMultiplierBps = 12_000,
+    fun `warning-band DCA (12500 bps) matches Core wallet_collateral`() {
+        // price 5100 micro-USD -> Core health 134% (warning), effective 438%.
+        assertEquals(
+            8_674_117_647_059,
+            Collateral.requiredSats(
+                ddCents = 10_000,
+                tier = LockTiers.byIndex(3),
+                oraclePriceMicroUsd = 5_100,
+                dcaMultiplierBps = 12_500,
+            ),
         )
-        assertEquals(3_160_953_800_298, sats)
+    }
+
+    @Test
+    fun `critical-band DCA (15000 bps) matches Core wallet_collateral`() {
+        // price 4370 micro-USD -> Core health 115% (critical), effective 525%.
+        assertEquals(
+            12_133_867_276_888,
+            Collateral.requiredSats(
+                ddCents = 10_000,
+                tier = LockTiers.byIndex(3),
+                oraclePriceMicroUsd = 4_370,
+                dcaMultiplierBps = 15_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `emergency-band DCA (20000 bps) matches Core wallet_collateral`() {
+        // price 3600 micro-USD -> Core health 94% (emergency), effective 700%.
+        assertEquals(
+            19_638_888_888_889,
+            Collateral.requiredSats(
+                ddCents = 10_000,
+                tier = LockTiers.byIndex(3),
+                oraclePriceMicroUsd = 3_600,
+                dcaMultiplierBps = 20_000,
+            ),
+        )
     }
 
     @Test
