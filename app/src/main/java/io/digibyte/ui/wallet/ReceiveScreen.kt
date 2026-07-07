@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import io.digibyte.core.isTestnet
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.ui.components.QrCodeDisplay
 import androidx.compose.ui.graphics.Color
@@ -41,22 +42,35 @@ fun ReceiveScreen(
     val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
     val hasPeers = peerCount > 0
 
-    // Address format: 0=legacy(D), 2=bech32(dgb1q) — default to bech32
+    // DigiDollar receive is offered only where DD is available (testnet, or mainnet
+    // post-activation) — same gating posture as the rest of the wallet's DD surface.
+    val ddEnabled = remember { isTestnet(context) }
+
+    // Address format: 0=legacy(D), 2=bech32(dgb1q), 3=DigiDollar(TD…) — default to bech32
     var addressFormat by remember { mutableIntStateOf(2) }
 
-    // Pre-derive both formats once so toggling the chip doesn't re-run the
-    // JNI key-derivation path. format 0 = legacy D-prefix, format 2 = bech32.
+    // Pre-derive each format once so toggling the chip doesn't re-run the JNI
+    // key-derivation path. format 0 = legacy D-prefix, 2 = bech32, 3 = DigiDollar TD… address.
     val legacyAddress = remember { viewModel.getReceiveAddress(0, 0) ?: "Address unavailable" }
     val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
-    val address = if (addressFormat == 0) legacyAddress else bech32Address
+    val digiDollarAddress = remember {
+        if (ddEnabled) viewModel.getDigiDollarReceiveAddress() ?: "Address unavailable" else null
+    }
+    val address = when (addressFormat) {
+        0 -> legacyAddress
+        3 -> digiDollarAddress ?: bech32Address
+        else -> bech32Address
+    }
+    val isDigiDollar = addressFormat == 3 && digiDollarAddress != null
 
     // Optional amount for the QR URI
     var amountInput by remember { mutableStateOf("") }
 
-    val qrContent by remember(address, amountInput) {
+    val qrContent by remember(address, amountInput, isDigiDollar) {
         derivedStateOf {
+            // DigiDollar addresses are not DGB-URI targets — QR carries the raw TD… address.
             val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
-            if (sats != null && sats > 0) {
+            if (!isDigiDollar && sats != null && sats > 0) {
                 DigiByteUri.encode(address = address, amountSats = sats)
             } else {
                 address
@@ -198,8 +212,16 @@ fun ReceiveScreen(
             FilterChip(
                 selected = addressFormat == 0,
                 onClick = { addressFormat = 0 },
-                label = { Text("Legacy (D…)", fontSize = 12.sp) }
+                label = { Text("Legacy (D…)", fontSize = 12.sp) },
+                modifier = if (ddEnabled) Modifier.padding(end = 8.dp) else Modifier
             )
+            if (ddEnabled) {
+                FilterChip(
+                    selected = addressFormat == 3,
+                    onClick = { addressFormat = 3 },
+                    label = { Text("DigiDollar (TD…)", fontSize = 12.sp) }
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))

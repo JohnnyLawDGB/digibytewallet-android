@@ -16,6 +16,7 @@ object NativeBridge {
     /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32/P2WPKH(dgb1q),
      *  3=Taproot/P2TR(dgb1p) — BIP86 (m/86'/20'/0'). */
     external fun getReceiveAddress(index: Int, format: Int): String?
+    external fun getDigiDollarReceiveAddress(): String?
     external fun getChangeAddress(index: Int, format: Int): String?
     external fun getBalance(): Long
     external fun getDigiDollarBalance(): Long

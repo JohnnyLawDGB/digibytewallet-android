@@ -218,6 +218,11 @@ class WalletManager(
         return NativeBridge.getReceiveAddress(index, format)
     }
 
+    /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
+    fun getDigiDollarReceiveAddress(): String? {
+        return NativeBridge.getDigiDollarReceiveAddress()
+    }
+
     /**
      * Start SPV sync.
      */

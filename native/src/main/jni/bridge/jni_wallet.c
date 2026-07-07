@@ -9,6 +9,7 @@
 
 #include "jni_bridge.h"
 #include "BRNetwork.h"
+#include "BRDigiDollar.h"
 
 /* ---------- Global state definitions ---------- */
 
@@ -551,6 +552,47 @@ Java_io_digibyte_core_bridge_NativeBridge_getReceiveAddress(JNIEnv *env, jobject
     }
 
     return (*env)->NewStringUTF(env, addr.s);
+}
+
+/* ---------- getDigiDollarReceiveAddress ----------
+ *
+ * The wallet's canonical DigiDollar receive address: the BIP86 taproot owner key at
+ * m/86'/20'/0'/0/0 (index 0 of the same watched P2TR receive chain the wallet already
+ * scans), tap-tweaked to its output key X(Q) and Base58Check-encoded as "TD…" (testnet) /
+ * "DD…" (mainnet) for the active runtime network. This is the SAME output key as the
+ * wallet's first dgbt1p… P2TR address, so DigiDollar sent here is detected and spendable
+ * with the key we sign with (seed_sign_transaction derives the same path). Requires an
+ * unlocked session (g_seedValid). Returns null if locked or on derivation failure. */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getDigiDollarReceiveAddress(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+
+    if (!g_seedValid) {
+        LOGW("getDigiDollarReceiveAddress: session locked (no seed)");
+        return NULL;
+    }
+
+    BRKey key;
+    memset(&key, 0, sizeof(key));
+    BRBIP32PrivKeyBIP86(&key, g_seed, sizeof(g_seed), 0, 0); /* m/86'/20'/0'/0/0 owner key */
+
+    uint8_t outputKey[32];
+    int ok = BRKeyTaprootOutputKey(&key, outputKey); /* X(Q): BIP341 tap-tweaked output key */
+    BRKeyClean(&key);                                /* zero the private key immediately */
+    if (!ok) {
+        LOGW("getDigiDollarReceiveAddress: taproot output-key derivation failed");
+        return NULL;
+    }
+
+    char addr[128];
+    memset(addr, 0, sizeof(addr));
+    size_t n = BRDigiDollarAddressEncode(addr, sizeof(addr), outputKey, BRNetworkIsTestnet());
+    if (n == 0) {
+        LOGW("getDigiDollarReceiveAddress: address encode failed");
+        return NULL;
+    }
+
+    return (*env)->NewStringUTF(env, addr);
 }
 
 /* ---------- getChangeAddress ---------- */

@@ -644,6 +644,10 @@ class WalletViewModel @Inject constructor(
     fun getReceiveAddress(index: Int = 0, format: Int = 2): String? =
         walletManager.getReceiveAddress(index, format = format)
 
+    /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
+    fun getDigiDollarReceiveAddress(): String? =
+        walletManager.getDigiDollarReceiveAddress()
+
     companion object {
         /** Blocks-behind-tip past which the UI honestly shows catch-up progress
          *  instead of "Complete", even if SyncState.Complete latched. Well above
