@@ -220,8 +220,53 @@ object AppModule {
         io.digibyte.core.recovery.SeedProvider { walletManager.loadBip39Seed() }
 
     @Provides @Singleton
-    fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
-        PriceProvider(dao, okHttpFetcher(client))
+    fun providePriceProvider(
+        dao: PriceCacheDao,
+        client: OkHttpClient,
+        oracle: io.digibyte.core.digidollar.DigiDollarStatusClient,
+    ): PriceProvider = PriceProvider(dao, okHttpFetcher(client), oracleProvider = oracle)
+
+    /** DigiDollar price/status client (issue #5). Default endpoint rides the
+     *  same api.digiscope.me certificate pins as [DigiScopeClient]; a future
+     *  settings override constructs an unpinned client for self-hosted nodes. */
+    @Provides @Singleton
+    fun provideDigiDollarStatusClient(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+    ): io.digibyte.core.digidollar.DigiDollarStatusClient {
+        val pinned = client.newBuilder()
+            .certificatePinner(
+                okhttp3.CertificatePinner.Builder()
+                    .add("api.digiscope.me", "sha256/VDo86Ks/QFE3kVoOXkmNVWTovKKNMFQsBd4KGvoP8OU=")
+                    .add("api.digiscope.me", "sha256/y7xVm0TVJNahMr2sZydE2jQH8SquXV9yLF9seROHHHU=")
+                    .build(),
+            )
+            .build()
+        return io.digibyte.core.digidollar.DigiDollarStatusClient(
+            okHttpFetcher(pinned),
+            testnet = isTestnet(context),
+        )
+    }
+
+    /** Softfork gate cache — chain state, so the prefs file is network-suffixed. */
+    @Provides @Singleton
+    fun provideDigiDollarGate(
+        @ApplicationContext context: Context,
+    ): io.digibyte.core.digidollar.DigiDollarGate {
+        val prefs = context.getSharedPreferences(
+            "dgb_digidollar" + networkSuffix(context),
+            Context.MODE_PRIVATE,
+        )
+        return io.digibyte.core.digidollar.DigiDollarGate(
+            object : io.digibyte.core.digidollar.DigiDollarGate.Store {
+                override fun get(key: String): Long? =
+                    if (prefs.contains(key)) prefs.getLong(key, 0) else null
+                override fun put(key: String, value: Long) {
+                    prefs.edit().putLong(key, value).apply()
+                }
+            },
+        )
+    }
 
     @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
     @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()
