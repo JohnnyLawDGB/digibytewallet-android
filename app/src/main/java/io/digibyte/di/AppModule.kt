@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.*
 import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
@@ -267,6 +268,46 @@ object AppModule {
             },
         )
     }
+
+    /** Mint flow glue (issue #11). The independent price for the ADR-0002
+     *  divergence check is LIVE CoinGecko/Binance only — a cached price can
+     *  be arbitrarily stale, and a Mint blocked during a brief API outage
+     *  beats one priced against last week's market. */
+    @Provides @Singleton
+    fun provideMintService(
+        @ApplicationContext context: Context,
+        statusClient: io.digibyte.core.digidollar.DigiDollarStatusClient,
+        gate: io.digibyte.core.digidollar.DigiDollarGate,
+        priceProvider: PriceProvider,
+        persister: io.digibyte.core.WalletTxPersister,
+        outgoingTxStore: io.digibyte.core.OutgoingTxStore,
+    ): io.digibyte.core.digidollar.MintService =
+        io.digibyte.core.digidollar.MintService(
+            wallet = object : io.digibyte.core.digidollar.MintService.WalletPort {
+                override fun listWalletUtxos() = NativeBridge.listWalletUtxos()
+                override fun changeAddress() = NativeBridge.getChangeAddress(0, 2)
+                override fun addressToScriptPubKey(address: String) =
+                    NativeBridge.addressToScriptPubKey(address)
+                override fun deriveOwnerKey(coinType: Int, chain: Int, index: Int) =
+                    NativeBridge.ddDeriveOwnerKey(coinType, chain, index)
+                override fun tipHeight() = NativeBridge.getLastBlockHeight()
+                override fun estimatedTipHeight() = NativeBridge.getEstimatedBlockHeight()
+            },
+            statusClient = statusClient,
+            gate = gate,
+            independentUsd = {
+                val price = priceProvider.fetchPrice("USD")
+                price.priceUsd.takeIf { price.source == "coingecko" || price.source == "binance" }
+            },
+            signMint = io.digibyte.core.digidollar.DigiDollarTxSigner::signMint,
+            broadcast = io.digibyte.core.dandelion.Broadcaster::broadcast,
+            persist = { persister.persist() },
+            recordOutgoing = { txid, sentSats, feeSats, toAddress ->
+                outgoingTxStore.record(txid, sentSats, feeSats, toAddress)
+            },
+            ecOps = io.digibyte.core.digidollar.NativeEcOps,
+            testnet = isTestnet(context),
+        )
 
     @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
     @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()
