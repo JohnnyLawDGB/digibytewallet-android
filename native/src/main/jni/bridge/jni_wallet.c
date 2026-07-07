@@ -919,3 +919,80 @@ Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarUtxos(JNIEnv *env, jobje
     (void)thiz;
     return _utxo_lines(env, BRWalletDigiDollarUTXOs, 1);
 }
+
+/* ---------- listDigiDollarMints ---------- */
+/* Collateral-position source (issue #10): one line per wallet-known DigiDollar
+ * Mint transaction as "txid:vout:valueSats:blockHeight:spent:opReturnHex".
+ * `vout` is the collateral output — the first value-bearing 34-byte OP_1 P2TR
+ * (vout 0 in the MintBuilder/Core layout, but located, not assumed). `spent`
+ * is 1 when any wallet transaction consumes that outpoint (our own
+ * Redemptions; a third-party liquidation spends an unwatched script, so SPV
+ * never sees it and the position stays listed until a redeem attempt fails).
+ * The Mint OP_RETURN is emitted raw — the Kotlin layer decodes
+ * ddCents/unlockHeight/Owner key with its fixture-proven MintMetadata.parse,
+ * keeping this pass mechanical (classify, locate, spent-check). */
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarMints(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t count = BRWalletTransactions(g_wallet, NULL, 0);
+    if (count == 0) return (*env)->NewStringUTF(env, "");
+
+    BRTransaction **txs = (BRTransaction **)malloc(sizeof(BRTransaction *) * count);
+    if (!txs) return (*env)->NewStringUTF(env, "");
+    count = BRWalletTransactions(g_wallet, txs, count);
+
+    /* txid + 4 numeric fields + separators ~ 110; a Mint OP_RETURN is ~45
+     * bytes (90 hex) — 300 per line never truncates a well-formed entry */
+    size_t cap = count * 300 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+
+    size_t off = 0;
+    for (size_t i = 0; i < count; i++) {
+        const BRTransaction *tx = txs[i];
+
+        if (!tx || BRDigiDollarTxType(tx) != DD_TYPE_MINT) continue;
+
+        const BRTxOutput *coll = NULL, *opret = NULL;
+        uint32_t collVout = 0;
+        for (size_t j = 0; j < tx->outCount; j++) {
+            const BRTxOutput *o = &tx->outputs[j];
+            if (!coll && o->amount > 0 && o->scriptLen == 34 &&
+                o->script[0] == OP_1 && o->script[1] == 32) {
+                coll = o;
+                collVout = (uint32_t)j;
+            }
+            if (!opret && o->scriptLen > 0 && o->script[0] == OP_RETURN) opret = o;
+        }
+        if (!coll || !opret) continue; /* not the Mint layout we build */
+
+        int spent = 0;
+        for (size_t j = 0; j < count && !spent; j++) {
+            for (size_t k = 0; txs[j] && k < txs[j]->inCount && !spent; k++) {
+                if (txs[j]->inputs[k].index == collVout &&
+                    UInt256Eq(txs[j]->inputs[k].txHash, tx->txHash)) spent = 1;
+            }
+        }
+
+        size_t need = 64 + 4 * 21 + opret->scriptLen * 2 + 8;
+        if (off + need >= cap) continue; /* never truncate mid-line */
+        off += (size_t)sprintf(buf + off, "%s:%u:%lld:%u:%d:",
+                               u256hex(UInt256Reverse(tx->txHash)), collVout,
+                               (long long)coll->amount, tx->blockHeight, spent);
+        for (size_t k = 0; k < opret->scriptLen; k++) {
+            off += (size_t)sprintf(buf + off, "%02x", opret->script[k]);
+        }
+        buf[off++] = '\n';
+        buf[off] = '\0';
+    }
+
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    free(txs);
+    return result;
+}

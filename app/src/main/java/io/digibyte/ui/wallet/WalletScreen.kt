@@ -46,6 +46,7 @@ fun WalletScreen(
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
+    onNavigatePositions: () -> Unit = {},
     onNavigateGame: () -> Unit = {},
     onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
     onShowLeaderboard: (() -> Unit)? = null,
@@ -111,10 +112,14 @@ fun WalletScreen(
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
                         dgbAmount = WalletViewModel.formatSatoshis(balance),
-                        ddAmount = if (ddBalance > 0L)
-                            WalletViewModel.formatDigiDollar(ddBalance) else null,
+                        // On testnet the DigiDollar line always shows — it is
+                        // the entry to the Positions screen, which can hold
+                        // open collateral even when the DD balance is zero.
+                        ddAmount = if (ddBalance > 0L || onTestnet)
+                            WalletViewModel.formatDigiDollar(ddBalance) + " DigiDollar" else null,
                         isSynced = syncState is SyncState.Complete,
-                        onFiatTap = { viewModel.cycleCurrency() }
+                        onFiatTap = { viewModel.cycleCurrency() },
+                        onDdTap = if (onTestnet) onNavigatePositions else null
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))

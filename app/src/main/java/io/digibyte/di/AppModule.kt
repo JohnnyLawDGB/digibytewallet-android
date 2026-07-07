@@ -344,6 +344,18 @@ object AppModule {
             testnet = isTestnet(context),
         )
 
+    /** Collateral positions (issue #10): recovered from the wallet's own Mint
+     *  transactions, so they survive a seed restore. Feeds [provideRedemptionService]. */
+    @Provides @Singleton
+    fun providePositionsService(): io.digibyte.core.digidollar.PositionsService =
+        io.digibyte.core.digidollar.PositionsService(
+            wallet = object : io.digibyte.core.digidollar.PositionsService.WalletPort {
+                override fun listDigiDollarMints() = NativeBridge.listDigiDollarMints()
+                override fun deriveOwnerKey(coinType: Int, chain: Int, index: Int) =
+                    NativeBridge.ddDeriveOwnerKey(coinType, chain, index)
+            },
+        )
+
     @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
     @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()
 

@@ -282,6 +282,7 @@ fun AppNavigation(
                         navController.navigate("transaction_detail/${txid}")
                     },
                     onNavigateAssets = { navController.navigate("assets") },
+                    onNavigatePositions = { navController.navigate("digidollar_positions") },
                     onNavigateGame = { navController.navigate("digirunner") },
                     onScoreSubmit = { score, distance, coins, livesRemaining ->
                         kotlinx.coroutines.MainScope().launch {
@@ -291,6 +292,14 @@ fun AppNavigation(
                         }
                     },
                     onShowLeaderboard = { navController.navigate("digirunner_leaderboard") }
+                )
+            }
+
+            // DigiDollar collateral positions (issue #10) — entry is testnet-
+            // gated in WalletScreen; RedemptionService refuses mainnet anyway.
+            composable("digidollar_positions") {
+                io.digibyte.ui.wallet.DigiDollarPositionsScreen(
+                    onBack = { navController.popBackStack() },
                 )
             }
 
