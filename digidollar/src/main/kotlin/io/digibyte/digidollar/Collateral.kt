@@ -36,10 +36,12 @@ object Collateral {
         require(oraclePriceMicroUsd > 0) { "Oracle price must be positive, got $oraclePriceMicroUsd" }
         require(dcaMultiplierBps > 0) { "DCA multiplier must be positive, got $dcaMultiplierBps" }
 
-        // Core dca.cpp ApplyDCA: effectiveRatio = ceil(baseRatio * bps / 10000)
-        // UNPROVEN vs Core for bps != 10000: the only Core-anchored vector has
-        // DCA as a no-op (healthy system). Needs a regtest vector with an
-        // unhealthy DCA before mint amounts computed off this path are trusted.
+        // Core dca.cpp ApplyDCA: effectiveRatio = ceil(baseRatio * bps / 10000).
+        // Core-anchored across all bands (v9.26.4 regtest, 2026-07-07): the
+        // healthy (10000), warning (12500), critical (15000) and emergency
+        // (20000) multipliers each reproduce Core's calculatecollateralrequirement
+        // wallet_collateral satoshi-exact — see CollateralTest. Those four are
+        // Core's only reachable bands (dca.cpp HEALTH_TIERS).
         val effectiveRatio = ceilDiv(
             tier.ratioPercent.toBigInteger() * dcaMultiplierBps.toBigInteger(),
             DCA_BPS_SCALE.toBigInteger(),
