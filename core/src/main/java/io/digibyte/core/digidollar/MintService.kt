@@ -75,6 +75,14 @@ class MintService(
         data class Error(val message: String) : MintResult()
     }
 
+    /**
+     * Live status snapshot for the Mint UI's collateral preview. Reads the
+     * SAME status source and network [mint] computes against, so the on-screen
+     * estimate cannot drift from a different price feed. Null when the endpoint
+     * is unreachable — the UI shows a retry, and [mint] would block anyway.
+     */
+    suspend fun currentStatus(): DigiDollarStatus? = statusClient.fetchStatus(testnet)
+
     suspend fun mint(ddCents: Long, tier: LockTier): MintResult {
         if (!inFlight.compareAndSet(false, true)) {
             return MintResult.Error(

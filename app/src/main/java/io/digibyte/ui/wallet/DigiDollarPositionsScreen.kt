@@ -16,10 +16,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,6 +57,7 @@ import io.digibyte.ui.theme.DigiByteAccent
 @Composable
 fun DigiDollarPositionsScreen(
     onBack: () -> Unit,
+    onMint: () -> Unit = {},
     viewModel: PositionsViewModel = hiltViewModel(),
 ) {
     val positions by viewModel.positions.collectAsState()
@@ -87,6 +91,18 @@ fun DigiDollarPositionsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = { viewModel.refresh() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    }
+                },
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onMint,
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("Mint") },
             )
         },
     ) { padding ->

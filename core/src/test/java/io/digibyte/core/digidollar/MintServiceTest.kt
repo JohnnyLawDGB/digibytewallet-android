@@ -436,6 +436,22 @@ class MintServiceTest {
         )
     }
 
+    // ---- currentStatus (UI collateral-preview seam) ----
+
+    @Test
+    fun `currentStatus parses the live price and dca for the preview`() = runTest {
+        val status = service(wallet = fundedWallet()).currentStatus()
+        assertEquals(DigiDollarDeployment.ACTIVE, status?.deployment)
+        assertEquals(price, status?.priceMicroUsd)
+        assertEquals(10_000L, status?.dcaMultiplierBps)
+    }
+
+    @Test
+    fun `currentStatus is null when the endpoint is unusable`() = runTest {
+        val status = service(wallet = fundedWallet(), statusJson = "not json").currentStatus()
+        assertEquals(null, status)
+    }
+
     @Test
     fun `failed broadcast records nothing for the activity list`() = runTest {
         val records = mutableListOf<List<Any>>()

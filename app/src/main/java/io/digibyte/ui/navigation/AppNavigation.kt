@@ -300,6 +300,16 @@ fun AppNavigation(
             composable("digidollar_positions") {
                 io.digibyte.ui.wallet.DigiDollarPositionsScreen(
                     onBack = { navController.popBackStack() },
+                    onMint = { navController.navigate("digidollar_mint") },
+                )
+            }
+
+            // Mint calculator/confirm (issue #11) — entered from Positions; the
+            // Positions entry is testnet-gated and MintService refuses mainnet.
+            composable("digidollar_mint") {
+                io.digibyte.ui.wallet.MintScreen(
+                    onBack = { navController.popBackStack() },
+                    onMinted = { navController.popBackStack() },
                 )
             }
 
