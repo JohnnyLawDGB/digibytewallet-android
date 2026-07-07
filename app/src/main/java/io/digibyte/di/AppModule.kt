@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.*
 import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.db.WalletDatabase
 import io.digibyte.core.db.dao.*
@@ -220,8 +221,140 @@ object AppModule {
         io.digibyte.core.recovery.SeedProvider { walletManager.loadBip39Seed() }
 
     @Provides @Singleton
-    fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
-        PriceProvider(dao, okHttpFetcher(client))
+    fun providePriceProvider(
+        dao: PriceCacheDao,
+        client: OkHttpClient,
+        oracle: io.digibyte.core.digidollar.DigiDollarStatusClient,
+    ): PriceProvider = PriceProvider(dao, okHttpFetcher(client), oracleProvider = oracle)
+
+    /** DigiDollar price/status client (issue #5). Default endpoint rides the
+     *  same api.digiscope.me certificate pins as [DigiScopeClient]; a future
+     *  settings override constructs an unpinned client for self-hosted nodes. */
+    @Provides @Singleton
+    fun provideDigiDollarStatusClient(
+        @ApplicationContext context: Context,
+        client: OkHttpClient,
+    ): io.digibyte.core.digidollar.DigiDollarStatusClient {
+        val pinned = client.newBuilder()
+            .certificatePinner(
+                okhttp3.CertificatePinner.Builder()
+                    .add("api.digiscope.me", "sha256/VDo86Ks/QFE3kVoOXkmNVWTovKKNMFQsBd4KGvoP8OU=")
+                    .add("api.digiscope.me", "sha256/y7xVm0TVJNahMr2sZydE2jQH8SquXV9yLF9seROHHHU=")
+                    .build(),
+            )
+            .build()
+        return io.digibyte.core.digidollar.DigiDollarStatusClient(
+            okHttpFetcher(pinned),
+            testnet = isTestnet(context),
+        )
+    }
+
+    /** Softfork gate cache — chain state, so the prefs file is network-suffixed. */
+    @Provides @Singleton
+    fun provideDigiDollarGate(
+        @ApplicationContext context: Context,
+    ): io.digibyte.core.digidollar.DigiDollarGate {
+        val prefs = context.getSharedPreferences(
+            "dgb_digidollar" + networkSuffix(context),
+            Context.MODE_PRIVATE,
+        )
+        return io.digibyte.core.digidollar.DigiDollarGate(
+            object : io.digibyte.core.digidollar.DigiDollarGate.Store {
+                override fun get(key: String): Long? =
+                    if (prefs.contains(key)) prefs.getLong(key, 0) else null
+                override fun put(key: String, value: Long) {
+                    prefs.edit().putLong(key, value).apply()
+                }
+            },
+        )
+    }
+
+    /** Mint flow glue (issue #11). The independent price for the ADR-0002
+     *  divergence check is LIVE CoinGecko/Binance only — a cached price can
+     *  be arbitrarily stale, and a Mint blocked during a brief API outage
+     *  beats one priced against last week's market. */
+    @Provides @Singleton
+    fun provideMintService(
+        @ApplicationContext context: Context,
+        statusClient: io.digibyte.core.digidollar.DigiDollarStatusClient,
+        gate: io.digibyte.core.digidollar.DigiDollarGate,
+        priceProvider: PriceProvider,
+        persister: io.digibyte.core.WalletTxPersister,
+        outgoingTxStore: io.digibyte.core.OutgoingTxStore,
+    ): io.digibyte.core.digidollar.MintService =
+        io.digibyte.core.digidollar.MintService(
+            wallet = object : io.digibyte.core.digidollar.MintService.WalletPort {
+                override fun listWalletUtxos() = NativeBridge.listWalletUtxos()
+                override fun changeAddress() = NativeBridge.getChangeAddress(0, 2)
+                override fun addressToScriptPubKey(address: String) =
+                    NativeBridge.addressToScriptPubKey(address)
+                override fun deriveOwnerKey(coinType: Int, chain: Int, index: Int) =
+                    NativeBridge.ddDeriveOwnerKey(coinType, chain, index)
+                override fun tipHeight() = NativeBridge.getLastBlockHeight()
+                override fun estimatedTipHeight() = NativeBridge.getEstimatedBlockHeight()
+            },
+            statusClient = statusClient,
+            gate = gate,
+            independentUsd = {
+                val price = priceProvider.fetchPrice("USD")
+                price.priceUsd.takeIf { price.source == "coingecko" || price.source == "binance" }
+            },
+            signMint = io.digibyte.core.digidollar.DigiDollarTxSigner::signMint,
+            broadcast = io.digibyte.core.dandelion.Broadcaster::broadcast,
+            persist = { persister.persist() },
+            recordOutgoing = { txid, sentSats, feeSats, toAddress ->
+                outgoingTxStore.record(txid, sentSats, feeSats, toAddress)
+            },
+            ecOps = io.digibyte.core.digidollar.NativeEcOps,
+            testnet = isTestnet(context),
+        )
+
+    /** Redemption flow glue (issue #13). Mirrors [provideMintService] but with
+     *  no divergence check — the redeem witness carries no oracle price, so the
+     *  only price-independent gate is that the position's timelock has expired. */
+    @Provides @Singleton
+    fun provideRedemptionService(
+        @ApplicationContext context: Context,
+        statusClient: io.digibyte.core.digidollar.DigiDollarStatusClient,
+        gate: io.digibyte.core.digidollar.DigiDollarGate,
+        persister: io.digibyte.core.WalletTxPersister,
+        outgoingTxStore: io.digibyte.core.OutgoingTxStore,
+    ): io.digibyte.core.digidollar.RedemptionService =
+        io.digibyte.core.digidollar.RedemptionService(
+            wallet = object : io.digibyte.core.digidollar.RedemptionService.WalletPort {
+                override fun listDigiDollarUtxos() = NativeBridge.listDigiDollarUtxos()
+                override fun listWalletUtxos() = NativeBridge.listWalletUtxos()
+                override fun changeAddress() = NativeBridge.getChangeAddress(0, 2)
+                override fun addressToScriptPubKey(address: String) =
+                    NativeBridge.addressToScriptPubKey(address)
+                override fun deriveOwnerKey(coinType: Int, chain: Int, index: Int) =
+                    NativeBridge.ddDeriveOwnerKey(coinType, chain, index)
+                override fun tipHeight() = NativeBridge.getLastBlockHeight()
+                override fun estimatedTipHeight() = NativeBridge.getEstimatedBlockHeight()
+            },
+            statusClient = statusClient,
+            gate = gate,
+            signRedemption = io.digibyte.core.digidollar.DigiDollarTxSigner::signRedemption,
+            broadcast = io.digibyte.core.dandelion.Broadcaster::broadcast,
+            persist = { persister.persist() },
+            recordOutgoing = { txid, returnedSats, feeSats, toAddress ->
+                outgoingTxStore.record(txid, returnedSats, feeSats, toAddress)
+            },
+            ecOps = io.digibyte.core.digidollar.NativeEcOps,
+            testnet = isTestnet(context),
+        )
+
+    /** Collateral positions (issue #10): recovered from the wallet's own Mint
+     *  transactions, so they survive a seed restore. Feeds [provideRedemptionService]. */
+    @Provides @Singleton
+    fun providePositionsService(): io.digibyte.core.digidollar.PositionsService =
+        io.digibyte.core.digidollar.PositionsService(
+            wallet = object : io.digibyte.core.digidollar.PositionsService.WalletPort {
+                override fun listDigiDollarMints() = NativeBridge.listDigiDollarMints()
+                override fun deriveOwnerKey(coinType: Int, chain: Int, index: Int) =
+                    NativeBridge.ddDeriveOwnerKey(coinType, chain, index)
+            },
+        )
 
     @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
     @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()

@@ -33,7 +33,9 @@ jobs:
         run: ./gradlew lint || true  # Don't fail on lint warnings in alpha
 
       - name: Unit Tests
-        run: ./gradlew testMainnetDebugUnitTest
+        # testMainnetDebugUnitTest only covers Android modules; the pure-JVM
+        # :digidollar module needs its own test + detekt invocation.
+        run: ./gradlew testMainnetDebugUnitTest :digidollar:test :digidollar:detekt
 
       - name: Build Debug APK
         run: ./gradlew :app:assembleMainnetDebug

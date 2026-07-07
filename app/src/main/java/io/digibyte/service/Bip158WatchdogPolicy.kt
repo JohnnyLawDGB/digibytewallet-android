@@ -30,6 +30,13 @@ internal enum class PostTimeoutAction {
      *  (cfTip reads 0). Keep polling — don't read the rebuild as a dead chain. */
     AWAIT_REANCHOR,
 
+    /** The wallet holds DigiDollar and bloom (BIP37) never matches P2TR outputs,
+     *  so degrading to it would silently miss DigiDollar receives (issue #19).
+     *  Keep retrying compact filters and surface a degraded-detection warning
+     *  instead of blinding the wallet to its own stablecoin. Headers are already
+     *  caught up at this branch, so staying on filters remains viable. */
+    STAY_ON_FILTERS_DD,
+
     /** No re-anchor is warranted (never synced) or the re-anchored chain never
      *  rebuilt within the grace window — degrade to bloom for the session. */
     FALLBACK_BLOOM,
@@ -53,13 +60,19 @@ internal const val REANCHOR_GRACE_MS = 60_000L
  * @param reanchoredThisSession a re-anchor has already been attempted this session.
  * @param msSinceReanchor wall-clock since that re-anchor (ignored unless
  *   [reanchoredThisSession]).
+ * @param hasDigiDollarBalance the wallet holds DigiDollar. Bloom is P2TR-blind,
+ *   so once re-anchor is exhausted the choice is stay-on-filters (preserve DD
+ *   detection) rather than the DD-blinding bloom degrade (issue #19). Re-anchor
+ *   still takes precedence — it also stays on filters.
  */
 internal fun decidePostTimeoutAction(
     hasReachedSynced: Boolean,
     reanchoredThisSession: Boolean,
     msSinceReanchor: Long,
+    hasDigiDollarBalance: Boolean = false,
 ): PostTimeoutAction = when {
     hasReachedSynced && !reanchoredThisSession -> PostTimeoutAction.REANCHOR
     reanchoredThisSession && msSinceReanchor < REANCHOR_GRACE_MS -> PostTimeoutAction.AWAIT_REANCHOR
+    hasDigiDollarBalance -> PostTimeoutAction.STAY_ON_FILTERS_DD
     else -> PostTimeoutAction.FALLBACK_BLOOM
 }

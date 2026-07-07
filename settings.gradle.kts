@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "digibytewallet-android"
-include(":app", ":core", ":native", ":game")
+include(":app", ":core", ":native", ":game", ":digidollar")

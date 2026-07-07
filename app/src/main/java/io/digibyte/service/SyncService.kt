@@ -598,6 +598,12 @@ class SyncService : Service() {
 
                 // cfheaders is actively riding the header chain — healthy.
                 if (advanced) {
+                    // Filters recovered: DigiDollar detection is live again (#19).
+                    if (_digiDollarDetectionDegraded.value) {
+                        _digiDollarDetectionDegraded.value = false
+                        android.util.Log.i("SyncService",
+                            "BIP158 watchdog: cfheaders resumed — DigiDollar detection restored")
+                    }
                     android.util.Log.d("SyncService",
                         "BIP158 watchdog: progressing (cfTip=$cfTipNow, blockTip=$blockTip, " +
                         "gap=$gap, elapsed=${elapsedMs}ms) — keeping poll alive")
@@ -643,6 +649,13 @@ class SyncService : Service() {
                     try {
                         NativeBridge.fallbackToBloom()
                         _bloomFallbackActive.value = true
+                        // Headers can't advance here, so filters can't either — bloom is
+                        // the only way to keep syncing. But it's P2TR-blind, so warn a DD
+                        // holder that DigiDollar detection is degraded this session (#19);
+                        // filters retry on next launch and a rescan re-credits anything missed.
+                        if (NativeBridge.getDigiDollarBalance() > 0L) {
+                            _digiDollarDetectionDegraded.value = true
+                        }
                     } catch (t: Throwable) {
                         android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
                     }
@@ -657,7 +670,17 @@ class SyncService : Service() {
                 // filters at the floor. The skipped gap was already bloom-scanned —
                 // gated on hasReachedSynced, which is that guarantee.
                 if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
-                    when (decidePostTimeoutAction(hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs)) {
+                    // Bloom (BIP37) never matches P2TR, so degrading to it blinds
+                    // the wallet to DigiDollar (issue #19). If DD is held, prefer
+                    // staying on filters over the silent-loss bloom degrade.
+                    val hasDigiDollar = try {
+                        NativeBridge.getDigiDollarBalance() > 0L
+                    } catch (_: Throwable) {
+                        false
+                    }
+                    when (decidePostTimeoutAction(
+                        hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs, hasDigiDollar,
+                    )) {
                         PostTimeoutAction.REANCHOR -> {
                             val reanchored = try {
                                 NativeBridge.reanchorCompactFilterChainAtFloor()
@@ -678,8 +701,14 @@ class SyncService : Service() {
                                     "(cfTip was $cfTipNow, below floor) — staying on filters")
                                 continue
                             }
-                            // re-anchor returned false (cfTip not actually below the
-                            // floor) — nothing left to try; degrade to bloom below.
+                            // re-anchor returned false (cfTip not below the floor) — the
+                            // deficit isn't the problem. Mark it exhausted (backdate past
+                            // the grace window) so subsequent polls don't re-invoke the JNI
+                            // every 15s and instead settle into the bloom / stay-on-filters
+                            // decision below (#19 review — matters only for DD wallets,
+                            // which keep polling; non-DD falls to bloom and ends this poll).
+                            reanchoredThisSession = true
+                            reanchorAtMs = nowMs - REANCHOR_GRACE_MS
                         }
                         PostTimeoutAction.AWAIT_REANCHOR -> {
                             // The re-anchor freed the stuck chain; getCFChainTipHeight()
@@ -693,9 +722,26 @@ class SyncService : Service() {
                                 "staying on filters")
                             continue
                         }
+                        PostTimeoutAction.STAY_ON_FILTERS_DD -> {
+                            // handled by the DigiDollar guard below (shared with
+                            // the re-anchor-returned-false convergence)
+                        }
                         PostTimeoutAction.FALLBACK_BLOOM -> {
                             // fall through to the bloom degrade below
                         }
+                    }
+                    // DigiDollar held: never degrade to the P2TR-blind bloom path
+                    // (issue #19). Keep retrying filters and warn once; nothing is
+                    // missed because we never leave the filter set.
+                    if (hasDigiDollar) {
+                        if (!_digiDollarDetectionDegraded.value) {
+                            android.util.Log.w("SyncService",
+                                "BIP158 watchdog: cfheaders stalled (gap=$gap, cfTip=$cfTipNow) " +
+                                "but wallet holds DigiDollar — staying on filters; bloom is " +
+                                "P2TR-blind and would make DigiDollar undetectable")
+                        }
+                        _digiDollarDetectionDegraded.value = true
+                        continue
                     }
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: headers caught up (blockTip=$blockTip) but no " +
@@ -953,6 +999,15 @@ class SyncService : Service() {
                 maxOf(0L, anchorForWatchdog - 100L)
             )
             startBip158Watchdog(birthHeightForWatchdog)
+        } else {
+            // Persisted BLOOM_ONLY: the watchdog never runs, so it can't raise
+            // the DigiDollar-degraded flag. Bloom is P2TR-blind, so a wallet
+            // that already holds DigiDollar can't detect new DD this session —
+            // surface the wallet-screen banner directly (#19 review). Stays set
+            // for the session; the Sync Mode screen is the way back to filters.
+            if (runCatching { NativeBridge.getDigiDollarBalance() > 0L }.getOrDefault(false)) {
+                _digiDollarDetectionDegraded.value = true
+            }
         }
     }
 
@@ -1640,6 +1695,17 @@ class SyncService : Service() {
         val bloomFallbackActive: kotlinx.coroutines.flow.StateFlow<Boolean>
             get() = _bloomFallbackActive
         private val _bloomFallbackActive =
+            kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        /** Process-wide flag set when the wallet holds DigiDollar and the BIP158
+         *  watchdog would otherwise degrade to bloom — bloom (BIP37) never
+         *  matches P2TR outputs, so it cannot see DigiDollar (issue #19). When
+         *  set, the watchdog kept (or forced) filters and the UI surfaces a
+         *  "DigiDollar detection degraded" warning. Cleared when cfheaders
+         *  resume; resets on process start like [bloomFallbackActive]. */
+        val digiDollarDetectionDegraded: kotlinx.coroutines.flow.StateFlow<Boolean>
+            get() = _digiDollarDetectionDegraded
+        private val _digiDollarDetectionDegraded =
             kotlinx.coroutines.flow.MutableStateFlow(false)
 
         /** Process-wide flag set when the Tor watchdog gives up waiting for

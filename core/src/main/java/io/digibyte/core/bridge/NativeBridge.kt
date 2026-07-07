@@ -436,4 +436,61 @@ object NativeBridge {
      *  Pass the wallet's birth height (0 to scan from genesis). */
     external fun enableAutoCompactFilterFetch(startHeight: Long)
     external fun disableAutoCompactFilterFetch()
+
+    // ---- DigiDollar taproot signer (ADR-0001: Kotlin builds, C signs) ----
+
+    /** BIP86 Owner key m/86'/coinType'/0'/chain/index as an x-only public
+     *  key (32 bytes), or null if no seed is loaded. */
+    external fun ddDeriveOwnerKey(coinType: Int, chain: Int, index: Int): ByteArray?
+
+    /** BIP340-sign a 32-byte BIP341 sighash digest with the Owner key at
+     *  m/86'/coinType'/0'/chain/index. [tapTweak] true = key-path spend
+     *  (sign with the tweaked output key); false = script-path leaf spend
+     *  (sign with the untweaked Owner key). Returns a 64-byte signature or
+     *  null. Private keys never cross this boundary. */
+    external fun ddSignDigest(
+        digest: ByteArray,
+        coinType: Int,
+        chain: Int,
+        index: Int,
+        tapTweak: Boolean,
+    ): ByteArray?
+
+    /** Raw-key BIP340 signer for the official test vectors ONLY — production
+     *  signing uses the seed-derived [ddSignDigest]. Debug builds only: the
+     *  native symbol is compiled out under NDEBUG, so calling this in a
+     *  release build throws [UnsatisfiedLinkError]. */
+    external fun ddSchnorrSign(seckey: ByteArray, msg: ByteArray, auxRand: ByteArray): ByteArray?
+
+    /** BIP340 verification of a 64-byte signature over a 32-byte message
+     *  against a 32-byte x-only public key. */
+    external fun ddSchnorrVerify(pubkey: ByteArray, msg: ByteArray, sig: ByteArray): Boolean
+
+    /** X-only public key of a raw secret key (test vectors only). Debug
+     *  builds only — compiled out under NDEBUG like [ddSchnorrSign]. */
+    external fun ddXOnlyPubKey(seckey: ByteArray): ByteArray?
+
+    /** EC tweak-add for taproot output construction: returns parity byte
+     *  (0/1) followed by the 32-byte x coordinate of xonlyKey + tweak*G.
+     *  Public-key math only — no secrets involved. */
+    external fun ddXOnlyTweakAdd(xonlyKey: ByteArray, tweak: ByteArray): ByteArray?
+
+    // ---- Wallet UTXO listings (Kotlin-built DigiDollar transactions) ----
+
+    /** Wallet DGB UTXOs (asset and DD-token outputs excluded by the core's
+     *  balance update), one per line as "txid:vout:amountSats:scriptPubKeyHex"
+     *  with the txid in display order. Used to pick the Mint funding input
+     *  and the Redemption fee input. Empty string if no wallet or no UTXOs. */
+    external fun listWalletUtxos(): String
+
+    /** DigiDollar token UTXOs (zero-satoshi P2TR, cents-denominated), one per
+     *  line as "txid:vout:cents:scriptPubKeyHex". Empty string if none. */
+    external fun listDigiDollarUtxos(): String
+
+    /** Wallet-known DigiDollar Mint transactions (issue #10 Positions), one
+     *  per line as "txid:vout:valueSats:blockHeight:spent:opReturnHex" —
+     *  `vout`/`valueSats` locate the collateral output, `spent` (0/1) says
+     *  whether a wallet transaction consumed it, and `opReturnHex` is the raw
+     *  Mint metadata script for MintMetadata.parse. Empty string if none. */
+    external fun listDigiDollarMints(): String
 }

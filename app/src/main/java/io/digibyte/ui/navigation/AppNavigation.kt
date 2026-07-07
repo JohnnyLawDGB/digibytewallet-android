@@ -282,6 +282,7 @@ fun AppNavigation(
                         navController.navigate("transaction_detail/${txid}")
                     },
                     onNavigateAssets = { navController.navigate("assets") },
+                    onNavigatePositions = { navController.navigate("digidollar_positions") },
                     onNavigateGame = { navController.navigate("digirunner") },
                     onScoreSubmit = { score, distance, coins, livesRemaining ->
                         kotlinx.coroutines.MainScope().launch {
@@ -291,6 +292,24 @@ fun AppNavigation(
                         }
                     },
                     onShowLeaderboard = { navController.navigate("digirunner_leaderboard") }
+                )
+            }
+
+            // DigiDollar collateral positions (issue #10) — entry is testnet-
+            // gated in WalletScreen; RedemptionService refuses mainnet anyway.
+            composable("digidollar_positions") {
+                io.digibyte.ui.wallet.DigiDollarPositionsScreen(
+                    onBack = { navController.popBackStack() },
+                    onMint = { navController.navigate("digidollar_mint") },
+                )
+            }
+
+            // Mint calculator/confirm (issue #11) — entered from Positions; the
+            // Positions entry is testnet-gated and MintService refuses mainnet.
+            composable("digidollar_mint") {
+                io.digibyte.ui.wallet.MintScreen(
+                    onBack = { navController.popBackStack() },
+                    onMinted = { navController.popBackStack() },
                 )
             }
 

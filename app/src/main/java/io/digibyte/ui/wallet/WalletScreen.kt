@@ -46,6 +46,7 @@ fun WalletScreen(
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
+    onNavigatePositions: () -> Unit = {},
     onNavigateGame: () -> Unit = {},
     onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
     onShowLeaderboard: (() -> Unit)? = null,
@@ -63,6 +64,7 @@ fun WalletScreen(
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
     val bloomFallback by viewModel.bloomFallbackActive.collectAsStateWithLifecycle()
     val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
+    val ddDetectionDegraded by viewModel.digiDollarDetectionDegraded.collectAsStateWithLifecycle()
 
     // Runtime network selection (Task 6, dev-gated toggle in Settings > Advanced).
     // Read once — a restart is required to change it (see SettingsViewModel
@@ -111,10 +113,14 @@ fun WalletScreen(
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
                         dgbAmount = WalletViewModel.formatSatoshis(balance),
-                        ddAmount = if (ddBalance > 0L)
-                            WalletViewModel.formatDigiDollar(ddBalance) else null,
+                        // On testnet the DigiDollar line always shows — it is
+                        // the entry to the Positions screen, which can hold
+                        // open collateral even when the DD balance is zero.
+                        ddAmount = if (ddBalance > 0L || onTestnet)
+                            WalletViewModel.formatDigiDollar(ddBalance) + " DigiDollar" else null,
                         isSynced = syncState is SyncState.Complete,
-                        onFiatTap = { viewModel.cycleCurrency() }
+                        onFiatTap = { viewModel.cycleCurrency() },
+                        onDdTap = if (onTestnet) onNavigatePositions else null
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -154,9 +160,23 @@ fun WalletScreen(
         // BIP158 → bloom fallback notice. Watchdog flips this when filter
         // peers didn't make cfheaders progress within 120s; we tell the user
         // their session lost privacy for now but will retry filters next launch.
-        if (bloomFallback) {
+        // When DigiDollar detection is degraded the wallet also fell to bloom,
+        // so both flags can be set; the DD banner below is the stronger
+        // "missing funds" message and supersedes the privacy-only bloom banner.
+        if (bloomFallback && !ddDetectionDegraded) {
             item {
                 BloomFallbackBanner()
+            }
+        }
+
+        // DigiDollar detection degraded (#19): the wallet holds DigiDollar but
+        // compact-filter sync stalled; bloom is P2TR-blind so incoming
+        // DigiDollar could be missed. Distinct from the bloom-privacy banner —
+        // this is about missing funds, not just privacy. Clears when filters
+        // recover; resets next launch.
+        if (ddDetectionDegraded) {
+            item {
+                DigiDollarDetectionDegradedBanner()
             }
         }
 
@@ -791,6 +811,48 @@ private fun BloomFallbackBanner() {
                 text = "Compact-filter (private) sync was unavailable this session, so " +
                        "the wallet fell back to bloom filters — your addresses are " +
                        "visible to peers. Restart the app to retry private sync.",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+            )
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun DigiDollarDetectionDegradedBanner() {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0x33FFCC66),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "DigiDollar detection degraded",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFD580),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Compact-filter sync stalled and bloom filters can't see DigiDollar " +
+                       "(taproot). Incoming DigiDollar may not appear until private sync " +
+                       "recovers — restart the app to retry.",
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )

@@ -522,6 +522,16 @@ int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index) {
     return 1;
 }
 
+/* Arbitrary-path derivation with the standard "Bitcoin seed" HMAC key.
+ * Used by the DigiDollar taproot signer for BIP86 Owner keys
+ * (m/86'/coin'/account'/chain/index). Apply BIP32_HARD in `path` for
+ * hardened segments. */
+int seed_derive_path_key(BRKey *outKey, const uint32_t *path, size_t depth) {
+    if (!g_seedValid) return 0;
+    BRBIP32PrivKeyArrayPath(outKey, g_seed, sizeof(g_seed), "Bitcoin seed", path, depth);
+    return 1;
+}
+
 void seed_zero(void) {
     secure_zero(g_seed, sizeof(g_seed));
     g_seedValid = 0;
@@ -829,4 +839,186 @@ Java_io_digibyte_core_bridge_NativeBridge_walletContainsAddress(JNIEnv *env, job
     int contained = BRWalletContainsAddress(g_wallet, addrChars);
     (*env)->ReleaseStringUTFChars(env, address, addrChars);
     return contained ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ---------- listWalletUtxos / listDigiDollarUtxos ---------- */
+/* Wallet UTXO listings for Kotlin-built DigiDollar transactions (ADR-0001:
+ * Kotlin builds the bytes, C signs). One UTXO per line as
+ * "txid:vout:amount:scriptPubKeyHex" — txid in display order, amount in
+ * satoshis for DGB entries and USD cents for DigiDollar token entries.
+ * wallet->utxos already excludes asset and DD-token outputs (BRWallet.c
+ * balance update), so every DGB entry is safe to spend as Mint funding or
+ * a Redemption fee input. */
+
+#include "BRDigiDollar.h"
+
+static size_t _utxo_append_line(char *buf, size_t off, size_t cap, const BRUTXO *u,
+                                const BRTransaction *tx, int64_t amount)
+{
+    const BRTxOutput *o = &tx->outputs[u->n];
+    size_t need = 64 + 1 + 10 + 1 + 20 + 1 + o->scriptLen * 2 + 2;
+
+    if (off + need >= cap) return off; /* never truncate mid-line */
+    off += (size_t)sprintf(buf + off, "%s:%u:%lld:", u256hex(UInt256Reverse(u->hash)),
+                           u->n, (long long)amount);
+    for (size_t k = 0; k < o->scriptLen; k++) {
+        off += (size_t)sprintf(buf + off, "%02x", o->script[k]);
+    }
+    buf[off++] = '\n';
+    buf[off] = '\0';
+    return off;
+}
+
+typedef size_t (*_utxo_lister)(BRWallet *wallet, BRUTXO *utxos, size_t utxosCount);
+
+static jstring _utxo_lines(JNIEnv *env, _utxo_lister list, int ddCents)
+{
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t count = list(g_wallet, NULL, 0);
+    if (count == 0) return (*env)->NewStringUTF(env, "");
+
+    BRUTXO *utxos = (BRUTXO *)malloc(sizeof(BRUTXO) * count);
+    if (!utxos) return (*env)->NewStringUTF(env, "");
+    count = list(g_wallet, utxos, count);
+
+    /* txid+vout+amount+separators ≈ 100; scripts are ≤ 34 bytes (68 hex) for
+     * every standard output the wallet tracks */
+    size_t cap = count * 200 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(utxos); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+
+    size_t off = 0;
+    for (size_t i = 0; i < count; i++) {
+        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, utxos[i].hash);
+
+        if (!tx || utxos[i].n >= tx->outCount) continue;
+        int64_t amount = ddCents ? BRDigiDollarOutputAmount(tx, utxos[i].n)
+                                 : (int64_t)tx->outputs[utxos[i].n].amount;
+        if (ddCents && amount < 0) continue; /* not actually a DD output */
+        off = _utxo_append_line(buf, off, cap, &utxos[i], tx, amount);
+    }
+
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    free(utxos);
+    return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_listWalletUtxos(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    return _utxo_lines(env, BRWalletUTXOs, 0);
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarUtxos(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    return _utxo_lines(env, BRWalletDigiDollarUTXOs, 1);
+}
+
+/* ---------- listDigiDollarMints ---------- */
+/* Collateral-position source (issue #10): one line per wallet-known DigiDollar
+ * Mint transaction as "txid:vout:valueSats:blockHeight:spent:opReturnHex".
+ * `vout` is the collateral output — the first value-bearing 34-byte OP_1 P2TR
+ * (vout 0 in the MintBuilder/Core layout, but located, not assumed). `spent`
+ * is 1 when any wallet transaction consumes that outpoint (our own
+ * Redemptions; a third-party liquidation spends an unwatched script, so SPV
+ * never sees it and the position stays listed until a redeem attempt fails).
+ * The Mint OP_RETURN is emitted raw — the Kotlin layer decodes
+ * ddCents/unlockHeight/Owner key with its fixture-proven MintMetadata.parse,
+ * keeping this pass mechanical (classify, locate, spent-check). */
+
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarMints(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+    if (!g_wallet) return (*env)->NewStringUTF(env, "");
+
+    size_t count = BRWalletTransactions(g_wallet, NULL, 0);
+    if (count == 0) return (*env)->NewStringUTF(env, "");
+
+    BRTransaction **txs = (BRTransaction **)malloc(sizeof(BRTransaction *) * count);
+    if (!txs) return (*env)->NewStringUTF(env, "");
+    count = BRWalletTransactions(g_wallet, txs, count);
+
+    /* Pass 1 — collect the Mint transactions and their located collateral
+     * outpoints. Positions are a handful even for heavy users, so both the
+     * output buffer and the spent sweep size to the Mint count, not the whole
+     * (unbounded, SPV-history-deep) transaction set. */
+    struct { const BRTransaction *tx; const BRTxOutput *coll, *opret; uint32_t vout; int spent; }
+        *mints = malloc(sizeof(*mints) * count);
+    if (!mints) { free(txs); return (*env)->NewStringUTF(env, ""); }
+    size_t mintCount = 0;
+
+    for (size_t i = 0; i < count; i++) {
+        const BRTransaction *tx = txs[i];
+        if (!tx || BRDigiDollarTxType(tx) != DD_TYPE_MINT) continue;
+
+        const BRTxOutput *coll = NULL, *opret = NULL;
+        uint32_t collVout = 0;
+        for (size_t j = 0; j < tx->outCount; j++) {
+            const BRTxOutput *o = &tx->outputs[j];
+            if (!coll && o->amount > 0 && o->scriptLen == 34 &&
+                o->script[0] == OP_1 && o->script[1] == 32) {
+                coll = o;
+                collVout = (uint32_t)j;
+            }
+            if (!opret && o->scriptLen > 0 && o->script[0] == OP_RETURN) opret = o;
+        }
+        if (!coll || !opret) continue; /* not the Mint layout we build */
+
+        mints[mintCount].tx = tx;
+        mints[mintCount].coll = coll;
+        mints[mintCount].opret = opret;
+        mints[mintCount].vout = collVout;
+        mints[mintCount].spent = 0;
+        mintCount++;
+    }
+
+    /* Spent sweep — one pass over every input, marking any Mint whose
+     * collateral outpoint it consumes (our own Redemptions; a third-party
+     * liquidation spends an unwatched script SPV never sees). */
+    for (size_t i = 0; i < count; i++) {
+        if (!txs[i]) continue;
+        for (size_t k = 0; k < txs[i]->inCount; k++) {
+            const BRTxInput *in = &txs[i]->inputs[k];
+            for (size_t m = 0; m < mintCount; m++) {
+                if (in->index == mints[m].vout &&
+                    UInt256Eq(in->txHash, mints[m].tx->txHash)) mints[m].spent = 1;
+            }
+        }
+    }
+
+    /* txid + numeric fields + separators ~ 110; a Mint OP_RETURN is ~45 bytes
+     * (90 hex) — 300 per line never truncates a well-formed entry. */
+    size_t cap = mintCount * 300 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(mints); free(txs); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+
+    size_t off = 0;
+    for (size_t m = 0; m < mintCount; m++) {
+        const BRTxOutput *opret = mints[m].opret;
+        size_t need = 64 + 4 * 21 + opret->scriptLen * 2 + 8;
+        if (off + need >= cap) continue; /* never truncate mid-line */
+        off += (size_t)sprintf(buf + off, "%s:%u:%lld:%u:%d:",
+                               u256hex(UInt256Reverse(mints[m].tx->txHash)), mints[m].vout,
+                               (long long)mints[m].coll->amount, mints[m].tx->blockHeight,
+                               mints[m].spent);
+        for (size_t k = 0; k < opret->scriptLen; k++) {
+            off += (size_t)sprintf(buf + off, "%02x", opret->script[k]);
+        }
+        buf[off++] = '\n';
+        buf[off] = '\0';
+    }
+
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    free(mints);
+    free(txs);
+    return result;
 }
