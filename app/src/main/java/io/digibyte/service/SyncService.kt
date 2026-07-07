@@ -701,8 +701,14 @@ class SyncService : Service() {
                                     "(cfTip was $cfTipNow, below floor) — staying on filters")
                                 continue
                             }
-                            // re-anchor returned false (cfTip not actually below the
-                            // floor) — nothing left to try; degrade to bloom below.
+                            // re-anchor returned false (cfTip not below the floor) — the
+                            // deficit isn't the problem. Mark it exhausted (backdate past
+                            // the grace window) so subsequent polls don't re-invoke the JNI
+                            // every 15s and instead settle into the bloom / stay-on-filters
+                            // decision below (#19 review — matters only for DD wallets,
+                            // which keep polling; non-DD falls to bloom and ends this poll).
+                            reanchoredThisSession = true
+                            reanchorAtMs = nowMs - REANCHOR_GRACE_MS
                         }
                         PostTimeoutAction.AWAIT_REANCHOR -> {
                             // The re-anchor freed the stuck chain; getCFChainTipHeight()
@@ -993,6 +999,15 @@ class SyncService : Service() {
                 maxOf(0L, anchorForWatchdog - 100L)
             )
             startBip158Watchdog(birthHeightForWatchdog)
+        } else {
+            // Persisted BLOOM_ONLY: the watchdog never runs, so it can't raise
+            // the DigiDollar-degraded flag. Bloom is P2TR-blind, so a wallet
+            // that already holds DigiDollar can't detect new DD this session —
+            // surface the wallet-screen banner directly (#19 review). Stays set
+            // for the session; the Sync Mode screen is the way back to filters.
+            if (runCatching { NativeBridge.getDigiDollarBalance() > 0L }.getOrDefault(false)) {
+                _digiDollarDetectionDegraded.value = true
+            }
         }
     }
 

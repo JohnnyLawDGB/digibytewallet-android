@@ -160,7 +160,10 @@ fun WalletScreen(
         // BIP158 → bloom fallback notice. Watchdog flips this when filter
         // peers didn't make cfheaders progress within 120s; we tell the user
         // their session lost privacy for now but will retry filters next launch.
-        if (bloomFallback) {
+        // When DigiDollar detection is degraded the wallet also fell to bloom,
+        // so both flags can be set; the DD banner below is the stronger
+        // "missing funds" message and supersedes the privacy-only bloom banner.
+        if (bloomFallback && !ddDetectionDegraded) {
             item {
                 BloomFallbackBanner()
             }
