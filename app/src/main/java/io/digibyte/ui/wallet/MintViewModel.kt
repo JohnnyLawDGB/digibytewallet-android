@@ -25,8 +25,10 @@ import javax.inject.Inject
  * nav entry is testnet-gated and MintService refuses mainnet regardless.
  *
  * The preview reads [MintService.currentStatus] — the SAME price source and
- * network mint() computes against — and reuses [Collateral.requiredSats], so
- * the on-screen number cannot drift from what actually gets locked.
+ * network mint() computes against — and reuses [Collateral.requiredSats]. The
+ * price can still move between preview and confirm; [mint] caps that drift with
+ * [COLLATERAL_SLIPPAGE_BPS] so a Mint never locks materially more DGB than the
+ * figure the user confirmed.
  */
 @HiltViewModel
 class MintViewModel @Inject constructor(
@@ -94,14 +96,28 @@ class MintViewModel @Inject constructor(
             return
         }
         val tier = selectedTier
+        // Cap the collateral at the previewed figure plus a small tolerance, so
+        // a price move between preview and Mint can't silently lock materially
+        // more DGB than the user just confirmed (MintService blocks past it).
+        val snapshot = _status.value
+        val previewed = snapshot?.let {
+            previewCollateralSats(cents, tier, it.priceMicroUsd, it.dcaMultiplierBps)
+        }
+        if (previewed == null) {
+            _mintState.value = MintState.Failed("Oracle price unavailable — reopen Mint")
+            return
+        }
+        val maxCollateral = previewed + previewed * COLLATERAL_SLIPPAGE_BPS / BPS_SCALE
         _mintState.value = MintState.Minting
         viewModelScope.launch(Dispatchers.IO) {
-            _mintState.value = when (val r = mintService.mint(cents, tier)) {
+            _mintState.value = when (val r = mintService.mint(cents, tier, maxCollateral)) {
                 is MintService.MintResult.Success ->
                     MintState.Success(r.txid, r.unlockHeight, r.collateralSats)
                 is MintService.MintResult.Blocked -> MintState.Failed(r.reason)
                 is MintService.MintResult.Error -> MintState.Failed(r.message)
             }
+            // Refresh the price so a retry after a failure prices off current data.
+            if (_mintState.value is MintState.Failed) refreshStatus()
         }
     }
 
@@ -110,10 +126,14 @@ class MintViewModel @Inject constructor(
     }
 
     companion object {
+        /** Allowed collateral drift between preview and Mint: 1% (100 bps). */
+        const val COLLATERAL_SLIPPAGE_BPS = 100L
+        const val BPS_SCALE = 10_000L
+
         /** "100.00" USD → 10000 cents; null if blank/non-numeric/negative. */
         fun parseUsdToCents(s: String): Long? {
             val d = s.trim().toDoubleOrNull() ?: return null
-            if (d < 0) return null
+            if (d < 0 || d.isNaN() || d.isInfinite()) return null
             return Math.round(d * 100.0)
         }
 

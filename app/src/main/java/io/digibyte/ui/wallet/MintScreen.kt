@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +27,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -225,7 +228,7 @@ private fun TierDropdown(tierIndex: Int, onSelect: (Int) -> Unit) {
             readOnly = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(),
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -254,10 +257,10 @@ private fun CollateralPreview(
         Column(Modifier.padding(16.dp)) {
             when {
                 statusLoaded == null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.height(20.dp))
-                    Spacer(Modifier.height(0.dp))
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
-                        "  Fetching the Oracle price…",
+                        "Fetching the Oracle price…",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -301,7 +304,8 @@ private fun CollateralPreview(
                         "Locked for $tierLabel" +
                             (oraclePriceMicroUsd?.let {
                                 "  ·  Oracle price \$%.4f/DGB".format(it / 1_000_000.0)
-                            } ?: ""),
+                            } ?: "") +
+                            "\nLeftover change under 0.001 DGB is added to the fee.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

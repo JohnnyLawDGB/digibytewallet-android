@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.digibyte.core.digidollar.RedemptionService
 import io.digibyte.ui.theme.DigiByteAccent
 
@@ -64,6 +68,19 @@ fun DigiDollarPositionsScreen(
     val redeemState by viewModel.redeemState.collectAsState()
     var confirming by remember { mutableStateOf<RedemptionService.CollateralPosition?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Refresh whenever the screen resumes — a Mint on the pushed Mint screen
+    // returns here (popBackStack) to the SAME ViewModel instance, so init's
+    // one-shot refresh never re-runs; without this the just-minted Position
+    // stays hidden until a manual refresh.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(redeemState) {
         when (val s = redeemState) {

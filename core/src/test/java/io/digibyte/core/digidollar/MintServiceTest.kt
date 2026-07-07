@@ -436,6 +436,24 @@ class MintServiceTest {
         )
     }
 
+    // ---- slippage cap (preview-vs-actual collateral drift) ----
+
+    @Test
+    fun `blocks when fresh collateral exceeds the approved cap`() = runTest {
+        // maxCollateral one sat below the freshly-priced collateral: the price
+        // "moved" against the user since the preview, so lock is refused.
+        val result = service(wallet = fundedWallet())
+            .mint(ddCents, tier, maxCollateralSats = collateral - 1)
+        assertTrue(result is MintService.MintResult.Blocked)
+    }
+
+    @Test
+    fun `mints when fresh collateral is within the approved cap`() = runTest {
+        val result = service(wallet = fundedWallet())
+            .mint(ddCents, tier, maxCollateralSats = collateral)
+        assertTrue(result is MintService.MintResult.Success)
+    }
+
     // ---- currentStatus (UI collateral-preview seam) ----
 
     @Test

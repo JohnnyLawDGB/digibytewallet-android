@@ -27,6 +27,9 @@ class DigiDollarMintCalculatorTest {
         assertNull(MintViewModel.parseUsdToCents(""))
         assertNull(MintViewModel.parseUsdToCents("abc"))
         assertNull(MintViewModel.parseUsdToCents("-5"))
+        // toDoubleOrNull accepts these Java FP tokens — must still be rejected.
+        assertNull(MintViewModel.parseUsdToCents("NaN"))
+        assertNull(MintViewModel.parseUsdToCents("Infinity"))
     }
 
     @Test fun mintAmountBounds() {
