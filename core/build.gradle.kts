@@ -36,6 +36,12 @@ android {
         // Expose Room schema JSON files to MigrationTestHelper via test assets
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
+
+    packaging {
+        // BouncyCastle (androidTest-only) is a multi-release jar whose
+        // versioned OSGI manifests collide during androidTest merging.
+        resources.excludes += "META-INF/versions/**"
+    }
 }
 
 ksp {
@@ -92,4 +98,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.room:room-testing:$roomVersion")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    // Low-level secp256k1 math only (no Provider registration): independent
+    // ECDSA verification in the DigiDollar signing round-trip KATs.
+    androidTestImplementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 }
