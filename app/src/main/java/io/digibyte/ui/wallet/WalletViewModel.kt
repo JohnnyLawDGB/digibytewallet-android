@@ -17,6 +17,7 @@ import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.network.ChainTipFetcher
+import io.digibyte.core.isTestnet
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -643,6 +644,25 @@ class WalletViewModel @Inject constructor(
     /** Get a receive address for [index]. Delegates to WalletManager (bech32 by default). */
     fun getReceiveAddress(index: Int = 0, format: Int = 2): String? =
         walletManager.getReceiveAddress(index, format = format)
+
+    /** The wallet's DigiDollar receive address (`TD…`/`DD…`) — the tap-tweaked
+     *  DD-token output key of the watched owner key m/86'/20'/0'/0/0, which
+     *  others paste into `senddigidollar`. Null on a locked wallet or if key
+     *  derivation fails. DigiDollar is testnet-only until 4.0.0, so the receive
+     *  screen only surfaces this on testnet builds. */
+    fun getDigiDollarReceiveAddress(): String? {
+        val ownerKey = NativeBridge.ddDeriveOwnerKey(
+            io.digibyte.core.digidollar.MintService.OWNER_KEY_COIN_TYPE, 0, 0,
+        ) ?: return null
+        val ownerKeyHex = ownerKey.joinToString("") { "%02x".format(it) }
+        return runCatching {
+            io.digibyte.core.digidollar.DigiDollarReceiveAddress.forOwnerKey(
+                ownerKeyHex,
+                io.digibyte.core.digidollar.NativeEcOps,
+                testnet = isTestnet(application),
+            )
+        }.getOrNull()
+    }
 
     companion object {
         /** Blocks-behind-tip past which the UI honestly shows catch-up progress

@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import io.digibyte.core.isTestnet
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.ui.components.QrCodeDisplay
 import androidx.compose.ui.graphics.Color
@@ -50,16 +51,24 @@ fun ReceiveScreen(
     val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
     val address = if (addressFormat == 0) legacyAddress else bech32Address
 
-    // Optional amount for the QR URI
+    // DigiDollar is testnet-only until 4.0.0, so the TD/DD receive address is
+    // only offered on testnet builds (and only if key derivation succeeds).
+    val onTestnet = remember { isTestnet(context) }
+    val ddAddress = remember { if (onTestnet) viewModel.getDigiDollarReceiveAddress() else null }
+    var showDigiDollar by remember { mutableStateOf(false) }
+    val isDd = showDigiDollar && ddAddress != null
+    val displayAddress = if (isDd) ddAddress!! else address
+
+    // Optional amount for the QR URI (DGB only — DigiDollar has no amount URI)
     var amountInput by remember { mutableStateOf("") }
 
-    val qrContent by remember(address, amountInput) {
+    val qrContent by remember(displayAddress, amountInput, isDd) {
         derivedStateOf {
             val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
-            if (sats != null && sats > 0) {
-                DigiByteUri.encode(address = address, amountSats = sats)
+            if (!isDd && sats != null && sats > 0) {
+                DigiByteUri.encode(address = displayAddress, amountSats = sats)
             } else {
-                address
+                displayAddress
             }
         }
     }
@@ -92,13 +101,30 @@ fun ReceiveScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                text = "Receive DGB",
+                text = if (isDd) "Receive DigiDollar" else "Receive DGB",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.weight(1f)
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Asset toggle — only when a DigiDollar address is available (testnet).
+        if (ddAddress != null) {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = !showDigiDollar,
+                    onClick = { showDigiDollar = false },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                ) { Text("DigiByte") }
+                SegmentedButton(
+                    selected = showDigiDollar,
+                    onClick = { showDigiDollar = true },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                ) { Text("DigiDollar") }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // Informational banner when SPV has no connected peers. The address
         // is still safe to share — incoming transactions settle on chain
@@ -151,7 +177,7 @@ fun ReceiveScreen(
 
         // Address display (selectable + copyable)
         Text(
-            text = "Your DigiByte Address",
+            text = if (isDd) "Your DigiDollar Address" else "Your DigiByte Address",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -167,7 +193,7 @@ fun ReceiveScreen(
         ) {
             SelectionContainer {
                 Text(
-                    text = address,
+                    text = displayAddress,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
@@ -183,26 +209,28 @@ fun ReceiveScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Address format toggle
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FilterChip(
-                selected = addressFormat == 2,
-                onClick = { addressFormat = 2 },
-                label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) },
-                modifier = Modifier.padding(end = 8.dp)
-            )
-            FilterChip(
-                selected = addressFormat == 0,
-                onClick = { addressFormat = 0 },
-                label = { Text("Legacy (D…)", fontSize = 12.sp) }
-            )
-        }
+        // Address format toggle — DGB only; DigiDollar has a single address form.
+        if (!isDd) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = addressFormat == 2,
+                    onClick = { addressFormat = 2 },
+                    label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                FilterChip(
+                    selected = addressFormat == 0,
+                    onClick = { addressFormat = 0 },
+                    label = { Text("Legacy (D…)", fontSize = 12.sp) }
+                )
+            }
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // Copy + Share buttons
         Row(
@@ -212,7 +240,8 @@ fun ReceiveScreen(
             OutlinedButton(
                 onClick = {
                     val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    cb?.setPrimaryClip(ClipData.newPlainText("DGB address", address))
+                    val label = if (isDd) "DigiDollar address" else "DGB address"
+                    cb?.setPrimaryClip(ClipData.newPlainText(label, displayAddress))
                     showCopied = true
                 },
                 modifier = Modifier.weight(1f)
@@ -233,10 +262,14 @@ fun ReceiveScreen(
             Button(
                 onClick = {
                     val shareText = buildString {
-                        append("My DigiByte address: $address")
-                        val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
-                        if (sats != null && sats > 0) {
-                            append("\n${DigiByteUri.encode(address, sats)}")
+                        if (isDd) {
+                            append("My DigiDollar address: $displayAddress")
+                        } else {
+                            append("My DigiByte address: $displayAddress")
+                            val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
+                            if (sats != null && sats > 0) {
+                                append("\n${DigiByteUri.encode(displayAddress, sats)}")
+                            }
                         }
                     }
                     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -260,40 +293,42 @@ fun ReceiveScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(20.dp))
+        // Optional amount request — DGB only (DigiDollar has no amount URI).
+        if (!isDd) {
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(20.dp))
 
-        // Optional amount input
-        Text(
-            text = "Request Specific Amount (Optional)",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = amountInput,
-            onValueChange = { amountInput = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("0.00000000") },
-            suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            label = { Text("Amount") },
-            shape = RoundedCornerShape(8.dp)
-        )
-
-        if (amountInput.isNotBlank()) {
-            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "QR encodes: ${DigiByteUri.encode(address, amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() })}",
-                style = MaterialTheme.typography.labelSmall,
+                text = "Request Specific Amount (Optional)",
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = amountInput,
+                onValueChange = { amountInput = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("0.00000000") },
+                suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                label = { Text("Amount") },
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            if (amountInput.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "QR encodes: ${DigiByteUri.encode(address, amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() })}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
