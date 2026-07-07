@@ -514,6 +514,10 @@ class SyncService : Service() {
         // peer manager doesn't exist and getCFChainTipHeight returns 0.
         bip158WatchdogJob = serviceScope.launch {
             val startedAt = System.currentTimeMillis()
+            // Testnet26 nodes have bloom disabled and RESET on a bloom filterload, so
+            // bloom is never a valid fallback there — the watchdog must stay on compact
+            // filters (re-anchor recovery below still applies). Mainnet is unchanged.
+            val testnet = isTestnet(this@SyncService)
             var lastCfTip = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
             val cfTipAtStart = lastCfTip
             val blockTipAtStart = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
@@ -617,11 +621,11 @@ class SyncService : Service() {
 
                 if (!blocksCaughtUp) {
                     val stalledMs = nowMs - lastBlockProgressMs
-                    if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS) {
+                    if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS || testnet) {
                         android.util.Log.d("SyncService",
                             "BIP158 watchdog: header sync still catching up to tip " +
                             "(blockTip=$blockTip, est=$estHeight, cfTip=$cfTipNow) — " +
-                            "staying on filters (elapsed=${elapsedMs}ms)")
+                            "staying on filters (elapsed=${elapsedMs}ms${if (testnet) ", testnet" else ""})")
                         continue
                     }
                     if (blockStallRecoveries < MAX_BLOCK_STALL_RECOVERIES) {
@@ -696,6 +700,14 @@ class SyncService : Service() {
                         PostTimeoutAction.FALLBACK_BLOOM -> {
                             // fall through to the bloom degrade below
                         }
+                    }
+                    if (testnet) {
+                        // No bloom on testnet26 (nodes reset on filterload) — keep polling
+                        // filters; re-anchor above is the only recovery lever here.
+                        android.util.Log.d("SyncService",
+                            "BIP158 watchdog: cfheaders stuck at $cfTipNow but testnet — " +
+                            "staying on filters (no bloom fallback)")
+                        continue
                     }
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: headers caught up (blockTip=$blockTip) but no " +
@@ -878,7 +890,16 @@ class SyncService : Service() {
         // if filter peers don't make progress; the choice resets on next launch
         // so we try filters again. Users can override in Settings → Sync Mode.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-        val syncMode = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH)
+        // Testnet26 nodes run with bloom DISABLED (peerbloomfilters off by default on
+        // modern Core) and RESET the connection when they receive a bloom `filterload`.
+        // BOTH mode sends filterload, so it gets us dropped before compact-filter sync
+        // can proceed. Force COMPACT_FILTERS_ONLY on testnet — the wallet syncs via
+        // BIP157/158 filters only (no filterload sent). Mainnet is unchanged.
+        val syncMode = if (isTestnet(this@SyncService)) {
+            NativeBridge.SyncMode.COMPACT_FILTERS_ONLY
+        } else {
+            settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH)
+        }
         NativeBridge.setSyncMode(syncMode)
         if (syncMode != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedFilters = prefs.getString("saved_filter_headers", null)
