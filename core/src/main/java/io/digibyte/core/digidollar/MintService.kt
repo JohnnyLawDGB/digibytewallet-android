@@ -142,7 +142,7 @@ class MintService(
 
         val unsigned: MintBuilder.UnsignedMint
         val signed: ByteArray
-        val fundingUtxo: WalletUtxo
+        val fundingUtxo: UtxoLines.Utxo
         try {
             val neededSats = Collateral.requiredSats(
                 ddCents = ddCents,
@@ -155,10 +155,10 @@ class MintService(
             // precondition (legacy inputs would only fail later, looking like
             // signer corruption). Single funding input, largest-first — the
             // reference builder's shape.
-            fundingUtxo = parseUtxoLines(wallet.listWalletUtxos())
+            fundingUtxo = UtxoLines.parse(wallet.listWalletUtxos())
                 .filter { it.scriptPubKeyHex.length == 44 && it.scriptPubKeyHex.startsWith("0014") }
-                .maxByOrNull { it.valueSats }
-                ?.takeIf { it.valueSats >= neededSats }
+                .maxByOrNull { it.amount }
+                ?.takeIf { it.amount >= neededSats }
                 ?: return MintResult.Error(
                     "No single spendable coin covers the Collateral + fee " +
                         "($neededSats sats needed) — consolidate funds and retry",
@@ -168,7 +168,7 @@ class MintService(
                 fundingUtxo = MintBuilder.FundingUtxo(
                     fundingUtxo.txidHex,
                     fundingUtxo.vout,
-                    fundingUtxo.valueSats,
+                    fundingUtxo.amount,
                 ),
                 ddCents = ddCents,
                 tier = tier,
@@ -180,7 +180,7 @@ class MintService(
                 ecOps = ecOps,
                 dcaMultiplierBps = status.dcaMultiplierBps,
             )
-            signed = signMint(unsigned, TxOutput(fundingUtxo.valueSats, fundingUtxo.scriptPubKeyHex))
+            signed = signMint(unsigned, TxOutput(fundingUtxo.amount, fundingUtxo.scriptPubKeyHex))
         } catch (e: IllegalArgumentException) {
             return MintResult.Error(e.message ?: "Mint assembly failed")
         } catch (e: IllegalStateException) {
@@ -195,7 +195,7 @@ class MintService(
         recordOutgoing(
             txid,
             unsigned.collateralSats,
-            fundingUtxo.valueSats - unsigned.collateralSats - unsigned.changeSats,
+            fundingUtxo.amount - unsigned.collateralSats - unsigned.changeSats,
             ddTokenAddress(unsigned),
         )
         persist()
@@ -209,21 +209,6 @@ class MintService(
         val network = if (testnet) DdAddress.Network.TESTNET else DdAddress.Network.MAINNET
         return DdAddress.encode(key, network)
     }
-
-    /** One wallet coin as listed by the native UTXO listing. */
-    data class WalletUtxo(
-        val txidHex: String,
-        val vout: Int,
-        val valueSats: Long,
-        val scriptPubKeyHex: String,
-    )
-
-    private fun parseUtxoLines(raw: String): List<WalletUtxo> =
-        raw.lineSequence().filter { it.isNotBlank() }.map { line ->
-            val parts = line.split(":")
-            require(parts.size == 4) { "malformed UTXO line from the native listing: $line" }
-            WalletUtxo(parts[0], parts[1].toInt(), parts[2].toLong(), parts[3])
-        }.toList()
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 

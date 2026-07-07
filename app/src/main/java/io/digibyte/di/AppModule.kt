@@ -309,6 +309,41 @@ object AppModule {
             testnet = isTestnet(context),
         )
 
+    /** Redemption flow glue (issue #13). Mirrors [provideMintService] but with
+     *  no divergence check — the redeem witness carries no oracle price, so the
+     *  only price-independent gate is that the position's timelock has expired. */
+    @Provides @Singleton
+    fun provideRedemptionService(
+        @ApplicationContext context: Context,
+        statusClient: io.digibyte.core.digidollar.DigiDollarStatusClient,
+        gate: io.digibyte.core.digidollar.DigiDollarGate,
+        persister: io.digibyte.core.WalletTxPersister,
+        outgoingTxStore: io.digibyte.core.OutgoingTxStore,
+    ): io.digibyte.core.digidollar.RedemptionService =
+        io.digibyte.core.digidollar.RedemptionService(
+            wallet = object : io.digibyte.core.digidollar.RedemptionService.WalletPort {
+                override fun listDigiDollarUtxos() = NativeBridge.listDigiDollarUtxos()
+                override fun listWalletUtxos() = NativeBridge.listWalletUtxos()
+                override fun changeAddress() = NativeBridge.getChangeAddress(0, 2)
+                override fun addressToScriptPubKey(address: String) =
+                    NativeBridge.addressToScriptPubKey(address)
+                override fun deriveOwnerKey(coinType: Int, chain: Int, index: Int) =
+                    NativeBridge.ddDeriveOwnerKey(coinType, chain, index)
+                override fun tipHeight() = NativeBridge.getLastBlockHeight()
+                override fun estimatedTipHeight() = NativeBridge.getEstimatedBlockHeight()
+            },
+            statusClient = statusClient,
+            gate = gate,
+            signRedemption = io.digibyte.core.digidollar.DigiDollarTxSigner::signRedemption,
+            broadcast = io.digibyte.core.dandelion.Broadcaster::broadcast,
+            persist = { persister.persist() },
+            recordOutgoing = { txid, returnedSats, feeSats, toAddress ->
+                outgoingTxStore.record(txid, returnedSats, feeSats, toAddress)
+            },
+            ecOps = io.digibyte.core.digidollar.NativeEcOps,
+            testnet = isTestnet(context),
+        )
+
     @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
     @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()
 
