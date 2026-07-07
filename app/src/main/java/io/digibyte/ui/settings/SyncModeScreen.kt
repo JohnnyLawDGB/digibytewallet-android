@@ -49,7 +49,13 @@ fun SyncModeScreen(navController: NavController) {
         if (mode == selected) return
         selected = mode
         prefs.edit().putInt(KEY_SYNC_MODE, mode).apply()
-        snackMessage = "Sync mode change applies on next app restart."
+        // Bloom (BIP37) never matches P2TR outputs, so it cannot detect
+        // DigiDollar (issue #19) — warn explicitly, not just "applies on restart".
+        snackMessage = if (mode == NativeBridge.SyncMode.BLOOM_ONLY) {
+            "Bloom-only can't detect DigiDollar (taproot). Applies on next restart."
+        } else {
+            "Sync mode change applies on next app restart."
+        }
     }
 
     Scaffold(
@@ -88,8 +94,9 @@ fun SyncModeScreen(navController: NavController) {
                 SettingsCategory(title = "Protocol") {
                     SyncModeRow(
                         label = "Bloom filter (BIP 37)",
-                        description = "Default. Wallet asks peers to filter blocks for its addresses. " +
-                                "Peers see the addresses you're watching.",
+                        description = "Wallet asks peers to filter blocks for its addresses. " +
+                                "Peers see the addresses you're watching, and DigiDollar " +
+                                "(taproot) cannot be detected in this mode.",
                         selected = selected == NativeBridge.SyncMode.BLOOM_ONLY,
                         onSelect = { pick(NativeBridge.SyncMode.BLOOM_ONLY) }
                     )
