@@ -283,6 +283,13 @@ class WalletViewModel @Inject constructor(
     val torFailureActive: StateFlow<Boolean> =
         io.digibyte.service.SyncService.torFailureActive
 
+    /** True iff the wallet holds DigiDollar and the BIP158 watchdog had to stay
+     *  on / fall to a path where DigiDollar detection is degraded (bloom is
+     *  P2TR-blind, issue #19). Surfaces a "DigiDollar detection degraded"
+     *  banner; clears when cfheaders resume. */
+    val digiDollarDetectionDegraded: StateFlow<Boolean> =
+        io.digibyte.service.SyncService.digiDollarDetectionDegraded
+
     /** Manually retry the post-upgrade reconcile from the banner's button.
      *  Same code path as the auto trigger — if it succeeds, the flag clears
      *  and the banner disappears. */
