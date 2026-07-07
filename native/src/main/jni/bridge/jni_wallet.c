@@ -945,17 +945,17 @@ Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarMints(JNIEnv *env, jobje
     if (!txs) return (*env)->NewStringUTF(env, "");
     count = BRWalletTransactions(g_wallet, txs, count);
 
-    /* txid + 4 numeric fields + separators ~ 110; a Mint OP_RETURN is ~45
-     * bytes (90 hex) — 300 per line never truncates a well-formed entry */
-    size_t cap = count * 300 + 1;
-    char *buf = (char *)malloc(cap);
-    if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
-    buf[0] = '\0';
+    /* Pass 1 — collect the Mint transactions and their located collateral
+     * outpoints. Positions are a handful even for heavy users, so both the
+     * output buffer and the spent sweep size to the Mint count, not the whole
+     * (unbounded, SPV-history-deep) transaction set. */
+    struct { const BRTransaction *tx; const BRTxOutput *coll, *opret; uint32_t vout; int spent; }
+        *mints = malloc(sizeof(*mints) * count);
+    if (!mints) { free(txs); return (*env)->NewStringUTF(env, ""); }
+    size_t mintCount = 0;
 
-    size_t off = 0;
     for (size_t i = 0; i < count; i++) {
         const BRTransaction *tx = txs[i];
-
         if (!tx || BRDigiDollarTxType(tx) != DD_TYPE_MINT) continue;
 
         const BRTxOutput *coll = NULL, *opret = NULL;
@@ -971,19 +971,44 @@ Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarMints(JNIEnv *env, jobje
         }
         if (!coll || !opret) continue; /* not the Mint layout we build */
 
-        int spent = 0;
-        for (size_t j = 0; j < count && !spent; j++) {
-            for (size_t k = 0; txs[j] && k < txs[j]->inCount && !spent; k++) {
-                if (txs[j]->inputs[k].index == collVout &&
-                    UInt256Eq(txs[j]->inputs[k].txHash, tx->txHash)) spent = 1;
+        mints[mintCount].tx = tx;
+        mints[mintCount].coll = coll;
+        mints[mintCount].opret = opret;
+        mints[mintCount].vout = collVout;
+        mints[mintCount].spent = 0;
+        mintCount++;
+    }
+
+    /* Spent sweep — one pass over every input, marking any Mint whose
+     * collateral outpoint it consumes (our own Redemptions; a third-party
+     * liquidation spends an unwatched script SPV never sees). */
+    for (size_t i = 0; i < count; i++) {
+        if (!txs[i]) continue;
+        for (size_t k = 0; k < txs[i]->inCount; k++) {
+            const BRTxInput *in = &txs[i]->inputs[k];
+            for (size_t m = 0; m < mintCount; m++) {
+                if (in->index == mints[m].vout &&
+                    UInt256Eq(in->txHash, mints[m].tx->txHash)) mints[m].spent = 1;
             }
         }
+    }
 
+    /* txid + numeric fields + separators ~ 110; a Mint OP_RETURN is ~45 bytes
+     * (90 hex) — 300 per line never truncates a well-formed entry. */
+    size_t cap = mintCount * 300 + 1;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { free(mints); free(txs); return (*env)->NewStringUTF(env, ""); }
+    buf[0] = '\0';
+
+    size_t off = 0;
+    for (size_t m = 0; m < mintCount; m++) {
+        const BRTxOutput *opret = mints[m].opret;
         size_t need = 64 + 4 * 21 + opret->scriptLen * 2 + 8;
         if (off + need >= cap) continue; /* never truncate mid-line */
         off += (size_t)sprintf(buf + off, "%s:%u:%lld:%u:%d:",
-                               u256hex(UInt256Reverse(tx->txHash)), collVout,
-                               (long long)coll->amount, tx->blockHeight, spent);
+                               u256hex(UInt256Reverse(mints[m].tx->txHash)), mints[m].vout,
+                               (long long)mints[m].coll->amount, mints[m].tx->blockHeight,
+                               mints[m].spent);
         for (size_t k = 0; k < opret->scriptLen; k++) {
             off += (size_t)sprintf(buf + off, "%02x", opret->script[k]);
         }
@@ -993,6 +1018,7 @@ Java_io_digibyte_core_bridge_NativeBridge_listDigiDollarMints(JNIEnv *env, jobje
 
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
+    free(mints);
     free(txs);
     return result;
 }
