@@ -28,6 +28,7 @@ fun BalanceDisplay(
     ddAmount: String? = null,
     isSynced: Boolean = true,
     onFiatTap: (() -> Unit)? = null,
+    onDdTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val fiatColor = if (isSynced)
@@ -73,7 +74,8 @@ fun BalanceDisplay(
                     fontSize = 15.sp
                 ),
                 color = dgbColor,   // reuse the accent (dimmed when unsynced)
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                modifier = if (onDdTap != null) Modifier.clickable { onDdTap() } else Modifier
             )
         }
     }

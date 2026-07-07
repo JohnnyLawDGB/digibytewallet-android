@@ -23,6 +23,22 @@ class MetadataTest {
         )
     }
 
+    // Production parse (issue #10 Positions): collateral positions are
+    // recovered from the wallet's own Mint transactions, so the Mint
+    // OP_RETURN — OUR build format — must parse in main source too.
+    @Test
+    fun `MintMetadata parse recovers the Core mint fixture fields`() {
+        val meta = MintMetadata.parse(mintFixtureScript)
+        assertEquals(10_000, meta.ddCents)
+        assertEquals(1_037_552, meta.unlockHeight)
+        assertEquals(3, meta.lockTier)
+        assertEquals(
+            "c20a139635a064cbfb7ee7c8f1d4362de68f5d6b02e8cf1f6906f0c0e760c034",
+            meta.ownerKeyHex,
+        )
+        assertEquals(mintFixtureScript, meta.build())
+    }
+
     @Test
     fun `builds the Core mint fixture OP_RETURN byte-for-byte`() {
         val script = MintMetadata(

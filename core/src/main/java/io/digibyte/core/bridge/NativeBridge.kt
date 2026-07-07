@@ -486,4 +486,11 @@ object NativeBridge {
     /** DigiDollar token UTXOs (zero-satoshi P2TR, cents-denominated), one per
      *  line as "txid:vout:cents:scriptPubKeyHex". Empty string if none. */
     external fun listDigiDollarUtxos(): String
+
+    /** Wallet-known DigiDollar Mint transactions (issue #10 Positions), one
+     *  per line as "txid:vout:valueSats:blockHeight:spent:opReturnHex" —
+     *  `vout`/`valueSats` locate the collateral output, `spent` (0/1) says
+     *  whether a wallet transaction consumed it, and `opReturnHex` is the raw
+     *  Mint metadata script for MintMetadata.parse. Empty string if none. */
+    external fun listDigiDollarMints(): String
 }

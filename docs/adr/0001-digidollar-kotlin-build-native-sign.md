@@ -14,6 +14,12 @@ metadata decoder) while this ADR was in flight. The split is therefore re-scoped
 - The secp256k1 submodule bump is obsolete: upstream vendored secp v0.4.1 (schnorrsig +
   extrakeys enabled in the BRKey.c amalgamation), which provides every symbol the signer needs.
 
+**Positions clarification (2026-07, issue #10):** Mint metadata *parsing* is production
+Kotlin (`MintMetadata.parse`) — collateral positions are recovered from the wallet's own
+Mint transactions (so they survive a seed restore), and the Mint OP_RETURN is our build
+format, not third-party wire data. The test-only demotion applies to Transfer (and
+incoming-metadata parsing generally), which stays with upstream's C decoder.
+
 The original text below stands as the record of the pre-reconciliation decision.
 
 ## Context

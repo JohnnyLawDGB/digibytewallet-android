@@ -36,18 +36,9 @@ object CrossCheckParse {
         return DigiDollarTxType.entries.firstOrNull { it.code == code }
     }
 
-    /** Parse a Mint OP_RETURN scriptPubKey (hex). */
-    fun mint(scriptHex: String): MintMetadata {
-        val pushes = typedPushes(scriptHex, DigiDollarTxType.MINT, exactSize = 6)
-        val ownerKey = pushes[5]
-        require(ownerKey.size == 32) { "Owner key must be 32 bytes" }
-        return MintMetadata(
-            ddCents = ScriptNum.decode(pushes[2]),
-            unlockHeight = ScriptNum.decode(pushes[3]).toInt(),
-            lockTier = ScriptNum.decode(pushes[4]).toInt(),
-            ownerKeyHex = ownerKey.toHex(),
-        )
-    }
+    /** Parse a Mint OP_RETURN scriptPubKey (hex). Mint parsing is production
+     *  code since issue #10 (positions recovery) — delegate to it. */
+    fun mint(scriptHex: String): MintMetadata = MintMetadata.parse(scriptHex)
 
     /** Parse a Transfer OP_RETURN scriptPubKey (hex). */
     fun transfer(scriptHex: String): TransferMetadata {

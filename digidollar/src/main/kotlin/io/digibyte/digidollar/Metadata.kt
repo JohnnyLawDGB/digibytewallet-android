@@ -41,6 +41,38 @@ data class MintMetadata(
             ),
         )
     }
+
+    companion object {
+        private const val MINT_PUSH_COUNT = 6
+
+        /**
+         * Parse a Mint OP_RETURN scriptPubKey (hex) — the inverse of [build].
+         *
+         * This is the one production parse in the Kotlin layer: collateral
+         * positions (issue #10) are recovered from the wallet's OWN Mint
+         * transactions, whose metadata is our build format above — not
+         * third-party wire data (Transfer parsing stays test-only per
+         * ADR-0001). Throws [IllegalArgumentException] on anything that is
+         * not a well-formed Mint metadata script.
+         */
+        fun parse(scriptHex: String): MintMetadata {
+            val pushes = ScriptPushData.read(scriptHex)
+            require(pushes.size == MINT_PUSH_COUNT && pushes[0].contentEquals(MAGIC)) {
+                "not a DigiDollar Mint metadata script"
+            }
+            require(pushes[1].size == 1 && pushes[1][0].toInt() == DigiDollarTxType.MINT.code) {
+                "not a Mint metadata script"
+            }
+            val ownerKey = pushes[5]
+            require(ownerKey.size == 32) { "Owner key must be 32 bytes" }
+            return MintMetadata(
+                ddCents = ScriptNum.decode(pushes[2]),
+                unlockHeight = ScriptNum.decode(pushes[3]).toInt(),
+                lockTier = ScriptNum.decode(pushes[4]).toInt(),
+                ownerKeyHex = ownerKey.toHex(),
+            )
+        }
+    }
 }
 
 /**
