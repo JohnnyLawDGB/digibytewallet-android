@@ -111,8 +111,9 @@ fun WalletScreen(
                     BalanceDisplay(
                         fiatAmount = fiatBalance,
                         dgbAmount = WalletViewModel.formatSatoshis(balance),
-                        ddAmount = if (ddBalance > 0L)
-                            WalletViewModel.formatDigiDollar(ddBalance) else null,
+                        // Always give DigiDollar a place on the hero — shows $0.00
+                        // when none is held (rather than hiding the pill).
+                        ddAmount = WalletViewModel.formatDigiDollar(ddBalance),
                         isSynced = syncState is SyncState.Complete,
                         onFiatTap = { viewModel.cycleCurrency() }
                     )
