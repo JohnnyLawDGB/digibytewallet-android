@@ -199,6 +199,26 @@ not research.
 > the non-client parts: peer selection by service bits, a community seeder-mesh /
 > peer diversity beyond author infrastructure, and the bloom-deprecation path
 > once enough peers advertise `NODE_COMPACT_FILTERS`.
+>
+> **DESIGN NOTE (2026-07-08):** *Seederless sovereign peer discovery via
+> oracle-node bootstrap* —
+> [`docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md`](docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md).
+> Concrete mechanism for "peer diversity beyond author infrastructure":
+> hardcode the multi-operator DigiDollar oracle-node set as CF bootstrap peers,
+> let the P2P pool bloom from them via `addr` gossip, and demote
+> `api.digiscope.me` from required to an optional accelerant. Grounded in and
+> adversarially reviewed against the real C core. Key findings the note pins
+> down: (1) DNS seeds are a **bloom/liveness** fallback only — they are
+> synthetically stamped bloom-only and contribute **zero** CF peers, so CF
+> discovery has exactly two sources (oracle injection + gossip); (2) two mainnet
+> gates (accept gate + gossip retention) embed a **testnet-only** CF exception
+> that must generalize before CF-only oracle nodes can survive on mainnet —
+> *unless* operators also run `peerbloomfilters=1` (Path A vs Path B, an open
+> decision for operators); (3) filter headers are **not** checkpoint-verified
+> today (TOFU + cross-peer quorum, with a single-peer escape hatch) — a shipped
+> `cfcheckpt` checkpoint is the real residual fix. **Operator prerequisite
+> (in progress): oracle operators enable `blockfilterindex=1` +
+> `peerblockfilters=1`.** Design-only; sequence when the oracle set is defined.
 
 **Why this now.** This is the single change that most directly answers
 "what's the point of this wallet." It removes the plaintext address
