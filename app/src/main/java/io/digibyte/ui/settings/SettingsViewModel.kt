@@ -11,8 +11,11 @@ import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.WalletConfigEntity
+import io.digibyte.core.isTestnet
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.security.PinManager
+import io.digibyte.core.settings.CustomNode
+import io.digibyte.core.settings.CustomNodePrefs
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.Dispatchers
@@ -122,6 +125,31 @@ class SettingsViewModel @Inject constructor(
             context.startActivity(launchIntent)
         }
         Runtime.getRuntime().exit(0)
+    }
+
+    // ── Custom / own node (Advanced section) ──────────────────────────────────
+    private val _customNodeEnabled = MutableStateFlow(CustomNodePrefs.isEnabled(context))
+    val customNodeEnabled: StateFlow<Boolean> = _customNodeEnabled.asStateFlow()
+
+    private val _customNodeHostPort = MutableStateFlow(CustomNodePrefs.hostPort(context) ?: "")
+    val customNodeHostPort: StateFlow<String> = _customNodeHostPort.asStateFlow()
+
+    fun setCustomNodeEnabled(enabled: Boolean) {
+        CustomNodePrefs.setEnabled(context, enabled)
+        _customNodeEnabled.value = enabled
+        // Restart-to-apply (matches Sync Mode). The injection + CF-only mode + watchdog
+        // suppression run inside SyncService's latched setup coroutine, which a live
+        // reconnect does NOT re-run — so the UI must tell the user to restart the app.
+    }
+
+    /** Validate + persist the host:port. Returns false (persists nothing) if invalid. */
+    fun saveCustomNodeHostPort(raw: String): Boolean {
+        val defaultPort = if (isTestnet(context)) CustomNode.TESTNET_DEFAULT_PORT
+                          else CustomNode.MAINNET_DEFAULT_PORT
+        val parsed = CustomNode.parse(raw, defaultPort) ?: return false
+        CustomNodePrefs.setHostPort(context, parsed.asHostPort())
+        _customNodeHostPort.value = parsed.asHostPort()
+        return true
     }
 
     // ── Action results ────────────────────────────────────────────────────────
