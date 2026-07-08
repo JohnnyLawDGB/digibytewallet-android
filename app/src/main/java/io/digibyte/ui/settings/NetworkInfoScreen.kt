@@ -40,6 +40,8 @@ fun NetworkInfoScreen(
     val torEnabled by viewModel.torEnabled.collectAsStateWithLifecycle()
     val dandelionEnabled by viewModel.dandelionEnabled.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
+    val customNodeEnabled by viewModel.customNodeEnabled.collectAsStateWithLifecycle()
+    val customNodeHostPort by viewModel.customNodeHostPort.collectAsStateWithLifecycle()
 
     // Refresh network stats when this screen is opened
     LaunchedEffect(Unit) { viewModel.refreshNetworkStats() }
@@ -240,6 +242,55 @@ fun NetworkInfoScreen(
                             )
                         }
                     )
+                }
+            }
+
+            // ── Own node ─────────────────────────────────────────────────────
+            item {
+                SettingsCategory(title = "Own node") {
+                    SettingsRow(
+                        icon = Icons.Filled.Dns,
+                        iconTint = DigiByteAccent,
+                        title = "Use my own node",
+                        subtitle = "Sync only through your DigiByte node (compact filters). " +
+                                   "Your node must run peerblockfilters=1. Applies on next app restart.",
+                        onClick = { viewModel.setCustomNodeEnabled(!customNodeEnabled) },
+                        trailing = {
+                            Switch(checked = customNodeEnabled,
+                                   onCheckedChange = { viewModel.setCustomNodeEnabled(it) })
+                        }
+                    )
+                    if (customNodeEnabled) {
+                        SettingsRowDivider()
+                        var draft by remember(customNodeHostPort) { mutableStateOf(customNodeHostPort) }
+                        var error by remember { mutableStateOf(false) }
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            OutlinedTextField(
+                                value = draft,
+                                onValueChange = { draft = it; error = false },
+                                singleLine = true,
+                                isError = error,
+                                label = { Text("Node address (host or host:port)") },
+                                placeholder = { Text("10.0.0.5  or  node.example.com:12024") }
+                            )
+                            if (error) {
+                                Text("Enter a valid host, optionally :port (1–65535). IPv6/URLs not supported.",
+                                     color = MaterialTheme.colorScheme.error,
+                                     style = MaterialTheme.typography.bodySmall)
+                            }
+                            TextButton(onClick = { error = !viewModel.saveCustomNodeHostPort(draft) }) {
+                                Text("Save")
+                            }
+                            // Coarse reachability signal (full "your node is serving filters" check is a
+                            // follow-up needing a native CF-peer-census accessor).
+                            Text(
+                                if (peerCount > 0) "Connected · $peerCount peer(s)"
+                                else "Not connected — restart the app after saving; check your node is reachable and serving filters.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
