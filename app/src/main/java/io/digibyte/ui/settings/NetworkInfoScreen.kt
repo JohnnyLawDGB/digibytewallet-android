@@ -44,7 +44,17 @@ fun NetworkInfoScreen(
     val customNodeHostPort by viewModel.customNodeHostPort.collectAsStateWithLifecycle()
 
     // Refresh network stats when this screen is opened
-    LaunchedEffect(Unit) { viewModel.refreshNetworkStats() }
+    // Poll live stats while the screen is visible so the display self-corrects a
+    // transient read (e.g. a momentary 0 during peer churn) instead of freezing a
+    // one-shot snapshot that diverges from the main screen. Read-only — this never
+    // mutates sync state (see SettingsViewModel.refreshNetworkStats). The loop is
+    // cancelled automatically when the screen leaves composition.
+    LaunchedEffect(Unit) {
+        while (true) {
+            viewModel.refreshNetworkStats()
+            kotlinx.coroutines.delay(3000)
+        }
+    }
 
     val numFmt = remember { NumberFormat.getNumberInstance(Locale.US) }
 
