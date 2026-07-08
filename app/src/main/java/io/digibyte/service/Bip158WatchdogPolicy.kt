@@ -63,3 +63,30 @@ internal fun decidePostTimeoutAction(
     reanchoredThisSession && msSinceReanchor < REANCHOR_GRACE_MS -> PostTimeoutAction.AWAIT_REANCHOR
     else -> PostTimeoutAction.FALLBACK_BLOOM
 }
+
+/**
+ * Largest block-height gap between the block tip and the compact-filter tip
+ * (cfTip) that still counts as "filters keeping pace."
+ */
+internal const val HEALTHY_CF_GAP_BLOCKS = 100L
+
+/**
+ * Is compact-filter sync healthy this poll? Healthy = cfTip is within
+ * [HEALTHY_CF_GAP_BLOCKS] of the block tip AND either it advanced this session
+ * (actively riding the chain) OR the block chain has caught up to the network tip.
+ *
+ * The `blocksCaughtUp` disjunct fixes a false "Privacy degraded for this session"
+ * banner: a wallet already fully filter-synced at launch never advances cfTip —
+ * there is nothing new to fetch — so an advance-only check mislabeled it "stuck"
+ * and degraded a genuinely-synced wallet to bloom after the timeout. When cfTip
+ * is within the gap of a block chain that IS at the network tip, the filter chain
+ * is effectively complete: that is synced, not stuck. A filter chain that is truly
+ * behind (gap > [HEALTHY_CF_GAP_BLOCKS]) or a block chain not yet at the tip
+ * ("stuck at restore below the tip", blocksCaughtUp=false) is still, correctly,
+ * not healthy and falls through to the recovery/degrade path.
+ */
+internal fun isFilterSyncHealthy(
+    gap: Long,
+    cfAdvancedSinceStart: Boolean,
+    blocksCaughtUp: Boolean,
+): Boolean = gap <= HEALTHY_CF_GAP_BLOCKS && (cfAdvancedSinceStart || blocksCaughtUp)

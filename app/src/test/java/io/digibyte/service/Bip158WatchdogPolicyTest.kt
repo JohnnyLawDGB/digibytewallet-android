@@ -92,4 +92,60 @@ class Bip158WatchdogPolicyTest {
             ),
         )
     }
+
+    // --- isFilterSyncHealthy: the false "Privacy degraded" regression ---
+
+    @Test
+    fun `already-synced wallet at the network tip is healthy even though cfTip did not advance`() {
+        // THE BUG: an established wallet relaunching with its filter chain already
+        // at the tip has nothing new to fetch, so cfTip never advances this session.
+        // The advance-only check mislabeled it "stuck" and degraded it to bloom,
+        // surfacing "Privacy degraded" on a wallet whose filters are complete.
+        assertEquals(
+            true,
+            isFilterSyncHealthy(gap = 0L, cfAdvancedSinceStart = false, blocksCaughtUp = true),
+        )
+    }
+
+    @Test
+    fun `filters actively riding the chain are healthy`() {
+        assertEquals(
+            true,
+            isFilterSyncHealthy(gap = 10L, cfAdvancedSinceStart = true, blocksCaughtUp = false),
+        )
+    }
+
+    @Test
+    fun `filters far behind the tip are not healthy`() {
+        // Genuine CF-peer scarcity: blocks caught up (via bloom) but cfTip is far
+        // behind — this MUST still be reported unhealthy so the honest degrade path
+        // runs. The fix must not mask a real filter deficit.
+        assertEquals(
+            false,
+            isFilterSyncHealthy(gap = 500L, cfAdvancedSinceStart = false, blocksCaughtUp = true),
+        )
+    }
+
+    @Test
+    fun `filters at the restore tip below the network tip are not healthy`() {
+        // "Stuck at restore": cfTip==blockTip (gap small) but the block chain has
+        // NOT reached the network tip, so we cannot conclude filters are complete —
+        // keep monitoring, do not declare healthy.
+        assertEquals(
+            false,
+            isFilterSyncHealthy(gap = 0L, cfAdvancedSinceStart = false, blocksCaughtUp = false),
+        )
+    }
+
+    @Test
+    fun `gap boundary is inclusive and one past it is unhealthy`() {
+        assertEquals(
+            true,
+            isFilterSyncHealthy(gap = HEALTHY_CF_GAP_BLOCKS, cfAdvancedSinceStart = false, blocksCaughtUp = true),
+        )
+        assertEquals(
+            false,
+            isFilterSyncHealthy(gap = HEALTHY_CF_GAP_BLOCKS + 1, cfAdvancedSinceStart = true, blocksCaughtUp = true),
+        )
+    }
 }

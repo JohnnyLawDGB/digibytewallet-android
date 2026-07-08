@@ -586,13 +586,22 @@ class SyncService : Service() {
                 val elapsedMs = System.currentTimeMillis() - startedAt
                 val cfAdvancedSinceStart = cfTipNow > cfTipAtStart
 
-                // Healthy = cfTip has actually moved past where we started AND
-                // is keeping pace with blockTip. gap<=100 with cfTip pinned to
-                // the saved-blocks tip is "stuck at restore," not "synced."
-                if (gap <= 100 && cfAdvancedSinceStart) {
+                // How far the header chain is from the network tip. Computed here
+                // (before the healthy check, not just in the deficit branch below)
+                // because "block chain is at the network tip" is part of healthy.
+                val estHeight = try { NativeBridge.getEstimatedBlockHeight() } catch (_: Throwable) { 0L }
+                val blocksCaughtUp = estHeight > 0L && blockTip >= estHeight - BLOCK_CATCHUP_GRACE
+
+                // Healthy = cfTip within HEALTHY_CF_GAP_BLOCKS of blockTip AND either
+                // it advanced this session OR the block chain is at the network tip.
+                // The blocksCaughtUp disjunct fixes the false "Privacy degraded": a
+                // wallet already fully filter-synced at launch never advances cfTip
+                // (nothing new to fetch), so the advance-only check mislabeled it
+                // "stuck" and degraded a synced wallet to bloom. See isFilterSyncHealthy.
+                if (isFilterSyncHealthy(gap, cfAdvancedSinceStart, blocksCaughtUp)) {
                     android.util.Log.i("SyncService",
                         "BIP158 watchdog: healthy (cfTip $cfTipAtStart→$cfTipNow, " +
-                        "blockTip=$blockTip, gap=$gap, after ${elapsedMs}ms)")
+                        "blockTip=$blockTip, gap=$gap, blocksCaughtUp=$blocksCaughtUp, after ${elapsedMs}ms)")
                     return@launch
                 }
 
@@ -623,10 +632,8 @@ class SyncService : Service() {
                 // deep-behind wallet headers take minutes to climb back. Staying
                 // on filters while headers import lets cfheaders ride along once
                 // they pass the frontier — abandoning here is the bug that made
-                // BIP158 always fall back.
-                val estHeight = try { NativeBridge.getEstimatedBlockHeight() } catch (_: Throwable) { 0L }
-                val blocksCaughtUp = estHeight > 0L && blockTip >= estHeight - BLOCK_CATCHUP_GRACE
-
+                // BIP158 always fall back. (estHeight/blocksCaughtUp computed above,
+                // before the healthy check.)
                 if (!blocksCaughtUp) {
                     val stalledMs = nowMs - lastBlockProgressMs
                     if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS || testnet || customNode) {
