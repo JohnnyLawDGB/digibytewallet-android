@@ -20,6 +20,9 @@ import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.isTestnet
 import io.digibyte.core.networkSuffix
+import io.digibyte.core.settings.CustomNode
+import io.digibyte.core.settings.CustomNodePrefs
+import io.digibyte.core.settings.syncModeFor
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
@@ -380,6 +383,7 @@ class SyncService : Service() {
                         }
                         android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
                         injectBloomPeers()
+                        injectCustomNode()
                         NativeBridge.startSync()
                     }
                 } else {
@@ -518,6 +522,10 @@ class SyncService : Service() {
             // bloom is never a valid fallback there — the watchdog must stay on compact
             // filters (re-anchor recovery below still applies). Mainnet is unchanged.
             val testnet = isTestnet(this@SyncService)
+            // A configured own-node forces COMPACT_FILTERS_ONLY (syncModeFor) so no
+            // bloom filterload ever goes on the wire — mirror the testnet treatment
+            // exactly so the watchdog can never flip to bloom while the toggle is on.
+            val customNode = CustomNodePrefs.isEnabled(this@SyncService)
             var lastCfTip = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
             val cfTipAtStart = lastCfTip
             val blockTipAtStart = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
@@ -621,11 +629,12 @@ class SyncService : Service() {
 
                 if (!blocksCaughtUp) {
                     val stalledMs = nowMs - lastBlockProgressMs
-                    if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS || testnet) {
+                    if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS || testnet || customNode) {
                         android.util.Log.d("SyncService",
                             "BIP158 watchdog: header sync still catching up to tip " +
                             "(blockTip=$blockTip, est=$estHeight, cfTip=$cfTipNow) — " +
-                            "staying on filters (elapsed=${elapsedMs}ms${if (testnet) ", testnet" else ""})")
+                            "staying on filters (elapsed=${elapsedMs}ms" +
+                            "${if (testnet) ", testnet" else ""}${if (customNode) ", own-node" else ""})")
                         continue
                     }
                     if (blockStallRecoveries < MAX_BLOCK_STALL_RECOVERIES) {
@@ -701,12 +710,15 @@ class SyncService : Service() {
                             // fall through to the bloom degrade below
                         }
                     }
-                    if (testnet) {
-                        // No bloom on testnet26 (nodes reset on filterload) — keep polling
-                        // filters; re-anchor above is the only recovery lever here.
+                    if (testnet || customNode) {
+                        // No bloom on testnet26 (nodes reset on filterload); no bloom
+                        // fallback under an own-node toggle either (COMPACT_FILTERS_ONLY
+                        // is forced so the address set never leaks via filterload) — keep
+                        // polling filters; re-anchor above is the only recovery lever here.
                         android.util.Log.d("SyncService",
-                            "BIP158 watchdog: cfheaders stuck at $cfTipNow but testnet — " +
-                            "staying on filters (no bloom fallback)")
+                            "BIP158 watchdog: cfheaders stuck at $cfTipNow but " +
+                            "${if (testnet) "testnet" else "own-node"} — staying on filters " +
+                            "(no bloom fallback)")
                         continue
                     }
                     android.util.Log.w("SyncService",
@@ -768,6 +780,7 @@ class SyncService : Service() {
             torReconnectFailures = 0
             _torFailureActive.value = true
             injectBloomPeers()
+            injectCustomNode()
             NativeBridge.startSync()
             return
         }
@@ -881,6 +894,9 @@ class SyncService : Service() {
         // Inject bloom-capable peers from the seeder API before starting sync.
         // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
         injectBloomPeers()
+        // Inject the user's own node (if configured) as a priority compact-filter
+        // peer. No-op unless the toggle is on; resolves DNS off the native peer lock.
+        injectCustomNode()
 
         // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
         // Default sync mode is BOTH (bloom + compact filters in parallel) for new
@@ -890,16 +906,20 @@ class SyncService : Service() {
         // if filter peers don't make progress; the choice resets on next launch
         // so we try filters again. Users can override in Settings → Sync Mode.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-        // Testnet26 nodes run with bloom DISABLED (peerbloomfilters off by default on
-        // modern Core) and RESET the connection when they receive a bloom `filterload`.
-        // BOTH mode sends filterload, so it gets us dropped before compact-filter sync
-        // can proceed. Force COMPACT_FILTERS_ONLY on testnet — the wallet syncs via
-        // BIP157/158 filters only (no filterload sent). Mainnet is unchanged.
-        val syncMode = if (isTestnet(this@SyncService)) {
-            NativeBridge.SyncMode.COMPACT_FILTERS_ONLY
-        } else {
-            settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH)
-        }
+        // Effective sync mode: a configured own-node (or testnet) forces
+        // COMPACT_FILTERS_ONLY so no bloom filterload — and thus no address-set
+        // leak — ever goes on the wire; otherwise the user's stored sync_mode
+        // pref wins. Testnet26 nodes run with bloom DISABLED (peerbloomfilters
+        // off by default on modern Core) and RESET the connection when they
+        // receive a bloom `filterload`, so forcing filters-only there is
+        // required for the same reason as the own-node case. Mainnet without
+        // an own node configured is unchanged (defaults to BOTH, or the
+        // stored pref).
+        val syncMode = syncModeFor(
+            pref = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH),
+            customNodeEnabled = CustomNodePrefs.isEnabled(this@SyncService),
+            isTestnet = isTestnet(this@SyncService)
+        )
         NativeBridge.setSyncMode(syncMode)
         if (syncMode != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedFilters = prefs.getString("saved_filter_headers", null)
@@ -964,7 +984,11 @@ class SyncService : Service() {
         // +120s, and falsely declares progress. Without fallback firing in
         // the no-filter-peer case, the wallet sits with no bloom loaded and
         // silently misses every incoming tx.
-        val syncModeNow = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH)
+        val syncModeNow = syncModeFor(
+            pref = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH),
+            customNodeEnabled = CustomNodePrefs.isEnabled(this@SyncService),
+            isTestnet = isTestnet(this@SyncService)
+        )
         if (syncModeNow != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedTipForWatchdog = NativeBridge.getSavedBlocksTip()
             val anchorForWatchdog = if (savedTipForWatchdog > 0) savedTipForWatchdog
@@ -1292,6 +1316,39 @@ class SyncService : Service() {
         android.util.Log.i(
             "SyncService",
             "Testnet26: injected ${TESTNET_PRIORITY_PEERS.size} hardcoded peer(s)"
+        )
+    }
+
+    /**
+     * Inject the user's own node as a priority compact-filter peer (services
+     * 0x41 = NODE_NETWORK|NODE_COMPACT_FILTERS). Re-run every sync start. Resolves
+     * the hostname off the native peer lock (injectPeerByIp resolves under PEER_GUARD)
+     * and passes an IPv4 literal (its live-manager re-add path uses inet_pton) — DNS
+     * never touches the native peer lock. No-op unless the toggle is on, the address
+     * parses, and it resolves to an IPv4.
+     */
+    private suspend fun injectCustomNode() {
+        if (!CustomNodePrefs.isEnabled(this@SyncService)) return
+        val raw = CustomNodePrefs.hostPort(this@SyncService) ?: return
+        val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
+                          else CustomNode.MAINNET_DEFAULT_PORT
+        val node = CustomNode.parse(raw, defaultPort) ?: run {
+            android.util.Log.w("SyncService", "custom node enabled but address unparseable: '$raw'")
+            return
+        }
+        val ip = withContext(Dispatchers.IO) {
+            try {
+                java.net.InetAddress.getAllByName(node.host)
+                    .firstOrNull { it is java.net.Inet4Address }?.hostAddress
+            } catch (e: Exception) {
+                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host}", e)
+                null
+            }
+        } ?: return
+        NativeBridge.injectPeerByIp(ip, node.port, 0x41L)
+        android.util.Log.i(
+            "SyncService",
+            "custom node injected as priority CF peer: $ip:${node.port} (${node.host})"
         )
     }
 
