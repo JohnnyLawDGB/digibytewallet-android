@@ -1,6 +1,8 @@
 package io.digibyte.core.settings
 
+import android.content.Context
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.networkSuffix
 
 /** A user-configured DigiByte node to use as a priority compact-filter peer. */
 data class CustomNode(val host: String, val port: Int) {
@@ -43,3 +45,19 @@ data class CustomNode(val host: String, val port: Int) {
  */
 fun syncModeFor(pref: Int, customNodeEnabled: Boolean, isTestnet: Boolean): Int =
     if (isTestnet || customNodeEnabled) NativeBridge.SyncMode.COMPACT_FILTERS_ONLY else pref
+
+object CustomNodePrefs {
+    private const val PREFS = "dgb_settings"
+    private const val KEY_ENABLED = "custom_node_enabled"
+    private const val KEY_HOSTPORT = "custom_node_hostport"
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun key(base: String, ctx: Context) = base + networkSuffix(ctx)
+
+    fun isEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(key(KEY_ENABLED, ctx), false)
+    fun hostPort(ctx: Context): String? = prefs(ctx).getString(key(KEY_HOSTPORT, ctx), null)
+    fun setEnabled(ctx: Context, enabled: Boolean) =
+        prefs(ctx).edit().putBoolean(key(KEY_ENABLED, ctx), enabled).apply()
+    fun setHostPort(ctx: Context, hostPort: String) =
+        prefs(ctx).edit().putString(key(KEY_HOSTPORT, ctx), hostPort.trim()).apply()
+}
