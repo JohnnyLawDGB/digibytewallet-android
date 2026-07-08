@@ -1,6 +1,6 @@
 # Bloom Deprecation — BIP 157/158-Only Sync, Own-Node as the Backup
 
-**Status:** Design note / plan — Phase 1 (ROADMAP: "bloom-deprecation path"). **DRAFT — one open decision (own-node model) pending user pick.**
+**Status:** Design note / plan — Phase 1 (ROADMAP: "bloom-deprecation path"). **Model C selected (own-node = tiered: fixed CF peer now, full RPC backend later), 2026-07-08.** First buildable increment: Model B (own node as fixed CF peer) + the mainnet CF gate generalization it needs.
 **Audience:** wallet engineers + (for the operator prerequisite) DigiDollar oracle-node operators.
 **Scope:** Android wallet (`digibytewallet-android`, branch `develop`). Digi-Mobile out of scope.
 **No code herein** — direction, dependency analysis, sequencing, and the one open decision.
@@ -39,6 +39,8 @@ The user's words were "connect via **rpc** to their own node." Two very differen
 
 **Recommendation: Model C.** It gives the fastest *safe* path to BIP158-only while keeping "full own-node RPC" as the stated end-goal rather than a blocker.
 
+> **DECIDED (2026-07-08, user): Model C.** Track A tier 1 = **Model B** (own node as a fixed/priority CF peer, pinned via injection, node must serve `peerblockfilters=1`). Track A tier 2 = **Model A** (full wallet↔node JSON-RPC backend on a `UtxoSource` seam), built after bloom is gone. The first buildable increment — planned next — is Model B **plus** the mainnet CF gate generalization it depends on (so a modern CF-only node is accepted on mainnet); both are pure client work, not operator-gated.
+
 ## Dependency structure & sequencing
 
 Bloom removal is **gated** — do it last, or you dead-end users who can't reach a CF peer and have no bloom and no own node.
@@ -52,7 +54,7 @@ Bloom removal is **gated** — do it last, or you dead-end users who can't reach
 
 ## Open questions
 
-1. **Own-node model — A vs B vs C** (this note recommends C). Decides Track A's depth. *This is the one blocking decision.*
+1. **Own-node model — RESOLVED (2026-07-08): Model C** (tiered — Model B fixed-CF-peer now, Model A RPC backend later). No longer blocking.
 2. **Watchdog end state.** When CF peers are unreachable and the user has no own node configured, what does the wallet show? (Proposed: an explicit "no filter peers — sync paused, configure your own node or wait" state, never a silent bloom downgrade.) Do we auto-offer the own-node setup at that moment?
 3. **Major-version trigger.** Bloom removal (step 5) is a legacy-path removal — confirm it lands as `X.0.0` and coordinate release notes. Steps 1-4 are minor/patch and mainnet-safe with bloom still compiled.
 4. **Migration for `BLOOM_ONLY`-pinned wallets.** Any wallet whose persisted `sync_mode` is `BLOOM_ONLY` must be migrated to `COMPACT_FILTERS_ONLY` on upgrade, not left on a removed mode.
