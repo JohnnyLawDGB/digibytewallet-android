@@ -219,6 +219,19 @@ not research.
 > `cfcheckpt` checkpoint is the real residual fix. **Operator prerequisite
 > (in progress): oracle operators enable `blockfilterindex=1` +
 > `peerblockfilters=1`.** Design-only; sequence when the oracle set is defined.
+>
+> **DECISION + DESIGN NOTE (2026-07-08): deprecate bloom entirely — BIP 157/158
+> is the *only* sync path; the backup is the user's own node, not bloom.** See
+> [`docs/superpowers/specs/2026-07-08-bloom-deprecation-bip158-only.md`](docs/superpowers/specs/2026-07-08-bloom-deprecation-bip158-only.md).
+> Bloom is a privacy liability wherever it runs (address set on the wire), so it
+> is being removed rather than kept as a fallback. The note maps the three jobs
+> bloom secretly does today (120s watchdog fallback, DNS-seed replenishment, the
+> two mainnet accept/retention gates) and their BIP158-only replacements, and
+> sequences removal **after** CF peer diversity (oracle-bootstrap) + the own-node
+> fallback land — bloom excision is the wire-path removal that finally triggers a
+> **major (`X.0.0`) bump**. One open decision (user's call): the own-node model —
+> wallet↔node JSON-RPC (Model A), own node as a fixed CF peer (Model B), or
+> tiered B-then-A (Model C, recommended). Draft pending that pick.
 
 **Why this now.** This is the single change that most directly answers
 "what's the point of this wallet." It removes the plaintext address
