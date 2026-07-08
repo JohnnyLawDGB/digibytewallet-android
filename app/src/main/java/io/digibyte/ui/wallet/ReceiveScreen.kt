@@ -43,9 +43,10 @@ fun ReceiveScreen(
     val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
     val hasPeers = peerCount > 0
 
-    // DigiDollar receive is offered only where DD is available (testnet, or mainnet
-    // post-activation) — same gating posture as the rest of the wallet's DD surface.
-    val ddEnabled = remember { isTestnet(context) }
+    // DigiDollar receive is always VISIBLE (so users know it's coming) but only
+    // ACTIVE where DigiDollar is live — testnet today, mainnet after the softfork.
+    // On mainnet it renders as a disabled "soon" chip; on testnet it's functional.
+    val ddActive = remember { isTestnet(context) }
 
     // Address format: 0=legacy(D), 2=bech32/SegWit(dgb1q), 4=Taproot/P2TR(dgb1p),
     // 3=DigiDollar(TD…) — default to bech32/SegWit.
@@ -58,7 +59,7 @@ fun ReceiveScreen(
     val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
     val taprootAddress = remember { viewModel.getReceiveAddress(0, 3) ?: "Address unavailable" }
     val digiDollarAddress = remember {
-        if (ddEnabled) viewModel.getDigiDollarReceiveAddress() ?: "Address unavailable" else null
+        if (ddActive) viewModel.getDigiDollarReceiveAddress() ?: "Address unavailable" else null
     }
     val address = when (addressFormat) {
         0 -> legacyAddress
@@ -223,13 +224,17 @@ fun ReceiveScreen(
                 onClick = { addressFormat = 4 },
                 label = { Text("Taproot (dgb1p…)", fontSize = 12.sp) }
             )
-            if (ddEnabled) {
-                FilterChip(
-                    selected = addressFormat == 3,
-                    onClick = { addressFormat = 3 },
-                    label = { Text("DigiDollar (TD…)", fontSize = 12.sp) }
-                )
-            }
+            FilterChip(
+                selected = addressFormat == 3 && ddActive,
+                enabled = ddActive,
+                onClick = { if (ddActive) addressFormat = 3 },
+                label = {
+                    Text(
+                        if (ddActive) "DigiDollar (TD…)" else "DigiDollar (soon)",
+                        fontSize = 12.sp
+                    )
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
