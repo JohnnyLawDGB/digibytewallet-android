@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ReceiveScreen(
     onNavigateBack: () -> Unit,
@@ -42,22 +43,27 @@ fun ReceiveScreen(
     val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
     val hasPeers = peerCount > 0
 
-    // DigiDollar receive is offered only where DD is available (testnet, or mainnet
-    // post-activation) — same gating posture as the rest of the wallet's DD surface.
-    val ddEnabled = remember { isTestnet(context) }
+    // DigiDollar receive is always VISIBLE (so users know it's coming) but only
+    // ACTIVE where DigiDollar is live — testnet today, mainnet after the softfork.
+    // On mainnet it renders as a disabled "soon" chip; on testnet it's functional.
+    val ddActive = remember { isTestnet(context) }
 
-    // Address format: 0=legacy(D), 2=bech32(dgb1q), 3=DigiDollar(TD…) — default to bech32
+    // Address format: 0=legacy(D), 2=bech32/SegWit(dgb1q), 4=Taproot/P2TR(dgb1p),
+    // 3=DigiDollar(TD…) — default to bech32/SegWit.
     var addressFormat by remember { mutableIntStateOf(2) }
 
     // Pre-derive each format once so toggling the chip doesn't re-run the JNI
-    // key-derivation path. format 0 = legacy D-prefix, 2 = bech32, 3 = DigiDollar TD… address.
+    // key-derivation path. getReceiveAddress format: 0 = legacy, 2 = bech32 P2WPKH,
+    // 3 = Taproot P2TR; DigiDollar comes from getDigiDollarReceiveAddress().
     val legacyAddress = remember { viewModel.getReceiveAddress(0, 0) ?: "Address unavailable" }
     val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
+    val taprootAddress = remember { viewModel.getReceiveAddress(0, 3) ?: "Address unavailable" }
     val digiDollarAddress = remember {
-        if (ddEnabled) viewModel.getDigiDollarReceiveAddress() ?: "Address unavailable" else null
+        if (ddActive) viewModel.getDigiDollarReceiveAddress() ?: "Address unavailable" else null
     }
     val address = when (addressFormat) {
         0 -> legacyAddress
+        4 -> taprootAddress
         3 -> digiDollarAddress ?: bech32Address
         else -> bech32Address
     }
@@ -197,31 +203,38 @@ fun ReceiveScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Address format toggle
-        Row(
+        // Address format toggle — wraps to a second line if the chips don't fit.
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             FilterChip(
                 selected = addressFormat == 2,
                 onClick = { addressFormat = 2 },
-                label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) },
-                modifier = Modifier.padding(end = 8.dp)
+                label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) }
             )
             FilterChip(
                 selected = addressFormat == 0,
                 onClick = { addressFormat = 0 },
-                label = { Text("Legacy (D…)", fontSize = 12.sp) },
-                modifier = if (ddEnabled) Modifier.padding(end = 8.dp) else Modifier
+                label = { Text("Legacy (D…)", fontSize = 12.sp) }
             )
-            if (ddEnabled) {
-                FilterChip(
-                    selected = addressFormat == 3,
-                    onClick = { addressFormat = 3 },
-                    label = { Text("DigiDollar (TD…)", fontSize = 12.sp) }
-                )
-            }
+            FilterChip(
+                selected = addressFormat == 4,
+                onClick = { addressFormat = 4 },
+                label = { Text("Taproot (dgb1p…)", fontSize = 12.sp) }
+            )
+            FilterChip(
+                selected = addressFormat == 3 && ddActive,
+                enabled = ddActive,
+                onClick = { if (ddActive) addressFormat = 3 },
+                label = {
+                    Text(
+                        if (ddActive) "DigiDollar (TD…)" else "DigiDollar (soon)",
+                        fontSize = 12.sp
+                    )
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
