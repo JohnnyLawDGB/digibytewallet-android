@@ -3,6 +3,8 @@ package io.digibyte.core
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.entity.UtxoEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 sealed class TxResult {
     data class Success(val txid: String) : TxResult()
@@ -24,15 +26,20 @@ class TransactionBuilder(
         amountSatoshis: Long,
         feePerKb: Long,
         spendableUtxos: List<UtxoEntity>
-    ): TxResult {
+    ): TxResult = withContext(Dispatchers.IO) {
+        // Off the caller's thread (SendViewModel launches on Main): build, sign,
+        // and BROADCAST are blocking native calls that take the C-core peer/wallet
+        // locks. Running them on the UI thread froze the app at "broadcasting",
+        // especially once the compact-filter confirmation path started holding the
+        // peer-manager lock across full-block processing.
         // Validate address
         if (!NativeBridge.isValidAddress(toAddress)) {
-            return TxResult.Error("Invalid DigiByte address")
+            return@withContext TxResult.Error("Invalid DigiByte address")
         }
 
         // Validate amount
         if (amountSatoshis <= 0) {
-            return TxResult.Error("Amount must be positive")
+            return@withContext TxResult.Error("Amount must be positive")
         }
 
         // Create unsigned transaction via C core — the C core's BRWallet handles
@@ -40,15 +47,15 @@ class TransactionBuilder(
         // CoinSelector was redundant and failed because Room UTXOs weren't populated
         // from the SPV sync. Let the C core do what it's designed to do.
         val unsignedTx = NativeBridge.createTransaction(toAddress, amountSatoshis, feePerKb)
-            ?: return TxResult.Error("Insufficient balance")
+            ?: return@withContext TxResult.Error("Insufficient balance")
 
         // Sign via C core (uses RFC 6979 deterministic nonces)
         val signedTx = NativeBridge.signTransaction(unsignedTx)
-            ?: return TxResult.Error("Failed to sign transaction")
+            ?: return@withContext TxResult.Error("Failed to sign transaction")
 
         // Broadcast via C core
         val txid = Broadcaster.broadcast(signedTx)
-            ?: return TxResult.Error("Failed to broadcast transaction")
+            ?: return@withContext TxResult.Error("Failed to broadcast transaction")
 
         // Record the outgoing tx so the activity list can categorize it as
         // "Sent" even if BRWalletAmountSentByTx later returns 0 because the
@@ -71,7 +78,7 @@ class TransactionBuilder(
         // persist() runs.
         walletTxPersister.persist()
 
-        return TxResult.Success(txid)
+        TxResult.Success(txid)
     }
 
     private fun estimateFee(signedSize: Int, feePerKb: Long): Long =
