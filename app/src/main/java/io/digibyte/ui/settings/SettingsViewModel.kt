@@ -161,21 +161,24 @@ class SettingsViewModel @Inject constructor(
         loadConfig()
     }
 
+    /**
+     * READ-ONLY network stats for the Network Info screen. MUST NOT mutate sync
+     * state.
+     *
+     * This previously called forceReconnect()+startSync() whenever it read 0
+     * peers, so merely opening (or auto-refreshing) the Network Info screen could
+     * tear down a working/recovering peer manager. Worse, that uncoordinated
+     * startSync bypasses SyncService's saved-block-header load path, so the
+     * recreated manager could come up with an empty chain — block height 0, and
+     * an incoming tx unable to confirm (observed on-device, v3.10.1). A display
+     * screen must never drive sync; reconnect is the wallet screen's
+     * pull-to-refresh (the coordinated, on-device-proven path).
+     */
     fun refreshNetworkStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
-            _peerCount.value = peers
+            _peerCount.value = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
-            // Wake-up: a manual refresh at 0 peers should actually reconnect, not just
-            // repaint the count. Force a clean recreate so a manager stuck after long
-            // idle re-dials (digiscope.me + cached peers are always re-injected).
-            if (peers == 0) {
-                runCatching {
-                    NativeBridge.forceReconnect()
-                    NativeBridge.startSync()
-                }
-            }
         }
     }
 
