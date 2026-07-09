@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.db.entity.TransactionEntity
+import io.digibyte.ui.components.CONFIRMED_THRESHOLD
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
@@ -175,7 +176,7 @@ private fun TransactionDetailContent(
 
                 DetailRow(label = "Confirmations", value = when {
                     tx.confirmations == 0 -> "Unconfirmed"
-                    tx.confirmations >= 6 -> "${tx.confirmations} (Final)"
+                    tx.confirmations >= CONFIRMED_THRESHOLD -> "${tx.confirmations} (Final)"
                     else -> tx.confirmations.toString()
                 })
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -300,7 +301,7 @@ private fun DetailRow(
 private fun ConfirmationsBadge(confirmations: Int) {
     val (label, color) = when {
         confirmations == 0 -> "Unconfirmed" to MaterialTheme.colorScheme.error
-        confirmations < 6  -> "$confirmations confirmation${if (confirmations > 1) "s" else ""}" to Color(0xFFFFA726)
+        confirmations < CONFIRMED_THRESHOLD -> "$confirmations confirmation${if (confirmations > 1) "s" else ""}" to Color(0xFFFFA726)
         else               -> "Confirmed ($confirmations)" to DigiByteGreen
     }
     Surface(

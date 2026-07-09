@@ -22,6 +22,14 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
+ * Confirmations at which a transaction is shown as settled ("Confirmed"). DigiByte
+ * mines ~every 15s, so 4 confirmations ≈ 1 minute. Historical txs re-synced during
+ * catch-up are already deep (high confirmations), so this latency only applies to
+ * genuinely-new incoming transactions — legitimate settlement time.
+ */
+const val CONFIRMED_THRESHOLD = 4
+
+/**
  * Single row in the transaction list. Tapping triggers [onClick].
  */
 @Composable
@@ -128,7 +136,7 @@ fun TransactionItem(
 private fun ConfirmationsBadge(confirmations: Int) {
     val (label, color) = when {
         confirmations == 0 -> "Unconfirmed" to MaterialTheme.colorScheme.error
-        confirmations < 6  -> "$confirmations conf." to Color(0xFFFFA726) // amber
+        confirmations < CONFIRMED_THRESHOLD -> "$confirmations conf." to Color(0xFFFFA726) // amber
         else               -> "Confirmed" to DigiByteGreen
     }
     Surface(
