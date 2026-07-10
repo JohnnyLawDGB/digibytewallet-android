@@ -292,24 +292,33 @@ class WalletManager(
      * restart the app afterward so the wallet reloads clean and the rescan begins.
      */
     fun rebuildFromChainRescan() {
+        // Stop native sync FIRST so the peer manager can't re-persist saved_blocks /
+        // saved_transactions after we clear them (its final persist, if any, runs
+        // before the clear below and is therefore overwritten).
+        runCatching { NativeBridge.stopSync() }
         val suffix = networkSuffix(context)
+        // NOTE: commit() (synchronous), NOT apply(). The caller kills the process
+        // (Runtime.exit) immediately after this returns to force a clean reload; an
+        // async apply() would be dropped before it flushes, leaving the corrupt cache
+        // in place (the tx graph would reload unchanged and the scan would stay at the
+        // tip instead of the birth floor).
         context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
             .remove("saved_transactions")   // corrupt/phantom tx graph — re-derived from chain
             .remove("saved_filter_headers") // CF chain re-anchors at the birth floor
             .remove("saved_blocks")         // header chain re-syncs to span the rescan range
             .remove("has_synced")
             .remove("last_balance")
-            .apply()
+            .commit()
         OutgoingTxStore(context).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
         // If the birth height is unknown, REMOVE the pref rather than writing 0 —
         // 0 would floor the scan at genesis (~23M blocks). SyncService then falls back
-        // to the wallet's birth checkpoint on its own.
+        // to the wallet's birth checkpoint on its own (savedTip is now 0).
         val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
             if (birth > 0L) putLong("cf_birth_height", birth) else remove("cf_birth_height")
-        }.apply()
+        }.commit()
     }
 
     /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */

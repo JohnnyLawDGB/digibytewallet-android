@@ -65,9 +65,11 @@ class OutgoingTxStore(context: Context) {
         }.toSet()
 
     /** Forget every recorded send. Used by the full chain rebuild, which discards the
-     *  local transaction cache entirely and re-derives it from on-chain data. */
+     *  local transaction cache entirely and re-derives it from on-chain data.
+     *  commit() (synchronous): the rebuild kills the process right after, so an async
+     *  apply() could be dropped before it flushes. */
     fun clearAll() {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().commit()
     }
 
     /** Forget a recorded send (its three keys). Used after a phantom double-spend
