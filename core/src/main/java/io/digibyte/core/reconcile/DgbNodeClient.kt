@@ -45,9 +45,13 @@ class DgbNodeClient(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS) // scantxoutset takes 20–60s on the server
         .certificatePinner(
+            // Pin the current leaf AND the Let's Encrypt intermediate. Pinning the
+            // intermediate (not just the leaf) means a routine ~90-day leaf renewal no
+            // longer breaks reconcile — the prior pins were leaf-only and went stale when
+            // the cert rotated, which silently killed "Scan for missing funds" for everyone.
             CertificatePinner.Builder()
-                .add("api.digiscope.me", "sha256/VDo86Ks/QFE3kVoOXkmNVWTovKKNMFQsBd4KGvoP8OU=")
-                .add("api.digiscope.me", "sha256/y7xVm0TVJNahMr2sZydE2jQH8SquXV9yLF9seROHHHU=")
+                .add("api.digiscope.me", "sha256/mxkNfnacx0nKcMPntNt/8/iv7iEoVNyg0WkCOt2FdU0=") // leaf
+                .add("api.digiscope.me", "sha256/brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=") // LE intermediate (YE1)
                 .build()
         )
         .build()
