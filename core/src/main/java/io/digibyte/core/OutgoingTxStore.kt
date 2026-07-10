@@ -64,6 +64,12 @@ class OutgoingTxStore(context: Context) {
             if (key.endsWith(".sent")) key.removeSuffix(".sent") else null
         }.toSet()
 
+    /** Forget every recorded send. Used by the full chain rebuild, which discards the
+     *  local transaction cache entirely and re-derives it from on-chain data. */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+    }
+
     /** Forget a recorded send (its three keys). Used after a phantom double-spend
      *  is dropped so it isn't re-checked on the next launch. */
     fun remove(txid: String) {

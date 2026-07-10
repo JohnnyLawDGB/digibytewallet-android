@@ -279,6 +279,39 @@ class WalletManager(
         return dropped to kept
     }
 
+    /**
+     * Full rebuild from chain. Discards the local transaction cache, the filter-header
+     * chain, and the saved block headers, and floors the compact-filter scan at the
+     * wallet's birth so EVERY transaction is re-detected and block-stamped against the
+     * real chain on the next launch. This cures a corrupted tx graph (phantom chained
+     * sends, missing block heights that break confirmation + ordering, phantom coins)
+     * without touching the SEED or derived addresses — the wallet is reconstructed
+     * entirely from on-chain data. Clearing saved_blocks alongside the filter chain
+     * avoids the "in-memory chain too shallow" wedge (the header chain must span the
+     * rescan range for the CF driver to resolve filter stop-hashes). The caller MUST
+     * restart the app afterward so the wallet reloads clean and the rescan begins.
+     */
+    fun rebuildFromChainRescan() {
+        val suffix = networkSuffix(context)
+        context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
+            .remove("saved_transactions")   // corrupt/phantom tx graph — re-derived from chain
+            .remove("saved_filter_headers") // CF chain re-anchors at the birth floor
+            .remove("saved_blocks")         // header chain re-syncs to span the rescan range
+            .remove("has_synced")
+            .remove("last_balance")
+            .apply()
+        OutgoingTxStore(context).clearAll()
+        // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
+        // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
+        // If the birth height is unknown, REMOVE the pref rather than writing 0 —
+        // 0 would floor the scan at genesis (~23M blocks). SyncService then falls back
+        // to the wallet's birth checkpoint on its own.
+        val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
+        context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
+            if (birth > 0L) putLong("cf_birth_height", birth) else remove("cf_birth_height")
+        }.apply()
+    }
+
     /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
     fun getDigiDollarReceiveAddress(): String? {
         return NativeBridge.getDigiDollarReceiveAddress()

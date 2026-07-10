@@ -282,6 +282,53 @@ fun ReconcileScreen(navController: NavController) {
                 Text(it, color = Color(0xFF6BE8A3), fontSize = 13.sp)
             }
 
+            // --- Full rebuild from chain (rescan every tx, re-stamp block heights) ---
+            HorizontalDivider(color = Color(0xFF243352))
+            Text(
+                "Full rebuild from chain",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            )
+            Text(
+                "If confirmations, ordering, or balance still look wrong, this clears the local " +
+                    "transaction cache and re-scans the whole chain with compact filters — re-detecting " +
+                    "and block-stamping every transaction from on-chain data. Your seed and coins are " +
+                    "untouched; everything is rebuilt from the chain. The app restarts and the rescan " +
+                    "runs from your wallet's birth, so it takes a while to finish.",
+                color = Color(0xFFB0BEC5),
+                fontSize = 13.sp,
+            )
+            var armRebuild by remember { mutableStateOf(false) }
+            OutlinedButton(
+                onClick = {
+                    if (!armRebuild) {
+                        armRebuild = true
+                    } else {
+                        walletManager.rebuildFromChainRescan()
+                        val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                        li?.addFlags(
+                            android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        )
+                        context.startActivity(li)
+                        Runtime.getRuntime().exit(0)
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (armRebuild) Color(0xFFFF6B6B) else Color(0xFFB0BEC5)
+                ),
+            ) {
+                Text(
+                    if (armRebuild) "Tap again to confirm — clears cache & restarts"
+                    else "Full rebuild from chain (rescan)"
+                )
+            }
+
             when (val s = state) {
                 is ChainReconciliationService.State.Idle -> Unit
 
