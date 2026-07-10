@@ -238,6 +238,47 @@ class WalletManager(
     fun watchedReceiveAddresses(): Set<String> =
         watchedPrefs.getStringSet("addrs", emptySet()) ?: emptySet()
 
+    /**
+     * Recover from a stuck phantom-send chain. The wallet can build a send that spends
+     * the unconfirmed change of a previous send; if that base never landed on-chain
+     * (the pre-fix confirmation-bug era), every send in the chain spends a coin that
+     * does not exist — so all are invalid, never mine, and the durable-resend job
+     * re-fires them forever. This drops every recorded outgoing send that is NOT
+     * confirmed on-chain: BRWalletRemoveTransaction cascades to dependents and
+     * un-spends the real UTXO the chain tied up, then we persist the corrected tx set.
+     * The compact-filter sync (already at the chain tip) keeps the restored, real
+     * UTXO set confirmed. Returns (dropped, kept). Safe because a send showing a real
+     * confirmation height is never touched.
+     */
+    fun clearStuckSends(): Pair<Int, Int> {
+        val store = OutgoingTxStore(context)
+        val recorded = store.allTxids()
+        if (recorded.isEmpty()) return 0 to 0
+
+        // Wallet's confirmation view: txid -> blockHeight (TX_UNCONFIRMED = INT32_MAX).
+        val heights = HashMap<String, Long>()
+        runCatching {
+            NativeBridge.getTransactionDetails().trim().lines().forEach { line ->
+                val p = line.split("|")
+                if (p.size >= 4) heights[p[0]] = p[3].toLongOrNull() ?: 0L
+            }
+        }
+
+        var dropped = 0
+        var kept = 0
+        for (txid in recorded) {
+            val h = heights[txid]
+            val confirmed = h != null && h > 0L && h < Int.MAX_VALUE.toLong()
+            if (confirmed) { kept++; continue } // real, on-chain send — never touch it
+            if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
+                store.remove(txid)
+                dropped++
+            }
+        }
+        if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
+        return dropped to kept
+    }
+
     /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
     fun getDigiDollarReceiveAddress(): String? {
         return NativeBridge.getDigiDollarReceiveAddress()

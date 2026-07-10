@@ -35,6 +35,7 @@ import java.util.Locale
 @InstallIn(SingletonComponent::class)
 interface ReconcileScreenEntryPoint {
     fun assetManager(): AssetManager
+    fun walletManager(): io.digibyte.core.WalletManager
 }
 
 /**
@@ -54,14 +55,17 @@ fun ReconcileScreen(navController: NavController) {
     // Pull the app-scoped AssetManager via a Hilt entry point so reconcile
     // can refresh asset UTXOs after tx import. Without this the Assets tab
     // stayed empty even after a successful scan.
-    val assetManager = remember {
+    val entryPoint = remember {
         dagger.hilt.android.EntryPointAccessors.fromApplication(
             context.applicationContext,
             ReconcileScreenEntryPoint::class.java,
-        ).assetManager()
+        )
     }
+    val assetManager = remember { entryPoint.assetManager() }
+    val walletManager = remember { entryPoint.walletManager() }
     val service = remember { ChainReconciliationService(client, assetManager) }
     val scope = rememberCoroutineScope()
+    var stuckResult by remember { mutableStateOf<String?>(null) }
 
     val state by service.state.collectAsStateWithLifecycle()
     var endpoint by remember { mutableStateOf(client.endpoint()) }
@@ -237,6 +241,45 @@ fun ReconcileScreen(navController: NavController) {
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp
                 )
+            }
+
+            // --- Stuck / phantom-chain send recovery ---
+            HorizontalDivider(color = Color(0xFF243352))
+            Text(
+                "Stuck unconfirmed sends",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            )
+            Text(
+                "If sends never confirm, they may be spending change from an earlier send " +
+                    "that never landed on-chain — so they can never be mined. This drops those " +
+                    "un-mineable transactions and restores the coins they tied up. Confirmed " +
+                    "sends are never touched.",
+                color = Color(0xFFB0BEC5),
+                fontSize = 13.sp,
+            )
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        val (dropped, kept) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            walletManager.clearStuckSends()
+                        }
+                        stuckResult = if (dropped == 0)
+                            "No stuck sends to clear ($kept confirmed send(s) kept)."
+                        else
+                            "Cleared $dropped stuck send(s); $kept confirmed kept. Balance updates shortly."
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Clear stuck sends & rebuild")
+            }
+            stuckResult?.let {
+                Text(it, color = Color(0xFF6BE8A3), fontSize = 13.sp)
             }
 
             when (val s = state) {
