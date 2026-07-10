@@ -4,7 +4,6 @@ import android.content.Context
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -44,16 +43,10 @@ class DgbNodeClient(
     private val pinnedClient: OkHttpClient = baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS) // scantxoutset takes 20–60s on the server
-        .certificatePinner(
-            // Pin the current leaf AND the Let's Encrypt intermediate. Pinning the
-            // intermediate (not just the leaf) means a routine ~90-day leaf renewal no
-            // longer breaks reconcile — the prior pins were leaf-only and went stale when
-            // the cert rotated, which silently killed "Scan for missing funds" for everyone.
-            CertificatePinner.Builder()
-                .add("api.digiscope.me", "sha256/mxkNfnacx0nKcMPntNt/8/iv7iEoVNyg0WkCOt2FdU0=") // leaf
-                .add("api.digiscope.me", "sha256/brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=") // LE intermediate (YE1)
-                .build()
-        )
+        // Shared pin set — see io.digibyte.core.network.DigiScopePins. Pinning the
+        // LE intermediate (not just the leaf) survives routine ~90-day leaf renewals;
+        // a stale leaf-only pin previously killed "Scan for missing funds" for everyone.
+        .certificatePinner(io.digibyte.core.network.DigiScopePins.certificatePinner())
         .build()
 
     private val unpinnedClient: OkHttpClient = baseClient.newBuilder()

@@ -1,6 +1,5 @@
 package io.digibyte.core.asset.network
 
-import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,12 +29,9 @@ class DigiScopeAssetClient(
         // Per backend dev's note 2026-04-25.
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
-        .certificatePinner(
-            CertificatePinner.Builder()
-                .add("api.digiscope.me", "sha256/VDo86Ks/QFE3kVoOXkmNVWTovKKNMFQsBd4KGvoP8OU=")
-                .add("api.digiscope.me", "sha256/y7xVm0TVJNahMr2sZydE2jQH8SquXV9yLF9seROHHHU=")
-                .build()
-        )
+        // Shared pin set — see io.digibyte.core.network.DigiScopePins. A stale
+        // pin here previously killed the M3 asset parent-walk → "metadata offline".
+        .certificatePinner(io.digibyte.core.network.DigiScopePins.certificatePinner())
         .build()
 
     override suspend fun getAssetData(assetId: String): AssetDataResponse? {

@@ -35,14 +35,11 @@ class DigiScopeClient(
         private const val KEY_JWT = "dgb_jwt"
     }
 
-    // Certificate pinning for api.digiscope.me — prevents MITM via rogue CA
-    // Leaf pin + intermediate CA pin for rotation resilience
-    // Extracted 2026-03-28 from live cert chain
+    // Certificate pinning for api.digiscope.me — prevents MITM via rogue CA.
+    // Shared pin set — see io.digibyte.core.network.DigiScopePins (one place to
+    // update on rotation, so a stale pin can't linger in one client).
     private val client: OkHttpClient = baseClient.newBuilder()
-        .certificatePinner(okhttp3.CertificatePinner.Builder()
-            .add("api.digiscope.me", "sha256/VDo86Ks/QFE3kVoOXkmNVWTovKKNMFQsBd4KGvoP8OU=") // leaf
-            .add("api.digiscope.me", "sha256/y7xVm0TVJNahMr2sZydE2jQH8SquXV9yLF9seROHHHU=") // intermediate CA
-            .build())
+        .certificatePinner(io.digibyte.core.network.DigiScopePins.certificatePinner())
         .build()
 
     private val prefs: SharedPreferences =

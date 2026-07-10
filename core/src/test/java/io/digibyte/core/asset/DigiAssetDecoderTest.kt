@@ -359,4 +359,26 @@ class DigiAssetDecoderTest {
         assertEquals(0, first.outputIndex)
         assertEquals(1000L, first.amount)
     }
+
+    /**
+     * Real on-chain issuance: the "Mobile Tester" DigiAsset (created via digiscope
+     * 2026-07-10). Its OP_RETURN is a v1 opcode-1 issuance carrying a 20-byte SHA1
+     * torrent hash followed by the 32-byte SHA256 metadata hash. The decoder must
+     * skip the SHA1 and build CIDv1(raw, that SHA256) = the real, IPFS-reachable
+     * metadata CID. Proves the DECODER is correct — so a runtime null metadataCid
+     * ("metadata offline") comes from decoding a TRANSFER (which carries no hash) or
+     * a failed network walk to the issuance tx, NOT from the decoder.
+     */
+    @Test
+    fun `decodes real Mobile Tester issuance to correct IPFS metadata CID`() {
+        val opReturn = "6a3a4441010134fdfc1f913ab9aae04fa1daf92f389248ff21f1" +
+            "be4e676d3cfc8a454fcc38c94b192b8ef916fbbc8f0903c558568b21cafd2a620f1098fa4"
+        val header = decoder.decode(hexToBytes(opReturn))
+        assertNotNull("real issuance OP_RETURN should decode", header)
+        assertEquals(AssetOperation.ISSUANCE, header!!.operation)
+        assertEquals(
+            "bafkreif6jztw2ph4rjcu7tbyzffrsk4o7elpxpepbeb4kwcwrmq4v7jkmi",
+            header.metadataCid
+        )
+    }
 }
