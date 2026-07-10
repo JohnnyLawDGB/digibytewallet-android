@@ -635,38 +635,14 @@ class SyncService : Service() {
                 // BIP158 always fall back. (estHeight/blocksCaughtUp computed above,
                 // before the healthy check.)
                 if (!blocksCaughtUp) {
-                    val stalledMs = nowMs - lastBlockProgressMs
-                    if (stalledMs < BIP158_FALLBACK_TIMEOUT_MS || testnet || customNode) {
-                        android.util.Log.d("SyncService",
-                            "BIP158 watchdog: header sync still catching up to tip " +
-                            "(blockTip=$blockTip, est=$estHeight, cfTip=$cfTipNow) — " +
-                            "staying on filters (elapsed=${elapsedMs}ms" +
-                            "${if (testnet) ", testnet" else ""}${if (customNode) ", own-node" else ""})")
-                        continue
-                    }
-                    if (blockStallRecoveries < MAX_BLOCK_STALL_RECOVERIES) {
-                        blockStallRecoveries++
-                        android.util.Log.w("SyncService",
-                            "BIP158 watchdog: block sync stalled below tip for ${stalledMs}ms " +
-                            "(blockTip=$blockTip, est=$estHeight) — bloom recovery " +
-                            "$blockStallRecoveries/$MAX_BLOCK_STALL_RECOVERIES, will retry filters once caught up")
-                        try { NativeBridge.fallbackToBloom() } catch (t: Throwable) {
-                            android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
-                        }
-                        bloomRecoveryActive = true
-                        lastBlockProgressMs = System.currentTimeMillis()   // fresh stall window
-                        continue   // NO banner — recover via bloom, switch back once caught up
-                    }
-                    android.util.Log.w("SyncService",
-                        "BIP158 watchdog: block sync stalled $blockStallRecoveries times — " +
-                        "staying on bloom for the session (blockTip=$blockTip, est=$estHeight)")
-                    try {
-                        NativeBridge.fallbackToBloom()
-                        _bloomFallbackActive.value = true
-                    } catch (t: Throwable) {
-                        android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
-                    }
-                    return@launch
+                    // Bloom (BIP37) is removed as a data path: a header-sync stall never
+                    // falls back to a bloom filterload. Stay on compact filters and keep
+                    // retrying — the block-header path recovers via peer rotation and the
+                    // cfheaders re-anchor below, never by leaking the address set to bloom.
+                    android.util.Log.d("SyncService",
+                        "BIP158 watchdog: header sync still catching up " +
+                        "(blockTip=$blockTip, est=$estHeight, cfTip=$cfTipNow) — staying on filters (${elapsedMs}ms)")
+                    continue
                 }
 
                 // Headers are caught up to the network tip but cfheaders still
@@ -717,28 +693,13 @@ class SyncService : Service() {
                             // fall through to the bloom degrade below
                         }
                     }
-                    if (testnet || customNode) {
-                        // No bloom on testnet26 (nodes reset on filterload); no bloom
-                        // fallback under an own-node toggle either (COMPACT_FILTERS_ONLY
-                        // is forced so the address set never leaks via filterload) — keep
-                        // polling filters; re-anchor above is the only recovery lever here.
-                        android.util.Log.d("SyncService",
-                            "BIP158 watchdog: cfheaders stuck at $cfTipNow but " +
-                            "${if (testnet) "testnet" else "own-node"} — staying on filters " +
-                            "(no bloom fallback)")
-                        continue
-                    }
-                    android.util.Log.w("SyncService",
-                        "BIP158 watchdog: headers caught up (blockTip=$blockTip) but no " +
-                        "cfheaders progress after ${elapsedMs}ms (cfTip stuck at $cfTipNow, " +
-                        "gap=$gap) — falling back to bloom")
-                    try {
-                        NativeBridge.fallbackToBloom()
-                        _bloomFallbackActive.value = true
-                    } catch (t: Throwable) {
-                        android.util.Log.e("SyncService", "BIP158 watchdog: fallback failed", t)
-                    }
-                    return@launch
+                    // Bloom (BIP37) is removed as a data path. cfheaders stuck is recovered
+                    // ONLY by the one-time re-anchor above — never by a bloom filterload,
+                    // which would leak the whole address set. Stay on compact filters.
+                    android.util.Log.d("SyncService",
+                        "BIP158 watchdog: cfheaders stuck at $cfTipNow (gap=$gap) — staying on " +
+                        "filters (bloom removed; re-anchor is the only recovery)")
+                    continue
                 }
                 android.util.Log.d("SyncService",
                     "BIP158 watchdog: gap=$gap, cfTip stuck at $cfTipNow while " +
@@ -950,6 +911,17 @@ class SyncService : Service() {
             val tip = if (savedTip > 0) savedTip else NativeBridge.getWalletBirthCheckpointHeight()
             val birthHeight = settings.getLong("cf_birth_height", maxOf(0L, tip - 100L))
             NativeBridge.enableAutoCompactFilterFetch(birthHeight)
+            // Re-pin every Receive-screen address into the native BIP158 watch set so a
+            // receive to an address that fell outside the derived gap window is still
+            // scanned in every block (fixes not-confirming / undetected receives).
+            val watched = getSharedPreferences("dgb_watched_addrs", MODE_PRIVATE)
+                .getStringSet("addrs", emptySet()) ?: emptySet()
+            if (watched.isNotEmpty()) {
+                try { NativeBridge.addWatchedAddresses(watched.toTypedArray()) } catch (t: Throwable) {
+                    android.util.Log.e("SyncService", "addWatchedAddresses threw", t)
+                }
+                android.util.Log.i("SyncService", "BIP158: pinned ${watched.size} watched receive address(es)")
+            }
             android.util.Log.i("SyncService",
                 "BIP158: mode=$syncMode, auto-fetch from height $birthHeight " +
                 "(savedTip=$savedTip, anchor=$tip)")

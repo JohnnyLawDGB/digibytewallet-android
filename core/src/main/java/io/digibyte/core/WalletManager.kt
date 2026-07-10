@@ -30,6 +30,12 @@ class WalletManager(
     private val prefs: SharedPreferences =
         context.getSharedPreferences("dgb_wallet_seed", Context.MODE_PRIVATE)
 
+    // Every address ever shown on the Receive screen, persisted so it can be re-pinned
+    // into the native BIP158 watch set on each load — a receive to it can never fall
+    // outside the derived gap window and be missed. See NativeBridge.addWatchedAddresses.
+    private val watchedPrefs: SharedPreferences =
+        context.getSharedPreferences("dgb_watched_addrs", Context.MODE_PRIVATE)
+
     init {
         // Check if a wallet exists on disk
         if (hasSavedWallet()) {
@@ -215,8 +221,22 @@ class WalletManager(
      * Get a new receive address.
      */
     fun getReceiveAddress(index: Int, format: Int = 2): String? {
-        return NativeBridge.getReceiveAddress(index, format)
+        val addr = NativeBridge.getReceiveAddress(index, format)
+        if (!addr.isNullOrBlank()) rememberWatchedAddress(addr)
+        return addr
     }
+
+    /** Persist a Receive-screen address into the watched-address store. */
+    private fun rememberWatchedAddress(addr: String) {
+        val cur = watchedPrefs.getStringSet("addrs", emptySet()) ?: emptySet()
+        if (!cur.contains(addr)) {
+            watchedPrefs.edit().putStringSet("addrs", cur + addr).apply()
+        }
+    }
+
+    /** All persisted Receive-screen addresses, to re-pin into the native watch set on load. */
+    fun watchedReceiveAddresses(): Set<String> =
+        watchedPrefs.getStringSet("addrs", emptySet()) ?: emptySet()
 
     /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
     fun getDigiDollarReceiveAddress(): String? {

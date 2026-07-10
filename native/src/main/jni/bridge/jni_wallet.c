@@ -554,6 +554,28 @@ Java_io_digibyte_core_bridge_NativeBridge_getReceiveAddress(JNIEnv *env, jobject
     return (*env)->NewStringUTF(env, addr.s);
 }
 
+/* ---------- addWatchedAddresses ----------
+ * Pin every Receive-screen address into the wallet's permanent watch set so a
+ * receive to it is always in the BIP158 match set / balance detection, even if
+ * derivation never reaches it after a restart. Idempotent; invalid entries ignored. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_addWatchedAddresses(JNIEnv *env, jobject thiz,
+                                                              jobjectArray addrs) {
+    (void)thiz;
+    if (!g_wallet || !addrs) return;
+    jsize n = (*env)->GetArrayLength(env, addrs);
+    for (jsize i = 0; i < n; i++) {
+        jstring js = (jstring)(*env)->GetObjectArrayElement(env, addrs, i);
+        if (!js) continue;
+        const char *s = (*env)->GetStringUTFChars(env, js, NULL);
+        if (s) {
+            BRWalletAddWatchedAddress(g_wallet, s);
+            (*env)->ReleaseStringUTFChars(env, js, s);
+        }
+        (*env)->DeleteLocalRef(env, js);
+    }
+}
+
 /* ---------- getDigiDollarReceiveAddress ----------
  *
  * The wallet's canonical DigiDollar receive address: the BIP86 taproot owner key at

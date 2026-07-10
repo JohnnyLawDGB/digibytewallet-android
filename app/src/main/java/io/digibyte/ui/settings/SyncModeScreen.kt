@@ -87,36 +87,21 @@ fun SyncModeScreen(navController: NavController) {
             item {
                 SettingsCategory(title = "Protocol") {
                     SyncModeRow(
-                        label = "Bloom filter (BIP 37)",
-                        description = "Default. Wallet asks peers to filter blocks for its addresses. " +
-                                "Peers see the addresses you're watching.",
-                        selected = selected == NativeBridge.SyncMode.BLOOM_ONLY,
-                        onSelect = { pick(NativeBridge.SyncMode.BLOOM_ONLY) }
-                    )
-                    SettingsRowDivider()
-                    SyncModeRow(
                         label = "Compact filters (BIP 158)",
-                        description = "Wallet downloads compact filters per block and matches " +
-                                "addresses locally. Peer never learns which addresses you watch.",
-                        selected = selected == NativeBridge.SyncMode.COMPACT_FILTERS_ONLY,
-                        onSelect = { pick(NativeBridge.SyncMode.COMPACT_FILTERS_ONLY) }
-                    )
-                    SettingsRowDivider()
-                    SyncModeRow(
-                        label = "Both",
-                        description = "Run both stacks in parallel. Best coverage during the rollout " +
-                                "while filter-capable peers are still rare.",
-                        selected = selected == NativeBridge.SyncMode.BOTH,
-                        onSelect = { pick(NativeBridge.SyncMode.BOTH) }
+                        description = "The wallet downloads a compact filter for each block and matches " +
+                                "your addresses locally — peers never learn which addresses you watch. " +
+                                "This is the only mode. The legacy bloom filter (BIP 37), which leaked " +
+                                "your addresses to every peer, has been removed.",
+                        selected = true,
+                        onSelect = { }
                     )
                 }
             }
 
             item {
                 Text(
-                    text = "Compact filters require a peer that serves them. The seeder routes you " +
-                            "to filter-capable peers automatically when available, and falls back " +
-                            "to bloom peers when not.",
+                    text = "Compact filters require peers that serve them (NODE_COMPACT_FILTERS). " +
+                            "The wallet discovers and holds a set of filter-capable peers automatically.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF8899AA),
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)

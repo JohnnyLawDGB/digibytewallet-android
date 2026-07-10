@@ -47,6 +47,11 @@ object NativeBridge {
      *  3=Taproot/P2TR(dgb1p) — BIP86 (m/86'/20'/0'). */
     external fun getReceiveAddress(index: Int, format: Int): String?
 
+    /** Pin addresses into the wallet's permanent BIP158 watch set (every Receive-screen
+     *  address). Ensures a receive to an address that later falls outside the derived
+     *  gap window is still scanned in every block. Idempotent; invalid entries ignored. */
+    external fun addWatchedAddresses(addrs: Array<String>)
+
     /** The wallet's canonical DigiDollar receive address (TD… testnet / DD… mainnet, Base58Check).
      *  Encodes the BIP86 owner key m/86'/20'/0'/0/0's tap-tweaked output key — the same key as the
      *  first P2TR address, so received DigiDollar is watched and spendable. Null if session locked. */

@@ -39,12 +39,14 @@ data class CustomNode(val host: String, val port: Int) {
 }
 
 /**
- * The effective sync mode. A configured own-node (or testnet) forces
- * COMPACT_FILTERS_ONLY so no bloom filterload — and thus no address-set leak —
- * ever goes on the wire; otherwise the user's stored sync_mode pref wins.
+ * The effective sync mode. Bloom (BIP37) is removed as a data path: the wallet
+ * ALWAYS runs BIP157/158 compact filters only, so the address set never leaves the
+ * device via a bloom filterload. The parameters are retained for call-site
+ * compatibility but no longer select bloom — the stored `sync_mode` pref is ignored.
  */
+@Suppress("UNUSED_PARAMETER")
 fun syncModeFor(pref: Int, customNodeEnabled: Boolean, isTestnet: Boolean): Int =
-    if (isTestnet || customNodeEnabled) NativeBridge.SyncMode.COMPACT_FILTERS_ONLY else pref
+    NativeBridge.SyncMode.COMPACT_FILTERS_ONLY
 
 object CustomNodePrefs {
     private const val PREFS = "dgb_settings"
