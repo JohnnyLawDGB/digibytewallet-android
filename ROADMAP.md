@@ -232,6 +232,21 @@ not research.
 > **major (`X.0.0`) bump**. One open decision (user's call): the own-node model —
 > wallet↔node JSON-RPC (Model A), own node as a fixed CF peer (Model B), or
 > tiered B-then-A (Model C, recommended). Draft pending that pick.
+>
+> **EMPIRICAL MOTIVATION (2026-07-11): the own-node track is now the critical
+> path, not a nice-to-have.** See
+> [`docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md`](docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md).
+> Shipping v3.10.18 (the dead-socket filter-peer floor) proved the dialer good
+> enough on-device — cfheaders climbed in real 2000-header batches, cycling 8
+> distinct filter peers — while making the *architectural* residual undeniable:
+> CF-only correctly rejects the (mostly bloom-off) network majority, leaving a
+> thin ~16-node fleet that churns (connect → serve a burst → reset → drop) with
+> phantom `0x40` gossip tags, and the manager can stall at 0 peers. That is an
+> **infrastructure** problem, not a peer-selection one. **Explicit non-goal:** do
+> not ship more filter-peer-selection heuristics as the fix for "CF sync is slow
+> on weak devices" — route effort to the **own-node model decision (A/B/C, rec C)**
+> and oracle-operator enablement. Until then, `reconcile` stays the fast balance
+> path on weak hardware.
 
 **Why this now.** This is the single change that most directly answers
 "what's the point of this wallet." It removes the plaintext address
