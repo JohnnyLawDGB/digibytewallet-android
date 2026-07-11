@@ -106,6 +106,12 @@ class WalletViewModel @Inject constructor(
     private val _currentBlock = MutableStateFlow(0L)
     private val _targetBlock = MutableStateFlow(0L)
 
+    /** Compact-filter chain tip (getCFChainTipHeight) — the FUNCTIONAL sync frontier in
+     *  CF-only mode: tx/deposit detection only reaches this height. Polled in
+     *  pollNativeBalance; 0 until the first cfheaders response. Gates the sync state so the
+     *  wallet never shows "Synced" while cfheaders lags the (fast) header chain. */
+    private val _cfTip = MutableStateFlow(0L)
+
     /** Authoritative chain tip fetched from api.digiscope.me. Used as the
      *  progress denominator so the UI percent anchors to a stable value
      *  rather than peer-quorum estimated_height (which churns as peers
@@ -170,7 +176,8 @@ class WalletViewModel @Inject constructor(
         _currentBlock,
         _targetBlock,
         _recoveryFromTimestamp,
-        _externalTip
+        _externalTip,
+        _cfTip
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val state = values[0] as SyncState
@@ -181,6 +188,7 @@ class WalletViewModel @Inject constructor(
         val target = values[5] as Long
         val recoveryTs = values[6] as Long?
         val externalTip = values[7] as Long
+        val cfTip = values[8] as Long
 
         // Prefer the authoritative external tip when available; fall back to
         // the peer-quorum target only when the fetch has never succeeded
@@ -198,10 +206,19 @@ class WalletViewModel @Inject constructor(
         val materiallyBehind = current > 0 && effectiveTarget > 0 &&
             (effectiveTarget - current) > SYNC_BEHIND_THRESHOLD
 
+        // CF-first honesty: in CF-only the FUNCTIONAL sync frontier is the compact-filter chain
+        // tip (deposits/confirmations are only detected up to cfTip), NOT the header height that
+        // races to tip via every peer. Never claim "Synced" while cfheaders materially lags —
+        // that is exactly how a deposit gets missed while the UI says "Up to date". cfTip==0
+        // means CF hasn't started yet → fall back to header logic (no false 0%/stuck).
+        val cfBehind = cfTip > 0 && effectiveTarget > 0 &&
+            (effectiveTarget - cfTip) > CF_BEHIND_THRESHOLD
+        val behind = materiallyBehind || cfBehind
+
         val stage = when {
             state is SyncState.Failed -> SyncStage.Failed
             peers <= 0 -> SyncStage.Connecting
-            materiallyBehind -> SyncStage.Syncing
+            behind -> SyncStage.Syncing
             state is SyncState.Complete -> SyncStage.Synced
             else -> SyncStage.Syncing
         }
@@ -212,8 +229,12 @@ class WalletViewModel @Inject constructor(
         if (stage == SyncStage.Synced) hasReachedSyncedOnce = true
 
         val progress = when {
-            materiallyBehind && effectiveTarget > 0 ->
-                (current.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
+            behind && effectiveTarget > 0 -> {
+                // Track the bottleneck frontier: the CF tip when cfheaders lags (so the bar
+                // moves with filter catch-up instead of freezing at ~100% on headers), else headers.
+                val frontier = if (cfBehind && cfTip > 0) cfTip else current
+                (frontier.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
+            }
             state is SyncState.Complete -> 1.0f
             current > 0 && effectiveTarget > 0 ->
                 (current.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
@@ -227,7 +248,9 @@ class WalletViewModel @Inject constructor(
 
         SyncProgressInfo(
             stage = stage,
-            currentBlock = current,
+            // Report the bottleneck frontier so "Block X of Y" is coherent with the bar: the CF
+            // tip when cfheaders is the thing we're waiting on, else the header height.
+            currentBlock = if (cfBehind && cfTip > 0) cfTip else current,
             targetBlock = effectiveTarget,
             progressFraction = progress.coerceIn(0f, 1f),
             matchCount = txs.size,
@@ -530,6 +553,9 @@ class WalletViewModel @Inject constructor(
                 // entries (~2 minutes of history at the 5s poll cadence).
                 _currentBlock.value = currentHeight
                 _targetBlock.value = if (estHeight > 0) estHeight else currentHeight
+                // CF frontier (functional sync height in CF-only). Poll every cycle so the
+                // honesty gate un-latches when cfheaders catches up (must keep polling post-Complete).
+                _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)
                 if (currentHeight > 0) {
                     scanSamples.addLast(System.currentTimeMillis() to currentHeight)
                     while (scanSamples.size > 24) scanSamples.removeFirst()
@@ -654,6 +680,9 @@ class WalletViewModel @Inject constructor(
          *  normal tip lag (a handful of 15s blocks) so steady state never
          *  flickers; far below any real re-sync (hundreds of thousands). */
         private const val SYNC_BEHIND_THRESHOLD = 100L
+        /** CF-only: the wallet is not FUNCTIONALLY synced until the compact-filter chain tip is
+         *  within this many blocks of the header tip — tx/deposit detection only reaches cfTip. */
+        private const val CF_BEHIND_THRESHOLD = 100L
 
         /** Peer-count=0 must persist this long before the watchdog fires. */
         private const val STALL_THRESHOLD_MS = 60_000L

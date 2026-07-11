@@ -308,6 +308,15 @@ class SyncService : Service() {
             // coroutine that's still nominally active and respawn it.
             lastKeepaliveTickMs = System.currentTimeMillis()
             tickCount++
+            // CF-first: re-inject the validated filter peers every ~30s so they stay dialable in
+            // the native pool after the fleet churns them out (a peer is removed from the pool on
+            // connect failure). injectPeerByIp dedups, so this only re-adds ones that dropped —
+            // without it, a churn burst can leave the native filter-first pre-pass with nothing
+            // to dial and the wallet stops catching cfheaders up. Network fetch is throttled
+            // hourly inside injectFilterPeers; the 30s cadence just re-injects the cached set.
+            if (tickCount % 3L == 0L && !isTestnet(this@SyncService)) {
+                launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { injectFilterPeers() } }
+            }
             // Every 3rd tick (~30s), refresh asset UTXOs against the node's
             // authoritative listunspent view. SPV bloom filters are known to
             // miss asset transactions (cracked-filter / merkleblock-drop
@@ -1211,6 +1220,43 @@ class SyncService : Service() {
      *      api.digiscope.me is briefly down — the pool from any previous
      *      session is still usable.
      */
+    /** CF-first: fetch the dedicated validated filter-peer list (capability=filter) and inject
+     *  ALL of them (no BLOOM_BATCH_SIZE rotation — the validated set is only ~16) so the native
+     *  filter-first pre-pass always has its primary set in manager->peers. Caches the last good
+     *  list in its own bucket so an offline launch still primes the native set. Injected services
+     *  carry the 0x40 (NODE_COMPACT_FILTERS) bit, which is what the native CF-first dialer keys on. */
+    private fun injectFilterPeers() {
+        val prefs = getSharedPreferences("dgb_filter_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val lastFetch = prefs.getLong("last_fetch", 0L)
+
+        var pool: List<Triple<String, Int, Long>> =
+            prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
+
+        if (now - lastFetch > BLOOM_REFRESH_INTERVAL_MS || pool.isEmpty()) {
+            val fresh = fetchFromSeeder("filter")
+            if (fresh != null && fresh.isNotEmpty()) {
+                pool = fresh
+                prefs.edit()
+                    .putString("peer_pool", serializePool(pool))
+                    .putLong("last_fetch", now)
+                    .apply()
+                android.util.Log.i("SyncService", "Filter peers fetched: ${fresh.size}")
+            }
+        }
+
+        if (pool.isEmpty()) {
+            android.util.Log.w("SyncService",
+                "No filter peers (seeder empty + no cache) — native falls back to discovery")
+            return
+        }
+
+        for ((ip, port, services) in pool) {
+            NativeBridge.injectPeerByIp(ip, port, services)
+        }
+        android.util.Log.i("SyncService", "Injected ${pool.size} filter peers (primary CF set)")
+    }
+
     private fun injectBloomPeers() {
         if (isTestnet(this@SyncService)) {
             // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
@@ -1223,6 +1269,12 @@ class SyncService : Service() {
             injectTestnetPeers()
             return
         }
+        // CF-first: inject the FULL dedicated filter-peer list (capability=filter) as the
+        // primary CF peer set every sync-start, so the native filter-first pre-pass always has
+        // the known validated filter peers to dial (instead of a rotating 20-slice of the mixed
+        // pool that may contain none of them). The native dialer suppresses the DNS/bloom
+        // shotgun while any of these are dialable or connected.
+        injectFilterPeers()
         // Dandelion peers piggyback here so they're injected at every sync-start
         // path (all of them call injectBloomPeers). Runs first so bloom's early
         // returns can't skip it; self-throttled by its own last_fetch timer.
