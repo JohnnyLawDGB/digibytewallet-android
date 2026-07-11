@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.tor.TorState
 import io.digibyte.ui.theme.DigiByteAccent
@@ -33,10 +34,12 @@ fun NetworkInfoScreen(
     navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    // CF-gated sync frontier — the SAME source the main wallet screen uses, so
+    // the two screens can never disagree. syncState is kept only for the
+    // Failed / ChainSplit detail message (SyncStage doesn't carry the text).
+    val frontier by viewModel.syncFrontier.collectAsStateWithLifecycle()
     val syncState by viewModel.syncState.collectAsStateWithLifecycle()
     val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
-    val lastBlock by viewModel.lastBlockHeight.collectAsStateWithLifecycle()
-    val estimatedHeight by viewModel.estimatedHeight.collectAsStateWithLifecycle()
     val torEnabled by viewModel.torEnabled.collectAsStateWithLifecycle()
     val dandelionEnabled by viewModel.dandelionEnabled.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
@@ -58,20 +61,17 @@ fun NetworkInfoScreen(
 
     val numFmt = remember { NumberFormat.getNumberInstance(Locale.US) }
 
-    val (statusLabel, statusColor, statusIcon) = when (syncState) {
-        is SyncState.Idle -> Triple("Idle", Color(0xFF8899AA), Icons.Default.CloudOff)
-        is SyncState.Syncing -> {
-            val s = syncState as SyncState.Syncing
-            val pct = (s.progress * 100).toInt()
+    val (statusLabel, statusColor, statusIcon) = when (frontier.stage) {
+        SyncStage.Connecting -> Triple("Connecting…", DigiByteAccent, Icons.Default.Sync)
+        SyncStage.Syncing -> {
+            val pct = (frontier.progressFraction * 100).toInt()
             Triple("Syncing ($pct%)", DigiByteAccent, Icons.Default.Sync)
         }
-        is SyncState.Rescanning -> Triple("Verifying transactions", DigiByteAccent, Icons.Default.Sync)
-        is SyncState.Complete -> Triple("Synced", DigiByteGreen, Icons.Default.CheckCircle)
-        is SyncState.Failed -> Triple("Error", DigiByteRed, Icons.Default.Error)
-        is SyncState.ChainSplit -> Triple("Chain Split!", DigiByteRed, Icons.Default.Warning)
+        SyncStage.Synced -> Triple("Synced", DigiByteGreen, Icons.Default.CheckCircle)
+        SyncStage.Failed -> Triple("Error", DigiByteRed, Icons.Default.Error)
     }
 
-    val progressValue = (syncState as? SyncState.Syncing)?.progress ?: if (syncState is SyncState.Complete) 1f else 0f
+    val progressValue = frontier.progressFraction
 
     Scaffold(
         topBar = {
@@ -127,7 +127,7 @@ fun NetworkInfoScreen(
                             )
                         }
 
-                        if (syncState is SyncState.Syncing) {
+                        if (frontier.stage == SyncStage.Syncing) {
                             Spacer(Modifier.height(10.dp))
                             LinearProgressIndicator(
                                 progress = { progressValue },
@@ -172,27 +172,38 @@ fun NetworkInfoScreen(
                             value = peerCount.toString()
                         )
                         HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+                        // CF frontier — the functional sync height (compact-filter
+                        // chain tip), NOT the header height. This is what drives
+                        // tx/deposit detection, so it's the honest "synced to here".
+                        val cfBlock = frontier.currentBlock
+                        val chainTip = frontier.targetBlock
                         NetworkStatRow(
                             icon = Icons.Default.Block,
                             iconTint = Color(0xFF4CAF50),
-                            label = "Last Synced Block",
-                            value = if (lastBlock > 0) numFmt.format(lastBlock) else "—"
+                            label = "Synced Block (filters)",
+                            value = if (cfBlock > 0) numFmt.format(cfBlock) else "—"
                         )
                         HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
                         NetworkStatRow(
                             icon = Icons.Default.Cloud,
                             iconTint = Color(0xFF8899AA),
-                            label = "Estimated Chain Height",
-                            value = if (estimatedHeight > 0) numFmt.format(estimatedHeight) else "—"
+                            label = "Chain Height",
+                            value = if (chainTip > 0) numFmt.format(chainTip) else "—"
                         )
                         HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
-                        val remaining = if (estimatedHeight > lastBlock && estimatedHeight > 0)
-                            estimatedHeight - lastBlock else 0L
+                        // Once the CF-gated stage says Synced, report "Caught up"
+                        // regardless of a 1–100 block tip lead — otherwise the green
+                        // "Synced" header would sit next to an amber "3 remaining"
+                        // during normal ~15s block propagation (the two rows used
+                        // different thresholds). Only actively-behind sync shows a count.
+                        val synced = frontier.stage == SyncStage.Synced
+                        val remaining = if (synced) 0L
+                            else if (chainTip > cfBlock && chainTip > 0) chainTip - cfBlock else 0L
                         NetworkStatRow(
                             icon = Icons.Default.HourglassBottom,
                             iconTint = if (remaining == 0L) Color(0xFF4CAF50) else Color(0xFFFF9800),
                             label = "Blocks Remaining",
-                            value = if (remaining == 0L && lastBlock > 0) "Caught up" else numFmt.format(remaining)
+                            value = if (remaining == 0L && (synced || cfBlock > 0)) "Caught up" else numFmt.format(remaining)
                         )
                     }
                 }

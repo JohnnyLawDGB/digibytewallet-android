@@ -6,7 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.digibyte.core.model.SyncState
+import io.digibyte.core.model.SyncStage
 import io.digibyte.game.DigiRunnerGame
 import io.digibyte.ui.theme.DigiByteBlue
 
@@ -24,28 +24,29 @@ import io.digibyte.ui.theme.DigiByteBlue
  */
 @Composable
 fun SyncOverlay(
-    syncState: SyncState,
+    stage: SyncStage,
+    progress: Float,
     onPlayGame: () -> Unit = {},
     onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
     onShowLeaderboard: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val isComplete = syncState is SyncState.Complete
+    // CF-gated stage — matches the main SyncProgressCard, so the game/Play
+    // button never says "synced" while the wallet is still catching up.
+    val isComplete = stage == SyncStage.Synced
 
-    if (!isComplete && syncState !is SyncState.Failed) {
+    if (!isComplete && stage != SyncStage.Failed) {
         var showGame by remember { mutableStateOf(true) }
 
-        // Game uses the authoritative syncState.progress directly; no separate
-        // native polling so the physics-gated progress animation can't drift
-        // against SyncProgressCard's percent.
-        val progress = if (syncState is SyncState.Syncing) {
-            syncState.progress.coerceIn(0f, 1f)
-        } else 0f
+        // Game uses the CF-gated progress fraction directly (same source as
+        // SyncProgressCard) so the physics-gated animation can't drift against
+        // the card's percent.
+        val gameProgress = progress.coerceIn(0f, 1f)
 
         Column(modifier = modifier) {
             if (showGame) {
                 DigiRunnerGame(
-                    syncProgress = progress,
+                    syncProgress = gameProgress,
                     onScoreSubmit = onScoreSubmit,
                     onShowLeaderboard = onShowLeaderboard,
                     modifier = Modifier.fillMaxWidth()

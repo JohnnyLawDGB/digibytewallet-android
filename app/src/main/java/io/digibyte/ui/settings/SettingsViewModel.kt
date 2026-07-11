@@ -12,17 +12,22 @@ import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.WalletConfigEntity
 import io.digibyte.core.isTestnet
+import io.digibyte.core.model.SyncFrontier
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.model.deriveSyncFrontier
+import io.digibyte.core.network.ChainTipFetcher
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.settings.CustomNode
 import io.digibyte.core.settings.CustomNodePrefs
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -49,6 +54,37 @@ class SettingsViewModel @Inject constructor(
 
     private val _estimatedHeight = MutableStateFlow(0L)
     val estimatedHeight: StateFlow<Long> = _estimatedHeight.asStateFlow()
+
+    /** Compact-filter chain tip — the FUNCTIONAL sync frontier in CF-only mode.
+     *  Polled alongside the other network stats in [refreshNetworkStats]. */
+    private val _cfTip = MutableStateFlow(0L)
+
+    /** Authoritative external chain tip (ChainTipFetcher). 0 until first fetch;
+     *  refreshed every 30s so this screen's progress denominator matches the
+     *  main wallet screen's. */
+    private val _externalTip = MutableStateFlow(0L)
+
+    /** CF-gated sync frontier — the SAME derivation ([deriveSyncFrontier]) the
+     *  main wallet screen uses, so the Network Info screen shares its CF-gated
+     *  STAGE and can't categorically diverge (e.g. show "Synced" while cfheaders
+     *  lags). Inputs are polled per-VM, so the exact block number can differ by
+     *  a poll interval during active sync; it converges in steady state. */
+    val syncFrontier: StateFlow<SyncFrontier> = combine(
+        syncState, _peerCount, _lastBlockHeight, _estimatedHeight, _externalTip, _cfTip
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        deriveSyncFrontier(
+            state = values[0] as SyncState,
+            peerCount = values[1] as Int,
+            currentHeight = values[2] as Long,
+            targetHeight = values[3] as Long,
+            externalTip = values[4] as Long,
+            cfTip = values[5] as Long,
+        )
+    }.stateIn(
+        viewModelScope, SharingStarted.Eagerly,
+        deriveSyncFrontier(SyncState.Idle, 0, 0L, 0L, 0L, 0L)
+    )
 
     // ── Wallet config ─────────────────────────────────────────────────────────
     private val _config = MutableStateFlow(WalletConfigEntity())
@@ -159,6 +195,20 @@ class SettingsViewModel @Inject constructor(
     init {
         refreshNetworkStats()
         loadConfig()
+        fetchChainTipPeriodically()
+    }
+
+    /** Refresh the authoritative chain tip every 30s (mirrors WalletViewModel)
+     *  so the Network Info progress denominator matches the main screen. On
+     *  failure the stored value is left unchanged. */
+    private fun fetchChainTipPeriodically() {
+        viewModelScope.launch {
+            while (true) {
+                val tip = ChainTipFetcher.fetch()
+                if (tip > 0L) _externalTip.value = tip
+                delay(30_000L)
+            }
+        }
     }
 
     /**
@@ -179,6 +229,7 @@ class SettingsViewModel @Inject constructor(
             _peerCount.value = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
+            _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)
         }
     }
 

@@ -682,6 +682,17 @@ Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz
     return (jint)BRPeerManagerPeerCount(g_peerManager);
 }
 
+/* ---------- keepAlivePeers ---------- */
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_keepAlivePeers(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    PEER_GUARD();
+
+    if (g_peerManager) BRPeerManagerKeepAlive(g_peerManager);
+}
+
 /* ---------- getEstimatedBlockHeight ---------- */
 
 JNIEXPORT jlong JNICALL

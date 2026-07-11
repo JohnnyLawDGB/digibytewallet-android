@@ -26,7 +26,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.isTestnet
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
-import io.digibyte.core.model.SyncState
 import io.digibyte.core.tor.TorState
 import io.digibyte.ui.components.BalanceDisplay
 import io.digibyte.ui.components.TransactionItem
@@ -56,7 +55,6 @@ fun WalletScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
-    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
@@ -114,7 +112,9 @@ fun WalletScreen(
                         // Always give DigiDollar a place on the hero — shows $0.00
                         // when none is held (rather than hiding the pill).
                         ddAmount = WalletViewModel.formatDigiDollar(ddBalance),
-                        isSynced = syncState is SyncState.Complete,
+                        // CF-gated — matches the sync card/overlay, never "synced"
+                        // while cfheaders is still catching up.
+                        isSynced = syncProgressInfo.stage == SyncStage.Synced,
                         onFiatTap = { viewModel.cycleCurrency() }
                     )
 
@@ -137,13 +137,14 @@ fun WalletScreen(
         // (5000 DGB, recent confirmed tx, sync at tip) — academically the
         // reconcile DID fail, but the user can see they're fine, so the
         // banner just adds anxiety. Now requires:
-        //   - sync settled (SyncState.Complete) so we're not pre-empting
-        //     SPV's own recovery,
+        //   - sync settled (CF-gated Synced) so we're not pre-empting SPV's
+        //     own recovery — and specifically not firing while cfheaders is
+        //     still finding the user's funds,
         //   - reconcile failed flag set,
         //   - AND balance == 0 (the actual symptom users complained about).
         // A wallet with non-zero balance is its own evidence of working,
         // even if the reconcile insurance step didn't run.
-        if (reconcileFailed && syncState is SyncState.Complete && balance == 0L) {
+        if (reconcileFailed && syncProgressInfo.stage == SyncStage.Synced && balance == 0L) {
             item {
                 ReconcileFailedBanner(
                     onRetry = { viewModel.retryPostUpgradeReconcile() },
@@ -227,7 +228,8 @@ fun WalletScreen(
         // ── DigiRunner sync game / progress bar ──────────────────────────
         item {
             SyncOverlay(
-                syncState = syncState,
+                stage = syncProgressInfo.stage,
+                progress = syncProgressInfo.progressFraction,
                 onPlayGame = onNavigateGame,
                 onScoreSubmit = onScoreSubmit,
                 onShowLeaderboard = onShowLeaderboard,

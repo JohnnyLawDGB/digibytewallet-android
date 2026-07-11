@@ -82,14 +82,6 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                     subtitle = "Peers, sync status, block height",
                     onClick = { navController.navigate("settings_network") }
                 )
-                SettingsRowDivider()
-                SettingsRow(
-                    icon = Icons.Default.FilterAlt,
-                    iconTint = Color(0xFF9C27B0),
-                    title = "Sync Mode",
-                    subtitle = "Bloom filter, compact filters (BIP 158), or both",
-                    onClick = { navController.navigate("settings_sync_mode") }
-                )
             }
         }
 

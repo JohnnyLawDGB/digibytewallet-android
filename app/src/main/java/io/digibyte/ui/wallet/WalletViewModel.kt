@@ -16,6 +16,7 @@ import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.model.deriveSyncFrontier
 import io.digibyte.core.network.ChainTipFetcher
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
@@ -190,69 +191,31 @@ class WalletViewModel @Inject constructor(
         val externalTip = values[7] as Long
         val cfTip = values[8] as Long
 
-        // Prefer the authoritative external tip when available; fall back to
-        // the peer-quorum target only when the fetch has never succeeded
-        // (offline, DNS, etc). Never let the effective target regress — once
-        // we've seen the real tip we trust it over any lower peer claim.
-        val effectiveTarget = if (externalTip > target) externalTip else target
+        // CF-gated sync frontier — the single source of truth shared with the
+        // Network Info screen and the DigiRunner overlay (see deriveSyncFrontier
+        // in core.model). Keeping this derivation in one place is what stops the
+        // main screen and Network Info from disagreeing about "Synced".
+        val frontier = deriveSyncFrontier(
+            state = state,
+            peerCount = peers,
+            currentHeight = current,
+            targetHeight = target,
+            externalTip = externalTip,
+            cfTip = cfTip,
+        )
 
-        // Honest progress: if the real block height (current = getLastBlockHeight,
-        // before the maxTxHeight display floor) is materially behind the tip,
-        // surface a catch-up even if SyncState.Complete latched. Without this the
-        // wallet could sit "Connected" while silently re-syncing hundreds of
-        // thousands of blocks underneath — wrong confirmations, no progress bar.
-        // The threshold is well above normal tip lag (a few blocks between 15s
-        // blocks) so steady-state operation never flickers to Syncing.
-        val materiallyBehind = current > 0 && effectiveTarget > 0 &&
-            (effectiveTarget - current) > SYNC_BEHIND_THRESHOLD
+        // Latch hasReachedSyncedOnce — gates the anti-flash balance guard in
+        // pollNativeBalance so that post-sync sends correctly debit the shown balance.
+        if (frontier.stage == SyncStage.Synced) hasReachedSyncedOnce = true
 
-        // CF-first honesty: in CF-only the FUNCTIONAL sync frontier is the compact-filter chain
-        // tip (deposits/confirmations are only detected up to cfTip), NOT the header height that
-        // races to tip via every peer. Never claim "Synced" while cfheaders materially lags —
-        // that is exactly how a deposit gets missed while the UI says "Up to date". cfTip==0
-        // means CF hasn't started yet → fall back to header logic (no false 0%/stuck).
-        val cfBehind = cfTip > 0 && effectiveTarget > 0 &&
-            (effectiveTarget - cfTip) > CF_BEHIND_THRESHOLD
-        val behind = materiallyBehind || cfBehind
-
-        val stage = when {
-            state is SyncState.Failed -> SyncStage.Failed
-            peers <= 0 -> SyncStage.Connecting
-            behind -> SyncStage.Syncing
-            state is SyncState.Complete -> SyncStage.Synced
-            else -> SyncStage.Syncing
-        }
-
-        // Latch hasReachedSyncedOnce — gates the anti-flash balance
-        // guard in pollNativeBalance so that post-sync sends correctly
-        // debit the shown balance.
-        if (stage == SyncStage.Synced) hasReachedSyncedOnce = true
-
-        val progress = when {
-            behind && effectiveTarget > 0 -> {
-                // Track the bottleneck frontier: the CF tip when cfheaders lags (so the bar
-                // moves with filter catch-up instead of freezing at ~100% on headers), else headers.
-                val frontier = if (cfBehind && cfTip > 0) cfTip else current
-                (frontier.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
-            }
-            state is SyncState.Complete -> 1.0f
-            current > 0 && effectiveTarget > 0 ->
-                (current.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
-            state is SyncState.Syncing -> state.progress
-            else -> 0.0f
-        }
-
-        // ETA: compute from rolling samples. Need ≥ 2 samples spanning > 10s
-        // and a positive block-rate, otherwise null.
-        val eta: Long? = computeEta(current, effectiveTarget)
+        // ETA from the raw header height toward the effective tip (rolling samples).
+        val eta: Long? = computeEta(current, frontier.targetBlock)
 
         SyncProgressInfo(
-            stage = stage,
-            // Report the bottleneck frontier so "Block X of Y" is coherent with the bar: the CF
-            // tip when cfheaders is the thing we're waiting on, else the header height.
-            currentBlock = if (cfBehind && cfTip > 0) cfTip else current,
-            targetBlock = effectiveTarget,
-            progressFraction = progress.coerceIn(0f, 1f),
+            stage = frontier.stage,
+            currentBlock = frontier.currentBlock,
+            targetBlock = frontier.targetBlock,
+            progressFraction = frontier.progressFraction,
             matchCount = txs.size,
             runningBalanceSat = balance,
             etaSeconds = eta,
@@ -675,15 +638,6 @@ class WalletViewModel @Inject constructor(
         walletManager.getDigiDollarReceiveAddress()
 
     companion object {
-        /** Blocks-behind-tip past which the UI honestly shows catch-up progress
-         *  instead of "Complete", even if SyncState.Complete latched. Well above
-         *  normal tip lag (a handful of 15s blocks) so steady state never
-         *  flickers; far below any real re-sync (hundreds of thousands). */
-        private const val SYNC_BEHIND_THRESHOLD = 100L
-        /** CF-only: the wallet is not FUNCTIONALLY synced until the compact-filter chain tip is
-         *  within this many blocks of the header tip — tx/deposit detection only reaches cfTip. */
-        private const val CF_BEHIND_THRESHOLD = 100L
-
         /** Peer-count=0 must persist this long before the watchdog fires. */
         private const val STALL_THRESHOLD_MS = 60_000L
 

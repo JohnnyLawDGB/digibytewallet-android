@@ -154,6 +154,10 @@ object NativeBridge {
     /** Get number of currently connected peers. */
     external fun getPeerCount(): Int
 
+    /** Send a keepalive ping to every connected peer so idle CF filter-peer connections aren't
+     *  dropped by the remote node / NAT inactivity timeout. Call periodically (~every 10-20s). */
+    external fun keepAlivePeers()
+
     /** Get estimated network block height. */
     external fun getEstimatedBlockHeight(): Long
 

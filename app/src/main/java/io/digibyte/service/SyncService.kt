@@ -308,6 +308,12 @@ class SyncService : Service() {
             // coroutine that's still nominally active and respawn it.
             lastKeepaliveTickMs = System.currentTimeMillis()
             tickCount++
+            // CF connection keepalive: ping every connected peer each 10s tick so idle filter
+            // peers (only one serves cfheaders at a time; the rest sit idle) don't get dropped by
+            // the remote node / NAT inactivity timeout and become dead-socket zombies. Bloom got
+            // this "for free" via its always-active single download peer; CF's multi-peer model
+            // needs it explicit. This is the hypothesized root of CF sync being flakier than bloom.
+            runCatching { NativeBridge.keepAlivePeers() }
             // CF-first: re-inject the validated filter peers every ~30s so they stay dialable in
             // the native pool after the fleet churns them out (a peer is removed from the pool on
             // connect failure). injectPeerByIp dedups, so this only re-adds ones that dropped —
