@@ -32,8 +32,11 @@ class CustomNodeTest {
         assertEquals(NativeBridge.SyncMode.COMPACT_FILTERS_ONLY,
             syncModeFor(NativeBridge.SyncMode.BLOOM_ONLY, customNodeEnabled = false, isTestnet = true))
     }
-    @Test fun otherwisePrefIsRespected() {
-        assertEquals(NativeBridge.SyncMode.BOTH,
+    @Test fun defaultIsAlsoCompactFiltersOnly() {
+        // CF-only decision (v3.10.21 removed the Sync Mode toggle): syncModeFor
+        // collapses EVERY case to COMPACT_FILTERS_ONLY — bloom is gone from the
+        // UX. Even the plain BOTH pref, no custom node, mainnet resolves to CF-only.
+        assertEquals(NativeBridge.SyncMode.COMPACT_FILTERS_ONLY,
             syncModeFor(NativeBridge.SyncMode.BOTH, customNodeEnabled = false, isTestnet = false))
     }
 }
