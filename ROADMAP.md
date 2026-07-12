@@ -145,7 +145,7 @@ regression that's hard to undo.
 |-------|-------|-----------|------------|
 | 0 | Legibility prerequisite | M | `ARCHITECTURE.md`, `THREAT_MODEL.md`, BIP matrix, process flows |
 | 1 | Sovereign data layer | L | BIP 157/158 client, peer selection, bloom deprecation path |
-| 2 | Key & trust hardening | M | Keystore auth binding, PIN rate-limit, Digi-ID isolation, Tor default-on |
+| 2 | Key & trust hardening | M | Keystore auth binding, PIN rate-limit, duress/decoy PIN, Digi-ID isolation, Tor default-on |
 | 3 | Feature velocity on sovereign layer | L | PSBT, multisig, watch-only, coin control, RBF, paper sweep |
 | 4 | Distribution + hardware | M | Play Store, F-Droid, Coldcard QR, NFC |
 
@@ -373,6 +373,22 @@ because each item is independent — they can land as separate merges.
   3 attempts free, then 1/5/30/60 minute cooldowns, then optional
   "wipe on N failed attempts" policy behind a settings toggle.
   `core/src/main/java/io/digibyte/core/security/PinManager.kt:43–58`.
+- **Duress / decoy PIN (wrench-attack protection).** Optional second PIN
+  that opens a plausible **decoy wallet** = BIP84/86 **account 1'** of the
+  same seed (`m/84'/20'/1'`, `m/86'/20'/1'`), holding only the ~5% the user
+  pre-funds. Under duress: main funds/DigiAssets/DigiDollar hidden, seed view
+  blocked, biometrics auto-disabled (a forced finger must not open the real
+  wallet), no UI tell that a duress PIN exists. A real-time alert fires via
+  DigiScope (app ping + a covert keyed `HMAC(secret, input0.outpoint)`
+  OP_RETURN on duress sends that DigiScope's `tx-monitor` recognizes).
+  Protects the *coerced-to-unlock-the-app* case only — not seed extraction /
+  device forensics. Phased A (wallet protection) / B (alert) / C (polish).
+  Design: `docs/superpowers/specs/2026-07-12-duress-pin-design.md`.
+  Note: the decoy's account-1' (purpose 84'/86') does **not** collide with the
+  Digi-ID isolation subtree below (purpose 44'); future features must keep
+  coordinating the purpose/account namespace.
+  `core/…/security/PinManager.kt`, `core/…/WalletManager.kt`,
+  `native/…/BRBIP32Sequence.c` (account-parameterized derivation).
 - **Digi-ID key isolation.** Derive Digi-ID signing from a distinct
   BIP44 subtree (e.g., `m/44'/20'/1'/0/0` for account 1, or a dedicated
   purpose code) so a Digi-ID signature never exposes main-wallet keys.
