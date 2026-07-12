@@ -33,9 +33,21 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
             .build()
 
     override fun onCreate() {
+        // Crash-loop breaker FIRST — before the native lib load, DB open, or
+        // saved-blocks deserialize can crash the process. Records this boot and,
+        // if prior boots died mid-startup, wipes regenerable data (seed preserved).
+        // Survives native SIGSEGV/SIGABRT that a try/catch cannot. See BootGuard.
+        BootGuard.beginBoot(this)
         super.onCreate()
         applyNetworkSelection()
         scheduleBackgroundSync()
+        // Clear the crash-loop counter once we've run stably past the risky
+        // startup window. A crashing boot dies well before this fires, so the
+        // counter stays elevated for the next launch to recover from.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+            { BootGuard.markBootHealthy(this) },
+            BootGuard.HEALTHY_AFTER_MS
+        )
     }
 
     /**

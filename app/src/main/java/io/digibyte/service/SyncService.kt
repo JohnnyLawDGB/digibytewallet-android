@@ -828,11 +828,15 @@ class SyncService : Service() {
 
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-        val savedBlocks = prefs.getString("saved_blocks", null)
-        val savedPeers = prefs.getString("saved_peers", null)
 
-        if (savedBlocks != null) {
-            val blockBytes = savedBlocks.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        // Validate + decode the stored hex blobs before handing raw bytes to the
+        // native block/peer deserializer. A malformed blob (odd length, non-hex,
+        // absurd size) is DROPPED and skipped rather than fed to native, where
+        // corrupt bytes can SIGSEGV — a native crash no try/catch can catch.
+        // Structurally corrupt-but-valid-hex blobs are caught by the BootGuard
+        // crash-loop breaker (wipes sync state and re-syncs; seed preserved).
+        val blockBytes = decodeSavedBlobOrDrop(prefs, "saved_blocks")
+        if (blockBytes != null) {
             val loaded = NativeBridge.loadSavedBlocks(blockBytes)
             android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
             // Seed the monotonic persistence guard with the on-disk tip so the
@@ -843,8 +847,8 @@ class SyncService : Service() {
                 prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
             }
         }
-        if (savedPeers != null) {
-            val peerBytes = savedPeers.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val peerBytes = decodeSavedBlobOrDrop(prefs, "saved_peers")
+        if (peerBytes != null) {
             val loaded = NativeBridge.loadSavedPeers(peerBytes)
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
         }
@@ -1261,6 +1265,20 @@ class SyncService : Service() {
             NativeBridge.injectPeerByIp(ip, port, services)
         }
         android.util.Log.i("SyncService", "Injected ${pool.size} filter peers (primary CF set)")
+    }
+
+    /** Read + validate a stored sync blob; return its bytes, or null if absent or
+     *  malformed. A malformed blob is dropped from prefs so it can't crash the
+     *  native deserializer again (the wallet just re-syncs). Pure validation lives
+     *  in [decodeSyncBlobOrNull]; this only adds the prefs read + drop. */
+    private fun decodeSavedBlobOrDrop(prefs: android.content.SharedPreferences, key: String): ByteArray? {
+        val hex = prefs.getString(key, null)
+        val bytes = decodeSyncBlobOrNull(hex)
+        if (hex != null && bytes == null) {
+            android.util.Log.w("SyncService", "Dropping malformed '$key' sync blob (${hex.length} chars) — will re-sync")
+            prefs.edit().remove(key).apply()
+        }
+        return bytes
     }
 
     private fun injectBloomPeers() {

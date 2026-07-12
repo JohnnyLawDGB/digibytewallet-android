@@ -45,50 +45,8 @@ object AppModule {
             // If ANYTHING fails during DB init, wipe stale data and try fresh.
             // The wallet seed is in its own SharedPreferences — not lost.
             android.util.Log.e("AppModule", "DB init failed, wiping stale data and retrying: ${e.message}", e)
-            wipeStaleData(context)
+            io.digibyte.StaleDataWiper.wipeAll(context)
             provideDatabaseInner(context, ksm)
-        }
-    }
-
-    /**
-     * Wipe all app data that can become stale across installs/upgrades:
-     * DB files, DB key prefs, PIN, sync data. The wallet seed prefs
-     * (dgb_wallet_seed) are preserved — user funds are never lost.
-     *
-     * Only wipes the CURRENTLY SELECTED network's DB + sync-data + bloom-peer
-     * cache (via [networkSuffix]) — a mainnet DB init failure must not touch
-     * a testnet DB file/prefs that happen to also exist on disk, and vice
-     * versa. `dgb_db_key` stays unsuffixed/shared (same passphrase encrypts
-     * either network's DB file).
-     */
-    private fun wipeStaleData(context: Context) {
-        android.util.Log.w("AppModule", "Wiping stale app data (wallet seed preserved)")
-        val dbFileName = "wallet${networkSuffix(context)}.db"
-        // Delete database files
-        context.getDatabasePath(dbFileName).delete()
-        context.getDatabasePath("$dbFileName-journal").delete()
-        context.getDatabasePath("$dbFileName-shm").delete()
-        context.getDatabasePath("$dbFileName-wal").delete()
-        // Clear DB key prefs
-        context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE).edit().clear().apply()
-        // NOTE: do NOT delete the PIN store here. Clearing the PIN locks the
-        // user out of their wallet. Only the recovery flow should clear the PIN.
-        // Clear sync data (blocks/peers will be re-downloaded)
-        context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE).edit().clear().apply()
-        // Clear bloom peer cache
-        context.getSharedPreferences("dgb_bloom_peers" + networkSuffix(context), Context.MODE_PRIVATE).edit().clear().apply()
-        // Delete stale Keystore keys
-        try {
-            val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
-            ks.load(null)
-            for (alias in listOf("dgb_db_passphrase", "dgb_wallet_master")) {
-                if (ks.containsAlias(alias)) {
-                    ks.deleteEntry(alias)
-                    android.util.Log.w("AppModule", "Deleted stale Keystore key: $alias")
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("AppModule", "Could not clean Keystore: ${e.message}")
         }
     }
 

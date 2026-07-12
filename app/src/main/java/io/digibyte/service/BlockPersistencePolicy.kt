@@ -34,3 +34,22 @@ internal fun parseSavedBlocksTopHeight(data: ByteArray): Long {
         ((data[10].toLong() and 0xff) shl 16) or
         ((data[11].toLong() and 0xff) shl 24)
 }
+
+/** Max plausible size of a saved sync blob in hex chars (32 MB of bytes);
+ *  anything larger is corruption, not a real blocks/peers window. */
+internal const val MAX_SAVED_BLOB_HEX_LEN = 64 * 1024 * 1024
+
+/**
+ * Validate and hex-decode a stored sync blob. Returns the decoded bytes, or
+ * null if [hex] is null OR malformed — odd length, non-hex chars, or an absurd
+ * size. Pure (the caller drops the bad pref). This is the first line of defense
+ * for the native block/peer deserializer: a corrupt blob is rejected here rather
+ * than fed to native, where bad bytes can SIGSEGV (an uncatchable native crash
+ * that bricked the app on every open before this + the BootGuard existed).
+ */
+internal fun decodeSyncBlobOrNull(hex: String?): ByteArray? {
+    if (hex == null) return null
+    if (hex.length % 2 != 0 || hex.length > MAX_SAVED_BLOB_HEX_LEN) return null
+    if (!hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+    return runCatching { hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray() }.getOrNull()
+}

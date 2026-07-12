@@ -67,4 +67,53 @@ class BlockPersistencePolicyTest {
         b[off + 2] = ((v ushr 16) and 0xff).toByte()
         b[off + 3] = ((v ushr 24) and 0xff).toByte()
     }
+
+    // ── decodeSyncBlobOrNull — the native-deserializer input guard ───────────
+    // Rejects malformed stored hex before it reaches the C block/peer parser,
+    // where corrupt bytes can SIGSEGV (an uncatchable native crash).
+
+    @Test
+    fun `valid hex decodes to the exact bytes`() {
+        val bytes = decodeSyncBlobOrNull("00ff10ab")
+        assertTrue(bytes != null)
+        assertEquals(4, bytes!!.size)
+        assertEquals(0x00.toByte(), bytes[0])
+        assertEquals(0xff.toByte(), bytes[1])
+        assertEquals(0x10.toByte(), bytes[2])
+        assertEquals(0xab.toByte(), bytes[3])
+    }
+
+    @Test
+    fun `uppercase hex is accepted`() {
+        assertTrue(decodeSyncBlobOrNull("00FF10AB") != null)
+    }
+
+    @Test
+    fun `null pref returns null (nothing saved)`() {
+        assertEquals(null, decodeSyncBlobOrNull(null))
+    }
+
+    @Test
+    fun `odd-length hex is rejected (corruption)`() {
+        assertEquals(null, decodeSyncBlobOrNull("abc"))
+    }
+
+    @Test
+    fun `non-hex characters are rejected (corruption)`() {
+        assertEquals(null, decodeSyncBlobOrNull("00zz"))
+        assertEquals(null, decodeSyncBlobOrNull("hello!!!"))
+    }
+
+    @Test
+    fun `absurdly large blob is rejected before decode`() {
+        val huge = "ab".repeat((MAX_SAVED_BLOB_HEX_LEN / 2) + 1)
+        assertEquals(null, decodeSyncBlobOrNull(huge))
+    }
+
+    @Test
+    fun `empty string decodes to empty bytes (harmless — 0 blocks)`() {
+        val bytes = decodeSyncBlobOrNull("")
+        assertTrue(bytes != null)
+        assertEquals(0, bytes!!.size)
+    }
 }
