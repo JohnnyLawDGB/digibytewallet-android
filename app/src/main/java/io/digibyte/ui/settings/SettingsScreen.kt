@@ -40,6 +40,9 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
     // "mainnet" / "digiTestnet" per the `network` flavor dimension.
     val isDevBuild = BuildConfig.DEBUG || BuildConfig.FLAVOR == "digiTestnet"
     val networkTestnetEnabled by viewModel.networkTestnetEnabled.collectAsStateWithLifecycle()
+    // CF-gated sync stage — attached to the bug-report deep link so intake knows
+    // whether the user's issue was mid-sync or fully synced.
+    val syncFrontier by viewModel.syncFrontier.collectAsStateWithLifecycle()
     var pendingNetworkTestnet by remember { mutableStateOf(false) }
     var showNetworkConfirmDialog by remember { mutableStateOf(false) }
 
@@ -125,6 +128,24 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                     title = "About",
                     subtitle = "Version, licenses, open source",
                     onClick = { navController.navigate("settings_about") }
+                )
+                SettingsRowDivider()
+                SettingsRow(
+                    icon = Icons.Default.BugReport,
+                    iconTint = Color(0xFFFF6D00),
+                    title = "Report a bug / feedback",
+                    subtitle = "Send an issue or idea — device & version info is filled in for you",
+                    onClick = {
+                        val url = buildBugReportUrl(context, syncFrontier.stage.name)
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(url)
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    }
                 )
             }
         }
