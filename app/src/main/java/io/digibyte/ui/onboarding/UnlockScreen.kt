@@ -30,7 +30,9 @@ import io.digibyte.core.security.PinManager
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val UNLOCK_PIN_LENGTH = 6
 private const val MAX_ATTEMPTS = 5
@@ -49,6 +51,14 @@ fun UnlockScreen(
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var attemptCount by remember { mutableIntStateOf(0) }
+    // True while unlockFromUi()/restoreFromDisk() are running in the background.
+    // restoreFromDisk() calls NativeBridge.stopSync(), which takes the native
+    // peer-manager lock (PEER_GUARD) — the keepalive sweep can hold that lock for
+    // up to ~K×10s pinging half-dead sockets, so this work must run off the main
+    // thread (this was the ANR trace's attemptUnlock → unlockFromUi/restoreFromDisk
+    // → stopSync path). The keypad/biometric button are disabled and a brief
+    // "Unlocking…" indicator is shown while this is in flight.
+    var isUnlocking by remember { mutableStateOf(false) }
     val biometricAvailable = remember { activity?.let { biometricAuth.canAuthenticate(it) } ?: false }
 
     // Attempt biometric automatically on first composition if available
@@ -56,11 +66,15 @@ fun UnlockScreen(
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
             if (result is BiometricResult.Success) {
-                if (walletManager.isWalletReady()) {
-                    walletManager.unlockFromUi()
-                } else {
-                    walletManager.restoreFromDisk()
+                isUnlocking = true
+                withContext(Dispatchers.IO) {
+                    if (walletManager.isWalletReady()) {
+                        walletManager.unlockFromUi()
+                    } else {
+                        walletManager.restoreFromDisk()
+                    }
                 }
+                isUnlocking = false
                 navController.navigate("wallet") {
                     popUpTo("unlock") { inclusive = true }
                 }
@@ -70,15 +84,23 @@ fun UnlockScreen(
 
     fun attemptUnlock(pin: String) {
         if (pinManager.verifyPin(pin)) {
-            // For UI-only relock (wallet already loaded in memory), just flip state.
-            // For fresh process (wallet not loaded), restore from disk on IO thread.
-            if (walletManager.isWalletReady()) {
-                walletManager.unlockFromUi()
-            } else {
-                walletManager.restoreFromDisk()
-            }
-            navController.navigate("wallet") {
-                popUpTo("unlock") { inclusive = true }
+            scope.launch {
+                // For UI-only relock (wallet already loaded in memory), just flip state.
+                // For fresh process (wallet not loaded), restore from disk — both run
+                // off the main thread since restoreFromDisk() can block on the native
+                // peer-manager lock.
+                isUnlocking = true
+                withContext(Dispatchers.IO) {
+                    if (walletManager.isWalletReady()) {
+                        walletManager.unlockFromUi()
+                    } else {
+                        walletManager.restoreFromDisk()
+                    }
+                }
+                isUnlocking = false
+                navController.navigate("wallet") {
+                    popUpTo("unlock") { inclusive = true }
+                }
             }
         } else {
             attemptCount++
@@ -153,20 +175,44 @@ fun UnlockScreen(
                     )
                 }
 
+                if (isUnlocking) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = DigiByteAccent
+                        )
+                        Text(
+                            text = "Unlocking…",
+                            color = Color(0xFFB0BEC5),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
                 // Biometric button
                 if (biometricAvailable) {
                     Spacer(Modifier.height(24.dp))
                     IconButton(
+                        enabled = !isUnlocking,
                         onClick = {
                             scope.launch {
                                 if (activity != null) {
                                     val result = biometricAuth.authenticate(activity)
                                     if (result is BiometricResult.Success) {
-                                        if (walletManager.isWalletReady()) {
-                                            walletManager.unlockFromUi()
-                                        } else {
-                                            walletManager.restoreFromDisk()
+                                        isUnlocking = true
+                                        withContext(Dispatchers.IO) {
+                                            if (walletManager.isWalletReady()) {
+                                                walletManager.unlockFromUi()
+                                            } else {
+                                                walletManager.restoreFromDisk()
+                                            }
                                         }
+                                        isUnlocking = false
                                         navController.navigate("wallet") {
                                             popUpTo("unlock") { inclusive = true }
                                         }
@@ -179,7 +225,7 @@ fun UnlockScreen(
                         Icon(
                             imageVector = Icons.Default.Fingerprint,
                             contentDescription = "Unlock with biometrics",
-                            tint = DigiByteAccent,
+                            tint = if (isUnlocking) Color(0xFF546E7A) else DigiByteAccent,
                             modifier = Modifier.size(40.dp)
                         )
                     }
@@ -211,7 +257,7 @@ fun UnlockScreen(
                                         modifier = Modifier
                                             .size(72.dp)
                                             .clip(CircleShape)
-                                            .clickable {
+                                            .clickable(enabled = !isUnlocking) {
                                                 if (currentInput.isNotEmpty()) {
                                                     currentInput = currentInput.dropLast(1)
                                                 }
@@ -233,7 +279,7 @@ fun UnlockScreen(
                                             .clip(CircleShape)
                                             .background(Color(0xFF1A2742))
                                             .border(1.dp, Color(0xFF243352), CircleShape)
-                                            .clickable(enabled = attemptCount < MAX_ATTEMPTS) {
+                                            .clickable(enabled = attemptCount < MAX_ATTEMPTS && !isUnlocking) {
                                                 if (currentInput.length < UNLOCK_PIN_LENGTH) {
                                                     currentInput += key
                                                     errorMessage = null
@@ -248,7 +294,7 @@ fun UnlockScreen(
                                             text = key,
                                             fontSize = 24.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = if (attemptCount < MAX_ATTEMPTS) Color.White else Color(0xFF546E7A)
+                                            color = if (attemptCount < MAX_ATTEMPTS && !isUnlocking) Color.White else Color(0xFF546E7A)
                                         )
                                     }
                                 }

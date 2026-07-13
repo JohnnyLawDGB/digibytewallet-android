@@ -1004,7 +1004,15 @@ class SyncService : Service() {
         // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
         // guard ensures this never regresses a higher persisted tip.
         lastSavedBlocksData?.let { runCatching { persistBlocks(it, synchronous = true) } }
-        NativeBridge.stopSync()
+        // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
+        // keepalive sweep can hold for up to ~K×10s pinging half-dead sockets —
+        // calling it synchronously here runs on the main thread (Service lifecycle
+        // callbacks are main-thread) and can block long enough to ANR. Fire it off
+        // on a plain background thread, best-effort: serviceScope is cancelled
+        // immediately below, so a coroutine launched on it wouldn't reliably run.
+        Thread {
+            runCatching { NativeBridge.stopSync() }
+        }.start()
         serviceScope.cancel()
         super.onDestroy()
     }

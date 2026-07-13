@@ -213,20 +213,22 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         if (walletManager.walletState.value !is WalletState.Unlocked) return
-        val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { -1 }
-        // Don't kick a direct startSync while Tor is enabled and still
-        // bootstrapping — peers would dial direct before the SOCKS proxy is wired,
-        // leaking the IP. Once Tor reaches Connected (bootstrap 100%) or fails, the
-        // proxy is set / we've degraded, and this kick connects through Tor / direct.
-        val torState = torManager.state.value
-        val torComingUp = torManager.isEnabled &&
-            (torState is TorState.Connecting || torState is TorState.Starting)
-        if (peers == 0 && !torComingUp) {
-            android.util.Log.i("MainActivity", "onResume with peerCount=0 — forcing a clean reconnect")
-            // startSync opens sockets via BRPeerManagerConnect and can block for
-            // seconds under network conditions — onResume must return quickly to
-            // avoid an ANR, so dispatch to IO.
-            lifecycleScope.launch(Dispatchers.IO) {
+        // getPeerCount() takes the native peer-manager lock (PEER_GUARD), which the
+        // keepalive sweep can hold for up to ~K×10s while pinging half-dead peer
+        // sockets. Reading it — and the follow-up reconnect decision — must happen
+        // off the main thread so onResume always returns immediately; it must NEVER
+        // call getPeerCount() directly here (that's the ANR).
+        lifecycleScope.launch(Dispatchers.IO) {
+            val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { -1 }
+            // Don't kick a direct startSync while Tor is enabled and still
+            // bootstrapping — peers would dial direct before the SOCKS proxy is wired,
+            // leaking the IP. Once Tor reaches Connected (bootstrap 100%) or fails, the
+            // proxy is set / we've degraded, and this kick connects through Tor / direct.
+            val torState = torManager.state.value
+            val torComingUp = torManager.isEnabled &&
+                (torState is TorState.Connecting || torState is TorState.Starting)
+            if (peers == 0 && !torComingUp) {
+                android.util.Log.i("MainActivity", "onResume with peerCount=0 — forcing a clean reconnect")
                 try {
                     // forceReconnect first: after a long idle the existing manager is
                     // often stuck (dead peers holding the slots) and startSync alone
