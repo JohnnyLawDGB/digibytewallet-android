@@ -1,566 +1,452 @@
 # DigiByte Wallet — Roadmap
 
-Current version: **v3.7.6** (June 2026). This roadmap supersedes the
-feature-ordered roadmap previously in this file. It is reorganized around
-what actually makes this wallet different from a BlueWallet-style SPV client:
-**no trusted third party in the data path**.
+Current version: **v3.10.26** (July 2026). This revision supersedes the
+June 2026 roadmap, which had fallen behind the code in the good
+direction: BIP 157/158 is no longer the goal of Phase 1 — it is the
+*only* sync path, bloom having been excised from the wire entirely in
+v3.10.5–3.10.15. The wallet the old roadmap was working toward is,
+at the data layer, the wallet that now exists. This revision records
+that, declares the major version it earned, and resequences what
+remains around the two things that now matter most: **never stranding
+a CF-only wallet** and **DigiDollar as a sovereign light client**.
 
 ## Principles, in priority order
 
 1. **Sovereignty first.** Anything that removes a trusted intermediary or
-   hardens the local trust model comes before feature breadth. Compact
-   block filters (BIP 157/158), hardware-sealed key material, peer
-   diversity beyond author-operated infrastructure, and Tor as a first-class
-   (not opt-in-afterthought) transport are the work this wallet exists to do.
+   hardens the local trust model comes before feature breadth. The
+   compact-filter-only data layer, hardware-sealed key material, peer
+   diversity beyond author-operated infrastructure, and coercion
+   resistance are the work this wallet exists to do.
 2. **Legibility second.** The wallet is the kind of software where the
    threat model must be stated in prose a hostile reviewer can audit.
-   `ARCHITECTURE.md`, `THREAT_MODEL.md`, a BIP compliance matrix, and
-   process-flow docs are treated as deliverables, not documentation. They
-   land *with* the code they describe, not after.
-3. **Feature velocity third.** Multisig/PSBT, Digi-ID polish, payment
-   requests, coin control, watch-only, and contacts are sequenced so they
-   compose cleanly on top of the sovereign data layer — not against it. A
-   feature that would require a trusted backend to ship quickly doesn't
-   get shipped.
+   `docs/ARCHITECTURE.md`, `docs/THREAT_MODEL.md`, `docs/BIP_COMPLIANCE.md`,
+   and `docs/PROCESS_FLOWS.md` shipped with Phase 0 and are maintained
+   *with* the code they describe. **This roadmap is itself a legibility
+   deliverable** — a stale roadmap is a legibility bug, and the June
+   revision had become one (it described `SyncMode.BOTH` as the default
+   months after bloom was removed). Corollary adopted with this
+   revision: the roadmap header version and the feature-inventory
+   appendix are updated in the same PR as any release that changes them.
+3. **Feature velocity third.** PSBT, watch-only, vault management,
+   coin control, and contacts are sequenced so they compose cleanly on
+   top of the sovereign data layer — not against it. A feature that
+   would require a trusted backend to ship quickly doesn't get shipped.
 
 ## Current state — honest summary
 
 **What is sovereign today:**
+
+- **The data layer.** BIP 157/158 compact block filters are the only
+  sync path. The bloom wire path (`filterload` and friends) was removed
+  from the C core in v3.10.5–3.10.15; the Sync Mode setting is gone
+  because there is nothing to choose. The wallet's address set cannot
+  leave the device via the sync path — the code that could leak it no
+  longer exists. Filter-chain integrity cross-checking against built-in
+  checkpoints landed (observe-and-log) in v3.10.25.
+- **Transaction-origin privacy.** Dandelion++ stem submission shipped
+  v3.7.0 (opt-in) — seeder-tagged dandelion peers with random
+  embargo/fluff fallback so delivery is never sacrificed.
 - Local key custody. Seed sealed with AES-256-GCM via a hardware-backed
-  Android Keystore key (`KeyStoreManager.kt:44–51`, `core/…/security/`).
+  Android Keystore key (`core/…/security/KeyStoreManager.kt`).
 - SPV block validation. All transaction validity and balance computation
-  happens on-device from block headers and merkle proofs; nothing is
-  fetched from an explorer.
-- Recovery. BIP39 mnemonic, in-app seed backup + verify, dual-scan
-  recovery covers the legacy `m/0H` tree for pre-v3.4.0 wallets.
-- Tor support. Real kmp-tor no-exec (dlopen) integration with SOCKS5 into
-  the C core (switched from exec in v3.6.5 for 16 KB page-size support);
-  peer traffic, bloom seeder fetch, and HTTP calls route through it when
-  enabled. SOCKS routing was fixed in v3.7.5 (`SafeSocks=0`). Opt-in,
-  OFF by default.
+  happens on-device from block headers; nothing a user sees in the UI is
+  fetched from an explorer. (`reconcile` remains an explicitly-labeled
+  recovery/safety-net path, not a balance display path.)
+- Recovery. BIP39 mnemonic with checksum validation at entry (v3.6.4),
+  Universal Restore across every historical DigiByte derivation path
+  with auto-sweep (v3.5.15), foreign-seed sweep (v3.9.0).
+- Taproot. P2TR receive shipped v3.10.0; BIP341 sighash and DigiDollar
+  address/send paths are KAT-tested in `native/src/test/host/`.
+- **DigiDollar, testnet-complete.** Send/receive/balance wired end to
+  end (`core/…/WalletManager.kt:325`, `NativeBridge.kt`, Send/Receive
+  screens), live on testnet, inert on mainnet until softfork activation.
 
 **What is not sovereign today, and this roadmap is built around:**
-- **The peer-discovery layer is a soft trusted third party.**
-  `api.digiscope.me/api/peers/bloom` is operated by the wallet author
-  (`SyncService.kt:524`). Every cold start fetches the peer list from
-  it, with hourly cached fallback. The seeder itself is narrowly
-  scoped — it runs a DGB node used only for peer discovery; it does
-  not serve blocks, filters, or any chain data. So the trust surface
-  is *which* peers the wallet talks to, not *what* the chain looks
-  like. That still matters: a compromised seeder could eclipse the
-  wallet onto hostile peers that surveil the wallet's transaction set
-  via bloom filter fingerprints. Phase 1 demotes this from a required
-  bootstrap source to one of several.
-- **The data layer leaks wallet state.** BIP 37 bloom filters
-  (`BRPeer.c:1520`, `BRPeerManager.c:328–399`) are sent in plaintext to
-  every peer the wallet connects to. With the default 0.005 false-positive
-  rate, a wallet with 10k addresses probabilistically discloses ~50
-  addresses per scan. Merkleblock responses further reveal the wallet's
-  exact transaction set — even over Tor, the content leak remains.
-- **Key sealing is PIN-gated at the application layer, not at the
-  Keystore**. `setUserAuthenticationRequired` is deliberately false
-  (`KeyStoreManager.kt:37–43`) because enabling it crashes on API 28/33/35
-  in inconsistent ways. This was the right call at the time — but it
-  means a compromised app process can decrypt the seed without the
-  device being unlocked. PIN brute-force also has no rate-limit.
-- **Digi-ID signs with the first wallet address** (`m/44'/20'/0'/0/0`),
-  not an isolated key subtree. Digi-ID compromise = wallet compromise.
-- **Tor is OFF by default and opt-in (advanced) (v3.6.6+).** The in-app kmp-tor
-  *no-exec* (dlopen) integration (switched from exec in v3.6.5 for 16 KB
-  page-size compatibility) had a broken SOCKS peer-routing path: the C core got
-  `connect error: Connection refused` on Tor's in-process SOCKS listener, so 0
-  peers routed through Tor. **Fixed in v3.7.5:** `SafeSocks=1` was rejecting
-  every raw-IP `CONNECT`; `SafeSocks=0` (`TorManager.kt`) restored routing
-  (device-verified).
-  Root analysis (2026-06-10): the listener port reported by kmp-tor's `LISTENERS`
-  event isn't reliably accepting connections, compounded by SOCKS-port churn
-  across the degrade→reconnect cycle (each restart gets a new auto-assigned port,
-  stranding the C core on a stale one). Today's session DID land correct adjacent
-  fixes that stay in for when Tor returns: bootstrap-100%-gated `Connected`
-  (don't wire the proxy before circuits exist), a reactive Tor-state observer
-  (re-wire + clear the banner on reconnect), keepalive/onResume deferral so peers
-  don't dial direct before the proxy, and `MAX_TOR_RECONNECT_FAILURES` 3→15.
-  **Product decision (2026-07-02): keep Tor opt-in / OFF by default** — routing
-  now works, but Tor is not promoted to default-on. In-app privacy is carried by
-  BIP158 compact filters (address privacy, default) + Dandelion++ (tx-origin
-  privacy, opt-in). Tor stays an advanced toggle in Settings → Network Info;
-  Orbot / system VPN remain the recommended IP-anonymity path for most users.
-  Residual open bug: when Tor bootstrap fails there is no automatic clearnet
-  fallback (wallet can sit at 0 peers) — tracked; only affects users who
-  explicitly enable Tor.
 
-The gap between "sovereign for signing" and "sovereign for data" is the
-central thing this roadmap closes.
+- **CF peer availability is the architectural residual.** Shipping
+  v3.10.18 proved the dialer good enough on-device while making the
+  real problem undeniable: CF-only correctly rejects the mostly
+  bloom-off network majority, leaving a thin ~16-node filter-serving
+  fleet that churns, and the manager can stall at 0 peers. This is an
+  **infrastructure** problem, not a peer-selection one. See
+  `docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md`.
+  **Explicit non-goal restated:** no more filter-peer-selection
+  heuristics as the fix for slow CF sync. The fixes are the own-node
+  track and oracle-operator CF enablement (Phase 1 remainder, below).
+- **The peer-discovery layer is still a soft trusted third party.**
+  `api.digiscope.me/api/peers` is operated by the wallet author
+  (`app/…/service/SyncService.kt:1714`). Narrowly scoped — peer
+  discovery only, no chain data — but a compromised seeder could still
+  eclipse the wallet onto hostile peers. The oracle-bootstrap design
+  (`docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md`)
+  demotes it from required to accelerant.
+- **PIN brute-force has no rate limit.** `core/…/security/PinManager.kt:43`
+  verifies with no backoff, no attempt counter, no wipe policy. This is
+  now the single cheapest high-value hardening item in the repo, and it
+  gates the duress PIN (a decoy PIN is theater while the real PIN is
+  free to brute-force).
+- **Key sealing is PIN-gated at the application layer, not at the
+  Keystore.** `setUserAuthenticationRequired` remains deliberately off
+  (`core/…/security/KeyStoreManager.kt:37`) for API-level crash reasons.
+  Right call at the time; still means a compromised app process can
+  decrypt the seed without the device being unlocked.
+- **Digi-ID signs with the first wallet address.**
+  `core/…/digiid/DigiIdManager.kt:49` calls `signMessage(uri, 0)` —
+  index 0 of the main account. Digi-ID compromise = wallet compromise,
+  and (new consequence, see duress spec addendum) the Hub identity is
+  cryptographically the wallet identity, which a duress session must
+  therefore sever.
+- **Tor is opt-in, OFF by default** (product decision 2026-07-02, stands).
+  Routing works (`SafeSocks=0`, v3.7.5); in-app privacy is carried by
+  BIP158 (address privacy, default) + Dandelion++ (tx-origin, opt-in);
+  Orbot / system VPN remain the recommended IP-anonymity path. Residual
+  open bug: no automatic clearnet fallback when a user-enabled Tor
+  bootstrap fails — loud-fallback fix scheduled in Phase 2.
+
+The gap the June roadmap was built around — "sovereign for signing but
+not for data" — is closed. The gap this revision is built around is
+**"sovereign but strandable"** (CF fleet thinness) and **"sovereign for
+DGB but not yet for dollars"** (DigiDollar vault lifecycle).
 
 ## Anti-patterns we will not ship
 
-Some shortcuts look like feature velocity but would dismantle the trust
-model that makes the wallet worth using. They're named here so they
-don't sneak back in during feature sprints.
+Unchanged from the June revision, and they held — bloom was removed
+rather than kept warm "for speed," which is exactly what this list was
+for. Restated so they don't sneak back in during the DigiDollar sprint:
 
-- **Explorer REST for balance or history.** The moment the wallet hits
-  an Insight/Blockbook/Esplora endpoint for anything a user can see in
-  the UI, we've ceded the sovereignty claim. This includes "fast-path"
-  balance on cold start.
-- **Push notifications for incoming transactions.** Any implementation
-  requires disclosing addresses to a server. Hard no.
-- **Cloud seed backup**, even encrypted. Until there's a formally
-  reviewed threshold model that doesn't leak metadata about wallet
-  existence and usage, this is out of scope.
-- **"Just ask the seeder if sync is slow."** The seeder is already a
-  trust concession for bootstrap; turning it into a sync progress
-  accelerator would be observably worse.
-- **Explorer-backed transaction detail screens** (e.g., fee market
-  context, confirmation ETAs). All context shown for a tx must be
-  derivable from the data the SPV client already has.
-- **Price feeds coupled to wallet state.** Price is cosmetic and may be
-  fetched from CoinGecko/Binance — but never with a request body that
-  could correlate to wallet activity (e.g., don't ask for quotes for the
-  exact DGB amount being sent).
-- **Hub-as-data-layer.** The DigiScope Hub is a pseudonymous chat / forum
-  surface. It must not become a side-channel for transaction data or
-  address metadata.
-- **BIP 21 URIs with embedded server metadata** (callbacks to check
-  invoice status, etc.). Keep payment URIs pure on-chain.
-
-## Multisig placement: Phase 3, deliberately
-
-Multisig + PSBT belongs to feature velocity, not sovereignty. The reason
-to sequence it *after* BIP 157/158 is that multisig compounds the privacy
-problem of bloom-filter SPV. Every co-signer's device independently
-connects to peers and advertises its portion of the multisig address set
-via `filterload`. With three co-signers, the wallet set is probabilistically
-discoverable to any peer any of them connects to — and correlation across
-devices narrows it dramatically.
-
-On a compact-filter data layer, each co-signer downloads filters without
-revealing which addresses they care about. Multisig then inherits the
-privacy property users reasonably expect from it, rather than undermining
-it. Shipping multisig on the current bloom layer would bake in a privacy
-regression that's hard to undo.
+- **Explorer REST for balance or history** visible in the UI. Includes
+  "fast-path" balance on cold start. (`reconcile` stays a labeled
+  recovery tool, not a display path.)
+- **Push notifications for incoming transactions.** Requires disclosing
+  addresses to a server. Hard no.
+- **Cloud seed backup**, even encrypted.
+- **"Just ask the seeder."** The seeder is a bootstrap concession, not
+  a data source, and the oracle-bootstrap track shrinks it further.
+- **Explorer-backed transaction detail.** All context shown for a tx
+  must be derivable from data the SPV client already has. (This rule is
+  also what *admits* the multi-algo security dashboard — see Phase 3 —
+  because algo bits and nBits are already in every validated header.)
+- **Price feeds coupled to wallet state.** Cosmetic price is fine;
+  request bodies that correlate to wallet activity are not. This rule
+  gains teeth with DigiDollar: never fetch a quote for the exact
+  collateral or mint amount in flight.
+- **Hub-as-data-layer.** The Hub must not become a side-channel for
+  transaction or address metadata.
+- **DigiDollar-specific addition — no hosted vault dashboard in the
+  data path.** Vault state (collateral, time-lock height, mint
+  capacity) must be derived from the user's own filter-matched blocks
+  and headers, not from a DigiScope API. DigiScope may *mirror* vault
+  state for the web experience; the wallet must never *depend* on it.
 
 ## Phase summary
 
-| Phase | Theme | Rough size | Ships with |
-|-------|-------|-----------|------------|
-| 0 | Legibility prerequisite | M | `ARCHITECTURE.md`, `THREAT_MODEL.md`, BIP matrix, process flows |
-| 1 | Sovereign data layer | L | BIP 157/158 client, peer selection, bloom deprecation path |
-| 2 | Key & trust hardening | M | Keystore auth binding, PIN rate-limit, duress/decoy PIN, Digi-ID isolation, Tor default-on |
-| 3 | Feature velocity on sovereign layer | L | PSBT, multisig, watch-only, coin control, RBF, paper sweep |
-| 4 | Distribution + hardware | M | Play Store, F-Droid, Coldcard QR, NFC |
+| Phase | Theme | Rough size | Status / ships with |
+|-------|-------|-----------|---------------------|
+| 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
+| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) and bloom **removed** (v3.10.x). 🚧 Remainder: own-node track (Model C) + oracle CF enablement + seeder demotion |
+| 1.5 | **v4.0.0** | S | Declared when Phase 1 remainder lands — see Versioning |
+| 2 | Key & trust hardening | M | 🚧 Resequenced: PIN rate-limit → duress PIN A → Keystore binding → Digi-ID isolation → loud Tor fallback |
+| 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
+| 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet and duress-PIN promotion; F-Droid before Play |
 
 ---
 
-## Phase 0 — Legibility prerequisite
+## Phase 0 — Legibility prerequisite ✅
 
-**Why this now.** We cannot honestly describe what BIP 157/158 changes
-if we have not first stated what the current trust model actually is.
-Every subsequent phase's rationale refers back to claims in these docs.
-Getting them into the repo first also forces the seeder-as-third-party
-admission to be public — a prerequisite for users' informed consent
-while Phase 1 is in flight.
-
-**Deliverables**
-
-- `docs/ARCHITECTURE.md` — module boundaries (`app/`, `core/`, `native/`),
-  data flow for send/receive/sync, the boundary between what the C core
-  owns and what the Kotlin layer owns, where state is persisted.
-- `docs/THREAT_MODEL.md` — assets, adversaries (casual observer, peer,
-  network observer, malicious peer, compromised seeder, device-theft
-  with PIN, device-theft with biometric), current mitigations, known
-  residual risks. Named explicitly: the bloom seeder as a trusted third
-  party, the PIN rate-limit gap, and the Tor silent-fallback behavior.
-- `docs/BIP_COMPLIANCE.md` — matrix of BIPs touched (39, 32, 44, 84, 21,
-  111, 37, 157, 158, 174, 152 if ever, 32 test vectors), with status:
-  Implemented / Partial / Planned / Not applicable, and file:line
-  citations into the submodule or Kotlin layer for the implemented ones.
-- `docs/PROCESS_FLOWS.md` — diagrammed flows for
-  "create new wallet", "recover from seed", "send transaction",
-  "receive and confirm", "upgrade path". Each flow cites the specific
-  functions in the C core and Kotlin that execute each step.
-
-**Files that change:** only new files under `docs/`. No code churn.
-
-**Core-side work required:** none.
-
-**Effort:** M (~1 week of focused writing). The facts to document are
-already known from this session's audits — the work is articulation,
-not research.
+Complete. `docs/ARCHITECTURE.md`, `docs/THREAT_MODEL.md`,
+`docs/BIP_COMPLIANCE.md`, and `docs/PROCESS_FLOWS.md` exist and named
+the seeder-as-third-party, PIN rate-limit gap, and Tor fallback
+behavior in public before the fixes landed. Standing obligation (not a
+phase): these documents update in the same PR as code that changes
+their claims. Immediate debts under that rule: THREAT_MODEL's peer/
+observer adversary rows must reflect bloom removal as *complete*
+mitigation with filter-header-source trust as the named residual, and
+BIP_COMPLIANCE must show 37 as **Removed** (not Implemented), 157/158
+as Implemented-and-only, 341/342 as Partial (receive + DigiDollar
+paths), 174 as Planned (Phase 3).
 
 ---
 
-## Phase 1 — Sovereign data layer (BIP 157/158)
+## Phase 1 — Sovereign data layer
 
-> **STATUS (2026-07-02): the BIP157/158 client is SHIPPED and default as of
-> v3.5.39** — native GCS decoder, `cfheaders`/`cfilter` handlers, filter-header
-> checkpoint/persistence, and dual-mode sync (`SyncMode.BOTH` default, 120s
-> bloom-fallback watchdog) all landed and run in production. The deliverables
-> below are retained for historical rationale; the **remaining** Phase-1 work is
-> the non-client parts: peer selection by service bits, a community seeder-mesh /
-> peer diversity beyond author infrastructure, and the bloom-deprecation path
-> once enough peers advertise `NODE_COMPACT_FILTERS`.
->
-> **DESIGN NOTE (2026-07-08):** *Seederless sovereign peer discovery via
-> oracle-node bootstrap* —
-> [`docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md`](docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md).
-> Concrete mechanism for "peer diversity beyond author infrastructure":
-> hardcode the multi-operator DigiDollar oracle-node set as CF bootstrap peers,
-> let the P2P pool bloom from them via `addr` gossip, and demote
-> `api.digiscope.me` from required to an optional accelerant. Grounded in and
-> adversarially reviewed against the real C core. Key findings the note pins
-> down: (1) DNS seeds are a **bloom/liveness** fallback only — they are
-> synthetically stamped bloom-only and contribute **zero** CF peers, so CF
-> discovery has exactly two sources (oracle injection + gossip); (2) two mainnet
-> gates (accept gate + gossip retention) embed a **testnet-only** CF exception
-> that must generalize before CF-only oracle nodes can survive on mainnet —
-> *unless* operators also run `peerbloomfilters=1` (Path A vs Path B, an open
-> decision for operators); (3) filter headers are **not** checkpoint-verified
-> today (TOFU + cross-peer quorum, with a single-peer escape hatch) — a shipped
-> `cfcheckpt` checkpoint is the real residual fix. **Operator prerequisite
-> (in progress): oracle operators enable `blockfilterindex=1` +
-> `peerblockfilters=1`.** Design-only; sequence when the oracle set is defined.
->
-> **DECISION + DESIGN NOTE (2026-07-08): deprecate bloom entirely — BIP 157/158
-> is the *only* sync path; the backup is the user's own node, not bloom.** See
-> [`docs/superpowers/specs/2026-07-08-bloom-deprecation-bip158-only.md`](docs/superpowers/specs/2026-07-08-bloom-deprecation-bip158-only.md).
-> Bloom is a privacy liability wherever it runs (address set on the wire), so it
-> is being removed rather than kept as a fallback. The note maps the three jobs
-> bloom secretly does today (120s watchdog fallback, DNS-seed replenishment, the
-> two mainnet accept/retention gates) and their BIP158-only replacements, and
-> sequences removal **after** CF peer diversity (oracle-bootstrap) + the own-node
-> fallback land — bloom excision is the wire-path removal that finally triggers a
-> **major (`X.0.0`) bump**. One open decision (user's call): the own-node model —
-> wallet↔node JSON-RPC (Model A), own node as a fixed CF peer (Model B), or
-> tiered B-then-A (Model C, recommended). Draft pending that pick.
->
-> **EMPIRICAL MOTIVATION (2026-07-11): the own-node track is now the critical
-> path, not a nice-to-have.** See
-> [`docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md`](docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md).
-> Shipping v3.10.18 (the dead-socket filter-peer floor) proved the dialer good
-> enough on-device — cfheaders climbed in real 2000-header batches, cycling 8
-> distinct filter peers — while making the *architectural* residual undeniable:
-> CF-only correctly rejects the (mostly bloom-off) network majority, leaving a
-> thin ~16-node fleet that churns (connect → serve a burst → reset → drop) with
-> phantom `0x40` gossip tags, and the manager can stall at 0 peers. That is an
-> **infrastructure** problem, not a peer-selection one. **Explicit non-goal:** do
-> not ship more filter-peer-selection heuristics as the fix for "CF sync is slow
-> on weak devices" — route effort to the **own-node model decision (A/B/C, rec C)**
-> and oracle-operator enablement. Until then, `reconcile` stays the fast balance
-> path on weak hardware.
+**Client: shipped and hardened.** Native GCS decoder,
+`cfheaders`/`cfilter` handlers, filter-header persistence and
+continuity re-anchor, dead-socket peer floor, responsive-peer filter
+download with failover, checkpoint cross-check groundwork (v3.10.25).
+Bloom is gone from the wire. Historical rationale lives in the June
+roadmap in git history; it does not need to be re-litigated here.
 
-**Why this now.** This is the single change that most directly answers
-"what's the point of this wallet." It removes the plaintext address
-leakage of bloom filters, makes the per-peer correlation attack
-infeasible, and — critically — relegates `api.digiscope.me` from a
-soft *requirement* to one of several optional bootstrap sources. It is
-the technical underpinning of every other sovereignty claim.
+**Remainder — the strandability problem.** Three coordinated tracks,
+already designed, now sequenced as the top of the whole roadmap because
+every sovereignty claim is hollow if a fresh install can sit at 0 peers:
 
-**Client-side deliverables (C core + bridge)**
+1. **Own-node track, Model C (decided).** Tiered: the user's own
+   DigiByte node as a pinned CF peer first (Model B semantics), with
+   wallet↔node JSON-RPC (Model A) as a later tier for capabilities CF
+   can't express. v3.10.1 already ships the primitive (Settings →
+   Network Info → custom node); this track makes it a first-class,
+   one-screen "pair with your node" flow: QR-scan a `host:port` (or
+   Tor onion) from the node, verify it serves `NODE_COMPACT_FILTERS`,
+   pin it, and surface its health on the main screen. Spec:
+   `docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md`.
+2. **Oracle-bootstrap peer discovery.** Hardcode the multi-operator
+   DigiDollar oracle-node set as CF bootstrap peers; let the pool bloom
+   from `addr` gossip; demote `api.digiscope.me` to optional accelerant.
+   Spec: `docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md`.
+   **Promoted to the DigiDollar critical path:** oracle operators
+   enabling `blockfilterindex=1` + `peerblockfilters=1` is now a
+   *launch prerequisite* for DigiDollar mainnet support in this wallet,
+   not a nice-to-have — one operator checklist simultaneously fixes CF
+   fleet thinness and gives the stablecoin's own infrastructure a
+   second job. The two mainnet gates embedding the testnet-only CF
+   exception must generalize (or operators run Path B) before
+   activation; resolve the Path A/B open decision when the oracle
+   roster is frozen.
+3. **`cfcheckpt` checkpoint verification.** Filter headers are
+   TOFU-plus-quorum today; v3.10.25's observe-and-log cross-check
+   graduates to actively rejecting a misbehaving filter chain. This is
+   the real residual named in the oracle-bootstrap spec, and it should
+   land before v4.0.0 so the major version's trust story is clean.
 
-- **GCS filter decoder** in the C submodule. SipHash + Golomb-Rice
-  decoding. Estimated ~400 lines of new C, no external deps. Lives at
-  `native/src/main/jni/digibytewallet-core/BRGCSFilter.{c,h}` (new).
-- **BIP 157 message handlers.** `getcfilters`, `cfilter`, `getcfheaders`,
-  `cfheaders`, `getcfcheckpt`, `cfcheckpt`. Wired into `BRPeer.c` and
-  `BRPeerManager.c` alongside the existing handlers.
-- **Filter header checkpoint array — as bootstrap hint, not authority.**
-  Separate from the block checkpoint array at `BRChainParams.h:72–130`.
-  Hardcoded checkpoints every **10,000 blocks** (≈83 KB APK impact vs
-  830 KB at 1000-block cadence; verifying the intermediate 10 k headers
-  against an anchor is milliseconds of SHA-256). Lives at
-  `BRFilterHeaders.{c,h}` (new). The shipped values are treated as
-  bootstrap hints only — at runtime, the client *always* cross-verifies
-  against a peer-quorum `cfcheckpt` response. Mismatch means loud sync
-  failure, not silent trust. This is the neutrino model; it makes a
-  malicious shipped checkpoint detectable rather than authoritative.
-- **Sync state machine.** Dual-mode: if at least `PEER_MAX_CONNECTIONS/2`
-  connected peers advertise `NODE_COMPACT_FILTERS` (0x40), use compact
-  filters exclusively and never send a `filterload`. Otherwise fall back
-  to bloom. The fallback exists solely to avoid dead-ending users during
-  network rollout — **the long-term goal is removing the bloom path
-  entirely** once enough peers advertise 0x40.
-- **Peer selection by service bits.** The current peer manager connects
-  to any peer that handshakes. Extend the bloom-prioritization code
-  (`BRPeerManager.c:1853` region) to prefer `NODE_COMPACT_FILTERS`
-  candidates ahead of `NODE_BLOOM`.
-- **Bloom seeder demotion.** The seeder at `api.digiscope.me` currently
-  returns an opaque list of peers presumed to support bloom. Extend its
-  output to include the advertised service bits for each peer, and
-  extend the wallet's consumption (`SyncService.kt:490–520`) to classify
-  them. Meanwhile, add two other bootstrap sources: a community-maintained
-  seeder mesh (at least one endpoint not operated by the wallet author)
-  and a richer hardcoded seed list curated by `NODE_COMPACT_FILTERS`
-  support.
+**Effort:** M remaining (the L was the client, and it's done).
 
-**Server-side / Core-side work**
+---
 
-- DigiByte Core 8.26 = Bitcoin Core v26.2 rebase. BIP 157/158 serving
-  stack is fully present, including the `NODE_COMPACT_FILTERS`
-  (0x40) service bit, P2P handlers (`net_processing.cpp:3399–3507`),
-  and the `getblockfilter` / `getindexinfo` / `scanblocks` RPCs. No
-  upstream Core PR needed. Nodes need `blockfilterindex=basic`
-  + `peerblockfilters=1` in `digibyte.conf` and a restart. Real cost
-  on DGB (extrapolated from BTC figures): ~6–12 GB of extra disk for
-  the filter index, 4–12 hours to build from a synced node. Not
-  compatible with `prune=<n>`.
-- Enable those flags on the digiscope.me DGB node plus at least one
-  other community-operated node (the existing bloom-seeder operators
-  are the natural first targets since they already run 8.26 with
-  `peerbloomfilters=1`). Measure real-world filter sizes over the DGB
-  chain to tune the checkpoint cadence before the client-side
-  checkpoint array is frozen.
-- Extend the `dgb-bloom-seeder` on digiscope.me to track
-  `NODE_COMPACT_FILTERS` (0x40) alongside `NODE_BLOOM` (0x04) in the
-  peer-capability index it builds, and return service bits per peer
-  in its JSON response. The wallet will use this to classify peers
-  into "compact-filter-capable" vs "bloom-only" without having to
-  re-probe every peer on cold start.
+## Phase 1.5 — Declare v4.0.0
 
-**Kotlin layer changes**
-
-- `SyncService.kt` — adjust startup to dispatch into compact-filter
-  sync when enough peers support 0x40.
-- `core/src/main/java/io/digibyte/core/bridge/NativeBridge.kt` — add
-  native methods for filter header chain progress, filter-match counts,
-  and sync mode reporting (so the UI can distinguish "compact filter
-  sync" from "bloom sync" from "no peers").
-- `WalletScreen` — update the sync UI copy to reflect mode; when on
-  bloom fallback, surface a non-scary banner ("bootstrap via bloom —
-  your privacy is lower until enough peers support compact filters").
-
-**Docs update alongside code**
-
-- `ARCHITECTURE.md` — add data-layer section documenting both modes.
-- `THREAT_MODEL.md` — update the peer/observer adversary rows to reflect
-  the compact-filter mitigation and explicitly note what's now residual
-  (e.g., filter-header source trust, block header chain trust).
-- `BIP_COMPLIANCE.md` — flip 157/158 from Planned to Implemented.
-- `PROCESS_FLOWS.md` — add a filter-sync flow diagram.
-
-**Effort:** L. Realistically 4–6 weeks including test coverage and
-mainnet verification. The GCS decoder and message handlers are the
-straightforward part; the checkpoint-cadence tuning and the dual-mode
-fallback's edge cases (what if peers drop mid-sync and we have to switch
-modes mid-stream?) are where the time goes.
-
-**Anti-pattern reminders specific to this phase**
-
-- Do not ship a "I'll just run a filter-proxy server for mobile clients"
-  shortcut. Filters must come from peers, full stop. Running our own
-  filter-serving node is fine; making the wallet depend on it is not.
-- Do not keep the bloom path warm "for speed" after compact filters are
-  viable. The bloom path exists as a transitional safety net; it must
-  be removable by config flag, and flagged off by default once the
-  service-bit population crosses a threshold.
+The June roadmap named its own trigger: *"bloom excision is the
+wire-path removal that finally triggers a major (X.0.0) bump."* The
+trigger fired in v3.10.5–3.10.15; the bump didn't. That's now a
+sequencing choice rather than an oversight: **v4.0.0 = compact-filters-
+only AND never stranded.** Cut it when Phase 1's remainder lands (own-
+node pairing + oracle bootstrap + active checkpoint rejection), so the
+release that carries the headline claim — *the sync path that could
+leak your addresses does not exist in this codebase, and losing our
+infrastructure cannot strand you* — is true in both halves. v4.0.0 is
+also the natural release vehicle for the F-Droid submission and the
+digiscope.me `/wallet` page relaunch.
 
 ---
 
 ## Phase 2 — Key & trust hardening
 
-**Why this now.** BIP 157/158 closes the data-layer leak. This phase
-closes the key-layer and peer-trust gaps that the Phase 0 threat model
-will have made legible. It's sized deliberately smaller than Phase 1
-because each item is independent — they can land as separate merges.
+Resequenced. The June ordering listed these as independent; they are
+not quite — the duress PIN's threat model leans on the rate limit, and
+the duress session's identity handling leans on Digi-ID isolation
+being at least designed. New order:
 
-**Deliverables**
+1. **PIN rate-limit (first, small, unblocking).** Exponential backoff:
+   3 attempts free, then 1/5/30/60-minute cooldowns, optional
+   wipe-after-N behind a settings toggle. `core/…/security/PinManager.kt:43`.
+   A duress PIN shipped before this is a decoy door on a house with no
+   lock; this lands first.
+2. **Duress / decoy PIN — Phase A (wallet protection).** As designed in
+   `docs/superpowers/specs/2026-07-12-duress-pin-design.md`: second PIN
+   opens decoy account 1' (`m/84'/20'/1'`, `m/86'/20'/1'`) pre-funded
+   ~5%; main funds/DigiAssets/DigiDollar and seed unreachable in
+   session; biometrics auto-disabled; no UI tell. **Two spec addenda
+   adopted with this revision:**
+   - **A duress session must sever the Hub/Digi-ID identity.** Because
+     Digi-ID currently signs with the main wallet's first address
+     (`DigiIdManager.kt:49`), a decoy session that can still one-tap
+     into DigiScope authenticates as the *real* user — real handle,
+     chat history, education-portal earnings — collapsing the "small
+     plausible wallet" story. Duress Phase A ships with Hub/Digi-ID
+     either disabled-with-plausible-cover (e.g., logged-out state) or
+     swapped to a decoy identity derived from account 1'. Coordinate
+     the derivation namespace with item 4 below.
+   - **The covert OP_RETURN alert (Phase B) is downgraded to
+     research.** An extra OP_RETURN on duress sends is unreadable
+     (keyed HMAC) but not *invisible* — a coercer inspecting the tx
+     preview or the broadcast sees an output shape this wallet's normal
+     sends don't produce, and the mechanism is documented in this
+     open-source repo. The app-ping alert path ships as Phase B; the
+     on-chain beacon needs a design that makes duress sends
+     shape-identical to normal sends (or explicit acceptance that the
+     beacon trades deniability for notification) before it ships.
+3. **Keystore user-auth binding, per-API.** Revisit
+   `setUserAuthenticationRequired` with per-API probing; enable on
+   modern APIs if stable, keep the app-PIN as sole gate on older ones.
+   `core/…/security/KeyStoreManager.kt:37`.
+4. **Digi-ID key isolation.** Distinct subtree (dedicated purpose code
+   or account) so a Digi-ID signature never exposes main-wallet keys;
+   one-time migration with a compatibility window on `api.digiscope.me`.
+   Namespace rule (from the duress spec, now binding): the decoy owns
+   purpose 84'/86' account 1'; Digi-ID isolation must not collide, and
+   any future subtree claims get recorded in `docs/derivation/`.
+   `core/…/digiid/DigiIdManager.kt:49`.
+5. **Loud Tor fallback.** Tor stays opt-in/OFF by default (2026-07-02
+   decision stands), but a user-enabled Tor that fails bootstrap must
+   fall back to clearnet *loudly* — main-screen banner + retry — never
+   sit at 0 peers, never fall back silently.
 
-- **Keystore user-auth binding, per-API.** Revisit `setUserAuthenticationRequired`
-  with per-API-level probing. If it can be made to work on modern API
-  levels (33+) without the crashes that forced it off, enable it there
-  and keep the app-PIN gate as the sole mechanism on older APIs.
-  `core/src/main/java/io/digibyte/core/security/KeyStoreManager.kt:37–43`.
-- **PIN rate-limit.** Exponential backoff on failed attempts:
-  3 attempts free, then 1/5/30/60 minute cooldowns, then optional
-  "wipe on N failed attempts" policy behind a settings toggle.
-  `core/src/main/java/io/digibyte/core/security/PinManager.kt:43–58`.
-- **Duress / decoy PIN (wrench-attack protection).** Optional second PIN
-  that opens a plausible **decoy wallet** = BIP84/86 **account 1'** of the
-  same seed (`m/84'/20'/1'`, `m/86'/20'/1'`), holding only the ~5% the user
-  pre-funds. Under duress: main funds/DigiAssets/DigiDollar hidden, seed view
-  blocked, biometrics auto-disabled (a forced finger must not open the real
-  wallet), no UI tell that a duress PIN exists. A real-time alert fires via
-  DigiScope (app ping + a covert keyed `HMAC(secret, input0.outpoint)`
-  OP_RETURN on duress sends that DigiScope's `tx-monitor` recognizes).
-  Protects the *coerced-to-unlock-the-app* case only — not seed extraction /
-  device forensics. Phased A (wallet protection) / B (alert) / C (polish).
-  Design: `docs/superpowers/specs/2026-07-12-duress-pin-design.md`.
-  Note: the decoy's account-1' (purpose 84'/86') does **not** collide with the
-  Digi-ID isolation subtree below (purpose 44'); future features must keep
-  coordinating the purpose/account namespace.
-  `core/…/security/PinManager.kt`, `core/…/WalletManager.kt`,
-  `native/…/BRBIP32Sequence.c` (account-parameterized derivation).
-- **Digi-ID key isolation.** Derive Digi-ID signing from a distinct
-  BIP44 subtree (e.g., `m/44'/20'/1'/0/0` for account 1, or a dedicated
-  purpose code) so a Digi-ID signature never exposes main-wallet keys.
-  Requires a one-time migration and a compatibility path for existing
-  Digi-ID-linked accounts on `api.digiscope.me`.
-  `core/src/main/java/io/digibyte/core/digiid/DigiIdManager.kt:49`,
-  `native/src/main/jni/digibytewallet-core/BRBIP32Sequence.c:224–226`.
-- **Tor default-on for new installs + visible clearnet-fallback
-  banner.** Silent fallback becomes a warning surfaced in the main
-  wallet screen. Users who explicitly disable Tor see no banner;
-  users who had Tor fail see the warning and a retry action.
-  `SyncService.kt:106–124`, Compose wallet screen.
-- **Peer diversity widening.** Reduce hard dependency on the
-  digiscope.me seeder by (a) increasing the hardcoded DNS seed list
-  weight in cold-start peer discovery, (b) accepting a user-provided
-  additional seeder URL in settings, (c) making the seeder fetch
-  tolerate cold-start without a cached JSON. The goal is that an
-  air-gapped fresh install can reach a good peer population with or
-  without the author's infrastructure.
-
-**Files that change:** `core/…/security/*`, `core/…/digiid/*`,
-`app/…/service/SyncService.kt`, new settings screens, DigiScope backend
-for Digi-ID migration (out-of-repo).
-
-**Core-side work:** DigiScope backend (Hub) needs to accept the new
-Digi-ID subtree address during the transition. Coordination but not
-blocking — can be done as a rolling migration.
-
-**Effort:** M. The Keystore auth-binding work is the longest item;
-the rest are each a few days.
-
-**Anti-pattern reminder:** don't paper over the silent Tor fallback by
-disabling the fallback entirely. Users stuck in places Tor is blocked
-need a path out of the app. The fix is *loud* fallback, not *no*
-fallback.
+**Effort:** M. Items 1 and 5 are days; 2 is the largest; 3 is the
+riskiest (device-matrix testing); 4 is coordination-heavy.
 
 ---
 
 ## Phase 3 — Feature velocity on the sovereign layer
 
-**Why this now.** With the data layer and trust layer fixed, new features
-compose cleanly. PSBT, multisig, watch-only, and coin control all benefit
-from compact filters — and shipping them earlier would have been costly
-rework. Each item here is sized as an independent increment.
+Reframed. The June roadmap sequenced PSBT as generic feature velocity
+with multisig as the motivating consumer. The motivating consumer is
+now **DigiDollar vault management** — the flow where users lock
+meaningful DGB collateral behind Taproot time-locks is exactly where
+cold-key signing stops being an enthusiast feature and becomes table
+stakes. "Open, mint against, and redeem a decentralized-stablecoin
+vault from a phone, with keys that never touch the phone" is not a
+feature parity item; nothing else on any chain does it.
 
-**Deliverables, in rough suggested order**
+**Deliverables, in order:**
 
-- **PSBT (BIP 174) foundation.** Read/decode/validate PSBT from QR or
-  file, surface signing UI, produce a finalized PSBT suitable for
-  broadcast. The PSBT codec is the foundation for multisig, watch-only
-  with cold signer, and future hardware wallet integration. Lives in
-  a new `core/src/main/java/io/digibyte/core/psbt/` package.
-- **Watch-only wallets.** `xpub` or descriptor import, read-only address
-  derivation, transaction history, ability to construct an *unsigned*
-  PSBT that a cold signer (hardware wallet, air-gapped machine) can
-  sign. Existing flow in `OnboardingViewModel` extended.
-- **Multisig (2-of-3, N-of-M).** Script generation, descriptor-driven
-  address derivation, PSBT round-trip between co-signers via QR. UI
-  supports adding co-signer xpubs, viewing the unsigned tx, producing
-  the partial signature for broadcast by another co-signer.
-- **Coin control / UTXO management.** List UTXOs, freeze selected ones,
-  manual-select inputs for a send. Compose on top of the existing
-  `UtxoManager`. `core/src/main/java/io/digibyte/core/UtxoManager.kt`.
-- **Replace-by-fee (RBF).** UI toggle on send, sets the nSequence on all
-  inputs, and a "bump fee" action on pending txs in history.
-- **Sweep paper wallet (WIF).** Scan a WIF private key, derive its
-  address, query the SPV layer for UTXOs (now possible privately because
-  of compact filters), construct a sweep tx to the wallet's first
-  receive address.
-- **Address book / labeled addresses.** Contacts-style surface for
-  repeated sends; labels on received addresses. Kept local only — no
-  cloud sync in this roadmap.
-- **DigiAsset send completion.** The existing detection-only DigiAsset
-  code (`core/…/asset/AssetManager.kt:44`) gets its send path finished.
-  Design spec already exists at
-  `docs/superpowers/specs/2026-04-03-digiasset-send-design.md`.
+1. **PSBT (BIP 174) foundation.** Decode/validate from QR or file,
+   signing UI, finalized-PSBT output. New `core/…/psbt/` package.
+   Must handle the Taproot (BIP 371 fields) cases DigiDollar vault
+   scripts require, not just legacy/SegWit — that's the reason it moved
+   up, so it's in scope from the first PR.
+2. **Watch-only wallets.** `xpub`/descriptor import, read-only
+   derivation and history (privately, via the CF layer), construct
+   unsigned PSBTs for a cold signer.
+3. **DigiDollar vault lifecycle.** Open vault (lock DGB collateral
+   under the Taproot time-lock template), mint, redeem, monitor
+   collateral ratio — with vault state derived on-device from
+   filter-matched blocks per the anti-patterns rule, and every
+   signing path expressible as hot-key *or* PSBT-round-trip to a cold
+   signer. Builds on the shipped send/wire-format work
+   (`docs/superpowers/specs/2026-07-03…07-05` series). Mainnet
+   activation gating: see Phase 4 audit note.
+4. **Multi-algo security dashboard.** Live per-algo difficulty and
+   DigiShield adjustment, effective chainwork, blocks-per-algo cadence
+   — computed entirely from the version bits and nBits in headers the
+   SPV client already validates. Passes the "derivable from data the
+   client already has" rule with zero network additions; it is the
+   wallet-native companion to DigiScope's Gauntlet and the cheapest
+   genuine differentiation in this phase. No SPV wallet on any chain
+   shows users the live security model of their own chain.
+5. **Coin control / UTXO management.** List, freeze, manual-select.
+   On `core/…/UtxoManager.kt`. Gains urgency from the duress PIN
+   (funding the decoy cleanly) and vaults (choosing collateral UTXOs).
+6. **Replace-by-fee (RBF).** Send-screen toggle + bump action.
+7. **Sweep paper wallet (WIF).** Privately queryable now via CF.
+8. **Address book / labels.** Local only; no cloud sync.
+9. **Multisig (2-of-3, N-of-M).** Still last, and now for a cleaner
+   reason than the June revision's: the bloom-privacy objection is
+   moot (bloom is gone), but multisig composes on descriptors +
+   PSBT + watch-only, all of which vault work exercises and hardens
+   first. Vault-grade collateral custody is also multisig's natural
+   first customer.
 
-**Files that change:** many across `app/…/ui/` and `core/…/`. New
-packages for PSBT, multisig, descriptors.
+Shipped out of the June ordering and removed from this list:
+**DigiAsset send** (v3.5.21–3.5.28, with per-asset history and image
+rendering) — the June appendix still called it stubbed.
 
-**Core-side work:** none per item — PSBT and multisig are fully defined
-at the protocol level; we're implementing existing standards.
-
-**Effort:** L overall. PSBT foundation alone is M; multisig on top is
-M; the rest are each S. Sequence them as independent PRs so progress is
-visible.
-
-**Multisig deferred from Phase 2:** see rationale above — shipping
-multisig on the bloom data layer would bake in a privacy regression.
+**Effort:** L overall. PSBT-with-Taproot is M; vault lifecycle is M
+(client-side; protocol work is in the DigiDollar repos); dashboard is
+S–M; the rest are each S.
 
 ---
 
-## Phase 4 — Distribution + hardware
+## Phase 4 — Audit, distribution + hardware
 
-**Why this now.** Sovereignty and legibility are done; the app is
-genuinely trustworthy; *now* we expand reach and external-device
-support.
+**The third-party audit is a gate, not a deliverable.** Two things do
+not ship to general users before an independent audit completes:
 
-**Deliverables**
+- **DigiDollar on mainnet in this wallet.** The moment balances are
+  dollar-denominated, the trust bar changes category. Wallet-side
+  mainnet activation of Phase 3's vault features waits for the audit
+  even if the softfork activates first (testnet + expert-mode mainnet
+  behind a flag are acceptable in the interim).
+- **Public promotion of the duress PIN.** A coercion-safety feature
+  that fails under adversarial review is worse than its absence. It
+  can *exist* in releases pre-audit (labeled experimental); it does not
+  get marketed until an auditor has tried to break the "no UI tell /
+  no stored flag / biometric kill" properties.
 
-- **Google Play Store release.** Play review tends to reject
-  self-custodial crypto wallets erratically; having the Phase 0
-  threat model doc and a clean compliance matrix helps.
-- **F-Droid submission.** Reproducible build verification already ~90%
-  there; finish the metadata YAML and submit.
-- **Coldcard via QR** (Phase 3's PSBT foundation is the prerequisite).
-  Scan animated QR from Coldcard to import xpub, produce animated QR
-  of unsigned PSBT, scan animated QR of signed PSBT.
-- **NFC tap-to-pay.** Android's HCE APIs allow the wallet to present a
-  payment request over NFC; other wallets with NFC readers can receive
-  it. Read-side (tap-to-receive from a payment terminal) is more niche
-  and can be deferred.
-- **Multiple accounts / profiles.** Separate BIP44 account trees under
-  the same seed, switchable from the main screen.
+**Distribution, resequenced: F-Droid before Play.** Reproducible-build
+verification is ~90% there, the sovereignty audience lives on F-Droid,
+and its review process rewards exactly the legibility docs this repo
+already has. Play Store follows (its crypto-wallet review is erratic;
+the threat model + audit report are the mitigation), timed with or
+after v4.0.0 so the listing carries the strongest true claims.
 
-**Effort:** M. Each item is a week or two of work, mostly integration.
+**Hardware & reach, after:**
+
+- **Coldcard via animated QR** — direct consumer of Phase 3's PSBT
+  work; vault users are its natural first audience.
+- **NFC tap-to-pay** (present payment request over HCE; read-side
+  deferred).
+- **Multiple accounts / profiles** — respecting the derivation
+  namespace registry established in Phase 2.
+
+**Effort:** M, dominated by audit scheduling (external) and Play review
+latency (external).
 
 ---
 
 ## Appendix — Feature inventory
 
 Baseline against a modern self-custodial wallet. Status reflects
-v3.7.6.
+**v3.10.26**.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Send (SPV broadcast) | Shipped | `TransactionBuilder.kt:39` |
-| Receive (address + QR) | Shipped | `ReceiveScreen.kt` |
-| Fee selection | Partial | Fixed tiers + custom; no network-derived or RBF |
-| Address book | Not started | Phase 3 |
-| BIP 21 payment URIs | Shipped | `DigiByteUri.kt:10` |
-| QR scanning | Shipped | `QrScannerScreen.kt` |
-| PIN lock | Shipped | Argon2id, but no rate-limit — Phase 2 |
-| Biometric unlock | Shipped | UI-gate only; not seed-binding — Phase 2 |
-| Seed backup | Shipped | `SeedDisplayScreen.kt`, `SeedVerifyScreen.kt` |
-| Seed recovery | Shipped | BIP84 + legacy dual-scan |
-| Tx history | Shipped | `WalletScreen.kt` |
-| Tx detail screen | Shipped | `TransactionDetailScreen.kt` |
-| Multi-network (mainnet/testnet) | Shipped | `digiTestnet` flavor |
-| Regtest flavor | Not started | Low priority; Phase 4 if demanded |
-| Digi-ID | Shipped | Key isolation pending — Phase 2 |
-| Multisig | Not started | Phase 3 (deliberately) |
-| PSBT (BIP 174) | Not started | Phase 3 foundation |
-| NFC | Not started | Phase 4 |
-| Watch-only (xpub) | Not started | Phase 3 |
+| Send (SPV broadcast) | Shipped | Native-SegWit fee-sizing bug fixed v3.10.15 |
+| Receive (address + QR) | Shipped | SegWit, Legacy, **Taproot P2TR (v3.10.0)** |
+| Fee selection | Partial | Fixed tiers + custom; RBF in Phase 3 |
+| BIP 21 payment URIs | Shipped | |
+| QR scanning | Shipped | |
+| PIN lock | Shipped | Argon2id; **no rate-limit — Phase 2 item 1** |
+| Duress / decoy PIN | Designed | Spec approved 2026-07-12; Phase 2 item 2 |
+| Biometric unlock | Shipped | UI-gate only; Keystore binding — Phase 2 |
+| Seed backup / verify | Shipped | |
+| Seed recovery | Shipped | Universal Restore + foreign-seed sweep (v3.9.0) |
+| Self-healing startup | Shipped | v3.10.23 |
+| Tx history / detail | Shipped | |
+| Multi-network | Shipped | mainnet / testnet26 flavors, network toggle |
+| Digi-ID | Shipped | One-tap DigiScope login; **key isolation pending — Phase 2 item 4** |
+| DigiAsset send/receive | **Shipped** | v3.5.21–3.5.28 (June appendix was stale) |
+| DigiDollar send/receive | Testnet | Mainnet at softfork activation, **audit-gated** |
+| DigiDollar vault lifecycle | Not started | Phase 3 item 3 — the flagship |
+| PSBT (BIP 174 + Taproot fields) | Not started | Phase 3 item 1 |
+| Watch-only (xpub/descriptor) | Not started | Phase 3 item 2 |
+| Multi-algo security dashboard | Not started | Phase 3 item 4 |
 | Coin control | Not started | Phase 3 |
+| RBF | Not started | Phase 3 |
 | Sweep paper wallet | Not started | Phase 3 |
-| DigiAsset send | Partial | Detection shipped; send stubbed |
-| Hardware wallet (Coldcard QR) | Not started | Phase 4, PSBT-dependent |
-| Hardware wallet (USB) | Out of scope | Android USB OTG fragility, QR preferred |
-| CSV export | Not started | Phase 3 small increment |
+| Address book | Not started | Phase 3, local-only |
+| Multisig | Not started | Phase 3, last — post-PSBT/vaults |
+| Hardware wallet (Coldcard QR) | Not started | Phase 4 |
+| Hardware wallet (USB) | Out of scope | QR preferred |
 | Multiple accounts | Not started | Phase 4 |
-| Tor as transport | Shipped (opt-in, off by default) | Routing fixed v3.7.5 (`SafeSocks=0`); no-clearnet-fallback bug residual — Phase 2 |
-| BIP 157/158 compact filters | **Shipped `v3.5.39`** | Default sync mode (`SyncMode.BOTH`: bloom + compact filters in parallel; `COMPACT_FILTERS_ONLY` selectable), 120s bloom-fallback watchdog. Remaining Phase-1 work is peer diversity + bloom deprecation, not the client. |
-| Dandelion++ stem submission | Shipped `v3.7.0` | SPV stem-submit on the live v8.26 network (the 9.26 dependency was incorrect); seeder-tagged dandelion peers + random embargo/fluff fallback so delivery is never sacrificed |
+| BIP 157/158 compact filters | **Shipped — only sync path** | Bloom wire path removed v3.10.5–3.10.15; checkpoint cross-check (observe) v3.10.25 |
+| BIP 37 bloom | **Removed** | Not fallback — removed |
+| Dandelion++ | Shipped v3.7.0 | Opt-in stem submission |
+| Tor as transport | Shipped, opt-in OFF | 2026-07-02 decision; loud-fallback fix — Phase 2 item 5 |
+| Own-node pairing | Primitive shipped v3.10.1 | First-class flow — Phase 1 remainder |
+| In-app bug reporting | Shipped v3.10.26 | Pre-filled device/sync context; DGB bounties |
+| CSV export | Not started | Phase 3 small increment |
+| F-Droid / Play Store | Not started | Phase 4; F-Droid first |
+| Third-party audit | Not started | Phase 4 **gate** for DigiDollar mainnet + duress promotion |
 
 ## Versioning
 
-- **3.X.Y** — current line (at v3.7.6). `Y` = patch (bug fixes, sovereignty
-  hardening increments); `X` = minor (feature batches — 3.5→3.6→3.7).
-- **X.0.0** — major. RETIRED trigger: "4.0.0 = BIP157/158 lands" — BIP157/158
-  actually shipped inside the 3.5.x line (v3.5.39) without a major bump, so
-  that premise is dead. A new major trigger is an **open decision**: candidates
-  are removal of the legacy bloom path, a true wire-protocol change, or the
-  multisig/PSBT feature line. Until chosen, stay on the 3.X.Y cadence.
+- **3.X.Y** — current line (at v3.10.26). `Y` = patch; `X` = minor
+  feature batches.
+- **4.0.0 — trigger resolved.** The June revision left the major
+  trigger as an open decision after "4.0.0 = BIP157/158 lands" died
+  (it shipped inside 3.5.x). Its own fallback candidate — removal of
+  the legacy bloom path — has since *happened* (v3.10.5–3.10.15).
+  Decision: **v4.0.0 ships when Phase 1's remainder lands** (own-node
+  pairing, oracle bootstrap, active `cfcheckpt` rejection), so the
+  major version means "cannot leak, cannot be stranded" — both halves
+  true. Subsequent major candidates: the multisig/PSBT line as 5.0.0
+  if it warrants it.
 
 ## What this roadmap is not
 
-- Not a sprint plan. Effort sizes are rough; dependencies are called out
-  but dates are not.
-- Not exhaustive. Minor UX fixes, translation updates, detekt hygiene,
-  and dependency bumps happen continuously and don't belong here.
-- Not a commitment to ship in this exact order. If a critical user-reported
-  bug (like the send-history-vanishing bug v3.5.11 fixed) appears mid-phase,
-  it takes priority.
+- Not a sprint plan. Effort sizes are rough; dependencies are called
+  out but dates are not.
+- Not exhaustive. UX fixes, translations, detekt hygiene, and
+  dependency bumps happen continuously and don't belong here.
+- Not a commitment to this exact order. A critical user-reported bug
+  takes priority mid-phase — v3.10.22's sync-freeze fix over a planned
+  feature is the standing example of that rule working.
