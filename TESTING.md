@@ -1,127 +1,121 @@
-# DigiByte Wallet v3.0.3-beta — Test Report
+# DigiByte Android Wallet — Test Suite
 
-**Date:** 2026-03-28
-**APK SHA-256:** `6ffef7a6b6a50431469b424e68fcc0666182ed52dd67192f212ec9eca30e214d`
-**Device:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28)
+**Version:** v3.10.27 (`app/build.gradle.kts` `versionName` — source of truth)
+**Branch:** `develop` (canonical integration branch)
+**Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35, 16 KB page-size coverage)
 
-## Test Summary
+This document describes the repeatable test suite that ships in the repo. It is a description of *what tests exist and how to run them*, not a point-in-time pass/fail report for any single build.
 
-| Suite | Passed | Failed | Total |
-|-------|--------|--------|-------|
-| Unit Tests | 120 | 0 | 120 |
-| Security Tests | 34 | 0 | 34 |
-| Functional (API) | 10 | 1 | 11 |
-| MobSF Static Analysis | — | — | Clean |
-| **Total** | **164** | **1** | **165** |
+## Test Tiers at a Glance
 
-## Unit Tests (120/120)
+| Tier | Location | Files | `@Test` methods | Runs on |
+|------|----------|-------|-----------------|---------|
+| JVM unit tests | `app/src/test`, `core/src/test` | 43 | 348 | Host JVM (no device) |
+| — security subset | `core/src/test/.../security` | 4 | 42 | Host JVM (no device) |
+| Instrumented tests | `core/src/androidTest`, `native/src/androidTest` | 19 | 73 | Device / emulator |
+| Native host KATs | `native/src/test/host` | 22 dirs (21 runners) | — (C, exit 0/1) | Host with clang |
+| Pre-publish suite | `scripts/pre-publish-test.sh` | 8 scenarios (A–H) | — (UI/emulator) | Emulators API 28/33/34/35 |
+
+Total Kotlin `*Test.kt` files: **62** (348 unit + 73 instrumented `@Test` methods). Counts above are current as of v3.10.27; re-derive with the `grep -c '@Test'` / `find` commands rather than trusting the numbers if the suite has grown.
+
+## JVM Unit Tests (host, no device)
 
 ```bash
+# All unit tests (mainnet debug variant)
 ./gradlew testMainnetDebugUnitTest
 ```
 
-| Test Class | Tests | Status |
-|------------|-------|--------|
-| DigiAssetDecoderTest | 26 | PASS |
-| BitReaderTest | 15 | PASS |
-| CidVerifierTest | 11 | PASS |
-| NativeMemorySecurityTest | 11 | PASS |
-| SeedIsolationTest | 9 | PASS |
-| DigiIdRequestTest | 8 | PASS |
-| ManifestSecurityTest | 8 | PASS |
-| DigiAssetRulesTest | 7 | PASS |
-| CoinSelectorTest | 7 | PASS |
-| IpfsClientTest | 7 | PASS |
-| NetworkLeakTest | 6 | PASS |
-| PriceProviderTest | 5 | PASS |
+43 test files, 348 `@Test` methods across `app/src/test` (9 files, 64 methods) and `core/src/test` (34 files, 284 methods). Coverage spans:
 
-## Security Tests (34/34)
+- **DigiAsset v2** — decoder, encoder, decoder fuzz, asset rules, bit reader, coin selector (+ security variant), history backfill
+- **IPFS / metadata** — CID verifier, IPFS client, asset-metadata sanitization
+- **Recovery / sweep** — legacy derivation vectors, foreign-seed sweep selection, sweep destination/outcome/inputs, amount-provenance gate, UTXO source, scan-classify
+- **Wallet core** — BIP84 derivation, coin selection, price provider, outgoing-tx-store override, post-upgrade reconciler
+- **Sync / network policy** — sync frontier, BIP158 watchdog policy, block-persistence policy, peer-services policy, foreground-readiness policy, DigiScope pins, custom node, dandelion broadcast policy, Tor manager
+- **UI logic** — DigiDollar format + send validation, asset image resolver, external-URL safety, bug-report link
+- **Security** — see below
+
+## Security Suite (subset of the unit tests)
 
 ```bash
+# Security tests only (host JVM)
 ./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"
 ```
 
-| Test Class | Tests | Coverage |
-|------------|-------|----------|
-| SeedIsolationTest | 9 | JNI API surface — no methods return seed/key material |
-| NativeMemorySecurityTest | 11 | C code: secure_zero, BRKeyClean, volatile+barrier, /dev/urandom |
-| ManifestSecurityTest | 8 | allowBackup=false, no exports, minimal permissions |
-| NetworkLeakTest | 6 | No seed references in HTTP/WS/JSON code |
+**42 security tests** across 4 files in `core/src/test/java/io/digibyte/core/security/`:
 
-## MobSF Static Analysis
+| Test class | `@Test` | Coverage |
+|------------|---------|----------|
+| `NativeMemorySecurityTest` | 17 | C `secure_zero`, `BRKeyClean`, volatile + compiler barrier, `/dev/urandom`, `g_seed` encapsulation |
+| `SeedIsolationTest` | 11 | JNI API surface — no method returns seed/key material; accessor-only `g_seed` |
+| `ManifestSecurityTest` | 8 | `allowBackup=false`, no exported components, minimal permissions |
+| `NetworkLeakTest` | 6 | No seed references in HTTP / WebSocket / JSON code paths |
 
-- **Trackers detected:** 0
-- **Secrets leaked:** 0 (only secp256k1 curve constants and localization strings)
-- **Exported components:** 1 (Compose PreviewActivity — debug build only)
-- **Backup:** Disabled
-- **Cleartext traffic:** Disabled
+(Instrumented security tests — `KeyStoreManagerTest`, `PinManagerTest` — live under `core/src/androidTest/.../security` and are counted in the instrumented tier, not the 42.)
 
-Full report: `security/reports/mobsf-report.json`
+## Instrumented Tests (device / emulator)
 
-## Functional Tests (10/11)
+Require a connected device or emulator (`adb devices`). 19 files, 73 `@Test` methods:
 
-Tested against live DigiScope backend (`api.digiscope.me`) and on-chain via DigiByte node.
+- `core/src/androidTest` (5 files, 31 methods) — Room DB migration, `TransactionDao`, `UtxoDao`, `KeyStoreManager`, `PinManager`
+- `native/src/androidTest` (14 files, 42 methods) — JNI bridge / asset / proxy, legacy sweep (derivation, amount guard, SegWit KAT, signed-tx KAT), Taproot (receive address, watch-set, sign transaction, reload balance), Universal Restore, wallet birth checkpoint, peer
 
-| # | Test | Result | Notes |
-|---|------|--------|-------|
-| 1 | On-chain balance scan | PASS | 2.00 DGB confirmed at `dgb1q3e7w9u...` (block 23,195,908) |
-| 2 | Hub channels (8 channels) | PASS | All seeded channels returned |
-| 3 | Hub profile (JLawTest) | PASS | custom_username displayed correctly |
-| 4 | Forum — create thread | PASS | Thread ID 2 created in Support channel |
-| 5 | Forum — reply to thread | PASS | Reply ID 1 |
-| 6 | Forum — read back thread + reply | PASS | Title + 1 reply verified |
-| 7 | Forum — upvote | PASS | `{"upvoted": true}` |
-| 8 | Chat messages (General) | PASS | 3 messages retrieved |
-| 9 | Handle availability | CHECK | Returns `available:true` for existing custom_username — handle vs custom_username column mismatch |
-| 10 | SPV sync complete | PASS | `bridge_syncStopped: sync complete` |
-| 11 | Digi-ID session validity | PASS | HTTP 200 on authenticated endpoint |
+## Native Host KATs (C, run on host with clang)
 
-## What Has Been Tested On-Device
+Known-answer tests under `native/src/test/host/`. Each KAT is a self-contained directory that compiles the **real** submodule C sources directly out of the tree with `clang` (representative of the NDK build) and exits `0` on all-pass / `1` on any failure. There is no aggregate runner — run each KAT's `run.sh` individually:
 
-- Wallet creation (new mnemonic generation)
-- Wallet recovery (restore from mnemonic)
-- PIN entry and biometric unlock
-- QR code scanning (Digi-ID and DigiByte addresses)
-- Digi-ID authentication flow (scan → confirm → biometric → sign → callback)
-- DigiScope Hub login (auto-JWT capture)
-- Community Hub chat (Enigma AI bot responded)
-- Community Hub forum (thread creation, display)
-- SPV sync to chain tip (block 23.2M+)
-- Block/peer persistence across restarts
-- Transaction detection via bloom filter rescan (2 DGB found)
-- DigiRunner mini-game (sprint, jump, coin collection, BTC obstacles)
-- Balance display and "Verifying transactions..." UX
+```bash
+# Example: BIP-340 Schnorr signing KAT
+./native/src/test/host/bip340_kat/run.sh
+```
 
-## What Has NOT Been Fully Tested
+**22 KAT directories** (21 have a `run.sh`; `gcs_match_kat` is a `*_main.c` source without a runner):
 
-> **These features need thorough testing before production. Use at your own risk.**
+- **Address / bech32** — `bech32m_kat`, `taproot_addr_kat`
+- **Taproot / BIP-340/341** — `bip340_kat` (Schnorr), `bip341_sighash_kat`, `bip341_sign_kat`, `bip341_signtx_kat`
+- **BIP-86 key derivation** — `bip86_derivation_kat`, `bip86_privkey_kat`
+- **Compact filters (BIP157/158)** — `cf_confirm_kat`, `cf_gate_kat`, `gcs_match_kat`
+- **Peer / network** — `peer_keepalive_kat`, `peer_penalty_kat`, `network_switch_kat`, `watched_addr_kat`
+- **Transactions / fees** — `tx_fee_vsize_kat`, `legacy_gap_uaf_kat`
+- **DigiDollar** — `digidollar_addr_encode_kat`, `digidollar_decode_kat`, `digidollar_send_kat`, `digidollar_realtx_kat`, `digidollar_wallet_kat`
 
-| Feature | Status | Risk |
-|---------|--------|------|
-| **Send DGB** | Built, not tested on mainnet | MEDIUM — could lose funds if tx construction is wrong |
-| **Receive DGB** | Partially tested (2 DGB received) | LOW — address generation verified |
-| **DigiAsset send/receive** | Built, NOT tested | HIGH — UTXO protection untested on real assets |
-| **Wallet restore on new device** | Not tested | MEDIUM — seed backup/restore path unverified |
-| **Tor routing** | Built, basic connection tested | MEDIUM — privacy guarantees unverified |
-| **Multi-device sync** | Not tested | LOW — SPV is stateless per-device |
-| **Large balance handling** | Not tested | LOW — coin selection tested in unit tests only |
-| **Fee estimation** | Built, not tested against real mempool | MEDIUM |
-| **Edge cases** | Network loss mid-sync, low battery, app kill during tx | UNKNOWN |
+## Pre-Publish Suite (emulator, API 28/33/34/35)
 
-## Security Audit Status
+```bash
+./scripts/pre-publish-test.sh              # all API levels
+./scripts/pre-publish-test.sh 33           # only API 33
+./scripts/pre-publish-test.sh 33 --skip-build
+./scripts/pre-publish-test.sh --test D     # single scenario
+```
 
-Full audit: `security/AUDIT-SUMMARY.md`
+8 scenarios run across emulators for API 28, 33, 34, 35 (AVDs `dgb-test-api28/33/34/35`). Results are written to `test-results/<timestamp>.txt`.
 
-| Finding | Severity | Status |
-|---------|----------|--------|
-| KeyStore key auth-bound | CRITICAL | **FIXED** — `setUserAuthenticationRequired(true)` |
-| Digi-ID callback domain validation | CRITICAL | **FIXED** — host checked against URI domain |
-| `g_seed` process-lifetime global | CRITICAL | **OPEN** — inherent to SPV model, documented |
-| Seed as Java String on heap | CRITICAL | **OPEN** — needs ByteArray refactor |
-| Certificate pinning | HIGH | **FIXED** — leaf + intermediate CA pins |
-| HTTP callbacks blocked | HIGH | **FIXED** |
-| Address redacted from logs | HIGH | **FIXED** |
-| Seed String on JVM heap | HIGH | **OPEN** — same root as CRITICAL-3 |
-| secure_zero LTO-proof | MEDIUM | **FIXED** — compiler barrier added |
-| Response body redacted | MEDIUM | **FIXED** |
-| Non-atomic wipe | MEDIUM | **FIXED** — prefs cleared before key deletion |
+| Scenario | Description |
+|----------|-------------|
+| A | Fresh install, no lock screen |
+| B | Fresh install, with lock screen |
+| C | Upgrade from previous version (`test-fixtures/previous-release.apk`) |
+| D | Wallet creation flow |
+| E | Wallet recovery flow |
+| F | Sync without ANR (compact-filter sync to tip) |
+| G | Send transaction (SKIP on emulator — needs a funded wallet / physical device) |
+| H | 60-second stability soak (crash watch) |
+
+The suite must pass before any release tag. Sync in scenario F is compact-filter-only (BIP157/158) — the bloom wire path and the Sync Mode toggle were removed across v3.10.5–3.10.15.
+
+## Static Analysis (MobSF)
+
+MobSF report: `security/reports/mobsf-report.json` (versioned snapshots alongside it, e.g. `mobsf-report-v3.6.6.json`, `mobsf-scorecard-v3.6.6.json`).
+
+Baseline expectations (see the MobSF false-positive baseline notes): 0 trackers; secrets flagged are only secp256k1 curve constants / localization strings; the single "exported component" is the Compose `PreviewActivity` (debug build only); backup disabled; cleartext traffic disabled.
+
+## Security Audit
+
+Authoritative audit: **`security/AUDIT-SUMMARY.md`** (do not maintain a second copy of the finding statuses here). Current CRITICAL dispositions:
+
+- **CRITICAL-1** — Resolved as designed: KeyStore key is *not* bound to user authentication (`setUserAuthenticationRequired` removed to avoid cross-API crashes); the app enforces its own PIN lock. **Residual (Phase 2):** no Keystore user-auth binding and no PIN rate-limit — a compromised app process can decrypt the seed without a device unlock.
+- **CRITICAL-2** — Resolved: `g_seed` is `static` to `jni_wallet.c` with an accessor-only API (`seed_sign_transaction`, `seed_derive_key`, `seed_is_valid`, `seed_zero`).
+- **CRITICAL-3** — Resolved: `loadSeed()` returns a `ByteArray` zeroed after use; `createWalletFromBytes` / `recoverWalletFromBytes` accept `jbyteArray` with `secure_zero()` on the C stack. The mnemonic never becomes an immutable JVM `String` on the restore path.
+- **CRITICAL-4** — Resolved: Digi-ID callback domain validated against the URI host; HTTP (`u=1`) callbacks blocked. **Residual (Phase 2):** Digi-ID still signs with the first wallet address (`m/44'/20'/0'/0/0`) rather than an isolated subtree.
+
+A bug bounty program (up to 100K DGB) covers v3.5.31+; report to `security@digiscope.me`.

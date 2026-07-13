@@ -13,20 +13,22 @@ and file references. Kept in sync with `ROADMAP.md` phases.
 | BIP 21 | URI scheme (`digibyte:…`) | Implemented | `core/…/model/DigiByteUri.kt` |
 | BIP 22 / 23 / 152 | Block template / Compact blocks | Not applicable (wallet, not miner/node) | — |
 | BIP 32 | Hierarchical Deterministic Wallets | Implemented (non-standard variant — see detail §1) | `native/…/BRBIP32Sequence.{c,h}` |
-| BIP 37 | Connection Bloom filtering | Implemented (current SPV data layer) | `native/…/BRBloomFilter.{c,h}`, `native/…/BRPeer.c`, `native/…/BRPeerManager.c` |
+| BIP 37 | Connection Bloom filtering | **Removed** as a data path — never loaded (see §3); C code retained pending X.0.0 deletion | `native/…/BRBloomFilter.{c,h}` (dead on the app path) |
 | BIP 39 | Mnemonic code for seeds | Implemented | `native/…/BRBIP39Mnemonic.{c,h}` + `BRBIP39WordsEn.h` |
 | BIP 44 | Multi-account hierarchy | Partial — single account (`account'=0`); multi-account is Phase 4 | `native/…/BRBIP32Sequence.c` |
 | BIP 49 | Derivation for P2WPKH-nested-in-P2SH | Not applicable — we use native SegWit (BIP 84) | — |
 | BIP 84 | Derivation for P2WPKH (native SegWit) | Implemented (v3.4.0+) | `native/…/BRBIP32Sequence.c` (see detail §2) |
+| BIP 86 | Derivation for single-key P2TR | Implemented — receive only (`m/86'/20'/0'`); see §7 | `native/…/BRBIP32Sequence.c`, `app/…/ui/wallet/ReceiveScreen.kt` |
 | BIP 111 | `NODE_BLOOM` service bit advertisement | Implemented (advertised, not yet enforced on selection) | `native/…/BRPeer.h` |
 | BIP 125 | Opt-in Replace-by-Fee | Not started | Phase 3 |
 | BIP 141 | Segregated Witness | Implemented (via C core) | `native/…/BRTransaction.c`, `BRAddress.c` |
 | BIP 143 | Signature hash for SegWit | Implemented | `native/…/BRTransaction.c` |
-| BIP 157 | Client-side block filtering (P2P) | **Planned — Phase 1** | `docs/roadmap/phase1-issues.md` |
-| BIP 158 | Compact Block Filters for light clients | **Planned — Phase 1** | `docs/roadmap/phase1-issues.md` |
+| BIP 157 | Client-side block filtering (P2P) | **Implemented — the wallet's sole sync path** (see §4) | `native/…/BRCompactFilterChain.{c,h}`, `native/…/BRPeer.c` (cfheaders/cfilter handlers) |
+| BIP 158 | Compact Block Filters for light clients | **Implemented** — GCS filter decoder (see §4) | `native/…/BRGCSFilter.{c,h}` |
 | BIP 173 | Bech32 encoding | Implemented | `native/…/BRBech32.{c,h}` |
-| BIP 174 | Partially Signed Bitcoin Transactions (PSBT) | Not started — Phase 3 foundation | Planned at `core/…/psbt/` |
-| BIP 340 / 341 / 342 | Schnorr + Taproot | Not planned — DigiByte protocol support is upstream-gated | — |
+| BIP 174 | Partially Signed Bitcoin Transactions (PSBT) | **Planned — Phase 3** (not implemented; no code exists yet — see §6) | — |
+| BIP 340 | Schnorr Signatures | Implemented | `native/…/BRKey.c` (`BRKeySchnorrSign`), `native/…/secp256k1` (schnorrsig module) |
+| BIP 341 / 342 | Taproot / Tapscript | **Partial** — BIP 341 key-path (BIP 86) receive + signing shipped; no BIP 342 tapscript, no general Taproot spend UX (see §7) | `native/…/BRTransaction.c`, `native/…/BRKey.c`, `native/…/BRAddress.c` |
 | SLIP-0010 | Universal private key derivation | Not applicable (BIP 32 variant used directly) | — |
 | SLIP-0044 | Registered coin types | Implemented (coin type 20 for DigiByte) | `native/…/BRBIP32Sequence.c` |
 
@@ -65,38 +67,61 @@ Address encoding: bech32 (BIP 173) with HRP `dgb`, producing
 Legacy P2PKH (`D…`) remains the selectable "legacy" format on the
 Receive screen but isn't the default.
 
-### §3 — BIP 37 (current SPV, being phased out)
+### §3 — BIP 37 (removed data path)
 
-Currently the wallet's data layer. On each peer connection,
-`BRPeerManager.c` constructs a bloom filter from the wallet's address
-set and calls `BRPeerSendFilterload`. Peers respond with merkleblocks
-and relevant transactions.
+Bloom filtering was the wallet's SPV data layer through the v3.4–
+v3.10.4 line. It was removed as a data path across the v3.10.5–
+v3.10.15 releases when the wallet moved to compact-filters-only, and
+the Sync Mode UI toggle was removed with it.
 
-Known privacy limitations (see `THREAT_MODEL.md` residual risk 1):
-the bloom filter probabilistically reveals the wallet's address set
-to every peer it connects to. The Phase 1 migration to BIP 157/158
-closes this leak; BIP 37 remains implemented as a fallback during
-network rollout and will be retirement-flagged once the
-`NODE_COMPACT_FILTERS` (0x40) peer population is healthy.
+Removal is enforced at two layers:
 
-### §4 — BIP 157 / 158 (planned Phase 1)
+- Kotlin: `syncModeFor` (`core/…/settings/CustomNode.kt`)
+  unconditionally returns `COMPACT_FILTERS_ONLY`. The stored
+  `sync_mode` pref is ignored; the enum members
+  (`BLOOM_ONLY`, `BOTH`) are retained only for call-site compatibility.
+- Native: `_BRPeerManagerLoadBloomFilter` (`native/…/BRPeerManager.c`)
+  early-returns when `syncMode == BR_SYNC_MODE_COMPACT_FILTERS_ONLY`,
+  so `BRPeerSendFilterload` is never reached and the address set never
+  leaves the device via a bloom filterload.
 
-Target: the wallet becomes the first mobile SPV client for
-DigiByte on compact block filters. Design decisions encoded in
-`docs/roadmap/phase1-issues.md`:
+There is no longer a bloom fallback or a 120s bloom watchdog — the old
+"compact when peers advertise 0x40, bloom otherwise" transitional
+scheme is gone. The C bloom implementation (`BRBloomFilter.{c,h}` and
+the `_BRPeerManagerLoadBloomFilter` code path) still compiles but is
+dead on the app path; physical deletion is deferred to the next major
+(X.0.0), which is the trigger reserved for removing the legacy bloom
+code.
 
-- GCS decoder ported verbatim from Bitcoin Core v26.2 (inherited in
-  DGB Core 8.26) rather than reimplemented from scratch.
-- 10,000-block cadence for shipped filter-header checkpoint
-  bootstrap hints (vs BIP 157's 1000-block native `cfcheckpt`
-  cadence).
-- Runtime peer-quorum verification of all filter-header values,
-  following the neutrino model. Shipped checkpoints are detected as
-  wrong via this quorum; they are bootstrap hints, not authority.
-- Dual-mode fallback: compact when ≥ `PEER_MAX_CONNECTIONS/2` peers
-  advertise 0x40, bloom otherwise, transitional only.
+### §4 — BIP 157 / 158 (shipped; sole sync path)
 
-See `docs/roadmap/phase1-issues.md` for the full 20-issue breakdown.
+Compact block filters have been default-on since v3.5.39 and are the
+wallet's only sync path since the bloom removal in the v3.10.x line.
+On the compact-filter path the wallet's address set never leaves the
+device. Implementation:
+
+- GCS filter decoder in `native/…/BRGCSFilter.{c,h}`; the
+  `getcfheaders`/`cfheaders` and `getcfilters`/`cfilter` wire handlers
+  live in `native/…/BRPeer.c`, and the filter-header chain is persisted
+  by `native/…/BRCompactFilterChain.{c,h}` (`dgb_sync_data` →
+  `saved_filter_headers`). `cf_birth_height` (`dgb_settings`) bounds
+  the scan.
+- Filter-header trust is continuity-anchored (trust-on-first-use): the
+  chain extends from a stored anchor header, and a run of peers that
+  disagree with our tip is recorded rather than banned (an honest
+  majority disagreeing means our chain is the outlier).
+- Hardcoded operator-generated filter-header checkpoints ship in
+  `native/…/BRCompactFilterCheckpoints.h` (476 headers at 50,000-block
+  spacing, DGB mainnet). As of v3.10.27 they are cross-checked in
+  **OBSERVE-ONLY mode** (`BRPeerManager.c`, R1 of the Neutrino review):
+  each in-range checkpoint is compared against the wallet's own
+  computed header and logged as MATCH/MISMATCH, but never rejected or
+  banned. Turning this into enforced trust (reject + ban on mismatch,
+  gate the single-peer re-anchor) is a Phase 2 item.
+- There is no peer-quorum verification. A `getcfcheckpt` wire message
+  exists (`BRPeerSendGetCFCheckpt`) but is not driven by the sync loop.
+- If filter peers stall, the session does not fall back to bloom (that
+  path was removed); it keeps retrying compact-filter peers.
 
 ### §5 — BIP 21 (payment URIs)
 
@@ -122,6 +147,40 @@ Implementation plan:
   single input at a time, Kotlin orchestrates the combine/finalize
   steps.
 - QR transport for the typical air-gapped signer workflow.
+
+### §7 — BIP 340 / 341 / 342 (Taproot, partial)
+
+What is shipped:
+
+- **BIP 340 (Schnorr):** fully implemented. The vendored secp256k1
+  amalgamation is built with the `schnorrsig` + `extrakeys` modules,
+  and `BRKeySchnorrSign` / `BRKeyTaggedHash` (`native/…/BRKey.c`) sign
+  BIP-340 messages. Covered by the `bip340_kat` host known-answer test.
+- **BIP 341 key-path (via BIP 86):** implemented and KAT-tested. The
+  C core computes the BIP-341 key-path sighash
+  (`_BRTransactionTaprootSighash`, `native/…/BRTransaction.c`), applies
+  the BIP-86 taptweak and Schnorr-signs it (`BRKeyTaprootSchnorrSign`,
+  `BRKeyTaprootOutputKey`), and recognizes/spends witness-v1 key-path
+  inputs by matching the output key X(Q). Host KATs:
+  `bip341_sighash_kat`, `bip341_sign_kat`, `bip341_signtx_kat`,
+  `taproot_addr_kat`, `bech32m_kat`, `bip86_derivation_kat`,
+  `bip86_privkey_kat`.
+- **P2TR receive (UI):** shipped in v3.10.0. The Receive screen exposes
+  a "Taproot (dgb1p…)" address derived at `m/86'/20'/0'`
+  (`app/…/ui/wallet/ReceiveScreen.kt`, `NativeBridge.getReceiveAddress`).
+- DigiDollar (a Taproot construct) reuses this key-path signer; its
+  address codec and sighash paths carry their own KATs
+  (`digidollar_addr_encode_kat`, `digidollar_send_kat`, etc.).
+
+What is NOT implemented (why this is Partial):
+
+- **No BIP 342 (Tapscript):** there is no tapscript execution,
+  `OP_CHECKSIGADD`, tapleaf/control-block handling, or script-path
+  spend. Only single-key key-path Taproot is supported.
+- **No general Taproot spend UX:** the Send screen has no Taproot
+  spend flow. Key-path signing exists in the C core (and is exercised
+  by DigiDollar), but sweeping/spending arbitrary P2TR from the wallet
+  UI is not wired up.
 
 ## How this doc is kept honest
 

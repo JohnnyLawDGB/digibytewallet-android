@@ -5,8 +5,8 @@
 Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C native core via JNI, hardware-backed security, DigiAssets v2 (detection), Digi-ID, Community Hub.
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
-**Branch:** `phase1-modernization`
-**Version:** v3.7.6  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
+**Version:** v3.10.27 (versionCode 30106)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -54,10 +54,10 @@ adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 - `ByteArray.fill(0)` in `finally` blocks on all seed paths
 - 42 security tests verify these properties
 
-- **Sync modes (`dgb_settings/sync_mode`, `NativeBridge.SyncMode`):** default is `BOTH` — bloom + BIP158 compact filters run in parallel. Other modes: `COMPACT_FILTERS_ONLY` (max address privacy) and `BLOOM_ONLY`. User-selectable in Settings → Sync Mode (`SyncModeScreen.kt`).
-- **BIP157/158 compact filters (shipped v3.5.39, default-on):** native GCS decoder + `cfheaders`/`cfilter` wire handlers + filter-header chain persistence. In the compact-filter path the wallet's address set never leaves the device. `cf_birth_height` (`dgb_settings`) bounds the scan.
-- **120s BIP158→bloom watchdog:** if filter peers make no progress, the session falls back to `BLOOM_ONLY` (resets next launch so filters are retried).
-- **Bloom path (parallel / fallback):** priority bloom peer `digiscope.me` injected on sync start; wallet fetches 10+ bloom peers from `api.digiscope.me/api/peers/bloom` (cached hourly). `PEER_MAX_CONNECTIONS = 5`.
+- **Compact-filters-only sync (`NativeBridge.SyncMode`, `syncModeFor` in `CustomNode.kt`):** the wallet ALWAYS runs BIP157/158 compact filters. `syncModeFor(...)` unconditionally returns `COMPACT_FILTERS_ONLY` and ignores the stored `dgb_settings/sync_mode` pref; the old Sync Mode toggle/screen (`SyncModeScreen.kt`) is removed. Bloom (BIP37) is gone as a data path — no `filterload` ever goes on the wire, so the wallet's address set never leaves the device. The `SyncMode` enum still defines `BLOOM_ONLY`/`COMPACT_FILTERS_ONLY` and the native bloom C code is retained (its removal is the reserved X.0.0 trigger), but bloom is never selected.
+- **BIP157/158 compact filters (shipped v3.5.39):** native GCS decoder + `cfheaders`/`cfilter` wire handlers + filter-header chain persistence. `cf_birth_height` (`dgb_settings`) bounds the scan.
+- **BIP158 watchdog (`SyncService.startBip158Watchdog`, `BIP158_FALLBACK_TIMEOUT_MS = 120s`):** if the cfheaders chain stalls, its only recovery is a one-time chain re-anchor at the block floor (`reanchorCompactFilterChainAtFloor`) — it NEVER degrades to bloom (every former bloom-fallback branch now stays on filters). Testnet26 and a configured own-node likewise force CF-only.
+- **Peer discovery:** priority peer `digiscope.me` injected on sync start; the wallet fetches filter-capable peers from the capability-aware seeder `api.digiscope.me/api/peers` (cached hourly; falls through to bloom-capable peers only when no filter peers are advertised, but still dials them as CF peers). Native `PEER_MAX_CONNECTIONS = 8`.
 - **Dandelion++ (opt-in, default OFF):** stem submission to a seeder-tagged peer with Kotlin embargo→fluff fallback. Toggle in Settings → Network Info (`Broadcaster` + `SyncService.injectDandelionPeers`).
 - **Tor transport (opt-in, default OFF):** no-exec/dlopen kmp-tor, SOCKS5 into the C core (routing fixed v3.7.5, `SafeSocks=0`). Advanced toggle in Settings → Network Info.
 - Rescan locks to priority peer via `BRPeerManagerSetFixedPeer` then clears after completion.
@@ -108,7 +108,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 ### SharedPreferences Keys
 - `dgb_wallet_seed` — encrypted mnemonic + IV + seed fingerprint
 - `dgb_sync_data` — saved blocks (hex), saved peers (hex), `saved_filter_headers` (compact-filter header chain, hex), has_synced flag, last_balance, saved_transactions
-- `dgb_settings` — `sync_mode` (BOTH / COMPACT_FILTERS_ONLY / BLOOM_ONLY), `cf_birth_height` (compact-filter scan floor)
+- `dgb_settings` — `sync_mode` (legacy key, now ignored — sync is always compact-filters-only; see `syncModeFor`), `cf_birth_height` (compact-filter scan floor)
 - `dgb_digiscope` — JWT session token for Hub
 - `dgb_db_key` — encrypted DB passphrase
 - `dgb_bloom_peers` — cached bloom peer list from seeder API
