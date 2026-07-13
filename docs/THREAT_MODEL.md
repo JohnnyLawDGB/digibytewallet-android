@@ -47,8 +47,9 @@ Ordered roughly from lowest capability to highest:
   protocol.
 - **T4 — Malicious peer.** Serves crafted responses to attempt DoS,
   eclipse, or inject false chain data.
-- **T5 — Compromised bloom seeder** (api.digiscope.me). Can bias the
-  wallet's peer selection toward hostile peers.
+- **T5 — Compromised peer seeder** (api.digiscope.me). Serves the
+  capability-tagged compact-filter peer list; can bias the wallet's
+  peer selection toward hostile peers.
 - **T6 — Compromised DigiScope backend.** Can lie about Hub state and
   Digi-ID sessions.
 - **T7 — Attacker with unlocked device.** Physical access while the
@@ -71,10 +72,10 @@ exposure. Bold entries are known residual risks.
 | | A1 seed | A3 addresses | A4 tx history |
 |--|---------|---------------|---------------|
 | T1 casual observer | `FLAG_SECURE` on seed screens blocks screenshots | — | — |
-| T2 network observer | TLS on all HTTP; P2P traffic is encrypted-by-content only, not transport | TLS hides host, **P2P traffic leaks address set via bloom filter until Phase 1** | TLS hides host, **block request patterns leak tx interest** |
-| T3 honest peer | — | **Bloom filterload reveals filtered address set to every connected peer** | **Merkleblock responses reveal wallet tx set to each peer** |
-| T4 malicious peer | — | Same as T3 plus active correlation across connected peers | Same as T3 |
-| T5 compromised bloom seeder | — | Can eclipse wallet onto hostile peers (then T3/T4 apply) | Same |
+| T2 network observer | TLS on all HTTP; P2P traffic is encrypted-by-content only, not transport | TLS hides host; compact-filter sync sends no address data to peers, so P2P traffic no longer leaks the address set | TLS hides host, **block-request patterns leak tx interest** |
+| T3 honest peer | — | Compact filters (BIP 157/158) are built by the peer and matched on-device; the wallet sends no address data, so the address set never leaves the device via sync | Wallet fetches full blocks on filter match (no merkleblock/bloom path); **which blocks it fetches still leaks tx interest to the serving peer** |
+| T4 malicious peer | — | Same as T3 — no address data sent | Same as T3, plus **filter-header-source trust**: the CF filter-header chain is trust-on-first-use, checkpoint-anchored; with a single peer the wallet can TOFU-accept a divergent chain. v3.10.25 added an observe-and-log checkpoint cross-check (compiled-in mainnet checkpoints), not yet enforcing |
+| T5 compromised peer seeder | — | Can bias peer selection / eclipse the wallet onto hostile peers (then T3/T4 apply, including filter-header TOFU adoption) | Same |
 | T6 compromised DigiScope backend | — | Can correlate Digi-ID login events with IP address | — |
 | T7 unlocked device | Seed in memory while app is alive, accessible to a sophisticated attacker | Same | Full access |
 | T8 locked device | Sealed with Keystore-wrapped AES-GCM key; Keystore key is hardware-backed where supported | Same | Room DB encrypted with SQLCipher |
@@ -115,19 +116,29 @@ exposure. Bold entries are known residual risks.
 
 ### Data layer
 
-- **Current (bloom, BIP 37):** wallet constructs a filter containing
-  its address hashes and sends it to each connected peer; peers reply
-  with merkleblocks and transactions. **Leaks the address set
-  probabilistically to every peer.**
-- **Phase 1 (compact filters, BIP 157/158):** filters are constructed
-  by the peer and served to the wallet; the wallet matches filters
-  locally and requests full blocks on match, never sending wallet
-  state to peers. **Closes the plaintext address leak.**
+- **Compact filters (BIP 157/158) — the only sync path.** Filters are
+  constructed by the peer and served to the wallet; the wallet matches
+  them locally and requests full blocks on match, never sending wallet
+  state to peers. The address set never leaves the device via sync.
+- **Bloom (BIP 37) removed.** The bloom wire path was retired across
+  v3.10.5–3.10.15 and the Sync Mode toggle deleted; `syncModeFor` is
+  hardcoded to `COMPACT_FILTERS_ONLY` and the BIP158 watchdog no longer
+  falls back to a bloom filterload on any code path (`fallbackToBloom`
+  is unreferenced). The `BRBloomFilter.c` source remains compiled in but
+  dormant, slated for deletion at the next major (X.0.0).
+- **Residual — filter-header-source trust.** The filter-header chain is
+  trust-on-first-use: with no persisted chain the wallet anchors at the
+  wallet birth height and accepts the first peer's cfheaders, bounded by
+  a continuity check and a K-distinct-disagreer re-anchor. A single
+  peer's chain can still be TOFU-accepted. v3.10.25 added an observe-mode
+  cross-check against compiled-in mainnet filter-header checkpoints
+  (`BRMainNetCFCheckpoints`) that logs MATCH/MISMATCH but never rejects
+  or bans; enforcement is Phase 2.
 
 ### Network layer
 
 - Tor (optional, opt-in today): kmp-tor exec mode, separate process
-  for crash isolation. Routes P2P traffic and bloom-seeder HTTP
+  for crash isolation. Routes P2P traffic and peer-seeder HTTP
   through SOCKS5 when enabled. **Silent fallback to clearnet on Tor
   failure is a known gap — Phase 2 surfaces a loud warning.**
 - Certificate pinning on `api.digiscope.me` to defend against
@@ -145,14 +156,22 @@ exposure. Bold entries are known residual risks.
 
 Named explicitly so they don't go unfixed by being unspoken.
 
-1. **Bloom filter address leakage (current data layer).** Any peer we
-   connect to learns a probabilistic view of our address set. Phase 1
-   closes this.
-2. **Bloom seeder as soft trusted third party.** `api.digiscope.me` is
-   operated by the wallet author. Compromise or coercion could eclipse
-   users onto hostile peers. Scope is narrow: the seeder does not
-   serve chain data itself, only peer addresses. Phase 1 demotes
-   this from a required bootstrap to one of several optional sources.
+1. **Filter-header-source trust (compact-filter data layer).** The old
+   bloom address leak is closed — bloom is removed and compact-filter
+   sync sends no address data, so the address set can no longer leave
+   the device via sync. The residual is trust in the filter-header
+   source: the CF filter-header chain is trust-on-first-use,
+   checkpoint-anchored, and a single peer can be TOFU-accepted.
+   v3.10.25 added an observe-and-log checkpoint cross-check (compiled-in
+   mainnet checkpoints, logs MATCH/MISMATCH only); enforcing it
+   (reject + ban on mismatch, gate single-peer re-anchor) is Phase 2.
+2. **Peer seeder as soft trusted third party.** `api.digiscope.me` is
+   operated by the wallet author and supplies the capability-tagged
+   compact-filter peer list. Compromise or coercion could eclipse users
+   onto hostile peers (which then feed a divergent filter-header chain —
+   see risk 1). Scope is narrow: the seeder serves only peer addresses,
+   not chain data. Reducing this to one of several optional bootstrap
+   sources (oracle-node bootstrap, own-node fallback) is roadmapped.
 3. **PIN has no rate-limit.** An attacker with APK access and
    sustained compute can brute-force the PIN against the encrypted
    seed blob. Argon2id makes this expensive; exponential backoff
@@ -170,8 +189,9 @@ Named explicitly so they don't go unfixed by being unspoken.
    with `m/44'/20'/0'/0/0`. A Digi-ID signature produced in response
    to a malicious callback exposes the first address's signing
    capability; isolation to a separate subtree is Phase 2.
-7. **Block-request correlation.** Even in compact-filter mode, the
-   wallet still fetches full blocks on filter match. A surveillant
+7. **Block-request correlation.** In compact-filter mode (the only
+   sync path) the wallet still fetches full blocks on filter match. A
+   surveillant
    peer observing the wallet's block requests over time can infer
    which filters matched even without seeing the filter contents.
    Mitigated by wallet-birthday scoping (only request filters for
@@ -195,6 +215,11 @@ Named explicitly so they don't go unfixed by being unspoken.
 ## Change log
 
 - 2026-04-13 — initial version, documents pre-Phase-1 state.
-- (Phase 1) — updates the data-layer rows when compact filters land;
-  closes residual risk 1; narrows residual risk 2.
-- (Phase 2) — closes residual risks 3, 4, 5, 6.
+- 2026-07-13 (v3.10.27 true-up) — bloom removed as a data path; compact
+  filters are the only sync path, closing the sync-path address leak
+  (old residual risk 1). New residual is filter-header-source trust;
+  v3.10.25 shipped an observe-mode checkpoint cross-check ahead of
+  Phase 2 enforcement. Peer/observer matrix rows and the seeder row
+  updated.
+- (Phase 2) — closes residual risks 3, 4, 5, 6; enforces filter-header
+  checkpoints (risk 1).
