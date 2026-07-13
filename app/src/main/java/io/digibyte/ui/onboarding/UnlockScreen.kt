@@ -30,6 +30,7 @@ import io.digibyte.core.security.PinManager
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,23 +62,49 @@ fun UnlockScreen(
     var isUnlocking by remember { mutableStateOf(false) }
     val biometricAvailable = remember { activity?.let { biometricAuth.canAuthenticate(it) } ?: false }
 
+    // Shared unlock body for all three entry points below (auto-biometric,
+    // PIN entry, manual biometric button). Runs the wallet-ready check off
+    // the main thread — see the class comment for why (native PEER_GUARD
+    // lock inside restoreFromDisk()) — and fails safe:
+    //  - CancellationException is expected when the hosting scope is torn
+    //    down mid-unlock (e.g. rotation recreates the activity/composition)
+    //    and MUST propagate for structured concurrency to work; it is not an
+    //    error. The flow self-heals on the next PIN/biometric attempt, since
+    //    isWalletReady() will already be true by then and unlockFromUi() is
+    //    just a state flip.
+    //  - Any other exception is caught so a genuine unlock failure surfaces
+    //    the existing error UX instead of crashing the process.
+    //  - isUnlocking is always reset in `finally` so the keypad/biometric
+    //    button never get stuck disabled if navigation is skipped.
+    suspend fun performUnlockAndNavigate() {
+        isUnlocking = true
+        try {
+            withContext(Dispatchers.IO) {
+                if (walletManager.isWalletReady()) {
+                    walletManager.unlockFromUi()
+                } else {
+                    walletManager.restoreFromDisk()
+                }
+            }
+            navController.navigate("wallet") {
+                popUpTo("unlock") { inclusive = true }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            android.util.Log.e("UnlockScreen", "unlock failed: ${t.message}", t)
+            errorMessage = "Unlock failed. Please try again."
+        } finally {
+            isUnlocking = false
+        }
+    }
+
     // Attempt biometric automatically on first composition if available
     LaunchedEffect(Unit) {
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
             if (result is BiometricResult.Success) {
-                isUnlocking = true
-                withContext(Dispatchers.IO) {
-                    if (walletManager.isWalletReady()) {
-                        walletManager.unlockFromUi()
-                    } else {
-                        walletManager.restoreFromDisk()
-                    }
-                }
-                isUnlocking = false
-                navController.navigate("wallet") {
-                    popUpTo("unlock") { inclusive = true }
-                }
+                performUnlockAndNavigate()
             }
         }
     }
@@ -89,18 +116,7 @@ fun UnlockScreen(
                 // For fresh process (wallet not loaded), restore from disk — both run
                 // off the main thread since restoreFromDisk() can block on the native
                 // peer-manager lock.
-                isUnlocking = true
-                withContext(Dispatchers.IO) {
-                    if (walletManager.isWalletReady()) {
-                        walletManager.unlockFromUi()
-                    } else {
-                        walletManager.restoreFromDisk()
-                    }
-                }
-                isUnlocking = false
-                navController.navigate("wallet") {
-                    popUpTo("unlock") { inclusive = true }
-                }
+                performUnlockAndNavigate()
             }
         } else {
             attemptCount++
@@ -204,18 +220,7 @@ fun UnlockScreen(
                                 if (activity != null) {
                                     val result = biometricAuth.authenticate(activity)
                                     if (result is BiometricResult.Success) {
-                                        isUnlocking = true
-                                        withContext(Dispatchers.IO) {
-                                            if (walletManager.isWalletReady()) {
-                                                walletManager.unlockFromUi()
-                                            } else {
-                                                walletManager.restoreFromDisk()
-                                            }
-                                        }
-                                        isUnlocking = false
-                                        navController.navigate("wallet") {
-                                            popUpTo("unlock") { inclusive = true }
-                                        }
+                                        performUnlockAndNavigate()
                                     }
                                 }
                             }

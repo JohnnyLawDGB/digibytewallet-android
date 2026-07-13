@@ -47,7 +47,9 @@ import io.digibyte.ui.hub.CreateThreadScreen
 import io.digibyte.ui.hub.HubScreen
 import io.digibyte.ui.hub.ThreadDetailScreen
 import io.digibyte.ui.wallet.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
@@ -105,6 +107,12 @@ fun AppNavigation(
     // Observe wallet state to gate navigation
     val walletState by walletManager.walletState.collectAsStateWithLifecycle()
 
+    // Set (once, below) when the lost-PIN branch is taken: wallet exists on
+    // disk but PIN was lost. Consumed by the pin_setup composable, which
+    // performs the actual restoreFromDisk() call off the main thread — see
+    // the comment there for why it can't happen synchronously here.
+    val lostPinRestorePending = remember { mutableStateOf(false) }
+
     // Determine start destination ONCE at launch — do not recompute
     // when walletState changes mid-session (causes double PIN prompt).
     val startDestination = remember {
@@ -119,11 +127,17 @@ fun AppNavigation(
                 if (hasPin) {
                     "unlock"
                 } else {
-                    // Wallet exists but PIN was lost. Restore the wallet from
-                    // disk first, then route to pin_setup to set a new PIN.
-                    // The wallet is already on disk — don't go to onboarding.
-                    android.util.Log.w("AppNavigation", "Wallet exists but no PIN — restoring and routing to pin_setup")
-                    walletManager.restoreFromDisk()
+                    // Wallet exists but PIN was lost. Route to pin_setup to set
+                    // a new PIN — the wallet is already on disk, don't go to
+                    // onboarding. restoreFromDisk() must NOT run here: it calls
+                    // NativeBridge.stopSync(), which takes the native PEER_GUARD
+                    // lock and can block for many seconds inside the keepalive
+                    // sweep — doing that synchronously inside this remember{}
+                    // (i.e. during composition, on the main thread) is the exact
+                    // ANR this fix removes. The pin_setup composable performs
+                    // the restore off the main thread instead.
+                    android.util.Log.w("AppNavigation", "Wallet exists but no PIN — routing to pin_setup, restore deferred off-main")
+                    lostPinRestorePending.value = true
                     "pin_setup"
                 }
             }
@@ -254,11 +268,33 @@ fun AppNavigation(
                     else backStackEntry
                 }
                 val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(vmEntry)
-                PinSetupScreen(
-                    navController = navController,
-                    biometricAuth = biometricAuth,
-                    viewModel = sharedViewModel
-                )
+
+                // Lost-PIN path (see startDestination above): wallet exists on disk
+                // but PIN was lost. Perform the restore off the main thread here —
+                // restoreFromDisk() calls NativeBridge.stopSync(), which takes the
+                // native PEER_GUARD lock and can block for seconds inside the
+                // keepalive sweep (the confirmed ANR trace). A brief loading state
+                // is shown instead of PinSetupScreen until the restore completes,
+                // so PinSetupScreen's own isWalletLoaded() check (which decides
+                // "wallet already exists, skip creation" vs. "create a new wallet")
+                // can never race an in-flight restore and create a duplicate wallet.
+                var restoring by remember { mutableStateOf(lostPinRestorePending.value) }
+                if (restoring) {
+                    LaunchedEffect(Unit) {
+                        withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
+                        lostPinRestorePending.value = false
+                        restoring = false
+                    }
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    PinSetupScreen(
+                        navController = navController,
+                        biometricAuth = biometricAuth,
+                        viewModel = sharedViewModel
+                    )
+                }
             }
 
             // ── Unlock (returning users) ──────────────────────────────────────
