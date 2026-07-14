@@ -2,6 +2,7 @@ package io.digibyte.ui.settings
 
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,8 +20,10 @@ import io.digibyte.core.network.ChainTipFetcher
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.settings.CustomNode
 import io.digibyte.core.settings.CustomNodePrefs
+import io.digibyte.core.settings.OwnNodeUri
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
+import io.digibyte.service.SyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -170,12 +173,24 @@ class SettingsViewModel @Inject constructor(
     private val _customNodeHostPort = MutableStateFlow(CustomNodePrefs.hostPort(context) ?: "")
     val customNodeHostPort: StateFlow<String> = _customNodeHostPort.asStateFlow()
 
+    private val _customNodeLabel = MutableStateFlow(CustomNodePrefs.label(context))
+    val customNodeLabel: StateFlow<String?> = _customNodeLabel.asStateFlow()
+
+    private val _customNodeExclusive = MutableStateFlow(CustomNodePrefs.isExclusive(context))
+    val customNodeExclusive: StateFlow<Boolean> = _customNodeExclusive.asStateFlow()
+
+    /** Outcome of [pairFromUri]. NET_MISMATCH is a soft warning — the pairing is still
+     *  persisted + enabled; the caller decides whether to surface a confirmation prompt. */
+    enum class PairResult { OK, INVALID, NET_MISMATCH }
+
     fun setCustomNodeEnabled(enabled: Boolean) {
         CustomNodePrefs.setEnabled(context, enabled)
         _customNodeEnabled.value = enabled
-        // Restart-to-apply (matches Sync Mode). The injection + CF-only mode + watchdog
-        // suppression run inside SyncService's latched setup coroutine, which a live
-        // reconnect does NOT re-run — so the UI must tell the user to restart the app.
+        // Applies immediately: SyncService's ACTION_APPLY_OWN_NODE reruns the exact
+        // keepalive reconnect triple (forceReconnect → re-inject → startSync), so
+        // injectCustomNode() picks up the fresh isEnabled() and either pins the node
+        // (true) or clears the pinned peer (false) without an app restart.
+        applyOwnNodeNow()
     }
 
     /** Validate + persist the host:port. Returns false (persists nothing) if invalid. */
@@ -186,6 +201,37 @@ class SettingsViewModel @Inject constructor(
         CustomNodePrefs.setHostPort(context, parsed.asHostPort())
         _customNodeHostPort.value = parsed.asHostPort()
         return true
+    }
+
+    /** Parse a dgbnode:// URI (or raw host:port), persist + enable it as the pinned
+     *  own node. NET_MISMATCH is a soft warning — the pairing is still persisted
+     *  since [OwnNodeUri.net] is caller-declared metadata, not verified on-wire. */
+    fun pairFromUri(raw: String): PairResult {
+        val defaultPort = if (isTestnet(context)) CustomNode.TESTNET_DEFAULT_PORT
+                          else CustomNode.MAINNET_DEFAULT_PORT
+        val uri = OwnNodeUri.parse(raw, defaultPort) ?: return PairResult.INVALID
+        CustomNodePrefs.setHostPort(context, uri.node.asHostPort())
+        CustomNodePrefs.setLabel(context, uri.label)
+        CustomNodePrefs.setEnabled(context, true)
+        _customNodeHostPort.value = uri.node.asHostPort()
+        _customNodeLabel.value = uri.label
+        _customNodeEnabled.value = true
+        val mismatch = uri.net != null && (uri.net == "testnet") != isTestnet(context)
+        return if (mismatch) PairResult.NET_MISMATCH else PairResult.OK
+    }
+
+    /** Persist the exclusive-peer toggle (own node becomes the ONLY peer dialed). */
+    fun setCustomNodeExclusive(exclusive: Boolean) {
+        CustomNodePrefs.setExclusive(context, exclusive)
+        _customNodeExclusive.value = exclusive
+    }
+
+    /** Apply the current own-node prefs immediately (no app restart) via SyncService's
+     *  ACTION_APPLY_OWN_NODE — the same forceReconnect → re-inject → startSync triple
+     *  the keepalive coroutine uses to recover a stalled peer pool. */
+    fun applyOwnNodeNow() {
+        val intent = Intent(context, SyncService::class.java).setAction(SyncService.ACTION_APPLY_OWN_NODE)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     // ── Action results ────────────────────────────────────────────────────────
