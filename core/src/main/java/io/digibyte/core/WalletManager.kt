@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -309,6 +310,7 @@ class WalletManager(
             .remove("has_synced")
             .remove("last_balance")
             .commit()
+        FilterHeaderStore.delete(context) // also nuke the file-backed CF-header chain (synchronous)
         OutgoingTxStore(context).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).

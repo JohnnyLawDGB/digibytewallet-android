@@ -13,6 +13,7 @@ import io.digibyte.core.WalletState
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
+import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.db.dao.PeerDao
 import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.PeerEntity
@@ -108,6 +109,19 @@ class SyncService : Service() {
      */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // ── BIP158 filter-header persistence (coalesced, file-backed) ──────────────
+    // The CF-header chain grows to tens/hundreds of MB; hex-encoding it into
+    // SharedPreferences on every cfheaders batch pinned an ever-growing String in
+    // the prefs in-memory map (a 512MB heap leak → OOM loop → never-synced). Keep
+    // only the latest chain in memory and flush it to a plain file at most once per
+    // interval via the writer coroutine. See FilterHeaderStore.
+    // (chain bytes, epoch-at-capture) — the epoch lets a re-anchor/reset delete()
+    // invalidate a stale in-flight write (see FilterHeaderStore).
+    @Volatile private var pendingFilterHeaders: Pair<ByteArray, Long>? = null
+    @Volatile private var filterHeadersDirty = false
+    private var filterHeaderWriterJob: Job? = null
+    private val filterHeaderSaveIntervalMs = 20_000L
+
     private val binder = SyncBinder()
 
     // ── Public API exposed via Binder ─────────────────────────────────────────
@@ -123,6 +137,7 @@ class SyncService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        startFilterHeaderWriter()
     }
 
     /**
@@ -679,11 +694,12 @@ class SyncService : Service() {
                             if (reanchored) {
                                 reanchoredThisSession = true
                                 reanchorAtMs = nowMs
-                                // Kotlin owns SharedPreferences: drop the stale chain so a
-                                // kill before the first re-anchored append can't restore
-                                // the stuck cfTip.
-                                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                                    .edit().remove("saved_filter_headers").apply()
+                                // Drop the persisted chain (file + legacy key) and the
+                                // pending in-memory copy so a kill before the first
+                                // re-anchored append can't restore the stuck cfTip.
+                                FilterHeaderStore.delete(this@SyncService)
+                                pendingFilterHeaders = null
+                                filterHeadersDirty = false
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
                                     "(cfTip was $cfTipNow, below floor) — staying on filters")
@@ -909,12 +925,11 @@ class SyncService : Service() {
         )
         NativeBridge.setSyncMode(syncMode)
         if (syncMode != NativeBridge.SyncMode.BLOOM_ONLY) {
-            val savedFilters = prefs.getString("saved_filter_headers", null)
+            val savedFilters = FilterHeaderStore.load(this@SyncService)
             if (savedFilters != null) {
-                val bytes = savedFilters.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-                val ok = NativeBridge.setCompactFilterChain(bytes)
+                val ok = NativeBridge.setCompactFilterChain(savedFilters)
                 android.util.Log.i("SyncService",
-                    "BIP158: restored filter chain (${bytes.size} bytes, ok=$ok)")
+                    "BIP158: restored filter chain (${savedFilters.size} bytes, ok=$ok)")
             }
             // Birth height defaults to the most-recent block we know about, so a
             // fresh enable scans forward from "now" rather than re-downloading
@@ -1004,6 +1019,7 @@ class SyncService : Service() {
         // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
         // guard ensures this never regresses a higher persisted tip.
         lastSavedBlocksData?.let { runCatching { persistBlocks(it, synchronous = true) } }
+        flushFilterHeaders()
         // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
         // keepalive sweep can hold for up to ~K×10s pinging half-dead sockets —
         // calling it synchronously here runs on the main thread (Service lifecycle
@@ -1204,14 +1220,13 @@ class SyncService : Service() {
         }
 
         override fun onSaveFilterHeaders(data: ByteArray) {
-            // BIP 158 filter-header chain advanced. Persist hex-encoded for
-            // restore on next wallet open. Fires only when sync mode != BLOOM_ONLY.
-            val copy = data.copyOf()
-            serviceScope.launch(Dispatchers.IO) {
-                val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                    .edit().putString("saved_filter_headers", hex).apply()
-            }
+            // BIP 158 filter-header chain advanced. Record the latest chain only; the
+            // coalesced writer (startFilterHeaderWriter) flushes it to a plain file at
+            // most once per interval. Do NOT hex-encode + putString here — that pinned
+            // an ever-growing String in the prefs in-memory map (a 512MB heap leak that
+            // OOM-looped long-history wallets so they never finished syncing).
+            pendingFilterHeaders = data.copyOf() to FilterHeaderStore.currentEpoch()
+            filterHeadersDirty = true
         }
     }
 
@@ -1628,6 +1643,29 @@ class SyncService : Service() {
      * ~480k-block re-syncs). [synchronous] uses commit() for the onDestroy flush
      * so it survives serviceScope cancellation.
      */
+    /** Coalesced filter-header writer: at most one file write per interval, always
+     *  the latest chain. Idempotent; runs for the service lifetime. */
+    private fun startFilterHeaderWriter() {
+        if (filterHeaderWriterJob?.isActive == true) return
+        filterHeaderWriterJob = serviceScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(filterHeaderSaveIntervalMs)
+                if (filterHeadersDirty) {
+                    filterHeadersDirty = false // cleared first; a concurrent callback re-sets it
+                    pendingFilterHeaders?.let { (bytes, ep) -> FilterHeaderStore.write(this@SyncService, bytes, ep) }
+                }
+            }
+        }
+    }
+
+    /** Synchronously flush the latest filter-header chain (final save on teardown). */
+    private fun flushFilterHeaders() {
+        if (filterHeadersDirty) {
+            filterHeadersDirty = false
+            pendingFilterHeaders?.let { (bytes, ep) -> runCatching { FilterHeaderStore.write(this, bytes, ep) } }
+        }
+    }
+
     private fun persistBlocks(data: ByteArray, synchronous: Boolean) {
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
