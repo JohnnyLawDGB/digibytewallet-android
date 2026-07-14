@@ -23,6 +23,8 @@ import androidx.navigation.NavController
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.tor.TorState
+import io.digibyte.service.SyncService
+import io.digibyte.service.SyncService.Companion.OwnNodeHealth
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
@@ -32,7 +34,8 @@ import java.util.Locale
 @Composable
 fun NetworkInfoScreen(
     navController: NavController,
-    viewModel: SettingsViewModel = hiltViewModel()
+    viewModel: SettingsViewModel = hiltViewModel(),
+    onScanNode: () -> Unit = {}
 ) {
     // CF-gated sync frontier — the SAME source the main wallet screen uses, so
     // the two screens can never disagree. syncState is kept only for the
@@ -45,6 +48,9 @@ fun NetworkInfoScreen(
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val customNodeEnabled by viewModel.customNodeEnabled.collectAsStateWithLifecycle()
     val customNodeHostPort by viewModel.customNodeHostPort.collectAsStateWithLifecycle()
+    val customNodeLabel by viewModel.customNodeLabel.collectAsStateWithLifecycle()
+    val customNodeExclusive by viewModel.customNodeExclusive.collectAsStateWithLifecycle()
+    val ownNodeHealth by SyncService.ownNodeHealth.collectAsStateWithLifecycle()
 
     // Refresh network stats when this screen is opened
     // Poll live stats while the screen is visible so the display self-corrects a
@@ -274,8 +280,10 @@ fun NetworkInfoScreen(
                         iconTint = DigiByteAccent,
                         title = "Use my own node",
                         subtitle = "Sync only through your DigiByte node (compact filters). " +
-                                   "Your node must run peerblockfilters=1. Applies on next app restart.",
-                        onClick = { viewModel.setCustomNodeEnabled(!customNodeEnabled) },
+                                   "Your node must run peerblockfilters=1.",
+                        onClick = {
+                            viewModel.setCustomNodeEnabled(!customNodeEnabled)
+                        },
                         trailing = {
                             Switch(checked = customNodeEnabled,
                                    onCheckedChange = { viewModel.setCustomNodeEnabled(it) })
@@ -286,6 +294,11 @@ fun NetworkInfoScreen(
                         var draft by remember(customNodeHostPort) { mutableStateOf(customNodeHostPort) }
                         var error by remember { mutableStateOf(false) }
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            TextButton(onClick = onScanNode) {
+                                Icon(Icons.Filled.QrCodeScanner, null, tint = DigiByteAccent)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Scan node QR")
+                            }
                             OutlinedTextField(
                                 value = draft,
                                 onValueChange = { draft = it; error = false },
@@ -299,18 +312,51 @@ fun NetworkInfoScreen(
                                      color = MaterialTheme.colorScheme.error,
                                      style = MaterialTheme.typography.bodySmall)
                             }
-                            TextButton(onClick = { error = !viewModel.saveCustomNodeHostPort(draft) }) {
+                            TextButton(onClick = {
+                                val ok = viewModel.saveCustomNodeHostPort(draft)
+                                error = !ok
+                                if (ok) viewModel.applyOwnNodeNow()
+                            }) {
                                 Text("Save")
                             }
-                            // Coarse reachability signal (full "your node is serving filters" check is a
-                            // follow-up needing a native CF-peer-census accessor).
-                            Text(
-                                if (peerCount > 0) "Connected · $peerCount peer(s)"
-                                else "Not connected — restart the app after saving; check your node is reachable and serving filters.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            // Live pairing health (SyncService.ownNodeHealth), refreshed on its own
+                            // ~30s tick plus whenever this screen's actions (toggle/save/exclusive)
+                            // call applyOwnNodeNow() and reconnect.
+                            val (healthText, healthColor) = when (ownNodeHealth) {
+                                OwnNodeHealth.SERVING    -> "✓ Serving compact filters" to DigiByteGreen
+                                OwnNodeHealth.CONNECTING -> "Connecting…" to MaterialTheme.colorScheme.onSurfaceVariant
+                                OwnNodeHealth.DARK       -> "⚠ Not reachable / not serving filters" to Color(0xFFFFCC66)
+                                OwnNodeHealth.UNPAIRED   -> "" to MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            if (healthText.isNotEmpty()) {
+                                Text(
+                                    healthText + (customNodeLabel?.let { "  ·  $it" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = healthColor
+                                )
+                            }
                         }
+                        SettingsRowDivider()
+                        SettingsRow(
+                            icon = Icons.Filled.Shield,
+                            iconTint = DigiByteAccent,
+                            title = "Only my node (exclusive)",
+                            subtitle = "Sync solely through your node. If it goes offline the wallet " +
+                                       "has no other peers until you re-enable public peers.",
+                            onClick = {
+                                viewModel.setCustomNodeExclusive(!customNodeExclusive)
+                                viewModel.applyOwnNodeNow()
+                            },
+                            trailing = {
+                                Switch(
+                                    checked = customNodeExclusive,
+                                    onCheckedChange = {
+                                        viewModel.setCustomNodeExclusive(it)
+                                        viewModel.applyOwnNodeNow()
+                                    }
+                                )
+                            }
+                        )
                     }
                 }
             }
