@@ -157,6 +157,22 @@ class SyncService : Service() {
             return START_NOT_STICKY
         }
 
+        // Immediate-apply entry point: the Settings own-node UI sends this action
+        // right after the user saves a new host/port or flips exclusive/enabled so
+        // the change takes effect without waiting for the next keepalive cycle.
+        // Reuses the exact keepalive reconnect triple (forceReconnect → re-inject →
+        // startSync) that already recovers a stalled peer pool elsewhere in this
+        // service (see the 0-peer branch of runPeerKeepalive).
+        if (intent?.action == ACTION_APPLY_OWN_NODE) {
+            serviceScope.launch {
+                try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
+                injectBloomPeers()
+                injectCustomNode()   // re-injects + pins (or clears) with the new prefs
+                NativeBridge.startSync()
+            }
+            return START_STICKY
+        }
+
         // On repeat onStartCommand (watchdog kick, sticky-restart), resurrect
         // the peer-keepalive coroutine if it died silently. Without this the
         // service stays nominally alive with its foreground notification but
@@ -1391,7 +1407,10 @@ class SyncService : Service() {
      * parses, and it resolves to an IPv4.
      */
     private suspend fun injectCustomNode() {
-        if (!CustomNodePrefs.isEnabled(this@SyncService)) return
+        if (!CustomNodePrefs.isEnabled(this@SyncService)) {
+            NativeBridge.clearPinnedPeer()
+            return
+        }
         val raw = CustomNodePrefs.hostPort(this@SyncService) ?: return
         val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
                           else CustomNode.MAINNET_DEFAULT_PORT
@@ -1409,9 +1428,11 @@ class SyncService : Service() {
             }
         } ?: return
         NativeBridge.injectPeerByIp(ip, node.port, 0x41L)
+        NativeBridge.setPinnedPeer(ip, node.port, CustomNodePrefs.isExclusive(this@SyncService))
         android.util.Log.i(
             "SyncService",
-            "custom node injected as priority CF peer: $ip:${node.port} (${node.host})"
+            "own node injected + pinned as priority CF peer: $ip:${node.port} (${node.host}) " +
+                "exclusive=${CustomNodePrefs.isExclusive(this@SyncService)}"
         )
     }
 
@@ -1710,6 +1731,10 @@ class SyncService : Service() {
         const val CHANNEL_ID       = "dgb_sync_channel"
         const val NOTIFICATION_ID  = 1
         const val ERR_NO_PEERS     = 1001
+        /** Sent by the Settings own-node UI to apply a host/port/exclusive change
+         *  immediately (forceReconnect → re-inject bloom + custom node → startSync)
+         *  instead of waiting for the next keepalive cycle. */
+        const val ACTION_APPLY_OWN_NODE = "io.digibyte.service.APPLY_OWN_NODE"
         /** Peers not seen in 24 hours are pruned from the DB. */
         private const val PEER_STALE_SECONDS = 86_400L
         /** Capability-aware seeder API. Returns filter-capable peers when available,

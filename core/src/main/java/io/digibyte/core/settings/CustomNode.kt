@@ -52,6 +52,8 @@ object CustomNodePrefs {
     private const val PREFS = "dgb_settings"
     private const val KEY_ENABLED = "custom_node_enabled"
     private const val KEY_HOSTPORT = "custom_node_hostport"
+    private const val KEY_LABEL = "custom_node_label"
+    private const val KEY_EXCLUSIVE = "custom_node_exclusive"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun key(base: String, ctx: Context) = base + networkSuffix(ctx)
@@ -62,4 +64,16 @@ object CustomNodePrefs {
         prefs(ctx).edit().putBoolean(key(KEY_ENABLED, ctx), enabled).apply()
     fun setHostPort(ctx: Context, hostPort: String) =
         prefs(ctx).edit().putString(key(KEY_HOSTPORT, ctx), hostPort.trim()).apply()
+
+    /** Optional user-facing label for the configured node (e.g. "My Node"). */
+    fun label(ctx: Context): String? = prefs(ctx).getString(key(KEY_LABEL, ctx), null)
+    fun setLabel(ctx: Context, label: String?) =
+        prefs(ctx).edit().apply {
+            if (label.isNullOrBlank()) remove(key(KEY_LABEL, ctx)) else putString(key(KEY_LABEL, ctx), label.trim())
+        }.apply()
+
+    /** When true, the own node is the ONLY peer dialed (see NativeBridge.setPinnedPeer). */
+    fun isExclusive(ctx: Context): Boolean = prefs(ctx).getBoolean(key(KEY_EXCLUSIVE, ctx), false)
+    fun setExclusive(ctx: Context, exclusive: Boolean) =
+        prefs(ctx).edit().putBoolean(key(KEY_EXCLUSIVE, ctx), exclusive).apply()
 }
