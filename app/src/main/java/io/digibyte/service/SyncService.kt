@@ -339,6 +339,12 @@ class SyncService : Service() {
             if (tickCount % 3L == 0L && !isTestnet(this@SyncService)) {
                 launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { injectFilterPeers() } }
             }
+            // Own-node health poll: same ~30s cadence as the filter-peer re-injection
+            // above (reusing this tick rather than a dedicated timer). refreshOwnNodeHealth
+            // self-gates on the toggle (→ UNPAIRED when off), so no extra guard needed here.
+            if (tickCount % 3L == 0L) {
+                runCatching { refreshOwnNodeHealth() }
+            }
             // Every 3rd tick (~30s), refresh asset UTXOs against the node's
             // authoritative listunspent view. SPV bloom filters are known to
             // miss asset transactions (cracked-filter / merkleblock-drop
@@ -1436,6 +1442,43 @@ class SyncService : Service() {
         )
     }
 
+    /**
+     * Own-node health poll (own-node-pairing track). Called from the existing
+     * runPeerKeepalive tick (~every 30s) — does NOT start its own timer. Resolves the
+     * configured host to an IPv4 literal and queries native status off the main
+     * thread: compactFilterPeerStatus takes PEER_GUARD (manager->lock) in the C core,
+     * same constraint as injectCustomNode's resolve above, so this must never run on
+     * Dispatchers.Main.
+     */
+    private fun refreshOwnNodeHealth() {
+        if (!CustomNodePrefs.isEnabled(this@SyncService)) {
+            _ownNodeHealth.value = OwnNodeHealth.UNPAIRED
+            return
+        }
+        val raw = CustomNodePrefs.hostPort(this@SyncService) ?: return
+        val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
+                          else CustomNode.MAINNET_DEFAULT_PORT
+        val node = CustomNode.parse(raw, defaultPort) ?: return
+        serviceScope.launch(Dispatchers.IO) {
+            val ip = try {
+                java.net.InetAddress.getAllByName(node.host)
+                    .firstOrNull { it is java.net.Inet4Address }?.hostAddress
+            } catch (e: Exception) {
+                android.util.Log.w("SyncService", "own-node health: DNS resolve failed: ${node.host}", e)
+                null
+            } ?: return@launch
+            _ownNodeHealth.value = when (NativeBridge.compactFilterPeerStatus(ip, node.port)) {
+                3 -> OwnNodeHealth.SERVING             // connected + answered cfheaders
+                1 -> OwnNodeHealth.CONNECTING          // in pool, socket not yet up
+                // 0 UNKNOWN (not in pool) OR 2 CONNECTED_NOT_SERVING both map to DARK.
+                // The 2 case is deliberate: a node running WITHOUT peerblockfilters=1
+                // connects but never serves filters — surfacing that as dark/⚠ is
+                // exactly the misconfiguration this status exists to catch.
+                else -> OwnNodeHealth.DARK
+            }
+        }
+    }
+
     /** Fetch the seeder's Dandelion-capable peers, connect them, and mark each
      *  Dandelion-capable in the core so a broadcast can stem to one. The VPS
      *  priority peer is covered because the seeder tags it (see the dandelion spec).
@@ -1817,6 +1860,20 @@ class SyncService : Service() {
             get() = _torFailureActive
         private val _torFailureActive =
             kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        /** Own-node pairing health, as last observed by [refreshOwnNodeHealth]. UNPAIRED
+         *  when the own-node toggle is off (also the default at process start). DARK
+         *  covers both "not in the native peer pool at all" (0 UNKNOWN — unreachable,
+         *  never dialed) AND the deliberate case of a peer that connects but never
+         *  answers cfheaders (2 CONNECTED_NOT_SERVING — a node missing
+         *  peerblockfilters=1). Surfacing that misconfiguration as dark/⚠ rather than
+         *  a soft "connecting" is the point: it's the failure mode operators actually
+         *  hit when pairing a node they forgot to reconfigure. */
+        enum class OwnNodeHealth { UNPAIRED, CONNECTING, SERVING, DARK }
+        val ownNodeHealth: kotlinx.coroutines.flow.StateFlow<OwnNodeHealth>
+            get() = _ownNodeHealth
+        private val _ownNodeHealth =
+            kotlinx.coroutines.flow.MutableStateFlow(OwnNodeHealth.UNPAIRED)
 
         /** How long to wait for Tor to bring up peer connectivity before
          *  forcing a clearnet fallback. Covers both (a) Tor never reaching
