@@ -54,6 +54,8 @@ add_library(
         src/main/jni/digibytewallet-core/BRPeerManager.c
         src/main/jni/digibytewallet-core/BRPeerManager.h
         src/main/jni/digibytewallet-core/BRPeerServices.h
+        src/main/jni/digibytewallet-core/BRPeerPin.h
+        src/main/jni/digibytewallet-core/BRPeerCFStatus.h
         src/main/jni/digibytewallet-core/BRSet.c
         src/main/jni/digibytewallet-core/BRSet.h
         src/main/jni/digibytewallet-core/BRTransaction.c
