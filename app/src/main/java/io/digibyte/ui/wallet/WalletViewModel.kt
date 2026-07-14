@@ -268,6 +268,39 @@ class WalletViewModel @Inject constructor(
     val torFailureActive: StateFlow<Boolean> =
         io.digibyte.service.SyncService.torFailureActive
 
+    /** Own-node pairing health (own-node-pairing track), as last observed by
+     *  SyncService's ~30s keepalive-tick poll. UNPAIRED when the own-node
+     *  toggle is off; DARK drives the dark-node banner below. */
+    val ownNodeHealth: StateFlow<io.digibyte.service.SyncService.Companion.OwnNodeHealth> =
+        io.digibyte.service.SyncService.ownNodeHealth
+
+    /** Whether the configured own node is currently the EXCLUSIVE peer (all
+     *  public peers refused). Read fresh from prefs each access rather than a
+     *  dedicated StateFlow — Settings is the only place this changes, and this
+     *  screen recomposes periodically anyway (ownNodeHealth ticks ~30s), so a
+     *  plain re-check on render is simple and sufficient. Gates the dark-node
+     *  banner's "Use public peers" action: it's meaningless in additive mode,
+     *  where the wallet already has public peers alongside the own node. */
+    val customNodeExclusive: Boolean
+        get() = io.digibyte.core.settings.CustomNodePrefs.isExclusive(application)
+
+    /** Session escape: temporarily use public peers (exclusive OFF this run;
+     *  the persisted exclusive pref is untouched, so the next launch honors
+     *  the user's saved choice again). Routed through SyncService — mirrors
+     *  the watchdog kick above and Settings' applyOwnNodeNow — so no native
+     *  peer calls happen directly from the VM. */
+    fun temporarilyUsePublicPeers() {
+        try {
+            val intent = android.content.Intent(
+                application,
+                io.digibyte.service.SyncService::class.java
+            ).setAction(io.digibyte.service.SyncService.ACTION_OWN_NODE_ADDITIVE_SESSION)
+            androidx.core.content.ContextCompat.startForegroundService(application, intent)
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletVM", "temporarilyUsePublicPeers: startForegroundService threw", t)
+        }
+    }
+
     /** Manually retry the post-upgrade reconcile from the banner's button.
      *  Same code path as the auto trigger — if it succeeds, the flag clears
      *  and the banner disappears. */

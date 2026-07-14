@@ -27,6 +27,7 @@ import io.digibyte.core.isTestnet
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.tor.TorState
+import io.digibyte.service.SyncService.Companion.OwnNodeHealth
 import io.digibyte.ui.components.BalanceDisplay
 import io.digibyte.ui.components.TransactionItem
 import io.digibyte.ui.theme.DigiByteAccent
@@ -44,6 +45,7 @@ fun WalletScreen(
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
+    onNavigateNetworkInfo: () -> Unit = {},
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -57,6 +59,7 @@ fun WalletScreen(
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
     val bloomFallback by viewModel.bloomFallbackActive.collectAsStateWithLifecycle()
     val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
+    val ownNodeHealth by viewModel.ownNodeHealth.collectAsStateWithLifecycle()
 
     // Runtime network selection (Task 6, dev-gated toggle in Settings > Advanced).
     // Read once — a restart is required to change it (see SettingsViewModel
@@ -169,6 +172,21 @@ fun WalletScreen(
             }
         }
 
+        // Own-node dark banner (own-node-pairing track): the paired node is
+        // unreachable or connected but not serving compact filters (a node
+        // missing peerblockfilters=1). "Use public peers" only makes sense in
+        // exclusive mode — in additive mode the wallet already has public
+        // peers alongside the own node, so the escape hatch would be a no-op.
+        if (ownNodeHealth == OwnNodeHealth.DARK) {
+            item {
+                OwnNodeDarkBanner(
+                    showUsePublicPeers = viewModel.customNodeExclusive,
+                    onUsePublicPeers = { viewModel.temporarilyUsePublicPeers() },
+                    onOpenSettings = onNavigateNetworkInfo,
+                )
+            }
+        }
+
         // ── Action buttons ────────────────────────────────────────────────
         item {
             Row(
@@ -217,6 +235,18 @@ fun WalletScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        // Compact own-node health chip — small and non-intrusive, only shown
+        // once the paired node is actually serving compact filters (a paired
+        // but DARK/CONNECTING node surfaces via the banner above instead, not
+        // this chip, so this never contradicts it).
+        if (ownNodeHealth == OwnNodeHealth.SERVING) {
+            item {
+                OwnNodeHealthChip(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )
             }
         }
@@ -827,5 +857,97 @@ private fun TorFailureBanner() {
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
         }
+    }
+}
+
+/**
+ * Own-node-pairing track: shown when the paired node is DARK — either
+ * unreachable, or connected but not answering cfheaders (a node missing
+ * peerblockfilters=1). "Use public peers" is the session escape hatch
+ * (additive, non-exclusive re-pin — see SyncService.ACTION_OWN_NODE_ADDITIVE_SESSION);
+ * it's hidden in additive mode since the wallet already has public peers
+ * there and the action would be a no-op.
+ */
+@androidx.compose.runtime.Composable
+private fun OwnNodeDarkBanner(
+    showUsePublicPeers: Boolean,
+    onUsePublicPeers: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0x33FFCC66),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Your node is offline",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFD580),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "The paired node isn't reachable or isn't serving compact " +
+                       "filters right now. Check that it's running and reachable, " +
+                       "and that it has peerblockfilters=1 set.",
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showUsePublicPeers) {
+                    androidx.compose.material3.Button(
+                        onClick = onUsePublicPeers,
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = DigiByteAccent,
+                        ),
+                    ) { Text("Use public peers") }
+                }
+                androidx.compose.material3.OutlinedButton(onClick = onOpenSettings) {
+                    Text("Node settings")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Small, non-intrusive chip near the sync card confirming the paired own
+ * node is actively serving compact filters. Only rendered by the caller
+ * when ownNodeHealth == SERVING, so this composable itself has no gating.
+ */
+@androidx.compose.runtime.Composable
+private fun OwnNodeHealthChip(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .background(
+                color = Color(0xFF1E3A2E),
+                shape = RoundedCornerShape(20.dp),
+            )
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "✓ Own node serving",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF6FCF97),
+        )
     }
 }

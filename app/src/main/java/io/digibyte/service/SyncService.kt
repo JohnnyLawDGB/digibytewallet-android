@@ -173,6 +173,25 @@ class SyncService : Service() {
             return START_STICKY
         }
 
+        // Session escape hatch: the dark-node banner's "Use public peers" action.
+        // Re-pins the SAME configured node but non-exclusive for THIS session only —
+        // prefs are never written, so the persisted exclusive choice still applies
+        // on the next launch. Mirrors ACTION_APPLY_OWN_NODE's reconnect triple.
+        if (intent?.action == ACTION_OWN_NODE_ADDITIVE_SESSION) {
+            serviceScope.launch {
+                val raw = CustomNodePrefs.hostPort(this@SyncService)
+                val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT else CustomNode.MAINNET_DEFAULT_PORT
+                val node = raw?.let { CustomNode.parse(it, defaultPort) }
+                val ip = node?.let { withContext(Dispatchers.IO) {
+                    try { java.net.InetAddress.getAllByName(it.host).firstOrNull { a -> a is java.net.Inet4Address }?.hostAddress } catch (_: Exception) { null } } }
+                try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
+                injectBloomPeers()
+                if (ip != null) { NativeBridge.injectPeerByIp(ip, node.port, 0x41L); NativeBridge.setPinnedPeer(ip, node.port, false) }
+                NativeBridge.startSync()
+            }
+            return START_STICKY
+        }
+
         // On repeat onStartCommand (watchdog kick, sticky-restart), resurrect
         // the peer-keepalive coroutine if it died silently. Without this the
         // service stays nominally alive with its foreground notification but
@@ -1778,6 +1797,11 @@ class SyncService : Service() {
          *  immediately (forceReconnect → re-inject bloom + custom node → startSync)
          *  instead of waiting for the next keepalive cycle. */
         const val ACTION_APPLY_OWN_NODE = "io.digibyte.service.APPLY_OWN_NODE"
+        /** Session-only escape hatch from the dark-node banner: re-pins the same
+         *  configured node non-exclusive (additive with public peers) for THIS
+         *  session without touching prefs — the persisted exclusive setting still
+         *  applies on the next launch. See [OwnNodeHealth.DARK]. */
+        const val ACTION_OWN_NODE_ADDITIVE_SESSION = "io.digibyte.service.OWN_NODE_ADDITIVE_SESSION"
         /** Peers not seen in 24 hours are pruned from the DB. */
         private const val PEER_STALE_SECONDS = 86_400L
         /** Capability-aware seeder API. Returns filter-capable peers when available,

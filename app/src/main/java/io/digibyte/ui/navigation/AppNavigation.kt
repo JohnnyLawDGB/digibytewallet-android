@@ -317,7 +317,8 @@ fun AppNavigation(
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
                     },
-                    onNavigateAssets = { navController.navigate("assets") }
+                    onNavigateAssets = { navController.navigate("assets") },
+                    onNavigateNetworkInfo = { navController.navigate("settings_network") }
                 )
             }
 
