@@ -54,6 +54,15 @@ static uint16_t g_priorityPeerPort = 0;
  * peer prepend so the wallet dials ONLY the pinned own-node. */
 static int g_ownNodeExclusive = 0;
 
+/* Own-node pin, remembered at the bridge level so it survives peer-manager
+ * recreation (mirrors the _applyPendingBip158State defer-and-apply pattern).
+ * setPinnedPeer stores the parsed pin here UNCONDITIONALLY — even when
+ * g_peerManager==NULL (cold start) or is about to be freed (immediate-apply
+ * forceReconnect) — and startSync re-applies it after every manager creation.
+ * g_pinnedPort==0 means "no pin" (inert: the re-apply is a no-op). */
+static UInt128  g_pinnedAddr = { .u64 = {0, 0} };
+static uint16_t g_pinnedPort = 0;
+
 static void bridge_syncStarted(void *info) {
     (void)info;
     LOGD("bridge_syncStarted (rescanning=%d)", g_isRescanning);
@@ -489,12 +498,19 @@ Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thi
     (void)thiz;
     PEER_GUARD();
     g_ownNodeExclusive = exclusive ? 1 : 0;
-    if (! g_peerManager) return;
+    /* Parse and REMEMBER the pin unconditionally — before the null-check — so a
+     * pin set pre-sync (cold start, or against a manager forceReconnect is about
+     * to free) survives into the next manager via startSync's re-apply. */
     const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
     struct in_addr ip4;
     if (ip && inet_pton(AF_INET, ip, &ip4) == 1) {
         UInt128 addr = UINT128_ZERO; addr.u16[5] = 0xffff; addr.u32[3] = ip4.s_addr;
-        BRPeerManagerSetPinnedPeer(g_peerManager, addr, (uint16_t)port, exclusive ? 1 : 0);
+        g_pinnedAddr = addr;
+        g_pinnedPort = (uint16_t)port;
+        /* Also pin the live manager immediately, if one exists. */
+        if (g_peerManager) {
+            BRPeerManagerSetPinnedPeer(g_peerManager, addr, (uint16_t)port, exclusive ? 1 : 0);
+        }
     }
     if (ip) (*env)->ReleaseStringUTFChars(env, ipStr, ip);
 }
@@ -504,6 +520,10 @@ Java_io_digibyte_core_bridge_NativeBridge_clearPinnedPeer(JNIEnv *env, jobject t
     (void)env; (void)thiz;
     PEER_GUARD();
     g_ownNodeExclusive = 0;
+    /* Forget the remembered pin unconditionally so it is NOT re-applied to any
+     * future manager by startSync; also clear the live manager if present. */
+    g_pinnedAddr = UINT128_ZERO;
+    g_pinnedPort = 0;
     if (g_peerManager) BRPeerManagerClearPinnedPeer(g_peerManager);
 }
 
@@ -681,6 +701,20 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         /* Apply any BIP 158 state SyncService.kt configured before this point
          * (setSyncMode, setCompactFilterChain, enableAutoCompactFilterFetch). */
         _applyPendingBip158State();
+
+        /* Re-apply the own-node pin (remembered at bridge level by setPinnedPeer)
+         * so a fresh manager inherits it — the pin's lifecycle mirrors the BIP158
+         * state above: injectCustomNode()->setPinnedPeer runs BEFORE this
+         * (re)creation in every flow (cold start: g_peerManager==NULL; immediate-
+         * apply: forceReconnect frees it here). Without this the live manager's
+         * pinnedPort stays 0 and exclusive mode silently dials public peers.
+         * Inert for unpinned users (g_pinnedPort==0). Runs under PEER_GUARD;
+         * BRPeerManagerSetPinnedPeer takes manager->lock itself. */
+        if (g_pinnedPort != 0) {
+            BRPeerManagerSetPinnedPeer(g_peerManager, g_pinnedAddr, g_pinnedPort, g_ownNodeExclusive);
+            LOGI("startSync: re-applied own-node pin (port=%u, exclusive=%d) to fresh manager",
+                 g_pinnedPort, g_ownNodeExclusive);
+        }
     }
 
     BRPeerManagerConnect(g_peerManager);

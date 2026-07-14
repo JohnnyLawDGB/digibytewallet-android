@@ -1457,11 +1457,18 @@ class SyncService : Service() {
             NativeBridge.clearPinnedPeer()
             return
         }
-        val raw = CustomNodePrefs.hostPort(this@SyncService) ?: return
+        // On any enabled-but-can't-pin early return below, clear the pin: the pin
+        // is now remembered at the native bridge level (survives manager recreate),
+        // so a stale one would otherwise linger and be re-applied to future managers.
+        val raw = CustomNodePrefs.hostPort(this@SyncService) ?: run {
+            NativeBridge.clearPinnedPeer()
+            return
+        }
         val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
                           else CustomNode.MAINNET_DEFAULT_PORT
         val node = CustomNode.parse(raw, defaultPort) ?: run {
             android.util.Log.w("SyncService", "custom node enabled but address unparseable: '$raw'")
+            NativeBridge.clearPinnedPeer()
             return
         }
         val ip = withContext(Dispatchers.IO) {
@@ -1472,7 +1479,10 @@ class SyncService : Service() {
                 android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host}", e)
                 null
             }
-        } ?: return
+        } ?: run {
+            NativeBridge.clearPinnedPeer()
+            return
+        }
         // Session escape hatch override: while ownNodeAdditiveSessionOverride is
         // true (set by ACTION_OWN_NODE_ADDITIVE_SESSION, cleared by a deliberate
         // ACTION_APPLY_OWN_NODE re-apply), stay non-exclusive here regardless of
