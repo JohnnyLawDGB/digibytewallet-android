@@ -143,7 +143,7 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | Phase | Theme | Rough size | Status / ships with |
 |-------|-------|-----------|---------------------|
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
-| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) and bloom **removed** (v3.10.x). 🚧 Remainder: own-node track (Model C) + oracle CF enablement + seeder demotion |
+| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39), bloom **removed** (v3.10.x), own-node pairing flow shipped (Seq 1.1/1.2). 🚧 Remainder: oracle CF enablement + seeder demotion + `cfcheckpt` |
 | 1.5 | **v4.0.0** | S | Declared when Phase 1 remainder lands — see Versioning |
 | 2 | Key & trust hardening | M | 🚧 Resequenced: PIN rate-limit → duress PIN A → Keystore binding → Digi-ID isolation → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
@@ -180,15 +180,25 @@ roadmap in git history; it does not need to be re-litigated here.
 already designed, now sequenced as the top of the whole roadmap because
 every sovereignty claim is hollow if a fresh install can sit at 0 peers:
 
-1. **Own-node track, Model C (decided).** Tiered: the user's own
-   DigiByte node as a pinned CF peer first (Model B semantics), with
-   wallet↔node JSON-RPC (Model A) as a later tier for capabilities CF
-   can't express. v3.10.1 already ships the primitive (Settings →
-   Network Info → custom node); this track makes it a first-class,
-   one-screen "pair with your node" flow: QR-scan a `host:port` (or
-   Tor onion) from the node, verify it serves `NODE_COMPACT_FILTERS`,
-   pin it, and surface its health on the main screen. Spec:
-   `docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md`.
+1. **Own-node track, Model C (decided). Pairing flow shipped (Seq
+   1.1/1.2).** Tiered: the user's own DigiByte node as a pinned CF peer
+   first (Model B semantics), with wallet↔node JSON-RPC (Model A) as a
+   later tier for capabilities CF can't express. v3.10.1 shipped the
+   primitive (Settings → Network Info → custom node); the first-class,
+   one-screen "pair with your node" flow has now shipped on top of it:
+   QR-scan a `dgbnode://host:port?net=&label=` URI, verify the node
+   actually serves `NODE_COMPACT_FILTERS` (native CF-peer status
+   accessor: SERVING / CONNECTING / dark), pin it (reserved dial slot,
+   churn-eviction-exempt), and surface health on the main screen — with
+   a loud banner and a "use public peers" escape hatch if a pinned node
+   goes dark. Additive by default (own node prioritized, public fleet
+   stays as backup); an opt-in **exclusive** mode talks to the paired
+   node only. **Clearnet host:port only** — the `dgbnode://` grammar
+   reserves an onion host but the parser rejects it today; Tor onion
+   pairing is deferred to Sequence 2.5 (couples to the Tor
+   no-clearnet-fallback gap). Spec:
+   `docs/superpowers/specs/2026-07-14-own-node-first-class-pairing.md`
+   (builds on `docs/superpowers/specs/2026-07-11-cf-fleet-reliability-own-node-track.md`).
 2. **Oracle-bootstrap peer discovery.** Hardcode the multi-operator
    DigiDollar oracle-node set as CF bootstrap peers; let the pool bloom
    from `addr` gossip; demote `api.digiscope.me` to optional accelerant.
@@ -421,7 +431,7 @@ Baseline against a modern self-custodial wallet. Status reflects
 | BIP 37 bloom | **Removed** | Not fallback — removed |
 | Dandelion++ | Shipped v3.7.0 | Opt-in stem submission |
 | Tor as transport | Shipped, opt-in OFF | 2026-07-02 decision; loud-fallback fix — Phase 2 item 5 |
-| Own-node pairing | Primitive shipped v3.10.1 | First-class flow — Phase 1 remainder |
+| Own-node pairing | **Shipped** — first-class flow | Primitive v3.10.1 + QR-scan/verify/pin/health (Seq 1.1/1.2), additive default + exclusive mode. Clearnet only — onion pairing, oracle-bootstrap, `cfcheckpt` remain Phase 1 remainder |
 | In-app bug reporting | Shipped v3.10.26 | Pre-filled device/sync context; DGB bounties |
 | CSV export | Not started | Phase 3 small increment |
 | F-Droid / Play Store | Not started | Phase 4; F-Droid first |

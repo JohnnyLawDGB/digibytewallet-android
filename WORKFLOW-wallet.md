@@ -45,11 +45,20 @@ ROADMAP.md would have zero false beliefs about the codebase.
 
 Logical progression — each step is testable before the next begins:
 
-- [ ] **1.1** Own-node pairing flow: QR-scan `host:port` / onion →
+- [x] **1.1** Own-node pairing flow: QR-scan `host:port` →
       verify `NODE_COMPACT_FILTERS` service bit → pin → health on main
-      screen. Builds on the v3.10.1 custom-node primitive.
-- [ ] **1.2** Pinned-node behavior in the peer manager: pinned peer
+      screen. Builds on the v3.10.1 custom-node primitive. **Shipped**
+      (`seq1/own-node-track`) — `dgbnode://host:port?net=&label=` QR
+      parser, native CF-peer status accessor, main-screen health chip.
+      Onion scanning deferred: the grammar reserves an onion host but
+      the parser rejects it today (lands with Seq 2.5, loud Tor
+      fallback).
+- [x] **1.2** Pinned-node behavior in the peer manager: pinned peer
       never evicted by churn logic; loud banner if it goes dark.
+      **Shipped** — native reserved dial slot + eviction exemption +
+      exclusive-mode dial suppression, dark-node banner with a "use
+      public peers" escape hatch, immediate-apply via reconnect (no
+      forced restart).
 - [ ] **1.3** Oracle-bootstrap peer injection: hardcoded oracle set as
       CF bootstrap peers, `addr` gossip bloom-out, seeder demoted to
       accelerant. Gate on the operator prerequisite (see cross-repo
