@@ -6,7 +6,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
 **Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
-**Version:** v3.10.27 (versionCode 30106)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v3.10.29 (versionCode 30108)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -90,7 +90,7 @@ adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 ### DigiRunner Game
 - 4 files: GameState.kt, GamePhysics.kt, GameRenderer.kt, DigiRunnerGame.kt
 - Game module has ZERO dependency on `:core` or `:native`
-- Shows during sync overlay, hidden when sync complete
+- Launches from the Hub → Games tab (v3.10.28+). Removed from the sync overlay: rendering it during a fresh full sync could exhaust process memory on long-history wallets.
 
 ## Important Patterns
 
@@ -107,7 +107,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 
 ### SharedPreferences Keys
 - `dgb_wallet_seed` — encrypted mnemonic + IV + seed fingerprint
-- `dgb_sync_data` — saved blocks (hex), saved peers (hex), `saved_filter_headers` (compact-filter header chain, hex), has_synced flag, last_balance, saved_transactions
+- `dgb_sync_data` — saved blocks (hex), saved peers (hex), has_synced flag, last_balance, saved_transactions. NOTE: the compact-filter header chain moved OUT of this prefs blob to a plain file `filesDir/saved_filter_headers<net>.bin` in v3.10.29 (`core/…/sync/FilterHeaderStore.kt`) — a hex String here was pinned in the SharedPreferences in-memory map and re-grown on every cfheaders batch (a 512MB heap leak that OOM-looped long-history wallets so they never fully synced).
 - `dgb_settings` — `sync_mode` (legacy key, now ignored — sync is always compact-filters-only; see `syncModeFor`), `cf_birth_height` (compact-filter scan floor)
 - `dgb_digiscope` — JWT session token for Hub
 - `dgb_db_key` — encrypted DB passphrase
@@ -117,7 +117,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
 
 ### Versioning Policy
-- `3.X.Y` — current line (at v3.7.6). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).
+- `3.X.Y` — current line (at v3.10.29). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).
 - `X.0.0` — major: reserved for a wire-protocol change or removal of the legacy bloom path. NOTE: BIP157/158 shipped inside the 3.5.x line **without** a major bump, so the old "4.0.0 = BIP158 lands" trigger is retired — the next major needs a fresh trigger (open decision; see ROADMAP → Versioning).
 - Pre-publish test suite must pass before any release
 - Never reuse version numbers
