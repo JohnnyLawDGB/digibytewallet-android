@@ -87,6 +87,13 @@ static void bridge_syncStopped(void *info, int error) {
 
     if (error) {
         LOGW("bridge_syncStopped: error=%d (%s)", error, strerror(error));
+        /* A sync that stopped with an error is NOT rescanning. If g_isRescanning
+         * was latched (a rescan was interrupted mid-flight by peers dropping),
+         * leaving it set would deadlock recovery: startSync's manager-recreate is
+         * gated on !g_isRescanning, so the keepalive's forceReconnect could never
+         * dig the wallet out of a 0-peer wedge — only a force-stop would. Clear it
+         * here so an interrupted rescan doesn't strand the flag. */
+        g_isRescanning = 0;
         /* Report failure to UI — do NOT auto-reconnect here.
          * Immediate reconnect on "Network is unreachable" creates a tight
          * infinite loop that burns CPU and keeps resetting the UI to 0%.
@@ -602,10 +609,21 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
 
     if (g_peerManager && g_peerManagerNeedsRecreate) {
         /* Don't destroy the peer manager mid-rescan — the rescan needs it alive
-         * to find transactions. Defer the recreate until rescan finishes. */
-        if (g_isRescanning) {
+         * to find transactions. Defer the recreate ONLY while the rescan is
+         * actively progressing, i.e. it still has peers driving it. A rescan
+         * "in progress" with 0 peers is a stalled zombie (its only recovery,
+         * the keepalive's forceReconnect → this recreate, is exactly what the
+         * defer would block) — deferring there deadlocks the wallet at 0 peers
+         * until a force-stop. So: defer only if peers > 0; if the rescan has
+         * stalled at 0 peers, clear the marker and fall through to recreate a
+         * fresh manager (the whole point of the forceReconnect escalation). */
+        if (g_isRescanning && BRPeerManagerPeerCount(g_peerManager) > 0) {
             LOGI("startSync: deferring peer manager recreate — rescan in progress");
             return;
+        }
+        if (g_isRescanning) {
+            LOGW("startSync: rescan stalled at 0 peers — clearing marker, recreating fresh manager");
+            g_isRescanning = 0;
         }
         /* Wallet was created/recovered after peer manager was initialized.
          * Destroy and recreate so the bloom filter includes the wallet's addresses.
