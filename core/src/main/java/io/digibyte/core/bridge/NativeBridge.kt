@@ -133,6 +133,19 @@ object NativeBridge {
      *  NODE_NETWORK|NODE_BLOOM default so nothing regresses. */
     external fun injectPeerByIp(ip: String, port: Int, servicesHex: Long)
 
+    /** Pin the peer manager to a single own-node. When [exclusive] is true, the
+     *  next startSync() suppresses the digiscope.me / testnet26 priority-peer
+     *  prepend so the wallet dials ONLY this peer. Does NOT itself add the peer
+     *  to the live pool — callers must ALSO call injectPeerByIp for that. */
+    external fun setPinnedPeer(ip: String, port: Int, exclusive: Boolean)
+
+    /** Clear the pinned own-node and exclusive-dialing flag — resumes normal
+     *  priority-peer + seeder-sourced pool behavior on the next startSync(). */
+    external fun clearPinnedPeer()
+
+    /** 0=UNKNOWN, 1=CONNECTING, 2=CONNECTED_NOT_SERVING, 3=SERVING (BRComputeCFPeerStatus). */
+    external fun compactFilterPeerStatus(ip: String, port: Int): Int
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
     /** Flag the peer manager for a clean recreate on the next startSync() — recovers

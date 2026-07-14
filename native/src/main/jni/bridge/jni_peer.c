@@ -49,6 +49,11 @@ static int g_isRescanning = 0;
 static UInt128 g_priorityPeerAddr = { .u64 = {0, 0} };
 static uint16_t g_priorityPeerPort = 0;
 
+/* Own-node exclusive-pairing flag — set by setPinnedPeer/clearPinnedPeer. When
+ * set, startSync suppresses the digiscope.me (mainnet) / testnet26 priority-
+ * peer prepend so the wallet dials ONLY the pinned own-node. */
+static int g_ownNodeExclusive = 0;
+
 static void bridge_syncStarted(void *info) {
     (void)info;
     LOGD("bridge_syncStarted (rescanning=%d)", g_isRescanning);
@@ -470,6 +475,56 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);
 }
 
+/* ---------- setPinnedPeer / clearPinnedPeer / compactFilterPeerStatus ---------- */
+
+/* Pin the peer manager to a single own-node (IP literal only — no DNS under
+ * the lock, modeled on addDandelionPeer). `exclusive` also flips
+ * g_ownNodeExclusive so startSync() suppresses the digiscope.me / testnet26
+ * priority-peer prepend; the caller (Kotlin injectCustomNode) is responsible
+ * for ALSO adding this peer to the live pool via injectPeerByIp — this
+ * function only pins + sets the exclusivity flag. */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thiz,
+                                                        jstring ipStr, jint port, jboolean exclusive) {
+    (void)thiz;
+    PEER_GUARD();
+    g_ownNodeExclusive = exclusive ? 1 : 0;
+    if (! g_peerManager) return;
+    const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
+    struct in_addr ip4;
+    if (ip && inet_pton(AF_INET, ip, &ip4) == 1) {
+        UInt128 addr = UINT128_ZERO; addr.u16[5] = 0xffff; addr.u32[3] = ip4.s_addr;
+        BRPeerManagerSetPinnedPeer(g_peerManager, addr, (uint16_t)port, exclusive ? 1 : 0);
+    }
+    if (ip) (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+}
+
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_clearPinnedPeer(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    g_ownNodeExclusive = 0;
+    if (g_peerManager) BRPeerManagerClearPinnedPeer(g_peerManager);
+}
+
+/* 0=UNKNOWN, 1=CONNECTING, 2=CONNECTED_NOT_SERVING, 3=SERVING. */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_compactFilterPeerStatus(JNIEnv *env, jobject thiz,
+                                                                  jstring ipStr, jint port) {
+    (void)thiz;
+    PEER_GUARD();
+    if (! g_peerManager) return 0; /* BR_CF_PEER_UNKNOWN */
+    const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
+    jint status = 0;
+    struct in_addr ip4;
+    if (ip && inet_pton(AF_INET, ip, &ip4) == 1) {
+        UInt128 addr = UINT128_ZERO; addr.u16[5] = 0xffff; addr.u32[3] = ip4.s_addr;
+        status = (jint)BRPeerManagerCompactFilterPeerStatus(g_peerManager, addr, (uint16_t)port);
+    }
+    if (ip) (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+    return status;
+}
+
 /* ---------- forceReconnect ---------- */
 
 /* Flag the peer manager for a clean recreate on the next startSync(). Recovers a
@@ -574,14 +629,18 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * selection can't pick it and the wallet holds ~1 filter peer.
          * Testnet: the two hardcoded testnet26 peers in place of digiscope.me
          * — no mainnet seeder/priority-peer path is touched on testnet. */
-        if (BRNetworkIsTestnet()) {
-            for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
-                if (haveTestnetPrio[i]) {
-                    _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, TESTNET_PRIORITY_PEER_SERVICES);
+        if (! g_ownNodeExclusive) {
+            if (BRNetworkIsTestnet()) {
+                for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
+                    if (haveTestnetPrio[i]) {
+                        _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, TESTNET_PRIORITY_PEER_SERVICES);
+                    }
                 }
+            } else {
+                if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
             }
         } else {
-            if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
+            LOGI("startSync: own-node exclusive mode — suppressing priority-peer prepend");
         }
 
         /* Create peer manager for the active network (mainnet by default;
