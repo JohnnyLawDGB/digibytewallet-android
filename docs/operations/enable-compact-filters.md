@@ -21,7 +21,7 @@ Wait a few hours for the filter index to build. You're done.
 Compact filter messages travel over the existing DigiByte P2P protocol
 on the same TCP connection as block and transaction messages. **No new
 ports, no firewall changes.** Mainnet stays on 12024, testnet on
-12026. The only wire-visible difference after you enable the flags is
+12033. The only wire-visible difference after you enable the flags is
 that your node's version handshake advertises an additional service
 bit (`NODE_COMPACT_FILTERS`, 0x40) alongside `NODE_BLOOM` / `NODE_NETWORK`.
 Mobile SPV clients check that bit and know they can request filters

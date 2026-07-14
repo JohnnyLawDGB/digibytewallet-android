@@ -20,7 +20,7 @@ peerblockfilters=1
 (alongside `blockfilterindex=basic`, with the index finished building —
 see `enable-compact-filters.md`). If this isn't set, pairing still
 *succeeds* — the wallet will connect to the node — but the health
-readout shows **⚠ reachable, not serving filters** instead of **✓
+readout shows **⚠ Not reachable / not serving filters** instead of **✓
 serving**, and the node won't actually carry the sync. Verification is
 warn-but-allow, not a hard block, since nodes go down or are mid-index
 transiently.
@@ -34,12 +34,12 @@ qrencode -o node.png "dgbnode://$HOST:$PORT?net=mainnet&label=$(hostname)"
 - `$HOST` — the node's reachable IP or hostname (as seen from the
   phone: LAN IP, VPN address, or public IP/DNS name).
 - `$PORT` — the node's P2P port. Mainnet is `12024`, testnet26 is
-  `12026` (same ports `enable-compact-filters.md` uses — no firewall
+  `12033` (same ports `enable-compact-filters.md` uses — no firewall
   change beyond what that guide already covers).
 - `net=` — `mainnet` or `testnet`. Any other value (or omitting it) is
   ignored; if present and it disagrees with the network the wallet is
-  running on, the wallet shows a confirm-to-override dialog rather than
-  silently pairing to the wrong chain.
+  running on, the confirm screen shows an inline warning before you
+  pair rather than silently pairing to the wrong chain.
 - `label=` — optional display name (letters/digits/`-_.`/whitespace
   only, capped at 32 characters after sanitizing); shown in the wallet
   next to the health chip.
@@ -60,8 +60,7 @@ screen:
 | Health | Meaning |
 |---|---|
 | ✓ serving | Pinned, connected, and has answered `getcfheaders`/`getcfilters` — normal, sync is (or can be) carried by this node. |
-| ⚠ reachable, not serving | Connected, but the node hasn't produced filter data — almost always a missing `peerblockfilters=1` or an index still building. |
-| ✗ / dark | Not reachable — check the host/port, firewall, or whether the node process is up. |
+| ⚠ not reachable / not serving filters | The single ⚠ state the app shows for *either* cause — the wallet can't distinguish them, so check both: (a) the node isn't reachable (host/port, firewall, or the node process is down), **or** (b) it's reachable but hasn't produced filter data (almost always a missing `peerblockfilters=1`, or an index still building). |
 
 If a pinned node goes dark **after** pairing, the wallet shows a loud
 banner on the main screen (it does not fail silently), and re-dials the
