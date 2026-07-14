@@ -103,6 +103,21 @@ class SyncService : Service() {
     private var bip158WatchdogJob: Job? = null
 
     /**
+     * Session-scoped, NEVER-persisted override set by the dark-node banner's
+     * "Use public peers" escape hatch (ACTION_OWN_NODE_ADDITIVE_SESSION). While
+     * true, injectCustomNode() pins the configured node non-exclusive regardless
+     * of the persisted CustomNodePrefs.isExclusive() choice — so later re-pins
+     * from OTHER recovery paths (the 0-peer branch of runPeerKeepalive, the Tor
+     * fallback watchdog) don't silently re-apply exclusivity and re-strand the
+     * wallet at 0 peers, defeating the escape within the same session. Cleared
+     * by a deliberate re-apply from Settings (ACTION_APPLY_OWN_NODE), which
+     * re-honors the persisted choice. Defaults false — inert for every user who
+     * hasn't used the escape hatch, and always false again on the next process
+     * launch since it's never written to prefs.
+     */
+    @Volatile private var ownNodeAdditiveSessionOverride = false
+
+    /**
      * SupervisorJob so that a child coroutine failure never cancels the
      * parent — important because Room insert failures must not tear down sync.
      */
@@ -164,6 +179,11 @@ class SyncService : Service() {
         // startSync) that already recovers a stalled peer pool elsewhere in this
         // service (see the 0-peer branch of runPeerKeepalive).
         if (intent?.action == ACTION_APPLY_OWN_NODE) {
+            // A deliberate re-apply from Settings re-honors the persisted
+            // exclusive choice — clear any session escape left over from a
+            // prior "Use public peers" tap so it doesn't linger past the
+            // user's explicit save.
+            ownNodeAdditiveSessionOverride = false
             serviceScope.launch {
                 try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
                 injectBloomPeers()
@@ -178,15 +198,16 @@ class SyncService : Service() {
         // prefs are never written, so the persisted exclusive choice still applies
         // on the next launch. Mirrors ACTION_APPLY_OWN_NODE's reconnect triple.
         if (intent?.action == ACTION_OWN_NODE_ADDITIVE_SESSION) {
+            // Set BEFORE launching so injectCustomNode() below (and every later
+            // re-pin this session — the 0-peer keepalive recovery, the Tor
+            // fallback watchdog) honors the escape until a deliberate Settings
+            // re-apply (ACTION_APPLY_OWN_NODE) clears it. Never written to
+            // prefs, so the persisted exclusive choice is untouched.
+            ownNodeAdditiveSessionOverride = true
             serviceScope.launch {
-                val raw = CustomNodePrefs.hostPort(this@SyncService)
-                val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT else CustomNode.MAINNET_DEFAULT_PORT
-                val node = raw?.let { CustomNode.parse(it, defaultPort) }
-                val ip = node?.let { withContext(Dispatchers.IO) {
-                    try { java.net.InetAddress.getAllByName(it.host).firstOrNull { a -> a is java.net.Inet4Address }?.hostAddress } catch (_: Exception) { null } } }
                 try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
                 injectBloomPeers()
-                if (ip != null) { NativeBridge.injectPeerByIp(ip, node.port, 0x41L); NativeBridge.setPinnedPeer(ip, node.port, false) }
+                injectCustomNode()   // override above forces non-exclusive here
                 NativeBridge.startSync()
             }
             return START_STICKY
@@ -1452,12 +1473,21 @@ class SyncService : Service() {
                 null
             }
         } ?: return
+        // Session escape hatch override: while ownNodeAdditiveSessionOverride is
+        // true (set by ACTION_OWN_NODE_ADDITIVE_SESSION, cleared by a deliberate
+        // ACTION_APPLY_OWN_NODE re-apply), stay non-exclusive here regardless of
+        // the persisted prefs value — otherwise ANY later call into this function
+        // (0-peer keepalive recovery, Tor fallback watchdog) would re-derive
+        // exclusive=true fresh from prefs and silently re-pin the node exclusive,
+        // defeating the escape mid-session.
+        val effectiveExclusive = CustomNodePrefs.isExclusive(this@SyncService) && !ownNodeAdditiveSessionOverride
         NativeBridge.injectPeerByIp(ip, node.port, 0x41L)
-        NativeBridge.setPinnedPeer(ip, node.port, CustomNodePrefs.isExclusive(this@SyncService))
+        NativeBridge.setPinnedPeer(ip, node.port, effectiveExclusive)
         android.util.Log.i(
             "SyncService",
             "own node injected + pinned as priority CF peer: $ip:${node.port} (${node.host}) " +
-                "exclusive=${CustomNodePrefs.isExclusive(this@SyncService)}"
+                "exclusive=$effectiveExclusive" +
+                (if (ownNodeAdditiveSessionOverride) " (session escape active)" else "")
         )
     }
 
