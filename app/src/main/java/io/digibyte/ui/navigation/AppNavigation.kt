@@ -84,6 +84,7 @@ private val fullScreenRoutes = setOf(
     "asset_send/{assetId}",
     "qr_scanner",
     "digiid_confirm/{uri}",
+    "node_pair_confirm/{uri}",
     "thread_detail/{threadId}",
     "create_thread",
     "digirunner",
@@ -432,7 +433,10 @@ fun AppNavigation(
             }
 
             composable("settings_network") {
-                NetworkInfoScreen(navController = navController)
+                NetworkInfoScreen(
+                    navController = navController,
+                    onScanNode = { navController.navigate("qr_scanner") }
+                )
             }
 
             composable("settings_display") {
@@ -558,6 +562,11 @@ fun AppNavigation(
                             popUpTo("qr_scanner") { inclusive = true }
                         }
                     },
+                    onNode = { raw ->
+                        navController.navigate("node_pair_confirm/${Uri.encode(raw)}") {
+                            popUpTo("qr_scanner") { inclusive = true }
+                        }
+                    },
                     onInvalidQr = { reason ->
                         Toast.makeText(localContext, reason, Toast.LENGTH_SHORT).show()
                         navController.popBackStack()
@@ -581,6 +590,17 @@ fun AppNavigation(
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }
+            }
+
+            // ── Own-node pairing confirm (after scanning dgbnode://) ──────
+            composable("node_pair_confirm/{uri}") { backStackEntry ->
+                val encodedUri = backStackEntry.arguments?.getString("uri") ?: ""
+                val rawUri = Uri.decode(encodedUri)
+                NodePairConfirmScreen(
+                    rawUri = rawUri,
+                    onDone = { navController.popBackStack() },
+                    onCancel = { navController.popBackStack() }
+                )
             }
         }
     }

@@ -44,6 +44,7 @@ private const val TAG = "QrScannerScreen"
  *
  * On successful scan, the URI type is detected:
  *   - digiid://   → onDigiId(DigiIdRequest)
+ *   - dgbnode://  → onNode(raw)
  *   - digibyte:   → onDigiByteUri(DigiByteUri)
  *   - valid addr  → onDigiByteUri(DigiByteUri(address))
  *   - other       → onInvalidQr()
@@ -54,6 +55,7 @@ private const val TAG = "QrScannerScreen"
 fun QrScannerScreen(
     onDigiId: (DigiIdRequest) -> Unit,
     onDigiByteUri: (DigiByteUri) -> Unit,
+    onNode: (String) -> Unit,
     onInvalidQr: (String) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -107,7 +109,7 @@ fun QrScannerScreen(
         if (hasCameraPermission) {
             CameraPreviewWithZxing(
                 onScanResult = { raw ->
-                    dispatchScanResult(raw, onDigiId, onDigiByteUri, onInvalidQr)
+                    dispatchScanResult(raw, onDigiId, onDigiByteUri, onNode, onInvalidQr)
                 }
             )
         } else {
@@ -319,6 +321,7 @@ private fun dispatchScanResult(
     raw: String,
     onDigiId: (DigiIdRequest) -> Unit,
     onDigiByteUri: (DigiByteUri) -> Unit,
+    onNode: (String) -> Unit,
     onInvalidQr: (String) -> Unit
 ) {
     val trimmed = raw.trim()
@@ -331,6 +334,7 @@ private fun dispatchScanResult(
                 onInvalidQr("Invalid Digi-ID QR: missing required fields")
             }
         }
+        trimmed.startsWith("dgbnode://") -> onNode(trimmed)
         trimmed.startsWith("digibyte:") -> {
             val uri = DigiByteUri.parse(trimmed)
             if (uri != null) {
