@@ -29,7 +29,6 @@ import io.digibyte.core.model.SyncStage
 import io.digibyte.core.tor.TorState
 import io.digibyte.ui.components.BalanceDisplay
 import io.digibyte.ui.components.TransactionItem
-import io.digibyte.ui.sync.SyncOverlay
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteNavy
@@ -45,9 +44,6 @@ fun WalletScreen(
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
-    onNavigateGame: () -> Unit = {},
-    onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
-    onShowLeaderboard: (() -> Unit)? = null,
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -225,19 +221,10 @@ fun WalletScreen(
             }
         }
 
-        // ── DigiRunner sync game / progress bar ──────────────────────────
-        item {
-            SyncOverlay(
-                stage = syncProgressInfo.stage,
-                progress = syncProgressInfo.progressFraction,
-                onPlayGame = onNavigateGame,
-                onScoreSubmit = onScoreSubmit,
-                onShowLeaderboard = onShowLeaderboard,
-                modifier  = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-            )
-        }
+        // DigiRunner is no longer shown during sync — it launches from the
+        // Hub's Games tab. (Rendering the game during a fresh full sync could
+        // OOM the process on memory-constrained devices; the sync progress
+        // readout lives in SyncProgressCard.)
 
         // ── Price feed card ───────────────────────────────────────────────
         item {

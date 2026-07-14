@@ -316,16 +316,7 @@ fun AppNavigation(
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
                     },
-                    onNavigateAssets = { navController.navigate("assets") },
-                    onNavigateGame = { navController.navigate("digirunner") },
-                    onScoreSubmit = { score, distance, coins, livesRemaining ->
-                        kotlinx.coroutines.MainScope().launch {
-                            val ok = digiScopeClient.submitDigiRunnerScore(score, distance, coins, livesRemaining)
-                            val msg = if (ok) "Score submitted!" else "Score submit failed — are you logged in?"
-                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onShowLeaderboard = { navController.navigate("digirunner_leaderboard") }
+                    onNavigateAssets = { navController.navigate("assets") }
                 )
             }
 
