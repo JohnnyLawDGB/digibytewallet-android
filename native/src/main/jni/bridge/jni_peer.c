@@ -45,9 +45,6 @@ Java_io_digibyte_core_bridge_NativeBridge_clearSocksProxy(
 static int g_initialSyncDone = 0;
 static int g_isRescanning = 0;
 
-/* Priority peer (digiscope.me) — resolved once in _injectPriorityPeer, reused for rescan */
-static UInt128 g_priorityPeerAddr = { .u64 = {0, 0} };
-static uint16_t g_priorityPeerPort = 0;
 
 /* Own-node exclusive-pairing flag — set by setPinnedPeer/clearPinnedPeer. When
  * set, startSync suppresses the digiscope.me (mainnet) / testnet26 priority-
@@ -321,12 +318,6 @@ static size_t g_savedPeersCount = 0;
  * nothing regresses. */
 #define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM)
 
-/* digiscope.me is one of our BIP157/158 filter nodes, so tag the priority
- * peer compact-filter-capable. Without SERVICES_NODE_COMPACT_FILTERS set,
- * BRPeerManager's filter-first selection can never pick it and the wallet
- * falls back to holding ~1 filter peer by chance. */
-#define PRIORITY_PEER_SERVICES   (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM | SERVICES_NODE_COMPACT_FILTERS)
-
 /* testnet26 priority peers serve compact filters, not bloom — tag them
  * compact-filter-capable (no bloom) so filter-first selection dials them and
  * the relaxed testnet accept gate keeps them. */
@@ -353,6 +344,60 @@ static const char *TESTNET_PRIORITY_PEER_IPS[] = {
 };
 #define TESTNET_PRIORITY_PEER_COUNT \
     (sizeof(TESTNET_PRIORITY_PEER_IPS) / sizeof(TESTNET_PRIORITY_PEER_IPS[0]))
+
+/* MAINNET compact-filter priority peers — the DigiDollar oracle set (oracle-
+ * bootstrap, ROADMAP Phase 1 "peer diversity beyond author infrastructure").
+ * These are the persistent filter-serving nodes the capability-aware seeder
+ * advertises (api.digiscope.me/api/peers?capability=filter); the oracle
+ * operators run mainnet Core 9.26 nodes with blockfilterindex +
+ * peerblockfilters on. Hardcoding them makes the wallet self-bootstrapping: a
+ * reliable, diverse set of BIP157/158 filter nodes is ALWAYS in the pool even
+ * if the seeder is unreachable or churns — so a fresh install is never stranded
+ * on one seeder or one peer. This DEMOTES digiscope.me from THE single priority
+ * peer to just one-of-N (134.199.198.90, listed first), removing the author's
+ * node as a single point of dependence on the data path.
+ *
+ * Raw IP literals (not hostnames) match TESTNET_PRIORITY_PEER_IPS and avoid a
+ * DNS dependency on the sovereignty-critical bootstrap path. The live seeder
+ * (refreshed hourly via injectFilterPeers) remains the source of FRESH peers
+ * when this baked set ages, so a stale IP degrades to "use the seeder", never
+ * to "stranded".
+ *
+ * The set is MIXED: some serve bloom+CF (services 0x44d), some are CF-only
+ * (0x449, bloom off by default on modern Core). All 15 are tagged
+ * compact-filter-capable (no bloom) so BRPeerManager's filter-first selection
+ * dials them and the sync-mode-gated mainnet accept gate (admits CF-only,
+ * BRPeerManager.c) keeps them; the real service bits from each peer's version
+ * message govern retention afterward. The 15 span distinct /16 subnets, but
+ * that is only a ROUGH diversity signal — NOT a guarantee of operator/ASN
+ * independence (several fall in shared-hosting ranges, e.g. DigitalOcean /
+ * Linode, and some may be co-located or author-run). So the cfheaders
+ * continuity quorum's (CF_CONTINUITY_REANCHOR_K) real independence is bounded
+ * by the actual operator diversity of the seeder set, which this comment
+ * cannot vouch for — this is a curated multi-operator bootstrap, strictly
+ * better than the single-seeder/single-peer it replaces, not a trustless one.
+ * SNAPSHOT 2026-07-15 — re-pull from the seeder when operators rotate. */
+#define MAINNET_PRIORITY_PEER_SERVICES (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
+#define MAINNET_PRIORITY_PEER_PORT  12024
+static const char *MAINNET_PRIORITY_PEER_IPS[] = {
+    "134.199.198.90",   /* digiscope.me (author node — now one-of-N, not THE peer) */
+    "129.212.182.152",
+    "134.56.44.241",
+    "174.131.163.123",
+    "64.182.71.26",
+    "66.64.43.14",
+    "172.104.191.6",
+    "103.230.156.247",
+    "216.250.127.199",
+    "112.213.39.221",
+    "101.103.12.129",
+    "95.111.238.51",
+    "84.30.137.73",
+    "109.123.231.205",
+    "147.93.171.46",
+};
+#define MAINNET_PRIORITY_PEER_COUNT \
+    (sizeof(MAINNET_PRIORITY_PEER_IPS) / sizeof(MAINNET_PRIORITY_PEER_IPS[0]))
 
 /**
  * Resolve a hostname and prepend it to g_savedPeers so the peer manager
@@ -394,7 +439,8 @@ static int _resolveHostToAddr(const char *hostname, UInt128 *out) {
  * MUST hold g_peerManagerMutex. Fast (no DNS).
  *
  * `services` carries the peer's advertised capabilities (from the seeder's
- * services_hex, or PRIORITY_PEER_SERVICES for digiscope.me). We OR it into an
+ * services_hex, or MAINNET/TESTNET_PRIORITY_PEER_SERVICES for a hardcoded
+ * priority peer). We OR it into an
  * existing entry so a previously handshake-upgraded / filter-tagged peer is
  * never downgraded by a later injection that happens to lack the bit. */
 static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services) {
@@ -404,8 +450,6 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services
             /* Already there — just bump its timestamp to the top */
             g_savedPeers[i].timestamp = (uint64_t)time(NULL);
             g_savedPeers[i].services |= services;   /* union — never downgrade */
-            g_priorityPeerAddr = addr;
-            g_priorityPeerPort = port;
             return;
         }
     }
@@ -428,10 +472,6 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services
     free(g_savedPeers);
     g_savedPeers = newPeers;
     g_savedPeersCount = newCount;
-
-    /* Cache for rescan locking */
-    g_priorityPeerAddr = addr;
-    g_priorityPeerPort = port;
 }
 
 /* Resolve + prepend in one step. For IP-literal callers (injectPeerByIp) where
@@ -590,11 +630,12 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
      * across DNS would turn a brief read into an ANR. Resolution touches no
      * shared state, so it is safe unlocked; the prepend below is under the lock.
      *
-     * Mainnet resolves the digiscope.me hostname (unchanged). Testnet resolves
-     * the two hardcoded testnet26 IP-literal peers instead — no mainnet
-     * seeder/hostname involved at all when BRNetworkIsTestnet(). */
-    UInt128 prioAddr = UINT128_ZERO;
-    int havePrio = 0;
+     * Both networks now resolve a hardcoded IP-literal priority-peer set
+     * (mainnet = the DigiDollar oracle set, testnet = the testnet26 nodes) —
+     * IP literals are instant (no real DNS lookup), so no seeder/hostname sits
+     * on the bootstrap path for either network. */
+    UInt128 mainnetPrioAddr[MAINNET_PRIORITY_PEER_COUNT];
+    int haveMainnetPrio[MAINNET_PRIORITY_PEER_COUNT];
     UInt128 testnetPrioAddr[TESTNET_PRIORITY_PEER_COUNT];
     int haveTestnetPrio[TESTNET_PRIORITY_PEER_COUNT];
     if (BRNetworkIsTestnet()) {
@@ -602,7 +643,9 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             haveTestnetPrio[i] = _resolveHostToAddr(TESTNET_PRIORITY_PEER_IPS[i], &testnetPrioAddr[i]);
         }
     } else {
-        havePrio = _resolveHostToAddr("digiscope.me", &prioAddr);
+        for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
+            haveMainnetPrio[i] = _resolveHostToAddr(MAINNET_PRIORITY_PEER_IPS[i], &mainnetPrioAddr[i]);
+        }
     }
 
     PEER_GUARD();
@@ -662,11 +705,11 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         /* Prepend the priority peer(s) (resolved above, before the lock) so a
          * reliable node is always in the pool, even if DNS seeds aren't
          * re-queried.
-         * Mainnet: digiscope.me — it is a BIP157/158 filter node, so tag it
-         * compact-filter-capable, otherwise BRPeerManager's filter-first
-         * selection can't pick it and the wallet holds ~1 filter peer.
-         * Testnet: the two hardcoded testnet26 peers in place of digiscope.me
-         * — no mainnet seeder/priority-peer path is touched on testnet. */
+         * Mainnet: the DigiDollar oracle set (15 filter nodes incl. digiscope.me,
+         * now one-of-N) — all tagged compact-filter-capable so filter-first
+         * selection dials them and the wallet always holds several filter peers,
+         * never stranded on one seeder or one peer.
+         * Testnet: the hardcoded testnet26 peers in place of the oracle set. */
         if (! g_ownNodeExclusive) {
             if (BRNetworkIsTestnet()) {
                 for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
@@ -675,7 +718,11 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
                     }
                 }
             } else {
-                if (havePrio) _prependSavedPeerAddr(prioAddr, 12024, PRIORITY_PEER_SERVICES);
+                for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
+                    if (haveMainnetPrio[i]) {
+                        _prependSavedPeerAddr(mainnetPrioAddr[i], MAINNET_PRIORITY_PEER_PORT, MAINNET_PRIORITY_PEER_SERVICES);
+                    }
+                }
             }
         } else {
             LOGI("startSync: own-node exclusive mode — suppressing priority-peer prepend");
