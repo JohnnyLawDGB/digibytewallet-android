@@ -80,6 +80,14 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   eclipse the wallet onto hostile peers. The oracle-bootstrap design
   (`docs/superpowers/specs/2026-07-08-oracle-bootstrap-peer-discovery.md`)
   demotes it from required to accelerant.
+- **The price feed is a trusted third party.** The DGB/USD rate comes
+  from CoinGecko → Binance (`core/…/PriceProvider.kt:130`) — external
+  APIs on the default data path. Low-stakes (display-only; never touches
+  consensus, balances, or spending) but still a third party the wallet
+  trusts, and offline when both APIs are. The sovereign replacement —
+  verifying the DigiDollar oracles' on-chain Schnorr price attestations —
+  is already scaffolded (`OraclePriceProvider` / `PriceSource.ORACLE`)
+  and scheduled in Phase 3, gated on oracle liveness.
 - **PIN brute-force has no rate limit.** `core/…/security/PinManager.kt:43`
   verifies with no backoff, no attempt counter, no wipe policy. This is
   now the single cheapest high-value hardening item in the repo, and it
@@ -332,13 +340,28 @@ feature parity item; nothing else on any chain does it.
    wallet-native companion to DigiScope's Gauntlet and the cheapest
    genuine differentiation in this phase. No SPV wallet on any chain
    shows users the live security model of their own chain.
-5. **Coin control / UTXO management.** List, freeze, manual-select.
+5. **Sovereign price feed (oracle Schnorr blockstamps).** The DGB/USD
+   rate is the last trusted third party in the default data path — today
+   it comes from CoinGecko → Binance. Once the DigiDollar oracles are
+   live, read it instead from their Schnorr-signed price attestations
+   stamped on-chain: verify the signatures against the known oracle
+   pubkey set on-device, then demote the CoinGecko/Binance APIs to a
+   clearly-labeled fallback. Same "derivable from data the client already
+   validates, zero trusted-API additions" rule as the dashboard above —
+   and the wallet already dials these same oracle nodes for compact
+   filters (Phase 1 oracle-bootstrap), so it adds no new trust surface.
+   The client seam already exists (`OraclePriceProvider` /
+   `PriceSource.ORACLE` in `core/…/PriceProvider.kt`, plus the Settings
+   toggle that already notes "requires DigiByte v9 on mainnet"); only the
+   concrete signature-verifying provider is missing. Gated on oracle
+   liveness (testnet26 now → mainnet).
+6. **Coin control / UTXO management.** List, freeze, manual-select.
    On `core/…/UtxoManager.kt`. Gains urgency from the duress PIN
    (funding the decoy cleanly) and vaults (choosing collateral UTXOs).
-6. **Replace-by-fee (RBF).** Send-screen toggle + bump action.
-7. **Sweep paper wallet (WIF).** Privately queryable now via CF.
-8. **Address book / labels.** Local only; no cloud sync.
-9. **Multisig (2-of-3, N-of-M).** Still last, and now for a cleaner
+7. **Replace-by-fee (RBF).** Send-screen toggle + bump action.
+8. **Sweep paper wallet (WIF).** Privately queryable now via CF.
+9. **Address book / labels.** Local only; no cloud sync.
+10. **Multisig (2-of-3, N-of-M).** Still last, and now for a cleaner
    reason than the June revision's: the bloom-privacy objection is
    moot (bloom is gone), but multisig composes on descriptors +
    PSBT + watch-only, all of which vault work exercises and hardens
