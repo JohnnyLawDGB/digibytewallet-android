@@ -72,6 +72,15 @@ class SyncService : Service() {
      *  unhandled JNI throwable, SupervisorJob child cancellation). */
     private var keepaliveJob: Job? = null
 
+    /** Self-healing watchdog that re-arms the keepalive if it dies or goes
+     *  stale, on a timer — independent of onStartCommand. onStartCommand is the
+     *  only OTHER resurrection path, and nothing fires it while the app sits
+     *  foreground-idle, so a keepalive that dies on a transient error (observed:
+     *  a network blip dropping every peer at once → error 101 → the keepalive
+     *  coroutine dies) would otherwise stay dead and strand the wallet at 0
+     *  peers until a manual force-stop. See runKeepaliveWatchdog. */
+    private var keepaliveWatchdogJob: Job? = null
+
     /** Wall-clock timestamp of the last keepalive tick. Used by the respawn
      *  check so we detect coroutines that are nominally `isActive=true` but
      *  have been frozen by Doze for so long that the peer-keepalive has
@@ -248,24 +257,12 @@ class SyncService : Service() {
                 )
                 syncSetupJob = serviceScope.launch { startSyncWithTor() }
             }
-            val now = System.currentTimeMillis()
-            val stale = lastKeepaliveTickMs > 0L &&
-                (now - lastKeepaliveTickMs) > KEEPALIVE_STALE_THRESHOLD_MS
-            if (keepaliveJob?.isActive != true) {
-                android.util.Log.w("SyncService", "keepalive coroutine not active — respawning")
-                keepaliveJob = serviceScope.launch { runPeerKeepalive() }
-            } else if (stale) {
-                // Coroutine reports active but hasn't ticked in a long time —
-                // Doze froze it without cancelling. Cancel the old job so we
-                // don't end up with two loops fighting, then respawn.
-                val gap = (now - lastKeepaliveTickMs) / 1000L
-                android.util.Log.w(
-                    "SyncService",
-                    "keepalive stale: no tick in ${gap}s — cancelling + respawning"
-                )
-                keepaliveJob?.cancel()
-                lastKeepaliveTickMs = 0L
-                keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+            resurrectKeepaliveIfNeeded()
+            // Re-arm the self-healing watchdog too, in case it ever died — so the
+            // keepalive always has a timer-based resurrector, even when
+            // onStartCommand stops being called (foreground-idle).
+            if (keepaliveWatchdogJob?.isActive != true) {
+                keepaliveWatchdogJob = serviceScope.launch { runKeepaliveWatchdog() }
             }
             return START_STICKY
         }
@@ -352,7 +349,73 @@ class SyncService : Service() {
         // Keep peers alive while app is open — poll every 10s, reconnect aggressively.
         keepaliveJob = serviceScope.launch { runPeerKeepalive() }
 
+        // Self-healing watchdog: re-arm the keepalive on a timer if it ever dies
+        // or goes stale, so recovery never depends on onStartCommand being
+        // fired again (it isn't, while the app sits foreground-idle).
+        keepaliveWatchdogJob = serviceScope.launch { runKeepaliveWatchdog() }
+
         return START_STICKY
+    }
+
+    /**
+     * Respawn the peer-keepalive coroutine if it has died or gone stale
+     * (Doze-frozen without cancelling). Idempotent. Called from onStartCommand
+     * (on a start Intent, main thread) AND runKeepaliveWatchdog (on a timer,
+     * Dispatchers.Default) — @Synchronized so the two callers can't race into
+     * two competing keepalive loops.
+     */
+    @Synchronized
+    private fun resurrectKeepaliveIfNeeded() {
+        val now = System.currentTimeMillis()
+        val stale = lastKeepaliveTickMs > 0L &&
+            (now - lastKeepaliveTickMs) > KEEPALIVE_STALE_THRESHOLD_MS
+        if (keepaliveJob?.isActive != true) {
+            android.util.Log.w("SyncService", "keepalive coroutine not active — respawning")
+            // Reset the tick watermark (like the stale branch) so a respawned
+            // keepalive that parks on walletState.first{Unlocked} (wallet locked)
+            // isn't immediately re-flagged stale off the pre-death timestamp.
+            lastKeepaliveTickMs = 0L
+            keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+        } else if (stale) {
+            // Coroutine reports active but hasn't ticked in a long time —
+            // Doze froze it without cancelling. Cancel the old job so we
+            // don't end up with two loops fighting, then respawn.
+            val gap = (now - lastKeepaliveTickMs) / 1000L
+            android.util.Log.w(
+                "SyncService",
+                "keepalive stale: no tick in ${gap}s — cancelling + respawning"
+            )
+            keepaliveJob?.cancel()
+            lastKeepaliveTickMs = 0L
+            keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+        }
+    }
+
+    /**
+     * Self-healing watchdog for the peer-keepalive. The reconnect recovery
+     * (re-inject peers, startSync, forceReconnect) lives in runPeerKeepalive's
+     * 0-peer branch, but that coroutine can die — an unhandled JNI throwable, a
+     * child coroutine cancelling its scope, or the peer-drop storm that follows
+     * a "Network is unreachable" error (observed on a Note 8: a wifi blip
+     * dropped all peers at once, error 101 fired, and the keepalive never
+     * ticked again). Its only other resurrection is onStartCommand, which is
+     * NOT fired while the app sits foreground-idle — so without this the wallet
+     * stays at 0 peers until a manual force-stop. This loop re-arms the
+     * keepalive on a timer. It launches NO child coroutines and guards every
+     * tick, so it cannot die the way the keepalive can; delay() is the sole
+     * cancellation point, so it exits cleanly when serviceScope is cancelled.
+     */
+    private suspend fun runKeepaliveWatchdog() {
+        while (true) {
+            delay(KEEPALIVE_WATCHDOG_INTERVAL_MS)
+            try {
+                resurrectKeepaliveIfNeeded()
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                android.util.Log.w("SyncService", "keepalive watchdog tick threw", t)
+            }
+        }
     }
 
     /**
@@ -2011,6 +2074,13 @@ class SyncService : Service() {
          *  cancels the old job and respawns. Chosen to be > 5× the normal
          *  10s tick to avoid respawn thrash under short GC pauses etc. */
         private const val KEEPALIVE_STALE_THRESHOLD_MS = 60_000L
+
+        /** How often the self-healing watchdog checks that the keepalive is alive
+         *  and ticking, respawning it if not. 30s catches a dead keepalive well
+         *  before the wallet is meaningfully stranded, without polling so often
+         *  it churns. Independent of onStartCommand (which foreground-idle apps
+         *  never re-fire) and far faster than the 15-min WorkManager catch-up. */
+        private const val KEEPALIVE_WATCHDOG_INTERVAL_MS = 30_000L
 
         /** Consecutive 10s keepalive ticks at 0 peers before escalating from a light
          *  reconnect (re-inject + startSync) to a clean peer-manager recreate
