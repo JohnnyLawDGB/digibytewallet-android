@@ -7,6 +7,7 @@ import io.digibyte.core.TxResult
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.entity.TransactionEntity
+import io.digibyte.core.asset.send.AssetFeeEstimator
 import io.digibyte.core.model.OwnedAsset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,14 @@ import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.math.RoundingMode
 import javax.inject.Inject
+
+/** Fee warning surfaced under the custom-fee field — mirrors the regular
+ *  send's [io.digibyte.ui.wallet.FeeWarning] semantics. */
+sealed class AssetFeeWarning {
+    data object None : AssetFeeWarning()
+    data object BelowRelay : AssetFeeWarning()
+    data object ZeroFee : AssetFeeWarning()
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -52,6 +61,67 @@ class AssetViewModel @Inject constructor(
     private val _sendState = MutableStateFlow<SendState>(SendState.Idle)
     val sendState: StateFlow<SendState> = _sendState.asStateFlow()
 
+    // ── Fee state (mirrors SendViewModel) ──────────────────────────────
+    //
+    // An asset send is a regular DGB tx carrying an OP_RETURN + a pinned
+    // asset UTXO, so the fee is a regular DGB fee: a sat/kB rate (default
+    // 100 sat/byte = min relay) with a custom TOTAL-DGB override. The old
+    // 1/5/20 sat/byte tier chips were all BELOW min relay and got stuck.
+
+    /** Whether the user has toggled the custom (total-DGB) fee override. */
+    val isCustomFee = MutableStateFlow(false)
+
+    /** Custom fee input — a TOTAL fee in DGB (same UX as the regular send). */
+    val customFeeInput = MutableStateFlow("")
+
+    /** Default estimated total fee in sats for a typical asset transfer. */
+    val defaultFeeSat: Long = ASSET_TYPICAL_VSIZE * DEFAULT_FEE_PER_KB / 1000
+
+    /** Fee rate in sat/kB handed to [AssetManager.sendAsset]. When custom,
+     *  the user's total-DGB fee is converted to a rate over an asset-typical
+     *  vsize; the size-aware estimator + min-relay floor in sendAsset then
+     *  applies it to the concrete tx shape. */
+    val feeRatePerKb: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
+        if (!custom) {
+            DEFAULT_FEE_PER_KB
+        } else {
+            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
+            val feeSat = (feeDgb * 100_000_000).toLong()
+            if (feeSat <= 0 || ASSET_TYPICAL_VSIZE <= 0) return@combine DEFAULT_FEE_PER_KB
+            (feeSat * 1000) / ASSET_TYPICAL_VSIZE
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_FEE_PER_KB)
+
+    /** Estimated total fee in sats (for the fee-row display). */
+    val estimatedFeeSat: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
+        if (!custom) {
+            defaultFeeSat
+        } else {
+            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
+            (feeDgb * 100_000_000).toLong()
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, defaultFeeSat)
+
+    /** Warning state for the custom fee (amber below relay, red on zero). */
+    val feeWarning: StateFlow<AssetFeeWarning> = combine(isCustomFee, customFeeInput) { custom, input ->
+        if (!custom) return@combine AssetFeeWarning.None
+        val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
+        val feeSat = (feeDgb * 100_000_000).toLong()
+        if (feeSat <= 0) return@combine AssetFeeWarning.ZeroFee
+        val satPerVbyte = feeSat.toDouble() / ASSET_TYPICAL_VSIZE
+        if (satPerVbyte < 100.0) AssetFeeWarning.BelowRelay else AssetFeeWarning.None
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, AssetFeeWarning.None)
+
+    /** Toggle between default and custom fee mode. Seeds the custom field
+     *  with the current default so the user edits from a sane baseline. */
+    fun toggleCustomFee() {
+        val wasCustom = isCustomFee.value
+        isCustomFee.value = !wasCustom
+        if (!wasCustom) {
+            customFeeInput.value = String.format("%.8f", defaultFeeSat / 100_000_000.0)
+        }
+    }
+
     fun selectAsset(assetId: String) {
         _selectedAssetId.value = assetId
     }
@@ -74,7 +144,7 @@ class AssetViewModel @Inject constructor(
     fun sendAssetTransfer(
         toAddress: String,
         quantityInput: String,
-        feeSats: Long,
+        feePerKb: Long,
     ) {
         val asset = selectedAsset.value
         if (asset == null) {
@@ -101,7 +171,7 @@ class AssetViewModel @Inject constructor(
                 assetId = asset.assetId,
                 quantity = internalQty,
                 toAddress = toAddress,
-                feeSats = feeSats,
+                feePerKb = feePerKb,
             )
             _sendState.value = when (result) {
                 is TxResult.Success -> SendState.Success(result.txid)
@@ -137,4 +207,17 @@ class AssetViewModel @Inject constructor(
 
     private fun BigDecimal.toLongOrNull(): Long? =
         try { longValueExact() } catch (_: ArithmeticException) { null }
+
+    companion object {
+        /** DGB min relay / default fee rate — reuse the exact estimator
+         *  constant (100,000 sat/kB = 100 sat/byte). */
+        private const val DEFAULT_FEE_PER_KB = AssetFeeEstimator.MIN_RELAY_FEE_PER_KB
+
+        /** Asset-typical vsize used ONLY for the custom total-DGB ⇄ rate
+         *  conversion and the default-fee display. The regular send uses
+         *  ~141; an asset transfer (mixed inputs + OP_RETURN + markers)
+         *  runs larger, so we use a mid-range 400 vbytes. The authoritative
+         *  fee is still computed size-aware in AssetManager.sendAsset. */
+        private const val ASSET_TYPICAL_VSIZE = 400L
+    }
 }

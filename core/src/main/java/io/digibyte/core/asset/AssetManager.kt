@@ -677,18 +677,23 @@ class AssetManager(
      *                   The caller must scale from user-entered decimals
      *                   using the asset's divisibility before calling.
      * @param toAddress  Recipient DigiByte address.
-     * @param feeSats    Total DGB fee in satoshis. Caller can derive this
-     *                   from tx-size estimate × sat/byte.
+     * @param feePerKb   DGB fee **rate** in sat/kB (100,000 = 100 sat/byte =
+     *                   DGB min relay). The actual absolute fee is derived
+     *                   size-aware from the concrete tx shape via
+     *                   [AssetFeeEstimator.estimateAssetTxFeeSats] and is
+     *                   always floored at min relay so the tx relays. A
+     *                   custom TOTAL-fee override is expressed by the caller
+     *                   as an equivalent feePerKb (see AssetViewModel).
      */
     suspend fun sendAsset(
         assetId: String,
         quantity: Long,
         toAddress: String,
-        feeSats: Long,
+        feePerKb: Long,
     ): TxResult {
         if (!NativeBridge.isValidAddress(toAddress)) return TxResult.Error("Invalid DigiByte address")
         if (quantity <= 0) return TxResult.Error("Quantity must be positive")
-        if (feeSats < 0) return TxResult.Error("Fee must be non-negative")
+        if (feePerKb < 0) return TxResult.Error("Fee rate must be non-negative")
 
         // 1. Load spendable UTXOs.
         val assetUtxos = utxoDao.getAssetUtxosByIdNow(assetId)
@@ -700,6 +705,77 @@ class AssetManager(
         //    DGB change naturally — slight pessimism, simpler code.
         val markerSats = io.digibyte.core.asset.send.DA_MARKER_SATS
         val twoMarkerSats = markerSats * 2
+
+        // 2a. First (bootstrap) selection with a conservative typical-shape
+        //     fee. The asset-input set and the OP_RETURN are FEE-INDEPENDENT
+        //     (they depend only on the transfer quantity), so this select
+        //     reveals the stable parts of the shape; only the DGB fee inputs
+        //     and DGB change vary with the fee, and the estimator's
+        //     +1-input margin covers a re-select that pulls one more input.
+        val bootstrapFeeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
+            assetInputCount = 1,
+            dgbInputCount = 1,
+            outputCount = 3,
+            opReturnBytes = 80,
+            feePerKb = feePerKb,
+        )
+        val bootstrap = io.digibyte.core.asset.send.AssetCoinSelector.select(
+            assetUtxos = assetUtxos,
+            dgbUtxos = dgbUtxos,
+            assetNeeded = quantity,
+            feeSats = bootstrapFeeSats,
+            markerOutputSats = twoMarkerSats,
+        )
+        val ok0 = when (bootstrap) {
+            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
+                return TxResult.Error("Not enough asset: need ${bootstrap.required}, have ${bootstrap.available}")
+            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
+                return TxResult.Error("Not enough DGB for fee: need ${bootstrap.required}, have ${bootstrap.available}")
+            is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> bootstrap
+        }
+
+        val hasAssetChange = ok0.assetChangeQty > 0L
+
+        // 3. Output layout. Recipient marker at vout 0, OP_RETURN at vout 1,
+        //    optional asset-change marker at vout 2, optional DGB change at
+        //    the next free vout. Transfer instructions reference these vouts
+        //    directly so we have to commit to the layout before encoding.
+        val recipientVout = 0
+        val assetChangeVout = if (hasAssetChange) 2 else -1
+
+        // 4. Build transfer instructions: walk asset inputs in order,
+        //    distributing each input's units into the recipient first then
+        //    the change marker. `skip=true` on the LAST instruction pulling
+        //    from a non-final input advances the decoder to the next input.
+        //    Built from the bootstrap selection's asset side — identical
+        //    across both selects since asset selection is fee-independent.
+        val instructions = buildTransferInstructions(
+            assetInputs = ok0.assetInputs,
+            quantityToRecipient = quantity,
+            assetChangeQty = ok0.assetChangeQty,
+            recipientVout = recipientVout,
+            assetChangeVout = assetChangeVout,
+        ) ?: return TxResult.Error("Could not build transfer instructions")
+
+        val opReturnScript = try {
+            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
+        } catch (e: Exception) {
+            return TxResult.Error("Encode failed: ${e.message}")
+        }
+
+        // 4a. Now that we know the real OP_RETURN length and the concrete
+        //     output count (recipient + optional asset-change + a DGB-change
+        //     output we conservatively assume is present), compute the actual
+        //     size-aware fee and RE-select with it. Value-output count for the
+        //     estimate: recipient(1) + asset-change(0/1) + dgb-change(1).
+        val estimateOutputCount = 1 + (if (hasAssetChange) 1 else 0) + 1
+        val feeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
+            assetInputCount = ok0.assetInputs.size,
+            dgbInputCount = ok0.dgbInputs.size,
+            outputCount = estimateOutputCount,
+            opReturnBytes = opReturnScript.size,
+            feePerKb = feePerKb,
+        )
         val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
             assetUtxos = assetUtxos,
             dgbUtxos = dgbUtxos,
@@ -715,35 +791,10 @@ class AssetManager(
             is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
         }
 
-        val hasAssetChange = ok.assetChangeQty > 0L
-
-        // 3. Output layout. Recipient marker at vout 0, OP_RETURN at vout 1,
-        //    optional asset-change marker at vout 2, optional DGB change at
-        //    the next free vout. Transfer instructions reference these vouts
-        //    directly so we have to commit to the layout before encoding.
-        val recipientVout = 0
-        val assetChangeVout = if (hasAssetChange) 2 else -1
-
-        // 4. Build transfer instructions: walk asset inputs in order,
-        //    distributing each input's units into the recipient first then
-        //    the change marker. `skip=true` on the LAST instruction pulling
-        //    from a non-final input advances the decoder to the next input.
-        val instructions = buildTransferInstructions(
-            assetInputs = ok.assetInputs,
-            quantityToRecipient = quantity,
-            assetChangeQty = ok.assetChangeQty,
-            recipientVout = recipientVout,
-            assetChangeVout = assetChangeVout,
-        ) ?: return TxResult.Error("Could not build transfer instructions")
-
-        val opReturnScript = try {
-            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
-        } catch (e: Exception) {
-            return TxResult.Error("Encode failed: ${e.message}")
-        }
-
         // 5. Build the output list — order locked to match the vout
-        //    references baked into the transfer instructions above.
+        //    references baked into the transfer instructions above. The
+        //    asset side of `ok` is identical to `ok0` (fee-independent);
+        //    only the DGB inputs / change reflect the real fee.
         val allInputs = ok.assetInputs + ok.dgbInputs
         val outAddresses = mutableListOf<String>()
         val outAmounts = mutableListOf<Long>()

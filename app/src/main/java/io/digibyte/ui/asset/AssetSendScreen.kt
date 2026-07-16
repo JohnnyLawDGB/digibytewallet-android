@@ -49,10 +49,14 @@ fun AssetSendScreen(
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
+    val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
+    val customFeeInput by viewModel.customFeeInput.collectAsStateWithLifecycle()
+    val estimatedFeeSat by viewModel.estimatedFeeSat.collectAsStateWithLifecycle()
+    val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
+    val feeRatePerKb by viewModel.feeRatePerKb.collectAsStateWithLifecycle()
 
     var recipientAddress by remember { mutableStateOf("") }
     var quantityInput by remember { mutableStateOf("") }
-    var selectedFeeTier by remember { mutableStateOf(1) }
     var showConfirmDialog by remember { mutableStateOf(false) }
     var addressError by remember { mutableStateOf<String?>(null) }
     var quantityError by remember { mutableStateOf<String?>(null) }
@@ -72,14 +76,13 @@ fun AssetSendScreen(
             asset = asset!!,
             recipientAddress = recipientAddress,
             quantityInput = quantityInput,
-            feeTierLabel = feeTierLabel(selectedFeeTier),
-            feeSats = estimatedFeeSats(selectedFeeTier),
+            feeSats = estimatedFeeSat,
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
                 viewModel.sendAssetTransfer(
                     toAddress = recipientAddress,
                     quantityInput = quantityInput,
-                    feeSats = estimatedFeeSats(selectedFeeTier),
+                    feePerKb = feeRatePerKb,
                 )
             },
             onCancel = {
@@ -306,12 +309,26 @@ fun AssetSendScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── DGB fee selector ──────────────────────────────────────────
-            Text(
-                text = "DGB Carrier Fee",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // ── DGB network fee ───────────────────────────────────────────
+            // An asset send is a regular DGB transaction (pins an asset UTXO
+            // + carries an OP_RETURN marker), so the fee is a regular DGB
+            // fee: default 100 sat/byte (min relay, ~15s confirm) with an
+            // optional custom TOTAL-DGB override — identical UX to Send DGB.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Network Fee",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { viewModel.toggleCustomFee() }) {
+                    Text(
+                        text = if (isCustomFee) "Default" else "Custom",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = DigiByteAccent
+                    )
+                }
+            }
             Text(
                 text = "Asset transactions require DGB for network fees",
                 style = MaterialTheme.typography.labelSmall,
@@ -319,30 +336,56 @@ fun AssetSendScreen(
                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(0, 1, 2).forEach { tier ->
-                    AssetFeeTierChip(
-                        label = feeTierLabel(tier),
-                        satPerKb = feeTierSatPerKb(tier),
-                        selected = selectedFeeTier == tier,
-                        onClick = { selectedFeeTier = tier },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+            if (isCustomFee) {
+                OutlinedTextField(
+                    value = customFeeInput,
+                    onValueChange = { viewModel.customFeeInput.value = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("0.00040000") },
+                    suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    isError = feeWarning is AssetFeeWarning.ZeroFee
+                )
+            } else {
+                val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
+                Text(
+                    text = String.format("%.8f DGB", defaultFeeDgb),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            when (feeWarning) {
+                is AssetFeeWarning.BelowRelay -> Text(
+                    text = "⚠ Below minimum relay fee — transaction may not broadcast",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFA000)
+                )
+                is AssetFeeWarning.ZeroFee -> Text(
+                    text = "Fee required",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteRed
+                )
+                is AssetFeeWarning.None -> Text(
+                    text = "Confirms in ~15 seconds",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteGreen
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
             // ── DGB cost preview ─────────────────────────────────────────
-            // Updates as the user types quantity / changes fee tier so the
-            // DGB outflow is visible before the confirm dialog ever opens.
+            // Updates as the user types quantity / edits the fee so the DGB
+            // outflow is visible before the confirm dialog ever opens.
             CostPreviewCard(
                 quantityInput = quantityInput,
                 ownedAsset = ownedAsset,
-                feeSats = estimatedFeeSats(selectedFeeTier),
+                feeSats = estimatedFeeSat,
             )
 
             Spacer(modifier = Modifier.height(28.dp))
@@ -395,7 +438,6 @@ private fun AssetSendConfirmDialog(
     asset: OwnedAsset,
     recipientAddress: String,
     quantityInput: String,
-    feeTierLabel: String,
     feeSats: Long,
     sending: Boolean,
     onConfirm: () -> Unit,
@@ -433,7 +475,10 @@ private fun AssetSendConfirmDialog(
                 AssetConfirmRow(label = "Quantity", value = "$quantityInput ${asset.metadata?.symbol ?: "tokens"}")
                 // Full address — never truncated per security requirement
                 AssetConfirmRow(label = "To", value = recipientAddress)
-                AssetConfirmRow(label = "DGB Fee Tier", value = feeTierLabel)
+                AssetConfirmRow(
+                    label = "Network fee",
+                    value = String.format("%.8f DGB", feeSats / 100_000_000.0)
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
                 CostPreviewCard(
@@ -555,77 +600,7 @@ private fun AssetConfirmRow(label: String, value: String) {
     }
 }
 
-// ── Fee tier chip ────────────────────────────────────────────────────────────
-
-@Composable
-private fun AssetFeeTierChip(
-    label: String,
-    satPerKb: Long,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val containerColor = if (selected) DigiByteAccent.copy(alpha = 0.18f)
-                         else MaterialTheme.colorScheme.surface
-    val borderColor = if (selected) DigiByteAccent else MaterialTheme.colorScheme.outline
-
-    Surface(
-        onClick = onClick,
-        modifier = modifier.border(1.dp, borderColor, RoundedCornerShape(8.dp)),
-        shape = RoundedCornerShape(8.dp),
-        color = containerColor
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = if (selected) DigiByteAccent else MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "${satPerKb / 1000} sat/B",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-private fun feeTierLabel(tier: Int) = when (tier) {
-    0 -> "Slow"
-    1 -> "Normal"
-    2 -> "Fast"
-    else -> "Normal"
-}
-
-private fun feeTierSatPerKb(tier: Int) = when (tier) {
-    0 -> 1_000L
-    1 -> 5_000L
-    2 -> 20_000L
-    else -> 5_000L
-}
-
-/**
- * Conservative total-sats fee estimate for a typical single-recipient
- * asset transfer. Accounts for:
- *   - 2 inputs × ~150 bytes (1 asset UTXO + 1 DGB fee UTXO)
- *   - 3 outputs × ~34 bytes (marker + OP_RETURN + change)
- *   - ~10 bytes fixed overhead
- * Total ~410 bytes. Upper bound to 500 bytes for safety.
- * Partial transfers (when we support asset change) may bump the output
- * count; the coin selector will reject if we actually underfund.
- */
-private fun estimatedFeeSats(tier: Int): Long {
-    val satPerKb = feeTierSatPerKb(tier)
-    val estSize = 500L
-    return (estSize * satPerKb / 1000L).coerceAtLeast(1_000L)
-}
 
 private const val DA_MARKER_SATS_UI: Long = 700L
 
