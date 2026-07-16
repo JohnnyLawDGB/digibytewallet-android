@@ -621,7 +621,7 @@ private fun formatBalanceForInput(quantity: Long, decimals: Int): String {
  *   - 1 marker (700 sats) for the recipient
  *   - 1 marker (700 sats) for asset change, only if the user is sending
  *     less than their full balance for this asset
- *   - The selected fee tier's estimated network fee
+ *   - The estimated network fee (size-aware, at the chosen fee rate)
  *
  * Doesn't account for DGB-fee-input contribution (the 700 sats already in
  * the asset UTXO partly funds the markers); that's a wash from the user's
