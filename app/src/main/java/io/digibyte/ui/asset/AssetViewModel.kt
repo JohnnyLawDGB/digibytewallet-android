@@ -215,9 +215,16 @@ class AssetViewModel @Inject constructor(
 
         /** Asset-typical vsize used ONLY for the custom total-DGB ⇄ rate
          *  conversion and the default-fee display. The regular send uses
-         *  ~141; an asset transfer (mixed inputs + OP_RETURN + markers)
-         *  runs larger, so we use a mid-range 400 vbytes. The authoritative
-         *  fee is still computed size-aware in AssetManager.sendAsset. */
-        private const val ASSET_TYPICAL_VSIZE = 400L
+         *  ~141 (close to its real 1-in/2-out size, so its estimate is
+         *  accurate); an asset transfer (mixed inputs + OP_RETURN + markers)
+         *  runs much larger. This MUST match the vsize the estimator actually
+         *  charges over — AssetFeeEstimator's typical shape (1 asset + 1 DGB
+         *  input incl. its +1 margin, 3 outputs, ~40-byte OP_RETURN) is
+         *  12 + 3·150 + 3·34 + 9 + 40 = 613 vB. Using the old 400 biased the
+         *  displayed/confirm-dialog fee ~45% LOW and made a custom TOTAL-DGB
+         *  entry T get charged as ~1.47·T (T over 400 vB re-applied to ~590 vB).
+         *  613 keeps the on-screen estimate at/above what AssetManager.sendAsset
+         *  actually deducts and round-trips the custom total. */
+        private const val ASSET_TYPICAL_VSIZE = 613L
     }
 }

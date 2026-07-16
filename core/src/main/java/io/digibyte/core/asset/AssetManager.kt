@@ -710,8 +710,9 @@ class AssetManager(
         //     fee. The asset-input set and the OP_RETURN are FEE-INDEPENDENT
         //     (they depend only on the transfer quantity), so this select
         //     reveals the stable parts of the shape; only the DGB fee inputs
-        //     and DGB change vary with the fee, and the estimator's
-        //     +1-input margin covers a re-select that pulls one more input.
+        //     and DGB change vary with the fee. The bootstrap's DGB-input count
+        //     merely seeds the convergence loop below (step 4a) — it is NOT
+        //     assumed to be within one input of the final count.
         val bootstrapFeeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
             assetInputCount = 1,
             dgbInputCount = 1,
@@ -768,27 +769,53 @@ class AssetManager(
         //     output we conservatively assume is present), compute the actual
         //     size-aware fee and RE-select with it. Value-output count for the
         //     estimate: recipient(1) + asset-change(0/1) + dgb-change(1).
+        //
+        //     CONVERGENCE LOOP (not a single pass): the size-aware fee is a
+        //     function of the DGB-input count, and the DGB-input count is a
+        //     function of the fee — a wallet whose DGB side is fragmented into
+        //     many small UTXOs can pull far more inputs when the fee jumps from
+        //     the bootstrap estimate to the real one than the estimator's fixed
+        //     +1-input margin covers. If we only re-selected once, the built tx
+        //     would pay below the 100 sat/byte min relay for its (larger) actual
+        //     vsize and never relay. So iterate select→estimate→select, feeding
+        //     the actual DGB-input count back into the next fee estimate, until
+        //     the count stops growing. DGB-input count is monotonically
+        //     non-decreasing in the fee and bounded by dgbUtxos.size, so the
+        //     loop is guaranteed to reach a fixed point; the cap is a safety net.
         val estimateOutputCount = 1 + (if (hasAssetChange) 1 else 0) + 1
-        val feeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
-            assetInputCount = ok0.assetInputs.size,
-            dgbInputCount = ok0.dgbInputs.size,
-            outputCount = estimateOutputCount,
-            opReturnBytes = opReturnScript.size,
-            feePerKb = feePerKb,
-        )
-        val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
-            assetUtxos = assetUtxos,
-            dgbUtxos = dgbUtxos,
-            assetNeeded = quantity,
-            feeSats = feeSats,
-            markerOutputSats = twoMarkerSats,
-        )
-        val ok = when (selection) {
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
-                return TxResult.Error("Not enough asset: need ${selection.required}, have ${selection.available}")
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
-                return TxResult.Error("Not enough DGB for fee: need ${selection.required}, have ${selection.available}")
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
+        // dgbUtxos.size distinct growth steps at most, +2 slack. Never below 2.
+        val maxFeeIterations = dgbUtxos.size + 2
+        var estimatedForDgbInputs = ok0.dgbInputs.size
+        var feeSats = bootstrapFeeSats
+        var ok = ok0
+        for (iter in 0 until maxFeeIterations) {
+            feeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
+                assetInputCount = ok0.assetInputs.size,
+                dgbInputCount = estimatedForDgbInputs,
+                outputCount = estimateOutputCount,
+                opReturnBytes = opReturnScript.size,
+                feePerKb = feePerKb,
+            )
+            val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
+                assetUtxos = assetUtxos,
+                dgbUtxos = dgbUtxos,
+                assetNeeded = quantity,
+                feeSats = feeSats,
+                markerOutputSats = twoMarkerSats,
+            )
+            ok = when (selection) {
+                is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
+                    return TxResult.Error("Not enough asset: need ${selection.required}, have ${selection.available}")
+                is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
+                    return TxResult.Error("Not enough DGB for fee: need ${selection.required}, have ${selection.available}")
+                is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
+            }
+            // Converged: the fee we just charged was estimated for at least as
+            // many DGB inputs as the selection actually pulled (the estimator's
+            // internal +1 margin then still leaves a cushion), so the built tx
+            // pays >= min relay for its real vsize.
+            if (ok.dgbInputs.size <= estimatedForDgbInputs) break
+            estimatedForDgbInputs = ok.dgbInputs.size
         }
 
         // 5. Build the output list — order locked to match the vout
