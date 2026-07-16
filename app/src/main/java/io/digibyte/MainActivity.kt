@@ -60,6 +60,20 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Wipe-after-N backstop: if a prior wipe-after-N was interrupted (process
+        // killed between PinManager returning ShouldWipe and the wallet wipe
+        // completing), finish it now — BEFORE any unlock UI is shown — so we never
+        // present an unlock screen over a half-wiped wallet. Rare recovery path;
+        // at cold start the native peer manager isn't running yet so this is quick.
+        if (pinManager.isWipePending()) {
+            android.util.Log.w("MainActivity", "pin_wipe_pending set — completing interrupted wallet wipe")
+            kotlinx.coroutines.runBlocking {
+                runCatching { walletManager.wipeWallet() }
+                    .onFailure { android.util.Log.e("MainActivity", "backstop wipe failed", it) }
+                pinManager.clearPin() // clears counters + pin_wipe_pending so we don't loop
+            }
+        }
+
         // Capture digiid:// deep link from launching intent
         handleDigiIdIntent(intent)
 

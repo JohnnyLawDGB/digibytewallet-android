@@ -22,13 +22,13 @@ class PinManagerTest {
     @Test
     fun setPin_thenVerify_returnsTrue() {
         pinManager.setPin("123456")
-        assertTrue(pinManager.verifyPin("123456"))
+        assertTrue(pinManager.verifyPin("123456") is PinVerifyResult.Success)
     }
 
     @Test
     fun verifyPin_wrongPin_returnsFalse() {
         pinManager.setPin("123456")
-        assertFalse(pinManager.verifyPin("654321"))
+        assertFalse(pinManager.verifyPin("654321") is PinVerifyResult.Success)
     }
 
     @Test
@@ -47,20 +47,20 @@ class PinManagerTest {
 
     @Test
     fun verifyPin_beforeSet_returnsFalse() {
-        assertFalse(pinManager.verifyPin("000000"))
+        assertFalse(pinManager.verifyPin("000000") is PinVerifyResult.Success)
     }
 
     @Test
     fun setPin_overwrite_verifyNewPin() {
         pinManager.setPin("111111")
         pinManager.setPin("999999")
-        assertTrue(pinManager.verifyPin("999999"))
-        assertFalse(pinManager.verifyPin("111111"))
+        assertTrue(pinManager.verifyPin("999999") is PinVerifyResult.Success)
+        assertFalse(pinManager.verifyPin("111111") is PinVerifyResult.Success)
     }
 
     @Test
     fun verifyPin_emptyPin_noMatch() {
         pinManager.setPin("123456")
-        assertFalse(pinManager.verifyPin(""))
+        assertFalse(pinManager.verifyPin("") is PinVerifyResult.Success)
     }
 }

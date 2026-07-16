@@ -27,16 +27,25 @@ import io.digibyte.core.WalletManager
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
 import io.digibyte.core.security.PinManager
+import io.digibyte.core.security.PinVerifyResult
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val UNLOCK_PIN_LENGTH = 6
-private const val MAX_ATTEMPTS = 5
+
+/** Format a remaining-lockout duration (ms) as M:SS for the countdown. */
+private fun formatLockCountdown(remainingMs: Long): String {
+    val totalSec = ((remainingMs + 999L) / 1000L).coerceAtLeast(0L) // round up
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return "%d:%02d".format(m, s)
+}
 
 @Composable
 fun UnlockScreen(
@@ -51,7 +60,13 @@ fun UnlockScreen(
 
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var attemptCount by remember { mutableIntStateOf(0) }
+    // Persisted PIN rate-limit (PinManager). lockedUntil is the wall-clock epoch-ms
+    // the lockout expires (0 = not locked); nowTick drives the live M:SS countdown.
+    // Both survive a process restart because PinManager persists the lockout in
+    // dgb_pin_store — currentLockout() rehydrates it on enter (below).
+    var lockedUntil by remember { mutableStateOf(0L) }
+    var nowTick by remember { mutableStateOf(System.currentTimeMillis()) }
+    val isLocked = lockedUntil > nowTick
     // True while unlockFromUi()/restoreFromDisk() are running in the background.
     // restoreFromDisk() calls NativeBridge.stopSync(), which takes the native
     // peer-manager lock (PEER_GUARD) — the keepalive sweep can hold that lock for
@@ -78,6 +93,11 @@ fun UnlockScreen(
     //    button never get stuck disabled if navigation is skipped.
     suspend fun performUnlockAndNavigate() {
         isUnlocking = true
+        // Any successful unlock — PIN or BIOMETRIC — clears the PIN rate-limit
+        // counter. Critical for the biometric path: a legit user who unlocks with a
+        // fingerprint must not carry a stale PIN lockout the next time they type it.
+        // (The PIN path already reset via verifyPin()==Success; this is idempotent.)
+        pinManager.onUnlockSuccess()
         try {
             withContext(Dispatchers.IO) {
                 if (walletManager.isWalletReady()) {
@@ -99,7 +119,11 @@ fun UnlockScreen(
         }
     }
 
-    // Attempt biometric automatically on first composition if available
+    // Attempt biometric automatically on first composition if available.
+    // Biometric stays available even during a PIN lockout (decision E): it's a
+    // separate credential with its own OS lockout, and a PIN brute-forcer has no
+    // finger — a legit owner shouldn't be locked out of their own fingerprint by
+    // someone else fat-fingering the PIN.
     LaunchedEffect(Unit) {
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
@@ -109,22 +133,72 @@ fun UnlockScreen(
         }
     }
 
-    fun attemptUnlock(pin: String) {
-        if (pinManager.verifyPin(pin)) {
-            scope.launch {
-                // For UI-only relock (wallet already loaded in memory), just flip state.
-                // For fresh process (wallet not loaded), restore from disk — both run
-                // off the main thread since restoreFromDisk() can block on the native
-                // peer-manager lock.
-                performUnlockAndNavigate()
+    // Rehydrate a persisted lockout on enter (survives force-stop / process restart).
+    LaunchedEffect(Unit) {
+        val until = pinManager.currentLockout()
+        if (until > System.currentTimeMillis()) {
+            lockedUntil = until
+            nowTick = System.currentTimeMillis()
+        }
+    }
+
+    // Live countdown: tick while locked, then re-enable the keypad automatically.
+    LaunchedEffect(lockedUntil) {
+        if (lockedUntil > 0L) {
+            while (System.currentTimeMillis() < lockedUntil) {
+                nowTick = System.currentTimeMillis()
+                delay(500)
             }
-        } else {
-            attemptCount++
-            currentInput = ""
-            errorMessage = if (attemptCount >= MAX_ATTEMPTS) {
-                "Too many attempts. Please wait before trying again."
-            } else {
-                "Incorrect PIN (${MAX_ATTEMPTS - attemptCount} attempts remaining)"
+            lockedUntil = 0L
+            nowTick = System.currentTimeMillis()
+            errorMessage = null
+        }
+    }
+
+    fun attemptUnlock(pin: String) {
+        when (val result = pinManager.verifyPin(pin)) {
+            is PinVerifyResult.Success -> {
+                scope.launch {
+                    // For UI-only relock (wallet already loaded in memory), just flip state.
+                    // For fresh process (wallet not loaded), restore from disk — both run
+                    // off the main thread since restoreFromDisk() can block on the native
+                    // peer-manager lock.
+                    performUnlockAndNavigate()
+                }
+            }
+            is PinVerifyResult.Wrong -> {
+                currentInput = ""
+                val startedLockout = result.lockedUntil
+                if (startedLockout != null) {
+                    lockedUntil = startedLockout
+                    nowTick = System.currentTimeMillis()
+                    errorMessage = null // the countdown text takes over
+                } else {
+                    val before = (PinManager.FREE_ATTEMPTS + 1) - result.failCount
+                    errorMessage = "Incorrect PIN — $before ${if (before == 1) "attempt" else "attempts"} before lockout"
+                }
+            }
+            is PinVerifyResult.LockedOut -> {
+                currentInput = ""
+                lockedUntil = result.until
+                nowTick = System.currentTimeMillis()
+                errorMessage = null
+            }
+            is PinVerifyResult.ShouldWipe -> {
+                // Wipe-after-N tripped: PinManager already persisted pin_wipe_pending
+                // (a kill here completes the wipe next launch). The caller owns the
+                // destructive wallet wipe — PinManager can only clear dgb_pin_store.
+                currentInput = ""
+                errorMessage = "Too many failed attempts — wiping wallet"
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        walletManager.wipeWallet()
+                        pinManager.clearPin() // clears counters + pin_wipe_pending
+                    }
+                    navController.navigate("onboarding") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             }
         }
     }
@@ -181,7 +255,15 @@ fun UnlockScreen(
                     }
                 }
 
-                errorMessage?.let {
+                if (isLocked) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Locked — try again in ${formatLockCountdown(lockedUntil - nowTick)}",
+                        color = Color(0xFFFF9800),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center
+                    )
+                } else errorMessage?.let {
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = it,
@@ -262,7 +344,7 @@ fun UnlockScreen(
                                         modifier = Modifier
                                             .size(72.dp)
                                             .clip(CircleShape)
-                                            .clickable(enabled = !isUnlocking) {
+                                            .clickable(enabled = !isLocked && !isUnlocking) {
                                                 if (currentInput.isNotEmpty()) {
                                                     currentInput = currentInput.dropLast(1)
                                                 }
@@ -284,7 +366,7 @@ fun UnlockScreen(
                                             .clip(CircleShape)
                                             .background(Color(0xFF1A2742))
                                             .border(1.dp, Color(0xFF243352), CircleShape)
-                                            .clickable(enabled = attemptCount < MAX_ATTEMPTS && !isUnlocking) {
+                                            .clickable(enabled = !isLocked && !isUnlocking) {
                                                 if (currentInput.length < UNLOCK_PIN_LENGTH) {
                                                     currentInput += key
                                                     errorMessage = null
@@ -299,7 +381,7 @@ fun UnlockScreen(
                                             text = key,
                                             fontSize = 24.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = if (attemptCount < MAX_ATTEMPTS && !isUnlocking) Color.White else Color(0xFF546E7A)
+                                            color = if (!isLocked && !isUnlocking) Color.White else Color(0xFF546E7A)
                                         )
                                     }
                                 }
