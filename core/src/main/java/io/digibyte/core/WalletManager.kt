@@ -20,7 +20,14 @@ sealed class WalletState {
 class WalletManager(
     private val context: Context,
     private val keyStoreManager: KeyStoreManager,
-    private val utxoManager: UtxoManager
+    private val utxoManager: UtxoManager,
+    // Persistent, non-native destructive routine — injectable so wipeWallet() is
+    // unit-testable and the manual + auto (PIN wipe-after-N) wipes share one path.
+    private val dataEraser: WalletDataEraser = AndroidWalletDataEraser(context),
+    // Native pre-wipe quiesce, injectable so a pure-JVM wipe test needn't load the
+    // native lib (NativeBridge's init { System.loadLibrary } would crash off-device).
+    // The default lambda body only touches NativeBridge when actually invoked.
+    private val quiesceNative: () -> Unit = { NativeBridge.stopSync(); NativeBridge.lockSession() },
 ) {
     private val _walletState = MutableStateFlow<WalletState>(WalletState.NoWallet)
     val walletState: StateFlow<WalletState> = _walletState.asStateFlow()
@@ -352,22 +359,26 @@ class WalletManager(
     }
 
     /**
-     * Wipe the wallet — delete everything.
+     * Complete wallet wipe — destroys the seed AND all privacy-sensitive derived
+     * data (tx history, address set, recorded sends, filter-header chain, Room DB),
+     * so a security wipe (manual Settings OR the PIN wipe-after-N backstop) doesn't
+     * leave transaction history behind. Both paths call this single routine.
+     *
+     * Order is crash-safe: the seed ciphertext is cleared FIRST, so a process death
+     * mid-wipe leaves hasSavedWallet()=false (no half-loadable wallet).
      */
     suspend fun wipeWallet() {
-        // Stop sync and disconnect peers before destroying wallet
-        NativeBridge.stopSync()
-        NativeBridge.lockSession()
-        // Clear seed ciphertext FIRST — if process dies after this but before
-        // key deletion, hasSavedWallet()=false so no orphaned state.
-        prefs.edit().clear().commit()
-        clearSyncData()
-        // Clear saved transactions so they don't reappear on next wallet
-        context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
-            .edit().remove("saved_transactions").remove("has_synced").commit()
-        // Clear bloom peer cache
-        context.getSharedPreferences("dgb_bloom_peers" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
-            .edit().clear().commit()
+        // Stop sync and disconnect peers before destroying wallet.
+        quiesceNative()
+        // Seed ciphertext FIRST (crash-safety invariant, see above).
+        dataEraser.eraseSeedCiphertext()
+        // Regenerable + privacy-sensitive persisted data.
+        dataEraser.eraseSyncData()
+        dataEraser.eraseBloomPeerCache()
+        dataEraser.eraseWatchedAddresses()
+        dataEraser.eraseOutgoingTx()
+        dataEraser.eraseFilterHeaders()
+        dataEraser.eraseDatabase()
         utxoManager.clearAll()
         keyStoreManager.deleteKey()
         _walletState.value = WalletState.NoWallet
