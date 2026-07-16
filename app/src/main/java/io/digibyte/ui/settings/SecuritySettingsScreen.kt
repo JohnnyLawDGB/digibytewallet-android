@@ -33,6 +33,7 @@ import io.digibyte.core.WalletManager
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
 import io.digibyte.core.security.PinManager
+import io.digibyte.core.security.PinVerifyResult
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
@@ -40,8 +41,17 @@ import kotlinx.coroutines.launch
 
 private const val SEC_PIN_LENGTH = 6
 
+/** Format a re-auth lockout deadline as "Locked — try again in M:SS" at press time.
+ *  (The dialog gates re-render per keystroke; a live tick isn't needed here — the
+ *  enforcement lives in PinManager regardless of what this string says.) */
+private fun securityLockedMessage(until: Long): String {
+    val remainingMs = (until - System.currentTimeMillis()).coerceAtLeast(0L)
+    val totalSec = (remainingMs + 999L) / 1000L
+    return "Locked — try again in %d:%02d".format(totalSec / 60, totalSec % 60)
+}
+
 // ── Internal step state for security actions ──────────────────────────────────
-private enum class SecurityDialog { None, ChangePinVerify, ChangePinNew, ChangePinConfirm, ViewSeedWarning, ViewSeedPinVerify, WipePinVerify, WipeConfirmDialog }
+private enum class SecurityDialog { None, ChangePinVerify, ChangePinNew, ChangePinConfirm, ViewSeedWarning, ViewSeedPinVerify, WipePinVerify, WipeConfirmDialog, WipeAfterNConfirm }
 
 @Composable
 fun SecuritySettingsScreen(
@@ -75,6 +85,7 @@ fun SecuritySettingsScreen(
         )
     }
     val currentTimeout by viewModel.autoLockTimeout.collectAsStateWithLifecycle()
+    val wipeAfterNEnabled by viewModel.wipeAfterNEnabled.collectAsStateWithLifecycle()
 
     val wipeResult by viewModel.wipeResult.collectAsStateWithLifecycle()
     LaunchedEffect(wipeResult) {
@@ -187,6 +198,36 @@ fun SecuritySettingsScreen(
                             }
                         }
                     }
+
+                    SettingsRowDivider()
+
+                    // Wipe-after-N: destructive, opt-in, default OFF. Enabling requires
+                    // an explicit "recovery phrase is backed up" acknowledgement — 10
+                    // consecutive wrong PINs then permanently erase the wallet on-device.
+                    SettingsRow(
+                        icon = Icons.Default.DeleteSweep,
+                        iconTint = DigiByteRed,
+                        title = "Wipe After ${PinManager.WIPE_THRESHOLD} Failed PINs",
+                        subtitle = if (wipeAfterNEnabled) "Enabled — wallet erases after ${PinManager.WIPE_THRESHOLD} wrong PINs"
+                                   else "Off — extra protection against PIN brute-force",
+                        onClick = {
+                            if (wipeAfterNEnabled) viewModel.setWipeAfterN(false)
+                            else activeDialog = SecurityDialog.WipeAfterNConfirm
+                        },
+                        trailing = {
+                            Switch(
+                                checked = wipeAfterNEnabled,
+                                onCheckedChange = { checked ->
+                                    if (checked) activeDialog = SecurityDialog.WipeAfterNConfirm
+                                    else viewModel.setWipeAfterN(false)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = DigiByteRed,
+                                    checkedTrackColor = DigiByteRed.copy(alpha = 0.4f)
+                                )
+                            )
+                        }
+                    )
                 }
             }
 
@@ -229,12 +270,20 @@ fun SecuritySettingsScreen(
                             pinInput += d
                             pinError = null
                             if (pinInput.length == SEC_PIN_LENGTH) {
-                                if (viewModel.verifyPin(pinInput)) {
-                                    pinInput = ""
-                                    activeDialog = SecurityDialog.ChangePinNew
-                                } else {
-                                    pinError = "Incorrect PIN"
-                                    pinInput = ""
+                                when (val r = viewModel.verifyPin(pinInput)) {
+                                    is PinVerifyResult.Success -> {
+                                        pinInput = ""
+                                        activeDialog = SecurityDialog.ChangePinNew
+                                    }
+                                    is PinVerifyResult.LockedOut -> {
+                                        pinError = securityLockedMessage(r.until); pinInput = ""
+                                    }
+                                    is PinVerifyResult.ShouldWipe -> {
+                                        pinInput = ""; resetDialogState(); viewModel.wipeWallet()
+                                    }
+                                    is PinVerifyResult.Wrong -> {
+                                        pinError = "Incorrect PIN"; pinInput = ""
+                                    }
                                 }
                             }
                         }
@@ -350,30 +399,38 @@ fun SecuritySettingsScreen(
                             pinInput += d
                             pinError = null
                             if (pinInput.length == SEC_PIN_LENGTH) {
-                                if (viewModel.verifyPin(pinInput)) {
-                                    pinInput = ""
-                                    // Now require biometric
-                                    scope.launch {
-                                        activeDialog = SecurityDialog.None
-                                        if (activity != null && biometricAvailable) {
-                                            val result = biometricAuth.authenticate(
-                                                activity,
-                                                title = "DigiByte Wallet",
-                                                subtitle = "Authenticate to view recovery phrase"
-                                            )
-                                            if (result is BiometricResult.Success) {
+                                when (val r = viewModel.verifyPin(pinInput)) {
+                                    is PinVerifyResult.Success -> {
+                                        pinInput = ""
+                                        // Now require biometric
+                                        scope.launch {
+                                            activeDialog = SecurityDialog.None
+                                            if (activity != null && biometricAvailable) {
+                                                val result = biometricAuth.authenticate(
+                                                    activity,
+                                                    title = "DigiByte Wallet",
+                                                    subtitle = "Authenticate to view recovery phrase"
+                                                )
+                                                if (result is BiometricResult.Success) {
+                                                    navController.navigate("settings_view_seed")
+                                                } else {
+                                                    snackMessage = "Biometric authentication required"
+                                                }
+                                            } else if (!biometricAvailable) {
+                                                // No biometric hardware — PIN alone suffices
                                                 navController.navigate("settings_view_seed")
-                                            } else {
-                                                snackMessage = "Biometric authentication required"
                                             }
-                                        } else if (!biometricAvailable) {
-                                            // No biometric hardware — PIN alone suffices
-                                            navController.navigate("settings_view_seed")
                                         }
                                     }
-                                } else {
-                                    pinError = "Incorrect PIN"
-                                    pinInput = ""
+                                    is PinVerifyResult.LockedOut -> {
+                                        pinError = securityLockedMessage(r.until); pinInput = ""
+                                    }
+                                    is PinVerifyResult.ShouldWipe -> {
+                                        pinInput = ""; resetDialogState(); viewModel.wipeWallet()
+                                    }
+                                    is PinVerifyResult.Wrong -> {
+                                        pinError = "Incorrect PIN"; pinInput = ""
+                                    }
                                 }
                             }
                         }
@@ -394,12 +451,20 @@ fun SecuritySettingsScreen(
                             pinInput += d
                             pinError = null
                             if (pinInput.length == SEC_PIN_LENGTH) {
-                                if (viewModel.verifyPin(pinInput)) {
-                                    pinInput = ""
-                                    activeDialog = SecurityDialog.WipeConfirmDialog
-                                } else {
-                                    pinError = "Incorrect PIN"
-                                    pinInput = ""
+                                when (val r = viewModel.verifyPin(pinInput)) {
+                                    is PinVerifyResult.Success -> {
+                                        pinInput = ""
+                                        activeDialog = SecurityDialog.WipeConfirmDialog
+                                    }
+                                    is PinVerifyResult.LockedOut -> {
+                                        pinError = securityLockedMessage(r.until); pinInput = ""
+                                    }
+                                    is PinVerifyResult.ShouldWipe -> {
+                                        pinInput = ""; resetDialogState(); viewModel.wipeWallet()
+                                    }
+                                    is PinVerifyResult.Wrong -> {
+                                        pinError = "Incorrect PIN"; pinInput = ""
+                                    }
                                 }
                             }
                         }
@@ -434,6 +499,64 @@ fun SecuritySettingsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = DigiByteRed)
                         ) {
                             Text("Wipe Everything", color = Color.White)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = ::resetDialogState) {
+                            Text("Cancel", color = Color(0xFF8899AA))
+                        }
+                    }
+                )
+            }
+
+            SecurityDialog.WipeAfterNConfirm -> {
+                var backupAcknowledged by remember { mutableStateOf(false) }
+                AlertDialog(
+                    onDismissRequest = ::resetDialogState,
+                    containerColor = Color(0xFF1A2742),
+                    title = {
+                        Text("Wipe After ${PinManager.WIPE_THRESHOLD} Failed PINs", color = DigiByteRed, fontWeight = FontWeight.Bold)
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                "When enabled, ${PinManager.WIPE_THRESHOLD} consecutive incorrect PIN entries will " +
+                                "PERMANENTLY erase this wallet — seed, keys, and history — from this device.\n\n" +
+                                "This is irreversible on-device. Your funds are only recoverable from your " +
+                                "recovery phrase.",
+                                color = Color(0xFFB0BEC5),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { backupAcknowledged = !backupAcknowledged }
+                            ) {
+                                Checkbox(
+                                    checked = backupAcknowledged,
+                                    onCheckedChange = { backupAcknowledged = it },
+                                    colors = CheckboxDefaults.colors(checkedColor = DigiByteRed)
+                                )
+                                Text(
+                                    "My recovery phrase is backed up",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            enabled = backupAcknowledged,
+                            onClick = {
+                                viewModel.setWipeAfterN(true)
+                                resetDialogState()
+                                snackMessage = "Wipe-after-${PinManager.WIPE_THRESHOLD} enabled"
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DigiByteRed)
+                        ) {
+                            Text("Enable", color = Color.White)
                         }
                     },
                     dismissButton = {

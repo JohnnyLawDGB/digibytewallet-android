@@ -18,6 +18,7 @@ import io.digibyte.core.model.SyncState
 import io.digibyte.core.model.deriveSyncFrontier
 import io.digibyte.core.network.ChainTipFetcher
 import io.digibyte.core.security.PinManager
+import io.digibyte.core.security.PinVerifyResult
 import io.digibyte.core.settings.CustomNode
 import io.digibyte.core.settings.CustomNodePrefs
 import io.digibyte.core.settings.OwnNodeUri
@@ -289,12 +290,26 @@ class SettingsViewModel @Inject constructor(
     }
 
     // ── PIN management ────────────────────────────────────────────────────────
-    fun verifyPin(pin: String): Boolean = pinManager.verifyPin(pin)
+    /** Verify a PIN through the rate-limited [PinManager]. Returns the full
+     *  [PinVerifyResult] so Settings re-auth gates enforce the SAME lockout the
+     *  unlock screen does — a brute-forcer can't bypass the limit via Settings. */
+    fun verifyPin(pin: String): PinVerifyResult = pinManager.verifyPin(pin)
 
     fun changePin(newPin: String) {
         viewModelScope.launch(Dispatchers.IO) {
             pinManager.setPin(newPin)
         }
+    }
+
+    // ── Wipe-after-N (destructive, opt-in, default OFF) ───────────────────────
+    private val _wipeAfterNEnabled = MutableStateFlow(pinManager.isWipeAfterNEnabled())
+    val wipeAfterNEnabled: StateFlow<Boolean> = _wipeAfterNEnabled.asStateFlow()
+
+    /** Enable/disable "wipe wallet after N failed PIN attempts". Enabling is gated
+     *  by an explicit backup acknowledgement in the UI (irreversible on-device). */
+    fun setWipeAfterN(enabled: Boolean) {
+        pinManager.setWipeAfterN(enabled)
+        _wipeAfterNEnabled.value = enabled
     }
 
     // ── Display preferences ───────────────────────────────────────────────────
