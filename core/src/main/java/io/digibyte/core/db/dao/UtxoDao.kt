@@ -44,6 +44,33 @@ interface UtxoDao {
     @Query("DELETE FROM utxos")
     suspend fun deleteAll()
 
+    /** Delete every asset UTXO whose "txid:vout" key is NOT in [keptKeys].
+     *  Scoped to is_asset = 1 so plain-DGB UTXOs are never touched. Used by
+     *  the authoritative network refresh to prune phantom / already-spent
+     *  asset rows the node no longer reports. NOTE: [keptKeys] is bound as one
+     *  SQL parameter per element (SQLite var limit ~999); asset UTXO sets are
+     *  small in practice, so this is not chunked. */
+    @Query("DELETE FROM utxos WHERE is_asset = 1 AND (txid || ':' || vout) NOT IN (:keptKeys)")
+    suspend fun deleteAssetUtxosNotIn(keptKeys: List<String>)
+
+    /** Atomically reconcile the asset-UTXO set to the authoritative [fresh]
+     *  set from the network: prune any asset row not present in [fresh], then
+     *  upsert [fresh]. One transaction, so a concurrent reader never observes
+     *  the intermediate pruned-but-not-yet-reinserted state. The caller MUST
+     *  pass a COMPLETE, non-empty network response — pruning to an empty or
+     *  partial set would wipe real holdings from the local cache. */
+    @Transaction
+    suspend fun replaceAssetUtxos(fresh: List<UtxoEntity>) {
+        // Self-guard: an empty set would make deleteAssetUtxosNotIn prune ALL
+        // asset rows (NOT IN () matches everything). Never do that here — the
+        // "we truly hold nothing" case is the caller's decision to make, not a
+        // silent side effect of an empty argument.
+        if (fresh.isEmpty()) return
+        val keptKeys = fresh.map { "${it.txid}:${it.vout}" }.distinct()
+        deleteAssetUtxosNotIn(keptKeys)
+        insertAll(fresh)
+    }
+
     @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
     fun getAssetBalances(): Flow<List<AssetBalance>>
 }

@@ -206,9 +206,36 @@ class AssetManager(
             io.digibyte.core.model.AssetOperation.BURN -> 0L
         }
 
+        // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
+        // which returns ALL of the tx's outputs unfiltered — NOT just the ones
+        // we own. For a transfer WE send, the recipient's marker output carries
+        // the full sent quantity; inserting it here manufactures a phantom
+        // is_asset/spent=0 row for an output we don't control, which then
+        // inflates SUM(asset_quantity) (the displayed balance) and can even be
+        // re-selected as an un-signable input on the next send. So skip any
+        // output whose scriptPubKey isn't one of our own addresses.
+        //
+        // Both error directions self-heal: a false-positive (phantom slips in,
+        // e.g. owned-set empty) is pruned by refreshAssetUtxosFromNetwork; a
+        // false-negative (we drop one of our own change markers because its
+        // address wasn't in the set) is re-inserted by that same authoritative
+        // refresh, which queries the backend over the same address set. If the
+        // owned set can't be built we fall back to the old insert-everything
+        // behavior and let the prune clean up — never worse than before.
+        val ownedScriptHexes: Set<String> = runCatching {
+            NativeBridge.dumpAllAddresses()
+                .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
+                .mapNotNull { NativeBridge.addressToScriptPubKey(it)?.toHex() }
+                .toSet()
+        }.getOrDefault(emptySet())
+
         var anyStillUnresolved = false
         for (out in outputs) {
             if (out.script.isNotEmpty() && out.script[0] == 0x6A.toByte()) continue
+            // Skip outputs we don't own (see ownership-gate note above). Only
+            // enforce when we actually have an owned set — an empty set means
+            // the lookup failed, in which case we defer to the prune.
+            if (ownedScriptHexes.isNotEmpty() && out.script.toHex() !in ownedScriptHexes) continue
             // Preserve a real (non-placeholder) asset-id if a prior sweep +
             // M3 walk already resolved this UTXO. Without this check, each
             // 30s sweep would clobber the real id with a fresh
@@ -529,11 +556,13 @@ class AssetManager(
      * registerRawTransaction both populate transactions but not utxos;
      * this pass fills the utxos side by trusting the node's indexed view.
      *
-     * Safe to call repeatedly. Idempotent — Room insert uses REPLACE on
-     * the (txid, vout) primary key.
+     * Safe to call repeatedly. AUTHORITATIVE: the node's set replaces the
+     * local asset-UTXO rows (prune-not-in-set + upsert, atomically), so this
+     * both keeps the set current AND heals stale/phantom rows a prior bug may
+     * have accumulated. Skips the prune on an empty response (see the guard).
      *
-     * Returns the count of asset UTXOs upserted, or null if no network
-     * client is configured or all endpoints failed.
+     * Returns the count of asset UTXOs in the reconciled set, or null if no
+     * network client is configured or all endpoints failed.
      */
     suspend fun refreshAssetUtxosFromNetwork(): Int? {
         val client = assetNetworkClient ?: return null
@@ -550,7 +579,15 @@ class AssetManager(
 
         if (utxos.isEmpty()) return 0
 
-        var upserted = 0
+        // Build the authoritative fresh set first, then reconcile in ONE atomic
+        // step (below). The node's getAssetUtxos returns ONLY genuinely-unspent
+        // asset UTXOs at OUR OWN addresses, so this set — by construction —
+        // excludes both the spent inputs of prior sends and any phantom
+        // recipient marker (which sits at someone else's address). Replacing the
+        // local asset rows with it therefore HEALS an already-inflated balance
+        // (e.g. 30 -> 10) and keeps it correct going forward, instead of the old
+        // REPLACE-only upsert that never pruned stale/phantom rows.
+        val fresh = mutableListOf<UtxoEntity>()
         for (u in utxos) {
             for (asset in u.assets) {
                 // One logical UtxoEntity per (txid, vout, assetId). In the
@@ -562,19 +599,16 @@ class AssetManager(
                 // to empty bytes — the row still displays correctly; send
                 // would fail gracefully with a typed error at that layer.
                 val scriptPubKey = NativeBridge.addressToScriptPubKey(u.address) ?: ByteArray(0)
-                utxoDao.insertAll(listOf(
-                    UtxoEntity(
-                        txid = u.txid,
-                        vout = u.vout,
-                        scriptPubKey = scriptPubKey,
-                        satoshis = u.satoshis,
-                        blockHeight = u.confirmedHeight,
-                        isAsset = true,
-                        assetId = asset.assetId,
-                        assetQuantity = asset.count,
-                    )
-                ))
-                upserted++
+                fresh += UtxoEntity(
+                    txid = u.txid,
+                    vout = u.vout,
+                    scriptPubKey = scriptPubKey,
+                    satoshis = u.satoshis,
+                    blockHeight = u.confirmedHeight,
+                    isAsset = true,
+                    assetId = asset.assetId,
+                    assetQuantity = asset.count,
+                )
 
                 // Metadata cache handling — there's a subtle ordering
                 // requirement here: AssetMetadataService.getMetadata returns
@@ -622,7 +656,17 @@ class AssetManager(
                 }
             }
         }
-        return upserted
+
+        // Guard: only prune when we have a non-empty authoritative set. A
+        // successful-but-EMPTY response is ambiguous (truly hold nothing vs a
+        // transient backend hiccup), so skip the prune rather than risk wiping
+        // real historical holdings from the local cache. On-chain assets are
+        // seed-controlled and untouched regardless, but we don't want them to
+        // flicker out of the UI on an empty read. (A hard fetch failure already
+        // returned null above, before reaching here.)
+        if (fresh.isEmpty()) return 0
+        utxoDao.replaceAssetUtxos(fresh)
+        return fresh.size
     }
 
     /**
@@ -870,6 +914,19 @@ class AssetManager(
         val txid = Broadcaster.broadcast(signedBytes)
             ?: return TxResult.Error("Broadcast failed — check peer connection")
 
+        // Retire the inputs we just spent so they stop counting toward the
+        // balance (SUM of asset_quantity over spent=0 rows) immediately. Covers
+        // BOTH the asset inputs and the DGB fee inputs — any input left spent=0
+        // is re-selectable on the next send (a double-spend attempt), and a
+        // never-retired ASSET input keeps inflating the displayed asset balance
+        // until the next network refresh. If this send later turns out stranded
+        // /unconfirmed, refreshAssetUtxosFromNetwork re-inserts (REPLACE →
+        // spent=0) any input the node still reports as unspent, so marking here
+        // can never permanently hide funds that legitimately return.
+        for (input in allInputs) {
+            runCatching { utxoDao.markSpent(input.txid, input.vout) }
+        }
+
         // Durability: record + persist through the same path the normal send
         // uses so SyncService.rebroadcastStrandedSends() re-publishes this asset
         // transfer if a force-stop within ~1s of broadcast strands the stem.
@@ -968,9 +1025,15 @@ class AssetManager(
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private companion object {
-        /** DGB change below this floor is folded into the fee (avoids
-         *  creating an indistinguishable-from-marker output). */
-        const val DGB_CHANGE_DUST_THRESHOLD = 1000L
+        /** DGB change below this floor is folded into the fee rather than
+         *  emitted as its own output. MUST be >= the network dust threshold
+         *  for the change address type, or the node rejects the whole tx
+         *  with reject-reason "dust". DigiByte 9.26 raised dust to 30,000
+         *  sat/kB → legacy P2PKH floor = 5,460 sats (measured on a 9.26.4
+         *  node). We use the legacy worst case so a change output is never
+         *  dust regardless of the change address's script type. The old
+         *  1,000 value produced dust change outputs that stalled sends. */
+        const val DGB_CHANGE_DUST_THRESHOLD = 5_460L
 
         /** Max hops the M3 parent-walk will traverse before giving up. In
          *  practice asset chains are 1-3 transfers deep; this bounds the

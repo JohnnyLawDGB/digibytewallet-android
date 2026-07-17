@@ -2,9 +2,26 @@ package io.digibyte.core.asset.send
 
 import io.digibyte.core.db.entity.UtxoEntity
 
-/** DigiAsset spec's per-recipient marker output value — 700 satoshis,
- *  matching BRDigiAsset.h:39 DA_ASSET_DUST_AMOUNT. */
-const val DA_MARKER_SATS: Long = 700L
+/**
+ * Per-recipient DigiAsset marker output value, in satoshis.
+ *
+ * The DigiAsset spec's historical convention was ~600–700 sats (see
+ * BRDigiAsset.h:39 `DA_ASSET_DUST_AMOUNT`), which is fine because asset
+ * detection is OP_RETURN/output-index based — the marker's *value* is never
+ * used to identify an asset output (verified: `quantityForOutput` in
+ * AssetManager and `BRTXContainsAsset` in BRDigiAsset.c both key on the
+ * OP_RETURN transfer instructions, not sats).
+ *
+ * BUT DigiByte Core 9.26.x raised its dust relay fee to 30,000 sat/kB, which
+ * puts the **dust floor for a legacy P2PKH output at 5,460 sats** (measured
+ * against a 9.26.4 node via `testmempoolaccept`: 5,459 = dust, 5,462 = ok;
+ * segwit ≈ 2,940, taproot ≈ 3,300). A 700-sat marker is therefore rejected
+ * network-wide with `reject-reason: "dust"` — and **no fee increase can fix a
+ * dust rejection**, which is exactly why asset sends could not be pushed
+ * through. The recipient's address type is arbitrary (could be legacy), so we
+ * clear the worst-case legacy floor with headroom. 6,000 sats ≈ 0.00006 DGB —
+ * negligible, and safely above 5,460 even if the recipient is legacy. */
+const val DA_MARKER_SATS: Long = 6_000L
 
 /**
  * Pure selection logic for DigiAsset transfer transactions.
@@ -14,8 +31,8 @@ const val DA_MARKER_SATS: Long = 700L
  *     Must sum to at least the send quantity; any surplus returns as asset
  *     change to the sender via transfer-instruction encoding.
  *   - **DGB fee inputs** — plain DGB UTXOs funding the network fee and
- *     the per-recipient "marker" outputs (600–1000 sats per output, which
- *     the DigiAsset spec calls the node-dust threshold).
+ *     the per-recipient "marker" outputs ([DA_MARKER_SATS] each, sized to
+ *     clear DigiByte 9.26's raised dust floor — see that constant).
  *
  * This class picks the minimum-viable set of each kind. No privacy-aware
  * coin selection yet — naive largest-first; enough to ship. Upgrade to
@@ -34,8 +51,8 @@ object AssetCoinSelector {
      *                    surplus returns as DGB change).
      * @param markerOutputSats Total sats across all per-recipient marker
      *                    outputs. For a single-recipient transfer, this is
-     *                    one dust output (600 sats); for a multi-recipient
-     *                    transfer it's `N × 600`.
+     *                    one marker ([DA_MARKER_SATS]); for a multi-recipient
+     *                    transfer it's `N × DA_MARKER_SATS`.
      */
     fun select(
         assetUtxos: List<UtxoEntity>,
