@@ -260,11 +260,6 @@ class AssetManager(
                 anyStillUnresolved = true
                 placeholderAssetId
             }
-            // Preserve a locally-set spent=1 across this REPLACE upsert: once a
-            // send marks its input spent, re-detecting that same outpoint in a
-            // later 30s sweep must NOT resurrect it as unspent (which would
-            // re-inflate the balance and let it be re-selected as a dead input).
-            val wasSpent = utxoDao.getSpentAt(txHashHex, out.vout) ?: false
             utxoDao.insertAll(
                 listOf(
                     UtxoEntity(
@@ -276,7 +271,6 @@ class AssetManager(
                         isAsset = true,
                         assetId = effectiveAssetId,
                         assetQuantity = quantityForOutput(out.vout),
-                        spent = wasSpent,
                     )
                 )
             )
@@ -626,10 +620,6 @@ class AssetManager(
                 // to empty bytes — the row still displays correctly; send
                 // would fail gracefully with a typed error at that layer.
                 val scriptPubKey = NativeBridge.addressToScriptPubKey(u.address) ?: ByteArray(0)
-                // Preserve a locally-set spent=1: a just-sent input the backend
-                // may still report as unspent in the brief pre-confirmation
-                // window must not be resurrected as spendable by this refresh.
-                val wasSpent = utxoDao.getSpentAt(u.txid, u.vout) ?: false
                 fresh += UtxoEntity(
                     txid = u.txid,
                     vout = u.vout,
@@ -639,7 +629,6 @@ class AssetManager(
                     isAsset = true,
                     assetId = asset.assetId,
                     assetQuantity = asset.count,
-                    spent = wasSpent,
                 )
 
                 // Metadata cache handling — there's a subtle ordering
@@ -961,19 +950,14 @@ class AssetManager(
         val txid = Broadcaster.broadcast(signedBytes)
             ?: return TxResult.Error("Broadcast failed — check peer connection")
 
-        // Retire the ASSET inputs we just spent so they stop inflating the
-        // displayed asset balance (SUM of asset_quantity over spent=0 rows) the
-        // moment the send is broadcast. Scoped to asset inputs only: the DGB
-        // fee inputs live in the native BRWallet's own UTXO set, not this Room
-        // table (Room's is_asset=0 rows are unused today), so marking them here
-        // would be a no-op that risks stranding them spent=1 if that ever
-        // changes. spent=1 is preserved across later re-detects (see
-        // processIncomingAssetTx / refreshAssetUtxosFromNetwork); a stuck send
-        // is recovered via "Clear stuck sends & rebuild", which wipes the asset
-        // rows and lets native re-detection repopulate them unspent.
-        for (input in ok.assetInputs) {
-            runCatching { utxoDao.markSpent(input.txid, input.vout) }
-        }
+        // NOTE (v3.10.36): we intentionally do NOT mark the asset inputs spent
+        // here. Correct spent-tracking (so the balance decrements the moment a
+        // send confirms, and a dropped send safely un-hides its input) needs a
+        // durable spent-outpoint record + stuck-send recovery wiring that a
+        // review flagged as non-trivial; it lands in a follow-up. Until then
+        // the (pre-existing) behavior stands: the sovereign phantom prune keeps
+        // the balance correct for HELD assets, and a confirmed send's input is
+        // reconciled by the same path — never resurrecting a dead input.
 
         // Durability: record + persist through the same path the normal send
         // uses so SyncService.rebroadcastStrandedSends() re-publishes this asset

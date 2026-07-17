@@ -143,28 +143,4 @@ class UtxoDaoTest {
         assertEquals(0, utxoDao.getAssetUtxos().first().size)
     }
 
-    /** getSpentAt reflects the persisted flag, so re-insert paths can preserve
-     *  a locally-set spent=1 instead of resurrecting a just-spent input. */
-    @Test
-    fun getSpentAt_reflectsSpentFlagAndNullWhenMissing() = runTest {
-        utxoDao.insertAll(listOf(
-            UtxoEntity("a", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 1)
-        ))
-        assertEquals(false, utxoDao.getSpentAt("a", 0))
-        utxoDao.markSpent("a", 0)
-        assertEquals(true, utxoDao.getSpentAt("a", 0))
-        assertEquals(null, utxoDao.getSpentAt("missing", 9))
-    }
-
-    /** deleteAllAssetUtxos wipes asset rows (rebuild heal) but keeps DGB. */
-    @Test
-    fun deleteAllAssetUtxos_keepsDgb() = runTest {
-        utxoDao.insertAll(listOf(
-            UtxoEntity("dgb", 0, byteArrayOf(), 500000, 1000, isAsset = false),
-            UtxoEntity("asset", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 9)
-        ))
-        utxoDao.deleteAllAssetUtxos()
-        assertEquals(0, utxoDao.getAssetUtxos().first().size)
-        assertEquals(500000L, utxoDao.getDigiByteBalance().first())
-    }
 }

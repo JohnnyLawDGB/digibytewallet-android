@@ -57,17 +57,6 @@ interface UtxoDao {
     @Query("DELETE FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
     suspend fun deleteAssetUtxo(txid: String, vout: Int)
 
-    /** The persisted spent flag for an outpoint, or null if no such row. Lets
-     *  the re-insert paths PRESERVE a locally-set spent=1 across the REPLACE
-     *  upsert instead of silently resetting a just-spent input to unspent. */
-    @Query("SELECT spent FROM utxos WHERE txid = :txid AND vout = :vout LIMIT 1")
-    suspend fun getSpentAt(txid: String, vout: Int): Boolean?
-
-    /** Wipe every asset row (plain-DGB rows untouched). Clean-slate heal for
-     *  the rebuild path; native re-detection then repopulates only owned assets. */
-    @Query("DELETE FROM utxos WHERE is_asset = 1")
-    suspend fun deleteAllAssetUtxos()
-
     @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
     fun getAssetBalances(): Flow<List<AssetBalance>>
 }
