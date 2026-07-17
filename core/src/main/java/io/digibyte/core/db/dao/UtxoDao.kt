@@ -44,32 +44,29 @@ interface UtxoDao {
     @Query("DELETE FROM utxos")
     suspend fun deleteAll()
 
-    /** Delete every asset UTXO whose "txid:vout" key is NOT in [keptKeys].
-     *  Scoped to is_asset = 1 so plain-DGB UTXOs are never touched. Used by
-     *  the authoritative network refresh to prune phantom / already-spent
-     *  asset rows the node no longer reports. NOTE: [keptKeys] is bound as one
-     *  SQL parameter per element (SQLite var limit ~999); asset UTXO sets are
-     *  small in practice, so this is not chunked. */
-    @Query("DELETE FROM utxos WHERE is_asset = 1 AND (txid || ':' || vout) NOT IN (:keptKeys)")
-    suspend fun deleteAssetUtxosNotIn(keptKeys: List<String>)
+    /** All asset rows (spent + unspent). Used by the SOVEREIGN ownership
+     *  reconcile to find phantom rows — asset outputs sitting at addresses the
+     *  wallet does not own (e.g. the recipient marker of a send WE made). */
+    @Query("SELECT * FROM utxos WHERE is_asset = 1")
+    suspend fun getAllAssetUtxosNow(): List<UtxoEntity>
 
-    /** Atomically reconcile the asset-UTXO set to the authoritative [fresh]
-     *  set from the network: prune any asset row not present in [fresh], then
-     *  upsert [fresh]. One transaction, so a concurrent reader never observes
-     *  the intermediate pruned-but-not-yet-reinserted state. The caller MUST
-     *  pass a COMPLETE, non-empty network response — pruning to an empty or
-     *  partial set would wipe real holdings from the local cache. */
-    @Transaction
-    suspend fun replaceAssetUtxos(fresh: List<UtxoEntity>) {
-        // Self-guard: an empty set would make deleteAssetUtxosNotIn prune ALL
-        // asset rows (NOT IN () matches everything). Never do that here — the
-        // "we truly hold nothing" case is the caller's decision to make, not a
-        // silent side effect of an empty argument.
-        if (fresh.isEmpty()) return
-        val keptKeys = fresh.map { "${it.txid}:${it.vout}" }.distinct()
-        deleteAssetUtxosNotIn(keptKeys)
-        insertAll(fresh)
-    }
+    /** Delete a single asset UTXO by outpoint. Scoped to is_asset = 1 so a
+     *  plain-DGB UTXO is never removed. The reconcile deletes phantom rows one
+     *  at a time (their count is tiny), which also sidesteps the SQLite
+     *  bound-variable limit an `IN (:keys)` bulk delete would hit. */
+    @Query("DELETE FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
+    suspend fun deleteAssetUtxo(txid: String, vout: Int)
+
+    /** The persisted spent flag for an outpoint, or null if no such row. Lets
+     *  the re-insert paths PRESERVE a locally-set spent=1 across the REPLACE
+     *  upsert instead of silently resetting a just-spent input to unspent. */
+    @Query("SELECT spent FROM utxos WHERE txid = :txid AND vout = :vout LIMIT 1")
+    suspend fun getSpentAt(txid: String, vout: Int): Boolean?
+
+    /** Wipe every asset row (plain-DGB rows untouched). Clean-slate heal for
+     *  the rebuild path; native re-detection then repopulates only owned assets. */
+    @Query("DELETE FROM utxos WHERE is_asset = 1")
+    suspend fun deleteAllAssetUtxos()
 
     @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
     fun getAssetBalances(): Flow<List<AssetBalance>>

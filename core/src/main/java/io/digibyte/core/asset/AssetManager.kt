@@ -118,9 +118,26 @@ class AssetManager(
      * to label the [TransactionEntity] the same way), or null for non-asset
      * transactions.
      */
+    /**
+     * The set of hex-encoded scriptPubKeys the wallet owns, derived from the
+     * SOVEREIGN native address list (BRWalletAllAddrs — external + internal +
+     * legacy chains). This is the wallet's own view, never a third party, so
+     * using it to identify phantom outputs (asset outputs at addresses we don't
+     * own) keeps the DigiAsset accounting sovereign. Empty if the lookup fails;
+     * callers treat empty as "unknown" and fall back to non-destructive
+     * behavior (never prune, never gate) so a lookup failure can't lose data.
+     */
+    fun buildOwnedScriptHexes(): Set<String> = runCatching {
+        NativeBridge.dumpAllAddresses()
+            .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
+            .mapNotNull { NativeBridge.addressToScriptPubKey(it)?.toHex() }
+            .toSet()
+    }.getOrDefault(emptySet())
+
     suspend fun processIncomingAssetTx(
         txHashHex: String,
         blockHeight: Long,
+        ownedScriptHexes: Set<String>? = null,
     ): IncomingAssetInfo? {
         val outputLines = NativeBridge.getTransactionOutputsForHash(txHashHex) ?: return null
         if (outputLines.isEmpty()) return null
@@ -216,18 +233,14 @@ class AssetManager(
         // output whose scriptPubKey isn't one of our own addresses.
         //
         // Both error directions self-heal: a false-positive (phantom slips in,
-        // e.g. owned-set empty) is pruned by refreshAssetUtxosFromNetwork; a
-        // false-negative (we drop one of our own change markers because its
-        // address wasn't in the set) is re-inserted by that same authoritative
-        // refresh, which queries the backend over the same address set. If the
-        // owned set can't be built we fall back to the old insert-everything
-        // behavior and let the prune clean up — never worse than before.
-        val ownedScriptHexes: Set<String> = runCatching {
-            NativeBridge.dumpAllAddresses()
-                .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
-                .mapNotNull { NativeBridge.addressToScriptPubKey(it)?.toHex() }
-                .toSet()
-        }.getOrDefault(emptySet())
+        // e.g. owned-set empty) is pruned by the sovereign ownership reconcile
+        // in refreshAssetUtxosFromNetwork; a false-negative (we drop one of our
+        // own change markers) is re-derived by native detection / the backend
+        // refresh over the same sovereign address set. If the owned set can't
+        // be built we fall back to insert-everything and let the prune clean up
+        // — never worse than before. Built ONCE by the caller (the 30s sweep)
+        // and passed in, so we don't recompute it per tx.
+        val owned = ownedScriptHexes ?: buildOwnedScriptHexes()
 
         var anyStillUnresolved = false
         for (out in outputs) {
@@ -235,7 +248,7 @@ class AssetManager(
             // Skip outputs we don't own (see ownership-gate note above). Only
             // enforce when we actually have an owned set — an empty set means
             // the lookup failed, in which case we defer to the prune.
-            if (ownedScriptHexes.isNotEmpty() && out.script.toHex() !in ownedScriptHexes) continue
+            if (owned.isNotEmpty() && out.script.toHex() !in owned) continue
             // Preserve a real (non-placeholder) asset-id if a prior sweep +
             // M3 walk already resolved this UTXO. Without this check, each
             // 30s sweep would clobber the real id with a fresh
@@ -247,6 +260,11 @@ class AssetManager(
                 anyStillUnresolved = true
                 placeholderAssetId
             }
+            // Preserve a locally-set spent=1 across this REPLACE upsert: once a
+            // send marks its input spent, re-detecting that same outpoint in a
+            // later 30s sweep must NOT resurrect it as unspent (which would
+            // re-inflate the balance and let it be re-selected as a dead input).
+            val wasSpent = utxoDao.getSpentAt(txHashHex, out.vout) ?: false
             utxoDao.insertAll(
                 listOf(
                     UtxoEntity(
@@ -258,6 +276,7 @@ class AssetManager(
                         isAsset = true,
                         assetId = effectiveAssetId,
                         assetQuantity = quantityForOutput(out.vout),
+                        spent = wasSpent,
                     )
                 )
             )
@@ -526,11 +545,16 @@ class AssetManager(
      */
     suspend fun sweepKnownTransactionsForAssets(): Int {
         val hashes = NativeBridge.getAllTransactionHashes() ?: return 0
+        // Compute the owned-script set ONCE for the whole sweep (it's the same
+        // for every tx) instead of rebuilding it per tx — a long-history wallet
+        // has hundreds of addresses, so a per-tx rebuild is hundreds of JNI
+        // calls × every known tx, every 30s.
+        val owned = buildOwnedScriptHexes()
         var detected = 0
         for (txHash in hashes) {
             if (txHash.isBlank()) continue
             val info = runCatching {
-                processIncomingAssetTx(txHash, blockHeight = 0L)
+                processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned)
             }.onFailure {
                 android.util.Log.d("AssetManager", "sweep: processIncoming failed for $txHash", it)
             }.getOrNull()
@@ -556,12 +580,14 @@ class AssetManager(
      * registerRawTransaction both populate transactions but not utxos;
      * this pass fills the utxos side by trusting the node's indexed view.
      *
-     * Safe to call repeatedly. AUTHORITATIVE: the node's set replaces the
-     * local asset-UTXO rows (prune-not-in-set + upsert, atomically), so this
-     * both keeps the set current AND heals stale/phantom rows a prior bug may
-     * have accumulated. Skips the prune on an empty response (see the guard).
+     * Safe to call repeatedly. Additively upserts the backend's view of our
+     * asset UTXOs, then runs a SOVEREIGN phantom prune: rows at addresses the
+     * native wallet does not own are deleted (this heals the "30 shown for 10"
+     * inflation from recipient-marker rows a prior bug inserted). The backend is
+     * never allowed to DELETE — only the native address set is trusted for
+     * removal — so a partial/stale indexer response can't wipe real holdings.
      *
-     * Returns the count of asset UTXOs in the reconciled set, or null if no
+     * Returns the count of asset UTXOs upserted from the backend, or null if no
      * network client is configured or all endpoints failed.
      */
     suspend fun refreshAssetUtxosFromNetwork(): Int? {
@@ -570,35 +596,40 @@ class AssetManager(
             .trim().lines().filter { it.isNotBlank() }
         if (addresses.isEmpty()) return null
 
+        // The SOVEREIGN owned-script set (our own addresses, never the backend).
+        // Used below to prune phantom asset rows. Built from the addresses we
+        // already fetched — no second native round-trip.
+        val ownedScriptHexes: Set<String> =
+            addresses.mapNotNull { NativeBridge.addressToScriptPubKey(it)?.toHex() }.toSet()
+
         // Batch to respect the 500-addresses-per-request server cap.
         val utxos = mutableListOf<io.digibyte.core.asset.network.AssetUtxoResponse>()
         for (chunk in addresses.chunked(500)) {
             val resp = client.getAssetUtxos(chunk) ?: return null
             utxos += resp
         }
+        // NOTE: do NOT early-return on an empty backend response — the sovereign
+        // phantom prune below must still run to clean stale rows even when the
+        // backend currently reports no assets at our addresses.
 
-        if (utxos.isEmpty()) return 0
-
-        // Build the authoritative fresh set first, then reconcile in ONE atomic
-        // step (below). The node's getAssetUtxos returns ONLY genuinely-unspent
-        // asset UTXOs at OUR OWN addresses, so this set — by construction —
-        // excludes both the spent inputs of prior sends and any phantom
-        // recipient marker (which sits at someone else's address). Replacing the
-        // local asset rows with it therefore HEALS an already-inflated balance
-        // (e.g. 30 -> 10) and keeps it correct going forward, instead of the old
-        // REPLACE-only upsert that never pruned stale/phantom rows.
+        // Build the backend's current view, to be upserted ADDITIVELY below
+        // (never a backend-authoritative delete). NOTE: a single (txid,vout)
+        // carrying multiple assets collapses under the (txid,vout) primary key
+        // to the LAST asset — a pre-existing single-asset-per-outpoint
+        // limitation of the schema, unchanged here.
         val fresh = mutableListOf<UtxoEntity>()
         for (u in utxos) {
             for (asset in u.assets) {
-                // One logical UtxoEntity per (txid, vout, assetId). In the
-                // common case there's exactly one asset per UTXO; the inner
-                // loop handles the rare multi-asset marker.
                 // Resolve scriptPubKey from the address so the UTXO is
                 // fully spendable by the send flow without a second lookup.
                 // If derivation fails (invalid address format), fall back
                 // to empty bytes — the row still displays correctly; send
                 // would fail gracefully with a typed error at that layer.
                 val scriptPubKey = NativeBridge.addressToScriptPubKey(u.address) ?: ByteArray(0)
+                // Preserve a locally-set spent=1: a just-sent input the backend
+                // may still report as unspent in the brief pre-confirmation
+                // window must not be resurrected as spendable by this refresh.
+                val wasSpent = utxoDao.getSpentAt(u.txid, u.vout) ?: false
                 fresh += UtxoEntity(
                     txid = u.txid,
                     vout = u.vout,
@@ -608,6 +639,7 @@ class AssetManager(
                     isAsset = true,
                     assetId = asset.assetId,
                     assetQuantity = asset.count,
+                    spent = wasSpent,
                 )
 
                 // Metadata cache handling — there's a subtle ordering
@@ -657,15 +689,30 @@ class AssetManager(
             }
         }
 
-        // Guard: only prune when we have a non-empty authoritative set. A
-        // successful-but-EMPTY response is ambiguous (truly hold nothing vs a
-        // transient backend hiccup), so skip the prune rather than risk wiping
-        // real historical holdings from the local cache. On-chain assets are
-        // seed-controlled and untouched regardless, but we don't want them to
-        // flicker out of the UI on an empty read. (A hard fetch failure already
-        // returned null above, before reaching here.)
-        if (fresh.isEmpty()) return 0
-        utxoDao.replaceAssetUtxos(fresh)
+        // Additive upsert of the backend's view. NEVER a backend-authoritative
+        // delete: a trusted third-party indexer must not be able to erase asset
+        // UTXOs the sovereign native path detected, and a partial/stale backend
+        // response would otherwise wipe real holdings.
+        if (fresh.isNotEmpty()) utxoDao.insertAll(fresh)
+
+        // SOVEREIGN phantom prune: delete asset rows sitting at addresses the
+        // wallet does NOT own (chiefly the recipient marker of a send we made,
+        // which older builds inserted without an ownership check — the source
+        // of the "30 shown for 10" inflation). Ownership is judged against the
+        // native address set, never the backend. Guards:
+        //   - skip entirely if the owned set couldn't be built (treat "unknown"
+        //     as "don't delete" — a lookup failure must not lose data);
+        //   - never prune an empty-script row (a real-but-not-yet-derivable
+        //     holding the backend returned) — only rows with a concrete,
+        //     not-ours scriptPubKey, which is exactly what a phantom marker is.
+        // Deleted one row at a time (their count is tiny) to avoid any bulk-IN
+        // variable limit and keep the blast radius minimal.
+        if (ownedScriptHexes.isNotEmpty()) {
+            val phantoms = utxoDao.getAllAssetUtxosNow().filter {
+                it.scriptPubKey.isNotEmpty() && it.scriptPubKey.toHex() !in ownedScriptHexes
+            }
+            for (row in phantoms) utxoDao.deleteAssetUtxo(row.txid, row.vout)
+        }
         return fresh.size
     }
 
@@ -914,16 +961,17 @@ class AssetManager(
         val txid = Broadcaster.broadcast(signedBytes)
             ?: return TxResult.Error("Broadcast failed — check peer connection")
 
-        // Retire the inputs we just spent so they stop counting toward the
-        // balance (SUM of asset_quantity over spent=0 rows) immediately. Covers
-        // BOTH the asset inputs and the DGB fee inputs — any input left spent=0
-        // is re-selectable on the next send (a double-spend attempt), and a
-        // never-retired ASSET input keeps inflating the displayed asset balance
-        // until the next network refresh. If this send later turns out stranded
-        // /unconfirmed, refreshAssetUtxosFromNetwork re-inserts (REPLACE →
-        // spent=0) any input the node still reports as unspent, so marking here
-        // can never permanently hide funds that legitimately return.
-        for (input in allInputs) {
+        // Retire the ASSET inputs we just spent so they stop inflating the
+        // displayed asset balance (SUM of asset_quantity over spent=0 rows) the
+        // moment the send is broadcast. Scoped to asset inputs only: the DGB
+        // fee inputs live in the native BRWallet's own UTXO set, not this Room
+        // table (Room's is_asset=0 rows are unused today), so marking them here
+        // would be a no-op that risks stranding them spent=1 if that ever
+        // changes. spent=1 is preserved across later re-detects (see
+        // processIncomingAssetTx / refreshAssetUtxosFromNetwork); a stuck send
+        // is recovered via "Clear stuck sends & rebuild", which wipes the asset
+        // rows and lets native re-detection repopulate them unspent.
+        for (input in ok.assetInputs) {
             runCatching { utxoDao.markSpent(input.txid, input.vout) }
         }
 

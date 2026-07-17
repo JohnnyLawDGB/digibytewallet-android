@@ -602,7 +602,11 @@ private fun AssetConfirmRow(label: String, value: String) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-private const val DA_MARKER_SATS_UI: Long = 700L
+/** Marker value shown in the cost preview. Single source of truth — the same
+ *  constant the send path emits — so the preview can never drift from the
+ *  actual on-chain marker (it was hardcoded at the old 700 and understated the
+ *  DGB cost after the dust-driven bump to 6,000). */
+private val DA_MARKER_SATS_UI: Long = io.digibyte.core.asset.send.DA_MARKER_SATS
 
 /** Render an internal-units quantity back to a decimal string suitable
  *  for the OutlinedTextField. Keeps round-trip parity with the
@@ -618,13 +622,13 @@ private fun formatBalanceForInput(quantity: Long, decimals: Int): String {
  * Card showing the DGB outflow breakdown for the in-progress send.
  *
  * Mirrors the math the AssetCoinSelector + sendAsset path uses on submit:
- *   - 1 marker (700 sats) for the recipient
- *   - 1 marker (700 sats) for asset change, only if the user is sending
- *     less than their full balance for this asset
+ *   - 1 marker ([DA_MARKER_SATS_UI] sats) for the recipient
+ *   - 1 marker ([DA_MARKER_SATS_UI] sats) for asset change, only if the user
+ *     is sending less than their full balance for this asset
  *   - The estimated network fee (size-aware, at the chosen fee rate)
  *
- * Doesn't account for DGB-fee-input contribution (the 700 sats already in
- * the asset UTXO partly funds the markers); that's a wash from the user's
+ * Doesn't account for DGB-fee-input contribution (the marker sats already in
+ * the asset UTXO partly fund the new markers); that's a wash from the user's
  * perspective and complicates the display, so we surface gross outflow.
  */
 @Composable

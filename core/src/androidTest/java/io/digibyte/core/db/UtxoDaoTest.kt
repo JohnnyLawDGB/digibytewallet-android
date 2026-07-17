@@ -78,64 +78,93 @@ class UtxoDaoTest {
         assertEquals(200000L, balance)
     }
 
-    // ---- Authoritative asset-UTXO reconcile (fixes 30-shown-for-10 bug) ----
+    // ---- Sovereign asset-UTXO reconcile primitives (fix 30-shown-for-10) ----
 
-    /** Reproduces the exact inflation the user hit: one true holding of 10
-     *  plus two never-pruned phantom rows (recipient markers of a stuck send +
-     *  a recover-resend) sum to 30. Replacing with the node's authoritative set
-     *  {the true holding} must prune the phantoms and heal the balance to 10. */
+    // Distinct scripts so "owned vs phantom" is decidable by scriptPubKey, the
+    // way AssetManager's sovereign prune decides it.
+    private val ownedScript = byteArrayOf(0x76, 0x01, 0x02)
+    private val recipientScript = byteArrayOf(0x00, 0x14, 0x09)
+
+    /** Reproduces the exact inflation the user hit and heals it the way the
+     *  sovereign prune does: one true holding of 10 at an OWNED script, plus two
+     *  phantom recipient-marker rows of 10 at a NOT-owned script, sum to 30.
+     *  Deleting the phantom outpoints (what refreshAssetUtxosFromNetwork does
+     *  after filtering getAllAssetUtxosNow by ownership) heals the balance to 10
+     *  and never touches the real holding. */
     @Test
-    fun replaceAssetUtxos_prunesPhantomsAndHealsInflatedBalance() = runTest {
+    fun sovereignPrune_deletesPhantomsAndHealsInflatedBalance() = runTest {
         val assetId = "Ua1inflated"
-        val real = UtxoEntity("real", 0, byteArrayOf(), 6000, 1000, isAsset = true, assetId = assetId, assetQuantity = 10)
-        val phantom1 = UtxoEntity("stuckSend", 0, byteArrayOf(), 6000, 1001, isAsset = true, assetId = assetId, assetQuantity = 10)
-        val phantom2 = UtxoEntity("recoverResend", 0, byteArrayOf(), 6000, 1002, isAsset = true, assetId = assetId, assetQuantity = 10)
+        val real = UtxoEntity("real", 0, ownedScript, 6000, 1000, isAsset = true, assetId = assetId, assetQuantity = 10)
+        val phantom1 = UtxoEntity("stuckSend", 0, recipientScript, 6000, 1001, isAsset = true, assetId = assetId, assetQuantity = 10)
+        val phantom2 = UtxoEntity("recoverResend", 0, recipientScript, 6000, 1002, isAsset = true, assetId = assetId, assetQuantity = 10)
         utxoDao.insertAll(listOf(real, phantom1, phantom2))
 
         // Pre-condition: the bug — balance reads 30 for a true holding of 10.
         assertEquals(30L, utxoDao.getAssetBalances().first().first { it.assetId == assetId }.totalQuantity)
 
-        // The node reports only the genuinely-unspent holding at our address.
-        utxoDao.replaceAssetUtxos(listOf(real))
+        // Sovereign prune: rows whose script isn't in the owned set are phantoms.
+        val ownedHex = setOf(ownedScript.joinToString("") { "%02x".format(it) })
+        val phantoms = utxoDao.getAllAssetUtxosNow().filter {
+            it.scriptPubKey.isNotEmpty() &&
+                it.scriptPubKey.joinToString("") { b -> "%02x".format(b) } !in ownedHex
+        }
+        assertEquals(2, phantoms.size)
+        for (p in phantoms) utxoDao.deleteAssetUtxo(p.txid, p.vout)
 
         val healed = utxoDao.getAssetBalances().first()
         assertEquals(1, healed.size)
         assertEquals(10L, healed.first { it.assetId == assetId }.totalQuantity)
-        assertEquals(1, utxoDao.getAssetUtxos().first().size)
     }
 
-    /** The prune MUST be scoped to asset rows — plain-DGB UTXOs (the user's
-     *  spendable balance) are reconciled by the native wallet, not this path,
-     *  and must never be deleted by an asset refresh. */
+    /** getAllAssetUtxosNow returns every asset row (spent + unspent) and no
+     *  plain-DGB rows — the input the sovereign prune filters over. */
     @Test
-    fun replaceAssetUtxos_neverTouchesPlainDgbUtxos() = runTest {
-        val dgb = UtxoEntity("dgb", 0, byteArrayOf(), 500000, 1000, isAsset = false)
-        val staleAsset = UtxoEntity("staleAsset", 0, byteArrayOf(), 6000, 1000, isAsset = true, assetId = "Uold", assetQuantity = 5)
-        val freshAsset = UtxoEntity("freshAsset", 0, byteArrayOf(), 6000, 1001, isAsset = true, assetId = "Unew", assetQuantity = 7)
-        utxoDao.insertAll(listOf(dgb, staleAsset))
-
-        utxoDao.replaceAssetUtxos(listOf(freshAsset))
-
-        // DGB balance untouched; stale asset pruned; fresh asset present.
-        assertEquals(500000L, utxoDao.getDigiByteBalance().first())
-        val assets = utxoDao.getAssetUtxos().first()
-        assertEquals(1, assets.size)
-        assertEquals("freshAsset", assets[0].txid)
-    }
-
-    /** deleteAssetUtxosNotIn keeps only the listed keys, among asset rows. */
-    @Test
-    fun deleteAssetUtxosNotIn_scopedToAssetsOnly() = runTest {
+    fun getAllAssetUtxosNow_returnsAllAssetRowsExcludingDgb() = runTest {
         utxoDao.insertAll(listOf(
             UtxoEntity("dgb", 0, byteArrayOf(), 500000, 1000, isAsset = false),
-            UtxoEntity("keep", 0, byteArrayOf(), 6000, 1000, isAsset = true, assetId = "Uk", assetQuantity = 3),
-            UtxoEntity("drop", 1, byteArrayOf(), 6000, 1000, isAsset = true, assetId = "Ud", assetQuantity = 9)
+            UtxoEntity("assetUnspent", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Uu", assetQuantity = 3),
+            UtxoEntity("assetSpent", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Us", assetQuantity = 4, spent = true)
         ))
-        utxoDao.deleteAssetUtxosNotIn(listOf("keep:0"))
+        val all = utxoDao.getAllAssetUtxosNow()
+        assertEquals(2, all.size)
+        assertTrue(all.none { it.txid == "dgb" })
+    }
 
-        assertEquals(500000L, utxoDao.getDigiByteBalance().first()) // DGB survives
-        val assets = utxoDao.getAssetUtxos().first()
-        assertEquals(1, assets.size)
-        assertEquals("keep", assets[0].txid)
+    /** deleteAssetUtxo is scoped to is_asset = 1: a plain-DGB row is untouched. */
+    @Test
+    fun deleteAssetUtxo_neverTouchesDgb() = runTest {
+        utxoDao.insertAll(listOf(
+            UtxoEntity("shared", 0, byteArrayOf(), 500000, 1000, isAsset = false),
+            UtxoEntity("shared", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 9)
+        ))
+        utxoDao.deleteAssetUtxo("shared", 0)   // (shared,0) is DGB — must survive
+        assertEquals(500000L, utxoDao.getDigiByteBalance().first())
+        utxoDao.deleteAssetUtxo("shared", 1)   // (shared,1) is the asset — removed
+        assertEquals(0, utxoDao.getAssetUtxos().first().size)
+    }
+
+    /** getSpentAt reflects the persisted flag, so re-insert paths can preserve
+     *  a locally-set spent=1 instead of resurrecting a just-spent input. */
+    @Test
+    fun getSpentAt_reflectsSpentFlagAndNullWhenMissing() = runTest {
+        utxoDao.insertAll(listOf(
+            UtxoEntity("a", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 1)
+        ))
+        assertEquals(false, utxoDao.getSpentAt("a", 0))
+        utxoDao.markSpent("a", 0)
+        assertEquals(true, utxoDao.getSpentAt("a", 0))
+        assertEquals(null, utxoDao.getSpentAt("missing", 9))
+    }
+
+    /** deleteAllAssetUtxos wipes asset rows (rebuild heal) but keeps DGB. */
+    @Test
+    fun deleteAllAssetUtxos_keepsDgb() = runTest {
+        utxoDao.insertAll(listOf(
+            UtxoEntity("dgb", 0, byteArrayOf(), 500000, 1000, isAsset = false),
+            UtxoEntity("asset", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 9)
+        ))
+        utxoDao.deleteAllAssetUtxos()
+        assertEquals(0, utxoDao.getAssetUtxos().first().size)
+        assertEquals(500000L, utxoDao.getDigiByteBalance().first())
     }
 }
