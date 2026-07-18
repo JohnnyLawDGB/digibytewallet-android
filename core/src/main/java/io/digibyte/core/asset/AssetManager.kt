@@ -1241,6 +1241,66 @@ class AssetManager(
      *  refresh chain facts in case they ever go stale. */
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** Per-txid count of consecutive prune passes native has lacked the tx.
+     *  A NATIVE asset row is deleted only after the count reaches the
+     *  threshold, so a transient reload/reorg window can't mass-delete. */
+    private val nativeAbsenceCounts = mutableMapOf<String, Int>()
+
+    /**
+     * Sovereign replacement for the removed 30s backend refresh. Deletes a
+     * NATIVE-tagged asset row once native has POSITIVELY removed its tx
+     * (getTransactionOutputsForHash == null) across
+     * [ABSENCE_DEBOUNCE_THRESHOLD] consecutive passes. BACKEND rows are never
+     * touched — a real holding native never scanned is a BACKEND row with a
+     * null tx and must survive. Caller must gate with [assetPruneGateOpen].
+     * Returns the count deleted.
+     *
+     * Thin delegate onto [pruneRemovedNativeAssetRowsImpl], wrapping the real
+     * NativeBridge JNI check as a lambda. NativeBridge is a JNI singleton
+     * whose `init` block loads a native library, which the host JVM unit-test
+     * runner can't do — merely referencing the object (e.g. via
+     * `mockkObject(NativeBridge)`) throws `UnsatisfiedLinkError` before any
+     * mocking takes effect (same constraint documented on
+     * [persistDetectedAssetOutput] / `AssetProvenanceTaggingTest`). So the
+     * debounce logic actually under test lives in the Impl overload, driven
+     * by a fake `isTxGone` lambda + a mocked [UtxoDao] — no NativeBridge load
+     * required.
+     */
+    suspend fun pruneRemovedNativeAssetRows(): Int =
+        pruneRemovedNativeAssetRowsImpl { txid ->
+            runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull() == null
+        }
+
+    /**
+     * Testable debounce core of [pruneRemovedNativeAssetRows]. [isTxGone] is
+     * the native tx-absence check, factored out as a suspend lambda so tests
+     * can drive it deterministically instead of through the real JNI-backed
+     * NativeBridge singleton.
+     */
+    internal suspend fun pruneRemovedNativeAssetRowsImpl(isTxGone: suspend (String) -> Boolean): Int {
+        val rows = utxoDao.getAssetUtxosBySourceNow(AssetSource.NATIVE)
+        val liveTxids = HashSet<String>(rows.size)
+        var deleted = 0
+        for (row in rows) {
+            if (row.txid.length != 64) continue   // never pass a malformed txid to native
+            liveTxids.add(row.txid)
+            val gone = isTxGone(row.txid)
+            if (!gone) {
+                nativeAbsenceCounts.remove(row.txid)
+                continue
+            }
+            val n = (nativeAbsenceCounts[row.txid] ?: 0) + 1
+            nativeAbsenceCounts[row.txid] = n
+            if (n >= ABSENCE_DEBOUNCE_THRESHOLD) {
+                deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
+                nativeAbsenceCounts.remove(row.txid)
+            }
+        }
+        // Drop stale debounce entries for txids no longer NATIVE-tagged.
+        nativeAbsenceCounts.keys.retainAll(liveTxids)
+        return deleted
+    }
+
     private companion object {
         /** DGB change below this floor is folded into the fee rather than
          *  emitted as its own output. MUST be >= the network dust threshold
@@ -1257,6 +1317,10 @@ class AssetManager(
          *  pathological case without blowing up when some chain loops or
          *  points at a tx no endpoint has. */
         const val MAX_WALK_DEPTH = 12
+
+        /** Consecutive prune passes native must positively lack a NATIVE
+         *  row's tx before it's deleted (see [pruneRemovedNativeAssetRowsImpl]). */
+        const val ABSENCE_DEBOUNCE_THRESHOLD = 2
     }
 }
 
