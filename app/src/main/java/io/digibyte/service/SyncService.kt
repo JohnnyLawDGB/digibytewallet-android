@@ -483,7 +483,7 @@ class SyncService : Service() {
                 launch {
                     try {
                         runCatching { assetManager.sweepKnownTransactionsForAssets() }
-                            .onFailure { android.util.Log.d("SyncService", "native sweep threw", it) }
+                            .onFailure { android.util.Log.w("SyncService", "native sweep threw", it) }
                         if (assetPruneGateOpen(
                                 syncedThisSession = syncedThisSession,
                                 peerCount = NativeBridge.getPeerCount(),
@@ -491,7 +491,7 @@ class SyncService : Service() {
                                 walletLoaded = NativeBridge.isWalletLoaded(),
                             )) {
                             runCatching { assetManager.pruneRemovedNativeAssetRows() }
-                                .onFailure { android.util.Log.d("SyncService", "asset prune threw", it) }
+                                .onFailure { android.util.Log.w("SyncService", "asset prune threw", it) }
                         }
                     } finally {
                         assetMaintenanceRunning.set(false)
@@ -609,6 +609,13 @@ class SyncService : Service() {
                         atTipConsecutivePolls++
                         if (atTipConsecutivePolls >= TIP_GRACE_POLLS) {
                             hasReachedSynced = true
+                            // Co-located with hasReachedSynced: this poll-loop
+                            // fallback is a REAL this-session completion site
+                            // (native onSyncComplete is unreliable on flaky
+                            // devices). The asset prune gate must open here too,
+                            // or it never runs on exactly the Note 8-class
+                            // devices most likely to hold phantom rows.
+                            syncedThisSession = true
                             walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
                             getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                 .edit().putBoolean("has_synced", true).apply()
