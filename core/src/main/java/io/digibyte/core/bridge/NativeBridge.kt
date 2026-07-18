@@ -305,6 +305,13 @@ object NativeBridge {
      *  debugging "expected balance higher than detected" scenarios. */
     external fun dumpAllAddresses(): String
 
+    /** Sovereign, chain-derived spent-state for an asset outpoint (tri-state):
+     *  0 = SPENT (in the wallet's spentOutputs set), 1 = HELD (funding tx known
+     *  and unspent), -1 = UNDETECTED (funding tx unknown — a backend-sourced
+     *  row the SPV sync hasn't reached; leave it unchanged). Reads the
+     *  authoritative spentOutputs set, not the asset-UTXO array. */
+    external fun outpointSpentState(txHashHex: String, vout: Int): Int
+
     /** Injects a node-verified transaction into the wallet. Used by the
      *  chain reconciliation service to repair state when the SPV bloom
      *  scan misses a tx but we see it on-chain. Caller must merkle-proof

@@ -867,6 +867,11 @@ class AssetManager(
             }
             for (row in phantoms) utxoDao.deleteAssetUtxo(row.txid, row.vout)
         }
+
+        // Reconcile spent-state from the SOVEREIGN native UTXO set: mark spent
+        // the inputs of confirmed/broadcast sends, and un-spend a dropped
+        // send's input if it has returned to the wallet's UTXO set.
+        runCatching { reconcileAssetSpentFromNative() }
         return fresh.size
     }
 
@@ -913,6 +918,27 @@ class AssetManager(
             deleted += utxoDao.deleteAssetUtxo(txid, vout)
         }
         return deleted
+    }
+
+    /**
+     * Make each owned asset row's spent flag track the native BRWallet's
+     * authoritative spentOutputs set (via [NativeBridge.outpointSpentState]) —
+     * the sovereign, chain-derived source of spent-ness, with NO local flag to
+     * strand or resurrect. Per row: SPENT -> spent=true, HELD -> spent=false,
+     * UNDETECTED (funding tx not yet synced) -> left unchanged so a mid-sync
+     * wallet never hides a real holding.
+     * Because publishTransaction registers a send with BRWallet immediately,
+     * calling this right after a broadcast decrements the balance at once; a
+     * dropped send's removeTransaction takes its input back out of spentOutputs,
+     * so a later reconcile un-spends it automatically — no manual recovery.
+     */
+    suspend fun reconcileAssetSpentFromNative() {
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            val newSpent = decideAssetSpent(
+                NativeBridge.outpointSpentState(row.txid, row.vout)
+            ) ?: continue
+            if (row.spent != newSpent) utxoDao.setSpent(row.txid, row.vout, newSpent)
+        }
     }
 
     /**
@@ -1160,14 +1186,13 @@ class AssetManager(
         val txid = Broadcaster.broadcast(signedBytes)
             ?: return TxResult.Error("Broadcast failed — check peer connection")
 
-        // NOTE (v3.10.36): we intentionally do NOT mark the asset inputs spent
-        // here. Correct spent-tracking (so the balance decrements the moment a
-        // send confirms, and a dropped send safely un-hides its input) needs a
-        // durable spent-outpoint record + stuck-send recovery wiring that a
-        // review flagged as non-trivial; it lands in a follow-up. Until then
-        // the (pre-existing) behavior stands: the sovereign phantom prune keeps
-        // the balance correct for HELD assets, and a confirmed send's input is
-        // reconciled by the same path — never resurrecting a dead input.
+        // Decrement the balance immediately: publishTransaction (in Broadcaster)
+        // already called BRWalletRegisterTransaction, so the native wallet has
+        // marked our asset input(s) spent and dropped them from its UTXO set.
+        // Reconcile Room's spent-state from that sovereign set now (no local
+        // markSpent flag to strand). If the send is later dropped, the input
+        // returns to the UTXO set and a subsequent reconcile un-spends it.
+        runCatching { reconcileAssetSpentFromNative() }
 
         // Durability: record + persist through the same path the normal send
         // uses so SyncService.rebroadcastStrandedSends() re-publishes this asset
@@ -1490,3 +1515,18 @@ data class IncomingAssetInfo(
  * is the actual delete count — always 0 on a dry-run pass.
  */
 data class LegacyHealResult(val candidates: List<String>, val deleted: Int)
+
+/**
+ * Pure decision for the native asset spent-reconcile: map the native
+ * [NativeBridge.outpointSpentState] tri-state to a new spent flag, or null to
+ * LEAVE THE ROW UNCHANGED.
+ *   - 0 SPENT       -> true
+ *   - 1 HELD        -> false
+ *   - -1 UNDETECTED -> null (funding tx not yet detected mid-sync; marking it
+ *                     spent would hide a real holding the backend surfaced early)
+ */
+internal fun decideAssetSpent(state: Int): Boolean? = when (state) {
+    0 -> true
+    1 -> false
+    else -> null
+}

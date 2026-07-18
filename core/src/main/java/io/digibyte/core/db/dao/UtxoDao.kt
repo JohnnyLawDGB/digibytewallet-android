@@ -35,6 +35,13 @@ interface UtxoDao {
     @Query("UPDATE utxos SET spent = 0 WHERE txid = :txid AND vout = :vout")
     suspend fun markUnspent(txid: String, vout: Int)
 
+    /** Set the spent flag for an outpoint to an explicit value. Used by the
+     *  asset spent-reconcile to make Room's spent state track the sovereign
+     *  native UTXO set (both spend on send-confirm AND un-spend if a dropped
+     *  send's input returns to the wallet's UTXO set). */
+    @Query("UPDATE utxos SET spent = :spent WHERE txid = :txid AND vout = :vout")
+    suspend fun setSpent(txid: String, vout: Int, spent: Boolean)
+
     /** Rewrite the placeholder asset_id of every UTXO row matching [oldAssetId]
      *  once M3 parent-walk resolves it to a real DigiAsset id. Safe no-op if
      *  no rows match (e.g. the placeholder was already replaced). */

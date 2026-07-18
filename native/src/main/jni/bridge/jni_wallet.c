@@ -894,3 +894,38 @@ Java_io_digibyte_core_bridge_NativeBridge_walletContainsAddress(JNIEnv *env, job
     (*env)->ReleaseStringUTFChars(env, address, addrChars);
     return contained ? JNI_TRUE : JNI_FALSE;
 }
+
+/* ---------- outpointSpentState ---------- */
+/* Sovereign, chain-derived spent-state for an asset outpoint, as a tri-state:
+ *    0 = SPENT       (the outpoint is in the wallet's spentOutputs set)
+ *    1 = HELD        (the wallet knows the funding tx and the outpoint is unspent)
+ *   -1 = UNDETECTED  (the wallet doesn't know the funding tx yet — e.g. a
+ *                     backend-sourced row the SPV sync hasn't reached)
+ * The reconcile marks a Room asset row spent on 0, unspent on 1, and leaves it
+ * unchanged on -1 (so a mid-sync wallet never hides a real holding). Uses
+ * BRWalletOutpointSpent (the authoritative spentOutputs set), NOT the asset-UTXO
+ * array, which is never pruned of spends. */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_outpointSpentState(JNIEnv *env, jobject thiz,
+                                                             jstring txHashHex, jint vout)
+{
+    (void)thiz;
+    if (!g_wallet || !txHashHex || vout < 0) return -1;
+
+    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
+    if (!hashStr) return -1;
+
+    jint state = -1;
+    if (strlen(hashStr) == 64) {
+        UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
+        if (BRWalletOutpointSpent(g_wallet, hash, (uint32_t)vout)) {
+            state = 0;                                   /* spent */
+        } else if (BRWalletTransactionForHash(g_wallet, hash)) {
+            state = 1;                                   /* known + unspent = held */
+        } else {
+            state = -1;                                  /* undetected */
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
+    return state;
+}

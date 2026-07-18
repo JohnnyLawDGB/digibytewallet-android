@@ -185,4 +185,17 @@ class UtxoDaoTest {
         assertEquals(0, assets[0].vout)
     }
 
+    /** setSpent toggles the flag both ways — the reconcile decrements on send
+     *  AND un-spends when a dropped send's input returns to the UTXO set. */
+    @Test
+    fun setSpent_togglesBothDirections() = runTest {
+        utxoDao.insertAll(listOf(
+            UtxoEntity("a", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 5)
+        ))
+        assertEquals(5L, utxoDao.getAssetBalances().first().first { it.assetId == "Ua" }.totalQuantity)
+        utxoDao.setSpent("a", 0, true)   // native says the input was spent
+        assertTrue(utxoDao.getAssetBalances().first().none { it.assetId == "Ua" })
+        utxoDao.setSpent("a", 0, false)  // dropped send: input returned to UTXO set
+        assertEquals(5L, utxoDao.getAssetBalances().first().first { it.assetId == "Ua" }.totalQuantity)
+    }
 }
