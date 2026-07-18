@@ -183,6 +183,7 @@ class AssetManager(
         blockHeight: Long,
         ownedScriptHexes: Set<String>? = null,
         isOutgoingUnconfirmed: Boolean = false,
+        persistAfterDetect: Boolean = false,
     ): IncomingAssetInfo? {
         val outputLines = NativeBridge.getTransactionOutputsForHash(txHashHex) ?: return null
         if (outputLines.isEmpty()) return null
@@ -370,7 +371,31 @@ class AssetManager(
             }.onFailure { android.util.Log.d("AssetManager", "M3 walk threw for $txHashHex", it) }
         }
 
-        return IncomingAssetInfo(header = header, assetId = placeholderAssetId)
+        val result = IncomingAssetInfo(header = header, assetId = placeholderAssetId)
+        maybePersistAfterDetect(persistAfterDetect, result)
+        return result
+    }
+
+    /**
+     * Persist-on-detect decision (C6), extracted as its own seam so it's
+     * testable without touching `NativeBridge` at all: [processIncomingAssetTx]
+     * itself can't be driven directly from a host-JVM unit test (its own
+     * prefix unconditionally calls the real `NativeBridge` singleton, whose
+     * `init` block does `System.loadLibrary("core-lib")` — see the seam note
+     * on [persistDetectedAssetOutput] for the same pre-existing constraint).
+     *
+     * Durability rationale: a freshly-received asset tx needs to survive an
+     * app restart, or it's absent from the rebuilt native wallet tx set and
+     * its NATIVE-provenance row looks phantom to the ownership prune — so the
+     * receive path (SyncService.onTransactionReceived) snapshots the wallet's
+     * tx set via [walletTxPersister] right after a detect. Only fires when
+     * [persistAfterDetect] is true (the receive path; the periodic sweep
+     * passes the default `false` and must never persist here) AND [detected]
+     * is non-null (an asset tx was actually found — a non-asset received tx
+     * must not trigger a snapshot).
+     */
+    internal fun maybePersistAfterDetect(persistAfterDetect: Boolean, detected: IncomingAssetInfo?) {
+        if (persistAfterDetect && detected != null) runCatching { walletTxPersister?.persist() }
     }
 
     /**

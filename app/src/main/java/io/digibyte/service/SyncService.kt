@@ -1222,7 +1222,18 @@ class SyncService : Service() {
                 // via IPFS is kicked off on the same path. Happens regardless of
                 // backend health — our sovereign fallback.
                 val detected = runCatching {
-                    assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L)
+                    // isOutgoingUnconfirmed = !isReceive: this fires at tx
+                    // ARRIVAL (unconfirmed). For our own OUTGOING send
+                    // (isReceive == false) the owned change-marker must NOT be
+                    // inserted yet — the 30s sweep inserts it once the send
+                    // confirms; inserting here would let a stuck-but-valid
+                    // send's change-marker survive as a phantom the sweep's
+                    // skip can never remove (it was already persisted once,
+                    // at broadcast). A RECEIVE (isReceive == true) is not
+                    // gated (isOutgoingUnconfirmed == false) and still inserts
+                    // immediately.
+                    assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L,
+                        isOutgoingUnconfirmed = !isReceive, persistAfterDetect = true)
                 }.onFailure {
                     android.util.Log.w("SyncService", "native asset detect failed for $txHash", it)
                 }.getOrNull()
@@ -1800,9 +1811,25 @@ class SyncService : Service() {
             // re-fluffing forever. (Only acts on this authoritative signal, never
             // on the relay guess, so a valid-but-slow send is never dropped.)
             if (!runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)) {
+                // Read the tx's own outputs BEFORE removal — once removed,
+                // NativeBridge can no longer look it up.
+                val outputs = runCatching { NativeBridge.getTransactionOutputsForHash(txid) }
+                    .getOrNull()?.toList()
                 if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
                     store.remove(txid)
                     dropped = true
+                    if (outputs != null) {
+                        // Clean any asset rows this dead send would otherwise
+                        // leave behind as phantoms (e.g. an owned change
+                        // marker that never confirms because the send lost
+                        // to a double-spend).
+                        val owned = runCatching { assetManager.buildOwnedScriptHexes() }
+                            .getOrDefault(emptySet())
+                        if (owned.isNotEmpty()) {
+                            runCatching { assetManager.clearDeadAssetSend(txid, owned, outputs) }
+                                .onFailure { android.util.Log.d("SyncService", "double-spend asset cleanup threw", it) }
+                        }
+                    }
                     android.util.Log.i("SyncService",
                         "Dandelion recovery: dropped conflicted (double-spend) send $txid")
                 }
