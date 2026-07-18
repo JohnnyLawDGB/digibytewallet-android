@@ -226,7 +226,7 @@ class SyncService : Service() {
             ownNodeAdditiveSessionOverride = false
             serviceScope.launch {
                 try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectBloomPeers()
+                injectPeers()
                 injectCustomNode()   // re-injects + pins (or clears) with the new prefs
                 NativeBridge.startSync()
             }
@@ -246,7 +246,7 @@ class SyncService : Service() {
             ownNodeAdditiveSessionOverride = true
             serviceScope.launch {
                 try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectBloomPeers()
+                injectPeers()
                 injectCustomNode()   // override above forces non-exclusive here
                 NativeBridge.startSync()
             }
@@ -568,8 +568,8 @@ class SyncService : Service() {
                             try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
                             zeroPeerStreak = 0
                         }
-                        android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
-                        injectBloomPeers()
+                        android.util.Log.i("SyncService", "No peers connected, re-injecting filter peers and reconnecting")
+                        injectPeers()
                         injectCustomNode()
                         NativeBridge.startSync()
                     }
@@ -677,29 +677,29 @@ class SyncService : Service() {
         }
 
     /**
-     * BIP 158 watchdog. The wallet defaults to SyncMode.BOTH (bloom +
-     * compact filters in parallel); COMPACT_FILTERS_ONLY is user-selectable
-     * for max address privacy. But the compact-filter
-     * peer pool is small (the seeder currently advertises ~3 peers), so
-     * if all of them are unreachable through Tor or down, the wallet
-     * would otherwise sit "Connecting…" forever.
+     * BIP 158 watchdog. The wallet always runs compact-filters-only sync
+     * (bloom/BIP37 is removed as a data path — the address set never goes on
+     * the wire). The compact-filter peer pool is small (the seeder currently
+     * advertises ~3 peers), so if all of them are unreachable through Tor or
+     * down, the wallet would otherwise sit "Connecting…" forever.
      *
-     * This watchdog waits BIP158_FALLBACK_TIMEOUT_MS after sync start; if
-     * the cfheaders chain hasn't progressed past the configured birth
-     * height, it flips syncMode to BLOOM_ONLY in the C core and pushes a
-     * bloom filterload to every connected peer (NativeBridge.fallbackToBloom).
-     * The Kotlin StateFlow `bloomFallbackActive` flips true so the UI can
-     * surface a "privacy degraded" banner. We DO NOT persist this choice —
-     * next launch tries filters first again.
+     * This watchdog waits BIP158_FALLBACK_TIMEOUT_MS after sync start; if the
+     * cfheaders chain hasn't progressed past the configured birth height, its
+     * only recovery is a one-time re-anchor at the block floor
+     * (reanchorCompactFilterChainAtFloor). If that isn't warranted or doesn't
+     * land within its grace window, the watchdog stays on compact filters and
+     * gives up gracefully for the session — it never degrades to bloom.
      */
     private fun startBip158Watchdog(birthHeight: Long) {
         bip158WatchdogJob?.cancel()
-        // Polls every BIP158_WATCHDOG_POLL_MS, falls back if the cfheaders
-        // chain isn't keeping pace with the block chain. Three exit cases:
-        //   1. Mode flipped to BLOOM (manual override or already fallen back)
-        //   2. cfTip caught up to within 100 blocks of blockTip → healthy
-        //   3. blockTip is meaningfully ahead AND no cf progress between
-        //      polls → fallback to bloom.
+        // Polls every BIP158_WATCHDOG_POLL_MS, tracking whether the cfheaders
+        // chain is keeping pace with the block chain. Three exit cases (bloom is
+        // removed as a data path — none of them ever fall back to it):
+        //   1. cfTip caught up to within 100 blocks of blockTip → healthy, return.
+        //   2. blockTip is meaningfully ahead and cfheaders is stuck → try the
+        //      one-time re-anchor recovery, then stay on compact filters either way.
+        //   3. Neither yet — keep polling (header sync still catching up, or
+        //      awaiting the first cfheaders append after a re-anchor).
         //
         // A one-shot timer at +120s isn't enough: at startup blockTip is
         // often still at the saved-blocks tip (headers haven't synced yet)
@@ -735,45 +735,10 @@ class SyncService : Service() {
             // Wall-clock of the last re-anchor, for the rebuild grace window. A
             // re-anchor frees the stuck chain (getCFChainTipHeight() then reads 0
             // until the first cfheaders response rebuilds it); the grace keeps the
-            // watchdog from reading that transient 0 as "dead" and degrading to bloom.
+            // watchdog from reading that transient 0 as "dead" and giving up early.
             var reanchorAtMs = 0L
-            // Transient block-stall recovery: drop to bloom so any peer extends the
-            // chain, then switch back to compact filters once caught up. Capped per
-            // session so a flaky connection can't flap bloom↔filters forever.
-            var blockStallRecoveries = 0
-            var bloomRecoveryActive = false
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
-                val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
-                    NativeBridge.SyncMode.BLOOM_ONLY
-                }
-                if (mode == NativeBridge.SyncMode.BLOOM_ONLY) {
-                    if (bloomRecoveryActive) {
-                        // We dropped to bloom to recover a block-header stall. Wait for
-                        // block sync to catch up to the network tip, then switch back to
-                        // compact filters and resume monitoring (cfTip is preserved
-                        // across the switch — fallbackToBloom never freed the chain).
-                        val bTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
-                        val bEst = try { NativeBridge.getEstimatedBlockHeight() } catch (_: Throwable) { 0L }
-                        if (bEst > 0L && bTip >= bEst - BLOCK_CATCHUP_GRACE) {
-                            try {
-                                NativeBridge.setSyncMode(NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
-                            } catch (t: Throwable) {
-                                android.util.Log.e("SyncService", "BIP158 watchdog: switch-back to filters threw", t)
-                            }
-                            bloomRecoveryActive = false
-                            lastBlockTip = bTip
-                            lastBlockProgressMs = System.currentTimeMillis()
-                            android.util.Log.i("SyncService",
-                                "BIP158 watchdog: block sync caught up via bloom — switching back to " +
-                                "compact filters (recovery $blockStallRecoveries/$MAX_BLOCK_STALL_RECOVERIES)")
-                        }
-                        continue   // switched back, or still catching up — keep polling
-                    }
-                    android.util.Log.i("SyncService",
-                        "BIP158 watchdog: mode is BLOOM_ONLY, stopping poll")
-                    return@launch
-                }
                 val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
                 val blockTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
                 val gap = blockTip - cfTipNow.toLong()
@@ -840,7 +805,7 @@ class SyncService : Service() {
                 }
 
                 // Headers are caught up to the network tip but cfheaders still
-                // isn't advancing. Before falling back to bloom, try a one-time
+                // isn't advancing. Before giving up for the session, try a one-time
                 // re-anchor: a legacy wallet can have cfTip persisted far below the
                 // block floor (the gap was never re-downloaded), which retention
                 // can't bridge. Re-anchoring discards the stuck chain and restarts
@@ -870,7 +835,7 @@ class SyncService : Service() {
                                 continue
                             }
                             // re-anchor returned false (cfTip not actually below the
-                            // floor) — nothing left to try; degrade to bloom below.
+                            // floor) — nothing left to try; stay on filters below.
                         }
                         PostTimeoutAction.AWAIT_REANCHOR -> {
                             // The re-anchor freed the stuck chain; getCFChainTipHeight()
@@ -884,8 +849,8 @@ class SyncService : Service() {
                                 "staying on filters")
                             continue
                         }
-                        PostTimeoutAction.FALLBACK_BLOOM -> {
-                            // fall through to the bloom degrade below
+                        PostTimeoutAction.STAY_ON_FILTERS -> {
+                            // Nothing left to try this session — logged below.
                         }
                     }
                     // Bloom (BIP37) is removed as a data path. cfheaders stuck is recovered
@@ -913,8 +878,9 @@ class SyncService : Service() {
      * all (kmp-tor hung in Starting forever), and (b) Tor reaching Connected
      * but routing through SOCKS still failing to dial any peers.
      *
-     * Exits silently once peers > 0 — the bloom-fallback watchdog already
-     * handles BIP158→bloom; this one is solely about clearnet degradation.
+     * Exits silently once peers > 0 — the BIP158 watchdog handles compact-filter
+     * health separately (re-anchor recovery only, no bloom fallback); this one
+     * is solely about clearnet degradation.
      */
     private suspend fun runTorFallbackWatchdog() {
         val startedAt = System.currentTimeMillis()
@@ -942,7 +908,7 @@ class SyncService : Service() {
             torProxyActive = false
             torReconnectFailures = 0
             _torFailureActive.value = true
-            injectBloomPeers()
+            injectPeers()
             injectCustomNode()
             NativeBridge.startSync()
             return
@@ -1070,30 +1036,22 @@ class SyncService : Service() {
             NativeBridge.markInitialSyncDone()
         }
 
-        // Inject bloom-capable peers from the seeder API before starting sync.
-        // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
-        injectBloomPeers()
+        // Inject filter-capable peers from the seeder API before starting sync.
+        // This ensures the wallet has multiple compact-filter peers to try, not
+        // just digiscope.me.
+        injectPeers()
         // Inject the user's own node (if configured) as a priority compact-filter
         // peer. No-op unless the toggle is on; resolves DNS off the native peer lock.
         injectCustomNode()
 
         // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
-        // Default sync mode is BOTH (bloom + compact filters in parallel) for new
-        // installs and any user who hasn't explicitly chosen otherwise;
-        // COMPACT_FILTERS_ONLY (addresses never leave the device) is selectable.
-        // A 120s watchdog falls back to BLOOM_ONLY for THIS session
-        // if filter peers don't make progress; the choice resets on next launch
-        // so we try filters again. Users can override in Settings → Sync Mode.
+        // Sync mode is unconditionally COMPACT_FILTERS_ONLY — syncModeFor (CustomNode.kt)
+        // ignores the `sync_mode` pref/customNodeEnabled/isTestnet args entirely and
+        // always returns CF-only; the address set never goes on the wire under any
+        // condition. The Settings → Sync Mode toggle/screen that used to select BOTH/
+        // BLOOM_ONLY is removed. The `sync_mode` pref key below is read only for the
+        // (dead) function-signature arg and otherwise ignored.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-        // Effective sync mode: a configured own-node (or testnet) forces
-        // COMPACT_FILTERS_ONLY so no bloom filterload — and thus no address-set
-        // leak — ever goes on the wire; otherwise the user's stored sync_mode
-        // pref wins. Testnet26 nodes run with bloom DISABLED (peerbloomfilters
-        // off by default on modern Core) and RESET the connection when they
-        // receive a bloom `filterload`, so forcing filters-only there is
-        // required for the same reason as the own-node case. Mainnet without
-        // an own node configured is unchanged (defaults to BOTH, or the
-        // stored pref).
         val syncMode = syncModeFor(
             pref = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH),
             customNodeEnabled = CustomNodePrefs.isEnabled(this@SyncService),
@@ -1419,19 +1377,29 @@ class SyncService : Service() {
         }
     }
 
-    // ── Bloom peer discovery ────────────────────────────────────────────────────
+    // ── Compact-filter peer discovery ───────────────────────────────────────────
+    // (Legacy name/pref key retained: "bloom" below refers to the SharedPreferences
+    // key `dgb_bloom_peers<net>`, which is the live compact-filter peer cache under
+    // a name from before BIP157/158 shipped. Renaming it touches 4 pref owners in
+    // lockstep — out of scope for this stage; see the bloom-removal spec.)
 
     /**
-     * Fetch bloom-capable peers from the seeder API and inject them into the
+     * Fetch filter-capable peers from the seeder API and inject them into the
      * C core's peer list. Uses a cached response (SharedPreferences) and
      * refreshes from the network at most once per hour.
      */
     /**
-     * Inject a batch of bloom-serving peers into the native peer manager.
+     * Inject a batch of filter-capable peers into the native peer manager.
+     *
+     * This is a secondary/supplementary pool alongside [injectFilterPeers]'s
+     * small validated CF set: it draws from the seeder's general peer
+     * listing (also filter-capability-filtered, see [fetchFromSeeder]) for
+     * additional peer diversity/resilience, using a different caching and
+     * rotation strategy (below) rather than injecting everything every call.
      *
      * Pool strategy (avoids hammering the seeder every 10s on a flaky network):
-     *   1. Maintain a persistent pool of every bloom peer we've ever been
-     *      told about, stored as JSON in SharedPreferences.
+     *   1. Maintain a persistent pool of every filter-capable peer we've ever
+     *      been told about, stored as JSON in SharedPreferences.
      *   2. Each call rotates a cursor through the pool and injects
      *      [BLOOM_BATCH_SIZE] peers starting at that cursor. The native
      *      core dedupes by (ip, port) so re-injecting the same peer is a
@@ -1493,10 +1461,10 @@ class SyncService : Service() {
         return bytes
     }
 
-    private fun injectBloomPeers() {
+    private fun injectPeers() {
         if (isTestnet(this@SyncService)) {
             // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
-            // only knows mainnet peers, so the mainnet bloom-pool fetch AND the
+            // only knows mainnet peers, so the mainnet filter-pool fetch AND the
             // Dandelion-capable-peer fetch (also served from that same seeder)
             // are both skipped entirely on testnet. Inject the two hardcoded
             // testnet26 peers instead; the refreshed testnet DNS seeds
@@ -1507,13 +1475,13 @@ class SyncService : Service() {
         }
         // CF-first: inject the FULL dedicated filter-peer list (capability=filter) as the
         // primary CF peer set every sync-start, so the native filter-first pre-pass always has
-        // the known validated filter peers to dial (instead of a rotating 20-slice of the mixed
-        // pool that may contain none of them). The native dialer suppresses the DNS/bloom
-        // shotgun while any of these are dialable or connected.
+        // the known validated filter peers to dial (instead of a rotating 20-slice of the general
+        // pool that may contain none of them). The native dialer suppresses the DNS shotgun
+        // while any of these are dialable or connected.
         injectFilterPeers()
         // Dandelion peers piggyback here so they're injected at every sync-start
-        // path (all of them call injectBloomPeers). Runs first so bloom's early
-        // returns can't skip it; self-throttled by its own last_fetch timer.
+        // path (all of them call injectPeers). Runs first so the early
+        // returns below can't skip it; self-throttled by its own last_fetch timer.
         injectDandelionPeers()
         val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -1521,14 +1489,18 @@ class SyncService : Service() {
         val existing = prefs.getString("peer_pool", null)
         // Triple = (ip, port, servicesHex). servicesHex carries the seeder's
         // capability bits (0x40 = compact filters) so filter peers are tagged
-        // when injected; 0 = unknown → native bloom-only default.
+        // when injected; 0 = unknown → native CF-tagged default (INJECT_DEFAULT_SERVICES).
         val pool: MutableList<Triple<String, Int, Long>> =
             if (existing != null) parsePool(existing) else mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
 
         val stale = now - lastFetch > BLOOM_REFRESH_INTERVAL_MS
         if (stale || pool.isEmpty()) {
-            val fresh = fetchFromSeeder()
+            // capability=filter: the wallet is CF-only end to end, so this
+            // secondary/general pool must never source a bloom-only peer either —
+            // it's supplementary dial diversity on top of injectFilterPeers'
+            // small validated set, not a mixed-capability fallback.
+            val fresh = fetchFromSeeder("filter")
             if (fresh != null && fresh.isNotEmpty()) {
                 // Merge: add any peer we haven't seen before (dedup on ip:port,
                 // ignoring services so a re-fetch doesn't duplicate an entry
@@ -1541,12 +1513,12 @@ class SyncService : Service() {
                     .apply()
                 android.util.Log.i(
                     "SyncService",
-                    "Fetched bloom peers: ${fresh.size} new, pool now ${pool.size}"
+                    "Fetched filter peers: ${fresh.size} new, pool now ${pool.size}"
                 )
             } else if (pool.isEmpty()) {
                 android.util.Log.w(
                     "SyncService",
-                    "Bloom seeder empty and no cached pool — wallet may struggle to connect"
+                    "Filter-peer seeder empty and no cached pool — wallet may struggle to connect"
                 )
                 return
             }
@@ -1743,7 +1715,8 @@ class SyncService : Service() {
      *  Extracts ip + port + services_hex per peer. services_hex carries the node's
      *  advertised service bits — notably 0x40 (SERVICES_NODE_COMPACT_FILTERS) — so
      *  the native filter-first peer selection can recognize and hold filter peers.
-     *  Absent/unparseable services_hex → 0 (native falls back to bloom-only). */
+     *  Absent/unparseable services_hex → 0 (native falls back to the CF-tagged
+     *  INJECT_DEFAULT_SERVICES default, jni_peer.c — never bloom-only). */
     private fun parsePeersJson(json: String): List<Triple<String, Int, Long>> {
         return try {
             val root = org.json.JSONObject(json)
@@ -1767,7 +1740,8 @@ class SyncService : Service() {
     /** Pool is stored as a compact JSON array of "ip:port:servicesHex" strings
      *  (servicesHex is lowercase hex, no 0x prefix). Seeder peers are IPv4, so
      *  splitting on ':' is unambiguous. Legacy "ip:port" entries from older
-     *  caches parse with services = 0 (native falls back to bloom-only). */
+     *  caches parse with services = 0 (native falls back to the CF-tagged
+     *  INJECT_DEFAULT_SERVICES default, jni_peer.c — never bloom-only). */
     private fun serializePool(pool: List<Triple<String, Int, Long>>): String {
         val arr = org.json.JSONArray()
         for ((ip, port, services) in pool) arr.put("$ip:$port:${services.toString(16)}")
@@ -2031,7 +2005,7 @@ class SyncService : Service() {
          *  services_hex, etc.) since it only reads ip + port.
          *  MAINNET ONLY — api.digiscope.me knows nothing about testnet26 peers.
          *  Never fetched when [io.digibyte.core.isTestnet] is true; see
-         *  [injectBloomPeers]. */
+         *  [injectPeers]. */
         private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
         /** Hardcoded testnet26 public peers injected in place of the mainnet
          *  digiscope seeder pool when the wallet is running on testnet. The
@@ -2062,45 +2036,31 @@ class SyncService : Service() {
          *  fallback for a genuinely-dead daemon; this is a longer mid-session
          *  backstop that fires only after Tor has had ample time to route. */
         private const val MAX_TOR_RECONNECT_FAILURES = 15
-        /** How long to wait for BIP158 cfheaders progress before falling back
-         *  to bloom for this session. The pool is thin (3 filter peers) so we
-         *  need a generous window for Tor bootstrap + slow handshakes; 120s
-         *  was the user-chosen ceiling. Past this deadline, a poll interval
-         *  with no cf progress AND a real cfTip→blockTip gap triggers
-         *  fallbackToBloom. */
+        /** How long to wait for BIP158 cfheaders progress before giving up for
+         *  this session. The pool is thin (3 filter peers) so we need a
+         *  generous window for Tor bootstrap + slow handshakes; 120s was the
+         *  user-chosen ceiling. Past this deadline, a poll interval with no cf
+         *  progress AND a real cfTip→blockTip gap tries the one-time re-anchor
+         *  (see [decidePostTimeoutAction]); there is no bloom fallback. */
         private const val BIP158_FALLBACK_TIMEOUT_MS = 120_000L
 
         /** How close blockTip must be to the peers' estimated network height
          *  to consider block-header sync "caught up." While headers are still
          *  importing toward the tip (a deep-behind wallet or post-rescan
          *  checkpoint reset), cfheaders legitimately can't advance — the
-         *  watchdog stays on filters instead of falling back to bloom. */
+         *  watchdog stays on filters and keeps waiting. */
         private const val BLOCK_CATCHUP_GRACE = 50L
-
-        /** Max transient block-stall → bloom → back-to-filters recovery cycles per
-         *  session. After this many, stay on bloom and surface the privacy banner. */
-        private const val MAX_BLOCK_STALL_RECOVERIES = 3
 
         /** Poll cadence for the BIP158 watchdog. Tight enough to catch a
          *  freshly-opened cfTip→blockTip gap shortly after headers catch
          *  past the saved-blocks tip, loose enough to avoid log spam. */
         private const val BIP158_WATCHDOG_POLL_MS = 15_000L
 
-        /** Process-wide flag set when the BIP158 watchdog falls back to
-         *  bloom for the current session. The wallet UI collects this to
-         *  surface a "privacy degraded" banner. Resets to false on every
-         *  process start (companion-object lifecycle == process lifecycle)
-         *  so the next launch re-tries filters first. */
-        val bloomFallbackActive: kotlinx.coroutines.flow.StateFlow<Boolean>
-            get() = _bloomFallbackActive
-        private val _bloomFallbackActive =
-            kotlinx.coroutines.flow.MutableStateFlow(false)
-
         /** Process-wide flag set when the Tor watchdog gives up waiting for
          *  bootstrap and forces a clearnet fallback. The wallet UI collects
-         *  this to surface a "Tor unavailable" banner. Same lifecycle as
-         *  bloomFallbackActive — resets on every process start so the next
-         *  launch re-tries Tor. */
+         *  this to surface a "Tor unavailable" banner. Resets to false on
+         *  every process start (companion-object lifecycle == process
+         *  lifecycle) so the next launch re-tries Tor. */
         val torFailureActive: kotlinx.coroutines.flow.StateFlow<Boolean>
             get() = _torFailureActive
         private val _torFailureActive =

@@ -129,8 +129,9 @@ object NativeBridge {
      *  `services_hex`, e.g. 0x44d for a BIP157/158 filter peer where bit 0x40 =
      *  SERVICES_NODE_COMPACT_FILTERS). Threading this through lets the native
      *  filter-first peer selection recognize and hold filter-capable peers.
-     *  Pass 0 when unknown — the native side falls back to the legacy
-     *  NODE_NETWORK|NODE_BLOOM default so nothing regresses. */
+     *  Pass 0 when unknown — the native side falls back to
+     *  INJECT_DEFAULT_SERVICES (NODE_NETWORK|NODE_COMPACT_FILTERS), so an
+     *  untagged peer is still treated as CF-capable (the wallet is CF-only). */
     external fun injectPeerByIp(ip: String, port: Int, servicesHex: Long)
 
     /** Pin the peer manager to a single own-node. When [exclusive] is true, the
@@ -413,9 +414,12 @@ object NativeBridge {
     external fun isRawTransactionSigned(rawTxHex: String): Boolean
 
     // ---------- BIP 158 sync mode ----------
-    // All BIP 158 functions below are inert until setSyncMode is called with
-    // a mode other than BLOOM_ONLY. Default remains BLOOM_ONLY so existing
-    // wallets see no behavior change.
+    // The wallet is CF-only: SyncService always calls setSyncMode(COMPACT_FILTERS_ONLY)
+    // before startSync (syncModeFor unconditionally returns COMPACT_FILTERS_ONLY — see
+    // CustomNode.kt), and the native pending-mode default (jni_peer.c g_pendingSyncMode)
+    // is pinned to COMPACT_FILTERS_ONLY as defense-in-depth in case a call site is ever
+    // missed. BLOOM_ONLY/BOTH remain in the enum below for ABI compatibility (native int
+    // cast) but are never selected by the wallet.
 
     /** Sync mode constants — keep in sync with BRSyncMode in BRPeerManager.h */
     object SyncMode {
@@ -428,12 +432,6 @@ object NativeBridge {
      *  before startSync. Switching modes mid-sync requires a stop+start. */
     external fun setSyncMode(mode: Int)
     external fun getSyncMode(): Int
-
-    /** Mid-run privacy-fallback: flips to BLOOM_ONLY AND pushes a bloom
-     *  filterload to every currently-connected peer (peers that handshook
-     *  while in compact-filters mode never received our filter). Called by
-     *  the sync watchdog when filter peers don't make progress within 120s. */
-    external fun fallbackToBloom()
 
     /** Current cfheaders chain tip height (0 if no headers received yet).
      *  Used by the watchdog to detect "no BIP158 progress." */

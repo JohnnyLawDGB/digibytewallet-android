@@ -315,9 +315,11 @@ static size_t g_savedPeersCount = 0;
 
 /* Default services for an injected peer whose capability tags are unknown
  * (servicesHex == 0, e.g. a legacy cached pool entry or the background
- * SyncWorker): full node + bloom, matching pre-servicesHex behavior so
- * nothing regresses. */
-#define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_BLOOM)
+ * SyncWorker): full node + compact filters. The wallet is CF-only (bloom is
+ * never selected — see g_pendingSyncMode default below), so an untagged peer
+ * must be treated as CF-capable rather than bloom-capable, or filter-first
+ * selection would deprioritize/evict it while dialing for filter peers. */
+#define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
 
 /* testnet26 priority peers serve compact filters, not bloom — tag them
  * compact-filter-capable (no bloom) so filter-first selection dials them and
@@ -504,7 +506,9 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
      * how a BIP157/158 filter peer (0x44d has SERVICES_NODE_COMPACT_FILTERS)
      * gets recognized by BRPeerManager's filter-first selection so the wallet
      * holds >=2 filter peers. servicesHex==0 (absent, e.g. SyncWorker or a
-     * legacy pool entry) falls back to the legacy bloom-only default. */
+     * legacy pool entry) falls back to INJECT_DEFAULT_SERVICES, which is
+     * CF-tagged (not bloom) so the untagged peer still counts toward the
+     * filter-first pool instead of being treated as bloom-only. */
     uint64_t services = (servicesHex != 0)
         ? (uint64_t)servicesHex
         : INJECT_DEFAULT_SERVICES;
@@ -1086,7 +1090,12 @@ static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *cha
  * calling startSync (which is where the peer manager is created), so without
  * this defer-and-apply layer the setters all no-op. Applied in
  * _applyPendingBip158State after BRPeerManagerSetCallbacks. */
-static int      g_pendingSyncMode          = BR_SYNC_MODE_BLOOM_ONLY;
+/* Defense-in-depth default: the wallet is CF-only end-to-end (SyncService
+ * always calls setSyncMode(COMPACT_FILTERS_ONLY) before startSync), but if a
+ * call site is ever missed this pending default must never silently land on
+ * bloom — so it's pinned to COMPACT_FILTERS_ONLY rather than the native
+ * struct's own BLOOM_ONLY default. */
+static int      g_pendingSyncMode          = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
 static int      g_pendingSyncModeSet       = 0;
 static uint8_t *g_pendingFilterChain       = NULL;
 static size_t   g_pendingFilterChainLen    = 0;
@@ -1098,9 +1107,13 @@ static void _applyPendingBip158State(void) {
 
     if (g_pendingSyncModeSet) {
         BRPeerManagerSetSyncMode(g_peerManager, (BRSyncMode)g_pendingSyncMode);
-        if ((BRSyncMode)g_pendingSyncMode != BR_SYNC_MODE_BLOOM_ONLY) {
-            BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
-        }
+        /* Unconditional: install the CF-header persistence callback regardless
+         * of which mode lands. The wallet is always CF-only so this is a
+         * no-op guard removal, not a behavior change — but it also means a
+         * stray BLOOM_ONLY value here (should never happen; see the
+         * g_pendingSyncMode default above) still gets its filter headers
+         * saved instead of silently losing CF-header persistence. */
+        BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
         LOGI("BIP158: applied pending syncMode=%d", g_pendingSyncMode);
         g_pendingSyncModeSet = 0;
     }
@@ -1180,9 +1193,10 @@ Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz,
         return;
     }
     BRPeerManagerSetSyncMode(g_peerManager, m);
-    if (m != BR_SYNC_MODE_BLOOM_ONLY) {
-        BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
-    }
+    /* Unconditional (same reasoning as _applyPendingBip158State above): always
+     * install the CF-header save callback so persistence never silently
+     * depends on which mode got passed in. */
+    BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
     LOGI("setSyncMode: mode=%d", (int)mode);
 }
 
@@ -1230,18 +1244,6 @@ Java_io_digibyte_core_bridge_NativeBridge_hasDandelionPeer(JNIEnv *env, jobject 
     PEER_GUARD();
     if (!g_peerManager) return JNI_FALSE;
     return BRPeerManagerHasDandelionPeer(g_peerManager) ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_fallbackToBloom(JNIEnv *env, jobject thiz) {
-    (void)env; (void)thiz;
-    PEER_GUARD();
-    if (!g_peerManager) {
-        LOGI("fallbackToBloom: peer manager not created — ignoring");
-        return;
-    }
-    BRPeerManagerFallbackToBloom(g_peerManager);
-    LOGI("fallbackToBloom: switched to BLOOM_ONLY, reloaded bloom on connected peers");
 }
 
 JNIEXPORT jint JNICALL

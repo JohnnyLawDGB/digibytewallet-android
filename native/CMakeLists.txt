@@ -25,8 +25,6 @@ add_library(
         src/main/jni/digibytewallet-core/BRBIP39Mnemonic.c
         src/main/jni/digibytewallet-core/BRBIP39Mnemonic.h
         src/main/jni/digibytewallet-core/BRBIP39WordsEn.h
-        src/main/jni/digibytewallet-core/BRBloomFilter.c
-        src/main/jni/digibytewallet-core/BRBloomFilter.h
         src/main/jni/digibytewallet-core/BRChainParams.h
         src/main/jni/digibytewallet-core/BRCrypto.c
         src/main/jni/digibytewallet-core/BRCrypto.h
