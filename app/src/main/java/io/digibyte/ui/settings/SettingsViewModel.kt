@@ -16,7 +16,6 @@ import io.digibyte.core.isTestnet
 import io.digibyte.core.model.SyncFrontier
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.model.deriveSyncFrontier
-import io.digibyte.core.network.ChainTipFetcher
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.security.PinVerifyResult
 import io.digibyte.core.settings.CustomNode
@@ -63,9 +62,9 @@ class SettingsViewModel @Inject constructor(
      *  Polled alongside the other network stats in [refreshNetworkStats]. */
     private val _cfTip = MutableStateFlow(0L)
 
-    /** Authoritative external chain tip (ChainTipFetcher). 0 until first fetch;
-     *  refreshed every 30s so this screen's progress denominator matches the
-     *  main wallet screen's. */
+    /** Stable sync-target tip: a native monotonic high-water mark of the header
+     *  height + peer estimate (see [deriveStableTipPeriodically]) — no HTTP tip
+     *  call. 0 until first poll; matches the main wallet screen's denominator. */
     private val _externalTip = MutableStateFlow(0L)
 
     /** CF-gated sync frontier — the SAME derivation ([deriveSyncFrontier]) the
@@ -242,17 +241,22 @@ class SettingsViewModel @Inject constructor(
     init {
         refreshNetworkStats()
         loadConfig()
-        fetchChainTipPeriodically()
+        deriveStableTipPeriodically()
     }
 
-    /** Refresh the authoritative chain tip every 30s (mirrors WalletViewModel)
-     *  so the Network Info progress denominator matches the main screen. On
-     *  failure the stored value is left unchanged. */
-    private fun fetchChainTipPeriodically() {
-        viewModelScope.launch {
+    /** Maintain the stable sync-target tip natively (mirrors WalletViewModel) so
+     *  the Network Info progress denominator matches the main screen — a
+     *  MONOTONIC high-water mark of ONLY the PoW-validated header height, with no
+     *  digiscope.me /api/chain/tip HTTP call. The peer estimate is NOT latched
+     *  (it flows live as [_estimatedHeight]/targetHeight, which deriveSyncFrontier
+     *  maxes against) so a transient inflated single-peer estimate can't pin the
+     *  bar below 100% forever. Both screens latch the same header height, so they
+     *  converge. */
+    private fun deriveStableTipPeriodically() {
+        viewModelScope.launch(Dispatchers.IO) {
             while (true) {
-                val tip = ChainTipFetcher.fetch()
-                if (tip > 0L) _externalTip.value = tip
+                val header = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
+                if (header > _externalTip.value) _externalTip.value = header
                 delay(30_000L)
             }
         }

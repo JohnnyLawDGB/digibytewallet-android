@@ -17,7 +17,6 @@ import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.model.deriveSyncFrontier
-import io.digibyte.core.network.ChainTipFetcher
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -113,12 +112,13 @@ class WalletViewModel @Inject constructor(
      *  wallet never shows "Synced" while cfheaders lags the (fast) header chain. */
     private val _cfTip = MutableStateFlow(0L)
 
-    /** Authoritative chain tip fetched from api.digiscope.me. Used as the
-     *  progress denominator so the UI percent anchors to a stable value
-     *  rather than peer-quorum estimated_height (which churns as peers
-     *  come and go with different tip claims mid-sync). 0 means unknown;
-     *  callers fall back to [_targetBlock] in that case. Refreshed every
-     *  30 s from [fetchChainTipPeriodically]. */
+    /** Stable sync-target tip, used as the progress denominator so the UI
+     *  percent anchors to a stable value rather than peer-quorum
+     *  estimated_height (which churns as peers come and go with different tip
+     *  claims mid-sync). Now derived NATIVELY — a monotonic high-water mark of
+     *  the validated header height and the peer estimate, updated in
+     *  [pollNativeBalance]'s height poll — with no api.digiscope.me HTTP call.
+     *  0 means unknown; callers fall back to [_targetBlock] in that case. */
     private val _externalTip = MutableStateFlow(0L)
 
     /** Rolling samples of (timestamp_ms, blockHeight) for ETA computation.
@@ -375,20 +375,10 @@ class WalletViewModel @Inject constructor(
         fetchPricePeriodically()
         pollNativeBalance()
         loadRecoveryTimestamp()
-        fetchChainTipPeriodically()
-    }
-
-    /** Refresh the authoritative chain tip every 30 seconds. On failure the
-     *  stored value is left unchanged so a momentary network blip doesn't
-     *  regress the progress denominator to 0. */
-    private fun fetchChainTipPeriodically() {
-        viewModelScope.launch {
-            while (true) {
-                val tip = ChainTipFetcher.fetch()
-                if (tip > 0L) _externalTip.value = tip
-                delay(30_000L)
-            }
-        }
+        // The stable sync-target tip ([_externalTip]) is now derived natively in
+        // pollNativeBalance()'s height poll (a monotonic max of the validated
+        // header height and the peer estimate) — no digiscope.me /api/chain/tip
+        // HTTP call. See the tipCandidate latch there.
     }
 
     /** One-shot fetch of the wallet's stored creation/recovery timestamp,
@@ -550,6 +540,20 @@ class WalletViewModel @Inject constructor(
                 // entries (~2 minutes of history at the 5s poll cadence).
                 _currentBlock.value = currentHeight
                 _targetBlock.value = if (estHeight > 0) estHeight else currentHeight
+                // Sovereign stable tip (replaces the removed digiscope.me
+                // /api/chain/tip HTTP call): a MONOTONIC high-water mark of ONLY
+                // the PoW-validated header height (getLastBlockHeight). Headers
+                // carry proof-of-work and only grow, so this is genuinely
+                // monotonic AND un-inflatable by a peer — it gives
+                // deriveSyncFrontier a stable floor so the denominator can't
+                // churn downward ("99% -> 60% -> 99%") without any external call.
+                // The peer estimate (estHeight, published live as _targetBlock /
+                // targetHeight) is deliberately NOT latched: it is a single-peer
+                // CLAIM the native core flags as inflatable, so latching it would
+                // let one transient inflated estimate pin the bar below 100%
+                // forever. Left live, deriveSyncFrontier maxes against it and a
+                // spike self-heals on the next poll.
+                if (currentHeight > _externalTip.value) _externalTip.value = currentHeight
                 // CF frontier (functional sync height in CF-only). Poll every cycle so the
                 // honesty gate un-latches when cfheaders catches up (must keep polling post-Complete).
                 _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)

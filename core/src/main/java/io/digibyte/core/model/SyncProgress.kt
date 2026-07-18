@@ -52,7 +52,11 @@ const val CF_BEHIND_THRESHOLD = 100L
  * @param peerCount     live SPV peer count
  * @param currentHeight raw header height (getLastBlockHeight)
  * @param targetHeight  peer-quorum estimated height (getEstimatedBlockHeight)
- * @param externalTip   authoritative tip from ChainTipFetcher, or 0 if unknown
+ * @param externalTip   stable sync-target tip — a native monotonic high-water
+ *                      mark of ONLY the PoW-validated header height (never
+ *                      regresses, un-inflatable), or 0 if unknown. No external
+ *                      call. The peer estimate is passed live as [targetHeight]
+ *                      (this fn maxes them), so a spiked estimate self-heals.
  * @param cfTip         compact-filter chain tip (getCFChainTipHeight), or 0 if
  *                      CF hasn't started this session
  */
