@@ -96,7 +96,7 @@ fun AboutScreen(navController: NavController) {
                             color = DigiByteAccent
                         )
                         Text(
-                            text = "Powered by DigiByte Core 8.26",
+                            text = "Powered by DigiByte Core 9.26",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF8899AA)
                         )
@@ -139,8 +139,8 @@ fun AboutScreen(navController: NavController) {
                     SettingsRowDivider()
                     WalletInfoRow(
                         label = "Sync Method",
-                        value = "SPV (Bloom Filters)",
-                        description = "Simplified Payment Verification — syncs directly with the DigiByte P2P network without downloading the full blockchain. Bloom filters protect your privacy by not revealing exactly which addresses you own."
+                        value = "SPV (Compact Filters)",
+                        description = "Simplified Payment Verification — syncs directly with the DigiByte P2P network without downloading the full blockchain. Uses BIP157/158 compact block filters: your wallet downloads filters and checks them on-device, so the addresses you own never leave your phone."
                     )
                 }
             }
@@ -166,7 +166,7 @@ fun AboutScreen(navController: NavController) {
                         icon = Icons.Default.Memory,
                         iconTint = Color(0xFF8899AA),
                         label = "DigiByte Core",
-                        value = "8.26 (SPV node)"
+                        value = "9.26 (SPV node)"
                     )
                 }
             }
