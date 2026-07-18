@@ -10,6 +10,7 @@
 #include "jni_bridge.h"
 #include "BRCompactFilterChain.h"
 #include "BRNetwork.h"
+#include "saved_blocks_deserialize.h"
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
@@ -992,35 +993,23 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject t
     jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
     if (!buf) return 0;
 
-    uint8_t *b = (uint8_t *)buf;
-    size_t pos = 0;
-    uint32_t count = UInt32GetLE(&b[pos]); pos += 4;
-
     /* Free any previously loaded blocks */
     if (g_savedBlocks) {
         for (size_t i = 0; i < g_savedBlocksCount; i++) {
             if (g_savedBlocks[i]) BRMerkleBlockFree(g_savedBlocks[i]);
         }
         free(g_savedBlocks);
+        g_savedBlocks = NULL;
+        g_savedBlocksCount = 0;
     }
 
-    g_savedBlocks = malloc(count * sizeof(BRMerkleBlock *));
-    g_savedBlocksCount = 0;
-
-    for (uint32_t i = 0; i < count && pos + 8 <= (size_t)len; i++) {
-        uint32_t blockLen = UInt32GetLE(&b[pos]); pos += 4;
-        uint32_t height = UInt32GetLE(&b[pos]); pos += 4;
-
-        if (pos + blockLen > (size_t)len) break;
-
-        BRMerkleBlock *block = BRMerkleBlockParse(&b[pos], blockLen);
-        pos += blockLen;
-
-        if (block) {
-            block->height = height;
-            g_savedBlocks[g_savedBlocksCount++] = block;
-        }
-    }
+    /* Guarded, JNI-free deserialize core (saved_blocks_deserialize.h) --
+     * caps a corrupt/absurd persisted count and null-checks the
+     * allocation, so a bad blob fails closed (0 blocks, re-sync) instead
+     * of NULL-deref crashing on every launch. Host KAT:
+     * native/src/test/host/saved_blocks_kat/. */
+    g_savedBlocksCount = deserialize_saved_blocks_guarded((const uint8_t *)buf, (size_t)len,
+                                                           &g_savedBlocks);
 
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
     LOGI("loadSavedBlocks: loaded %zu blocks from persistent storage", g_savedBlocksCount);
