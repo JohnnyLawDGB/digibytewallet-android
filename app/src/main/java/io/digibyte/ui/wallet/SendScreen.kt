@@ -142,37 +142,40 @@ fun SendScreen(
             address = address,
             amountUsd = amountFiat,
             onConfirm = {
-                coroutineScope.launch {
-                    val activity = context as? androidx.fragment.app.FragmentActivity
-                    val authed = if (activity != null && biometricAuth.canAuthenticate(activity)) {
-                        biometricAuth.authenticate(
-                            activity,
-                            title = "Confirm DigiDollar Send",
-                            subtitle = "Authenticate to broadcast transaction"
-                        ) is BiometricResult.Success
-                    } else {
-                        // No biometric hardware — the confirmation dialog is the gate (matches DGB).
-                        true
-                    }
-                    if (!authed) {
-                        ddConfirming = false
-                        return@launch
-                    }
+                // Synchronous re-entrancy guard: the first tap flips ddConfirming
+                // false immediately, so a second tap already queued on this button
+                // no-ops. (State set inside the coroutine below runs too late to
+                // debounce an already-dispatched tap — hence the guard out here.)
+                if (ddConfirming) {
                     ddConfirming = false
-                    ddSending = true
-                    viewModel.sendDigiDollar(address, amountFiat) { txid ->
-                        // sendDigiDollar's callback fires on a background dispatcher —
-                        // hop back to Main before touching Compose state or Toast.
-                        coroutineScope.launch {
-                            ddSending = false
-                            if (txid != null) {
-                                ddSentTxid = txid
-                            } else {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "DigiDollar send failed",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
+                    coroutineScope.launch {
+                        val activity = context as? androidx.fragment.app.FragmentActivity
+                        val authed = if (activity != null && biometricAuth.canAuthenticate(activity)) {
+                            biometricAuth.authenticate(
+                                activity,
+                                title = "Confirm DigiDollar Send",
+                                subtitle = "Authenticate to broadcast transaction"
+                            ) is BiometricResult.Success
+                        } else {
+                            // No biometric hardware — the confirmation dialog is the gate (matches DGB).
+                            true
+                        }
+                        if (!authed) return@launch   // dialog already dismissed; back to the form
+                        ddSending = true
+                        viewModel.sendDigiDollar(address, amountFiat) { txid ->
+                            // sendDigiDollar's callback fires on a background dispatcher —
+                            // hop back to Main before touching Compose state or Toast.
+                            coroutineScope.launch {
+                                ddSending = false
+                                if (txid != null) {
+                                    ddSentTxid = txid
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "DigiDollar send failed",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                         }
                     }
