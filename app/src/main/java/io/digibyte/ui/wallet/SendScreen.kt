@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.digibyte.core.isTestnet
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
 import io.digibyte.ui.theme.DigiByteAccent
@@ -54,6 +55,8 @@ fun SendScreen(
     }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    // DigiDollar address prefix follows the running network (TD… testnet / DD… mainnet).
+    val onTestnet = remember { isTestnet(context) }
 
     val address by viewModel.address.collectAsStateWithLifecycle()
     val addressValid by viewModel.addressValid.collectAsStateWithLifecycle()
@@ -191,7 +194,9 @@ fun SendScreen(
 
         // ── Address input ─────────────────────────────────────────────────
         Text(
-            text = if (effectiveDdMode) "DigiDollar address (TD…)" else "Recipient Address",
+            text = if (effectiveDdMode) {
+                if (onTestnet) "DigiDollar address (TD…)" else "DigiDollar address (DD…)"
+            } else "Recipient Address",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -211,7 +216,7 @@ fun SendScreen(
                 .border(1.dp, addressBorderColor, RoundedCornerShape(8.dp)),
             placeholder = {
                 Text(
-                    if (effectiveDdMode) "TD…" else "dgb1q… or D…",
+                    if (effectiveDdMode) (if (onTestnet) "TD…" else "DD…") else "dgb1q… or D…",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },

@@ -43,10 +43,11 @@ fun ReceiveScreen(
     val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
     val hasPeers = peerCount > 0
 
-    // DigiDollar receive is always VISIBLE (so users know it's coming) but only
-    // ACTIVE where DigiDollar is live — testnet today, mainnet after the softfork.
-    // On mainnet it renders as a disabled "soon" chip; on testnet it's functional.
-    val ddActive = remember { isTestnet(context) }
+    // DigiDollar is LIVE on both networks — the mainnet softfork activated
+    // 2026-07-18 (testnet since testnet26). The receive chip is always active;
+    // the address prefix follows the running network (TD… testnet / DD… mainnet).
+    val ddActive = true
+    val onTestnet = remember { isTestnet(context) }
 
     // Address format: 0=legacy(D), 2=bech32/SegWit(dgb1q), 4=Taproot/P2TR(dgb1p),
     // 3=DigiDollar(TD…) — default to bech32/SegWit.
@@ -230,7 +231,7 @@ fun ReceiveScreen(
                 onClick = { if (ddActive) addressFormat = 3 },
                 label = {
                     Text(
-                        if (ddActive) "DigiDollar (TD…)" else "DigiDollar (soon)",
+                        if (onTestnet) "DigiDollar (TD…)" else "DigiDollar (DD…)",
                         fontSize = 12.sp
                     )
                 }
