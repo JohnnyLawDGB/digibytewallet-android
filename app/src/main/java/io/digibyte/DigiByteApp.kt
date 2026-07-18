@@ -38,6 +38,14 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // if prior boots died mid-startup, wipes regenerable data (seed preserved).
         // Survives native SIGSEGV/SIGABRT that a try/catch cannot. See BootGuard.
         BootGuard.beginBoot(this)
+        // Restore-crash bracket — checked right after beginBoot, BEFORE the UI
+        // can reach the unlock screen and start a post-unlock restore. Catches a
+        // crash that only happens inside the restore's risky window (which runs
+        // well after beginBoot's 12s healthy-timer has already reset
+        // pending_boots above) by seeing that a restore begun last launch never
+        // reached BootGuard.markRestoreHealthy. Idle-safe: a user who never
+        // unlocks never calls beginRestore, so this is a no-op for them.
+        BootGuard.recoverFromCrashedRestoreIfNeeded(this)
         super.onCreate()
         applyNetworkSelection()
         scheduleBackgroundSync()

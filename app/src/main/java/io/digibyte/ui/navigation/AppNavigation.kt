@@ -25,6 +25,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import io.digibyte.BootGuard
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.digiscope.DigiScopeClient
@@ -282,6 +283,12 @@ fun AppNavigation(
                 var restoring by remember { mutableStateOf(lostPinRestorePending.value) }
                 if (restoring) {
                     LaunchedEffect(Unit) {
+                        // Restore-crash bracket (see UnlockScreen's unlock path for the
+                        // same pattern + rationale): armed at this call site rather than
+                        // inside WalletManager.restoreFromDisk() itself, since BootGuard
+                        // (app module) isn't importable from core. This IS the start of
+                        // the post-unlock (lost-PIN) restore.
+                        BootGuard.beginRestore(context)
                         withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
                         lostPinRestorePending.value = false
                         restoring = false

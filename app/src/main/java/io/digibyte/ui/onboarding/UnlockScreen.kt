@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import io.digibyte.BootGuard
 import io.digibyte.core.WalletManager
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
@@ -103,6 +104,15 @@ fun UnlockScreen(
                 if (walletManager.isWalletReady()) {
                     walletManager.unlockFromUi()
                 } else {
+                    // Restore-crash bracket: BootGuard lives in the app module and
+                    // WalletManager.restoreFromDisk() is core (core cannot depend on
+                    // app), so beginRestore is armed here, at the call site, rather
+                    // than inside restoreFromDisk() itself. This IS the start of the
+                    // post-unlock restore — recoverWalletFromBytes runs synchronously
+                    // inside the call below. commit()'d before the risky call so a
+                    // crash mid-restore leaves restore_pending=true for BootGuard
+                    // .recoverFromCrashedRestoreIfNeeded to see next launch.
+                    BootGuard.beginRestore(context)
                     walletManager.restoreFromDisk()
                 }
             }
