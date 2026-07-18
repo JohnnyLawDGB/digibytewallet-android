@@ -6,6 +6,7 @@ import android.os.Binder
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
+import io.digibyte.BootGuard
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.OutgoingTxStore
 import io.digibyte.core.WalletManager
@@ -1001,6 +1002,18 @@ class SyncService : Service() {
         // birth checkpoint (~480k-block re-sync every launch). Called
         // unconditionally so fresh wallets (no saved blocks) also proceed.
         NativeBridge.markSavedBlocksLoadComplete()
+
+        // Restore-crash bracket: the risky post-unlock restore window (BootGuard
+        // .beginRestore, set at WalletManager.restoreFromDisk()'s call sites) is
+        // now provably clear of the corrupt-blob crash vector — loadSavedBlocks
+        // (and loadSavedPeers) just ran without crashing and the C core has
+        // consumed them. Clearing here — rather than right after
+        // recoverWalletFromBytes in restoreFromDisk() — is deliberate: that's
+        // still BEFORE the saved_blocks bytes are ever handed to the native
+        // block deserializer, so it would miss the actual crash this bracket
+        // exists to catch. A no-op if no restore is pending this launch (e.g.
+        // sync starting after a plain UI-only unlock, or a fresh wallet).
+        BootGuard.markRestoreHealthy(this@SyncService)
 
         // The native creation gate is now released — peer-manager creation is
         // permitted. Mark setup complete so onStartCommand stops re-running this

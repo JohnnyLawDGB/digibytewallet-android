@@ -2,6 +2,7 @@ package io.digibyte
 
 import android.content.Context
 import io.digibyte.core.networkSuffix
+import io.digibyte.core.sync.FilterHeaderStore
 
 /**
  * Wipes regenerable app data to recover from corruption — WITHOUT ever touching
@@ -29,6 +30,11 @@ object StaleDataWiper {
         val suffix = networkSuffix(context)
         context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("dgb_bloom_peers$suffix", Context.MODE_PRIVATE).edit().clear().apply()
+        // Also nuke the FILE-BACKED compact-filter-header chain (`saved_filter_
+        // headers<net>.bin`) — it moved out of dgb_sync_data (see FilterHeaderStore's
+        // doc comment) so clearing the prefs blob above never touched it. A corrupt
+        // .bin left behind here could re-crash the very next restore/re-anchor.
+        FilterHeaderStore.delete(context)
     }
 
     /** Heavier recovery: delete the encrypted Room DB and its key material so a
