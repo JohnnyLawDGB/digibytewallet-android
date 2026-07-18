@@ -568,7 +568,7 @@ class SyncService : Service() {
                             try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
                             zeroPeerStreak = 0
                         }
-                        android.util.Log.i("SyncService", "No peers connected, re-injecting bloom peers and reconnecting")
+                        android.util.Log.i("SyncService", "No peers connected, re-injecting filter peers and reconnecting")
                         injectBloomPeers()
                         injectCustomNode()
                         NativeBridge.startSync()
@@ -692,12 +692,14 @@ class SyncService : Service() {
      */
     private fun startBip158Watchdog(birthHeight: Long) {
         bip158WatchdogJob?.cancel()
-        // Polls every BIP158_WATCHDOG_POLL_MS, falls back if the cfheaders
-        // chain isn't keeping pace with the block chain. Three exit cases:
-        //   1. Mode flipped to BLOOM (manual override or already fallen back)
-        //   2. cfTip caught up to within 100 blocks of blockTip → healthy
-        //   3. blockTip is meaningfully ahead AND no cf progress between
-        //      polls → fallback to bloom.
+        // Polls every BIP158_WATCHDOG_POLL_MS, tracking whether the cfheaders
+        // chain is keeping pace with the block chain. Three exit cases (bloom is
+        // removed as a data path — none of them ever fall back to it):
+        //   1. cfTip caught up to within 100 blocks of blockTip → healthy, return.
+        //   2. blockTip is meaningfully ahead and cfheaders is stuck → try the
+        //      one-time re-anchor recovery, then stay on compact filters either way.
+        //   3. Neither yet — keep polling (header sync still catching up, or
+        //      awaiting the first cfheaders append after a re-anchor).
         //
         // A one-shot timer at +120s isn't enough: at startup blockTip is
         // often still at the saved-blocks tip (headers haven't synced yet)
@@ -1034,30 +1036,22 @@ class SyncService : Service() {
             NativeBridge.markInitialSyncDone()
         }
 
-        // Inject bloom-capable peers from the seeder API before starting sync.
-        // This ensures the wallet has multiple bloom peers to try, not just digiscope.me.
+        // Inject filter-capable peers from the seeder API before starting sync.
+        // This ensures the wallet has multiple compact-filter peers to try, not
+        // just digiscope.me.
         injectBloomPeers()
         // Inject the user's own node (if configured) as a priority compact-filter
         // peer. No-op unless the toggle is on; resolves DNS off the native peer lock.
         injectCustomNode()
 
         // ─── BIP 158 privacy-first sync ─────────────────────────────────────────
-        // Default sync mode is BOTH (bloom + compact filters in parallel) for new
-        // installs and any user who hasn't explicitly chosen otherwise;
-        // COMPACT_FILTERS_ONLY (addresses never leave the device) is selectable.
-        // A 120s watchdog falls back to BLOOM_ONLY for THIS session
-        // if filter peers don't make progress; the choice resets on next launch
-        // so we try filters again. Users can override in Settings → Sync Mode.
+        // Sync mode is unconditionally COMPACT_FILTERS_ONLY — syncModeFor (CustomNode.kt)
+        // ignores the `sync_mode` pref/customNodeEnabled/isTestnet args entirely and
+        // always returns CF-only; the address set never goes on the wire under any
+        // condition. The Settings → Sync Mode toggle/screen that used to select BOTH/
+        // BLOOM_ONLY is removed. The `sync_mode` pref key below is read only for the
+        // (dead) function-signature arg and otherwise ignored.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-        // Effective sync mode: a configured own-node (or testnet) forces
-        // COMPACT_FILTERS_ONLY so no bloom filterload — and thus no address-set
-        // leak — ever goes on the wire; otherwise the user's stored sync_mode
-        // pref wins. Testnet26 nodes run with bloom DISABLED (peerbloomfilters
-        // off by default on modern Core) and RESET the connection when they
-        // receive a bloom `filterload`, so forcing filters-only there is
-        // required for the same reason as the own-node case. Mainnet without
-        // an own node configured is unchanged (defaults to BOTH, or the
-        // stored pref).
         val syncMode = syncModeFor(
             pref = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH),
             customNodeEnabled = CustomNodePrefs.isEnabled(this@SyncService),
@@ -1383,19 +1377,29 @@ class SyncService : Service() {
         }
     }
 
-    // ── Bloom peer discovery ────────────────────────────────────────────────────
+    // ── Compact-filter peer discovery ───────────────────────────────────────────
+    // (Legacy name/pref key retained: "bloom" below refers to the SharedPreferences
+    // key `dgb_bloom_peers<net>`, which is the live compact-filter peer cache under
+    // a name from before BIP157/158 shipped. Renaming it touches 4 pref owners in
+    // lockstep — out of scope for this stage; see the bloom-removal spec.)
 
     /**
-     * Fetch bloom-capable peers from the seeder API and inject them into the
+     * Fetch filter-capable peers from the seeder API and inject them into the
      * C core's peer list. Uses a cached response (SharedPreferences) and
      * refreshes from the network at most once per hour.
      */
     /**
-     * Inject a batch of bloom-serving peers into the native peer manager.
+     * Inject a batch of filter-capable peers into the native peer manager.
+     *
+     * This is a secondary/supplementary pool alongside [injectFilterPeers]'s
+     * small validated CF set: it draws from the seeder's general peer
+     * listing (also filter-capability-filtered, see [fetchFromSeeder]) for
+     * additional peer diversity/resilience, using a different caching and
+     * rotation strategy (below) rather than injecting everything every call.
      *
      * Pool strategy (avoids hammering the seeder every 10s on a flaky network):
-     *   1. Maintain a persistent pool of every bloom peer we've ever been
-     *      told about, stored as JSON in SharedPreferences.
+     *   1. Maintain a persistent pool of every filter-capable peer we've ever
+     *      been told about, stored as JSON in SharedPreferences.
      *   2. Each call rotates a cursor through the pool and injects
      *      [BLOOM_BATCH_SIZE] peers starting at that cursor. The native
      *      core dedupes by (ip, port) so re-injecting the same peer is a
@@ -1460,7 +1464,7 @@ class SyncService : Service() {
     private fun injectBloomPeers() {
         if (isTestnet(this@SyncService)) {
             // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
-            // only knows mainnet peers, so the mainnet bloom-pool fetch AND the
+            // only knows mainnet peers, so the mainnet filter-pool fetch AND the
             // Dandelion-capable-peer fetch (also served from that same seeder)
             // are both skipped entirely on testnet. Inject the two hardcoded
             // testnet26 peers instead; the refreshed testnet DNS seeds
@@ -1471,13 +1475,13 @@ class SyncService : Service() {
         }
         // CF-first: inject the FULL dedicated filter-peer list (capability=filter) as the
         // primary CF peer set every sync-start, so the native filter-first pre-pass always has
-        // the known validated filter peers to dial (instead of a rotating 20-slice of the mixed
-        // pool that may contain none of them). The native dialer suppresses the DNS/bloom
-        // shotgun while any of these are dialable or connected.
+        // the known validated filter peers to dial (instead of a rotating 20-slice of the general
+        // pool that may contain none of them). The native dialer suppresses the DNS shotgun
+        // while any of these are dialable or connected.
         injectFilterPeers()
         // Dandelion peers piggyback here so they're injected at every sync-start
-        // path (all of them call injectBloomPeers). Runs first so bloom's early
-        // returns can't skip it; self-throttled by its own last_fetch timer.
+        // path (all of them call injectBloomPeers). Runs first so the early
+        // returns below can't skip it; self-throttled by its own last_fetch timer.
         injectDandelionPeers()
         val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -1485,14 +1489,18 @@ class SyncService : Service() {
         val existing = prefs.getString("peer_pool", null)
         // Triple = (ip, port, servicesHex). servicesHex carries the seeder's
         // capability bits (0x40 = compact filters) so filter peers are tagged
-        // when injected; 0 = unknown → native bloom-only default.
+        // when injected; 0 = unknown → native CF-tagged default (INJECT_DEFAULT_SERVICES).
         val pool: MutableList<Triple<String, Int, Long>> =
             if (existing != null) parsePool(existing) else mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
 
         val stale = now - lastFetch > BLOOM_REFRESH_INTERVAL_MS
         if (stale || pool.isEmpty()) {
-            val fresh = fetchFromSeeder()
+            // capability=filter: the wallet is CF-only end to end, so this
+            // secondary/general pool must never source a bloom-only peer either —
+            // it's supplementary dial diversity on top of injectFilterPeers'
+            // small validated set, not a mixed-capability fallback.
+            val fresh = fetchFromSeeder("filter")
             if (fresh != null && fresh.isNotEmpty()) {
                 // Merge: add any peer we haven't seen before (dedup on ip:port,
                 // ignoring services so a re-fetch doesn't duplicate an entry
@@ -1505,12 +1513,12 @@ class SyncService : Service() {
                     .apply()
                 android.util.Log.i(
                     "SyncService",
-                    "Fetched bloom peers: ${fresh.size} new, pool now ${pool.size}"
+                    "Fetched filter peers: ${fresh.size} new, pool now ${pool.size}"
                 )
             } else if (pool.isEmpty()) {
                 android.util.Log.w(
                     "SyncService",
-                    "Bloom seeder empty and no cached pool — wallet may struggle to connect"
+                    "Filter-peer seeder empty and no cached pool — wallet may struggle to connect"
                 )
                 return
             }

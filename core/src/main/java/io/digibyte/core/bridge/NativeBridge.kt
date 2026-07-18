@@ -413,9 +413,12 @@ object NativeBridge {
     external fun isRawTransactionSigned(rawTxHex: String): Boolean
 
     // ---------- BIP 158 sync mode ----------
-    // All BIP 158 functions below are inert until setSyncMode is called with
-    // a mode other than BLOOM_ONLY. Default remains BLOOM_ONLY so existing
-    // wallets see no behavior change.
+    // The wallet is CF-only: SyncService always calls setSyncMode(COMPACT_FILTERS_ONLY)
+    // before startSync (syncModeFor unconditionally returns COMPACT_FILTERS_ONLY — see
+    // CustomNode.kt), and the native pending-mode default (jni_peer.c g_pendingSyncMode)
+    // is pinned to COMPACT_FILTERS_ONLY as defense-in-depth in case a call site is ever
+    // missed. BLOOM_ONLY/BOTH remain in the enum below for ABI compatibility (native int
+    // cast) but are never selected by the wallet.
 
     /** Sync mode constants — keep in sync with BRSyncMode in BRPeerManager.h */
     object SyncMode {

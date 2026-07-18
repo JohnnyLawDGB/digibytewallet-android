@@ -32,7 +32,7 @@ class SyncWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
-            // Refresh bloom peers from seeder API (cached hourly)
+            // Refresh filter-capable peers from the seeder API (cached hourly)
             fetchBloomPeers()
             NativeBridge.startSync()
             // Allow 30 seconds for header catch-up.
@@ -70,7 +70,9 @@ class SyncWorker @AssistedInject constructor(
             cachedJson
         } else {
             try {
-                val url = java.net.URL(SEEDER_URL)
+                // capability=filter: the wallet is CF-only end to end, so the
+                // background catch-up worker must never source a bloom-only peer.
+                val url = java.net.URL("$SEEDER_URL?capability=filter")
                 val conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 5000
@@ -90,7 +92,7 @@ class SyncWorker @AssistedInject constructor(
                     val p = peers.getJSONObject(i)
                     // services_hex (e.g. "0x44d") carries the compact-filter bit
                     // (0x40) so filter peers are tagged; absent → 0 → native
-                    // bloom-only default.
+                    // CF-tagged default (INJECT_DEFAULT_SERVICES, jni_peer.c).
                     val services = parseSeederServicesHex(p.optString("services_hex", ""))
                     NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
                 }
