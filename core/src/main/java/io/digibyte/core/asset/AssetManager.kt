@@ -1338,6 +1338,74 @@ class AssetManager(
         return deleted
     }
 
+    /** The wallet's internal/change scriptPubKey set (lowercase hex), enumerated
+     *  from native change addresses. Bounded — historical internal-chain usage is
+     *  small. No native rebuild: getChangeAddress + addressToScriptPubKey exist.
+     *  Untested on host (NativeBridge JNI) — thin public helper only, exactly
+     *  like the prune's public delegate; [healLegacyChangeAddressOrphansImpl] does
+     *  not depend on it in tests (tests pass the change-script set directly). */
+    suspend fun buildChangeScriptHexes(maxIndex: Int = 200): Set<String> {
+        val out = HashSet<String>()
+        for (i in 0 until maxIndex) {
+            val addr = runCatching { NativeBridge.getChangeAddress(i, 0) }.getOrNull()
+            if (addr.isNullOrBlank()) continue
+            val script = runCatching { NativeBridge.addressToScriptPubKey(addr) }.getOrNull() ?: continue
+            out.add(script.toHex().lowercase())
+        }
+        return out
+    }
+
+    /**
+     * One-time heal of pre-existing owned-CHANGE-address asset orphans (dead-send
+     * change markers from before the going-forward source-fix). Thin delegate onto
+     * [healLegacyChangeAddressOrphansImpl], wrapping the real NativeBridge JNI
+     * tx-absence check as a lambda — same NativeBridge/`mockkObject` host-JVM
+     * constraint documented on [pruneRemovedNativeAssetRows]. Ships log-only
+     * (dryRun) first; deletes only once the operator confirms the candidate set
+     * on-device (see plan Rollout).
+     */
+    suspend fun healLegacyChangeAddressOrphans(
+        changeScriptHexes: Set<String>,
+        dryRun: Boolean,
+    ): LegacyHealResult =
+        healLegacyChangeAddressOrphansImpl(changeScriptHexes, dryRun) { txid ->
+            runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull() == null
+        }
+
+    /**
+     * Testable core of [healLegacyChangeAddressOrphans]. A row is a candidate
+     * iff ALL hold: native no longer has its tx ([isTxGone] true), its
+     * scriptPubKey is non-empty, its hex-lowercased scriptPubKey is a member of
+     * [changeScriptHexes] (lowercased), and its txid is a well-formed 64-char
+     * hash. A real EXTERNAL receive can never satisfy the change-script test —
+     * that's the whole safety argument for allowing a delete here at all. This
+     * is the ONLY place in the asset-maintenance path allowed to delete an
+     * owned row, and only on this positive conjunction — never on
+     * backend-absence, never on native-absence alone.
+     */
+    internal suspend fun healLegacyChangeAddressOrphansImpl(
+        changeScriptHexes: Set<String>,
+        dryRun: Boolean,
+        isTxGone: suspend (String) -> Boolean,
+    ): LegacyHealResult {
+        val changeLower = changeScriptHexes.map { it.lowercase() }.toSet()
+        val candidates = mutableListOf<String>()
+        var deleted = 0
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            if (row.txid.length != 64) continue
+            if (row.scriptPubKey.isEmpty()) continue
+            if (row.scriptPubKey.toHex().lowercase() !in changeLower) continue
+            if (!isTxGone(row.txid)) continue
+            candidates.add("${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
+            android.util.Log.i("AssetManager",
+                "legacyHeal ${if (dryRun) "DRYRUN candidate" else "DELETE"}: ${row.txid}:${row.vout} qty=${row.assetQuantity}")
+            if (!dryRun) deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
+        }
+        android.util.Log.i("AssetManager",
+            "legacyHeal: ${candidates.size} candidates, deleted=$deleted, dryRun=$dryRun")
+        return LegacyHealResult(candidates, deleted)
+    }
+
     private companion object {
         /** DGB change below this floor is folded into the fee rather than
          *  emitted as its own output. MUST be >= the network dust threshold
@@ -1372,3 +1440,11 @@ data class IncomingAssetInfo(
     /** Placeholder until M1.2 / M3 replace with real derived id. */
     val assetId: String,
 )
+
+/**
+ * Result of [AssetManager.healLegacyChangeAddressOrphans]. [candidates] is a
+ * human-readable `"txid:vout qty=.. asset=.."` line per row matching the
+ * change-address-scoped orphan rule, logged regardless of [dryRun]. [deleted]
+ * is the actual delete count — always 0 on a dry-run pass.
+ */
+data class LegacyHealResult(val candidates: List<String>, val deleted: Int)

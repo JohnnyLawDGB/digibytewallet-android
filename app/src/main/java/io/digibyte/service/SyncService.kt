@@ -139,6 +139,10 @@ class SyncService : Service() {
      *  second one on top of it every ~30s tick. */
     private val assetMaintenanceRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    // Legacy Chang heal ships LOG-ONLY first. Flip to false only after the
+    // on-device dry-run confirms the candidate set (see plan Rollout).
+    private val legacyHealDryRun = true
+
     /**
      * SupervisorJob so that a child coroutine failure never cancels the
      * parent — important because Room insert failures must not tear down sync.
@@ -492,6 +496,22 @@ class SyncService : Service() {
                             )) {
                             runCatching { assetManager.pruneRemovedNativeAssetRows() }
                                 .onFailure { android.util.Log.w("SyncService", "asset prune threw", it) }
+
+                            // One-time (per install) heal of pre-existing owned-CHANGE-address
+                            // asset orphans (the legacy Chang over-count, C9). Gated on the same
+                            // prune gate — synced-this-session + connected + wallet loaded — plus
+                            // a pref so it only ever runs once (or once per real, non-dry pass).
+                            val healPrefs = getSharedPreferences("dgb_asset_heal", MODE_PRIVATE)
+                            if (!healPrefs.getBoolean("legacy_done", false)) {
+                                runCatching {
+                                    val changeSet = assetManager.buildChangeScriptHexes()
+                                    val res = assetManager.healLegacyChangeAddressOrphans(changeSet, dryRun = legacyHealDryRun)
+                                    // Only mark done on a real (non-dry) pass, so the dry-run can be
+                                    // observed across sessions until deletion is enabled.
+                                    if (!legacyHealDryRun) healPrefs.edit().putBoolean("legacy_done", true).apply()
+                                    android.util.Log.i("SyncService", "legacyHeal ran: ${res.candidates.size} candidates")
+                                }.onFailure { android.util.Log.d("SyncService", "legacyHeal threw", it) }
+                            }
                         }
                     } finally {
                         assetMaintenanceRunning.set(false)
