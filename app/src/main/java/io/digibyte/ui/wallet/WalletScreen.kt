@@ -30,6 +30,7 @@ import io.digibyte.core.tor.TorState
 import io.digibyte.service.SyncService.Companion.OwnNodeHealth
 import io.digibyte.ui.components.BalanceDisplay
 import io.digibyte.ui.components.TransactionItem
+import io.digibyte.ui.components.TxKind
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteNavy
@@ -53,6 +54,7 @@ fun WalletScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
+    val txKinds by viewModel.txKinds.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
@@ -296,7 +298,8 @@ fun WalletScreen(
                 TransactionItem(
                     tx = tx,
                     onClick = { onNavigateTx(tx.txid) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    kind = txKinds[tx.txid] ?: TxKind.DGB
                 )
             }
         }

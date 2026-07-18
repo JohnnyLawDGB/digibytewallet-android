@@ -13,6 +13,8 @@ import io.digibyte.core.WalletManager
 import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.TransactionEntity
+import io.digibyte.ui.components.TxKind
+import io.digibyte.ui.components.classifyTxKind
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
@@ -56,6 +58,11 @@ class WalletViewModel @Inject constructor(
     /** Live transaction list from C core, most-recent first. */
     private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
     val transactions: StateFlow<List<TransactionEntity>> = _transactions.asStateFlow()
+
+    /** Per-txid display kind (DGB / DigiDollar / DigiAsset) for the activity list,
+     *  computed alongside each tx poll. Rows default to DGB when a txid is absent. */
+    private val _txKinds = MutableStateFlow<Map<String, TxKind>>(emptyMap())
+    val txKinds: StateFlow<Map<String, TxKind>> = _txKinds.asStateFlow()
 
     /** Pull-to-refresh spinner state for the wallet screen. */
     private val _isRefreshing = MutableStateFlow(false)
@@ -644,6 +651,17 @@ class WalletViewModel @Inject constructor(
                     if (sorted != _transactions.value) {
                         _transactions.value = sorted
                     }
+
+                    // Classify each visible tx for the activity list: DigiAsset if
+                    // the wallet tracks an asset output for it, else DigiDollar per
+                    // the native classifier, else plain DGB. Cheap — one DB read
+                    // plus a hash lookup per row (list is display-capped).
+                    val assetTxids = runCatching { assetManager.assetTxids() }.getOrDefault(emptySet())
+                    val kinds = sorted.associate { tx ->
+                        val ddType = runCatching { NativeBridge.digiDollarTxType(tx.txid) }.getOrDefault(0)
+                        tx.txid to classifyTxKind(tx.txid in assetTxids, ddType)
+                    }
+                    if (kinds != _txKinds.value) _txKinds.value = kinds
                 }
 
                 delay(5_000L)

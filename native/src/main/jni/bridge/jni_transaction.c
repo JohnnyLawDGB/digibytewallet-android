@@ -435,6 +435,30 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidDigiDollarAddress(JNIEnv *env, 
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+/* ---------- digiDollarTxType: classify a registered tx for the activity list ---------- */
+/* Returns the DigiDollar tx type for the wallet-known tx with this display (BE)
+ * txid: 1=MINT, 2=TRANSFER, 3=REDEEM, or 0 if the tx isn't a DigiDollar tx (or
+ * isn't known to the wallet). Read-only, display-only — lets the UI label a row
+ * DigiDollar vs DGB. Uses the same BE->LE reversal + BRWalletTransactionForHash
+ * lookup as outpointSpentState; BRDigiDollarTxType is the sovereign native
+ * classifier (DD version-marker + OP_RETURN type push). */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex) {
+    (void)thiz;
+    if (! g_wallet || ! txHashHex) return 0;
+    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
+    if (! hashStr) return 0;
+
+    jint type = 0;
+    if (strlen(hashStr) == 64) {
+        UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
+        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+        if (tx) type = BRDigiDollarTxType(tx);
+    }
+    (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
+    return type;
+}
+
 /* ---------- sendDigiDollar: decode TD -> build -> sign -> publish (in-memory) ---------- */
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents) {

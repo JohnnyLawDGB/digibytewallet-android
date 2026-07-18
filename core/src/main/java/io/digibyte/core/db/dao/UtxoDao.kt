@@ -63,6 +63,12 @@ interface UtxoDao {
     @Query("SELECT * FROM utxos WHERE is_asset = 1")
     suspend fun getAllAssetUtxosNow(): List<UtxoEntity>
 
+    /** Distinct txids that produced a tracked asset output (spent or unspent) —
+     *  covers both asset receives and the owned asset-change output of a send.
+     *  Used to label a transaction row as DigiAsset on the activity list. */
+    @Query("SELECT DISTINCT txid FROM utxos WHERE is_asset = 1")
+    suspend fun getAssetTxids(): List<String>
+
     /** Delete a single asset UTXO by outpoint. Scoped to is_asset = 1 so a
      *  plain-DGB UTXO is never removed. The reconcile deletes phantom rows one
      *  at a time (their count is tiny), which also sidesteps the SQLite

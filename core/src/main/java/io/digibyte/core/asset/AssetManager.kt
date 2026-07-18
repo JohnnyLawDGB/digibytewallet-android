@@ -941,6 +941,10 @@ class AssetManager(
         }
     }
 
+    /** Distinct txids the wallet tracks an asset output for (spent + unspent) —
+     *  used by the activity list to label a transaction row as DigiAsset. */
+    suspend fun assetTxids(): Set<String> = utxoDao.getAssetTxids().toSet()
+
     /**
      * Store a confirmed asset UTXO in the database and queue an IPFS metadata fetch.
      *

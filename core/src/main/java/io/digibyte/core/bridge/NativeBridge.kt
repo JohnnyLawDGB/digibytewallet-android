@@ -83,6 +83,11 @@ object NativeBridge {
     /** True if `addr` is a valid DigiDollar address for the current network (TD… testnet / DD… mainnet). */
     external fun isValidDigiDollarAddress(addr: String): Boolean
 
+    /** DigiDollar type of the wallet-known tx with this display (BE) txid, for the
+     *  activity list: 1=MINT, 2=TRANSFER, 3=REDEEM, 0=not a DigiDollar tx (or unknown).
+     *  Read-only/display-only — used to label a transaction row DigiDollar vs DGB. */
+    external fun digiDollarTxType(txHashHex: String): Int
+
     // === Dandelion++ broadcast-origin privacy ===
     /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
      *  successful stem, or null if no capable peer was available (caller floods via
