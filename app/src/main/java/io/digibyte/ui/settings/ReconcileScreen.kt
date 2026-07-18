@@ -266,10 +266,10 @@ fun ReconcileScreen(navController: NavController) {
                             walletManager.clearStuckSends()
                         }
                         stuckResult = if (result.dropped == 0)
-                            "No stuck sends to clear (${result.kept} confirmed send(s) kept)."
+                            "No stuck sends to clear."
                         else
                             "Cleared ${result.dropped} stuck send(s); corrected ${result.assetRowsCleared} " +
-                                "asset row(s). ${result.kept} confirmed kept. Balance updates shortly."
+                                "asset row(s). Balance updates shortly."
                     }
                 },
                 modifier = Modifier
@@ -277,7 +277,7 @@ fun ReconcileScreen(navController: NavController) {
                     .height(52.dp),
                 shape = RoundedCornerShape(12.dp),
             ) {
-                Text("Clear stuck sends & rebuild")
+                Text("Clear stuck sends")
             }
             stuckResult?.let {
                 Text(it, color = Color(0xFF6BE8A3), fontSize = 13.sp)

@@ -285,17 +285,6 @@ class WalletManager(
      */
     suspend fun clearStuckSends(): StuckSendResult {
         val store = OutgoingTxStore(context)
-        val recorded = store.allTxids()
-        if (recorded.isEmpty()) return StuckSendResult(dropped = 0, kept = 0, assetRowsCleared = 0)
-
-        // Wallet's confirmation view: txid -> blockHeight (TX_UNCONFIRMED = INT32_MAX).
-        val heights = HashMap<String, Long>()
-        runCatching {
-            NativeBridge.getTransactionDetails().trim().lines().forEach { line ->
-                val p = line.split("|")
-                if (p.size >= 4) heights[p[0]] = p[3].toLongOrNull() ?: 0L
-            }
-        }
 
         // Sovereign owned-address set, built ONCE for the whole pass (never a
         // third party) so dead-send phantom asset rows can be identified.
@@ -303,19 +292,38 @@ class WalletManager(
         // no asset cleanup happens — never a reason to skip the send cleanup.
         val ownedSet = assetManager?.buildOwnedScriptHexes() ?: emptySet()
 
+        // Source candidates from the WALLET'S ACTUAL tx list, NOT just OutgoingTxStore:
+        // a dead send created before the store existed (or by a path that never recorded
+        // it) still lives in BRWallet and shows in the activity list, so it MUST be
+        // clearable. Row format (jni_wallet.c getTransactionDetails):
+        //   txHash|amount|fee|blockHeight|timestamp|sent|received  (TX_UNCONFIRMED = INT32_MAX)
+        val rows = runCatching { NativeBridge.getTransactionDetails().trim().lines() }
+            .getOrDefault(emptyList())
+
         var dropped = 0
         var kept = 0
         var assetRowsCleared = 0
-        for (txid in recorded) {
-            // Whole per-txid body is guarded: a Room/JNI exception on one stuck tx
-            // must not skip the remaining txids or the final persist() below.
+        for (line in rows) {
+            // Whole per-row body is guarded: a Room/JNI exception on one stuck tx
+            // must not skip the remaining rows or the final persist() below.
             runCatching {
-                val h = heights[txid]
-                val confirmed = h != null && h > 0L && h < Int.MAX_VALUE.toLong()
-                if (confirmed) { kept++; return@runCatching } // real, on-chain send — never touch it
+                if (line.isBlank()) return@runCatching
+                val p = line.split("|")
+                if (p.size < 7) return@runCatching
+                val txid = p[0]
+                val h = p[3].toLongOrNull() ?: 0L
+                val sent = p[5].toLongOrNull() ?: 0L
 
-                // Unconfirmed: read outputs BEFORE any removal (removeTransaction
-                // below invalidates the tx from BRWallet's view).
+                val confirmed = h > 0L && h < Int.MAX_VALUE.toLong()
+                if (confirmed) return@runCatching                 // on-chain — never touch it
+                // Only OUR OWN unconfirmed sends are stuck-send candidates. Incoming
+                // (received) txs have sent==0; DigiDollar/asset RECEIVES carry sub-dust
+                // marker outputs, so gating on sent>0 keeps the dead-predicate from ever
+                // flagging an incoming transfer as a "dead send".
+                if (sent <= 0L) return@runCatching
+
+                // Unconfirmed OUTGOING send: read outputs BEFORE any removal
+                // (removeTransaction invalidates the tx from BRWallet's view).
                 val outputs = NativeBridge.getTransactionOutputsForHash(txid)?.toList() ?: emptyList()
                 val isValid = runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)
                 val dead = DeadSendPredicate.isDead(
@@ -341,7 +349,7 @@ class WalletManager(
                     }
                 }
             }.onFailure { e ->
-                android.util.Log.w("WalletManager", "clearStuckSends: skipping txid=$txid after exception", e)
+                android.util.Log.w("WalletManager", "clearStuckSends: skipping row after exception", e)
             }
         }
         if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
