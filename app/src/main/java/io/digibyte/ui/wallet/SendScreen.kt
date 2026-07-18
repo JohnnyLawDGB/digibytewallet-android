@@ -75,12 +75,14 @@ fun SendScreen(
     val canSend = hasPeers && isFullySynced
 
     // ── DigiDollar send mode ──────────────────────────────────────────────
-    val sendMode by viewModel.sendMode.collectAsStateWithLifecycle()
     val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
     val ddAddressValid by viewModel.ddAddressValid.collectAsStateWithLifecycle()
-    // Only actually in DD mode if the wallet holds DD — guards against a
-    // stale sendMode==DD if the balance drops to 0 while this screen is open.
-    val effectiveDdMode = sendMode == SendViewModel.SendMode.DD && ddBalance > 0
+    // Mode is auto-detected from the destination: a valid DD… address puts the
+    // whole screen into DigiDollar-send mode. No manual toggle — the address type
+    // is unambiguous (DD…/TD… vs dgb1q…/D…), and this also lets a DD send be
+    // composed at $0 balance so the amount field can say "insufficient" clearly
+    // instead of the address reading as an invalid DigiByte address.
+    val effectiveDdMode = ddAddressValid == true
     val effectiveAddressValid = if (effectiveDdMode) ddAddressValid else addressValid
     var ddSentTxid by remember { mutableStateOf<String?>(null) }
     var ddSending by remember { mutableStateOf(false) }
@@ -154,44 +156,6 @@ fun SendScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // ── DGB / DigiDollar mode toggle ───────────────────────────────────
-        // Only shown once the wallet actually holds DD — otherwise the
-        // screen is exactly today's DGB send, untouched.
-        if (ddBalance > 0) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TextButton(
-                    onClick = { if (effectiveDdMode) viewModel.toggleSendMode() },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.textButtonColors(
-                        containerColor = if (!effectiveDdMode) DigiByteAccent.copy(alpha = 0.15f) else Color.Transparent
-                    )
-                ) {
-                    Text(
-                        text = "DGB",
-                        fontWeight = if (!effectiveDdMode) FontWeight.Bold else FontWeight.Normal,
-                        color = if (!effectiveDdMode) DigiByteAccent else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TextButton(
-                    onClick = { if (!effectiveDdMode) viewModel.toggleSendMode() },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.textButtonColors(
-                        containerColor = if (effectiveDdMode) DigiByteAccent.copy(alpha = 0.15f) else Color.Transparent
-                    )
-                ) {
-                    Text(
-                        text = "DigiDollar",
-                        fontWeight = if (effectiveDdMode) FontWeight.Bold else FontWeight.Normal,
-                        color = if (effectiveDdMode) DigiByteAccent else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
         // ── Address input ─────────────────────────────────────────────────
         Text(
             text = if (effectiveDdMode) {
@@ -258,11 +222,24 @@ fun SendScreen(
 
         // ── Amount input ──────────────────────────────────────────────────
         if (effectiveDdMode) {
-            Text(
-                text = "Amount",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Amount",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = { viewModel.setDdAmountToMax() },
+                    enabled = ddBalance > 0
+                ) {
+                    Text(
+                        text = "MAX",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (ddBalance > 0) DigiByteAccent else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
             OutlinedTextField(
                 value = amountFiat,
@@ -274,6 +251,32 @@ fun SendScreen(
                 singleLine = true,
                 shape = RoundedCornerShape(8.dp)
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            // Available DigiDollar ceiling + inline amount validation (mirrors the
+            // send button's ddAmountValid gate so the error and the disabled state agree).
+            Text(
+                text = "Available: ${SendViewModel.formatDdUsd(ddBalance)} DigiDollar",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val ddCents = SendViewModel.parseUsdToCents(amountFiat)
+            val ddAmountError: String? = when {
+                amountFiat.isBlank()      -> null
+                ddCents == null           -> "Enter a valid amount"
+                ddBalance <= 0L           -> "You have no DigiDollar to send"
+                ddCents < 100L            -> "Minimum is $1.00"
+                ddCents > ddBalance       -> "Exceeds available DigiDollar"
+                ddCents > 10_000_000L     -> "Exceeds maximum per transaction"
+                else                      -> null
+            }
+            if (ddAmountError != null) {
+                Text(
+                    text = ddAmountError,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DigiByteRed,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Network fee paid in DGB",

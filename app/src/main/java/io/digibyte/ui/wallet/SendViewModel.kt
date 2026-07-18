@@ -253,17 +253,18 @@ class SendViewModel @Inject constructor(
     }
 
     // ── DigiDollar send mode ─────────────────────────────────────────────
-
-    enum class SendMode { DGB, DD }
-    private val _sendMode = MutableStateFlow(SendMode.DGB)
-    val sendMode: StateFlow<SendMode> = _sendMode.asStateFlow()
-    fun toggleSendMode() { _sendMode.value = if (_sendMode.value == SendMode.DGB) SendMode.DD else SendMode.DGB }
+    // Auto-detected from the destination address: a valid DD… address means a
+    // DigiDollar send (SendScreen: effectiveDdMode = ddAddressValid == true).
+    // There is no manual DGB/DD toggle — the address type disambiguates.
 
     /** Live DigiDollar balance in cents — polled on the same 5s cadence as
-     *  WalletViewModel's balance poll so the toggle + amount validation
-     *  have a fresh ceiling while this screen is open. */
+     *  WalletViewModel's balance poll so the amount validation + available
+     *  ceiling stay fresh while this screen is open. */
     private val _ddBalance = MutableStateFlow(0L)
     val ddBalance: StateFlow<Long> = _ddBalance.asStateFlow()
+
+    /** Fill the amount field with the full available DigiDollar balance (MAX). */
+    fun setDdAmountToMax() { amountFiat.value = ddCentsToPlainUsd(_ddBalance.value) }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -301,5 +302,12 @@ class SendViewModel @Inject constructor(
         /** DD send amount valid: within consensus [100, 10000000] cents and <= held balance. */
         fun ddAmountValid(cents: Long, ddBalance: Long): Boolean =
             cents in 100..10_000_000 && cents <= ddBalance
+
+        /** cents -> plain "X.XX" for the amount field (5000 -> "50.00"). */
+        fun ddCentsToPlainUsd(cents: Long): String = "%.2f".format(cents / 100.0)
+
+        /** cents -> "$X,XXX.XX" for display (5000 -> "$50.00"). */
+        fun formatDdUsd(cents: Long): String =
+            NumberFormat.getCurrencyInstance(Locale.US).format(cents / 100.0)
     }
 }
