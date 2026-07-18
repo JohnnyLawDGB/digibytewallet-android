@@ -262,13 +262,14 @@ fun ReconcileScreen(navController: NavController) {
             OutlinedButton(
                 onClick = {
                     scope.launch {
-                        val (dropped, kept) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             walletManager.clearStuckSends()
                         }
-                        stuckResult = if (dropped == 0)
-                            "No stuck sends to clear ($kept confirmed send(s) kept)."
+                        stuckResult = if (result.dropped == 0)
+                            "No stuck sends to clear (${result.kept} confirmed send(s) kept)."
                         else
-                            "Cleared $dropped stuck send(s); $kept confirmed kept. Balance updates shortly."
+                            "Cleared ${result.dropped} stuck send(s); corrected ${result.assetRowsCleared} " +
+                                "asset row(s). ${result.kept} confirmed kept. Balance updates shortly."
                     }
                 },
                 modifier = Modifier

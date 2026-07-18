@@ -706,6 +706,51 @@ class AssetManager(
     }
 
     /**
+     * Delete the OWNED is_asset output rows a dead/failed send fabricated.
+     *
+     * A send that never confirms (e.g. dropped from mempool) leaves behind
+     * local UTXO rows for outputs the transaction WOULD have created — most
+     * notably the asset-change marker at one of our own addresses, inserted
+     * optimistically before broadcast. If the send is dead, that row is a
+     * phantom: it inflates the displayed balance and can be re-selected as
+     * an un-signable input on a later send. This clears exactly those rows.
+     *
+     * [outputs] are the dead tx's outputs as `"vout|sats|scriptHex"` (the
+     * same wire format [processIncomingAssetTx] parses, from
+     * [NativeBridge.getTransactionOutputsForHash]), read BEFORE the caller
+     * removes the transaction. [ownedScriptHexes] is the sovereign owned-
+     * script set from [buildOwnedScriptHexes] — never a third party.
+     *
+     * Only deletes a row whose script is one of ours AND whose txid is
+     * [txid] ([UtxoDao.deleteAssetUtxo] is itself txid+vout scoped, so this
+     * can never touch a different transaction's rows). The non-owned
+     * recipient marker is deliberately left alone here — it lives at an
+     * address we don't control and isn't ours to delete.
+     *
+     * Skips malformed lines (fewer than 3 `|`-separated fields, a
+     * non-numeric vout) and empty scripts. Returns the count of rows
+     * deleted.
+     */
+    suspend fun clearDeadAssetSend(
+        txid: String,
+        ownedScriptHexes: Set<String>,
+        outputs: List<String>,
+    ): Int {
+        val ownedLower = ownedScriptHexes.map { it.lowercase() }.toSet()
+        var deleted = 0
+        for (line in outputs) {
+            val parts = line.split("|")
+            if (parts.size < 3) continue
+            val vout = parts[0].toIntOrNull() ?: continue
+            val scriptHex = parts[2]
+            if (scriptHex.isEmpty()) continue
+            if (scriptHex.lowercase() !in ownedLower) continue
+            deleted += utxoDao.deleteAssetUtxo(txid, vout)
+        }
+        return deleted
+    }
+
+    /**
      * Store a confirmed asset UTXO in the database and queue an IPFS metadata fetch.
      *
      * @param txid         Transaction ID (hex).

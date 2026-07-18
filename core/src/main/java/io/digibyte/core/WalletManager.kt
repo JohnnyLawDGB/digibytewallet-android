@@ -2,6 +2,8 @@ package io.digibyte.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.asset.DeadSendPredicate
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.sync.FilterHeaderStore
@@ -17,6 +19,14 @@ sealed class WalletState {
     data object Unlocked : WalletState()
 }
 
+/**
+ * Outcome of [WalletManager.clearStuckSends]: [dropped] un-mineable sends
+ * removed, [kept] left alone (either confirmed on-chain or unconfirmed-but-
+ * still-valid), and [assetRowsCleared] phantom owned DigiAsset UTXO rows a
+ * dropped dead send fabricated (see [AssetManager.clearDeadAssetSend]).
+ */
+data class StuckSendResult(val dropped: Int, val kept: Int, val assetRowsCleared: Int)
+
 class WalletManager(
     private val context: Context,
     private val keyStoreManager: KeyStoreManager,
@@ -28,6 +38,14 @@ class WalletManager(
     // native lib (NativeBridge's init { System.loadLibrary } would crash off-device).
     // The default lambda body only touches NativeBridge when actually invoked.
     private val quiesceNative: () -> Unit = { NativeBridge.stopSync(); NativeBridge.lockSession() },
+    // Nullable + defaulted so existing pure-JVM constructions (WalletWipeTest)
+    // keep compiling unchanged. No circular dependency: AssetManager (and
+    // everything it depends on — DAOs, AssetMetadataService, the network
+    // client) never references WalletManager, so this is a one-directional
+    // edge in the Hilt graph. Only clearStuckSends() uses it (dead-send
+    // phantom asset-row cleanup); every other WalletManager method is
+    // unaffected if it's null.
+    private val assetManager: AssetManager? = null,
 ) {
     private val _walletState = MutableStateFlow<WalletState>(WalletState.NoWallet)
     val walletState: StateFlow<WalletState> = _walletState.asStateFlow()
@@ -255,13 +273,20 @@ class WalletManager(
      * confirmed on-chain: BRWalletRemoveTransaction cascades to dependents and
      * un-spends the real UTXO the chain tied up, then we persist the corrected tx set.
      * The compact-filter sync (already at the chain tip) keeps the restored, real
-     * UTXO set confirmed. Returns (dropped, kept). Safe because a send showing a real
-     * confirmation height is never touched.
+     * UTXO set confirmed. Confirmed sends are never touched. Unconfirmed sends are
+     * gated on [DeadSendPredicate.isDead]: a send that's merely slow to confirm but
+     * still valid (no sub-dust output, no conflict) is spared rather than dropped —
+     * only a genuinely un-mineable send is removed. A removed dead send also has its
+     * OWNED phantom DigiAsset UTXO rows cleaned up via [AssetManager.clearDeadAssetSend]
+     * (e.g. an optimistically-inserted asset-change marker for a send that never
+     * confirms) — see [StuckSendResult.assetRowsCleared]. Suspend because the asset
+     * cleanup is a Room/IO call; callers should invoke this off the main thread
+     * (e.g. `withContext(Dispatchers.IO) { walletManager.clearStuckSends() }`).
      */
-    fun clearStuckSends(): Pair<Int, Int> {
+    suspend fun clearStuckSends(): StuckSendResult {
         val store = OutgoingTxStore(context)
         val recorded = store.allTxids()
-        if (recorded.isEmpty()) return 0 to 0
+        if (recorded.isEmpty()) return StuckSendResult(dropped = 0, kept = 0, assetRowsCleared = 0)
 
         // Wallet's confirmation view: txid -> blockHeight (TX_UNCONFIRMED = INT32_MAX).
         val heights = HashMap<String, Long>()
@@ -272,19 +297,55 @@ class WalletManager(
             }
         }
 
+        // Sovereign owned-address set, built ONCE for the whole pass (never a
+        // third party) so dead-send phantom asset rows can be identified.
+        // Null AssetManager (no DI wired, e.g. a bare test construction) means
+        // no asset cleanup happens — never a reason to skip the send cleanup.
+        val ownedSet = assetManager?.buildOwnedScriptHexes() ?: emptySet()
+
         var dropped = 0
         var kept = 0
+        var assetRowsCleared = 0
         for (txid in recorded) {
-            val h = heights[txid]
-            val confirmed = h != null && h > 0L && h < Int.MAX_VALUE.toLong()
-            if (confirmed) { kept++; continue } // real, on-chain send — never touch it
-            if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
-                store.remove(txid)
-                dropped++
+            // Whole per-txid body is guarded: a Room/JNI exception on one stuck tx
+            // must not skip the remaining txids or the final persist() below.
+            runCatching {
+                val h = heights[txid]
+                val confirmed = h != null && h > 0L && h < Int.MAX_VALUE.toLong()
+                if (confirmed) { kept++; return@runCatching } // real, on-chain send — never touch it
+
+                // Unconfirmed: read outputs BEFORE any removal (removeTransaction
+                // below invalidates the tx from BRWallet's view).
+                val outputs = NativeBridge.getTransactionOutputsForHash(txid)?.toList() ?: emptyList()
+                val isValid = runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)
+                val dead = DeadSendPredicate.isDead(
+                    isValid = isValid,
+                    outputs = outputs.map {
+                        DeadSendPredicate.OutSats(it.split("|").getOrNull(1)?.toLongOrNull() ?: 0L)
+                    }
+                )
+                if (!dead) { kept++; return@runCatching } // slow but still valid — spare it, don't touch
+
+                // Ordering is load-bearing (see dead-asset-send-clear design doc):
+                // remove the transaction from the wallet FIRST. Only once native
+                // removal has actually succeeded do we drop the local record and
+                // clean up owned phantom asset rows. If we deleted the Room rows
+                // before removal (or removal fails), the tx is still wallet-known
+                // and a subsequent sweepKnownTransactionsForAssets pass would
+                // silently re-insert the exact phantom rows we'd have just deleted.
+                if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
+                    store.remove(txid)
+                    dropped++
+                    if (assetManager != null) {
+                        assetRowsCleared += assetManager.clearDeadAssetSend(txid, ownedSet, outputs)
+                    }
+                }
+            }.onFailure { e ->
+                android.util.Log.w("WalletManager", "clearStuckSends: skipping txid=$txid after exception", e)
             }
         }
         if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
-        return dropped to kept
+        return StuckSendResult(dropped = dropped, kept = kept, assetRowsCleared = assetRowsCleared)
     }
 
     /**

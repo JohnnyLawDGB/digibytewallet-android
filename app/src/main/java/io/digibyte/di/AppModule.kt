@@ -163,9 +163,18 @@ object AppModule {
     ): io.digibyte.core.recovery.RecoveryScanService =
         io.digibyte.core.recovery.RecoveryScanService(utxoSource)
 
+    // AssetManager is injected here for clearStuckSends()'s dead-send phantom
+    // asset-row cleanup. No Hilt cycle: AssetManager (and its own deps — DAOs,
+    // AssetMetadataService, the network client) never depend on WalletManager,
+    // so this is a one-directional edge in the graph.
     @Provides @Singleton
-    fun provideWalletManager(@ApplicationContext context: Context, ksm: KeyStoreManager, um: UtxoManager): WalletManager =
-        WalletManager(context, ksm, um)
+    fun provideWalletManager(
+        @ApplicationContext context: Context,
+        ksm: KeyStoreManager,
+        um: UtxoManager,
+        am: AssetManager,
+    ): WalletManager =
+        WalletManager(context, ksm, um, assetManager = am)
 
     /**
      * Seed seam for the recovery flow. Delegates to the existing seed store via

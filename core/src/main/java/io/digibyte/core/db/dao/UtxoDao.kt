@@ -29,6 +29,12 @@ interface UtxoDao {
     @Query("UPDATE utxos SET spent = 1 WHERE txid = :txid AND vout = :vout")
     suspend fun markSpent(txid: String, vout: Int)
 
+    /** Inverse of markSpent — seam for a held branch to restore an asset UTXO's
+     *  input after a dead/failed asset-send so it becomes spendable again. Not
+     *  wired into any caller yet. */
+    @Query("UPDATE utxos SET spent = 0 WHERE txid = :txid AND vout = :vout")
+    suspend fun markUnspent(txid: String, vout: Int)
+
     /** Rewrite the placeholder asset_id of every UTXO row matching [oldAssetId]
      *  once M3 parent-walk resolves it to a real DigiAsset id. Safe no-op if
      *  no rows match (e.g. the placeholder was already replaced). */
@@ -53,9 +59,14 @@ interface UtxoDao {
     /** Delete a single asset UTXO by outpoint. Scoped to is_asset = 1 so a
      *  plain-DGB UTXO is never removed. The reconcile deletes phantom rows one
      *  at a time (their count is tiny), which also sidesteps the SQLite
-     *  bound-variable limit an `IN (:keys)` bulk delete would hit. */
+     *  bound-variable limit an `IN (:keys)` bulk delete would hit.
+     *
+     *  Returns the number of rows actually deleted (0 or 1) so a caller can
+     *  distinguish a real delete from a no-op — e.g. an owned DGB-change
+     *  output at the same txid is is_asset = 0 and never matches this query,
+     *  so it must not be counted as a removed asset row. */
     @Query("DELETE FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
-    suspend fun deleteAssetUtxo(txid: String, vout: Int)
+    suspend fun deleteAssetUtxo(txid: String, vout: Int): Int
 
     @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
     fun getAssetBalances(): Flow<List<AssetBalance>>
