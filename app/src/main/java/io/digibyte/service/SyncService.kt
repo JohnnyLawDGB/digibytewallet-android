@@ -12,6 +12,7 @@ import io.digibyte.core.OutgoingTxStore
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.asset.assetPruneGateOpen
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
 import io.digibyte.core.sync.FilterHeaderStore
@@ -127,6 +128,16 @@ class SyncService : Service() {
      * launch since it's never written to prefs.
      */
     @Volatile private var ownNodeAdditiveSessionOverride = false
+
+    /** Set true when an onSyncComplete fires IN THIS PROCESS. Distinct from the
+     *  persisted has_synced flag (which is true at startup before this session
+     *  verifies the tx set) — the asset prune must gate on this, not that. */
+    @Volatile private var syncedThisSession = false
+
+    /** Serializes the sovereign asset-maintenance cycle (native sweep + gated
+     *  prune) below so a slow cycle on a long-history wallet can't stack a
+     *  second one on top of it every ~30s tick. */
+    private val assetMaintenanceRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
      * SupervisorJob so that a child coroutine failure never cancels the
@@ -464,27 +475,27 @@ class SyncService : Service() {
             if (tickCount % 3L == 0L) {
                 runCatching { refreshOwnNodeHealth() }
             }
-            // Every 3rd tick (~30s), refresh asset UTXOs against the node's
-            // authoritative listunspent view. SPV bloom filters are known to
-            // miss asset transactions (cracked-filter / merkleblock-drop
-            // conditions documented in project memory), so we can't rely on
-            // onAssetDetected alone — a manual Scan tap shouldn't be required
-            // just to see a new asset land. 30s is a reasonable cadence: DGB
-            // blocks come every ~15s, so this catches new asset receives
-            // within ~2 blocks while not hammering the backend. Skipped when
-            // peers=0 (we're offline; refresh would fail anyway).
-            if (tickCount % 3L == 0L && NativeBridge.getPeerCount() > 0) {
+            // Every 3rd tick (~30s): sovereign asset maintenance. NO backend
+            // call on the standing path — /api/assets/unspent is reconcile-only
+            // now. Guarded so a slow cycle on a long-history wallet can't stack.
+            if (tickCount % 3L == 0L && NativeBridge.getPeerCount() > 0
+                && assetMaintenanceRunning.compareAndSet(false, true)) {
                 launch {
-                    runCatching { assetManager.refreshAssetUtxosFromNetwork() }
-                        .onFailure { android.util.Log.d("SyncService", "asset refresh threw", it) }
-                }
-                // Sovereign companion to the backend refresh above: re-scan
-                // every wallet-known tx via the Kotlin DigiAssetDecoder. Even
-                // if the backend is down (or we're running pure-SPV), asset
-                // UTXOs surface as long as SPV delivered the raw tx.
-                launch {
-                    runCatching { assetManager.sweepKnownTransactionsForAssets() }
-                        .onFailure { android.util.Log.d("SyncService", "native sweep threw", it) }
+                    try {
+                        runCatching { assetManager.sweepKnownTransactionsForAssets() }
+                            .onFailure { android.util.Log.d("SyncService", "native sweep threw", it) }
+                        if (assetPruneGateOpen(
+                                syncedThisSession = syncedThisSession,
+                                peerCount = NativeBridge.getPeerCount(),
+                                progress = NativeBridge.getSyncProgress(),
+                                walletLoaded = NativeBridge.isWalletLoaded(),
+                            )) {
+                            runCatching { assetManager.pruneRemovedNativeAssetRows() }
+                                .onFailure { android.util.Log.d("SyncService", "asset prune threw", it) }
+                        }
+                    } finally {
+                        assetMaintenanceRunning.set(false)
+                    }
                 }
             }
             try {
@@ -1257,6 +1268,7 @@ class SyncService : Service() {
                 return
             }
             hasReachedSynced = true
+            syncedThisSession = true
             walletManager.updateSyncState(SyncState.Complete)
             // Persist sync-complete so restarts don't flash "Syncing 0%"
             getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
@@ -1330,13 +1342,14 @@ class SyncService : Service() {
                         assetId       = assetId
                     )
                 )
-                // Refresh the UTXO table so the asset shows up in the Assets
-                // tab immediately. onAssetDetected only gives us the txHash +
-                // assetId + quantity — we need the vout, sats, and metadata
-                // for a complete UtxoEntity, and listunspent is the cheapest
-                // authoritative source.
-                runCatching { assetManager.refreshAssetUtxosFromNetwork() }
-                    .onFailure { android.util.Log.d("SyncService", "refresh-after-detect threw", it) }
+                // Sovereign: surface the just-detected asset via native decode of
+                // this tx — NO backend hit (onAssetDetected is exactly when the
+                // indexer is most likely behind). A fresh receive is confirmed
+                // false here, so its owned outputs persist as NATIVE rows.
+                runCatching {
+                    assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L,
+                        isOutgoingUnconfirmed = false)
+                }.onFailure { android.util.Log.d("SyncService", "native detect-after-asset threw", it) }
             }
         }
         override fun onSaveBlocks(data: ByteArray, replace: Int) {
