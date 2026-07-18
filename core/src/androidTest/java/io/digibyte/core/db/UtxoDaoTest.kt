@@ -143,4 +143,46 @@ class UtxoDaoTest {
         assertEquals(0, utxoDao.getAssetUtxos().first().size)
     }
 
+    /** markUnspent is the inverse of markSpent: it restores a spent asset UTXO
+     *  to spendable (spent = 0), the seam a held branch will wire in to undo a
+     *  dead/failed asset-send that consumed an input on the client side. */
+    @Test
+    fun markUnspent_restoresAssetUtxoToSpendableAndBalance() = runTest {
+        val assetUtxo = UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 5)
+        val otherAssetUtxo = UtxoEntity("tx1", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 7)
+        utxoDao.insertAll(listOf(assetUtxo, otherAssetUtxo))
+
+        utxoDao.markSpent("tx1", 0)
+        assertEquals(1, utxoDao.getAssetUtxos().first().size)
+        assertEquals("tx1", utxoDao.getAssetUtxos().first()[0].txid)
+        assertEquals(1, utxoDao.getAssetUtxos().first()[0].vout)
+        assertEquals(7L, utxoDao.getAssetBalances().first().first { it.assetId == "asset123" }.totalQuantity)
+
+        utxoDao.markUnspent("tx1", 0)
+
+        val assets = utxoDao.getAssetUtxos().first()
+        assertEquals(2, assets.size)
+        assertTrue(assets.any { it.txid == "tx1" && it.vout == 0 })
+        assertEquals(12L, utxoDao.getAssetBalances().first().first { it.assetId == "asset123" }.totalQuantity)
+    }
+
+    /** markUnspent is scoped to the exact (txid, vout) outpoint — a sibling
+     *  vout that is still spent must stay spent. */
+    @Test
+    fun markUnspent_onlyAffectsExactOutpoint() = runTest {
+        utxoDao.insertAll(listOf(
+            UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 5),
+            UtxoEntity("tx1", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 7)
+        ))
+        utxoDao.markSpent("tx1", 0)
+        utxoDao.markSpent("tx1", 1)
+        assertEquals(0, utxoDao.getAssetUtxos().first().size)
+
+        utxoDao.markUnspent("tx1", 0)
+
+        val assets = utxoDao.getAssetUtxos().first()
+        assertEquals(1, assets.size)
+        assertEquals(0, assets[0].vout)
+    }
+
 }

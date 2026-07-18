@@ -29,6 +29,12 @@ interface UtxoDao {
     @Query("UPDATE utxos SET spent = 1 WHERE txid = :txid AND vout = :vout")
     suspend fun markSpent(txid: String, vout: Int)
 
+    /** Inverse of markSpent — seam for a held branch to restore an asset UTXO's
+     *  input after a dead/failed asset-send so it becomes spendable again. Not
+     *  wired into any caller yet. */
+    @Query("UPDATE utxos SET spent = 0 WHERE txid = :txid AND vout = :vout")
+    suspend fun markUnspent(txid: String, vout: Int)
+
     /** Rewrite the placeholder asset_id of every UTXO row matching [oldAssetId]
      *  once M3 parent-walk resolves it to a real DigiAsset id. Safe no-op if
      *  no rows match (e.g. the placeholder was already replaced). */
