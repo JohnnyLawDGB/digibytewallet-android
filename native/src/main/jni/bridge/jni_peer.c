@@ -1246,18 +1246,6 @@ Java_io_digibyte_core_bridge_NativeBridge_hasDandelionPeer(JNIEnv *env, jobject 
     return BRPeerManagerHasDandelionPeer(g_peerManager) ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_fallbackToBloom(JNIEnv *env, jobject thiz) {
-    (void)env; (void)thiz;
-    PEER_GUARD();
-    if (!g_peerManager) {
-        LOGI("fallbackToBloom: peer manager not created — ignoring");
-        return;
-    }
-    BRPeerManagerFallbackToBloom(g_peerManager);
-    LOGI("fallbackToBloom: switched to BLOOM_ONLY, reloaded bloom on connected peers");
-}
-
 JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
