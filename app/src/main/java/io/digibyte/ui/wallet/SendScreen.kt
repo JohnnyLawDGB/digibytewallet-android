@@ -86,6 +86,7 @@ fun SendScreen(
     val effectiveAddressValid = if (effectiveDdMode) ddAddressValid else addressValid
     var ddSentTxid by remember { mutableStateOf<String?>(null) }
     var ddSending by remember { mutableStateOf(false) }
+    var ddConfirming by remember { mutableStateOf(false) }
 
     var inputIsDgb by remember { mutableStateOf(true) }
 
@@ -130,6 +131,54 @@ fun SendScreen(
                 }
             },
             onCancel = { viewModel.cancelConfirm() }
+        )
+    }
+
+    // ── DigiDollar confirmation dialog ────────────────────────────────────
+    // DD sends get the same confirm + biometric gate as DGB — a real-value
+    // transfer must not broadcast straight from a button tap (finality parity).
+    if (ddConfirming) {
+        DigiDollarConfirmationDialog(
+            address = address,
+            amountUsd = amountFiat,
+            onConfirm = {
+                coroutineScope.launch {
+                    val activity = context as? androidx.fragment.app.FragmentActivity
+                    val authed = if (activity != null && biometricAuth.canAuthenticate(activity)) {
+                        biometricAuth.authenticate(
+                            activity,
+                            title = "Confirm DigiDollar Send",
+                            subtitle = "Authenticate to broadcast transaction"
+                        ) is BiometricResult.Success
+                    } else {
+                        // No biometric hardware — the confirmation dialog is the gate (matches DGB).
+                        true
+                    }
+                    if (!authed) {
+                        ddConfirming = false
+                        return@launch
+                    }
+                    ddConfirming = false
+                    ddSending = true
+                    viewModel.sendDigiDollar(address, amountFiat) { txid ->
+                        // sendDigiDollar's callback fires on a background dispatcher —
+                        // hop back to Main before touching Compose state or Toast.
+                        coroutineScope.launch {
+                            ddSending = false
+                            if (txid != null) {
+                                ddSentTxid = txid
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "DigiDollar send failed",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            },
+            onCancel = { ddConfirming = false }
         )
     }
 
@@ -486,30 +535,13 @@ fun SendScreen(
             val ddCents = SendViewModel.parseUsdToCents(amountFiat) ?: -1L
             val ddValid = ddAddressValid == true && SendViewModel.ddAmountValid(ddCents, ddBalance)
             Button(
-                onClick = {
-                    ddSending = true
-                    viewModel.sendDigiDollar(address, amountFiat) { txid ->
-                        // sendDigiDollar's callback fires on a background
-                        // dispatcher — hop back to the composition's scope
-                        // (Main) before touching Compose state or Toast.
-                        coroutineScope.launch {
-                            ddSending = false
-                            if (txid != null) {
-                                ddSentTxid = txid
-                            } else {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "DigiDollar send failed",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    }
-                },
+                // Gate DD sends behind the same confirm + biometric flow as DGB
+                // (finality parity) instead of broadcasting straight from the tap.
+                onClick = { ddConfirming = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                enabled = !ddSending && canSend && ddValid,
+                enabled = !ddSending && !ddConfirming && canSend && ddValid,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
@@ -619,6 +651,82 @@ private fun SendConfirmationDialog(
                     label = "Network fee",
                     value = String.format("%.8f DGB", feeDgb)
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                HorizontalDivider()
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Verify the full address above carefully.\nTransactions are irreversible.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text("Send", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DigiDollarConfirmationDialog(
+    address: String,
+    amountUsd: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val view = LocalView.current
+    // Security: filter touches when obscured (tapjacking protection) — same as DGB.
+    DisposableEffect(view) {
+        view.filterTouchesWhenObscured = true
+        onDispose { view.filterTouchesWhenObscured = false }
+    }
+
+    Dialog(onDismissRequest = onCancel) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Confirm DigiDollar Transfer",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                ConfirmRow(label = "To", value = address) // FULL address — never truncated
+                ConfirmRow(label = "Amount", value = "$$amountUsd DigiDollar")
+                ConfirmRow(label = "Network fee", value = "Paid in DGB")
 
                 Spacer(modifier = Modifier.height(8.dp))
 
