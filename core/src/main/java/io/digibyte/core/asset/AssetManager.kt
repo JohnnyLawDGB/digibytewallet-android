@@ -1343,14 +1343,29 @@ class AssetManager(
      *  small. No native rebuild: getChangeAddress + addressToScriptPubKey exist.
      *  Untested on host (NativeBridge JNI) — thin public helper only, exactly
      *  like the prune's public delegate; [healLegacyChangeAddressOrphansImpl] does
-     *  not depend on it in tests (tests pass the change-script set directly). */
+     *  not depend on it in tests (tests pass the change-script set directly).
+     *
+     *  Enumerates ALL THREE address formats {0=legacy, 1=P2SH-segwit, 2=bech32}
+     *  and unions every resulting change script. The asset-send path derives its
+     *  change as format 2 (P2WPKH — see the asset-change marker at
+     *  `getChangeAddress(1, format = 2)` and DGB change at
+     *  `getChangeAddress(0, format = 2)` in the transfer builder), so format 2
+     *  is the one the real Chang phantoms actually carry; enumerating only
+     *  format 0 (legacy) would produce a set DISJOINT from those scripts and
+     *  heal nothing. Over-enumerating across all formats is strictly SAFE: every
+     *  format still resolves to the INTERNAL change chain (m/.../1/i), which is
+     *  disjoint from the external receive chain regardless of script type — so
+     *  no external receive can ever enter the change set no matter which formats
+     *  we union in. */
     suspend fun buildChangeScriptHexes(maxIndex: Int = 200): Set<String> {
         val out = HashSet<String>()
-        for (i in 0 until maxIndex) {
-            val addr = runCatching { NativeBridge.getChangeAddress(i, 0) }.getOrNull()
-            if (addr.isNullOrBlank()) continue
-            val script = runCatching { NativeBridge.addressToScriptPubKey(addr) }.getOrNull() ?: continue
-            out.add(script.toHex().lowercase())
+        for (format in intArrayOf(0, 1, 2)) {
+            for (i in 0 until maxIndex) {
+                val addr = runCatching { NativeBridge.getChangeAddress(i, format) }.getOrNull()
+                if (addr.isNullOrBlank()) continue
+                val script = runCatching { NativeBridge.addressToScriptPubKey(addr) }.getOrNull() ?: continue
+                out.add(script.toHex().lowercase())
+            }
         }
         return out
     }
@@ -1369,7 +1384,14 @@ class AssetManager(
         dryRun: Boolean,
     ): LegacyHealResult =
         healLegacyChangeAddressOrphansImpl(changeScriptHexes, dryRun) { txid ->
-            runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull() == null
+            // Gone iff the native call SUCCEEDED and returned null. Unlike the
+            // prune, this one-shot heal has NO debounce and deletes on the first
+            // gone==true, so a thrown/failed native call must be treated as
+            // NOT-gone (conservative — never delete on a transient JNI error).
+            // The prune can safely read an exception as gone because it self-heals
+            // via re-detection + a consecutive-absence debounce; the heal cannot.
+            val r = runCatching { NativeBridge.getTransactionOutputsForHash(txid) }
+            r.isSuccess && r.getOrNull() == null
         }
 
     /**
@@ -1382,6 +1404,14 @@ class AssetManager(
      * is the ONLY place in the asset-maintenance path allowed to delete an
      * owned row, and only on this positive conjunction — never on
      * backend-absence, never on native-absence alone.
+     *
+     * NOTE: this INTENTIONALLY spans ALL sources ([UtxoDao.getAllAssetUtxosNow]),
+     * unlike the NATIVE-only prune ([pruneRemovedNativeAssetRowsImpl]). The Chang
+     * phantoms are BACKEND-tagged (they came from the now-retired 30s backend
+     * refresh), so a NATIVE-only scope would skip every phantom and heal nothing.
+     * What makes deletion safe here is the CHANGE-CHAIN scope, NOT the source
+     * tag: a genuine still-valid change holding has its tx PRESENT in native
+     * (isTxGone == false) and therefore survives. Do NOT narrow this to NATIVE.
      */
     internal suspend fun healLegacyChangeAddressOrphansImpl(
         changeScriptHexes: Set<String>,
