@@ -70,4 +70,23 @@ interface UtxoDao {
 
     @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
     fun getAssetBalances(): Flow<List<AssetBalance>>
+
+    /** All asset rows of a given provenance (unspent + spent). Used by the
+     *  native-positive-removal prune, which only touches NATIVE rows. */
+    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND asset_source = :source")
+    suspend fun getAssetUtxosBySourceNow(source: String): List<UtxoEntity>
+
+    /** The asset row at an outpoint, or null. Used by the non-clobbering
+     *  re-tag to preserve spent/quantity/blockHeight. */
+    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout LIMIT 1")
+    suspend fun getAssetUtxoAt(txid: String, vout: Int): UtxoEntity?
+
+    /** Re-tag provenance only — never rewrites quantity/spent/blockHeight. */
+    @Query("UPDATE utxos SET asset_source = :source WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
+    suspend fun markAssetSource(txid: String, vout: Int, source: String)
+
+    /** Raise a resolved quantity without touching other columns. Callers must
+     *  only ever pass a value >= the current one (never downgrade). */
+    @Query("UPDATE utxos SET asset_quantity = :quantity WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
+    suspend fun updateAssetQuantity(txid: String, vout: Int, quantity: Long)
 }

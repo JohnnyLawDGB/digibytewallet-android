@@ -13,7 +13,8 @@ data class UtxoEntity(
     @ColumnInfo(name = "is_asset") val isAsset: Boolean = false,
     @ColumnInfo(name = "asset_id") val assetId: String? = null,
     @ColumnInfo(name = "asset_quantity") val assetQuantity: Long = 0,
-    val spent: Boolean = false
+    val spent: Boolean = false,
+    @ColumnInfo(name = "asset_source") val assetSource: String = "BACKEND"
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
