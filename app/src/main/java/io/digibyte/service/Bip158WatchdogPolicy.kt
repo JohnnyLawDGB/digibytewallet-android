@@ -16,10 +16,11 @@ package io.digibyte.service
  * `getCFChainTipHeight()` reads 0 until the first cfheaders response lazily
  * rebuilds it. The watchdog polls every 15s; without a grace window a single
  * poll landing in that rebuild gap (a slow/Tor round-trip, or no filter peer
- * connected at re-anchor time) reads cfTip=0, sees "no progress," and degrades
- * to bloom — abandoning a re-anchor that was about to succeed. [REANCHOR_GRACE_MS]
+ * connected at re-anchor time) reads cfTip=0, sees "no progress," and gives up
+ * — abandoning a re-anchor that was about to succeed. [REANCHOR_GRACE_MS]
  * keeps the watchdog on filters across that gap; if the chain still hasn't
- * rebuilt when the window expires, bloom is the safe floor.
+ * rebuilt when the window expires, staying on compact filters (and giving up
+ * gracefully) is the safe floor — there is no bloom fallback.
  */
 internal enum class PostTimeoutAction {
     /** cfTip is (probably) below the block floor and we haven't tried yet —
@@ -31,8 +32,11 @@ internal enum class PostTimeoutAction {
     AWAIT_REANCHOR,
 
     /** No re-anchor is warranted (never synced) or the re-anchored chain never
-     *  rebuilt within the grace window — degrade to bloom for the session. */
-    FALLBACK_BLOOM,
+     *  rebuilt within the grace window — stay on compact filters and give up
+     *  gracefully for the session. Bloom (BIP37) is removed as a data path:
+     *  this is never a fallback to bloom, only the terminal "nothing left to
+     *  try" state. */
+    STAY_ON_FILTERS,
 }
 
 /**
@@ -61,7 +65,7 @@ internal fun decidePostTimeoutAction(
 ): PostTimeoutAction = when {
     hasReachedSynced && !reanchoredThisSession -> PostTimeoutAction.REANCHOR
     reanchoredThisSession && msSinceReanchor < REANCHOR_GRACE_MS -> PostTimeoutAction.AWAIT_REANCHOR
-    else -> PostTimeoutAction.FALLBACK_BLOOM
+    else -> PostTimeoutAction.STAY_ON_FILTERS
 }
 
 /**

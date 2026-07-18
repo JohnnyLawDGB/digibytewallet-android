@@ -6,14 +6,15 @@ import org.junit.Test
 /**
  * Pure-logic coverage for [decidePostTimeoutAction] — the BIP158 watchdog's
  * post-timeout branch that chooses between re-anchoring the filter chain,
- * waiting for a just-re-anchored chain to rebuild, or degrading to bloom.
+ * waiting for a just-re-anchored chain to rebuild, or staying on compact
+ * filters and giving up gracefully for the session (no bloom fallback).
  *
  * Regression guard for the deep-deficit recovery bug: a re-anchor frees the
  * compact-filter chain, so getCFChainTipHeight() reads 0 until the first
  * cfheaders response lazily rebuilds it. The old one-shot logic gave that
- * rebuild a single 15s poll before degrading to bloom, so a slow/Tor
- * round-trip or a momentarily-absent filter peer abandoned a re-anchor that
- * would have succeeded. AWAIT_REANCHOR within REANCHOR_GRACE_MS is the fix.
+ * rebuild a single 15s poll before giving up, so a slow/Tor round-trip or a
+ * momentarily-absent filter peer abandoned a re-anchor that would have
+ * succeeded. AWAIT_REANCHOR within REANCHOR_GRACE_MS is the fix.
  */
 class Bip158WatchdogPolicyTest {
 
@@ -30,11 +31,11 @@ class Bip158WatchdogPolicyTest {
     }
 
     @Test
-    fun `never-synced wallet skips the re-anchor and degrades to bloom`() {
+    fun `never-synced wallet skips the re-anchor and stays on filters`() {
         // The re-anchor skips the historical [cfTip, floor] gap on the has_synced
         // guarantee that bloom already scanned it. Absent that, don't re-anchor.
         assertEquals(
-            PostTimeoutAction.FALLBACK_BLOOM,
+            PostTimeoutAction.STAY_ON_FILTERS,
             decidePostTimeoutAction(
                 hasReachedSynced = false,
                 reanchoredThisSession = false,
@@ -66,11 +67,12 @@ class Bip158WatchdogPolicyTest {
     }
 
     @Test
-    fun `re-anchored chain that never rebuilt within grace degrades to bloom`() {
-        // Bounded: if the first cfheaders append never lands, bloom is the safe
-        // floor — the wallet still syncs and the privacy banner is surfaced.
+    fun `re-anchored chain that never rebuilt within grace stays on filters`() {
+        // Bounded: if the first cfheaders append never lands, staying on compact
+        // filters (giving up gracefully) is the safe floor — there is no bloom
+        // fallback, the wallet keeps syncing on filters.
         assertEquals(
-            PostTimeoutAction.FALLBACK_BLOOM,
+            PostTimeoutAction.STAY_ON_FILTERS,
             decidePostTimeoutAction(
                 hasReachedSynced = true,
                 reanchoredThisSession = true,
@@ -82,9 +84,9 @@ class Bip158WatchdogPolicyTest {
     @Test
     fun `grace timer is ignored before any re-anchor`() {
         // reanchoredThisSession=false must never yield AWAIT regardless of the
-        // (meaningless) timer value — a never-synced wallet still falls back.
+        // (meaningless) timer value — a never-synced wallet still stays on filters.
         assertEquals(
-            PostTimeoutAction.FALLBACK_BLOOM,
+            PostTimeoutAction.STAY_ON_FILTERS,
             decidePostTimeoutAction(
                 hasReachedSynced = false,
                 reanchoredThisSession = false,

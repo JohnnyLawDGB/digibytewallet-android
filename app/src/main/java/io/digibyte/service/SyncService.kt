@@ -677,20 +677,18 @@ class SyncService : Service() {
         }
 
     /**
-     * BIP 158 watchdog. The wallet defaults to SyncMode.BOTH (bloom +
-     * compact filters in parallel); COMPACT_FILTERS_ONLY is user-selectable
-     * for max address privacy. But the compact-filter
-     * peer pool is small (the seeder currently advertises ~3 peers), so
-     * if all of them are unreachable through Tor or down, the wallet
-     * would otherwise sit "Connecting…" forever.
+     * BIP 158 watchdog. The wallet always runs compact-filters-only sync
+     * (bloom/BIP37 is removed as a data path — the address set never goes on
+     * the wire). The compact-filter peer pool is small (the seeder currently
+     * advertises ~3 peers), so if all of them are unreachable through Tor or
+     * down, the wallet would otherwise sit "Connecting…" forever.
      *
-     * This watchdog waits BIP158_FALLBACK_TIMEOUT_MS after sync start; if
-     * the cfheaders chain hasn't progressed past the configured birth
-     * height, it flips syncMode to BLOOM_ONLY in the C core and pushes a
-     * bloom filterload to every connected peer (NativeBridge.fallbackToBloom).
-     * The Kotlin StateFlow `bloomFallbackActive` flips true so the UI can
-     * surface a "privacy degraded" banner. We DO NOT persist this choice —
-     * next launch tries filters first again.
+     * This watchdog waits BIP158_FALLBACK_TIMEOUT_MS after sync start; if the
+     * cfheaders chain hasn't progressed past the configured birth height, its
+     * only recovery is a one-time re-anchor at the block floor
+     * (reanchorCompactFilterChainAtFloor). If that isn't warranted or doesn't
+     * land within its grace window, the watchdog stays on compact filters and
+     * gives up gracefully for the session — it never degrades to bloom.
      */
     private fun startBip158Watchdog(birthHeight: Long) {
         bip158WatchdogJob?.cancel()
@@ -735,45 +733,10 @@ class SyncService : Service() {
             // Wall-clock of the last re-anchor, for the rebuild grace window. A
             // re-anchor frees the stuck chain (getCFChainTipHeight() then reads 0
             // until the first cfheaders response rebuilds it); the grace keeps the
-            // watchdog from reading that transient 0 as "dead" and degrading to bloom.
+            // watchdog from reading that transient 0 as "dead" and giving up early.
             var reanchorAtMs = 0L
-            // Transient block-stall recovery: drop to bloom so any peer extends the
-            // chain, then switch back to compact filters once caught up. Capped per
-            // session so a flaky connection can't flap bloom↔filters forever.
-            var blockStallRecoveries = 0
-            var bloomRecoveryActive = false
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
-                val mode = try { NativeBridge.getSyncMode() } catch (_: Throwable) {
-                    NativeBridge.SyncMode.BLOOM_ONLY
-                }
-                if (mode == NativeBridge.SyncMode.BLOOM_ONLY) {
-                    if (bloomRecoveryActive) {
-                        // We dropped to bloom to recover a block-header stall. Wait for
-                        // block sync to catch up to the network tip, then switch back to
-                        // compact filters and resume monitoring (cfTip is preserved
-                        // across the switch — fallbackToBloom never freed the chain).
-                        val bTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
-                        val bEst = try { NativeBridge.getEstimatedBlockHeight() } catch (_: Throwable) { 0L }
-                        if (bEst > 0L && bTip >= bEst - BLOCK_CATCHUP_GRACE) {
-                            try {
-                                NativeBridge.setSyncMode(NativeBridge.SyncMode.COMPACT_FILTERS_ONLY)
-                            } catch (t: Throwable) {
-                                android.util.Log.e("SyncService", "BIP158 watchdog: switch-back to filters threw", t)
-                            }
-                            bloomRecoveryActive = false
-                            lastBlockTip = bTip
-                            lastBlockProgressMs = System.currentTimeMillis()
-                            android.util.Log.i("SyncService",
-                                "BIP158 watchdog: block sync caught up via bloom — switching back to " +
-                                "compact filters (recovery $blockStallRecoveries/$MAX_BLOCK_STALL_RECOVERIES)")
-                        }
-                        continue   // switched back, or still catching up — keep polling
-                    }
-                    android.util.Log.i("SyncService",
-                        "BIP158 watchdog: mode is BLOOM_ONLY, stopping poll")
-                    return@launch
-                }
                 val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
                 val blockTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
                 val gap = blockTip - cfTipNow.toLong()
@@ -840,7 +803,7 @@ class SyncService : Service() {
                 }
 
                 // Headers are caught up to the network tip but cfheaders still
-                // isn't advancing. Before falling back to bloom, try a one-time
+                // isn't advancing. Before giving up for the session, try a one-time
                 // re-anchor: a legacy wallet can have cfTip persisted far below the
                 // block floor (the gap was never re-downloaded), which retention
                 // can't bridge. Re-anchoring discards the stuck chain and restarts
@@ -870,7 +833,7 @@ class SyncService : Service() {
                                 continue
                             }
                             // re-anchor returned false (cfTip not actually below the
-                            // floor) — nothing left to try; degrade to bloom below.
+                            // floor) — nothing left to try; stay on filters below.
                         }
                         PostTimeoutAction.AWAIT_REANCHOR -> {
                             // The re-anchor freed the stuck chain; getCFChainTipHeight()
@@ -884,8 +847,8 @@ class SyncService : Service() {
                                 "staying on filters")
                             continue
                         }
-                        PostTimeoutAction.FALLBACK_BLOOM -> {
-                            // fall through to the bloom degrade below
+                        PostTimeoutAction.STAY_ON_FILTERS -> {
+                            // Nothing left to try this session — logged below.
                         }
                     }
                     // Bloom (BIP37) is removed as a data path. cfheaders stuck is recovered
@@ -913,8 +876,9 @@ class SyncService : Service() {
      * all (kmp-tor hung in Starting forever), and (b) Tor reaching Connected
      * but routing through SOCKS still failing to dial any peers.
      *
-     * Exits silently once peers > 0 — the bloom-fallback watchdog already
-     * handles BIP158→bloom; this one is solely about clearnet degradation.
+     * Exits silently once peers > 0 — the BIP158 watchdog handles compact-filter
+     * health separately (re-anchor recovery only, no bloom fallback); this one
+     * is solely about clearnet degradation.
      */
     private suspend fun runTorFallbackWatchdog() {
         val startedAt = System.currentTimeMillis()
@@ -2062,45 +2026,31 @@ class SyncService : Service() {
          *  fallback for a genuinely-dead daemon; this is a longer mid-session
          *  backstop that fires only after Tor has had ample time to route. */
         private const val MAX_TOR_RECONNECT_FAILURES = 15
-        /** How long to wait for BIP158 cfheaders progress before falling back
-         *  to bloom for this session. The pool is thin (3 filter peers) so we
-         *  need a generous window for Tor bootstrap + slow handshakes; 120s
-         *  was the user-chosen ceiling. Past this deadline, a poll interval
-         *  with no cf progress AND a real cfTip→blockTip gap triggers
-         *  fallbackToBloom. */
+        /** How long to wait for BIP158 cfheaders progress before giving up for
+         *  this session. The pool is thin (3 filter peers) so we need a
+         *  generous window for Tor bootstrap + slow handshakes; 120s was the
+         *  user-chosen ceiling. Past this deadline, a poll interval with no cf
+         *  progress AND a real cfTip→blockTip gap tries the one-time re-anchor
+         *  (see [decidePostTimeoutAction]); there is no bloom fallback. */
         private const val BIP158_FALLBACK_TIMEOUT_MS = 120_000L
 
         /** How close blockTip must be to the peers' estimated network height
          *  to consider block-header sync "caught up." While headers are still
          *  importing toward the tip (a deep-behind wallet or post-rescan
          *  checkpoint reset), cfheaders legitimately can't advance — the
-         *  watchdog stays on filters instead of falling back to bloom. */
+         *  watchdog stays on filters and keeps waiting. */
         private const val BLOCK_CATCHUP_GRACE = 50L
-
-        /** Max transient block-stall → bloom → back-to-filters recovery cycles per
-         *  session. After this many, stay on bloom and surface the privacy banner. */
-        private const val MAX_BLOCK_STALL_RECOVERIES = 3
 
         /** Poll cadence for the BIP158 watchdog. Tight enough to catch a
          *  freshly-opened cfTip→blockTip gap shortly after headers catch
          *  past the saved-blocks tip, loose enough to avoid log spam. */
         private const val BIP158_WATCHDOG_POLL_MS = 15_000L
 
-        /** Process-wide flag set when the BIP158 watchdog falls back to
-         *  bloom for the current session. The wallet UI collects this to
-         *  surface a "privacy degraded" banner. Resets to false on every
-         *  process start (companion-object lifecycle == process lifecycle)
-         *  so the next launch re-tries filters first. */
-        val bloomFallbackActive: kotlinx.coroutines.flow.StateFlow<Boolean>
-            get() = _bloomFallbackActive
-        private val _bloomFallbackActive =
-            kotlinx.coroutines.flow.MutableStateFlow(false)
-
         /** Process-wide flag set when the Tor watchdog gives up waiting for
          *  bootstrap and forces a clearnet fallback. The wallet UI collects
-         *  this to surface a "Tor unavailable" banner. Same lifecycle as
-         *  bloomFallbackActive — resets on every process start so the next
-         *  launch re-tries Tor. */
+         *  this to surface a "Tor unavailable" banner. Resets to false on
+         *  every process start (companion-object lifecycle == process
+         *  lifecycle) so the next launch re-tries Tor. */
         val torFailureActive: kotlinx.coroutines.flow.StateFlow<Boolean>
             get() = _torFailureActive
         private val _torFailureActive =

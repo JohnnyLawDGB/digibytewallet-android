@@ -256,12 +256,6 @@ class WalletViewModel @Inject constructor(
     val postUpgradeReconcileFailed: StateFlow<Boolean> =
         io.digibyte.core.reconcile.PostUpgradeReconciler.lastAttemptFailed
 
-    /** True iff the BIP158 watchdog gave up this session and forced bloom
-     *  fallback. Tells the UI to surface a "privacy degraded" banner.
-     *  Resets on every process start so each launch re-tries filters. */
-    val bloomFallbackActive: StateFlow<Boolean> =
-        io.digibyte.service.SyncService.bloomFallbackActive
-
     /** True iff the Tor watchdog gave up this session and forced a clearnet
      *  fallback. Tells the UI to surface a "Tor unavailable" banner. Resets
      *  on every process start so each launch re-tries Tor. */
