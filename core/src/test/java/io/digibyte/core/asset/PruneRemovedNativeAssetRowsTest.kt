@@ -37,8 +37,8 @@ class PruneRemovedNativeAssetRowsTest {
     private val utxoDao = mockk<UtxoDao>(relaxed = true)
     private lateinit var mgr: AssetManager
 
-    private fun row(txid: String, source: String) = UtxoEntity(
-        txid = txid, vout = 0, scriptPubKey = ByteArray(0), satoshis = 6000,
+    private fun row(txid: String, source: String, vout: Int = 0) = UtxoEntity(
+        txid = txid, vout = vout, scriptPubKey = ByteArray(0), satoshis = 6000,
         blockHeight = 0, isAsset = true, assetId = "La1", assetQuantity = 3,
         spent = false, assetSource = source
     )
@@ -56,6 +56,28 @@ class PruneRemovedNativeAssetRowsTest {
         assertEquals(0, mgr.pruneRemovedNativeAssetRowsImpl(isTxGone))   // sweep 1: below threshold
         assertEquals(1, mgr.pruneRemovedNativeAssetRowsImpl(isTxGone))   // sweep 2: delete
         coVerify(exactly = 1) { utxoDao.deleteAssetUtxo(txid, 0) }
+    }
+
+    @Test fun two_outpoints_same_txid_each_debounced_independently() = runTest {
+        // Regression: the debounce map must key on OUTPOINT (txid:vout), not
+        // txid. A single tx carrying two NATIVE asset UTXOs (vout 0 + vout 1 —
+        // e.g. an asset payment + our owned asset change) must NOT let the two
+        // rows share a counter within one sweep: with a txid-keyed counter,
+        // row(T,0) bumps to 1 and row(T,1) bumps the SAME counter to 2 and
+        // deletes (T,1) on the FIRST absent pass, defeating the threshold=2
+        // guarantee. Correct per-outpoint keying deletes NEITHER on pass 1 and
+        // BOTH on pass 2.
+        val txid = "b".repeat(64)
+        coEvery { utxoDao.getAssetUtxosBySourceNow(AssetSource.NATIVE) } returns
+            listOf(row(txid, AssetSource.NATIVE, vout = 0), row(txid, AssetSource.NATIVE, vout = 1))
+        val isTxGone: suspend (String) -> Boolean = { true }   // native dropped the whole tx
+
+        assertEquals(0, mgr.pruneRemovedNativeAssetRowsImpl(isTxGone))   // pass 1: both below threshold
+        coVerify(exactly = 0) { utxoDao.deleteAssetUtxo(any(), any()) }
+
+        assertEquals(2, mgr.pruneRemovedNativeAssetRowsImpl(isTxGone))   // pass 2: both delete
+        coVerify(exactly = 1) { utxoDao.deleteAssetUtxo(txid, 0) }
+        coVerify(exactly = 1) { utxoDao.deleteAssetUtxo(txid, 1) }
     }
 
     @Test fun native_row_present_resets_debounce_before_threshold() = runTest {

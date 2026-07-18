@@ -1241,10 +1241,17 @@ class AssetManager(
      *  refresh chain facts in case they ever go stale. */
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    /** Per-txid count of consecutive prune passes native has lacked the tx.
-     *  A NATIVE asset row is deleted only after the count reaches the
-     *  threshold, so a transient reload/reorg window can't mass-delete. */
-    private val nativeAbsenceCounts = mutableMapOf<String, Int>()
+    /** Per-OUTPOINT (`"txid:vout"`) count of consecutive prune passes native
+     *  has lacked the tx. Keyed by outpoint, not txid: a single txid can carry
+     *  several NATIVE asset UTXOs (e.g. an asset payment + our owned asset
+     *  change, or a batched receive), and deletion is per-outpoint — a txid-
+     *  keyed counter would let sibling outpoints of the same tx accumulate the
+     *  shared count within ONE sweep and delete on the first absent pass,
+     *  defeating the [ABSENCE_DEBOUNCE_THRESHOLD] "a transient window can't
+     *  mass-delete" guarantee. ConcurrentHashMap to match the sibling
+     *  [walkedInSession] convention (Task 5 serializes the cycle, but this
+     *  preempts a CME if it ever runs concurrently). */
+    private val nativeAbsenceCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /**
      * Sovereign replacement for the removed 30s backend refresh. Deletes a
@@ -1279,25 +1286,30 @@ class AssetManager(
      */
     internal suspend fun pruneRemovedNativeAssetRowsImpl(isTxGone: suspend (String) -> Boolean): Int {
         val rows = utxoDao.getAssetUtxosBySourceNow(AssetSource.NATIVE)
-        val liveTxids = HashSet<String>(rows.size)
+        val liveKeys = HashSet<String>(rows.size)
         var deleted = 0
         for (row in rows) {
             if (row.txid.length != 64) continue   // never pass a malformed txid to native
-            liveTxids.add(row.txid)
+            // Debounce is keyed per-OUTPOINT, not per-txid: a single tx can
+            // carry multiple NATIVE asset UTXOs (payment + owned change), and
+            // deletion is per-outpoint. A txid-keyed counter would let sibling
+            // outpoints share (and prematurely trip) the count in one sweep.
+            val key = "${row.txid}:${row.vout}"
+            liveKeys.add(key)
             val gone = isTxGone(row.txid)
             if (!gone) {
-                nativeAbsenceCounts.remove(row.txid)
+                nativeAbsenceCounts.remove(key)
                 continue
             }
-            val n = (nativeAbsenceCounts[row.txid] ?: 0) + 1
-            nativeAbsenceCounts[row.txid] = n
+            val n = (nativeAbsenceCounts[key] ?: 0) + 1
+            nativeAbsenceCounts[key] = n
             if (n >= ABSENCE_DEBOUNCE_THRESHOLD) {
                 deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
-                nativeAbsenceCounts.remove(row.txid)
+                nativeAbsenceCounts.remove(key)
             }
         }
-        // Drop stale debounce entries for txids no longer NATIVE-tagged.
-        nativeAbsenceCounts.keys.retainAll(liveTxids)
+        // Drop stale debounce entries for outpoints no longer NATIVE-tagged.
+        nativeAbsenceCounts.keys.retainAll(liveKeys)
         return deleted
     }
 
