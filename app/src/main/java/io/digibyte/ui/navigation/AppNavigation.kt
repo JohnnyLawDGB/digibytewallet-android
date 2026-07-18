@@ -536,17 +536,31 @@ fun AppNavigation(
                 )
             }
 
-            composable("asset_send/{assetId}") { backStackEntry ->
+            composable(
+                "asset_send/{assetId}?address={address}",
+                arguments = listOf(navArgument("address") { defaultValue = "" })
+            ) { backStackEntry ->
                 val assetId = backStackEntry.arguments?.getString("assetId") ?: ""
+                val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
                 AssetSendScreen(
                     assetId = assetId,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    prefillAddress = prefillAddress,
+                    onScanQr = {
+                        navController.navigate(
+                            "qr_scanner?returnTo=" + Uri.encode("asset_send/$assetId")
+                        )
+                    }
                 )
             }
 
             // ── QR Scanner (shared) ───────────────────────────────────────
-            composable("qr_scanner") {
+            composable(
+                "qr_scanner?returnTo={returnTo}",
+                arguments = listOf(navArgument("returnTo") { defaultValue = "" })
+            ) { backStackEntry ->
                 val localContext = LocalContext.current
+                val returnTo = backStackEntry.arguments?.getString("returnTo") ?: ""
                 QrScannerScreen(
                     onDigiId = { request ->
                         val encoded = Uri.encode(request.rawUri)
@@ -555,9 +569,12 @@ fun AppNavigation(
                         }
                     },
                     onDigiByteUri = { uri ->
-                        // Navigate to send with pre-filled address
+                        // Route the scanned address back to the caller: the asset
+                        // send screen when returnTo is set, else the DGB send flow.
                         val encoded = Uri.encode(uri.address)
-                        navController.navigate("send?address=$encoded") {
+                        val dest = if (returnTo.isNotBlank()) "$returnTo?address=$encoded"
+                                   else "send?address=$encoded"
+                        navController.navigate(dest) {
                             popUpTo("qr_scanner") { inclusive = true }
                         }
                     },

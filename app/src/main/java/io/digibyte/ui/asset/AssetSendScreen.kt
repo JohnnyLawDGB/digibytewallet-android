@@ -39,6 +39,8 @@ import io.digibyte.ui.theme.DigiByteRed
 fun AssetSendScreen(
     assetId: String,
     onNavigateBack: () -> Unit,
+    prefillAddress: String = "",
+    onScanQr: () -> Unit = {},
     viewModel: AssetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -60,6 +62,15 @@ fun AssetSendScreen(
     var showConfirmDialog by remember { mutableStateOf(false) }
     var addressError by remember { mutableStateOf<String?>(null) }
     var quantityError by remember { mutableStateOf<String?>(null) }
+
+    // Pre-fill the recipient from a scanned QR (routed back via the shared
+    // qr_scanner → asset_send?address=…).
+    LaunchedEffect(prefillAddress) {
+        if (prefillAddress.isNotBlank()) {
+            recipientAddress = prefillAddress
+            addressError = null
+        }
+    }
 
     // Close confirm dialog once the send either succeeds or fails so the
     // user sees the terminal state banner rendered below the form.
@@ -214,7 +225,7 @@ fun AssetSendScreen(
                                 tint = DigiByteAccent
                             )
                         }
-                        IconButton(onClick = { /* QR scan: Phase 2 Task 9 */ }) {
+                        IconButton(onClick = onScanQr) {
                             Icon(
                                 Icons.Default.QrCodeScanner,
                                 contentDescription = "Scan QR",
