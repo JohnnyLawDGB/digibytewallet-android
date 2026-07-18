@@ -6,7 +6,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
 **Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
-**Version:** v3.10.45 (versionCode 30124)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.0.0 (versionCode 40000)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -54,7 +54,7 @@ adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 - `ByteArray.fill(0)` in `finally` blocks on all seed paths
 - 42 security tests verify these properties
 
-- **Compact-filters-only sync (`NativeBridge.SyncMode`, `syncModeFor` in `CustomNode.kt`):** the wallet ALWAYS runs BIP157/158 compact filters. `syncModeFor(...)` unconditionally returns `COMPACT_FILTERS_ONLY` and ignores the stored `dgb_settings/sync_mode` pref; the old Sync Mode toggle/screen (`SyncModeScreen.kt`) is removed. Bloom (BIP37) is gone as a data path — no `filterload` ever goes on the wire, so the wallet's address set never leaves the device. The `SyncMode` enum still defines `BLOOM_ONLY`/`COMPACT_FILTERS_ONLY` and the native bloom C code is retained (its removal is the reserved X.0.0 trigger), but bloom is never selected.
+- **Compact-filters-only sync (`NativeBridge.SyncMode`, `syncModeFor` in `CustomNode.kt`):** the wallet ALWAYS runs BIP157/158 compact filters. `syncModeFor(...)` unconditionally returns `COMPACT_FILTERS_ONLY` and ignores the stored `dgb_settings/sync_mode` pref; the old Sync Mode toggle/screen (`SyncModeScreen.kt`) is removed. Bloom (BIP37) is gone as a data path — no `filterload` ever goes on the wire, so the wallet's address set never leaves the device. **Bloom (BIP37) was fully EXCISED in v4.0.0 — BIP157/158 compact filters are the ONLY sync path.** `BRBloomFilter.c/.h`, the filterload/filteradd/merkleblock-message handlers, the bloom filter loader, and the `fallbackToBloom` path are all deleted; the `SyncMode` enum keeps its 3 values as an ABI constant but `COMPACT_FILTERS_ONLY` is the only reachable mode. The address set can never leave the device under any condition. The sovereign fallback is the user's own node (own-node CF pairing), not bloom.
 - **BIP157/158 compact filters (shipped v3.5.39):** native GCS decoder + `cfheaders`/`cfilter` wire handlers + filter-header chain persistence. `cf_birth_height` (`dgb_settings`) bounds the scan.
 - **BIP158 watchdog (`SyncService.startBip158Watchdog`, `BIP158_FALLBACK_TIMEOUT_MS = 120s`):** if the cfheaders chain stalls, its only recovery is a one-time chain re-anchor at the block floor (`reanchorCompactFilterChainAtFloor`) — it NEVER degrades to bloom (every former bloom-fallback branch now stays on filters). Testnet26 and a configured own-node likewise force CF-only.
 - **Peer discovery:** priority peer `digiscope.me` injected on sync start; the wallet fetches filter-capable peers from the capability-aware seeder `api.digiscope.me/api/peers` (cached hourly; falls through to bloom-capable peers only when no filter peers are advertised, but still dials them as CF peers). Native `PEER_MAX_CONNECTIONS = 8`.
@@ -118,7 +118,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 
 ### Versioning Policy
 - `3.X.Y` — current line (at v3.10.29). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).
-- `X.0.0` — major: reserved for a wire-protocol change or removal of the legacy bloom path. NOTE: BIP157/158 shipped inside the 3.5.x line **without** a major bump, so the old "4.0.0 = BIP158 lands" trigger is retired — the next major needs a fresh trigger (open decision; see ROADMAP → Versioning).
+- `X.0.0` — major: reserved for a wire-protocol change or removal of the legacy bloom path. **v4.0.0 = the bloom-path removal** (BIP37 excised, BIP157/158-only) — the fresh trigger that earned the major after the retired "4.0.0 = BIP158 lands" trigger. Gates were oracle-bootstrap (v3.10.33) + own-node pairing, both shipped. The next major needs its own fresh trigger.
 - Pre-publish test suite must pass before any release
 - Never reuse version numbers
 
