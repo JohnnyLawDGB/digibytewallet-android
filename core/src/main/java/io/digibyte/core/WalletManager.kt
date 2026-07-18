@@ -307,30 +307,41 @@ class WalletManager(
         var kept = 0
         var assetRowsCleared = 0
         for (txid in recorded) {
-            val h = heights[txid]
-            val confirmed = h != null && h > 0L && h < Int.MAX_VALUE.toLong()
-            if (confirmed) { kept++; continue } // real, on-chain send — never touch it
+            // Whole per-txid body is guarded: a Room/JNI exception on one stuck tx
+            // must not skip the remaining txids or the final persist() below.
+            runCatching {
+                val h = heights[txid]
+                val confirmed = h != null && h > 0L && h < Int.MAX_VALUE.toLong()
+                if (confirmed) { kept++; return@runCatching } // real, on-chain send — never touch it
 
-            // Unconfirmed: read outputs BEFORE any removal (removeTransaction
-            // below invalidates the tx from BRWallet's view).
-            val outputs = NativeBridge.getTransactionOutputsForHash(txid)?.toList() ?: emptyList()
-            val isValid = runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)
-            val dead = DeadSendPredicate.isDead(
-                isValid = isValid,
-                outputs = outputs.map {
-                    DeadSendPredicate.OutSats(it.split("|").getOrNull(1)?.toLongOrNull() ?: 0L)
+                // Unconfirmed: read outputs BEFORE any removal (removeTransaction
+                // below invalidates the tx from BRWallet's view).
+                val outputs = NativeBridge.getTransactionOutputsForHash(txid)?.toList() ?: emptyList()
+                val isValid = runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)
+                val dead = DeadSendPredicate.isDead(
+                    isValid = isValid,
+                    outputs = outputs.map {
+                        DeadSendPredicate.OutSats(it.split("|").getOrNull(1)?.toLongOrNull() ?: 0L)
+                    }
+                )
+                if (!dead) { kept++; return@runCatching } // slow but still valid — spare it, don't touch
+
+                // Ordering is load-bearing (see dead-asset-send-clear design doc):
+                // remove the transaction from the wallet FIRST. Only once native
+                // removal has actually succeeded do we drop the local record and
+                // clean up owned phantom asset rows. If we deleted the Room rows
+                // before removal (or removal fails), the tx is still wallet-known
+                // and a subsequent sweepKnownTransactionsForAssets pass would
+                // silently re-insert the exact phantom rows we'd have just deleted.
+                if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
+                    store.remove(txid)
+                    dropped++
+                    if (assetManager != null) {
+                        assetRowsCleared += assetManager.clearDeadAssetSend(txid, ownedSet, outputs)
+                    }
                 }
-            )
-            if (!dead) { kept++; continue } // slow but still valid — spare it, don't touch
-
-            // Dead: clean up any owned phantom asset rows this send fabricated,
-            // then drop the transaction itself.
-            if (assetManager != null) {
-                assetRowsCleared += assetManager.clearDeadAssetSend(txid, ownedSet, outputs)
-            }
-            if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
-                store.remove(txid)
-                dropped++
+            }.onFailure { e ->
+                android.util.Log.w("WalletManager", "clearStuckSends: skipping txid=$txid after exception", e)
             }
         }
         if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
