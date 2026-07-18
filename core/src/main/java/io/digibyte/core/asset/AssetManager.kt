@@ -1338,36 +1338,40 @@ class AssetManager(
         return deleted
     }
 
-    /** The wallet's internal/change scriptPubKey set (lowercase hex), enumerated
-     *  from native change addresses. Bounded — historical internal-chain usage is
-     *  small. No native rebuild: getChangeAddress + addressToScriptPubKey exist.
-     *  Untested on host (NativeBridge JNI) — thin public helper only, exactly
-     *  like the prune's public delegate; [healLegacyChangeAddressOrphansImpl] does
-     *  not depend on it in tests (tests pass the change-script set directly).
+    /**
+     *  KNOWN LIMITATION — currently returns AT MOST the single current unused
+     *  internal-change TIP script (a 1-element set), NOT the wallet's used /
+     *  historical internal-change scripts.
      *
-     *  Enumerates ALL THREE address formats {0=legacy, 1=P2SH-segwit, 2=bech32}
-     *  and unions every resulting change script. The asset-send path derives its
-     *  change as format 2 (P2WPKH — see the asset-change marker at
-     *  `getChangeAddress(1, format = 2)` and DGB change at
-     *  `getChangeAddress(0, format = 2)` in the transfer builder), so format 2
-     *  is the one the real Chang phantoms actually carry; enumerating only
-     *  format 0 (legacy) would produce a set DISJOINT from those scripts and
-     *  heal nothing. Over-enumerating across all formats is strictly SAFE: every
-     *  format still resolves to the INTERNAL change chain (m/.../1/i), which is
-     *  disjoint from the external receive chain regardless of script type — so
-     *  no external receive can ever enter the change set no matter which formats
-     *  we union in. */
+     *  `NativeBridge.getChangeAddress(index, format)` IGNORES both `index` and
+     *  `format` — the JNI implementation casts `(void)index; (void)format;` and
+     *  returns only `BRWalletInternalChangeAddress` (the current unused change
+     *  tip); see `native/src/main/jni/bridge/jni_wallet.c`. So there is no way,
+     *  through this accessor, to enumerate the wallet's used/below-the-tip
+     *  internal-change addresses. The legacy Chang phantoms sit at exactly those
+     *  USED historical change addresses, so the tip set does not contain them.
+     *
+     *  CONSEQUENCE: the legacy heal is currently NON-FUNCTIONAL for pre-existing
+     *  phantoms — [healLegacyChangeAddressOrphans] will find ~0 candidates. This
+     *  is data-safe (under-matches; only ever ships dry-run) but is DEFERRED
+     *  pending a native internal-chain accessor that can list the used change
+     *  scripts (e.g. a future `BRWalletInternalAddrs` submodule accessor). Wire
+     *  that source in here and the existing candidate logic + dry-run safety
+     *  (already unit-tested) become fully functional with no other change.
+     *
+     *  Kept as a single cheap call (a loop over indices/formats would just make
+     *  hundreds of identical JNI calls returning the same tip). Untested on host
+     *  (NativeBridge JNI) — thin public helper only; the tests drive
+     *  [healLegacyChangeAddressOrphansImpl] with an injected change-set directly. */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun buildChangeScriptHexes(maxIndex: Int = 200): Set<String> {
-        val out = HashSet<String>()
-        for (format in intArrayOf(0, 1, 2)) {
-            for (i in 0 until maxIndex) {
-                val addr = runCatching { NativeBridge.getChangeAddress(i, format) }.getOrNull()
-                if (addr.isNullOrBlank()) continue
-                val script = runCatching { NativeBridge.addressToScriptPubKey(addr) }.getOrNull() ?: continue
-                out.add(script.toHex().lowercase())
-            }
-        }
-        return out
+        // getChangeAddress ignores its args (returns only the current change
+        // tip), so a single call is exhaustive of what this accessor can give.
+        val addr = runCatching { NativeBridge.getChangeAddress(0, 0) }.getOrNull()
+        if (addr.isNullOrBlank()) return emptySet()
+        val script = runCatching { NativeBridge.addressToScriptPubKey(addr) }.getOrNull()
+            ?: return emptySet()
+        return setOf(script.toHex().lowercase())
     }
 
     /**
@@ -1412,6 +1416,14 @@ class AssetManager(
      * What makes deletion safe here is the CHANGE-CHAIN scope, NOT the source
      * tag: a genuine still-valid change holding has its tx PRESENT in native
      * (isTxGone == false) and therefore survives. Do NOT narrow this to NATIVE.
+     *
+     * CURRENT STATE: in production [changeScriptHexes] comes from
+     * [buildChangeScriptHexes], which today can only supply the current
+     * change-TIP script (native `getChangeAddress` ignores index/format) — so
+     * in practice this yields ~0 candidates for the used/historical phantoms.
+     * The candidate LOGIC and dry-run safety below are correct and stay valid
+     * as-is once a real used-change-script source is wired into that helper;
+     * the tests here inject the set directly, so they already exercise it.
      */
     internal suspend fun healLegacyChangeAddressOrphansImpl(
         changeScriptHexes: Set<String>,
