@@ -263,8 +263,9 @@ class SendViewModel @Inject constructor(
     private val _ddBalance = MutableStateFlow(0L)
     val ddBalance: StateFlow<Long> = _ddBalance.asStateFlow()
 
-    /** Fill the amount field with the full available DigiDollar balance (MAX). */
-    fun setDdAmountToMax() { amountFiat.value = ddCentsToPlainUsd(_ddBalance.value) }
+    /** Fill the amount field with MAX sendable DigiDollar — the held balance
+     *  clamped to the per-transfer consensus cap so MAX always passes validation. */
+    fun setDdAmountToMax() { amountFiat.value = ddCentsToPlainUsd(minOf(_ddBalance.value, DD_MAX_CENTS)) }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -299,9 +300,15 @@ class SendViewModel @Inject constructor(
             return Math.round(d * 100.0)
         }
 
-        /** DD send amount valid: within consensus [100, 10000000] cents and <= held balance. */
+        /** Consensus max DigiDollar per transfer, in cents ($100,000.00). */
+        const val DD_MAX_CENTS = 10_000_000L
+
+        /** Consensus min DigiDollar per transfer, in cents ($1.00). */
+        const val DD_MIN_CENTS = 100L
+
+        /** DD send amount valid: within consensus [DD_MIN_CENTS, DD_MAX_CENTS] and <= held balance. */
         fun ddAmountValid(cents: Long, ddBalance: Long): Boolean =
-            cents in 100..10_000_000 && cents <= ddBalance
+            cents in DD_MIN_CENTS..DD_MAX_CENTS && cents <= ddBalance
 
         /** cents -> plain "X.XX" for the amount field (5000 -> "50.00"). */
         fun ddCentsToPlainUsd(cents: Long): String = "%.2f".format(cents / 100.0)

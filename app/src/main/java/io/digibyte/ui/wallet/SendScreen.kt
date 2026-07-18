@@ -261,13 +261,13 @@ fun SendScreen(
             )
             val ddCents = SendViewModel.parseUsdToCents(amountFiat)
             val ddAmountError: String? = when {
-                amountFiat.isBlank()      -> null
-                ddCents == null           -> "Enter a valid amount"
-                ddBalance <= 0L           -> "You have no DigiDollar to send"
-                ddCents < 100L            -> "Minimum is $1.00"
-                ddCents > ddBalance       -> "Exceeds available DigiDollar"
-                ddCents > 10_000_000L     -> "Exceeds maximum per transaction"
-                else                      -> null
+                amountFiat.isBlank()                 -> null
+                ddCents == null                      -> "Enter a valid amount"
+                ddBalance <= 0L                      -> "You have no DigiDollar to send"
+                ddCents < SendViewModel.DD_MIN_CENTS -> "Minimum is $1.00"
+                ddCents > ddBalance                  -> "Exceeds available DigiDollar"
+                ddCents > SendViewModel.DD_MAX_CENTS -> "Exceeds maximum per transaction"
+                else                                 -> null
             }
             if (ddAmountError != null) {
                 Text(
