@@ -169,9 +169,26 @@ class WalletManager(
             val syncPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
             val savedTxHex = syncPrefs.getString("saved_transactions", null)
             if (savedTxHex != null) {
-                val txBytes = hexToBytes(savedTxHex)
-                val loaded = NativeBridge.loadSerializedTransactions(txBytes)
-                android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
+                // A bad tx cache must NEVER abort the restore or block the seed load
+                // below — it's just a cache re-derivable from chain. The naive
+                // chunked(2).map { it.toInt(16) } decoder this replaces threw
+                // NumberFormatException on any non-hex byte, and that throw escaped
+                // this function's try/finally (only seedBytes is zeroed there),
+                // crashing startup on a corrupt blob. decodeSavedTransactionsOrNull
+                // validates hex first and returns null instead of throwing; the
+                // whole block is additionally wrapped so no other decode/native
+                // exception can escape either.
+                try {
+                    val txBytes = decodeSavedTransactionsOrNull(savedTxHex)
+                    if (txBytes != null) {
+                        val loaded = NativeBridge.loadSerializedTransactions(txBytes)
+                        android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
+                    } else {
+                        android.util.Log.w("WalletManager", "Dropping corrupt saved_transactions blob (invalid hex) — continuing restore from seed")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("WalletManager", "saved_transactions restore failed — dropping and continuing", e)
+                }
             }
 
             // Use recoverWalletFromBytes with the original creation timestamp so the
@@ -529,4 +546,26 @@ class WalletManager(
 
     private fun hexToBytes(hex: String): ByteArray =
         hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+}
+
+/**
+ * Validate + hex-decode the `saved_transactions` restore blob for
+ * [WalletManager.restoreFromDisk]. Pure and side-effect-free so it's testable
+ * without constructing a [WalletManager] (which would require mocking
+ * `NativeBridge`'s JNI surface).
+ *
+ * Reuses [FilterHeaderStore.decodeHexOrNull]'s hex-validity guard (odd length
+ * or a non-hex character -> `null`) instead of the throwing
+ * `chunked(2).map { it.toInt(16) }` decoder it replaces in `restoreFromDisk` —
+ * that decoder threw [NumberFormatException] on any corrupt byte, and nothing
+ * in `restoreFromDisk` caught it (only `finally { seedBytes.fill(0) }` ran), so
+ * a corrupt tx cache crashed the whole restore instead of just being dropped.
+ *
+ * @return the decoded bytes, or `null` if [hex] is `null` or malformed. The
+ *   caller drops a `null` result and continues restoring the wallet from the
+ *   seed — the tx cache is just a cache, re-derivable from chain.
+ */
+internal fun decodeSavedTransactionsOrNull(hex: String?): ByteArray? {
+    if (hex == null) return null
+    return FilterHeaderStore.decodeHexOrNull(hex)
 }
