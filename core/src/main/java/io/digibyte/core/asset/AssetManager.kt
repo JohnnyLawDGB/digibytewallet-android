@@ -249,31 +249,16 @@ class AssetManager(
             // enforce when we actually have an owned set — an empty set means
             // the lookup failed, in which case we defer to the prune.
             if (owned.isNotEmpty() && out.script.toHex() !in owned) continue
-            // Preserve a real (non-placeholder) asset-id if a prior sweep +
-            // M3 walk already resolved this UTXO. Without this check, each
-            // 30s sweep would clobber the real id with a fresh
-            // "unresolved:…" placeholder and trigger the walk on repeat.
-            val existing = utxoDao.getAssetIdAt(txHashHex, out.vout)
-            val effectiveAssetId = if (existing != null && !existing.startsWith("unresolved:")) {
-                existing
-            } else {
-                anyStillUnresolved = true
-                placeholderAssetId
-            }
-            utxoDao.insertAll(
-                listOf(
-                    UtxoEntity(
-                        txid = txHashHex,
-                        vout = out.vout,
-                        scriptPubKey = out.script,
-                        satoshis = out.sats,
-                        blockHeight = blockHeight,
-                        isAsset = true,
-                        assetId = effectiveAssetId,
-                        assetQuantity = quantityForOutput(out.vout),
-                    )
-                )
+            val stillUnresolved = persistDetectedAssetOutput(
+                txHashHex = txHashHex,
+                vout = out.vout,
+                scriptPubKey = out.script,
+                sats = out.sats,
+                blockHeight = blockHeight,
+                placeholderAssetId = placeholderAssetId,
+                computedQty = quantityForOutput(out.vout),
             )
+            if (stillUnresolved) anyStillUnresolved = true
         }
 
         // Kick off metadata fetch if we have a CID (issuance only).
@@ -340,6 +325,70 @@ class AssetManager(
         }
 
         return IncomingAssetInfo(header = header, assetId = placeholderAssetId)
+    }
+
+    /**
+     * The per-output persistence decision (C5): given a candidate asset UTXO
+     * detected at (txHashHex, vout), either non-destructively re-tag an
+     * existing row's provenance or insert a genuinely new one tagged NATIVE.
+     *
+     * Never rewrites `spent` or `blockHeight` on an existing row (a REPLACE-
+     * reinsert there would reset both and fight the native-spent-decrement
+     * branch — the exact data-loss bug this task fixes), and never lowers an
+     * already-resolved `asset_quantity` (native's per-output quantity is an
+     * underestimate for percent/range TRANSFER instructions, so only a
+     * strictly larger computed value is allowed to raise it).
+     *
+     * Returns true if this outpoint is still unresolved (no real asset id
+     * yet) after the upsert, so the caller can fold it into the M3-walk
+     * trigger `anyStillUnresolved`.
+     *
+     * `internal` rather than `private`: [processIncomingAssetTx]'s own prefix
+     * (OP_RETURN decode + asset-id derivation) unavoidably calls through the
+     * real `NativeBridge` singleton, whose `init` block does
+     * `System.loadLibrary("core-lib")` — unavailable on the host JVM unit-
+     * test runner (see WalletManagerSavedTransactionsDecodeTest / WalletWipe
+     * Test for the same constraint elsewhere in this codebase). Extracting
+     * this seam lets [AssetProvenanceTaggingTest] exercise the real
+     * persistence branch directly, by mocking only [utxoDao].
+     */
+    internal suspend fun persistDetectedAssetOutput(
+        txHashHex: String,
+        vout: Int,
+        scriptPubKey: ByteArray,
+        sats: Long,
+        blockHeight: Long,
+        placeholderAssetId: String,
+        computedQty: Long,
+    ): Boolean {
+        val existingRow = utxoDao.getAssetUtxoAt(txHashHex, vout)
+        return if (existingRow != null) {
+            // Re-detection of a row we already hold: re-tag provenance ONLY.
+            utxoDao.markAssetSource(txHashHex, vout, AssetSource.NATIVE)
+            if (computedQty > existingRow.assetQuantity) {
+                utxoDao.updateAssetQuantity(txHashHex, vout, computedQty)
+            }
+            existingRow.assetId == null || existingRow.assetId.startsWith("unresolved:")
+        } else {
+            // Genuinely new outpoint: insert as NATIVE.
+            utxoDao.insertAll(
+                listOf(
+                    UtxoEntity(
+                        txid = txHashHex,
+                        vout = vout,
+                        scriptPubKey = scriptPubKey,
+                        satoshis = sats,
+                        blockHeight = blockHeight,
+                        isAsset = true,
+                        assetId = placeholderAssetId,
+                        assetQuantity = computedQty,
+                        spent = false,
+                        assetSource = AssetSource.NATIVE,
+                    )
+                )
+            )
+            placeholderAssetId.startsWith("unresolved:")
+        }
     }
 
     /**
@@ -629,6 +678,7 @@ class AssetManager(
                     isAsset = true,
                     assetId = asset.assetId,
                     assetQuantity = asset.count,
+                    assetSource = io.digibyte.core.asset.AssetSource.BACKEND,
                 )
 
                 // Metadata cache handling — there's a subtle ordering
