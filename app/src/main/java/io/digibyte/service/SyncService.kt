@@ -226,7 +226,7 @@ class SyncService : Service() {
             ownNodeAdditiveSessionOverride = false
             serviceScope.launch {
                 try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectBloomPeers()
+                injectPeers()
                 injectCustomNode()   // re-injects + pins (or clears) with the new prefs
                 NativeBridge.startSync()
             }
@@ -246,7 +246,7 @@ class SyncService : Service() {
             ownNodeAdditiveSessionOverride = true
             serviceScope.launch {
                 try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectBloomPeers()
+                injectPeers()
                 injectCustomNode()   // override above forces non-exclusive here
                 NativeBridge.startSync()
             }
@@ -569,7 +569,7 @@ class SyncService : Service() {
                             zeroPeerStreak = 0
                         }
                         android.util.Log.i("SyncService", "No peers connected, re-injecting filter peers and reconnecting")
-                        injectBloomPeers()
+                        injectPeers()
                         injectCustomNode()
                         NativeBridge.startSync()
                     }
@@ -908,7 +908,7 @@ class SyncService : Service() {
             torProxyActive = false
             torReconnectFailures = 0
             _torFailureActive.value = true
-            injectBloomPeers()
+            injectPeers()
             injectCustomNode()
             NativeBridge.startSync()
             return
@@ -1039,7 +1039,7 @@ class SyncService : Service() {
         // Inject filter-capable peers from the seeder API before starting sync.
         // This ensures the wallet has multiple compact-filter peers to try, not
         // just digiscope.me.
-        injectBloomPeers()
+        injectPeers()
         // Inject the user's own node (if configured) as a priority compact-filter
         // peer. No-op unless the toggle is on; resolves DNS off the native peer lock.
         injectCustomNode()
@@ -1461,7 +1461,7 @@ class SyncService : Service() {
         return bytes
     }
 
-    private fun injectBloomPeers() {
+    private fun injectPeers() {
         if (isTestnet(this@SyncService)) {
             // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
             // only knows mainnet peers, so the mainnet filter-pool fetch AND the
@@ -1480,7 +1480,7 @@ class SyncService : Service() {
         // while any of these are dialable or connected.
         injectFilterPeers()
         // Dandelion peers piggyback here so they're injected at every sync-start
-        // path (all of them call injectBloomPeers). Runs first so the early
+        // path (all of them call injectPeers). Runs first so the early
         // returns below can't skip it; self-throttled by its own last_fetch timer.
         injectDandelionPeers()
         val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
@@ -1715,7 +1715,8 @@ class SyncService : Service() {
      *  Extracts ip + port + services_hex per peer. services_hex carries the node's
      *  advertised service bits — notably 0x40 (SERVICES_NODE_COMPACT_FILTERS) — so
      *  the native filter-first peer selection can recognize and hold filter peers.
-     *  Absent/unparseable services_hex → 0 (native falls back to bloom-only). */
+     *  Absent/unparseable services_hex → 0 (native falls back to the CF-tagged
+     *  INJECT_DEFAULT_SERVICES default, jni_peer.c — never bloom-only). */
     private fun parsePeersJson(json: String): List<Triple<String, Int, Long>> {
         return try {
             val root = org.json.JSONObject(json)
@@ -1739,7 +1740,8 @@ class SyncService : Service() {
     /** Pool is stored as a compact JSON array of "ip:port:servicesHex" strings
      *  (servicesHex is lowercase hex, no 0x prefix). Seeder peers are IPv4, so
      *  splitting on ':' is unambiguous. Legacy "ip:port" entries from older
-     *  caches parse with services = 0 (native falls back to bloom-only). */
+     *  caches parse with services = 0 (native falls back to the CF-tagged
+     *  INJECT_DEFAULT_SERVICES default, jni_peer.c — never bloom-only). */
     private fun serializePool(pool: List<Triple<String, Int, Long>>): String {
         val arr = org.json.JSONArray()
         for ((ip, port, services) in pool) arr.put("$ip:$port:${services.toString(16)}")
@@ -2003,7 +2005,7 @@ class SyncService : Service() {
          *  services_hex, etc.) since it only reads ip + port.
          *  MAINNET ONLY — api.digiscope.me knows nothing about testnet26 peers.
          *  Never fetched when [io.digibyte.core.isTestnet] is true; see
-         *  [injectBloomPeers]. */
+         *  [injectPeers]. */
         private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
         /** Hardcoded testnet26 public peers injected in place of the mainnet
          *  digiscope seeder pool when the wallet is running on testnet. The

@@ -129,8 +129,9 @@ object NativeBridge {
      *  `services_hex`, e.g. 0x44d for a BIP157/158 filter peer where bit 0x40 =
      *  SERVICES_NODE_COMPACT_FILTERS). Threading this through lets the native
      *  filter-first peer selection recognize and hold filter-capable peers.
-     *  Pass 0 when unknown — the native side falls back to the legacy
-     *  NODE_NETWORK|NODE_BLOOM default so nothing regresses. */
+     *  Pass 0 when unknown — the native side falls back to
+     *  INJECT_DEFAULT_SERVICES (NODE_NETWORK|NODE_COMPACT_FILTERS), so an
+     *  untagged peer is still treated as CF-capable (the wallet is CF-only). */
     external fun injectPeerByIp(ip: String, port: Int, servicesHex: Long)
 
     /** Pin the peer manager to a single own-node. When [exclusive] is true, the
