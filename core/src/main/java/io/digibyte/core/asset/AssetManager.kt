@@ -30,6 +30,37 @@ internal fun isOutgoingUnconfirmedRow(sent: Long, blockHeight: Long): Boolean =
     sent > 0L && blockHeight >= Int.MAX_VALUE.toLong()
 
 /**
+ * Pure builder for the sweep's txid -> isOutgoingUnconfirmed overlay
+ * (source-fix / C2). Parses each
+ * [io.digibyte.core.bridge.NativeBridge.getTransactionDetails] row
+ * (`txHash|amount|fee|blockHeight|timestamp|sent|received`) and records
+ * [isOutgoingUnconfirmedRow] against its txid. Malformed rows (fewer than 6
+ * `|`-fields, blank txid) are skipped. Top-level and dependency-free so the
+ * sweep's overlay logic is unit-testable without any NativeBridge mocking.
+ *
+ * A txid ABSENT from the returned map is, by construction, an OLD tx that
+ * fell outside `getTransactionDetails`' recent-100 window — and since
+ * `BRWalletTransactions` is oldest-first while unconfirmed txs sort NEWEST,
+ * every unconfirmed-outgoing send is guaranteed to be inside that window.
+ * So callers treat an absent txid as `false` (`map[txid] ?: false`), which
+ * is always correct: an out-of-window tx is necessarily confirmed.
+ */
+internal fun buildOutgoingUnconfirmedMap(detailRows: List<String>): Map<String, Boolean> {
+    val map = HashMap<String, Boolean>()
+    for (line in detailRows) {
+        if (line.isBlank()) continue
+        val p = line.split("|")
+        if (p.size < 6) continue
+        val txHash = p[0]
+        if (txHash.isBlank()) continue
+        val blockHeight = p[3].toLongOrNull() ?: 0L
+        val sent = p[5].toLongOrNull() ?: 0L
+        map[txHash] = isOutgoingUnconfirmedRow(sent, blockHeight)
+    }
+    return map
+}
+
+/**
  * Orchestration layer for DigiAsset operations.
  *
  * Responsibilities:
@@ -616,34 +647,44 @@ class AssetManager(
      *
      * Returns the count of transactions that were identified as DigiAsset txs.
      *
-     * Source-fix (C2): enumerates [NativeBridge.getTransactionDetails] (not
-     * [NativeBridge.getAllTransactionHashes]) because each row also carries
-     * `sent` and `blockHeight` — the two fields [isOutgoingUnconfirmedRow]
-     * needs to decide, per tx, whether this is an unconfirmed OUTGOING send.
-     * When it is, that flag is threaded into [processIncomingAssetTx] so its
+     * Two-source design (source-fix / C2 + full sovereign re-scan coverage):
+     *  - COVERAGE: the tx SET to re-scan comes from the UNCAPPED
+     *    [NativeBridge.getAllTransactionHashes] — every wallet-known tx, so a
+     *    long-history wallet's OLD asset holdings are re-detected as before.
+     *    ([NativeBridge.getTransactionDetails] caps at the 100 most recent, so
+     *    driving the sweep off it alone would silently drop older asset txs
+     *    from the re-scan.)
+     *  - UNCONFIRMED SIGNAL: the per-tx `isOutgoingUnconfirmed` flag is
+     *    overlaid from [NativeBridge.getTransactionDetails] (the recent-100),
+     *    which is the only source carrying `sent` + `blockHeight`. This is
+     *    SUFFICIENT: `BRWalletTransactions` is oldest-first and unconfirmed
+     *    txs sort NEWEST, so EVERY unconfirmed-outgoing send is guaranteed to
+     *    be inside the recent-100 window. A txid absent from the overlay map
+     *    is therefore necessarily an OLD (hence confirmed) tx, for which
+     *    `false` is the correct flag (`overlay[txHash] ?: false`).
+     * When the flag is true it's threaded into [processIncomingAssetTx] so its
      * owned-output persistence is skipped for this pass (see
      * [persistDetectedAssetOutput]); an incoming (`sent == 0`) unconfirmed
      * receive is unaffected and persists normally.
      */
     suspend fun sweepKnownTransactionsForAssets(): Int {
-        // Row format (jni_wallet getTransactionDetails):
+        // COVERAGE source: uncapped tx set (see method doc).
+        val hashes = NativeBridge.getAllTransactionHashes() ?: return 0
+        // UNCONFIRMED-SIGNAL source: recent-100 details rows carry sent+blockHeight.
+        //   Row format (jni_wallet getTransactionDetails):
         //   txHash|amount|fee|blockHeight|timestamp|sent|received   (TX_UNCONFIRMED = Int.MAX_VALUE)
-        val rows = runCatching { NativeBridge.getTransactionDetails().trim().lines() }
-            .getOrNull()?.filter { it.isNotBlank() } ?: return 0
+        val detailsRows = runCatching { NativeBridge.getTransactionDetails().trim().lines() }
+            .getOrNull().orEmpty()
+        val outgoingUnconfirmed = buildOutgoingUnconfirmedMap(detailsRows)
         // Compute the owned-script set ONCE for the whole sweep (it's the same
         // for every tx) instead of rebuilding it per tx — a long-history wallet
         // has hundreds of addresses, so a per-tx rebuild is hundreds of JNI
         // calls × every known tx, every 30s.
         val owned = buildOwnedScriptHexes()
         var detected = 0
-        for (line in rows) {
-            val p = line.split("|")
-            if (p.size < 6) continue
-            val txHash = p[0]
+        for (txHash in hashes) {
             if (txHash.isBlank()) continue
-            val blockHeight = p[3].toLongOrNull() ?: 0L
-            val sent = p[5].toLongOrNull() ?: 0L
-            val isOutgoingUnconfirmed = isOutgoingUnconfirmedRow(sent, blockHeight)
+            val isOutgoingUnconfirmed = outgoingUnconfirmed[txHash] ?: false
             val info = runCatching {
                 processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
                     isOutgoingUnconfirmed = isOutgoingUnconfirmed)
@@ -653,7 +694,7 @@ class AssetManager(
             if (info != null) detected++
         }
         android.util.Log.i("AssetManager",
-            "sweepKnownTransactions: ${rows.size} txs scanned, $detected asset txs found")
+            "sweepKnownTransactions: ${hashes.size} txs scanned, $detected asset txs found")
         return detected
     }
 

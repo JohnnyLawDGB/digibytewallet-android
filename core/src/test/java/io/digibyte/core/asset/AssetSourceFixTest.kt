@@ -165,3 +165,51 @@ class IsOutgoingUnconfirmedRowTest {
         assert(!isOutgoingUnconfirmedRow(sent = 700L, blockHeight = 800_000L))
     }
 }
+
+/**
+ * Tests for the sweep's two-source overlay (source-fix / C2 + full coverage):
+ * [buildOutgoingUnconfirmedMap] parses the recent-100 details rows into a
+ * txid -> isOutgoingUnconfirmed map, and the sweep enumerates the UNCAPPED
+ * hash set, defaulting an absent txid to `false` (an out-of-window tx is
+ * necessarily confirmed). Pure — no NativeBridge/DAO mocking.
+ *
+ * Row format: `txHash|amount|fee|blockHeight|timestamp|sent|received`
+ * (TX_UNCONFIRMED = Int.MAX_VALUE).
+ */
+class OutgoingUnconfirmedMapTest {
+    private val u = Int.MAX_VALUE.toLong().toString() // unconfirmed blockHeight sentinel
+
+    @Test fun outgoing_unconfirmed_row_maps_true() {
+        val m = buildOutgoingUnconfirmedMap(listOf("aa|-700|100|$u|1700000000|700|0"))
+        assert(m["aa"] == true)
+    }
+
+    @Test fun incoming_unconfirmed_receive_maps_false() {
+        val m = buildOutgoingUnconfirmedMap(listOf("bb|6000|0|$u|1700000000|0|6000"))
+        assert(m["bb"] == false)
+    }
+
+    @Test fun confirmed_outgoing_maps_false() {
+        val m = buildOutgoingUnconfirmedMap(listOf("cc|-700|100|800000|1700000000|700|0"))
+        assert(m["cc"] == false)
+    }
+
+    @Test fun malformed_rows_are_skipped() {
+        val m = buildOutgoingUnconfirmedMap(
+            listOf("", "  ", "tooFew|1|2", "|-1|1|$u|1|1|0", "dd|-700|100|$u|1700000000|700|0")
+        )
+        // Only the well-formed non-blank-txid row survives.
+        assert(m.size == 1)
+        assert(m["dd"] == true)
+    }
+
+    @Test fun absent_txid_defaults_false_matching_sweep_overlay() {
+        // Mirrors the sweep's `overlay[txHash] ?: false`: a txid that fell
+        // outside the recent-100 details window (so is not in the map) is an
+        // OLD, therefore confirmed, tx — false is correct.
+        val overlay = buildOutgoingUnconfirmedMap(listOf("aa|-700|100|$u|1700000000|700|0"))
+        assert((overlay["zz-not-in-window"] ?: false) == false)
+        // And the in-window unconfirmed-outgoing tx still resolves true.
+        assert((overlay["aa"] ?: false) == true)
+    }
+}
