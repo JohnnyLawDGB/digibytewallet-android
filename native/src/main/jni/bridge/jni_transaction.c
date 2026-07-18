@@ -11,6 +11,7 @@
 
 #include "jni_bridge.h"
 #include "BRDigiDollar.h"
+#include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 
 /* ---------- createTransaction ---------- */
 
@@ -423,11 +424,12 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidDigiDollarAddress(JNIEnv *env, 
     if (! addr) return JNI_FALSE;
     const char *s = (*env)->GetStringUTFChars(env, addr, NULL);
     uint8_t key[32];
-#ifdef BITCOIN_TESTNET
-    int isTestnet = 1;
-#else
-    int isTestnet = 0;
-#endif
+    /* Runtime network — MUST match the encode side (getDigiDollarReceiveAddress
+     * uses BRNetworkIsTestnet()). NOT compile-time #ifdef BITCOIN_TESTNET: the
+     * mainnet flavor builds with -DBITCOIN_TESTNET=0, which still DEFINES the
+     * macro, so #ifdef was ALWAYS true and forced testnet decode on mainnet —
+     * rejecting every valid DD… address (accepted TD… only). */
+    int isTestnet = BRNetworkIsTestnet();
     int ok = s && BRDigiDollarAddressDecode(key, s, isTestnet);
     if (s) (*env)->ReleaseStringUTFChars(env, addr, s);
     return ok ? JNI_TRUE : JNI_FALSE;
@@ -444,11 +446,10 @@ Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject th
 
     const char *td = (*env)->GetStringUTFChars(env, tdAddress, NULL);
     uint8_t key[32];
-#ifdef BITCOIN_TESTNET
-    int isTestnet = 1;
-#else
-    int isTestnet = 0;
-#endif
+    /* Runtime network — see isValidDigiDollarAddress note (compile-time #ifdef
+     * BITCOIN_TESTNET was always-true on the -DBITCOIN_TESTNET=0 mainnet build,
+     * so DD sends could never decode a mainnet DD… recipient). */
+    int isTestnet = BRNetworkIsTestnet();
     int decoded = td && BRDigiDollarAddressDecode(key, td, isTestnet);
     if (td) (*env)->ReleaseStringUTFChars(env, tdAddress, td);
     if (! decoded) { LOGW("sendDigiDollar: bad TD address"); return NULL; }
