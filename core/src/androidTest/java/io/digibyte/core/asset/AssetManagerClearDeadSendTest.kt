@@ -83,9 +83,11 @@ class AssetManagerClearDeadSendTest {
             deadTxid, 0, recipientScript, 700, 1000,
             isAsset = true, assetId = assetId, assetQuantity = 20
         )
-        // Owned row for a DIFFERENT txid, same asset — must survive (txid-scoped).
+        // Owned row for a DIFFERENT txid at the SAME vout (2) as the row that
+        // gets deleted below — proves the delete is scoped by txid, not just
+        // vout: a coincidental vout match on another transaction must survive.
         val otherHolding = UtxoEntity(
-            otherTxid, 1, ownedScript, 6000, 1000,
+            otherTxid, 2, ownedScript, 6000, 1000,
             isAsset = true, assetId = assetId, assetQuantity = 10
         )
         // A real, unrelated holding of a different asset — must survive.
@@ -93,7 +95,18 @@ class AssetManagerClearDeadSendTest {
             origTxid, 0, ownedScript, 6000, 1000,
             isAsset = true, assetId = otherAssetId, assetQuantity = 10
         )
-        utxoDao.insertAll(listOf(deadChange, deadRecipientMarker, otherHolding, realHolding))
+        // Owned DGB-change output of the SAME dead tx — is_asset = 0, exactly
+        // the shape of a normal asset send's change back to our own wallet.
+        // deleteAssetUtxo is is_asset = 1 scoped, so attempting to delete this
+        // row is a no-op: it must survive AND must not be counted in the
+        // returned deleted-rows total (the bug this test guards against —
+        // the old code did `deleted++` unconditionally per attempt, over-
+        // reporting 2 when only the one real asset row was removed).
+        val dgbChangeRow = UtxoEntity(
+            deadTxid, 3, ownedScript, 99300, 1000,
+            isAsset = false
+        )
+        utxoDao.insertAll(listOf(deadChange, deadRecipientMarker, otherHolding, realHolding, dgbChangeRow))
 
         val beforeBalance = utxoDao.getAssetBalances().first().first { it.assetId == assetId }.totalQuantity
         assertEquals(50L, beforeBalance) // 20 (phantom change) + 20 (phantom recipient) + 10 (other holding)
@@ -102,17 +115,30 @@ class AssetManagerClearDeadSendTest {
             "0|700|$recipientScriptHex",
             "1|0|$opReturnScriptHex",
             "2|700|$ownedScriptHex",
+            "3|99300|$ownedScriptHex",
         )
         val ownedScriptHexes = setOf(ownedScriptHex)
 
         val deletedCount = assetManager.clearDeadAssetSend(deadTxid, ownedScriptHexes, outputs)
+        // Exactly ONE asset row was actually removed — (deadTxid,3) is a
+        // same-owner, same-txid attempt that no-ops (is_asset = 0), and must
+        // NOT inflate the count to 2.
         assertEquals(1, deletedCount)
 
         val remaining = utxoDao.getAllAssetUtxosNow()
         assertFalse("(deadTxid,2) should be deleted", remaining.any { it.txid == deadTxid && it.vout == 2 })
         assertTrue("(deadTxid,0) non-owned marker must survive", remaining.any { it.txid == deadTxid && it.vout == 0 })
-        assertTrue("(otherTxid,1) must survive", remaining.any { it.txid == otherTxid && it.vout == 1 })
+        assertTrue("(otherTxid,2) same-vout-different-txid must survive", remaining.any { it.txid == otherTxid && it.vout == 2 })
         assertTrue("(origTxid,0) must survive", remaining.any { it.txid == origTxid && it.vout == 0 })
+
+        // The DGB-change row is is_asset = 0 so it never appears in the
+        // asset-rows query at all — confirm it's untouched via the DGB
+        // balance path instead.
+        val dgbBalanceAfter = utxoDao.getSpendableDigiByteUtxosNow()
+        assertTrue(
+            "(deadTxid,3) DGB-change row must survive untouched",
+            dgbBalanceAfter.any { it.txid == deadTxid && it.vout == 3 }
+        )
 
         val afterBalance = utxoDao.getAssetBalances().first().first { it.assetId == assetId }.totalQuantity
         assertEquals(30L, afterBalance)

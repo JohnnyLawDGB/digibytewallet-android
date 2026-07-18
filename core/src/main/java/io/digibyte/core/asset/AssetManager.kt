@@ -745,8 +745,7 @@ class AssetManager(
             val scriptHex = parts[2]
             if (scriptHex.isEmpty()) continue
             if (scriptHex.lowercase() !in ownedLower) continue
-            utxoDao.deleteAssetUtxo(txid, vout)
-            deleted++
+            deleted += utxoDao.deleteAssetUtxo(txid, vout)
         }
         return deleted
     }

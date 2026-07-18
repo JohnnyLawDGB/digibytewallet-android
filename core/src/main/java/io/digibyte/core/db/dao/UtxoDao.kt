@@ -59,9 +59,14 @@ interface UtxoDao {
     /** Delete a single asset UTXO by outpoint. Scoped to is_asset = 1 so a
      *  plain-DGB UTXO is never removed. The reconcile deletes phantom rows one
      *  at a time (their count is tiny), which also sidesteps the SQLite
-     *  bound-variable limit an `IN (:keys)` bulk delete would hit. */
+     *  bound-variable limit an `IN (:keys)` bulk delete would hit.
+     *
+     *  Returns the number of rows actually deleted (0 or 1) so a caller can
+     *  distinguish a real delete from a no-op — e.g. an owned DGB-change
+     *  output at the same txid is is_asset = 0 and never matches this query,
+     *  so it must not be counted as a removed asset row. */
     @Query("DELETE FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
-    suspend fun deleteAssetUtxo(txid: String, vout: Int)
+    suspend fun deleteAssetUtxo(txid: String, vout: Int): Int
 
     @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
     fun getAssetBalances(): Flow<List<AssetBalance>>
