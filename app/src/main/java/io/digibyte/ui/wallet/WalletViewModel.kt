@@ -488,8 +488,9 @@ class WalletViewModel @Inject constructor(
                     }
                 }
 
-                // Poll DigiDollar balance (cents). Trivially trusted — DD is zero on
-                // mainnet, nonzero only on a testnet26 build that syncs real DD txs.
+                // Poll DigiDollar balance (cents). DigiDollar is live on both
+                // networks (mainnet softfork activated 2026-07-18); this is nonzero
+                // once the wallet syncs real DD txs on whichever network it's on.
                 val ddCents = NativeBridge.getDigiDollarBalance()
                 if (ddCents != _ddBalance.value) {
                     _ddBalance.value = ddCents
