@@ -113,7 +113,7 @@ fun ReceiveScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                text = "Receive DGB",
+                text = if (isDigiDollar) "Receive DigiDollar" else "Receive DGB",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.weight(1f)
             )
@@ -172,7 +172,7 @@ fun ReceiveScreen(
 
         // Address display (selectable + copyable)
         Text(
-            text = "Your DigiByte Address",
+            text = if (isDigiDollar) "Your DigiDollar Address" else "Your DigiByte Address",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -248,7 +248,8 @@ fun ReceiveScreen(
             OutlinedButton(
                 onClick = {
                     val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    cb?.setPrimaryClip(ClipData.newPlainText("DGB address", address))
+                    val clipLabel = if (isDigiDollar) "DigiDollar address" else "DGB address"
+                    cb?.setPrimaryClip(ClipData.newPlainText(clipLabel, address))
                     showCopied = true
                 },
                 modifier = Modifier.weight(1f)
@@ -269,10 +270,15 @@ fun ReceiveScreen(
             Button(
                 onClick = {
                     val shareText = buildString {
-                        append("My DigiByte address: $address")
-                        val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
-                        if (sats != null && sats > 0) {
-                            append("\n${DigiByteUri.encode(address, sats)}")
+                        if (isDigiDollar) {
+                            // DigiDollar addresses aren't DGB-URI targets — share the raw address only.
+                            append("My DigiDollar address: $address")
+                        } else {
+                            append("My DigiByte address: $address")
+                            val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
+                            if (sats != null && sats > 0) {
+                                append("\n${DigiByteUri.encode(address, sats)}")
+                            }
                         }
                     }
                     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -296,37 +302,53 @@ fun ReceiveScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(20.dp))
+        // Amount-in-QR is a DGB payment-request feature (digibyte: URI). DigiDollar
+        // addresses aren't DGB-URI targets — the QR carries the raw DD address only —
+        // so this whole section is hidden when the DigiDollar format is selected, and
+        // replaced with a short DD note instead of a misleading "DGB" amount field.
+        if (!isDigiDollar) {
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(20.dp))
 
-        // Optional amount input
-        Text(
-            text = "Request Specific Amount (Optional)",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = amountInput,
-            onValueChange = { amountInput = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("0.00000000") },
-            suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            label = { Text("Amount") },
-            shape = RoundedCornerShape(8.dp)
-        )
-
-        if (amountInput.isNotBlank()) {
-            Spacer(modifier = Modifier.height(8.dp))
+            // Optional amount input
             Text(
-                text = "QR encodes: ${DigiByteUri.encode(address, amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() })}",
-                style = MaterialTheme.typography.labelSmall,
+                text = "Request Specific Amount (Optional)",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = amountInput,
+                onValueChange = { amountInput = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("0.00000000") },
+                suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                label = { Text("Amount") },
+                shape = RoundedCornerShape(8.dp)
+            )
+
+            if (amountInput.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "QR encodes: ${DigiByteUri.encode(address, amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() })}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "DigiDollar is received as USD-denominated tokens. Share this DigiDollar address — the QR carries the address only (no amount request).",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
