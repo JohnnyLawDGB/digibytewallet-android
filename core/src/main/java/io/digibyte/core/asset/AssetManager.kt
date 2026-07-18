@@ -17,6 +17,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 
 /**
+ * Pure per-row parse of a [io.digibyte.core.bridge.NativeBridge.getTransactionDetails]
+ * line's `sent` / `blockHeight` fields (source-fix / C2): decides whether a
+ * wallet-known tx is an unconfirmed OUTGOING send — one where we spent from
+ * our own inputs (`sent > 0`) but it hasn't confirmed yet (`blockHeight >=
+ * TX_UNCONFIRMED`, i.e. `Int.MAX_VALUE`). An incoming (`sent == 0`) unconfirmed
+ * receive returns false — only the outgoing-and-unconfirmed combination is
+ * gated. Top-level and dependency-free so it's directly unit-testable without
+ * any NativeBridge/DAO mocking.
+ */
+internal fun isOutgoingUnconfirmedRow(sent: Long, blockHeight: Long): Boolean =
+    sent > 0L && blockHeight >= Int.MAX_VALUE.toLong()
+
+/**
  * Orchestration layer for DigiAsset operations.
  *
  * Responsibilities:
@@ -138,6 +151,7 @@ class AssetManager(
         txHashHex: String,
         blockHeight: Long,
         ownedScriptHexes: Set<String>? = null,
+        isOutgoingUnconfirmed: Boolean = false,
     ): IncomingAssetInfo? {
         val outputLines = NativeBridge.getTransactionOutputsForHash(txHashHex) ?: return null
         if (outputLines.isEmpty()) return null
@@ -257,6 +271,7 @@ class AssetManager(
                 blockHeight = blockHeight,
                 placeholderAssetId = placeholderAssetId,
                 computedQty = quantityForOutput(out.vout),
+                isOutgoingUnconfirmed = isOutgoingUnconfirmed,
             )
             if (stillUnresolved) anyStillUnresolved = true
         }
@@ -350,7 +365,20 @@ class AssetManager(
      * test runner (see WalletManagerSavedTransactionsDecodeTest / WalletWipe
      * Test for the same constraint elsewhere in this codebase). Extracting
      * this seam lets [AssetProvenanceTaggingTest] exercise the real
-     * persistence branch directly, by mocking only [utxoDao].
+     * persistence branch directly, by mocking only [utxoDao]. [AssetSourceFixTest]
+     * (source-fix / C2) reuses the same seam to drive [isOutgoingUnconfirmed]
+     * without needing to mock `NativeBridge`.
+     *
+     * @param isOutgoingUnconfirmed Source-fix (C2): true when this tx is an
+     *   OUTGOING send (`sent > 0`) that hasn't confirmed yet. An unconfirmed
+     *   outgoing send's OWNED change-marker is not a settled holding — the
+     *   spent input hasn't been decremented yet, so counting the change
+     *   double-counts, and if the send strands, the change row becomes a
+     *   permanent phantom the periodic sweep would re-insert every tick.
+     *   When true, this call persists NOTHING (no insert, no re-tag) and
+     *   returns `false`; it settles normally once the flag flips to `false`
+     *   on confirmation. Does not affect metadata/asset-id detection — those
+     *   still run in [processIncomingAssetTx] regardless of this flag.
      */
     internal suspend fun persistDetectedAssetOutput(
         txHashHex: String,
@@ -360,7 +388,9 @@ class AssetManager(
         blockHeight: Long,
         placeholderAssetId: String,
         computedQty: Long,
+        isOutgoingUnconfirmed: Boolean = false,
     ): Boolean {
+        if (isOutgoingUnconfirmed) return false
         val existingRow = utxoDao.getAssetUtxoAt(txHashHex, vout)
         return if (existingRow != null) {
             // Re-detection of a row we already hold: re-tag provenance ONLY.
@@ -585,26 +615,45 @@ class AssetManager(
      * for historical holdings without depending on any backend.
      *
      * Returns the count of transactions that were identified as DigiAsset txs.
+     *
+     * Source-fix (C2): enumerates [NativeBridge.getTransactionDetails] (not
+     * [NativeBridge.getAllTransactionHashes]) because each row also carries
+     * `sent` and `blockHeight` — the two fields [isOutgoingUnconfirmedRow]
+     * needs to decide, per tx, whether this is an unconfirmed OUTGOING send.
+     * When it is, that flag is threaded into [processIncomingAssetTx] so its
+     * owned-output persistence is skipped for this pass (see
+     * [persistDetectedAssetOutput]); an incoming (`sent == 0`) unconfirmed
+     * receive is unaffected and persists normally.
      */
     suspend fun sweepKnownTransactionsForAssets(): Int {
-        val hashes = NativeBridge.getAllTransactionHashes() ?: return 0
+        // Row format (jni_wallet getTransactionDetails):
+        //   txHash|amount|fee|blockHeight|timestamp|sent|received   (TX_UNCONFIRMED = Int.MAX_VALUE)
+        val rows = runCatching { NativeBridge.getTransactionDetails().trim().lines() }
+            .getOrNull()?.filter { it.isNotBlank() } ?: return 0
         // Compute the owned-script set ONCE for the whole sweep (it's the same
         // for every tx) instead of rebuilding it per tx — a long-history wallet
         // has hundreds of addresses, so a per-tx rebuild is hundreds of JNI
         // calls × every known tx, every 30s.
         val owned = buildOwnedScriptHexes()
         var detected = 0
-        for (txHash in hashes) {
+        for (line in rows) {
+            val p = line.split("|")
+            if (p.size < 6) continue
+            val txHash = p[0]
             if (txHash.isBlank()) continue
+            val blockHeight = p[3].toLongOrNull() ?: 0L
+            val sent = p[5].toLongOrNull() ?: 0L
+            val isOutgoingUnconfirmed = isOutgoingUnconfirmedRow(sent, blockHeight)
             val info = runCatching {
-                processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned)
+                processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
+                    isOutgoingUnconfirmed = isOutgoingUnconfirmed)
             }.onFailure {
                 android.util.Log.d("AssetManager", "sweep: processIncoming failed for $txHash", it)
             }.getOrNull()
             if (info != null) detected++
         }
         android.util.Log.i("AssetManager",
-            "sweepKnownTransactions: ${hashes.size} txs scanned, $detected asset txs found")
+            "sweepKnownTransactions: ${rows.size} txs scanned, $detected asset txs found")
         return detected
     }
 
