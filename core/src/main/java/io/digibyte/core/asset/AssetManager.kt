@@ -30,6 +30,19 @@ internal fun isOutgoingUnconfirmedRow(sent: Long, blockHeight: Long): Boolean =
     sent > 0L && blockHeight >= Int.MAX_VALUE.toLong()
 
 /**
+ * Format a raw (smallest-unit) token count into human units for display, inserting
+ * a decimal point [decimals] places from the right (zero-padded). Mirrors
+ * digiasset-core `getStrCount` (DigiAsset.cpp:595-601). decimals<=0 → the integer
+ * as-is. E.g. (5000, 2) -> "50.00"; (5, 2) -> "0.05"; (20, 0) -> "20".
+ */
+internal fun formatAssetCount(count: Long, decimals: Int): String {
+    if (decimals <= 0) return count.toString()
+    val digits = count.toString().padStart(decimals + 1, '0')
+    val cut = digits.length - decimals
+    return digits.substring(0, cut) + "." + digits.substring(cut)
+}
+
+/**
  * Pure builder for the sweep's txid -> isOutgoingUnconfirmed overlay
  * (source-fix / C2). Parses each
  * [io.digibyte.core.bridge.NativeBridge.getTransactionDetails] row
@@ -986,6 +999,30 @@ class AssetManager(
             if (wanted) total += AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn)
         }
         return if (total > 0L) total else null
+    }
+
+    /**
+     * Activity-row asset amount label: token count + the asset's real name/symbol
+     * ("20 CHANG") when the assetId is resolved and has metadata, else a bare count
+     * ("20 Tokens"). Applies the asset's divisibility (decimals) to the count for
+     * human units ("50.00 CHANG"). Sovereign for the count (from the tx); the
+     * name/decimals come from the already-resolved metadata cache the Assets screen
+     * uses. Null when the tx has no resolvable token amount (row falls back to DGB).
+     */
+    suspend fun assetAmountLabelForTx(
+        txHashHex: String,
+        isSend: Boolean,
+        ownedScriptHexes: Set<String>? = null,
+    ): String? {
+        val count = assetTokenCountForTx(txHashHex, isSend, ownedScriptHexes) ?: return null
+        val meta = utxoDao.getResolvedAssetIdForTx(txHashHex)?.let { metadataDao.getMetadata(it) }
+        val amountStr = formatAssetCount(count, meta?.decimals ?: 0)
+        val label = meta?.symbol?.takeIf { it.isNotBlank() } ?: meta?.name?.takeIf { it.isNotBlank() }
+        return when {
+            label != null -> "$amountStr $label"
+            count == 1L && (meta?.decimals ?: 0) == 0 -> "$amountStr Token"
+            else -> "$amountStr Tokens"
+        }
     }
 
     /**

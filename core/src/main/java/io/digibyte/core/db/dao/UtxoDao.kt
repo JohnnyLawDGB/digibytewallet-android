@@ -54,6 +54,12 @@ interface UtxoDao {
     @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND vout = :vout LIMIT 1")
     suspend fun getAssetIdAt(txid: String, vout: Int): String?
 
+    /** A RESOLVED asset-id for any asset output of this tx (skips "unresolved:…"
+     *  placeholders), or null if none is resolved yet. Used to label an activity
+     *  row with the asset's real name/symbol instead of a bare "Tokens". */
+    @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND is_asset = 1 AND asset_id NOT LIKE 'unresolved:%' LIMIT 1")
+    suspend fun getResolvedAssetIdForTx(txid: String): String?
+
     @Query("DELETE FROM utxos")
     suspend fun deleteAll()
 

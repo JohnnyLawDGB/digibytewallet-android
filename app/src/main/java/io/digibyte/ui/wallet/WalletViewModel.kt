@@ -682,14 +682,9 @@ class WalletViewModel @Inject constructor(
                                     .getOrDefault(0L)
                                 if (cents > 0L) formatDigiDollar(cents) else null
                             }
-                            TxKind.DIGIASSET -> {
-                                val count = runCatching {
-                                    assetManager.assetTokenCountForTx(tx.txid, isSend, ownedScripts)
-                                }.getOrNull()
-                                if (count != null && count > 0L)
-                                    "$count " + if (count == 1L) "Token" else "Tokens"
-                                else null
-                            }
+                            TxKind.DIGIASSET -> runCatching {
+                                assetManager.assetAmountLabelForTx(tx.txid, isSend, ownedScripts)
+                            }.getOrNull()
                             else -> null
                         }
                         display?.let { tx.txid to it }
