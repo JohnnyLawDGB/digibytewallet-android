@@ -27,7 +27,9 @@ import io.digibyte.core.reconcile.ChainReconciliationService
 import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -301,19 +303,30 @@ fun ReconcileScreen(navController: NavController) {
                 fontSize = 13.sp,
             )
             var armRebuild by remember { mutableStateOf(false) }
+            var rebuilding by remember { mutableStateOf(false) }
             OutlinedButton(
+                enabled = !rebuilding,
                 onClick = {
                     if (!armRebuild) {
                         armRebuild = true
                     } else {
-                        walletManager.rebuildFromChainRescan()
-                        val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                        li?.addFlags(
-                            android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                                android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        )
-                        context.startActivity(li)
-                        Runtime.getRuntime().exit(0)
+                        // Run the native teardown OFF the main thread. rebuildFromChainRescan()
+                        // calls NativeBridge.stopSync(), which blocks on the peer lock; on a
+                        // wallet jammed on an orphaned tip (peers hammering getheaders) that
+                        // lock is contended, and running it on the UI thread ANRs the app
+                        // (reported: "clicked rescan and it locked up"). Restart on the main
+                        // thread once the clear completes.
+                        rebuilding = true
+                        scope.launch {
+                            withContext(Dispatchers.IO) { walletManager.rebuildFromChainRescan() }
+                            val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                            li?.addFlags(
+                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            )
+                            context.startActivity(li)
+                            Runtime.getRuntime().exit(0)
+                        }
                     }
                 },
                 modifier = Modifier
@@ -325,8 +338,11 @@ fun ReconcileScreen(navController: NavController) {
                 ),
             ) {
                 Text(
-                    if (armRebuild) "Tap again to confirm — clears cache & restarts"
-                    else "Full rebuild from chain (rescan)"
+                    when {
+                        rebuilding -> "Rebuilding — clearing cache, restarting…"
+                        armRebuild -> "Tap again to confirm — clears cache & restarts"
+                        else       -> "Full rebuild from chain (rescan)"
+                    }
                 )
             }
 
