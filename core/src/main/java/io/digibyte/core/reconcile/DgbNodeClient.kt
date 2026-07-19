@@ -122,6 +122,30 @@ class DgbNodeClient(
         TxConfirmation(height, blocktime)
     }
 
+    /**
+     * History of every confirmed tx touching [address], via the ElectrumX-backed
+     * {endpoint}/rpc/address-history/:address endpoint. Unlike the UTXO-based
+     * reconcile this returns 0-value (DigiDollar) and fully-spent (asset marker)
+     * txs for all four address types — the taproot/DD case scantxoutset misses.
+     * Returns null on network/parse failure.
+     */
+    suspend fun addressHistory(address: String): List<AddressTx>? = withContext(Dispatchers.IO) {
+        val root = httpGetJson("${endpoint()}/rpc/address-history/$address") ?: return@withContext null
+        parseAddressHistory(root)
+    }
+
+    /**
+     * Fetch a tx's raw hex + block time from {endpoint}/explorer/tx/:txid, packed
+     * with the [height] the caller already learned from [addressHistory] (the
+     * explorer/tx body exposes blockhash+confirmations but no direct height).
+     * The height satisfies BRWallet's dust-pending gate on 0-value DD credits.
+     * Returns null on network/parse failure.
+     */
+    suspend fun fetchRawTx(txid: String, height: Long): RawTxEntry? = withContext(Dispatchers.IO) {
+        val root = httpGetJson("${endpoint()}/explorer/tx/$txid") ?: return@withContext null
+        parseRawTxResponse(root, height)
+    }
+
     /** GET a URL and parse the body as a JSON object. Null on non-2xx, empty
      *  body, parse error, or network failure (logged). Uses the same cert-pinned
      *  client selection as the reconcile POST. */
@@ -241,3 +265,28 @@ data class ReconcileResult(
 /** A transaction's confirming block height + block time, from
  *  [DgbNodeClient.txConfirmation]. */
 data class TxConfirmation(val height: Long, val time: Long)
+
+/** One confirmed tx touching an address, from the node's address-history. */
+data class AddressTx(val txid: String, val height: Long)
+
+/** Pure: extract (txid, height) from a `/rpc/address-history/:address` body. */
+internal fun parseAddressHistory(root: JSONObject): List<AddressTx> {
+    val txs = root.optJSONArray("transactions") ?: return emptyList()
+    val out = ArrayList<AddressTx>(txs.length())
+    for (i in 0 until txs.length()) {
+        val t = txs.optJSONObject(i) ?: continue
+        val txid = t.optString("txid", "")
+        if (txid.isBlank()) continue
+        out += AddressTx(txid, t.optLong("height", 0L))
+    }
+    return out
+}
+
+/** Pure: pack a `/explorer/tx/:txid` body (hex + block time) with the height
+ *  the caller learned from address-history. Null if hex absent. */
+internal fun parseRawTxResponse(root: JSONObject, height: Long): RawTxEntry? {
+    val hex = root.optString("hex", "")
+    if (hex.isBlank()) return null
+    val time = root.optLong("blocktime", root.optLong("time", 0L))
+    return RawTxEntry(hex = hex, blockHeight = height, blockTime = time)
+}
