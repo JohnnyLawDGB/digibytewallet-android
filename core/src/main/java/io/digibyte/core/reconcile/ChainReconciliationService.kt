@@ -199,15 +199,11 @@ class ChainReconciliationService(
         val addrs = NativeBridge.dumpAllAddresses().trim().lines().filter { it.isNotBlank() }
         if (addrs.isEmpty()) return 0
         val known = extractKnownTxids(NativeBridge.getTransactionDetails())
-        val histories = ArrayList<List<AddressTx>>(addrs.size)
-        for ((i, addr) in addrs.withIndex()) {
-            _state.value = State.Scanning(
-                "Reading address history ${i + 1}/${addrs.size}…",
-                progress = (i + 1).toFloat() / addrs.size * 0.5f,
-            )
-            nodeClient.addressHistory(addr)?.let { histories += it }
-        }
-        val toImport = planHistoryImport(histories, known)
+        _state.value = State.Scanning("Reading address history…", progress = 0.2f)
+        // ONE batched POST per 500 addresses (not one GET per address) — stays
+        // well under the server's request limiter that the per-address loop tripped.
+        val history = nodeClient.addressHistoryBatch(addrs) ?: return 0
+        val toImport = planHistoryImport(listOf(history), known)
         var imported = 0
         for ((i, tx) in toImport.withIndex()) {
             _state.value = State.Scanning(

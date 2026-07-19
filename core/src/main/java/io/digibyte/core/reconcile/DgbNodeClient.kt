@@ -135,8 +135,28 @@ class DgbNodeClient(
     }
 
     /**
+     * BATCH address history: POST the whole address list to
+     * {endpoint}/rpc/address-history and get back the deduped (txid, height)
+     * union in ONE round-trip per [MAX_ADDRS_PER_REQUEST]. Replaces the
+     * per-address GET loop that fired ~1 request/address and blew past the
+     * server's 500/15min limiter (429 storm). Returns null on any failure.
+     */
+    suspend fun addressHistoryBatch(addresses: List<String>): List<AddressTx>? =
+        withContext(Dispatchers.IO) {
+            if (addresses.isEmpty()) return@withContext emptyList()
+            val out = ArrayList<AddressTx>()
+            for (chunk in addresses.chunked(MAX_ADDRS_PER_REQUEST)) {
+                val payload = JSONObject().apply { put("addresses", JSONArray(chunk)) }
+                val root = httpPostJson("${endpoint()}/rpc/address-history", payload)
+                    ?: return@withContext null
+                out += parseAddressHistory(root)
+            }
+            out
+        }
+
+    /**
      * Fetch a tx's raw hex + block time from {endpoint}/explorer/tx/:txid, packed
-     * with the [height] the caller already learned from [addressHistory] (the
+     * with the [height] the caller already learned from address-history (the
      * explorer/tx body exposes blockhash+confirmations but no direct height).
      * The height satisfies BRWallet's dust-pending gate on 0-value DD credits.
      * Returns null on network/parse failure.
@@ -162,6 +182,29 @@ class DgbNodeClient(
             }
         } catch (t: Throwable) {
             android.util.Log.w("DgbNodeClient", "GET $url threw ${t::class.java.simpleName}: ${t.message}")
+            null
+        }
+    }
+
+    /** POST a JSON body and parse the response as a JSON object. Null on non-2xx,
+     *  empty body, parse error, or network failure (logged). Same cert-pinned
+     *  client selection as the GET/reconcile paths. */
+    private fun httpPostJson(url: String, payload: JSONObject): JSONObject? {
+        val req = Request.Builder()
+            .url(url)
+            .post(payload.toString().toRequestBody(JSON.toMediaType()))
+            .build()
+        return try {
+            client(url).newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    android.util.Log.w("DgbNodeClient", "POST $url returned HTTP ${resp.code}")
+                    return null
+                }
+                val body = resp.body?.string() ?: return null
+                JSONObject(body)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("DgbNodeClient", "POST $url threw ${t::class.java.simpleName}: ${t.message}")
             null
         }
     }
