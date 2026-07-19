@@ -250,4 +250,74 @@ class Bip158WatchdogPolicyTest {
     @Test fun `tier2 needs peers`() {
         assertEquals(false, shouldForceReconnectOnStall(0, TIP_STALL_TIMEOUT_MS * 5, tier1Fired = true))
     }
+
+    // ── shouldHealCorruptFilterChain — the poisoned-persisted-chain clean-slate heal ──
+
+    private fun heal(
+        blocksCaughtUp: Boolean = true,
+        peerCount: Int = 4,
+        cfFrozenMs: Long = CF_CORRUPT_HEAL_MS,
+        reanchored: Boolean = true,
+        msSinceReanchor: Long = REANCHOR_GRACE_MS,
+        healsSoFar: Int = 0,
+    ) = shouldHealCorruptFilterChain(
+        blocksCaughtUp, peerCount, cfFrozenMs, reanchored, msSinceReanchor, healsSoFar,
+    )
+
+    @Test fun `heals when re-anchor already fired and grace elapsed but cfTip still frozen at tip`() {
+        // THE POISONED-CHAIN CASE: headers at the network tip, filter peers connected,
+        // the one-time re-anchor already ran + got its grace, yet cfTip is STILL frozen
+        // — the wallet's own persisted filter chain can't extend (a prior build wrote
+        // corrupt data). This is exactly the "stuck at a fixed block forever" wedge the
+        // one-time re-anchor gives up on.
+        assertEquals(true, heal())
+    }
+
+    @Test fun `does not heal before the re-anchor has been given its grace window`() {
+        // The ordinary re-anchor must get its full rebuild grace before we escalate to
+        // the expensive full-wipe re-sync — otherwise we'd nuke a re-anchor that was
+        // about to succeed.
+        assertEquals(false, heal(msSinceReanchor = REANCHOR_GRACE_MS - 1))
+    }
+
+    @Test fun `does not heal before the frozen window elapses`() {
+        // A filter tip still creeping forward resets the frozen timer; only a truly
+        // stuck tip reaches the threshold.
+        assertEquals(false, heal(cfFrozenMs = CF_CORRUPT_HEAL_MS - 1))
+    }
+
+    @Test fun `does not heal until the ordinary one-time re-anchor has been tried`() {
+        // The clean-slate wipe is the ESCALATION after the cheap re-anchor fails.
+        // reanchored=false means the cheaper recovery hasn't run yet — don't skip it.
+        assertEquals(false, heal(reanchored = false))
+    }
+
+    @Test fun `does not heal while block headers are still importing`() {
+        // blocksCaughtUp=false means headers haven't reached the network tip yet, so a
+        // lagging cfTip is legitimately waiting for headers — not corrupt.
+        assertEquals(false, heal(blocksCaughtUp = false))
+    }
+
+    @Test fun `does not heal with zero filter peers`() {
+        // With no peer to re-fetch a clean chain from, wiping would just re-sync into
+        // the void. Wait for a peer.
+        assertEquals(false, heal(peerCount = 0))
+    }
+
+    @Test fun `heal is bounded — stops after the per-session cap`() {
+        // Each heal forces a full re-scan; a wallet that can't reach any healthy filter
+        // peer must not loop full re-syncs forever. At the cap, give up gracefully.
+        assertEquals(true, heal(healsSoFar = MAX_CF_CORRUPT_HEALS - 1))
+        assertEquals(false, heal(healsSoFar = MAX_CF_CORRUPT_HEALS))
+        assertEquals(false, heal(healsSoFar = MAX_CF_CORRUPT_HEALS + 1))
+    }
+
+    @Test fun `heal cooldown is wider than the freeze threshold to survive reconnect latency`() {
+        // Regression guard for the heal-cascade finding: a heal's forceReconnect drops
+        // all peers, so cfTip reads 0 (== the reset cfNetMax) until the re-fetch
+        // reconnects and lands its first batch — during which the frozen timer keeps
+        // growing. The re-heal cooldown MUST exceed the frozen-detection threshold, or
+        // reconnect latency is misread as freeze and burns the whole heal budget.
+        assertEquals(true, CF_CORRUPT_HEAL_COOLDOWN_MS > CF_CORRUPT_HEAL_MS)
+    }
 }

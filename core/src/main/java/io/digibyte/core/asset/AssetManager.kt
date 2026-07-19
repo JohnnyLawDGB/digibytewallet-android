@@ -1594,34 +1594,33 @@ class AssetManager(
     }
 
     /**
-     * Sovereign heal for the residual DigiAsset over-count (e.g. CHANG displaying
-     * 21 for a supply-10 asset). Deletes any asset UTXO row whose scriptPubKey is
-     * NOT one of the wallet's own scripts — a not-owned recipient-marker output
-     * from a transfer WE sent, which the wallet wrongly counts toward its balance.
+     * Sovereign heal for the DigiAsset over-count: deletes any asset UTXO row whose
+     * scriptPubKey is NOT one of the wallet's own scripts — a not-owned recipient-
+     * marker output from a transfer WE sent, which [UtxoDao.getAssetBalances]
+     * (spent=0 rows, NO ownership filter) wrongly counts. This is the residue of a
+     * regression: the identical prune once lived in the backend-refresh path, which
+     * the sovereign redesign turned OFF, so the recipient phantoms it cleared now
+     * accumulate. Re-homes that exact check onto the standing maintenance cycle.
      *
-     * WHY THIS IS NEEDED (regression). The identical owned-script prune already
-     * lived inside the backend refresh path, but the sovereign redesign turned
-     * that path OFF — so the prune became dead code and the recipient phantoms it
-     * used to clear now accumulate. [UtxoDao.getAssetBalances] sums spent=0 rows
-     * with NO ownership filter, so each stray non-owned row inflates the shown
-     * count until removed. This re-homes the exact same check onto the standing
-     * sovereign maintenance cycle.
+     * Ownership is the ONLY delete authority — a not-owned output can never be a
+     * real holding of ours, so deleting it is safe regardless of sync state (the
+     * owned-script set comes from the seed via [buildOwnedScriptHexes], not the
+     * chain scan). OWNED rows are NEVER deleted here: a dropped NATIVE tx is the
+     * debounced, NATIVE-scoped job of [pruneRemovedNativeAssetRows]; a backend-
+     * reconciled holding that native never scans has a PERSISTENT
+     * `outpointSpentState == -1` and is a REAL holding that MUST survive.
      *
-     * Ownership is the ONLY delete authority here (never backend-absence, never
-     * native tx-absence): a non-owned output can never be a real holding of ours,
-     * so deleting it is always safe. Owned rows — including genuine change
-     * holdings — are never touched; their liveness is the job of
-     * [pruneRemovedNativeAssetRows] + [reconcileAssetSpentFromNative].
+     * (An earlier owned + `state==-1` "Rule B" was cut after adversarial review:
+     * -1 is the steady state of a legitimate below-scan-floor backend holding —
+     * indistinguishable from a dead phantom — and `getSyncProgress()` is
+     * header-honest, not cfilter-scan-honest, so nothing here can safely gate the
+     * deletion of an owned row on native tx-absence. Deleting them destroyed funds.)
      *
-     * SAFETY: if the owned-script set comes back empty (wallet not loaded / native
-     * hiccup) we skip entirely rather than treat every row as unowned and wipe the
-     * table. Ships log-only ([dryRun]) first — every asset row is logged with its
-     * owned / spent / native-spent-state so the candidate set can be eyeballed
-     * on-device before deletion is enabled.
+     * SAFETY: empty owned-script set (wallet not loaded) → skip entirely. [dryRun]
+     * logs candidates without deleting. [spentState] is logged for diagnostics only.
      */
     suspend fun pruneUnownedAssetRows(dryRun: Boolean): LegacyHealResult =
         pruneUnownedAssetRowsImpl(buildOwnedScriptHexes(), dryRun) { txid, vout ->
-            // -99 = native probe threw; diagnostic-only, never gates the delete.
             runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrDefault(-99)
         }
 
@@ -1629,8 +1628,8 @@ class AssetManager(
      * Testable core of [pruneUnownedAssetRows]. Same host-JVM/NativeBridge
      * constraint as [healLegacyChangeAddressOrphansImpl]: the owned-script set and
      * the native spent-state probe arrive as plain parameters so the logic can be
-     * driven without loading `core-lib`. [spentState] is diagnostic only (logged,
-     * never gating the delete) — ownership is the sole delete authority.
+     * driven without loading `core-lib`. [spentState] (0 SPENT / 1 HELD / -1
+     * UNDETECTED) is logged for diagnostics only — it never gates a delete.
      */
     internal suspend fun pruneUnownedAssetRowsImpl(
         ownedScriptHexes: Set<String>,
@@ -1647,9 +1646,14 @@ class AssetManager(
         for (row in utxoDao.getAllAssetUtxosNow()) {
             val scriptHex = row.scriptPubKey.toHex().lowercase()
             val isOwned = scriptHex.isNotEmpty() && scriptHex in owned
+            val state = spentState(row.txid, row.vout)  // diagnostic only — NEVER gates the delete
             android.util.Log.i("AssetManager",
                 "assetRow ${row.txid}:${row.vout} asset=${row.assetId} qty=${row.assetQuantity} " +
-                    "spent=${row.spent} owned=$isOwned nativeSpentState=${spentState(row.txid, row.vout)}")
+                    "spent=${row.spent} owned=$isOwned nativeSpentState=$state")
+            // ONLY not-owned rows are phantoms we delete. Owned rows — including
+            // dead-tx (state -1) and spent (state 0) — are left to the NATIVE-scoped
+            // debounced prune / reconcile; an owned row is never destroyed on native
+            // tx-absence here (that would delete real below-floor backend holdings).
             if (isOwned || scriptHex.isEmpty()) continue
             candidates.add("${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
             android.util.Log.i("AssetManager",

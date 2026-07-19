@@ -538,10 +538,15 @@ class SyncService : Service() {
                             // don't own (recipient markers from transfers we sent, which
                             // getAssetBalances still sums). This exact check used to run on the
                             // now-retired backend refresh; re-homed here onto the standing path.
-                            // Log-only first (same flag as the legacy heal) so the candidate
-                            // set is observable on-device before deletion is enabled.
+                            // Live delete (dry-run confirmed on-device); ownership is the sole
+                            // delete authority so an owned row can never be destroyed here.
                             runCatching {
-                                val res = assetManager.pruneUnownedAssetRows(dryRun = legacyHealDryRun)
+                                // Delete not-owned recipient-marker phantoms (the CHANG over-count
+                                // residue). Ownership-only — owned rows are never touched here (a
+                                // dropped native tx is pruneRemovedNativeAssetRows' debounced job; a
+                                // below-floor backend holding reads a persistent native -1 and is a
+                                // REAL holding). The on-device dry-run confirmed the not-owned set.
+                                val res = assetManager.pruneUnownedAssetRows(dryRun = false)
                                 android.util.Log.i("SyncService",
                                     "pruneUnowned ran: ${res.candidates.size} candidates, deleted=${res.deleted}")
                             }.onFailure { android.util.Log.w("SyncService", "pruneUnowned threw", it) }
@@ -914,6 +919,12 @@ class SyncService : Service() {
             var cfNetMax = cfTipAtStart
             var cfNetProgressMs = startedAt
             var cfFrozenRecoveredThisSession = false
+            // Clean-slate corrupt-chain heal state: how many full-wipe heals have run
+            // this session (bounded by MAX_CF_CORRUPT_HEALS), the last heal's timestamp
+            // (throttle), and a rotation cursor so each heal pins a DIFFERENT canon peer.
+            var corruptHeals = 0
+            var lastCorruptHealMs = 0L
+            var corruptHealRotation = 0
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
                 val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
@@ -1007,6 +1018,58 @@ class SyncService : Service() {
                     android.util.Log.d("SyncService",
                         "BIP158 watchdog: header sync still catching up " +
                         "(blockTip=$blockTip, est=$estHeight, cfTip=$cfTipNow) — staying on filters (${elapsedMs}ms)")
+                    continue
+                }
+
+                // POISONED-CHAIN HEAL — the clean-slate escalation. If, AFTER the
+                // one-time re-anchor below has already fired and been given its grace,
+                // cfheaders is STILL frozen at a fixed height with headers at the tip
+                // and filter peers connected, the wallet's own persisted filter chain
+                // is corrupt (a prior build wrote bad chain data — the class of wedge
+                // that left many wallets stuck at a fixed cfheaders block forever). The
+                // ordinary re-anchor gives up after one try and never switches peers;
+                // this wipes ALL persisted filter state and re-fetches a CLEAN chain
+                // from a freshly-pinned canon peer, rotating the peer each attempt.
+                val peersNow = try { NativeBridge.getPeerCount() } catch (_: Throwable) { 0 }
+                if (shouldHealCorruptFilterChain(
+                        blocksCaughtUp = blocksCaughtUp,
+                        peerCount = peersNow,
+                        cfFrozenMs = nowMs - cfNetProgressMs,
+                        reanchored = reanchoredThisSession,
+                        msSinceReanchor = nowMs - reanchorAtMs,
+                        healsSoFar = corruptHeals,
+                    ) && nowMs - lastCorruptHealMs >= CF_CORRUPT_HEAL_COOLDOWN_MS
+                ) {
+                    corruptHeals++
+                    lastCorruptHealMs = nowMs
+                    val fp = nextValidatedFilterPeer(corruptHealRotation++)
+                    android.util.Log.w("SyncService",
+                        "BIP158 watchdog: filter chain WEDGED at $cfTipNow after re-anchor " +
+                        "(heal $corruptHeals/$MAX_CF_CORRUPT_HEALS) — persisted chain looks corrupt; " +
+                        "wiping ALL filter state + clean re-fetch" +
+                        (if (fp != null) " via pinned canon ${fp.first}:${fp.second}" else " (no canon peer cached)"))
+                    // Clear EVERY persisted filter-chain source (the one-time re-anchor
+                    // only deletes the file store): file, in-memory pending copy, dirty flag.
+                    FilterHeaderStore.delete(this@SyncService)
+                    pendingFilterHeaders = null
+                    filterHeadersDirty = false
+                    // Reset the native CF chain to the floor, then force a clean manager
+                    // recreate that re-fetches cfheaders from a fresh peer cohort.
+                    runCatching { NativeBridge.reanchorCompactFilterChainAtFloor() }
+                    runCatching { NativeBridge.forceReconnect() }
+                    injectPeers()
+                    injectCustomNode()
+                    runCatching { NativeBridge.startSync() }
+                    // Prefer a fully-synced canon peer for the clean re-fetch (best-effort;
+                    // injectPeers already re-seeds the 16 canon nodes into the pool).
+                    if (fp != null) runCatching { NativeBridge.setPinnedPeer(fp.first, fp.second, false) }
+                    // Reset the frozen tracker: the clean re-fetch is a LEGITIMATE slow
+                    // re-climb from the floor. Without this, cfNetMax stays pinned at the
+                    // old wall so the growing frozen timer would re-heal mid-climb in a
+                    // loop and never finish. Any forward progress now updates the timer.
+                    cfNetMax = 0
+                    cfNetProgressMs = nowMs
+                    lastCfTip = 0
                     continue
                 }
 

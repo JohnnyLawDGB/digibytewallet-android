@@ -39,9 +39,12 @@ class PruneUnownedAssetRowsTest {
         txid = txid, vout = 0, scriptPubKey = script, satoshis = 6000, blockHeight = 0,
         isAsset = true, assetId = "La1", assetQuantity = 7, spent = false, assetSource = AssetSource.BACKEND)
 
-    // HELD(1): the exact false-positive that inflates the count — native knows the
-    // tx and the output isn't in our spentOutputs (because it isn't ours to spend).
+    // Native outpoint tri-state probes: HELD(1) = tx known + unspent, SPENT(0) =
+    // in spentOutputs, UNDETECTED(-1) = native has no such tx. All diagnostic only —
+    // the delete decision is ownership, never native spent-state.
     private val heldState: suspend (String, Int) -> Int = { _, _ -> 1 }
+    private val deadState: suspend (String, Int) -> Int = { _, _ -> -1 }
+    private val spentNativeState: suspend (String, Int) -> Int = { _, _ -> 0 }
 
     @Before fun setup() {
         mockkStatic(Log::class)
@@ -53,6 +56,8 @@ class PruneUnownedAssetRowsTest {
     }
 
     @After fun tearDown() = unmockkStatic(Log::class)
+
+    // ── Not-owned (recipient marker) — deleted regardless of native state ──
 
     @Test fun unowned_row_is_candidate_and_deleted_when_not_dryrun() = runTest {
         val txid = "a".repeat(64)
@@ -71,30 +76,54 @@ class PruneUnownedAssetRowsTest {
 
         val res = mgr.pruneUnownedAssetRowsImpl(setOf(ownedHex), dryRun = true, heldState)
 
-        // Same candidate set as the non-dry-run case — dryRun only gates the
-        // delete, never the candidate detection.
+        // dryRun only gates the delete, never the candidate detection.
         assertEquals(1, res.candidates.size)
         assertEquals(0, res.deleted)
         coVerify(exactly = 0) { utxoDao.deleteAssetUtxo(any(), any()) }
     }
 
-    @Test fun owned_row_never_a_candidate() = runTest {
-        // A row at one of our own scripts is a real holding — never eligible,
-        // regardless of its native spent-state.
+    // ── Owned rows are NEVER deleted here — whatever native reports ──
+
+    @Test fun owned_held_row_never_a_candidate() = runTest {
         val txid = "b".repeat(64)
         coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row(txid, ownedScript))
 
         val res = mgr.pruneUnownedAssetRowsImpl(setOf(ownedHex), dryRun = false, heldState)
 
         assertEquals(0, res.candidates.size)
+        coVerify(exactly = 0) { utxoDao.deleteAssetUtxo(any(), any()) }
+    }
+
+    @Test fun owned_dead_tx_row_is_NEVER_deleted() = runTest {
+        // THE CRITICAL SAFETY INVARIANT (adversarial-review finding #2): an owned row
+        // for a tx native has no record of (state -1) is the STEADY STATE of a real
+        // below-scan-floor BACKEND-reconciled holding — indistinguishable from a dead
+        // phantom. Deleting it destroys funds. Ownership is the sole delete authority,
+        // so this owned row must survive regardless of native tx-absence.
+        val txid = "d".repeat(64)
+        coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row(txid, ownedScript))
+
+        val res = mgr.pruneUnownedAssetRowsImpl(setOf(ownedHex), dryRun = false, deadState)
+
+        assertEquals(0, res.candidates.size)
         assertEquals(0, res.deleted)
         coVerify(exactly = 0) { utxoDao.deleteAssetUtxo(any(), any()) }
     }
 
+    @Test fun owned_spent_row_is_kept() = runTest {
+        val txid = "e".repeat(64)
+        coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row(txid, ownedScript))
+
+        val res = mgr.pruneUnownedAssetRowsImpl(setOf(ownedHex), dryRun = false, spentNativeState)
+
+        assertEquals(0, res.candidates.size)
+        coVerify(exactly = 0) { utxoDao.deleteAssetUtxo(any(), any()) }
+    }
+
     @Test fun empty_owned_set_skips_entirely() = runTest {
-        // SAFETY: an empty owned-script set (wallet not loaded / native hiccup)
-        // must NOT treat every row as unowned and wipe the table — it short-
-        // circuits before ever reading the rows.
+        // SAFETY: an empty owned-script set (wallet not loaded / native hiccup) must
+        // NOT treat every row as unowned and wipe the table — it short-circuits before
+        // ever reading the rows.
         val txid = "c".repeat(64)
         coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row(txid, unownedScript))
 

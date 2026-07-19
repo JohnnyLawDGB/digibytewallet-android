@@ -132,6 +132,75 @@ internal fun shouldRecoverFrozenCf(
     !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs
 
 /**
+ * How long the compact-filter tip may stay frozen AFTER the ordinary one-time
+ * re-anchor has already fired and been given its grace window — with headers
+ * caught up to the network tip and filter peers connected — before the watchdog
+ * treats the persisted filter chain as CORRUPT (poisoned by a prior build) and
+ * performs the stronger clean-slate heal.
+ */
+internal const val CF_CORRUPT_HEAL_MS = 90_000L
+
+/**
+ * Minimum spacing between successive clean-slate heals — deliberately LONGER than
+ * [CF_CORRUPT_HEAL_MS]. A heal calls forceReconnect(), which tears down every peer
+ * socket, so getCFChainTipHeight() reads 0 until the recreated manager reconnects
+ * AND lands its first cfheaders batch. During that reconnect window cfTip == 0 ==
+ * the reset cfNetMax, so the "no net progress" frozen timer keeps growing even
+ * though the heal's own re-fetch is legitimately still coming up. Without a cooldown
+ * wider than that window, the next poll would re-heal — tearing down the very
+ * reconnect it's waiting on and burning the whole heal budget in minutes (an
+ * adversarial-review finding). 4 minutes is comfortably longer than a filter peer
+ * reconnect + first-batch round-trip even over Tor, so a batch lands (cfTip jumps
+ * far above 0, resetting the timer) before another heal can fire; if none lands in
+ * 4 min the wallet is genuinely wedged and rotating to the next peer is warranted.
+ */
+internal const val CF_CORRUPT_HEAL_COOLDOWN_MS = 240_000L
+
+/**
+ * Max clean-slate corrupt-chain heals per session. Each wipes ALL persisted
+ * filter state and re-fetches from a freshly-pinned canon peer, forcing a full
+ * re-scan — so this is bounded: a wallet that genuinely can't reach any healthy
+ * filter peer must not loop full re-syncs forever. After [MAX_CF_CORRUPT_HEALS]
+ * the watchdog gives up gracefully (stays on filters, no bloom).
+ */
+internal const val MAX_CF_CORRUPT_HEALS = 3
+
+/**
+ * Should the watchdog perform the clean-slate corrupt-filter-chain heal this poll?
+ *
+ * The poisoned-chain signature: the block-header chain is at the network tip
+ * ([blocksCaughtUp]) and filter peers are connected ([peerCount] > 0), yet the
+ * compact-filter tip has made no NET forward progress for [cfFrozenMs] >=
+ * [thresholdMs] AND the ordinary one-time re-anchor has ALREADY fired this session
+ * ([reanchored]) and been given its full grace window ([msSinceReanchor] >=
+ * [REANCHOR_GRACE_MS]) without freeing it. That combination cannot be "slow sync"
+ * (cfTip would still creep, resetting the frozen timer) nor "headers still
+ * importing" (blocksCaughtUp rules it out) nor "re-anchor still rebuilding"
+ * (grace elapsed) — it means the wallet's OWN persisted filter chain can't extend,
+ * i.e. a prior build wrote corrupt chain data. Bounded to [maxHeals] attempts
+ * ([healsSoFar]) so an unreachable-fleet wallet can't re-sync-loop forever.
+ *
+ * Distinct from [shouldRecoverFrozenCf], which fires only WHILE headers import
+ * ([blockClimbing]) and BEFORE any re-anchor. This fires AFTER, with headers done
+ * — exactly the gap that left post-bad-version wallets wedged at a fixed cfheaders
+ * height with no remaining recovery (the one-time re-anchor having already given
+ * up for the session).
+ */
+internal fun shouldHealCorruptFilterChain(
+    blocksCaughtUp: Boolean,
+    peerCount: Int,
+    cfFrozenMs: Long,
+    reanchored: Boolean,
+    msSinceReanchor: Long,
+    healsSoFar: Int,
+    thresholdMs: Long = CF_CORRUPT_HEAL_MS,
+    maxHeals: Int = MAX_CF_CORRUPT_HEALS,
+): Boolean =
+    blocksCaughtUp && peerCount > 0 && reanchored &&
+        msSinceReanchor >= REANCHOR_GRACE_MS &&
+        healsSoFar < maxHeals && cfFrozenMs >= thresholdMs
+
+/**
  * How long the BLOCK-header tip may make no forward progress — while peers are
  * connected — before the watchdog proactively re-requests headers. Every native
  * getheaders sender is reactive (sync-start, relayed inv/orphan, forward-only
