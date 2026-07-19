@@ -279,6 +279,12 @@ object NativeBridge {
      *  detection on SPV receive to avoid round-tripping raw bytes. */
     external fun getTransactionOutputsForHash(txHashHex: String): Array<String>?
 
+    /** The wallet's spendable NATIVE DigiByte UTXOs (excludes asset/DD dust) as
+     *  newline-separated "txidHex|vout|amountSats|scriptPubKeyHex" lines, "" if none.
+     *  Sovereign source for the DigiAsset-send DGB fee — the Room is_asset=0 partition
+     *  isn't reliably populated (empty on a synced wallet → "Not enough DGB for fee"). */
+    external fun getSpendableDigiByteUtxos(): String
+
     /** Walks the inputs of a wallet-known transaction and returns each as
      *  "prevTxidHex|prevVout" (display-order hex). Used by asset-id
      *  derivation for issuance txs (we need the first input's outpoint)

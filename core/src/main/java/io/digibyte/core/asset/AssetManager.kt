@@ -43,6 +43,39 @@ internal fun formatAssetCount(count: Long, decimals: Int): String {
 }
 
 /**
+ * Parse [io.digibyte.core.bridge.NativeBridge.getSpendableDigiByteUtxos] output
+ * ("txidHex|vout|amountSats|scriptPubKeyHex" lines) into [UtxoEntity] rows for the
+ * asset-send DGB-fee selector. Sovereign DGB UTXO source (native wallet->utxos),
+ * replacing the unreliable Room is_asset=0 read that read empty on synced wallets.
+ * Skips malformed lines and non-positive amounts.
+ */
+internal fun parseNativeDgbUtxos(raw: String): List<UtxoEntity> =
+    raw.trim().lines().mapNotNull { line ->
+        val p = line.split("|")
+        if (p.size < 4) return@mapNotNull null
+        val txid = p[0].takeIf { it.length == 64 } ?: return@mapNotNull null
+        val vout = p[1].toIntOrNull()?.takeIf { it >= 0 } ?: return@mapNotNull null
+        val sats = p[2].toLongOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+        val script = decodeHexOrNull(p[3])?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        UtxoEntity(
+            txid = txid, vout = vout, scriptPubKey = script, satoshis = sats,
+            blockHeight = 0L, isAsset = false, spent = false,
+        )
+    }
+
+private fun decodeHexOrNull(hex: String): ByteArray? {
+    if (hex.isEmpty() || hex.length % 2 != 0) return null
+    val out = ByteArray(hex.length / 2)
+    for (i in out.indices) {
+        val hi = Character.digit(hex[i * 2], 16)
+        val lo = Character.digit(hex[i * 2 + 1], 16)
+        if (hi < 0 || lo < 0) return null
+        out[i] = ((hi shl 4) or lo).toByte()
+    }
+    return out
+}
+
+/**
  * Pure builder for the sweep's txid -> isOutgoingUnconfirmed overlay
  * (source-fix / C2). Parses each
  * [io.digibyte.core.bridge.NativeBridge.getTransactionDetails] row
@@ -1097,7 +1130,10 @@ class AssetManager(
 
         // 1. Load spendable UTXOs.
         val assetUtxos = utxoDao.getAssetUtxosByIdNow(assetId)
-        val dgbUtxos = utxoDao.getSpendableDigiByteUtxosNow()
+        // Sovereign DGB fee source: the native wallet->utxos set, NOT the Room
+        // is_asset=0 partition (empty on a normally-synced wallet whose DGB lives
+        // in native → the "Not enough DGB for fee: have 0" failure).
+        val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
         if (assetUtxos.isEmpty()) return TxResult.Error("No UTXOs for asset $assetId")
 
         // 2. Budget for two markers (recipient + possible asset-change). If
