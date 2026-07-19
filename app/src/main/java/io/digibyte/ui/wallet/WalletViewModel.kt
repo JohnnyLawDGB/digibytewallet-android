@@ -678,7 +678,7 @@ class WalletViewModel @Inject constructor(
                         val isSend = tx.amount < 0
                         val display: String? = when (kinds[tx.txid]) {
                             TxKind.DIGIDOLLAR -> {
-                                val cents = runCatching { NativeBridge.digiDollarTxAmount(tx.txid) }
+                                val cents = runCatching { NativeBridge.digiDollarTxAmount(tx.txid, isSend) }
                                     .getOrDefault(0L)
                                 if (cents > 0L) formatDigiDollar(cents) else null
                             }

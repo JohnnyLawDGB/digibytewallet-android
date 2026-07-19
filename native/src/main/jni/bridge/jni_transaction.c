@@ -522,13 +522,15 @@ Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxType(JNIEnv *env, jobject 
 /* digiDollarTxAmount: the wallet-relevant DigiDollar value (USD cents) moved in
  * this tx, or 0 if it isn't a DigiDollar tx / isn't known to the wallet.
  * Display-only — lets the UI show "$X" on a DigiDollar row instead of the ~0
- * on-chain DGB value. Sums BRDigiDollarOutputAmount over the tx's DD-token
- * outputs the wallet OWNS (a receive); if it owns none (a send funded by our
- * inputs), sums all DD outputs (the value transferred). Returns an unsigned
- * magnitude; the UI applies +/- from the existing DGB direction. Same BE->LE
- * reversal + BRWalletTransactionForHash lookup as digiDollarTxType. */
+ * on-chain DGB value. Direction-aware, bucketing BRDigiDollarOutputAmount over
+ * the tx's DD-token outputs BY OWNERSHIP so it shows what actually moved, not the
+ * change: a RECEIVE (isSend=0) sums the DD outputs the wallet OWNS; a SEND
+ * (isSend=1) sums the DD outputs it does NOT own (the recipient's) — summing the
+ * owned outputs on a send would report the DD CHANGE, not the amount sent.
+ * Returns an unsigned magnitude; the UI applies +/- from the DGB direction.
+ * Same BE->LE reversal + BRWalletTransactionForHash lookup as digiDollarTxType. */
 JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxAmount(JNIEnv *env, jobject thiz, jstring txHashHex) {
+Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxAmount(JNIEnv *env, jobject thiz, jstring txHashHex, jboolean isSend) {
     (void)thiz;
     if (! g_wallet || ! txHashHex) return 0;
     const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
@@ -539,14 +541,14 @@ Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxAmount(JNIEnv *env, jobjec
         UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
         BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
         if (tx && BRDigiDollarTxType(tx) > 0) {
-            int64_t owned = 0, total = 0;
+            int64_t owned = 0, notOwned = 0;
             for (size_t j = 0; j < tx->outCount; j++) {
                 int64_t dd = BRDigiDollarOutputAmount(tx, (uint32_t)j);
                 if (dd < 0) continue; /* not a DD-token output */
-                total += dd;
                 if (BRWalletContainsAddress(g_wallet, tx->outputs[j].address)) owned += dd;
+                else notOwned += dd;
             }
-            cents = (jlong)((owned > 0) ? owned : total);
+            cents = (jlong)(isSend ? notOwned : owned);
         }
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
