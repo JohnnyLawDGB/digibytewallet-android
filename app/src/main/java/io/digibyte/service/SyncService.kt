@@ -743,6 +743,14 @@ class SyncService : Service() {
             // until the first cfheaders response rebuilds it); the grace keeps the
             // watchdog from reading that transient 0 as "dead" and giving up early.
             var reanchorAtMs = 0L
+            // CF-wedge (cfheaders-frozen) recovery state. cfNetMax is the session
+            // running-MAX cfTip — NOT the current value — so the native chain
+            // oscillating 0↔N on each continuity re-anchor can't reset the frozen
+            // timer. cfNetProgressMs is the wall-clock of the last net gain. The
+            // recovery fires at most once per session (like reanchoredThisSession).
+            var cfNetMax = cfTipAtStart
+            var cfNetProgressMs = startedAt
+            var cfFrozenRecoveredThisSession = false
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
                 val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
@@ -781,6 +789,35 @@ class SyncService : Service() {
                 val blockClimbing = blockTip > lastBlockTip
                 if (blockClimbing) lastBlockProgressMs = nowMs
                 lastBlockTip = blockTip
+
+                // CF-wedge recovery — checked BEFORE the `advanced` short-circuit
+                // below (which is fooled by the native chain rebuilding 0→N after a
+                // continuity re-anchor and reads it as "progress") and independent of
+                // blocksCaughtUp (the wedge happens WHILE headers import, so that
+                // short-circuit is structurally blind to it). Track the session
+                // running-MAX cfTip: if it stops climbing for CF_FROZEN_RECOVERY_MS
+                // while headers are still importing, cfheaders is stuck in a
+                // continuity re-anchor loop that never converges — recover ONCE by
+                // dropping the diverged persisted chain and forcing a clean manager
+                // recreate (fresh peers + reset native CF continuity budget), which
+                // re-fetches cfheaders from the floor.
+                if (cfTipNow > cfNetMax) { cfNetMax = cfTipNow; cfNetProgressMs = nowMs }
+                if (shouldRecoverFrozenCf(
+                        blockClimbing, nowMs - cfNetProgressMs, cfNetMax, cfFrozenRecoveredThisSession)) {
+                    cfFrozenRecoveredThisSession = true
+                    android.util.Log.w("SyncService",
+                        "BIP158 watchdog: cfTip WEDGED at net-max $cfNetMax for " +
+                        "${(nowMs - cfNetProgressMs) / 1000}s while blockTip climbs ($blockTip) — " +
+                        "dropping diverged filter chain + recreating manager to re-fetch cfheaders")
+                    FilterHeaderStore.delete(this@SyncService)
+                    pendingFilterHeaders = null
+                    filterHeadersDirty = false
+                    runCatching { NativeBridge.forceReconnect() }
+                    injectPeers()
+                    injectCustomNode()
+                    runCatching { NativeBridge.startSync() }
+                    continue
+                }
 
                 // cfheaders is actively riding the header chain — healthy.
                 if (advanced) {

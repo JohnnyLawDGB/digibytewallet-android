@@ -150,4 +150,79 @@ class Bip158WatchdogPolicyTest {
             isFilterSyncHealthy(gap = HEALTHY_CF_GAP_BLOCKS + 1, cfAdvancedSinceStart = true, blocksCaughtUp = true),
         )
     }
+
+    // ── shouldRecoverFrozenCf — the CF-wedge (cfheaders-frozen) recovery gate ──
+
+    @Test
+    fun `cfTip frozen past the window while headers climb triggers recovery`() {
+        // THE WEDGE: cfheaders made progress (netMax > 0) then stuck in a continuity
+        // re-anchor loop; block headers keep importing. This is exactly the case the
+        // blocksCaughtUp short-circuit is blind to.
+        assertEquals(
+            true,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `does not recover before the frozen window elapses`() {
+        assertEquals(
+            false,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS - 1,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `does not recover when headers are not climbing`() {
+        // If block sync itself has stalled, cfTip-frozen isn't the cfheaders wedge —
+        // a different failure; don't fire this recovery.
+        assertEquals(
+            false,
+            shouldRecoverFrozenCf(
+                blockClimbing = false,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 3,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `does not recover during the normal pre-CF phase (netMax still zero)`() {
+        // Headers importing from birth before cfheaders has fetched anything is
+        // NORMAL — cfTip legitimately 0 until headers climb above the frontier.
+        // Requiring cfNetMax > 0 avoids a false recovery here.
+        assertEquals(
+            false,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 3,
+                cfNetMax = 0,
+                alreadyRecovered = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `recovers at most once per session`() {
+        assertEquals(
+            false,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = true,
+            ),
+        )
+    }
 }

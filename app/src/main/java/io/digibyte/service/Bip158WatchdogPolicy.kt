@@ -94,3 +94,39 @@ internal fun isFilterSyncHealthy(
     cfAdvancedSinceStart: Boolean,
     blocksCaughtUp: Boolean,
 ): Boolean = gap <= HEALTHY_CF_GAP_BLOCKS && (cfAdvancedSinceStart || blocksCaughtUp)
+
+/**
+ * How long the compact-filter tip may make no NET forward progress — while the
+ * block-header chain IS still climbing — before the watchdog treats the filter
+ * chain as WEDGED and forces a one-time recovery. A healthy cfheaders sync rides
+ * just behind the header chain and makes net progress every few seconds during a
+ * rescan; a continuity re-anchor loop that never converges makes none. Wide
+ * enough that a slow-but-progressing filter sync (Tor, flaky fleet) is never
+ * misread as wedged.
+ */
+internal const val CF_FROZEN_RECOVERY_MS = 120_000L
+
+/**
+ * Should the watchdog force a one-time CF-wedge recovery this poll?
+ *
+ * True when the compact-filter tip made SOME progress (session running-max
+ * [cfNetMax] > 0) then stopped advancing for [cfFrozenMs] >= [thresholdMs] while
+ * the block-header chain is still climbing ([blockClimbing]) — i.e. cfheaders
+ * SHOULD be able to ride the header chain but is stuck (the continuity re-anchor
+ * loop) — and we haven't already recovered this session ([alreadyRecovered]).
+ *
+ * This is deliberately INDEPENDENT of blocksCaughtUp: the wedge happens WHILE
+ * headers import, so the watchdog's blocksCaughtUp short-circuit is structurally
+ * blind to it. [cfNetMax] must be the session running-max (not the current cfTip)
+ * so the native chain oscillating 0↔N on each re-anchor cannot reset the frozen
+ * timer. Requiring cfNetMax > 0 avoids firing during the normal pre-CF phase
+ * where headers haven't yet climbed above the filter frontier.
+ */
+internal fun shouldRecoverFrozenCf(
+    blockClimbing: Boolean,
+    cfFrozenMs: Long,
+    cfNetMax: Int,
+    alreadyRecovered: Boolean,
+    thresholdMs: Long = CF_FROZEN_RECOVERY_MS,
+): Boolean =
+    !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs
