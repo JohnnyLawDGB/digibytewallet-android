@@ -1593,6 +1593,75 @@ class AssetManager(
         return LegacyHealResult(candidates, deleted)
     }
 
+    /**
+     * Sovereign heal for the residual DigiAsset over-count (e.g. CHANG displaying
+     * 21 for a supply-10 asset). Deletes any asset UTXO row whose scriptPubKey is
+     * NOT one of the wallet's own scripts — a not-owned recipient-marker output
+     * from a transfer WE sent, which the wallet wrongly counts toward its balance.
+     *
+     * WHY THIS IS NEEDED (regression). The identical owned-script prune already
+     * lived inside the backend refresh path, but the sovereign redesign turned
+     * that path OFF — so the prune became dead code and the recipient phantoms it
+     * used to clear now accumulate. [UtxoDao.getAssetBalances] sums spent=0 rows
+     * with NO ownership filter, so each stray non-owned row inflates the shown
+     * count until removed. This re-homes the exact same check onto the standing
+     * sovereign maintenance cycle.
+     *
+     * Ownership is the ONLY delete authority here (never backend-absence, never
+     * native tx-absence): a non-owned output can never be a real holding of ours,
+     * so deleting it is always safe. Owned rows — including genuine change
+     * holdings — are never touched; their liveness is the job of
+     * [pruneRemovedNativeAssetRows] + [reconcileAssetSpentFromNative].
+     *
+     * SAFETY: if the owned-script set comes back empty (wallet not loaded / native
+     * hiccup) we skip entirely rather than treat every row as unowned and wipe the
+     * table. Ships log-only ([dryRun]) first — every asset row is logged with its
+     * owned / spent / native-spent-state so the candidate set can be eyeballed
+     * on-device before deletion is enabled.
+     */
+    suspend fun pruneUnownedAssetRows(dryRun: Boolean): LegacyHealResult =
+        pruneUnownedAssetRowsImpl(buildOwnedScriptHexes(), dryRun) { txid, vout ->
+            // -99 = native probe threw; diagnostic-only, never gates the delete.
+            runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrDefault(-99)
+        }
+
+    /**
+     * Testable core of [pruneUnownedAssetRows]. Same host-JVM/NativeBridge
+     * constraint as [healLegacyChangeAddressOrphansImpl]: the owned-script set and
+     * the native spent-state probe arrive as plain parameters so the logic can be
+     * driven without loading `core-lib`. [spentState] is diagnostic only (logged,
+     * never gating the delete) — ownership is the sole delete authority.
+     */
+    internal suspend fun pruneUnownedAssetRowsImpl(
+        ownedScriptHexes: Set<String>,
+        dryRun: Boolean,
+        spentState: suspend (String, Int) -> Int,
+    ): LegacyHealResult {
+        val owned = ownedScriptHexes.map { it.lowercase() }.toSet()
+        if (owned.isEmpty()) {
+            android.util.Log.i("AssetManager", "pruneUnowned: owned-script set empty — skipping (safety)")
+            return LegacyHealResult(emptyList(), 0)
+        }
+        val candidates = mutableListOf<String>()
+        var deleted = 0
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            val scriptHex = row.scriptPubKey.toHex().lowercase()
+            val isOwned = scriptHex.isNotEmpty() && scriptHex in owned
+            android.util.Log.i("AssetManager",
+                "assetRow ${row.txid}:${row.vout} asset=${row.assetId} qty=${row.assetQuantity} " +
+                    "spent=${row.spent} owned=$isOwned nativeSpentState=${spentState(row.txid, row.vout)}")
+            if (isOwned || scriptHex.isEmpty()) continue
+            candidates.add("${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
+            android.util.Log.i("AssetManager",
+                "pruneUnowned ${if (dryRun) "DRYRUN candidate" else "DELETE"}: " +
+                    "${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
+            if (!dryRun) deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
+        }
+        android.util.Log.i("AssetManager",
+            "pruneUnowned: ${candidates.size} candidates, deleted=$deleted, dryRun=$dryRun")
+        return LegacyHealResult(candidates, deleted)
+    }
+
     private companion object {
         /** DGB change below this floor is folded into the fee rather than
          *  emitted as its own output. MUST be >= the network dust threshold

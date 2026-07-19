@@ -533,6 +533,19 @@ class SyncService : Service() {
                             runCatching { assetManager.pruneRemovedNativeAssetRows() }
                                 .onFailure { android.util.Log.w("SyncService", "asset prune threw", it) }
 
+                            // Sovereign owned-script phantom prune — the CHANG "21 for a
+                            // supply-10 asset" over-count. Deletes asset rows at addresses we
+                            // don't own (recipient markers from transfers we sent, which
+                            // getAssetBalances still sums). This exact check used to run on the
+                            // now-retired backend refresh; re-homed here onto the standing path.
+                            // Log-only first (same flag as the legacy heal) so the candidate
+                            // set is observable on-device before deletion is enabled.
+                            runCatching {
+                                val res = assetManager.pruneUnownedAssetRows(dryRun = legacyHealDryRun)
+                                android.util.Log.i("SyncService",
+                                    "pruneUnowned ran: ${res.candidates.size} candidates, deleted=${res.deleted}")
+                            }.onFailure { android.util.Log.w("SyncService", "pruneUnowned threw", it) }
+
                             // One-time (per install) heal of pre-existing owned-CHANGE-address
                             // asset orphans (the legacy Chang over-count, C9). Gated on the same
                             // prune gate — synced-this-session + connected + wallet loaded — plus
