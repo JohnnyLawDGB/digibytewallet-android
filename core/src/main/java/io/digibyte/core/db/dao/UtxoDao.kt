@@ -87,7 +87,10 @@ interface UtxoDao {
     @Query("DELETE FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
     suspend fun deleteAssetUtxo(txid: String, vout: Int): Int
 
-    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id")
+    // HAVING SUM > 0: an asset you hold 0 of (e.g. fully sent, leaving only a
+    // spent or 0-quantity row) must drop off the Assets tab, not linger as
+    // "<name> — 0 held". Also guards against a 0/negative-quantity phantom row.
+    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id HAVING SUM(asset_quantity) > 0")
     fun getAssetBalances(): Flow<List<AssetBalance>>
 
     /** All asset rows of a given provenance (unspent + spent). Used by the
