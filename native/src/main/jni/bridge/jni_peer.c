@@ -1101,22 +1101,39 @@ static uint8_t *g_pendingFilterChain       = NULL;
 static size_t   g_pendingFilterChainLen    = 0;
 static int      g_pendingAutoFetchEnabled  = 0;
 static uint32_t g_pendingAutoFetchStart    = 0;
+/* Sticky auto-fetch state — REMEMBERED across in-process peer-manager recreates
+ * (unlike g_pendingAutoFetch*, which are consumed once at the cold start). A
+ * recreated manager resets its per-manager autoFetchCFiltersEnabled flag (calloc
+ * default 0), and cfilter fetching is gated on that flag, so _applyPendingBip158State
+ * re-applies auto-fetch on every (re)creation — mirroring the remember-and-re-apply
+ * pattern used for the pinned peer in startSync. Uses the LAST Kotlin-set start
+ * (which honors a recovery cf_birth_height), not a tip-derived guess that would
+ * abandon a deep rescan floor. */
+static int      g_autoFetchRemembered      = 0;
+static uint32_t g_autoFetchStartRemembered = 0;
 
 static void _applyPendingBip158State(void) {
     if (!g_peerManager) return;
 
-    if (g_pendingSyncModeSet) {
-        BRPeerManagerSetSyncMode(g_peerManager, (BRSyncMode)g_pendingSyncMode);
-        /* Unconditional: install the CF-header persistence callback regardless
-         * of which mode lands. The wallet is always CF-only so this is a
-         * no-op guard removal, not a behavior change — but it also means a
-         * stray BLOOM_ONLY value here (should never happen; see the
-         * g_pendingSyncMode default above) still gets its filter headers
-         * saved instead of silently losing CF-header persistence. */
-        BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
-        LOGI("BIP158: applied pending syncMode=%d", g_pendingSyncMode);
-        g_pendingSyncModeSet = 0;
-    }
+    /* ALWAYS apply the sync mode — NOT only when g_pendingSyncModeSet. On an
+     * in-process peer-manager recreate (forceReconnect flags it, startSync frees
+     * + rebuilds it) the pending flag was already consumed at the cold start, so
+     * gating on it left the FRESH manager on its calloc default
+     * BR_SYNC_MODE_BLOOM_ONLY (== 0). Post-4.0.0 BLOOM_ONLY is a DEAD mode (the
+     * BIP37 download machinery was excised): such a manager dials peers, can't
+     * CF-sync them, hits PROTOCOL_TIMEOUT and penalizes every one → wedged at 0
+     * peers until a full process restart. g_pendingSyncMode is pinned to
+     * COMPACT_FILTERS_ONLY by default and SyncService sets it CF-only before
+     * every cold start, so re-applying it on every manager (re)creation is
+     * always correct for this CF-only wallet and is what makes the in-process
+     * recreate recover instead of wedging. */
+    BRPeerManagerSetSyncMode(g_peerManager, (BRSyncMode)g_pendingSyncMode);
+    /* Unconditional: install the CF-header persistence callback regardless of
+     * which mode lands (the wallet is always CF-only, so this never loses
+     * filter-header persistence). */
+    BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
+    LOGI("BIP158: applied syncMode=%d (pendingSet=%d)", g_pendingSyncMode, g_pendingSyncModeSet);
+    g_pendingSyncModeSet = 0;
 
     if (g_pendingFilterChain && g_pendingFilterChainLen > 0) {
         BRCompactFilterChain *chain = BRCompactFilterChainDeserialize(g_pendingFilterChain,
@@ -1143,6 +1160,24 @@ static void _applyPendingBip158State(void) {
         }
         g_pendingAutoFetchEnabled = 0;
         g_pendingAutoFetchStart = 0;
+    }
+
+    /* Sticky re-arm across in-process recreates. The pending block above fires
+     * only once (cold start); on a forceReconnect recreate it's a no-op and the
+     * fresh manager has autoFetchCFiltersEnabled=0. cfilter fetching is gated on
+     * that flag, so a CF-only recreate would connect + advance headers but never
+     * fetch cfilters → tx detection stays dark until a full process restart
+     * (exactly the DigiDollar "received but never confirmed / balance didn't
+     * increment" class). If Kotlin has ever enabled auto-fetch and the fresh
+     * manager isn't armed, re-apply the remembered start (honoring any recovery
+     * cf_birth_height). The ==0 gate is safe because BRPeerManagerNewEx
+     * calloc-zeroes autoFetchCFiltersStart — a freshly created manager never
+     * pre-arms auto-fetch — so ==0 uniquely identifies the recreate case. */
+    if (g_autoFetchRemembered &&
+        (BRSyncMode)g_pendingSyncMode == BR_SYNC_MODE_COMPACT_FILTERS_ONLY &&
+        BRPeerManagerGetAutoFetchCFiltersStart(g_peerManager) == 0) {
+        BRPeerManagerEnableAutoCompactFilterFetch(g_peerManager, g_autoFetchStartRemembered);
+        LOGI("BIP158: recreate — re-armed auto-fetch from remembered start %u", g_autoFetchStartRemembered);
     }
 }
 
@@ -1346,6 +1381,10 @@ Java_io_digibyte_core_bridge_NativeBridge_enableAutoCompactFilterFetch(JNIEnv *e
     (void)env; (void)thiz;
     PEER_GUARD();
     if (startHeight < 0) startHeight = 0;
+    /* Remember the request so a later in-process manager recreate re-arms it
+     * (see _applyPendingBip158State). */
+    g_autoFetchRemembered = 1;
+    g_autoFetchStartRemembered = (uint32_t)startHeight;
     if (!g_peerManager) {
         g_pendingAutoFetchEnabled = 1;
         g_pendingAutoFetchStart = (uint32_t)startHeight;
@@ -1361,6 +1400,10 @@ JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
+    /* Forget the sticky state so a subsequent recreate does NOT re-arm auto-fetch
+     * after an intentional disable. */
+    g_autoFetchRemembered = 0;
+    g_autoFetchStartRemembered = 0;
     if (!g_peerManager) return;
     BRPeerManagerDisableAutoCompactFilterFetch(g_peerManager);
     LOGI("disableAutoCompactFilterFetch");
