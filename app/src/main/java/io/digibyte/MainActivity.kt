@@ -242,16 +242,14 @@ class MainActivity : FragmentActivity() {
             val torComingUp = torManager.isEnabled &&
                 (torState is TorState.Connecting || torState is TorState.Starting)
             if (peers == 0 && !torComingUp) {
-                android.util.Log.i("MainActivity", "onResume with peerCount=0 — forcing a clean reconnect")
-                try {
-                    // forceReconnect first: after a long idle the existing manager is
-                    // often stuck (dead peers holding the slots) and startSync alone
-                    // (→ BRPeerManagerConnect) can't dig it out. A clean recreate does.
-                    NativeBridge.forceReconnect()
-                    NativeBridge.startSync()
-                } catch (t: Throwable) {
-                    android.util.Log.w("MainActivity", "reconnect kick failed", t)
-                }
+                android.util.Log.i("MainActivity", "onResume with peerCount=0 — re-kicking SyncService for full recovery")
+                // Route through the service (onStartCommand re-kick) so it re-arms its
+                // watchdogs AND runs the FULL recovery: recreate the manager, re-inject the
+                // canon filter peers, then restart. A bare forceReconnect+startSync here
+                // omits re-injecting the canon set, so the fresh manager can come up with
+                // no good CF peers and re-wedge. This is the OS-background-freeze 0-peer
+                // dead-loop revival — onResume is the reliable trigger the frozen watchdogs lost.
+                runCatching { startSyncService() }
             }
         }
     }

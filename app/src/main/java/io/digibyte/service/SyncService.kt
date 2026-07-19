@@ -287,6 +287,35 @@ class SyncService : Service() {
             if (keepaliveWatchdogJob?.isActive != true) {
                 keepaliveWatchdogJob = serviceScope.launch { runKeepaliveWatchdog() }
             }
+            // Re-arm the tip-stall watchdog too (same OS-freeze death risk as keepalive).
+            if (tipStallWatchdogJob?.isActive != true) {
+                startTipStallWatchdog()
+            }
+            // #2 loop-revival: if the loop DIED (0 peers) even though setup completed —
+            // the OS-background-freeze case where every serviceScope coroutine stopped and
+            // the resurrected keepalive alone can't dig out — do a full recovery here:
+            // recreate the manager + re-inject the canon peers + restart. Off-main because
+            // getPeerCount takes PEER_GUARD (main-thread ANR risk). Skip while Tor is coming
+            // up so peers don't dial direct before the SOCKS proxy is wired (IP leak).
+            val torComingUp = torManager.isEnabled &&
+                (torManager.state.value is TorState.Connecting || torManager.state.value is TorState.Starting)
+            if (syncSetupComplete && !torComingUp) {
+                serviceScope.launch(Dispatchers.IO) {
+                    val p = runCatching { NativeBridge.getPeerCount() }.getOrDefault(-1)
+                    val loaded = runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false)
+                    if (p == 0 && loaded) {
+                        android.util.Log.w(
+                            "SyncService",
+                            "loop-revival: 0 peers with sync setup complete — full recovery " +
+                                "(recreate manager + re-inject canon + restart)"
+                        )
+                        runCatching { NativeBridge.forceReconnect() }
+                        injectPeers()
+                        injectCustomNode()
+                        runCatching { NativeBridge.startSync() }
+                    }
+                }
+            }
             return START_STICKY
         }
         syncAlreadyLaunched = true
@@ -727,6 +756,9 @@ class SyncService : Service() {
             var lastAdvanceMs = System.currentTimeMillis()
             var tier1Fired = false
             var lastTier2Ms = 0L
+            var lastFastMs = 0L          // fast-tier (orphan / can't-hold-filter-peer) throttle
+            var pinRotation = 0          // rotate through the validated filter pool when pinning
+            var pinnedThisStall = false  // did we pin a canon filter peer for this stall?
             while (true) {
                 kotlinx.coroutines.delay(TIP_STALL_WATCHDOG_POLL_MS)
                 val tip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
@@ -737,6 +769,11 @@ class SyncService : Service() {
                     lastTip = tip
                     lastAdvanceMs = nowMs
                     tier1Fired = false
+                    // Recovered — release any pinned canon peer so the pool re-diversifies.
+                    if (pinnedThisStall) {
+                        runCatching { NativeBridge.clearPinnedPeer() }
+                        pinnedThisStall = false
+                    }
                 }
                 val stalledMs = nowMs - lastAdvanceMs
 
@@ -762,9 +799,51 @@ class SyncService : Service() {
                     )
                     runCatching { NativeBridge.rerequestHeadersFromTip() }
                     tier1Fired = true
+                } else if (peers > 0 && stalledMs >= TIP_STALL_FAST_MS &&
+                    nowMs - lastFastMs >= TIP_STALL_FAST_MS
+                ) {
+                    // FAST tier — connected but the tip hasn't advanced for a few minutes
+                    // (multi-algo DGB mines every ~15s, so this is genuinely stuck, not slow).
+                    // Two causes, both handled: (1) a short ORPHAN — a full-locator getheaders
+                    // walks back + reorgs off it; (2) ROAMING — the wallet holds peers but not a
+                    // filter-capable one, so PIN a validated canon CF peer (rotating) to lock it
+                    // on instead of churning the junk pool. The pin is released on advance above.
+                    lastFastMs = nowMs
+                    runCatching { NativeBridge.rerequestHeadersFromTip() }
+                    val fp = nextValidatedFilterPeer(pinRotation++)
+                    if (fp != null) {
+                        android.util.Log.i(
+                            "SyncService",
+                            "tip-stall FAST: frozen ${stalledMs / 1000}s, $peers peers — re-request " +
+                                "headers + pinning canon filter peer ${fp.first}:${fp.second}"
+                        )
+                        runCatching { NativeBridge.setPinnedPeer(fp.first, fp.second, false) }
+                        pinnedThisStall = true
+                    } else {
+                        android.util.Log.i(
+                            "SyncService",
+                            "tip-stall FAST: frozen ${stalledMs / 1000}s, $peers peers — re-request " +
+                                "headers (no validated filter peer in pool to pin)"
+                        )
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Rotate through the validated filter-peer pool (`dgb_filter_peers`, the canon set)
+     * for pinning when real-time sync holds peers but can't hold a CF one. Returns
+     * (ip, port) or null if the pool is empty (native then falls back to discovery).
+     */
+    private fun nextValidatedFilterPeer(rotation: Int): Pair<String, Int>? {
+        val prefs = getSharedPreferences(
+            "dgb_filter_peers" + networkSuffix(this@SyncService), MODE_PRIVATE
+        )
+        val pool = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: return null
+        if (pool.isEmpty()) return null
+        val (ip, port, _) = pool[((rotation % pool.size) + pool.size) % pool.size]
+        return ip to port
     }
 
     private fun startBip158Watchdog(birthHeight: Long) {
@@ -2211,6 +2290,12 @@ class SyncService : Service() {
         // thrash reconnects.
         private const val TIP_STALL_WATCHDOG_POLL_MS = 60_000L
         private const val TIP_STALL_TIER2_THROTTLE_MS = 60 * 60 * 1000L
+
+        // Fast tier: the tip hasn't advanced for 3 min while peers are connected. DGB
+        // mines every ~15s (multi-algo), so 3 min ≈ 12 missed blocks = genuinely stuck,
+        // not slow — safe to act (re-request headers + pin a canon CF peer). Far quicker
+        // than the 20-min tier, for the short-orphan and can't-hold-a-filter-peer cases.
+        private const val TIP_STALL_FAST_MS = 3 * 60 * 1000L
 
         /** Process-wide flag set when the Tor watchdog gives up waiting for
          *  bootstrap and forces a clearnet fallback. The wallet UI collects
