@@ -423,6 +423,45 @@ Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jo
     return JNI_TRUE;
 }
 
+/* ---------- confirmTransaction ---------- */
+/* Promote an ALREADY-REGISTERED wallet tx from TX_UNCONFIRMED to a real
+ * confirming height, driven by txid alone (no raw hex needed). The txid-based
+ * confirmation-reconcile uses this: it enumerates the wallet's own pending txs
+ * and asks the node for each one's height, so it recovers a stuck-pending tx
+ * even when the node's UTXO enumeration (scantxoutset) never surfaces it — e.g.
+ * a 0-value DigiDollar token output that a dust filter omits, which the
+ * address/UTXO-based reconcile can't reach.
+ * BRWalletUpdateTransactions sets the height and re-runs _BRWalletUpdateBalance,
+ * which releases the withheld DigiDollar/asset credit. Returns true only if a
+ * known, still-unconfirmed tx was promoted with a confirmed height. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
+                                                             jstring txHashHex,
+                                                             jlong blockHeight,
+                                                             jlong blockTimestamp) {
+    (void)thiz;
+    if (!g_wallet || !txHashHex) return JNI_FALSE;
+    if ((uint32_t)blockHeight == TX_UNCONFIRMED || blockHeight <= 0) return JNI_FALSE;
+
+    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
+    if (!hashStr) return JNI_FALSE;
+
+    jboolean promoted = JNI_FALSE;
+    if (strlen(hashStr) == 64) {
+        UInt256 h = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
+        BRTransaction *existing = BRWalletTransactionForHash(g_wallet, h);
+        if (existing && existing->blockHeight == TX_UNCONFIRMED) {
+            BRWalletUpdateTransactions(g_wallet, &h, 1,
+                                       (uint32_t)blockHeight, (uint32_t)blockTimestamp);
+            LOGI("confirmTransaction: promoted %s to height=%ld ts=%ld",
+                 hashStr, (long)blockHeight, (long)blockTimestamp);
+            promoted = JNI_TRUE;
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
+    return promoted;
+}
+
 /* ---------- getEstimatedFee ---------- */
 
 JNIEXPORT jlong JNICALL

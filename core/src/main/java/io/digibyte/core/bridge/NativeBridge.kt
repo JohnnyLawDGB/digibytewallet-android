@@ -329,6 +329,18 @@ object NativeBridge {
         blockTimestamp: Long
     ): Boolean
 
+    /** Promote an already-registered, still-unconfirmed wallet tx to its real
+     *  confirming height (txid-driven — no raw hex needed). Used by the txid-based
+     *  confirmation-reconcile to recover a stuck-"Pending" tx even when the node's
+     *  UTXO enumeration never surfaces it (e.g. a 0-value DigiDollar token output).
+     *  Re-runs the balance update, releasing a withheld DD/asset credit. Returns
+     *  true only if a known, unconfirmed tx was promoted with a confirmed height. */
+    external fun confirmTransaction(
+        txHashHex: String,
+        blockHeight: Long,
+        blockTimestamp: Long
+    ): Boolean
+
     // ── Universal Restore — stateless key derivation ──────────────────────────
     //
     // These functions probe arbitrary derivation paths during seed restore

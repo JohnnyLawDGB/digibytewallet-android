@@ -56,6 +56,19 @@ class ChainReconciliationService(
     /** Run the full reconcile cycle. Called from Settings UI. */
     suspend fun reconcile(): State = withContext(Dispatchers.IO) {
         try {
+            // Txid-driven confirmation-reconcile FIRST, independent of the
+            // address/UTXO reconcile below (and its early-returns): promote any
+            // wallet tx still stuck at TX_UNCONFIRMED to its real confirming
+            // height. Recovers a stuck-"Pending" tx the UTXO reconcile can't
+            // surface — e.g. a 0-value DigiDollar token output a dust filter
+            // omits from scantxoutset. Non-fatal.
+            _state.value = State.Scanning("Checking pending transactions…")
+            val promotedPending = runCatching { confirmPendingTransactions() }.getOrDefault(0)
+            if (promotedPending > 0) {
+                android.util.Log.i("ChainReconciliation",
+                    "confirmation-reconcile promoted $promotedPending stuck-pending tx(s)")
+            }
+
             _state.value = State.Scanning("Listing wallet addresses…")
             val addrs = NativeBridge.dumpAllAddresses()
                 .trim().lines().filter { it.isNotBlank() }
@@ -138,6 +151,35 @@ class ChainReconciliationService(
             failed
         }
     }
+
+    /**
+     * Txid-driven confirmation-reconcile: for each wallet tx still at
+     * TX_UNCONFIRMED, ask the node for its real confirming height ([DgbNodeClient.txConfirmation])
+     * and promote it via [NativeBridge.confirmTransaction] (which re-runs the
+     * balance update, releasing any withheld DigiDollar/asset credit). Driven by
+     * the wallet's OWN pending list — not the node's UTXO set — so it recovers a
+     * stuck-"Pending" tx the address/UTXO reconcile can't surface (e.g. a 0-value
+     * DigiDollar token output). Returns the number of txs promoted.
+     */
+    suspend fun confirmPendingTransactions(): Int {
+        var promoted = 0
+        for (txid in pendingTxids()) {
+            val conf = nodeClient.txConfirmation(txid) ?: continue
+            if (NativeBridge.confirmTransaction(txid, conf.height, conf.time)) promoted++
+        }
+        return promoted
+    }
+
+    /** Txids of wallet transactions still unconfirmed — blockHeight is the
+     *  TX_UNCONFIRMED sentinel (Int.MAX_VALUE), field 3 of a
+     *  `txHash|amount|fee|blockHeight|timestamp|sent|received` line. */
+    private fun pendingTxids(): List<String> =
+        NativeBridge.getTransactionDetails().trim().lines().mapNotNull { line ->
+            val parts = line.split("|")
+            if (parts.getOrNull(3)?.toLongOrNull() == Int.MAX_VALUE.toLong())
+                parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+            else null
+        }
 
     private fun hexToBytes(hex: String): ByteArray {
         val clean = hex.trim().removePrefix("0x")

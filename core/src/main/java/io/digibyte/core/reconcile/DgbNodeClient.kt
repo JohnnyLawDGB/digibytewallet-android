@@ -99,6 +99,49 @@ class DgbNodeClient(
             ReconcileResult(allUtxos, allRawTxs, chainHeight)
         }
 
+    /**
+     * Look up a transaction's confirming block height + time via the explorer
+     * endpoints ({endpoint}/explorer/tx/:txid → blockhash + confirmations, then
+     * /explorer/block/:hash → height). Returns null if unknown, still
+     * unconfirmed, or on any network/parse error.
+     *
+     * Used by the txid-driven confirmation-reconcile to promote a stuck-"Pending"
+     * tx the address/UTXO reconcile can't surface — e.g. a 0-value DigiDollar
+     * token output a dust filter omits from scantxoutset. Driven by the wallet's
+     * own pending txids, not the node's UTXO set, so it never misses such a tx.
+     */
+    suspend fun txConfirmation(txid: String): TxConfirmation? = withContext(Dispatchers.IO) {
+        val tx = httpGetJson("${endpoint()}/explorer/tx/$txid") ?: return@withContext null
+        val blockhash = tx.optString("blockhash", "")
+        val confirmations = tx.optLong("confirmations", 0L)
+        if (blockhash.isEmpty() || confirmations <= 0L) return@withContext null // still unconfirmed
+        val blocktime = tx.optLong("blocktime", tx.optLong("time", 0L))
+        val block = httpGetJson("${endpoint()}/explorer/block/$blockhash") ?: return@withContext null
+        val height = block.optLong("height", 0L)
+        if (height <= 0L) return@withContext null
+        TxConfirmation(height, blocktime)
+    }
+
+    /** GET a URL and parse the body as a JSON object. Null on non-2xx, empty
+     *  body, parse error, or network failure (logged). Uses the same cert-pinned
+     *  client selection as the reconcile POST. */
+    private fun httpGetJson(url: String): JSONObject? {
+        val req = Request.Builder().url(url).get().build()
+        return try {
+            client(url).newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    android.util.Log.w("DgbNodeClient", "GET $url returned HTTP ${resp.code}")
+                    return null
+                }
+                val body = resp.body?.string() ?: return null
+                JSONObject(body)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("DgbNodeClient", "GET $url threw ${t::class.java.simpleName}: ${t.message}")
+            null
+        }
+    }
+
     private fun requestBatch(addresses: List<String>): ReconcileResult? {
         val url = "${endpoint()}/wallet/reconcile"
         val payload = JSONObject().apply {
@@ -194,3 +237,7 @@ data class ReconcileResult(
     val rawTxs: Map<String, RawTxEntry>,
     val chainHeight: Long,
 )
+
+/** A transaction's confirming block height + block time, from
+ *  [DgbNodeClient.txConfirmation]. */
+data class TxConfirmation(val height: Long, val time: Long)
