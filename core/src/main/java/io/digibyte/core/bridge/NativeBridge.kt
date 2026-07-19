@@ -88,6 +88,13 @@ object NativeBridge {
      *  Read-only/display-only — used to label a transaction row DigiDollar vs DGB. */
     external fun digiDollarTxType(txHashHex: String): Int
 
+    /** Wallet-relevant DigiDollar value (USD cents) moved in the wallet-known tx
+     *  with this display (BE) txid, or 0 if not a DigiDollar tx / unknown. Sums the
+     *  tx's DD-token outputs the wallet owns (receive), else all DD outputs (send).
+     *  Unsigned magnitude — the UI applies +/- from the DGB direction. Display-only:
+     *  lets a DigiDollar row show "$X" instead of the ~0 on-chain DGB value. */
+    external fun digiDollarTxAmount(txHashHex: String): Long
+
     // === Dandelion++ broadcast-origin privacy ===
     /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
      *  successful stem, or null if no capable peer was available (caller floods via

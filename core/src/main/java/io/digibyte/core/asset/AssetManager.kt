@@ -946,6 +946,67 @@ class AssetManager(
     suspend fun assetTxids(): Set<String> = utxoDao.getAssetTxids().toSet()
 
     /**
+     * Token count MOVED in an asset tx, for the activity-row display ("20 Tokens"
+     * instead of the ~0 on-chain DGB value). Direction-aware, bucketing the tx's
+     * decoded outputs BY OWNERSHIP so it reflects what was actually sent/received,
+     * not the asset change:
+     *  - receive ([isSend]=false): sum of decoded quantities on outputs WE own
+     *  - send    ([isSend]=true):  sum on outputs we DON'T own (the recipients)
+     *
+     * A DB `SUM(asset_quantity WHERE txid)` would return our CHANGE on a send —
+     * wrong. (Confirmed against the RenzoDD digibyte-desktop reference: bucket by
+     * ownership, never SUM-by-txid.) Percent/range transfer instructions are
+     * skipped — unresolved without the M3 parent-input walk, an underestimate over
+     * a fake number, matching detection. Sums across assetIds (v1: a mixed-asset tx
+     * shows the combined count; per-assetId display awaits transfer asset-id
+     * resolution). [ownedScriptHexes] is built once by the caller and passed in.
+     * Returns null if not a resolvable asset tx — the row then falls back to DGB.
+     */
+    suspend fun assetTokenCountForTx(
+        txHashHex: String,
+        isSend: Boolean,
+        ownedScriptHexes: Set<String>? = null,
+    ): Long? {
+        val outputLines = NativeBridge.getTransactionOutputsForHash(txHashHex) ?: return null
+        if (outputLines.isEmpty()) return null
+
+        data class ParsedOut(val vout: Int, val script: ByteArray)
+        val outputs = outputLines.mapNotNull { line ->
+            val parts = line.split("|", limit = 3)
+            if (parts.size < 3) return@mapNotNull null
+            val vout = parts[0].toIntOrNull() ?: return@mapNotNull null
+            val script = parts[2].hexToByteArray() ?: return@mapNotNull null
+            ParsedOut(vout, script)
+        }
+        val opReturn = outputs.firstOrNull { it.script.isNotEmpty() && it.script[0] == 0x6A.toByte() }
+            ?: return null
+        val header = decoder.decode(opReturn.script) ?: return null
+        val firstNonOpReturn = outputs.firstOrNull {
+            it.script.isEmpty() || it.script[0] != 0x6A.toByte()
+        }?.vout
+
+        fun quantityForOutput(vout: Int): Long = when (header.operation) {
+            io.digibyte.core.model.AssetOperation.ISSUANCE ->
+                if (vout == firstNonOpReturn) (header.totalQuantity ?: 0L) else 0L
+            io.digibyte.core.model.AssetOperation.TRANSFER ->
+                header.transferInstructions
+                    .filter { !it.percent && !it.range && it.outputIndex == vout && !it.isBurn }
+                    .sumOf { it.amount }
+            io.digibyte.core.model.AssetOperation.BURN -> 0L
+        }
+
+        val owned = ownedScriptHexes ?: buildOwnedScriptHexes()
+        var total = 0L
+        for (out in outputs) {
+            if (out.script.isNotEmpty() && out.script[0] == 0x6A.toByte()) continue
+            val isOwned = owned.isNotEmpty() && out.script.toHex() in owned
+            val wanted = if (isSend) !isOwned else isOwned
+            if (wanted) total += quantityForOutput(out.vout)
+        }
+        return if (total > 0L) total else null
+    }
+
+    /**
      * Store a confirmed asset UTXO in the database and queue an IPFS metadata fetch.
      *
      * @param txid         Transaction ID (hex).

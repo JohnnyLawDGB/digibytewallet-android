@@ -58,7 +58,10 @@ fun TransactionItem(
     tx: TransactionEntity,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    kind: TxKind = TxKind.DGB
+    kind: TxKind = TxKind.DGB,
+    // Pre-formatted type amount for a non-DGB row: DigiDollar "$X.XX" / DigiAsset
+    // "N Tokens". Null → show the plain DGB amount (also the fallback for DGB rows).
+    typedAmount: String? = null,
 ) {
     val isSend = tx.amount < 0
     val amountAbs = kotlin.math.abs(tx.amount)
@@ -70,6 +73,14 @@ fun TransactionItem(
 
     val amountColor: Color = if (isSend) DigiByteRed else DigiByteGreen
     val amountPrefix = if (isSend) "- " else "+ "
+
+    // DigiDollar / DigiAsset rows show their type amount ("$1.00" / "20 Tokens")
+    // instead of the near-zero on-chain DGB value; everything else shows DGB.
+    val amountText = if (kind != TxKind.DGB && typedAmount != null) {
+        "$amountPrefix$typedAmount"
+    } else {
+        "$amountPrefix$amountFormatted DGB"
+    }
 
     val dateStr = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
         .format(Date(tx.timestamp * 1000L))
@@ -145,7 +156,7 @@ fun TransactionItem(
             // Amount + confirmations badge
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "$amountPrefix$amountFormatted DGB",
+                    text = amountText,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp

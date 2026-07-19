@@ -64,6 +64,11 @@ class WalletViewModel @Inject constructor(
     private val _txKinds = MutableStateFlow<Map<String, TxKind>>(emptyMap())
     val txKinds: StateFlow<Map<String, TxKind>> = _txKinds.asStateFlow()
 
+    // Pre-formatted type-appropriate amount per non-DGB tx: DigiDollar → "$X.XX",
+    // DigiAsset → "N Tokens". Absent → the row shows the plain DGB amount.
+    private val _txTypedAmounts = MutableStateFlow<Map<String, String>>(emptyMap())
+    val txTypedAmounts: StateFlow<Map<String, String>> = _txTypedAmounts.asStateFlow()
+
     /** Pull-to-refresh spinner state for the wallet screen. */
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -662,6 +667,34 @@ class WalletViewModel @Inject constructor(
                         tx.txid to classifyTxKind(tx.txid in assetTxids, ddType)
                     }
                     if (kinds != _txKinds.value) _txKinds.value = kinds
+
+                    // Type-appropriate amount per non-DGB row: DigiDollar → its $ value
+                    // (native per-tx accessor), DigiAsset → the token count moved
+                    // (ownership-bucketed, direction-aware). Owned-script set built
+                    // once here, not per row. Absent entry → row shows plain DGB.
+                    val ownedScripts = runCatching { assetManager.buildOwnedScriptHexes() }
+                        .getOrDefault(emptySet())
+                    val typedAmounts = sorted.mapNotNull { tx ->
+                        val isSend = tx.amount < 0
+                        val display: String? = when (kinds[tx.txid]) {
+                            TxKind.DIGIDOLLAR -> {
+                                val cents = runCatching { NativeBridge.digiDollarTxAmount(tx.txid) }
+                                    .getOrDefault(0L)
+                                if (cents > 0L) formatDigiDollar(cents) else null
+                            }
+                            TxKind.DIGIASSET -> {
+                                val count = runCatching {
+                                    assetManager.assetTokenCountForTx(tx.txid, isSend, ownedScripts)
+                                }.getOrNull()
+                                if (count != null && count > 0L)
+                                    "$count " + if (count == 1L) "Token" else "Tokens"
+                                else null
+                            }
+                            else -> null
+                        }
+                        display?.let { tx.txid to it }
+                    }.toMap()
+                    if (typedAmounts != _txTypedAmounts.value) _txTypedAmounts.value = typedAmounts
                 }
 
                 delay(5_000L)

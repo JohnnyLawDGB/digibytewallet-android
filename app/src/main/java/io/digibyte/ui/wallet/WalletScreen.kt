@@ -55,6 +55,7 @@ fun WalletScreen(
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
     val txKinds by viewModel.txKinds.collectAsStateWithLifecycle()
+    val txTypedAmounts by viewModel.txTypedAmounts.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
@@ -299,7 +300,8 @@ fun WalletScreen(
                     tx = tx,
                     onClick = { onNavigateTx(tx.txid) },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    kind = txKinds[tx.txid] ?: TxKind.DGB
+                    kind = txKinds[tx.txid] ?: TxKind.DGB,
+                    typedAmount = txTypedAmounts[tx.txid]
                 )
             }
         }
