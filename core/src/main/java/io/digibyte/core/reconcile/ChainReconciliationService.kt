@@ -46,6 +46,7 @@ class ChainReconciliationService(
             val txsImported: Int,
             val alreadyKnown: Int,
             val totalChainBalanceSat: Long,
+            val historyTxsImported: Int = 0,
         ) : State()
         data class Failed(val reason: String) : State()
     }
@@ -67,6 +68,18 @@ class ChainReconciliationService(
             if (promotedPending > 0) {
                 android.util.Log.i("ChainReconciliation",
                     "confirmation-reconcile promoted $promotedPending stuck-pending tx(s)")
+            }
+
+            // Address-history backstop: import every tx touching the owned set
+            // that the CF scan skipped (0-value DD, spent asset markers, taproot
+            // — all four address types), each WITH its confirming height. Unlike
+            // confirmPendingTransactions this recovers a tx that fell out of the
+            // wallet's set entirely, not just one stuck at Pending. Non-fatal.
+            _state.value = State.Scanning("Scanning address history…")
+            val historyImported = runCatching { reconcileAddressHistory() }.getOrDefault(0)
+            if (historyImported > 0) {
+                android.util.Log.i("ChainReconciliation",
+                    "address-history reconcile imported $historyImported tx(s)")
             }
 
             _state.value = State.Scanning("Listing wallet addresses…")
@@ -104,6 +117,7 @@ class ChainReconciliationService(
                     txsImported = 0,
                     alreadyKnown = 0,
                     totalChainBalanceSat = 0L,
+                    historyTxsImported = historyImported,
                 )
                 _state.value = done
                 return@withContext done
@@ -142,6 +156,7 @@ class ChainReconciliationService(
                 txsImported = imported,
                 alreadyKnown = alreadyKnown,
                 totalChainBalanceSat = totalBalance,
+                historyTxsImported = historyImported,
             )
             _state.value = done
             done
@@ -168,6 +183,45 @@ class ChainReconciliationService(
             if (NativeBridge.confirmTransaction(txid, conf.height, conf.time)) promoted++
         }
         return promoted
+    }
+
+    /**
+     * Address-HISTORY reconcile (the backstop): enumerate the full owned
+     * address set, ask the node for every tx touching each address, and
+     * register the ones the wallet is missing — WITH their confirming height,
+     * so BRWallet's dust-pending gate releases 0-value DigiDollar and spent
+     * asset markers the UTXO reconcile cannot surface. History-based, not
+     * UTXO-based. Recovers a tx that fell out of the CF scan set entirely
+     * (which confirmPendingTransactions — driven by the wallet's own pending
+     * list — cannot). Returns the count imported.
+     */
+    suspend fun reconcileAddressHistory(): Int {
+        val addrs = NativeBridge.dumpAllAddresses().trim().lines().filter { it.isNotBlank() }
+        if (addrs.isEmpty()) return 0
+        val known = extractKnownTxids(NativeBridge.getTransactionDetails())
+        val histories = ArrayList<List<AddressTx>>(addrs.size)
+        for ((i, addr) in addrs.withIndex()) {
+            _state.value = State.Scanning(
+                "Reading address history ${i + 1}/${addrs.size}…",
+                progress = (i + 1).toFloat() / addrs.size * 0.5f,
+            )
+            nodeClient.addressHistory(addr)?.let { histories += it }
+        }
+        val toImport = planHistoryImport(histories, known)
+        var imported = 0
+        for ((i, tx) in toImport.withIndex()) {
+            _state.value = State.Scanning(
+                "Recovering tx ${i + 1}/${toImport.size}…",
+                progress = 0.5f + (i + 1).toFloat() / toImport.size * 0.5f,
+            )
+            val raw = nodeClient.fetchRawTx(tx.txid, tx.height) ?: continue
+            val bytes = runCatching { hexToBytes(raw.hex) }.getOrNull() ?: continue
+            if (NativeBridge.registerRawTransaction(bytes, raw.blockHeight, raw.blockTime)) {
+                imported++
+                android.util.Log.i("ChainReconciliation", "history-recovered ${tx.txid} @${tx.height}")
+            }
+        }
+        return imported
     }
 
     /** Txids of wallet transactions still unconfirmed — blockHeight is the
