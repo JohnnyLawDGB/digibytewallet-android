@@ -199,7 +199,16 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
      * is idempotent (BRWallet.c:1111). Timestamp must be set first
      * because _BRWalletInsertTx orders by timestamp. */
     if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(g_wallet, tx);
+    /* Register an independent COPY into the wallet; hand the ORIGINAL to the peer
+     * manager below. BRPeerManagerPublishTx takes ownership and FREES tx on its
+     * error paths (unsigned / not-connected + unreachable) and otherwise holds it
+     * in its publish list — so it must NOT be the same object the wallet keeps, or
+     * the wallet's registered pointer dangles and a later getSerializedTransactions
+     * reads freed memory (use-after-free — the "String_" SIGSEGV on send, window
+     * widened by the asset-send's post-broadcast reconcile/record before persist).
+     * On copy OOM (rare) skip the local register; the peer relay-back re-registers. */
+    BRTransaction *walletCopy = BRTransactionCopy(tx);
+    if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
 
     /* Publish — BRPeerManagerPublishTx takes ownership of tx, do NOT free it.
        Pass NULL info/callback: the callback fires asynchronously on the peer
@@ -250,9 +259,13 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jo
     for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
     txidHex[64] = '\0';
 
-    /* Register before broadcast (same coherence rule as publishTransaction). */
+    /* Register before broadcast (same coherence rule as publishTransaction).
+     * Wallet keeps an independent COPY; the peer manager gets the ORIGINAL (which
+     * stem/publish may free on error / hold in its publish list) — same
+     * double-ownership UAF fix as publishTransaction. */
     if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(g_wallet, tx);
+    BRTransaction *walletCopy = BRTransactionCopy(tx);
+    if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
 
     /* NULL info/callback: a stem callback would be async and the stack-ctx pattern
        in publishTransaction is UAF-prone; Kotlin monitors via getRelayCount. */
