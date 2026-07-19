@@ -119,10 +119,18 @@ class IpfsClient(
                 // weakening documented at [TRUSTED_GATEWAY_PREFIXES].
                 // CIDv1 fetches stay strictly content-verified.
                 val isTrustedGateway = TRUSTED_GATEWAY_PREFIXES.any { gateway.startsWith(it) }
-                val isCidV0 = cid.startsWith("Qm")
-                val accept = if (isCidV0 && isTrustedGateway) {
+                // dag-pb / UnixFS CIDs hash the WRAPPER block, not the raw file content —
+                // CIDv0 (Qm…) AND CIDv1 dag-pb (bafybe…). Content-hash verification against
+                // the assembled bytes our trusted (cert-pinned) gateway serves can never
+                // pass, so defer to TLS trust for those. Only CIDv1 RAW codec (bafkre…)
+                // hashes the raw content and stays strictly content-verified. Without the
+                // bafybe… case, dag-pb v1 images (e.g. CHANG token art) failed verify on the
+                // real 279KB file and "passed" on the 108-byte dag root from a ?format=raw
+                // fallback — so the picture never rendered.
+                val isDagPbWrapped = cid.startsWith("Qm") || cid.startsWith("bafybe")
+                val accept = if (isDagPbWrapped && isTrustedGateway) {
                     android.util.Log.i(TAG,
-                        "tryGateway: $gateway → CIDv0 trust-by-cert for $cid (${bytes.size}b)")
+                        "tryGateway: $gateway → dag-pb trust-by-cert for $cid (${bytes.size}b)")
                     true
                 } else {
                     cidVerifier.verify(cid, bytes)
