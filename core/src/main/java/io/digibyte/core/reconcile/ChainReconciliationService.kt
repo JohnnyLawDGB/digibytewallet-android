@@ -194,3 +194,26 @@ class ChainReconciliationService(
         return out
     }
 }
+
+/** Known wallet txids = field 0 of each getTransactionDetails line
+ *  (`txHash|amount|fee|blockHeight|timestamp|sent|received`). */
+internal fun extractKnownTxids(details: String): Set<String> =
+    details.trim().lines().mapNotNull { line ->
+        line.split("|").getOrNull(0)?.trim()?.takeIf { it.isNotBlank() }
+    }.toSet()
+
+/** Flatten per-address histories, drop txids already in the wallet, dedup by
+ *  txid keeping the highest confirming height. Order = first-seen among kept
+ *  (deterministic for progress display + tests). */
+internal fun planHistoryImport(
+    histories: List<List<AddressTx>>,
+    knownTxids: Set<String>,
+): List<AddressTx> {
+    val byTxid = LinkedHashMap<String, AddressTx>()
+    for (history in histories) for (tx in history) {
+        if (tx.txid in knownTxids) continue
+        val existing = byTxid[tx.txid]
+        if (existing == null || tx.height > existing.height) byTxid[tx.txid] = tx
+    }
+    return byTxid.values.toList()
+}
