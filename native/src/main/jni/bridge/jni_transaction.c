@@ -379,9 +379,30 @@ Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jo
      * BRWalletRegisterTransaction's duplicate branch. */
     BRTransaction *existing = BRWalletTransactionForHash(g_wallet, tx->txHash);
     if (existing) {
-        LOGD("registerRawTransaction: duplicate, skipping");
+        /* Already registered. If it's stuck UNCONFIRMED and the caller now has
+         * its real confirming height, PROMOTE it rather than skip. This is the
+         * confirmation-reconcile path: a tx first detected while pending (CF
+         * match / mempool relay) can strand at TX_UNCONFIRMED because, in
+         * CF-only mode, the confirming block's cfilter is never re-requested
+         * once the scan window passes it. BRWalletUpdateTransactions sets the
+         * height and re-runs _BRWalletUpdateBalance, which also RELEASES a
+         * withheld DigiDollar/asset credit (a 0-value DD token output is
+         * otherwise held back by the dust-pending gate). No-op when it's already
+         * confirmed or the incoming height is itself unconfirmed. */
+        int promoted = JNI_FALSE;
+        if (existing->blockHeight == TX_UNCONFIRMED &&
+            (uint32_t)blockHeight != TX_UNCONFIRMED && blockHeight > 0) {
+            UInt256 h = existing->txHash;
+            BRWalletUpdateTransactions(g_wallet, &h, 1,
+                                       (uint32_t)blockHeight, (uint32_t)blockTimestamp);
+            LOGI("registerRawTransaction: promoted stuck-pending tx to height=%ld ts=%ld",
+                 (long)blockHeight, (long)blockTimestamp);
+            promoted = JNI_TRUE;
+        } else {
+            LOGD("registerRawTransaction: duplicate (already confirmed / incoming unconfirmed), skipping");
+        }
         BRTransactionFree(tx);
-        return JNI_FALSE;
+        return promoted;
     }
 
     tx->blockHeight = (uint32_t)blockHeight;

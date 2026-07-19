@@ -12,6 +12,8 @@ import io.digibyte.core.OutgoingTxStore
 import io.digibyte.core.WalletManager
 import io.digibyte.core.WalletState
 import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.reconcile.ChainReconciliationService
+import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.core.asset.assetPruneGateOpen
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
@@ -133,6 +135,10 @@ class SyncService : Service() {
      *  persisted has_synced flag (which is true at startup before this session
      *  verifies the tx set) — the asset prune must gate on this, not that. */
     @Volatile private var syncedThisSession = false
+
+    /** Last time the post-sync confirmation-reconcile ran (ms), so a flaky
+     *  network firing onSyncComplete repeatedly can't hammer the node. */
+    @Volatile private var lastConfirmReconcileMs = 0L
 
     /** Serializes the sovereign asset-maintenance cycle (native sweep + gated
      *  prune) below so a slow cycle on a long-history wallet can't stack a
@@ -1295,6 +1301,28 @@ class SyncService : Service() {
                 // repeatedly — UtxoDao.insertAll is REPLACE-on-PK.
                 runCatching { assetManager.sweepKnownTransactionsForAssets() }
                     .onFailure { android.util.Log.w("SyncService", "native asset sweep failed", it) }
+
+                // Confirmation-reconcile: a tx first detected while pending (CF
+                // match) can strand at "Unconfirmed" because, in CF-only mode,
+                // its confirming block's cfilter is never re-requested once the
+                // scan window passes it — e.g. a DigiDollar receive stuck
+                // "Pending" with its $ credit withheld by the dust-pending gate.
+                // If any wallet tx is still unconfirmed at sync-complete, ask the
+                // node for the real heights and promote them (registerRawTransaction
+                // now promotes a known-pending tx), which also releases the
+                // withheld DD/asset credit. Gated on pending>0 AND debounced so
+                // the node is only queried when something is actually stuck;
+                // self-limiting (a promoted tx is no longer pending).
+                runCatching {
+                    val now = System.currentTimeMillis()
+                    if (hasUnconfirmedTransactions() &&
+                        now - lastConfirmReconcileMs > CONFIRM_RECONCILE_DEBOUNCE_MS) {
+                        lastConfirmReconcileMs = now
+                        android.util.Log.i("SyncService",
+                            "sync complete with unconfirmed tx(s) — running confirmation-reconcile")
+                        ChainReconciliationService(DgbNodeClient(this@SyncService), assetManager).reconcile()
+                    }
+                }.onFailure { android.util.Log.w("SyncService", "confirmation-reconcile failed", it) }
             }
         }
 
@@ -1984,6 +2012,15 @@ class SyncService : Service() {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
+    /** True if any wallet tx is still unconfirmed — its blockHeight is the
+     *  TX_UNCONFIRMED sentinel (Int.MAX_VALUE), field index 3 of a
+     *  `txHash|amount|fee|blockHeight|timestamp|sent|received` [NativeBridge.getTransactionDetails]
+     *  line. The signal that a confirmation-reconcile is worth a node round-trip. */
+    private fun hasUnconfirmedTransactions(): Boolean =
+        NativeBridge.getTransactionDetails().trim().lines().any { line ->
+            line.split("|").getOrNull(3)?.toLongOrNull() == Int.MAX_VALUE.toLong()
+        }
+
     companion object {
         const val CHANNEL_ID       = "dgb_sync_channel"
         const val NOTIFICATION_ID  = 1
@@ -1997,6 +2034,9 @@ class SyncService : Service() {
          *  session without touching prefs — the persisted exclusive setting still
          *  applies on the next launch. See [OwnNodeHealth.DARK]. */
         const val ACTION_OWN_NODE_ADDITIVE_SESSION = "io.digibyte.service.OWN_NODE_ADDITIVE_SESSION"
+        /** Debounce for the post-sync confirmation-reconcile (5 min): a flaky
+         *  network firing onSyncComplete repeatedly must not hammer the node. */
+        private const val CONFIRM_RECONCILE_DEBOUNCE_MS = 5 * 60 * 1000L
         /** Peers not seen in 24 hours are pruned from the DB. */
         private const val PEER_STALE_SECONDS = 86_400L
         /** Capability-aware seeder API. Returns filter-capable peers when available,
