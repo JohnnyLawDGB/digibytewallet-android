@@ -257,17 +257,9 @@ class AssetManager(
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout
 
-        fun quantityForOutput(vout: Int): Long = when (header.operation) {
-            io.digibyte.core.model.AssetOperation.ISSUANCE ->
-                if (vout == firstNonOpReturn) (header.totalQuantity ?: 0L) else 0L
-
-            io.digibyte.core.model.AssetOperation.TRANSFER ->
-                header.transferInstructions
-                    .filter { !it.percent && !it.range && it.outputIndex == vout && !it.isBurn }
-                    .sumOf { it.amount }
-
-            io.digibyte.core.model.AssetOperation.BURN -> 0L
-        }
+        // Per-output quantity is the sovereign [AssetTxQuantity.forOutput] rule
+        // (ISSUANCE / FIXED + RANGE transfer / BURN; percent skipped). Shared with
+        // the activity-row token-count display so detection and display never diverge.
 
         // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
         // which returns ALL of the tx's outputs unfiltered — NOT just the ones
@@ -302,7 +294,7 @@ class AssetManager(
                 sats = out.sats,
                 blockHeight = blockHeight,
                 placeholderAssetId = placeholderAssetId,
-                computedQty = quantityForOutput(out.vout),
+                computedQty = AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn),
                 isOutgoingUnconfirmed = isOutgoingUnconfirmed,
             )
             if (stillUnresolved) anyStillUnresolved = true
@@ -985,23 +977,13 @@ class AssetManager(
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout
 
-        fun quantityForOutput(vout: Int): Long = when (header.operation) {
-            io.digibyte.core.model.AssetOperation.ISSUANCE ->
-                if (vout == firstNonOpReturn) (header.totalQuantity ?: 0L) else 0L
-            io.digibyte.core.model.AssetOperation.TRANSFER ->
-                header.transferInstructions
-                    .filter { !it.percent && !it.range && it.outputIndex == vout && !it.isBurn }
-                    .sumOf { it.amount }
-            io.digibyte.core.model.AssetOperation.BURN -> 0L
-        }
-
         val owned = ownedScriptHexes ?: buildOwnedScriptHexes()
         var total = 0L
         for (out in outputs) {
             if (out.script.isNotEmpty() && out.script[0] == 0x6A.toByte()) continue
             val isOwned = owned.isNotEmpty() && out.script.toHex() in owned
             val wanted = if (isSend) !isOwned else isOwned
-            if (wanted) total += quantityForOutput(out.vout)
+            if (wanted) total += AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn)
         }
         return if (total > 0L) total else null
     }
