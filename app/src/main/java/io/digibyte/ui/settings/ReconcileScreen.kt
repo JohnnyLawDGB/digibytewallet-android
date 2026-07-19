@@ -401,7 +401,14 @@ fun ReconcileScreen(navController: NavController) {
                             emphasize = s.txsImported > 0
                         )
                         ResultRow("Already in wallet", "${s.alreadyKnown}")
-                        if (s.txsImported > 0) {
+                        if (s.historyTxsImported > 0) {
+                            ResultRow(
+                                "Recovered from history",
+                                "${s.historyTxsImported}",
+                                emphasize = true
+                            )
+                        }
+                        if (s.txsImported > 0 || s.historyTxsImported > 0) {
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 "Your balance should update shortly.",
