@@ -115,6 +115,7 @@ class SyncService : Service() {
 
     /** Tracks BIP158 watchdog so we don't spawn two on a sync restart. */
     private var bip158WatchdogJob: Job? = null
+    private var tipStallWatchdogJob: Job? = null
 
     /**
      * Session-scoped, NEVER-persisted override set by the dark-node banner's
@@ -696,6 +697,76 @@ class SyncService : Service() {
      * land within its grace window, the watchdog stays on compact filters and
      * gives up gracefully for the session — it never degrades to bloom.
      */
+    /**
+     * Block-header-tip-stall watchdog — the ONLY proactive re-kick for header sync.
+     *
+     * Every native getheaders sender is reactive (sync-start, relayed inv/orphan,
+     * forward-only continuation). Once the wallet idles at a stale estimatedHeight,
+     * a tip with live-but-silent peers (half-dead socket answering pings, a
+     * non-announcing or lagging download peer) freezes forever — no tx confirms for
+     * days, surviving restarts. Every existing recovery is disqualified: the
+     * peers==0 watchdogs never fire (peers stay connected) and the BIP158 watchdog
+     * certifies the frozen state "healthy" (or needs a climbing header chain it
+     * doesn't have). Runs independently for the whole session so the BIP158
+     * watchdog's early "healthy" return can't take it down with it.
+     *
+     * Tier 1 (tip frozen >= TIP_STALL_TIMEOUT_MS, peers connected): re-issue a
+     *   full-locator getheaders — un-sticks behind-and-stopped and connectable
+     *   dead-branch. Benign 0-header no-op on a healthy at-tip wallet.
+     * Tier 2 (still frozen a full window after Tier 1): recreate the manager
+     *   (forceReconnect + re-inject + startSync) — a fresh handshake cohort, for a
+     *   dead-branch whose current peers won't serve the real chain. Throttled.
+     *
+     * Resets on any tip advance; DGB's ~15s blocks reset it constantly so a healthy
+     * wallet never arms it (20 min ≈ 80 missed blocks).
+     */
+    private fun startTipStallWatchdog() {
+        tipStallWatchdogJob?.cancel()
+        tipStallWatchdogJob = serviceScope.launch {
+            var lastTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+            var lastAdvanceMs = System.currentTimeMillis()
+            var tier1Fired = false
+            var lastTier2Ms = 0L
+            while (true) {
+                kotlinx.coroutines.delay(TIP_STALL_WATCHDOG_POLL_MS)
+                val tip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+                val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { 0 }
+                val nowMs = System.currentTimeMillis()
+
+                if (tip > lastTip) {
+                    lastTip = tip
+                    lastAdvanceMs = nowMs
+                    tier1Fired = false
+                }
+                val stalledMs = nowMs - lastAdvanceMs
+
+                if (shouldForceReconnectOnStall(peers, stalledMs, tier1Fired) &&
+                    nowMs - lastTier2Ms >= TIP_STALL_TIER2_THROTTLE_MS
+                ) {
+                    android.util.Log.w(
+                        "SyncService",
+                        "tip-stall: block tip still frozen at $tip for ${stalledMs / 1000}s after " +
+                            "re-request ($peers peers) — recreating peer manager (tier 2)"
+                    )
+                    lastTier2Ms = nowMs
+                    runCatching { NativeBridge.forceReconnect() }
+                    injectPeers()
+                    injectCustomNode()
+                    runCatching { NativeBridge.startSync() }
+                    tier1Fired = false // re-arm tier 1 against the fresh manager
+                } else if (shouldRerequestHeadersOnStall(peers, stalledMs) && !tier1Fired) {
+                    android.util.Log.w(
+                        "SyncService",
+                        "tip-stall: block tip frozen at $tip for ${stalledMs / 1000}s with $peers " +
+                            "peers — proactively re-requesting headers (tier 1)"
+                    )
+                    runCatching { NativeBridge.rerequestHeadersFromTip() }
+                    tier1Fired = true
+                }
+            }
+        }
+    }
+
     private fun startBip158Watchdog(birthHeight: Long) {
         bip158WatchdogJob?.cancel()
         // Polls every BIP158_WATCHDOG_POLL_MS, tracking whether the cfheaders
@@ -1188,6 +1259,7 @@ class SyncService : Service() {
                 maxOf(0L, anchorForWatchdog - 100L)
             )
             startBip158Watchdog(birthHeightForWatchdog)
+            startTipStallWatchdog()
         }
     }
 
@@ -2132,6 +2204,13 @@ class SyncService : Service() {
          *  freshly-opened cfTip→blockTip gap shortly after headers catch
          *  past the saved-blocks tip, loose enough to avoid log spam. */
         private const val BIP158_WATCHDOG_POLL_MS = 15_000L
+
+        // Tip-stall watchdog: poll the block tip every 60s (the stall it detects is
+        // 20 min, so a fast poll is unnecessary), and throttle the Tier-2 manager
+        // recreate to at most once/hour so a genuinely unreachable network can't
+        // thrash reconnects.
+        private const val TIP_STALL_WATCHDOG_POLL_MS = 60_000L
+        private const val TIP_STALL_TIER2_THROTTLE_MS = 60 * 60 * 1000L
 
         /** Process-wide flag set when the Tor watchdog gives up waiting for
          *  bootstrap and forces a clearnet fallback. The wallet UI collects

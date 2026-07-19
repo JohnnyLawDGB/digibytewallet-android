@@ -479,6 +479,13 @@ object NativeBridge {
      *  below the downloaded chain (legacy deficit). Returns true if re-anchored. */
     external fun reanchorCompactFilterChainAtFloor(): Boolean
 
+    /** Proactively re-issue a full-locator getheaders to all connected peers to
+     *  un-stick a FROZEN block-header tip (all other getheaders senders are reactive
+     *  — once idle at a stale estimatedHeight, a tip with live-but-silent peers never
+     *  advances). Called by the tip-stall watchdog. Returns the peer count sent to.
+     *  Benign no-op on a healthy at-tip wallet (peers reply 0 headers). */
+    external fun rerequestHeadersFromTip(): Int
+
     /** Serialize the in-memory filter-header chain. Returns null if no chain
      *  exists yet or sync mode is BLOOM_ONLY. Persist this blob to durable
      *  storage so it can be restored via setCompactFilterChain on next open. */

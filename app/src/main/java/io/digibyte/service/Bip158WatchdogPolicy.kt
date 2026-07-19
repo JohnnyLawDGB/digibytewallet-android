@@ -130,3 +130,43 @@ internal fun shouldRecoverFrozenCf(
     thresholdMs: Long = CF_FROZEN_RECOVERY_MS,
 ): Boolean =
     !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs
+
+/**
+ * How long the BLOCK-header tip may make no forward progress — while peers are
+ * connected — before the watchdog proactively re-requests headers. Every native
+ * getheaders sender is reactive (sync-start, relayed inv/orphan, forward-only
+ * continuation); once the wallet idles at a stale estimatedHeight, a tip with
+ * live-but-silent peers freezes forever and stops confirming txs. 20 min ≈ 80
+ * missed DGB blocks (~15s target), so a healthy wallet — which advances every few
+ * seconds and resets the timer — never reaches it.
+ */
+internal const val TIP_STALL_TIMEOUT_MS = 20 * 60 * 1000L
+
+/**
+ * Tier 1 — should the watchdog proactively re-request headers this poll? True when
+ * the block-header tip has been frozen for [tipStalledMs] >= [thresholdMs] while
+ * peers are connected. Deliberately INDEPENDENT of hasReachedSynced / gap /
+ * blocksCaughtUp / blockClimbing — those are exactly the flags that misclassify a
+ * frozen tip as "healthy" and blind every existing recovery path. Only inputs:
+ * peers connected + wall-clock since the last tip advance. The recovery it drives
+ * (a full-locator getheaders) is a benign 0-header no-op on a healthy at-tip wallet.
+ */
+internal fun shouldRerequestHeadersOnStall(
+    peerCount: Int,
+    tipStalledMs: Long,
+    thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
+): Boolean = peerCount > 0 && tipStalledMs >= thresholdMs
+
+/**
+ * Tier 2 — escalate to a full manager recreate ([forceReconnect]) when a Tier-1
+ * header re-request already fired this stall ([tier1Fired]) and the tip is STILL
+ * frozen a full window later ([tipStalledMs] >= 2×[thresholdMs]). Covers the
+ * dead-branch case where the connected peers can't (or won't) serve the real chain
+ * and only a fresh handshake cohort will. The caller throttles the actual recreate.
+ */
+internal fun shouldForceReconnectOnStall(
+    peerCount: Int,
+    tipStalledMs: Long,
+    tier1Fired: Boolean,
+    thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
+): Boolean = peerCount > 0 && tier1Fired && tipStalledMs >= thresholdMs * 2

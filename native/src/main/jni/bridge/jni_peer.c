@@ -1302,6 +1302,19 @@ Java_io_digibyte_core_bridge_NativeBridge_reanchorCompactFilterChainAtFloor(JNIE
     return r ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_rerequestHeadersFromTip(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) {
+        LOGI("rerequestHeadersFromTip: peer manager not created — ignoring");
+        return 0;
+    }
+    int sent = BRPeerManagerRerequestHeadersFromTip(g_peerManager);
+    if (sent > 0) LOGI("rerequestHeadersFromTip: re-requested headers from %d peer(s)", sent);
+    return (jint)sent;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getCompactFilterChain(JNIEnv *env, jobject thiz) {
     (void)thiz;

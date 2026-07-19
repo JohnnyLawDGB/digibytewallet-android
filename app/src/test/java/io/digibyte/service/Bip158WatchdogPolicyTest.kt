@@ -225,4 +225,29 @@ class Bip158WatchdogPolicyTest {
             ),
         )
     }
+
+    // ── tip-stall recovery (frozen BLOCK-header tip — the "no confirms for days") ──
+
+    @Test fun `re-requests headers when block tip frozen past the window with peers`() {
+        assertEquals(true, shouldRerequestHeadersOnStall(peerCount = 5, tipStalledMs = TIP_STALL_TIMEOUT_MS))
+    }
+
+    @Test fun `does not re-request before the stall window elapses`() {
+        assertEquals(false, shouldRerequestHeadersOnStall(peerCount = 5, tipStalledMs = TIP_STALL_TIMEOUT_MS - 1))
+    }
+
+    @Test fun `does not re-request with zero peers`() {
+        // 0 peers is the existing watchdogs' job; this gate only handles live-but-silent peers.
+        assertEquals(false, shouldRerequestHeadersOnStall(peerCount = 0, tipStalledMs = TIP_STALL_TIMEOUT_MS * 3))
+    }
+
+    @Test fun `tier2 forceReconnect only after tier1 fired and a full extra window`() {
+        assertEquals(false, shouldForceReconnectOnStall(5, TIP_STALL_TIMEOUT_MS * 2, tier1Fired = false))
+        assertEquals(false, shouldForceReconnectOnStall(5, TIP_STALL_TIMEOUT_MS * 2 - 1, tier1Fired = true))
+        assertEquals(true, shouldForceReconnectOnStall(5, TIP_STALL_TIMEOUT_MS * 2, tier1Fired = true))
+    }
+
+    @Test fun `tier2 needs peers`() {
+        assertEquals(false, shouldForceReconnectOnStall(0, TIP_STALL_TIMEOUT_MS * 5, tier1Fired = true))
+    }
 }
