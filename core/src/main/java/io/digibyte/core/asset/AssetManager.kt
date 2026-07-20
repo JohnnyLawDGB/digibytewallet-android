@@ -13,8 +13,12 @@ import io.digibyte.core.ipfs.AssetMetadataService
 import io.digibyte.core.model.AssetData
 import io.digibyte.core.model.AssetMetadata
 import io.digibyte.core.model.OwnedAsset
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 
 /**
  * Pure per-row parse of a [io.digibyte.core.bridge.NativeBridge.getTransactionDetails]
@@ -135,14 +139,37 @@ class AssetManager(
      * Assets without cached metadata have [OwnedAsset.metadata] == null until
      * [processAssetUtxo] triggers a background fetch.
      */
+    @OptIn(FlowPreview::class)
     fun getOwnedAssets(): Flow<List<OwnedAsset>> {
-        return utxoDao.getAssetBalances().combine(metadataDao.getAllMetadata()) { balances, metadata ->
+        return utxoDao.getAssetBalances()
+            .combine(metadataDao.getAllMetadata()) { naiveBalances, metadata -> naiveBalances to metadata }
+            // Collapse rapid utxos-table churn during sync into ONE recompute per window —
+            // the native-authoritative recompute below is not free (per-row native probes),
+            // and firing it on every insert adds back-pressure to the sync loop.
+            .debounce(250L)
+            .map { (naiveBalances, metadata) ->
             val metadataMap = metadata.associateBy { it.assetId }
-            balances.map { balance ->
-                val meta = metadataMap[balance.assetId]
+            // NATIVE-AUTHORITATIVE display balance: the naive DB SUM over spent=0 rows
+            // over-counts, because the Room UTXO cache accumulates phantoms (recipient
+            // markers from sends, dead-send change, dropped txs). Recompute what the
+            // wallet ACTUALLY holds from the sovereign native view — count a row only if
+            // we own its address AND native holds it live (see [isHeldForDisplay]). Null
+            // when the owned-script set is unavailable (wallet not loaded) → fall back to
+            // the naive SUM so a transient native hiccup never blanks the user's assets.
+            // This is DISPLAY ONLY — nothing is deleted, so a wrong call is a self-
+            // correcting glitch, never lost funds.
+            val held = runCatching { computeHeldAssetBalances() }.getOrNull()
+            val rows: List<Triple<String, Long, Int>> = if (held != null) {
+                held.entries.filter { it.value.quantity > 0 }
+                    .map { Triple(it.key, it.value.quantity, it.value.utxoCount) }
+            } else {
+                naiveBalances.map { Triple(it.assetId, it.totalQuantity, it.utxoCount) }
+            }
+            rows.map { (assetId, quantity, utxoCount) ->
+                val meta = metadataMap[assetId]
                 OwnedAsset(
-                    assetId = balance.assetId,
-                    quantity = balance.totalQuantity,
+                    assetId = assetId,
+                    quantity = quantity,
                     metadata = meta?.let {
                         AssetMetadata(
                             assetId = it.assetId,
@@ -155,9 +182,114 @@ class AssetManager(
                             imageUrl = it.imageUrl
                         )
                     },
-                    utxoCount = balance.utxoCount
+                    utxoCount = utxoCount
                 )
             }
+        }.flowOn(kotlinx.coroutines.Dispatchers.IO)
+    }
+
+    /** A native-authoritative held balance for one asset: the summed quantity and
+     *  UTXO count over the rows [isHeldForDisplay] accepts. */
+    data class HeldBalance(val quantity: Long, val utxoCount: Int)
+
+    /**
+     * Compute per-assetId held balances from the SOVEREIGN native view instead of a
+     * naive SUM over the Room cache. Returns null (→ caller falls back to the DB SUM)
+     * if the owned-script set is unavailable, so a native hiccup never blanks assets.
+     * DISPLAY ONLY — never deletes; wraps the real NativeBridge probes as lambdas over
+     * the testable core, same host-JVM constraint as the prune/heal impls.
+     */
+    suspend fun computeHeldAssetBalances(): Map<String, HeldBalance>? =
+        computeHeldAssetBalancesImpl(ownedScriptHexesCached()) { txid, vout ->
+            runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrDefault(-99)
+        }
+
+    @Volatile private var ownedScriptsCache: Set<String> = emptySet()
+    @Volatile private var ownedScriptsCacheAtMs: Long = 0L
+
+    /**
+     * Cached [buildOwnedScriptHexes]. That call enumerates the wallet's ENTIRE address
+     * set natively (dumpAllAddresses → O(all addresses), holding the BRWallet lock), so
+     * rebuilding it on every held-balance recompute contends with the sync loop during
+     * UTXO churn. Cache it and refresh at most every [OWNED_SCRIPTS_TTL_MS]; a
+     * newly-derived address is missed for at most that window, which is display-only and
+     * self-corrects on the next refresh. An empty result is never cached (treated as
+     * "unknown" so the caller falls back to the naive SUM instead of blanking assets).
+     */
+    private fun ownedScriptHexesCached(): Set<String> {
+        val now = System.currentTimeMillis()
+        val cached = ownedScriptsCache
+        if (cached.isNotEmpty() && now - ownedScriptsCacheAtMs < OWNED_SCRIPTS_TTL_MS) return cached
+        val fresh = buildOwnedScriptHexes()
+        if (fresh.isNotEmpty()) {
+            ownedScriptsCache = fresh
+            ownedScriptsCacheAtMs = now
+            return fresh
+        }
+        // Fresh build came back EMPTY (transient native hiccup — startSync recreate, wallet
+        // lock, JNI throw). Prefer the retained non-empty stale owned-set over reverting to
+        // the phantom-inflated naive SUM; only fall through to empty (→ naive fallback) if we
+        // never had a good set. Don't overwrite the cache with the empty result.
+        return cached
+    }
+
+    /** Force the next [ownedScriptHexesCached] to rebuild — call when the wallet may have
+     *  derived a NEW address (e.g. a fresh asset deposit) so it surfaces without waiting out
+     *  the TTL. Cheap: just expires the timestamp; the actual rebuild is lazy. */
+    private fun invalidateOwnedScriptsCache() {
+        ownedScriptsCacheAtMs = 0L
+    }
+
+    /**
+     * Testable core of [computeHeldAssetBalances]. Sums [UtxoEntity.assetQuantity]
+     * per assetId over reconciled-unspent rows that [isHeldForDisplay] accepts.
+     * Returns null when [ownedScriptHexes] is empty (ownership unknowable → the caller
+     * must fall back to the naive SUM rather than show every asset as 0).
+     */
+    internal suspend fun computeHeldAssetBalancesImpl(
+        ownedScriptHexes: Set<String>,
+        spentState: suspend (String, Int) -> Int,
+    ): Map<String, HeldBalance>? {
+        val owned = ownedScriptHexes.map { it.lowercase() }.toSet()
+        if (owned.isEmpty()) return null
+        val qty = HashMap<String, Long>()
+        val cnt = HashMap<String, Int>()
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            if (row.spent) continue   // reconciled-spent — matches getAssetBalances WHERE spent=0
+            val assetId = row.assetId ?: continue   // unattributed row — can't group by asset
+            val scriptHex = row.scriptPubKey.toHex().lowercase()
+            if (!isHeldForDisplay(scriptHex, owned, row.assetSource, spentState(row.txid, row.vout))) continue
+            qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
+            cnt[assetId] = (cnt[assetId] ?: 0) + 1
+        }
+        val result = qty.mapValues { (id, q) -> HeldBalance(q, cnt[id] ?: 0) }
+        android.util.Log.i("AssetManager",
+            "heldBalances: ${result.entries.joinToString { "${it.key.take(8)}=${it.value.quantity}(${it.value.utxoCount}u)" }}")
+        return result
+    }
+
+    /**
+     * Does this asset row count toward the DISPLAYED balance? Native is the authority:
+     *  - not one of our scripts → NO (a recipient marker from a send WE made).
+     *  - native says SPENT (0)  → NO.
+     *  - native says HELD (1)   → YES (we own it and it's unspent — the real holding).
+     *  - native has no record (−1, or −99 probe error) → ambiguous: a NATIVE-sourced
+     *    row means native detected then LOST the tx (a dead/dropped send) → NO; a
+     *    BACKEND-sourced row is a below-scan-floor holding native can't see (restored
+     *    via reconcile) → YES. Provenance is the only safe tell between the two, and
+     *    this is display-only so an error self-corrects (never destroys funds).
+     */
+    internal fun isHeldForDisplay(
+        scriptHexLower: String,
+        ownedLower: Set<String>,
+        assetSource: String,
+        nativeSpentState: Int,
+    ): Boolean {
+        if (scriptHexLower.isEmpty() || scriptHexLower !in ownedLower) return false
+        return when (nativeSpentState) {
+            0 -> false
+            1 -> true
+            else -> assetSource == AssetSource.BACKEND
         }
     }
 
@@ -511,6 +643,11 @@ class AssetManager(
                     )
                 )
             )
+            // A new native asset UTXO may sit at a freshly-derived (gap-limit-extended)
+            // address absent from the cached owned-set; expire the cache so the deposit
+            // surfaces in the display balance on the next recompute instead of waiting out
+            // the TTL (the "my confirmed deposit didn't show up" glitch).
+            invalidateOwnedScriptsCache()
             placeholderAssetId.startsWith("unresolved:")
         }
     }
@@ -1686,6 +1823,12 @@ class AssetManager(
         /** Consecutive prune passes native must positively lack a NATIVE
          *  row's tx before it's deleted (see [pruneRemovedNativeAssetRowsImpl]). */
         const val ABSENCE_DEBOUNCE_THRESHOLD = 2
+
+        /** How long the cached owned-script set (see [ownedScriptHexesCached]) may be
+         *  reused before a native rebuild. Long enough to spare the per-emission
+         *  O(all-addresses) enumeration + BRWallet-lock contention during sync churn;
+         *  short enough that a freshly-derived receive address surfaces promptly. */
+        const val OWNED_SCRIPTS_TTL_MS = 30_000L
     }
 }
 

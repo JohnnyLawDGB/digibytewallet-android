@@ -27,6 +27,17 @@ sealed class WalletState {
  */
 data class StuckSendResult(val dropped: Int, val kept: Int, val assetRowsCleared: Int)
 
+/**
+ * The `cf_birth_height` value to persist for a given native birth-checkpoint height,
+ * or null to CLEAR the pref. Only a POSITIVE height is ever persisted: a 0 (or
+ * negative) height means "unknown", and writing 0 would floor the compact-filter
+ * scan at genesis — the full ~23M-block, multi-hour scan that never finishes on an
+ * interruption. When null, callers remove the pref so SyncService falls back to its
+ * own default (the saved-blocks tip / wallet birth checkpoint) rather than genesis.
+ * Extracted so the recovery/rescan persistence decision is unit-testable without JNI.
+ */
+internal fun cfBirthHeightToPersist(rawBirth: Long): Long? = rawBirth.takeIf { it > 0L }
+
 class WalletManager(
     private val context: Context,
     private val keyStoreManager: KeyStoreManager,
@@ -108,6 +119,34 @@ class WalletManager(
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
                 saveSeedFingerprint(mnemonicBytes)
+                // PERSIST the creation time (mirror createWallet, line 97). Without this,
+                // restoreFromDisk finds no wallet_creation_time on the next launch and feeds
+                // native the HARDCODED 2026 fallback (line 229) → getWalletBirthCheckpointHeight
+                // returns the ~2026 checkpoint (~block 21.5M) for EVERY recovered wallet →
+                // an older wallet's scan floors ~20M blocks ABOVE its funds and shows empty.
+                // Use the user's chosen recovery timestamp; if unknown (0), match native's own
+                // time(NULL) default so a restart stays consistent with the first sync.
+                val creationTimeSecs =
+                    if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
+                prefs.edit().putLong("wallet_creation_time", creationTimeSecs).apply()
+                // PERSIST the compact-filter scan floor NOW, while native
+                // g_walletCreationTime still reflects the user's chosen recovery date
+                // (jni_wallet.c sets it from creationTimestamp). Without this the birth
+                // height lives ONLY in volatile native state: the next app launch rebuilds
+                // the wallet from the seed alone (restoreFromDisk passes no timestamp →
+                // g_walletCreationTime resets to 0 → getWalletBirthCheckpointHeight returns
+                // the GENESIS checkpoint), so the scan silently re-floors at genesis and
+                // grinds the full ~23M-block chain (~11-19h) that never finishes on an
+                // interruption. Writing cf_birth_height makes the chosen floor DURABLE
+                // across restarts (proven on-device: genesis→21.5M cut a 19h scan to ~12m).
+                // Mirrors rebuildFromChainRescan(). commit() (sync) so it lands before the
+                // rescan()/first sync reads it.
+                val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
+                val toPersist = cfBirthHeightToPersist(birth)
+                context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
+                    if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+                }.commit()
+                android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
                 NativeBridge.rescan()
             }
             return success
@@ -411,8 +450,9 @@ class WalletManager(
         // 0 would floor the scan at genesis (~23M blocks). SyncService then falls back
         // to the wallet's birth checkpoint on its own (savedTip is now 0).
         val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
+        val toPersist = cfBirthHeightToPersist(birth)
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-            if (birth > 0L) putLong("cf_birth_height", birth) else remove("cf_birth_height")
+            if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
         }.commit()
     }
 
