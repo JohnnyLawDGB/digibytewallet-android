@@ -156,6 +156,19 @@ class SyncService : Service() {
      */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // Event-driven network-regained recovery. serviceScope runs on Dispatchers.Default
+    // (a small, CPU-bound pool); a network blip can leave a native socket call blocked,
+    // starving that pool so the polling keepalive/watchdog freeze. This SEPARATE scope on
+    // Dispatchers.IO (a large pool) is not starved by those frozen Default-pool coroutines,
+    // so it can drive a reconnect when the OS reports the network is back — the common
+    // freeze here is Default-pool starvation, not a permanent native-lock hold. (If a
+    // serviceScope thread is parked inside a native call still holding PEER_GUARD,
+    // forceReconnect blocks on that mutex until it releases; withTimeout bounds the wait
+    // and the next onAvailable retries.)
+    private val recoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    @Volatile private var lastNetworkRecoveryMs = 0L
+
     // ── BIP158 filter-header persistence (coalesced, file-backed) ──────────────
     // The CF-header chain grows to tens/hundreds of MB; hex-encoding it into
     // SharedPreferences on every cfheaders batch pinned an ever-growing String in
@@ -185,6 +198,7 @@ class SyncService : Service() {
         super.onCreate()
         createNotificationChannel()
         startFilterHeaderWriter()
+        registerNetworkRegainedCallback()
     }
 
     /**
@@ -416,6 +430,63 @@ class SyncService : Service() {
      * Dispatchers.Default) — @Synchronized so the two callers can't race into
      * two competing keepalive loops.
      */
+    /**
+     * Register a default-network callback so we react when connectivity RETURNS. A
+     * network blip drops every peer socket at once (errno 101 "Network is unreachable")
+     * regardless of peer quality — and the wallet had NO reaction to the network coming
+     * back, so it sat at 0 peers until a force-stop (the polling keepalive/watchdog can
+     * freeze when the blip blocks a native call and starves serviceScope's Default pool).
+     * onAvailable fires exactly when a usable network appears; we then force a clean
+     * reconnect to the 16 canon CF peers from the independent [recoveryScope].
+     */
+    private fun registerNetworkRegainedCallback() {
+        if (networkCallback != null) return
+        val cm = runCatching { getSystemService(android.net.ConnectivityManager::class.java) }.getOrNull() ?: return
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { onNetworkRegained() }
+        }
+        if (runCatching { cm.registerDefaultNetworkCallback(cb) }.isSuccess) {
+            networkCallback = cb
+            android.util.Log.i("SyncService", "registered network-regained callback")
+        }
+    }
+
+    /**
+     * The network just became available. If we're at 0 peers, force a clean reconnect —
+     * recreate the manager, re-inject the canon peers, restart sync. Runs on [recoveryScope]
+     * (Dispatchers.IO, large pool) so it can't be starved by a frozen serviceScope, and under
+     * [withTimeout] so a hung native call can't wedge the recovery thread. Throttled so rapid
+     * network flaps don't stack reconnects. Tor-guarded (never dial direct while SOCKS wires up).
+     */
+    private fun onNetworkRegained() {
+        val now = System.currentTimeMillis()
+        if (now - lastNetworkRecoveryMs < NETWORK_RECOVERY_THROTTLE_MS) return
+        lastNetworkRecoveryMs = now
+        recoveryScope.launch {
+            runCatching {
+                withTimeout(NETWORK_RECOVERY_TIMEOUT_MS) {
+                    if (!syncSetupComplete) return@withTimeout
+                    val torComingUp = torManager.isEnabled &&
+                        (torManager.state.value is TorState.Connecting || torManager.state.value is TorState.Starting)
+                    if (torComingUp) return@withTimeout
+                    val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(-1)
+                    val loaded = runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false)
+                    if (peers <= 0 && loaded) {
+                        android.util.Log.w("SyncService",
+                            "network regained + $peers peers — forcing clean reconnect to canon peers")
+                        runCatching { NativeBridge.forceReconnect() }
+                        injectPeers()
+                        injectCustomNode()
+                        runCatching { NativeBridge.startSync() }
+                        // The polling keepalive/watchdog may have frozen with the pool; re-arm it
+                        // now that the reconnect has freed the wedged native state.
+                        runCatching { resurrectKeepaliveIfNeeded() }
+                    }
+                }
+            }.onFailure { android.util.Log.w("SyncService", "network-regained recovery threw/timed out", it) }
+        }
+    }
+
     @Synchronized
     private fun resurrectKeepaliveIfNeeded() {
         val now = System.currentTimeMillis()
@@ -1433,6 +1504,13 @@ class SyncService : Service() {
         Thread {
             runCatching { NativeBridge.stopSync() }
         }.start()
+        networkCallback?.let { cb ->
+            runCatching {
+                getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(cb)
+            }
+        }
+        networkCallback = null
+        recoveryScope.cancel()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -2438,6 +2516,15 @@ class SyncService : Service() {
          *  it churns. Independent of onStartCommand (which foreground-idle apps
          *  never re-fire) and far faster than the 15-min WorkManager catch-up. */
         private const val KEEPALIVE_WATCHDOG_INTERVAL_MS = 30_000L
+
+        /** Debounce for the network-regained reconnect: onAvailable can fire several times
+         *  in a burst during a WiFi/cellular handoff. One reconnect per 15s is plenty. */
+        private const val NETWORK_RECOVERY_THROTTLE_MS = 15_000L
+
+        /** Hard bound on a network-regained reconnect so a hung native socket call can't
+         *  wedge the recovery coroutine. The blocked JNI thread (if any) stays parked on the
+         *  large IO pool, but the coroutine moves on and a later onAvailable can retry. */
+        private const val NETWORK_RECOVERY_TIMEOUT_MS = 30_000L
 
         /** Consecutive 10s keepalive ticks at 0 peers before escalating from a light
          *  reconnect (re-inject + startSync) to a clean peer-manager recreate
