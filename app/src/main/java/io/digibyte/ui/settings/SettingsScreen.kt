@@ -85,6 +85,14 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                     subtitle = "Peers, sync status, block height",
                     onClick = { navController.navigate("settings_network") }
                 )
+                SettingsRowDivider()
+                SettingsRow(
+                    icon = Icons.Default.BatteryChargingFull,
+                    iconTint = Color(0xFF4CAF50),
+                    title = "Background sync",
+                    subtitle = "Allow unrestricted battery so sync keeps running with the screen off",
+                    onClick = { io.digibyte.util.BatteryOptimization.openBatterySettings(context) }
+                )
             }
         }
 

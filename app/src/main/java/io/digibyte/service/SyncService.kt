@@ -443,7 +443,19 @@ class SyncService : Service() {
         if (networkCallback != null) return
         val cm = runCatching { getSystemService(android.net.ConnectivityManager::class.java) }.getOrNull() ?: return
         val cb = object : android.net.ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: android.net.Network) { onNetworkRegained() }
+            override fun onCapabilitiesChanged(
+                network: android.net.Network,
+                caps: android.net.NetworkCapabilities,
+            ) {
+                // Trigger recovery only when the network is actually ROUTABLE to the internet,
+                // not merely associated. onAvailable fires while WiFi is still authenticating
+                // (captive portal / DHCP), so reconnecting then burns a dial against a
+                // not-yet-usable network. NET_CAPABILITY_VALIDATED means the OS has confirmed
+                // real connectivity. Cheap: onNetworkRegained is throttled + gated on peers<=0.
+                if (caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                    onNetworkRegained()
+                }
+            }
         }
         if (runCatching { cm.registerDefaultNetworkCallback(cb) }.isSuccess) {
             networkCallback = cb

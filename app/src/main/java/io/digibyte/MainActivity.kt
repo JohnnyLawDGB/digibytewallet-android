@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -176,6 +177,63 @@ class MainActivity : FragmentActivity() {
                     UpdateDialog(
                         update = pendingUpdate!!,
                         onDismiss = { pendingUpdate = null }
+                    )
+                }
+
+                // Background-sync (battery optimization) nudge. Doze / One UI suspends the
+                // whole process when the screen is off, dropping peers to 0 until the app is
+                // reopened. Battery-exempting the app is the single biggest prevention lever.
+                // Show ONCE, only for an unlocked-and-not-yet-exempt wallet; a Settings entry
+                // re-opens it anytime. Uses the Play-safe settings-list intent (no permission).
+                var showBatteryPrompt by remember { mutableStateOf(false) }
+                var batteryPromptChecked by remember { mutableStateOf(false) }
+                // OBSERVE the wallet state (don't snapshot it once): at app launch the wallet
+                // is Locked on the PIN screen, so we must wait until it becomes Unlocked.
+                // Check once per app session, respect a permanent "Not now" pref.
+                val walletState by walletManager.walletState.collectAsState()
+                androidx.compose.runtime.LaunchedEffect(walletState) {
+                    if (walletState is io.digibyte.core.WalletState.Unlocked && !batteryPromptChecked) {
+                        batteryPromptChecked = true
+                        val prefs = this@MainActivity.getSharedPreferences(
+                            "dgb_settings", android.content.Context.MODE_PRIVATE)
+                        if (!prefs.getBoolean("battery_prompt_dismissed", false) &&
+                            !io.digibyte.util.BatteryOptimization.isExempt(this@MainActivity)
+                        ) {
+                            showBatteryPrompt = true
+                        }
+                    }
+                }
+                if (showBatteryPrompt) {
+                    AlertDialog(
+                        onDismissRequest = { showBatteryPrompt = false },
+                        title = { Text("Keep sync running in the background") },
+                        text = {
+                            Text(
+                                "Android can put this wallet to sleep when the screen is off, " +
+                                "which drops its connection to the DigiByte network and can leave " +
+                                "it stuck at 0 peers until you reopen it.\n\nAllow it to run " +
+                                "unrestricted so it keeps syncing." +
+                                (if (io.digibyte.util.BatteryOptimization.isSamsung)
+                                    "\n\nOn Samsung, also open Device Care → Battery → " +
+                                    "Background usage limits → \"Never sleeping apps\" and add " +
+                                    "DigiByte Wallet."
+                                 else "")
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                io.digibyte.util.BatteryOptimization.openBatterySettings(this@MainActivity)
+                                showBatteryPrompt = false
+                            }) { Text("Open settings") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                this@MainActivity.getSharedPreferences(
+                                    "dgb_settings", android.content.Context.MODE_PRIVATE)
+                                    .edit().putBoolean("battery_prompt_dismissed", true).apply()
+                                showBatteryPrompt = false
+                            }) { Text("Not now") }
+                        }
                     )
                 }
 
