@@ -74,7 +74,11 @@ class ManifestSecurityTest {
             "android.permission.USE_BIOMETRIC",
             "android.permission.FOREGROUND_SERVICE",
             "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
-            "android.permission.POST_NOTIFICATIONS"
+            "android.permission.POST_NOTIFICATIONS",
+            // Normal (install-time) permission — required for the ConnectivityManager
+            // default-network callback that drives the network-regained reconnect
+            // (SyncService.registerNetworkRegainedCallback, v4.0.19). Not dangerous.
+            "android.permission.ACCESS_NETWORK_STATE"
         )
         val permPattern = Regex("android:name=\"(android\\.permission\\.[A-Z_]+)\"")
         val declared = permPattern.findAll(manifest).map { it.groupValues[1] }.toSet()

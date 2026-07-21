@@ -1422,8 +1422,14 @@ class SyncService : Service() {
             // Re-pin every Receive-screen address into the native BIP158 watch set so a
             // receive to an address that fell outside the derived gap window is still
             // scanned in every block (fixes not-confirming / undetected receives).
-            val watched = getSharedPreferences("dgb_watched_addrs", MODE_PRIVATE)
-                .getStringSet("addrs", emptySet()) ?: emptySet()
+            val watched = (getSharedPreferences("dgb_watched_addrs", MODE_PRIVATE)
+                .getStringSet("addrs", emptySet()) ?: emptySet()).toMutableSet()
+            // ALWAYS include the deterministic DigiDollar receive address — even if the user
+            // never opened the DD Receive screen. A DD receive to it must be matched by the
+            // compact-filter scan, else it stays invisible until a manual "Scan for missing
+            // funds" reconcile (the Ultra missed-DD-receive bug). Null when DD isn't active.
+            runCatching { NativeBridge.getDigiDollarReceiveAddress() }.getOrNull()
+                ?.takeIf { it.isNotBlank() }?.let { watched.add(it) }
             if (watched.isNotEmpty()) {
                 try { NativeBridge.addWatchedAddresses(watched.toTypedArray()) } catch (t: Throwable) {
                     android.util.Log.e("SyncService", "addWatchedAddresses threw", t)

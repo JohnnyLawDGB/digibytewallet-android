@@ -458,7 +458,15 @@ class WalletManager(
 
     /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
     fun getDigiDollarReceiveAddress(): String? {
-        return NativeBridge.getDigiDollarReceiveAddress()
+        val addr = NativeBridge.getDigiDollarReceiveAddress()
+        // Pin the DD receive address into the CF watch-set, exactly like getReceiveAddress.
+        // Without this the DigiDollar address never enters dgb_watched_addrs /
+        // addWatchedAddresses, so a DigiDollar RECEIVE isn't matched by the compact-filter
+        // scan and stays invisible until a manual "Scan for missing funds" reconcile —
+        // observed on the Ultra after a sync-wedge dropped the block, then the resumed scan
+        // still missed it because the address wasn't watched.
+        if (!addr.isNullOrBlank()) rememberWatchedAddress(addr)
+        return addr
     }
 
     /**
