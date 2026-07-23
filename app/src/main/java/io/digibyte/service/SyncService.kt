@@ -116,6 +116,8 @@ class SyncService : Service() {
     /** Tracks BIP158 watchdog so we don't spawn two on a sync restart. */
     private var bip158WatchdogJob: Job? = null
     private var tipStallWatchdogJob: Job? = null
+    /** Proactive backstop that respawns a dead/frozen keepalive on a timer (recoveryScope/IO). */
+    private var zeroPeerWatchdogJob: Job? = null
 
     /**
      * Session-scoped, NEVER-persisted override set by the dark-node banner's
@@ -199,6 +201,7 @@ class SyncService : Service() {
         createNotificationChannel()
         startFilterHeaderWriter()
         registerNetworkRegainedCallback()
+        startZeroPeerWatchdog()
     }
 
     /**
@@ -496,6 +499,81 @@ class SyncService : Service() {
                     }
                 }
             }.onFailure { android.util.Log.w("SyncService", "network-regained recovery threw/timed out", it) }
+        }
+    }
+
+    /**
+     * Launch the proactive 0-peer watchdog once, on the independent [recoveryScope].
+     * Idempotent (@Synchronized + isActive guard). Torn down with recoveryScope in onDestroy.
+     */
+    @Synchronized
+    private fun startZeroPeerWatchdog() {
+        if (zeroPeerWatchdogJob?.isActive == true) return
+        zeroPeerWatchdogJob = recoveryScope.launch { runZeroPeerWatchdog() }
+    }
+
+    /**
+     * Proactive, TIME-driven BACKSTOP for a dead/frozen peer-keepalive. The keepalive owns
+     * 0-peer recovery (light injectPeers()+startSync() every 10s → BRPeerManagerConnect, which
+     * resets the native connectFailureCount give-up latch and re-dials; escalating to a full
+     * forceReconnect recreate at 30s). But that coroutine can DIE or freeze in a peer-drop
+     * storm, and resurrectKeepaliveIfNeeded — the thing that respawns it — was only ever called
+     * on EVENTS (onResume / onStartCommand / network-regained), never on a timer. So when the
+     * keepalive died while the app sat foreground-idle on a stable network, nothing brought it
+     * back: the wedge captured live (foreground + screen-awake, 8 min at 0 peers, native loop
+     * silent, only a force-stop cured it). This loop is that missing timer.
+     *
+     * Runs on recoveryScope (Dispatchers.IO) so it survives even if the Default pool the
+     * keepalive lives on is starved. Acts ONLY as a backstop — while the keepalive is healthy
+     * (job active AND ticking) it defers, so it never double-drives recovery against the
+     * keepalive's own 0-peer branch. On a sustained wedge it does a LIGHT reconnect here
+     * (un-latches via startSync WITHOUT the expensive recreate / chain re-floor) AND respawns
+     * the keepalive so its own graduated recovery resumes.
+     */
+    private suspend fun runZeroPeerWatchdog() {
+        var consecutiveZero = 0
+        while (true) {
+            delay(ZERO_PEER_WATCHDOG_POLL_MS)
+            if (!syncSetupComplete) { consecutiveZero = 0; continue }
+            val loaded = runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false)
+            if (!loaded) { consecutiveZero = 0; continue }
+            // Backstop only: defer while the keepalive is HEALTHY (its job is active AND it has
+            // ticked within the stale threshold). A dead job fails this immediately; a frozen
+            // (active-but-not-ticking) one fails it after the stale threshold. Either way the
+            // keepalive's own faster 0-peer branch owns recovery when it's alive, so we never
+            // double-drive it.
+            val keepaliveHealthy = keepaliveJob?.isActive == true && lastKeepaliveTickMs > 0L &&
+                (System.currentTimeMillis() - lastKeepaliveTickMs) <= KEEPALIVE_STALE_THRESHOLD_MS
+            if (keepaliveHealthy) { consecutiveZero = 0; continue }
+            val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(-1)
+            if (peers > 0) { consecutiveZero = 0; continue }
+            consecutiveZero++
+            if (consecutiveZero >= ZERO_PEER_WATCHDOG_TRIGGER_POLLS) {
+                val secs = consecutiveZero * ZERO_PEER_WATCHDOG_POLL_MS / 1000L
+                android.util.Log.w("SyncService",
+                    "zero-peer watchdog: keepalive unhealthy + $peers peers for ~${secs}s — reviving recovery")
+                // Don't dial DIRECT while Tor is still wiring its SOCKS proxy (IP-leak guard).
+                val torComingUp = torManager.isEnabled &&
+                    (torManager.state.value is TorState.Connecting || torManager.state.value is TorState.Starting)
+                if (!torComingUp) {
+                    // LIGHT reconnect on THIS IO scope: injectPeers()+startSync() → BRPeerManagerConnect
+                    // resets the native give-up latch and re-dials WITHOUT the expensive manager recreate.
+                    // Runs here (Dispatchers.IO) so it works even if the Default pool is starved.
+                    // withTimeout bounds a hung native call.
+                    runCatching {
+                        withTimeout(NETWORK_RECOVERY_TIMEOUT_MS) {
+                            injectPeers()
+                            injectCustomNode()
+                            NativeBridge.startSync()
+                        }
+                    }.onFailure {
+                        android.util.Log.w("SyncService", "zero-peer watchdog reconnect threw/timed out", it)
+                    }
+                }
+                // Respawn the dead/frozen keepalive so its graduated recovery resumes.
+                runCatching { resurrectKeepaliveIfNeeded() }
+                consecutiveZero = 0
+            }
         }
     }
 
@@ -2543,6 +2621,14 @@ class SyncService : Service() {
          *  wedge the recovery coroutine. The blocked JNI thread (if any) stays parked on the
          *  large IO pool, but the coroutine moves on and a later onAvailable can retry. */
         private const val NETWORK_RECOVERY_TIMEOUT_MS = 30_000L
+
+        /** Poll interval for the proactive 0-peer watchdog (runZeroPeerWatchdog). */
+        private const val ZERO_PEER_WATCHDOG_POLL_MS = 45_000L
+
+        /** Consecutive unhealthy-keepalive + 0-peer polls the watchdog requires before reviving
+         *  recovery, so a brief keepalive stall / peer-rotation gap never trips it. 2 × 45s ≈ 90s
+         *  sustained — a reliable wedge signal (the live wedge sat 8 min). */
+        private const val ZERO_PEER_WATCHDOG_TRIGGER_POLLS = 2
 
         /** Consecutive 10s keepalive ticks at 0 peers before escalating from a light
          *  reconnect (re-inject + startSync) to a clean peer-manager recreate
