@@ -85,22 +85,29 @@ or native.
 ```
 Android foreground service (SyncService.kt)
     └─ starts Tor (if enabled) and wires SOCKS5 into C core
-    └─ fetches peer list from api.digiscope.me/api/peers/bloom
+    └─ fetches capability-aware peer list from api.digiscope.me/api/peers
+       (filter-tagged) + the 16 hardcoded canon CF oracle nodes
+       (MAINNET_PRIORITY_PEER_IPS, jni_peer.c)
     └─ calls NativeBridge.startSync()
           └─ JNI → jni_peer.c startSync
-                └─ _injectPriorityPeer(digiscope.me + bloom peers)
+                └─ _injectPriorityPeer(digiscope.me + canon oracles + fetched filter peers)
                 └─ BRPeerManagerConnect()
                       └─ opens TCP sockets to peers
-                      └─ sends BIP 37 filterload with wallet addresses
-                      └─ receives merkleblock + tx responses
-                      └─ BRWalletRegisterTransaction for our txs
+                      └─ sends getcfheaders/getcfilters (BIP 157/158) — no
+                         filterload is ever sent; the wallet's address set
+                         never leaves the device
+                      └─ decodes each block's GCS filter and matches it
+                         against the wallet's watched addresses/outpoints
+                      └─ on a match, fetches the full block and calls
+                         BRWalletRegisterTransaction for our txs
           └─ callbacks back to Kotlin via bridge_txStatusUpdate,
              bridge_saveBlocks, bridge_savePeers, bridge_syncStopped
 ```
 
-Current SPV path is BIP 37 bloom filters. Phase 1 of the roadmap
-replaces this with BIP 157/158 compact filters as the primary mode,
-keeping bloom as a fallback.
+The current — and only — SPV path is BIP 157/158 compact filters.
+Bloom (BIP 37) was fully excised in v4.0.0: `BRBloomFilter.c/.h`, the
+filterload/filteradd/merkleblock handlers, and the bloom filter loader
+are all deleted, so there is no bloom fallback.
 
 ### Send transaction
 
@@ -125,8 +132,11 @@ SendScreen (Compose)
 ### Receive transaction
 
 ```
-Peer gossips inv(MSG_TX or MSG_BLOCK) matching wallet bloom filter
-    └─ C core: _peerRelayedPeers / BRPeerManager state update
+Peer gossips inv(MSG_TX or MSG_BLOCK); C core requests/evaluates the
+block's compact filter (BIP 157/158) and matches the decoded GCS set
+against the wallet's watched addresses/outpoints
+    └─ on a match, fetches the full block and calls
+       BRWalletRegisterTransaction for our txs
     └─ bridge_txStatusUpdate callback fires
           └─ Kotlin NativeCallback.onTransactionStatusUpdate
           └─ WalletViewModel poll picks up the new tx next cycle
@@ -159,7 +169,7 @@ MainActivity.onCreate
 | SharedPreferences | Encrypted seed + IV + seed fingerprint | `dgb_wallet_seed` | Seed encrypted with Keystore master key (AES-GCM, 96-bit IV, 128-bit tag) |
 | SharedPreferences | Saved blocks + peers + `has_synced` flag + last balance + saved tx blob | `dgb_sync_data` | Plaintext (public chain data) |
 | SharedPreferences | DigiScope Hub JWT | `dgb_digiscope` | Plaintext |
-| SharedPreferences | Bloom seeder cached response | `dgb_bloom_peers` | Plaintext |
+| SharedPreferences | Legacy-named cached seeder peer-list response (capability-tagged; all entries are dialed as CF peers) | `dgb_bloom_peers` | Plaintext |
 | SharedPreferences | Room DB passphrase (encrypted) | `dgb_db_key` | Keystore-wrapped, fed to SQLCipher |
 | Room / SQLCipher | WalletConfig, Transaction metadata, DigiAsset cache, leaderboard entries, forum cache | `dgb.db` | SQLCipher page-level encryption via the `dgb_db_key` passphrase |
 
@@ -221,7 +231,7 @@ roadmap.
 | Endpoint | Purpose | Trust model |
 |----------|---------|-----------|
 | DigiByte P2P peers (port 12024) | Blockchain data (headers, blocks, filters, tx) | SPV — trust verified cryptographically via block-header chain and (Phase 1) filter-header quorum |
-| `api.digiscope.me/api/peers/bloom` | Peer discovery bootstrap | Soft-trust: wallet author operates. Compromise delays peer discovery but doesn't forge chain data. Demoted in Phase 1 |
+| `api.digiscope.me/api/peers` | Capability-aware peer discovery bootstrap (filter\|bloom tagged; wallet uses the filter-tagged set) | Soft-trust: wallet author operates; the 16 hardcoded canon CF oracle nodes are primary, this is the fallback. Compromise delays peer discovery but doesn't forge chain data |
 | `api.digiscope.me/api/hub/*` | DigiScope community forum + chat | Pseudonymous; certificate-pinned; no tx data sent |
 | `api.coingecko.com`, `api.binance.com` | DGB/USD and DGB/PHP rates | Cosmetic; price is display-only, not used for signing |
 | `trustless-gateway.link`, `dweb.link`, `ipfs.io` | DigiAsset metadata (IPFS) | CID-verified cryptographically; gateway compromise cannot inject wrong content |

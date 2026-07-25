@@ -158,9 +158,18 @@ confirmed entry in history.
 
 1. **Peer gossip.** Some peer on the network has the tx in its
    mempool and sends us `inv MSG_TX` during normal p2p chatter.
-2. **Bloom match (current path).** The tx matches our bloom filter
-   (output to one of our addresses, or spending a UTXO we
-   previously owned). Peer sends the full tx.
+2. **Compact-filter match (current path).** As the CF sync layer
+   works through block heights, the C core requests that block's
+   compact filter (BIP157/158 `getcfilter`/`cfilter`, GCS-encoded) and
+   matches it against the wallet's watched address/outpoint set — no
+   filter is ever sent to the peer (no `filterload`), so the address
+   set never leaves the device. On a match, the peer is asked for the
+   full block (`getdata`) and the tx is delivered to the C core via
+   `_peerRelayedTx`. A per-height CF scan ledger (see
+   `docs/superpowers/specs/2026-07-25-cf-scan-ledger-design.md`) tracks
+   which heights have been fully evaluated, so a dropped or
+   misbehaving-peer filter can't silently leave a permanent gap in
+   scan coverage.
 3. **Wallet register.** `BRWalletRegisterTransaction` is called in
    the C core. The tx is added to `allTx`; `BRWalletBalance` updates
    on the next query.
@@ -169,10 +178,13 @@ confirmed entry in history.
 5. **UI poll picks up the tx.** `WalletViewModel.pollNativeBalance`
    runs every 5 s; next cycle fetches `getBalance` and
    `getTransactionDetails`; new tx appears with 0 confirmations.
-6. **Block confirmation.** Some time later, a miner includes the tx
-   in a block. Our peer forwards the block header; C core's
-   `BRPeerManager` processes the merkleblock; the tx's blockHeight
-   is set to the confirming block.
+6. **Confirmation by depth.** The compact-filter match happens
+   against a block whose header is already connected in the local
+   header chain (headers sync ahead of filter content), so
+   `BRWalletRegisterTransaction` sets the tx's blockHeight at
+   detection time — there is no separate merkleblock message to wait
+   for. Confirmations accrue as later blocks extend the chain past
+   that height.
 7. **Confirmation count updates.** `WalletViewModel` computes
    confirmations as `currentHeight - txHeight + 1` on each poll
    cycle. Compose UI recomposes the tx row.
@@ -223,10 +235,10 @@ Cold start through to data-flowing sync.
    - On failure: `NativeBridge.clearSocksProxy()` and proceed on
      clearnet. Phase 2 adds a visible warning here.
 10. **Peer injection.**
-    - Fetch `https://api.digiscope.me/api/peers/bloom`, cached
-      response OK up to an hour.
-    - Priority-inject `digiscope.me` as a peer + all fetched peers
-      via `NativeBridge.injectPriorityPeer`.
+    - Fetch `https://api.digiscope.me/api/peers` (capability-aware;
+      filter-tagged peers), cached response OK up to an hour.
+    - Priority-inject `digiscope.me` as a peer + all fetched filter
+      peers via `NativeBridge.injectPriorityPeer`.
     - Hardcoded DNS seeds from `BRChainParams.h` remain as fallback.
 11. **Sync start.** `NativeBridge.startSync()` → C core
     `BRPeerManagerConnect`. Peers open TCP connections, exchange
