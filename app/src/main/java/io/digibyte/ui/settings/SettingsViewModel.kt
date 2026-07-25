@@ -62,6 +62,15 @@ class SettingsViewModel @Inject constructor(
      *  Polled alongside the other network stats in [refreshNetworkStats]. */
     private val _cfTip = MutableStateFlow(0L)
 
+    /** CF scan-ledger counters (Phase-1 observe-only): scanned-through height,
+     *  outstanding, gave-up, and pending. Polled in [refreshNetworkStats]. */
+    private val _cfLedgerCounts = MutableStateFlow(CfLedgerCounts())
+    val cfLedgerCounts: StateFlow<CfLedgerCounts> = _cfLedgerCounts.asStateFlow()
+
+    /** CF scan-ledger hole ranges as "start–end" strings (Phase-1 observe-only). */
+    private val _cfLedgerHoles = MutableStateFlow<List<String>>(emptyList())
+    val cfLedgerHoles: StateFlow<List<String>> = _cfLedgerHoles.asStateFlow()
+
     /** Stable sync-target tip: a native monotonic high-water mark of the header
      *  height + peer estimate (see [deriveStableTipPeriodically]) — no HTTP tip
      *  call. 0 until first poll; matches the main wallet screen's denominator. */
@@ -281,6 +290,22 @@ class SettingsViewModel @Inject constructor(
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
             _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)
+            // CF scan ledger (Phase-1 observe-only). Guarded like the other native
+            // reads — native returns empty/short arrays before startSync.
+            runCatching {
+                val c = NativeBridge.getCfScanLedgerCounts()
+                if (c.size >= 4) _cfLedgerCounts.value = CfLedgerCounts(c[0], c[1], c[2], c[3])
+            }
+            runCatching {
+                val flat = NativeBridge.getCfScanLedgerHoleRanges()
+                val holes = ArrayList<String>(flat.size / 2)
+                var i = 0
+                while (i + 1 < flat.size) {
+                    holes.add("${flat[i]}–${flat[i + 1]}") // en-dash between start–end
+                    i += 2
+                }
+                _cfLedgerHoles.value = holes
+            }
         }
     }
 
@@ -380,3 +405,11 @@ sealed class WipeResult {
     data object Success : WipeResult()
     data class Error(val message: String) : WipeResult()
 }
+
+/** CF scan-ledger counters surfaced to the Network Info screen (Phase-1 observe-only). */
+data class CfLedgerCounts(
+    val scannedThrough: Long = 0L,
+    val outstanding: Long = 0L,
+    val gaveUp: Long = 0L,
+    val pending: Long = 0L,
+)

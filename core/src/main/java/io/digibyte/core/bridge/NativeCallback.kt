@@ -21,4 +21,9 @@ interface NativeCallback {
      *  Called on a background thread; implementations must be thread-safe.
      *  Inert in BR_SYNC_MODE_BLOOM_ONLY (default) — never fires. */
     fun onSaveFilterHeaders(data: ByteArray) {}
+    /** CF scan-ledger persistence hook (Phase-1, observe-only). Persist the
+     *  serialized ledger buffer so it can be restored via
+     *  NativeBridge.restoreCfScanLedger on next open. Fires whenever the ledger
+     *  advances. Called on a background thread; implementations must be thread-safe. */
+    fun onSaveCfLedger(data: ByteArray) {}
 }

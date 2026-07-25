@@ -17,6 +17,7 @@ import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.core.asset.assetPruneGateOpen
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
+import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.db.dao.PeerDao
 import io.digibyte.core.db.dao.TransactionDao
@@ -183,6 +184,9 @@ class SyncService : Service() {
     // (chain bytes, epoch-at-capture) — the epoch lets a re-anchor/reset delete()
     // invalidate a stale in-flight write (see FilterHeaderStore).
     @Volatile private var pendingFilterHeaders: Pair<ByteArray, Long>? = null
+    // CF scan ledger (Phase-1 observe-only): mirrors pendingFilterHeaders — latest
+    // serialized ledger + epoch-at-capture, flushed by the same coalesced writer.
+    @Volatile private var pendingCfLedger: Pair<ByteArray, Long>? = null
     @Volatile private var filterHeadersDirty = false
     private var filterHeaderWriterJob: Job? = null
     private val filterHeaderSaveIntervalMs = 20_000L
@@ -554,6 +558,13 @@ class SyncService : Service() {
                     if (desired == SYNCED_PEER_COUNT) "synced — holding $desired peers (fleet load-spread)"
                     else "catching up — holding $desired peers")
                 applied = desired
+            }
+            // CF scan ledger (Phase-1 observe-only): log the ledger state once per poll
+            // for on-device watching, regardless of the peer-cap reduce/hold branch.
+            runCatching {
+                val c = NativeBridge.getCfScanLedgerCounts()
+                if (c.size >= 4) android.util.Log.i("SyncService",
+                    "cf-ledger: scannedThrough=${c[0]} outstanding=${c[1]} gaveUp=${c[2]} pending=${c[3]}")
             }
         }
     }
@@ -1203,6 +1214,8 @@ class SyncService : Service() {
                     FilterHeaderStore.delete(this@SyncService)
                     pendingFilterHeaders = null
                     filterHeadersDirty = false
+                    CfScanLedgerStore.delete(this@SyncService)
+                    pendingCfLedger = null
                     runCatching { NativeBridge.forceReconnect() }
                     injectPeers()
                     injectCustomNode()
@@ -1270,6 +1283,8 @@ class SyncService : Service() {
                     FilterHeaderStore.delete(this@SyncService)
                     pendingFilterHeaders = null
                     filterHeadersDirty = false
+                    CfScanLedgerStore.delete(this@SyncService)
+                    pendingCfLedger = null
                     // Reset the native CF chain to the floor, then force a clean manager
                     // recreate that re-fetches cfheaders from a fresh peer cohort.
                     runCatching { NativeBridge.reanchorCompactFilterChainAtFloor() }
@@ -1315,6 +1330,8 @@ class SyncService : Service() {
                                 FilterHeaderStore.delete(this@SyncService)
                                 pendingFilterHeaders = null
                                 filterHeadersDirty = false
+                                CfScanLedgerStore.delete(this@SyncService)
+                                pendingCfLedger = null
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
                                     "(cfTip was $cfTipNow, below floor) — staying on filters")
@@ -1601,6 +1618,16 @@ class SyncService : Service() {
         // state (sync mode, filter chain, auto-fetch), so cfTip becomes
         // queryable immediately after this returns.
         NativeBridge.startSync()
+
+        // CF scan ledger (Phase-1 observe-only): restore AFTER startSync so the
+        // native peer manager exists (restoreCfScanLedger is guarded and returns
+        // false otherwise). The native ledger is Init'd during startSync, so an
+        // earlier restore (e.g. at the filter-chain restore site) would be wiped.
+        val savedLedger = CfScanLedgerStore.load(this@SyncService)
+        if (savedLedger != null) {
+            val ok = NativeBridge.restoreCfScanLedger(savedLedger)
+            android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
+        }
 
         // Dandelion durability recovery: re-broadcast any recorded send the
         // wallet still sees as unconfirmed. A stem killed mid-embargo (process
@@ -1895,6 +1922,14 @@ class SyncService : Service() {
             // an ever-growing String in the prefs in-memory map (a 512MB heap leak that
             // OOM-looped long-history wallets so they never finished syncing).
             pendingFilterHeaders = data.copyOf() to FilterHeaderStore.currentEpoch()
+            filterHeadersDirty = true
+        }
+
+        override fun onSaveCfLedger(data: ByteArray) {
+            // CF scan ledger advanced (Phase-1 observe-only). Record the latest ledger
+            // only; the coalesced writer flushes it to a plain file at most once per
+            // interval — mirrors onSaveFilterHeaders. Does NOT change sync behavior.
+            pendingCfLedger = data.copyOf() to CfScanLedgerStore.currentEpoch()
             filterHeadersDirty = true
         }
     }
@@ -2415,6 +2450,7 @@ class SyncService : Service() {
                 if (filterHeadersDirty) {
                     filterHeadersDirty = false // cleared first; a concurrent callback re-sets it
                     pendingFilterHeaders?.let { (bytes, ep) -> FilterHeaderStore.write(this@SyncService, bytes, ep) }
+                    pendingCfLedger?.let { (bytes, ep) -> CfScanLedgerStore.write(this@SyncService, bytes, ep) }
                 }
             }
         }
@@ -2425,6 +2461,7 @@ class SyncService : Service() {
         if (filterHeadersDirty) {
             filterHeadersDirty = false
             pendingFilterHeaders?.let { (bytes, ep) -> runCatching { FilterHeaderStore.write(this, bytes, ep) } }
+            pendingCfLedger?.let { (bytes, ep) -> runCatching { CfScanLedgerStore.write(this, bytes, ep) } }
         }
     }
 

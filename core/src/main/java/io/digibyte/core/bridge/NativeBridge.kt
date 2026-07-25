@@ -512,4 +512,16 @@ object NativeBridge {
      *  Pass the wallet's birth height (0 to scan from genesis). */
     external fun enableAutoCompactFilterFetch(startHeight: Long)
     external fun disableAutoCompactFilterFetch()
+
+    /** CF scan-ledger counters: [scannedThrough, outstanding, gaveUp, pending]
+     *  (length 4). Phase-1 observe-only. */
+    external fun getCfScanLedgerCounts(): LongArray
+
+    /** CF scan-ledger hole ranges as flattened inclusive pairs
+     *  [start0,end0,start1,end1,...] (may be empty). Phase-1 observe-only. */
+    external fun getCfScanLedgerHoleRanges(): LongArray
+
+    /** Restore a previously persisted CF scan ledger. Returns false on malformed
+     *  input OR if called before startSync (the native peer manager must exist). */
+    external fun restoreCfScanLedger(data: ByteArray): Boolean
 }

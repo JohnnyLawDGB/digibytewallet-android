@@ -3,6 +3,7 @@
 package io.digibyte.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +52,8 @@ fun NetworkInfoScreen(
     val customNodeLabel by viewModel.customNodeLabel.collectAsStateWithLifecycle()
     val customNodeExclusive by viewModel.customNodeExclusive.collectAsStateWithLifecycle()
     val ownNodeHealth by SyncService.ownNodeHealth.collectAsStateWithLifecycle()
+    val cfLedgerCounts by viewModel.cfLedgerCounts.collectAsStateWithLifecycle()
+    val cfLedgerHoles by viewModel.cfLedgerHoles.collectAsStateWithLifecycle()
 
     // Refresh network stats when this screen is opened
     // Poll live stats while the screen is visible so the display self-corrects a
@@ -211,6 +214,104 @@ fun NetworkInfoScreen(
                             label = "Blocks Remaining",
                             value = if (remaining == 0L && (synced || cfBlock > 0)) "Caught up" else numFmt.format(remaining)
                         )
+                    }
+                }
+            }
+
+            // ── CF Scan Ledger (Phase-1 observe-only) ────────────────────────
+            item {
+                val counts = cfLedgerCounts
+                var holesExpanded by remember { mutableStateOf(false) }
+                SettingsCategory(title = "CF Scan Ledger") {
+                    NetworkStatRow(
+                        icon = Icons.Default.DoneAll,
+                        iconTint = Color(0xFF4CAF50),
+                        label = "Scanned-through",
+                        value = if (counts.scannedThrough > 0) numFmt.format(counts.scannedThrough) else "—"
+                    )
+                    HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+                    NetworkStatRow(
+                        icon = Icons.Default.HourglassBottom,
+                        iconTint = Color(0xFFFF9800),
+                        label = "Outstanding",
+                        value = numFmt.format(counts.outstanding)
+                    )
+                    HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+                    NetworkStatRow(
+                        icon = Icons.Default.Block,
+                        iconTint = DigiByteRed,
+                        label = "Gave-up",
+                        value = numFmt.format(counts.gaveUp)
+                    )
+                    HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+                    NetworkStatRow(
+                        icon = Icons.Default.Schedule,
+                        iconTint = DigiByteAccent,
+                        label = "Pending",
+                        value = numFmt.format(counts.pending)
+                    )
+                    HorizontalDivider(color = Color(0xFF243352), thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+                    // Expandable hole-range list — inclusive [start–end] gaps not yet scanned.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = cfLedgerHoles.isNotEmpty()) { holesExpanded = !holesExpanded }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFF8899AA).copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.ViewList, null, tint = Color(0xFF8899AA), modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = "Scan Holes",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF8899AA),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = cfLedgerHoles.size.toString(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (cfLedgerHoles.isNotEmpty()) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                if (holesExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                null, tint = Color(0xFF8899AA), modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    if (holesExpanded && cfLedgerHoles.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Cap the rendered rows so an unexpectedly long list can't
+                            // build a giant non-lazy Column inside this LazyColumn item.
+                            cfLedgerHoles.take(100).forEach { range ->
+                                Text(
+                                    text = "• $range",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFB0BEC5)
+                                )
+                            }
+                            if (cfLedgerHoles.size > 100) {
+                                Text(
+                                    text = "+${cfLedgerHoles.size - 100} more…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF8899AA)
+                                )
+                            }
+                        }
                     }
                 }
             }
