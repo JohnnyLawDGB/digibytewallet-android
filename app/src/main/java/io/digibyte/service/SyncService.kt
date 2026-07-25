@@ -118,6 +118,9 @@ class SyncService : Service() {
     private var tipStallWatchdogJob: Job? = null
     /** Proactive backstop that respawns a dead/frozen keepalive on a timer (recoveryScope/IO). */
     private var zeroPeerWatchdogJob: Job? = null
+    /** Demand-side peer-cap controller (full while catching up, few once synced). */
+    private var peerCapControllerJob: Job? = null
+    private var syncedSinceMs = 0L
 
     /**
      * Session-scoped, NEVER-persisted override set by the dark-node banner's
@@ -202,6 +205,7 @@ class SyncService : Service() {
         startFilterHeaderWriter()
         registerNetworkRegainedCallback()
         startZeroPeerWatchdog()
+        startPeerCapController()
     }
 
     /**
@@ -499,6 +503,58 @@ class SyncService : Service() {
                     }
                 }
             }.onFailure { android.util.Log.w("SyncService", "network-regained recovery threw/timed out", it) }
+        }
+    }
+
+    /**
+     * Demand-side load-spread: hold the FULL peer set while catching up (fast sync + the wedge
+     * buffer we rely on), then drop to [SYNCED_PEER_COUNT] once STABLY synced so the thousands of
+     * synced+idle wallets stop each pinning 8 slots on the small shared filter-node fleet. A wallet
+     * at the tip receives ~1 block / 15s, which a few peers serve easily. Restores to the full
+     * count the instant it falls behind (Syncing/Rescanning) — catch-up gets full redundancy.
+     *
+     * Reduction is gated on SyncState.Complete being stable for [PEER_CAP_REDUCE_GRACE_MS] (Complete
+     * is itself already grace-gated upstream, so this never flaps on a single tip block). We call
+     * the native setter every poll with the desired count; it no-ops when already at target and
+     * re-applies after a manager recreate (which resets to the full default), so the state stays
+     * correct without tracking it across recreates. Native never drops the download peer or the
+     * pinned own-node.
+     */
+    @Synchronized
+    private fun startPeerCapController() {
+        if (peerCapControllerJob?.isActive == true) return
+        peerCapControllerJob = serviceScope.launch { runPeerCapController() }
+    }
+
+    private suspend fun runPeerCapController() {
+        var applied = -1
+        while (true) {
+            delay(PEER_CAP_POLL_MS)
+            if (!syncSetupComplete) continue
+            val now = System.currentTimeMillis()
+            // SyncState.Complete is STICKY — it's restored from prefs and set BEFORE startSync's
+            // silent catch-up finishes, and never reverts without a rescan — so it's necessary but
+            // NOT sufficient. Gate the reduction on a LIVE at-tip signal: the header tip within
+            // PEER_CAP_TIP_DELTA of the network estimate AND a healthy peer count. This keeps the
+            // full 8 through a long-gap cold-start catch-up (est >> last) and through 0-peer
+            // recovery (peer count dips), and only drops to 3 once genuinely idle at the tip.
+            val atTip = run {
+                if (walletManager.syncState.value !is io.digibyte.core.model.SyncState.Complete) return@run false
+                val last = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
+                val est = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
+                val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+                last > 0L && est > 0L && est - last <= PEER_CAP_TIP_DELTA && peers >= SYNCED_PEER_COUNT
+            }
+            syncedSinceMs = if (atTip) (if (syncedSinceMs == 0L) now else syncedSinceMs) else 0L
+            val stableSynced = atTip && now - syncedSinceMs >= PEER_CAP_REDUCE_GRACE_MS
+            val desired = if (stableSynced) SYNCED_PEER_COUNT else CATCHUP_PEER_COUNT
+            runCatching { NativeBridge.setMaxPeerConnections(desired) }
+            if (desired != applied) {
+                android.util.Log.i("SyncService",
+                    if (desired == SYNCED_PEER_COUNT) "synced — holding $desired peers (fleet load-spread)"
+                    else "catching up — holding $desired peers")
+                applied = desired
+            }
         }
     }
 
@@ -2629,6 +2685,17 @@ class SyncService : Service() {
          *  recovery, so a brief keepalive stall / peer-rotation gap never trips it. 2 × 45s ≈ 90s
          *  sustained — a reliable wedge signal (the live wedge sat 8 min). */
         private const val ZERO_PEER_WATCHDOG_TRIGGER_POLLS = 2
+
+        /** Demand-side peer-cap controller. Full count while catching up, reduced once synced. */
+        private const val PEER_CAP_POLL_MS = 15_000L
+        /** Hold SyncState.Complete this long before reducing, so a momentary tip-touch can't drop
+         *  peers then immediately re-dial (Complete is already grace-gated upstream; this is belt). */
+        private const val PEER_CAP_REDUCE_GRACE_MS = 60_000L
+        private const val CATCHUP_PEER_COUNT = 8   // matches native PEER_MAX_CONNECTIONS default
+        private const val SYNCED_PEER_COUNT = 3
+        /** Max header-tip gap (wallet vs network estimate) still counted as "at the tip" for the
+         *  peer-cap reduction — ~a few minutes of blocks, so genuine catch-up (gap ≫ this) keeps 8. */
+        private const val PEER_CAP_TIP_DELTA = 25L
 
         /** Consecutive 10s keepalive ticks at 0 peers before escalating from a light
          *  reconnect (re-inject + startSync) to a clean peer-manager recreate

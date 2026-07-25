@@ -167,6 +167,12 @@ object NativeBridge {
      *  Call this immediately before startSync(). */
     external fun forceReconnect()
 
+    /** Demand-side load-spread: set the target peer connection count. Hold the full set while
+     *  catching up (fast sync + wedge buffer), then drop to a few once synced so idle wallets
+     *  stop pinning slots on the shared filter-node fleet. Reducing gently disconnects the
+     *  excess (never the download peer or pinned own-node); increasing tops back up. */
+    external fun setMaxPeerConnections(count: Int)
+
     /** Stop SPV sync — disconnects from all peers. */
     external fun stopSync()
 

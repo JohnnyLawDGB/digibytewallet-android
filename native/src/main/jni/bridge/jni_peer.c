@@ -616,6 +616,22 @@ Java_io_digibyte_core_bridge_NativeBridge_forceReconnect(JNIEnv *env, jobject th
     g_peerManagerNeedsRecreate = 1;
 }
 
+/* ---------- setMaxPeerConnections ---------- */
+
+/* Demand-side load-spread: the wallet holds the full peer set while catching up, then drops to a
+ * small count once synced so idle wallets stop pinning slots on the shared filter-node fleet.
+ * Reducing gently disconnects the excess (never the download peer or pinned own-node); increasing
+ * tops back up. No-op if no manager yet (startSync creates it at the default full count). */
+JNIEXPORT void JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_setMaxPeerConnections(JNIEnv *env, jobject thiz, jint count) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return;
+    if (count < 1) count = 1;
+    BRPeerManagerSetMaxConnectCount(g_peerManager, (size_t)count);
+    LOGI("setMaxPeerConnections: target=%d", count);
+}
+
 /* ---------- startSync ---------- */
 
 JNIEXPORT void JNICALL
