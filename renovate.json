@@ -1,23 +1,66 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
-  "baseBranches": ["phase1-modernization"],
+  "baseBranches": ["develop"],
+  "labels": ["dependencies"],
   "packageRules": [
     {
-      "matchPackagePatterns": ["androidx.compose"],
+      "description": "Compose — every androidx.compose.* artifact is pinned by the BOM (versions.composeBom in gradle/libs.versions.toml); the member libraries carry no version of their own.",
+      "matchPackageNames": ["/^androidx\\.compose/"],
       "groupName": "Compose BOM",
       "schedule": ["before 6am on monday"]
     },
     {
-      "matchPackagePatterns": ["com.google.dagger", "dagger.hilt"],
+      "description": "Hilt/Dagger — the Gradle plugin, hilt-android and hilt-android-compiler all resolve from versions.hilt and MUST land in one PR; a split version fails the build.",
+      "matchPackageNames": ["/^com\\.google\\.dagger/"],
       "groupName": "Hilt/Dagger",
       "schedule": ["before 6am on monday"]
     },
     {
-      "matchPackagePatterns": ["org.jetbrains.kotlin"],
+      "description": "androidx.hilt (hilt-navigation-compose, hilt-work, hilt-compiler) — versions.androidxHilt, released independently of Dagger/Hilt above.",
+      "matchPackageNames": ["/^androidx\\.hilt/"],
+      "groupName": "AndroidX Hilt",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Kotlin + KSP — versions.ksp is Kotlin-derived (<kotlin>-<ksp>) and the Compose compiler plugin ships in the Kotlin release, so all three move together. Patterns deliberately require ':' or '.' after 'kotlin' so org.jetbrains.kotlinx (coroutines) does NOT fall in here.",
+      "matchPackageNames": [
+        "/^org\\.jetbrains\\.kotlin:/",
+        "/^org\\.jetbrains\\.kotlin\\./",
+        "/^com\\.google\\.devtools\\.ksp/"
+      ],
       "groupName": "Kotlin",
       "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Room — runtime, ktx, compiler and testing all resolve from versions.room.",
+      "matchPackageNames": ["/^androidx\\.room/"],
+      "groupName": "Room",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Lifecycle — viewmodel-compose and runtime-compose resolve from versions.lifecycle.",
+      "matchPackageNames": ["/^androidx\\.lifecycle/"],
+      "groupName": "Lifecycle",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "CameraX — camera2, lifecycle and view resolve from versions.camerax.",
+      "matchPackageNames": ["/^androidx\\.camera/"],
+      "groupName": "CameraX",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Coroutines — kotlinx-coroutines-android and -test resolve from versions.coroutines.",
+      "matchPackageNames": ["/^org\\.jetbrains\\.kotlinx:kotlinx-coroutines/"],
+      "groupName": "Coroutines",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Android Gradle Plugin — application and library plugins resolve from versions.agp.",
+      "matchPackageNames": ["/^com\\.android\\.(application|library)$/"],
+      "groupName": "Android Gradle Plugin",
+      "schedule": ["before 6am on monday"]
     }
-  ],
-  "labels": ["dependencies"]
+  ]
 }

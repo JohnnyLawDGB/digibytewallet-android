@@ -24,11 +24,11 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
-    implementation("androidx.compose.runtime:runtime")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-text")
-    implementation("androidx.compose.material3:material3")
+    implementation(libs.androidx.compose.runtime)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.text)
+    implementation(libs.androidx.compose.material3)
 }

@@ -46,21 +46,23 @@ dependencies {
     implementation(project(":native"))
 
     // Room + SQLCipher
-    val roomVersion = "2.7.1"
-    implementation("androidx.room:room-runtime:$roomVersion")
-    implementation("androidx.room:room-ktx:$roomVersion")
-    ksp("androidx.room:room-compiler:$roomVersion")
-    implementation("net.zetetic:sqlcipher-android:4.6.1@aar")
-    implementation("androidx.sqlite:sqlite-ktx:2.4.0")
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    // Artifact-only `@aar` notation (also implies non-transitive) can't be
+    // expressed as a catalog module coordinate — only the version comes from
+    // the catalog. See the note in gradle/libs.versions.toml.
+    implementation("net.zetetic:sqlcipher-android:${libs.versions.sqlcipher.get()}@aar")
+    implementation(libs.androidx.sqlite.ktx)
 
     // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation(libs.kotlinx.coroutines.android)
 
     // OkHttp (for price API)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.okhttp)
 
     // Argon2 for PIN hashing
-    implementation("org.signal:argon2:13.1")
+    implementation(libs.argon2)
 
     // Tor via kmp-tor (NO-EXEC mode — Tor loaded in-process via dlopen, not
     // exec'd as a child process). Required because we package native libs
@@ -69,26 +71,24 @@ dependencies {
     // which uncompressed packaging doesn't do, so exec mode fails to find it.
     // No-exec also avoids the SELinux exec-from-data-dir denials newer Android
     // (15/16) enforces — more robust on modern devices.
-    val kmpTorRuntime = "2.4.0"
-    val kmpTorResource = "408.16.4"
-    implementation("io.matthewnelson.kmp-tor:runtime:$kmpTorRuntime")
-    implementation("io.matthewnelson.kmp-tor:resource-noexec-tor:$kmpTorResource")
+    implementation(libs.kmp.tor.runtime)
+    implementation(libs.kmp.tor.resource.noexec)
 
     // EncryptedSharedPreferences for PIN storage
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation(libs.androidx.security.crypto)
 
     // BiometricPrompt
-    implementation("androidx.biometric:biometric:1.1.0")
+    implementation(libs.androidx.biometric)
 
     // Testing
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
-    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
     // org.json real implementation for unit tests (Android stubs are empty)
-    testImplementation("org.json:json:20240303")
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.room:room-testing:$roomVersion")
-    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation(libs.org.json)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
 }
