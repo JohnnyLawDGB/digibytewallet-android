@@ -35,6 +35,14 @@ jobs:
       - name: Unit Tests
         run: ./gradlew testMainnetDebugUnitTest
 
+      # ASan known-answer tests compiled against the live C submodule sources. These cover
+      # memory safety and wire/protocol invariants the JVM tests structurally cannot reach:
+      # NativeBridge's static initializer throws UnsatisfiedLinkError on a host JVM, so the
+      # native layer is unmockable there. Nothing ran these before, and two had rotted into
+      # a permanently broken state unnoticed.
+      - name: Native host KATs
+        run: ./scripts/run-host-kats.sh
+
       - name: Build Debug APK
         run: ./gradlew :app:assembleMainnetDebug
 

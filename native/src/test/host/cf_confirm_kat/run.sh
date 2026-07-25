@@ -21,7 +21,7 @@
 # BRTransaction.c (BRRand plus every BRTransaction* symbol the KAT's payTx/
 # finalizeTxHash helpers and BRWallet.c/BRPeer.c call), BRSet.c
 # (manager->blocks / wallet->allTx hash sets), BRMerkleBlock.c (the dummy
-# block + BRMerkleBlockHash/Eq), BRBloomFilter.c, BRCompactFilterChain.c,
+# block + BRMerkleBlockHash/Eq), BRCompactFilterChain.c,
 # BRGCSFilter.c, BRWalletFilterElements.c (BIP158 machinery BRPeerManager.c
 # references even though this KAT never exercises it), BRNetwork.c
 # (BRNetworkIsTestnet, called from BRAddress.c/BRKey.c call sites), plus the
@@ -57,7 +57,6 @@ clang -w -include stdint.h \
     "$CORE_DIR/BRWallet.c" \
     "$CORE_DIR/BRTransaction.c" \
     "$CORE_DIR/BRMerkleBlock.c" \
-    "$CORE_DIR/BRBloomFilter.c" \
     "$CORE_DIR/BRCompactFilterChain.c" \
     "$CORE_DIR/BRGCSFilter.c" \
     "$CORE_DIR/BRWalletFilterElements.c" \
