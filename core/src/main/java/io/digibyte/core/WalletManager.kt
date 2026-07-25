@@ -9,6 +9,10 @@ import io.digibyte.core.model.SyncState
 import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,6 +76,11 @@ class WalletManager(
     // outside the derived gap window and be missed. See NativeBridge.addWatchedAddresses.
     private val watchedPrefs: SharedPreferences =
         context.getSharedPreferences("dgb_watched_addrs", Context.MODE_PRIVATE)
+
+    // Off-main scope for the native watch-set pin. Deliberately NOT the caller's thread:
+    // getReceiveAddress is invoked from Compose composition on the main thread, and the
+    // native pin takes the wallet mutex. See rememberWatchedAddress.
+    private val watchScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
         // Check if a wallet exists on disk
@@ -308,11 +317,39 @@ class WalletManager(
         return addr
     }
 
-    /** Persist a Receive-screen address into the watched-address store. */
+    /**
+     * Persist a Receive-screen address into the watched-address store, and pin it into the
+     * native watch set.
+     *
+     * The prefs write is the DURABLE store — it is replayed into native at sync start
+     * (SyncService), and it is the only part that survives a process restart.
+     *
+     * The native pin is belt-and-braces, NOT the live-detection path. An address returned by
+     * [getReceiveAddress] is already in the native match set before that JNI call returns:
+     * BRWalletReceiveAddress → BRWalletUnusedAddrs derives it into the chain array and adds it
+     * to the wallet's allAddrs set, and the compact-filter element list is rebuilt from live
+     * wallet state on every cfilter (nothing is cached). What this pin buys is durability for
+     * a later session in which derivation does not reach the address.
+     *
+     * Fired on [Dispatchers.IO], never inline. ReceiveScreen requests its addresses from a
+     * `remember { }` during composition — i.e. on the main thread — and the native call takes
+     * the wallet mutex, which the compact-filter element build holds once per block per peer.
+     * A synchronous JNI call there is the exact shape of the v3.10.26/27 Pixel ANR. Since the
+     * prefs write is the durable path, a late or dropped native pin costs nothing.
+     */
     private fun rememberWatchedAddress(addr: String) {
         val cur = watchedPrefs.getStringSet("addrs", emptySet()) ?: emptySet()
         if (!cur.contains(addr)) {
             watchedPrefs.edit().putStringSet("addrs", cur + addr).apply()
+        }
+        watchScope.launch {
+            runCatching {
+                if (NativeBridge.isWalletLoaded()) NativeBridge.addWatchedAddresses(arrayOf(addr))
+            }.onFailure {
+                // Never swallow silently: the prefs replay still covers this address at the next
+                // sync start, but a repeated failure here is worth seeing.
+                android.util.Log.w("WalletManager", "watch-set pin failed for ${addr.take(6)}…", it)
+            }
         }
     }
 
@@ -456,18 +493,33 @@ class WalletManager(
         }.commit()
     }
 
-    /** The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked. */
-    fun getDigiDollarReceiveAddress(): String? {
-        val addr = NativeBridge.getDigiDollarReceiveAddress()
-        // Pin the DD receive address into the CF watch-set, exactly like getReceiveAddress.
-        // Without this the DigiDollar address never enters dgb_watched_addrs /
-        // addWatchedAddresses, so a DigiDollar RECEIVE isn't matched by the compact-filter
-        // scan and stays invisible until a manual "Scan for missing funds" reconcile —
-        // observed on the Ultra after a sync-wedge dropped the block, then the resumed scan
-        // still missed it because the address wasn't watched.
-        if (!addr.isNullOrBlank()) rememberWatchedAddress(addr)
-        return addr
-    }
+    /**
+     * The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked.
+     *
+     * DO NOT re-add a watch-set pin here. The v4.0.20 version of this method pinned the DD
+     * address via [rememberWatchedAddress], described as what makes a DigiDollar receive
+     * visible to the compact-filter scan. That was wrong twice over, and measured:
+     *
+     *  1. The pin is INERT. A DD address is Base58Check over a 34-byte payload (2-byte
+     *     "DD"/"TD" version + 32-byte taproot output key), so BRAddressIsValid rejects it and
+     *     BRWalletAddWatchedAddress drops it before it reaches the watch set. Even if it were
+     *     admitted, BRAddressScriptPubKey cannot encode it, so it would contribute no filter
+     *     element.
+     *  2. It is also UNNECESSARY. This address encodes the tap-tweaked output key X(Q) of
+     *     m/86'/20'/0'/0/0 — the same key as taprootExternalChain[0] — and a DD token output
+     *     is a plain P2TR script. The filter element for a DD payment (OP_1 0x20 <X(Q)>, 34
+     *     bytes) is therefore ALREADY emitted by the taproot chain. Measured on a real
+     *     wallet: present at index 935 of 1045 elements. Pinned by filter_elements_kat so
+     *     the alias cannot silently break.
+     *
+     * Pinning it here additionally leaked a "DD…" string into dumpAllAddresses, which the
+     * reconcile path POSTs to the backend in 500-address batches — a privacy regression in a
+     * CF-only wallet, and one unparseable entry can fail a whole batch.
+     *
+     * The real cause of the Ultra missed-DD-receive is documented in
+     * docs/superpowers/specs/2026-07-25-watchset-silent-drops-design.md §9.
+     */
+    fun getDigiDollarReceiveAddress(): String? = NativeBridge.getDigiDollarReceiveAddress()
 
     /**
      * Start SPV sync.

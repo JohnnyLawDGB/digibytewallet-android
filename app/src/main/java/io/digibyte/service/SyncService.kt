@@ -743,6 +743,17 @@ class SyncService : Service() {
             if (tickCount % 3L == 0L) {
                 runCatching { refreshOwnNodeHealth() }
             }
+            // Every 30th tick (~5 min): confirmation-reconcile backstop for a tx stranded at
+            // TX_UNCONFIRMED because its confirming block's cfilter round-trip was lost and is
+            // never retried. Previously this ran only at onSyncComplete, which an already-synced
+            // wallet never reaches again — so a DigiDollar receive that arrived live could sit
+            // at $0 indefinitely until the user manually ran "Scan for missing transactions".
+            // Internally gated on pending>0 and debounced, so a healthy wallet does nothing.
+            if (tickCount % 30L == 0L && NativeBridge.getPeerCount() > 0) {
+                launch(kotlinx.coroutines.Dispatchers.IO) {
+                    maybeRunConfirmationReconcile("keepalive tick")
+                }
+            }
             // Every 3rd tick (~30s): sovereign asset maintenance. NO backend
             // call on the standing path — /api/assets/unspent is reconcile-only
             // now. Guarded so a slow cycle on a long-history wallet can't stack.
@@ -1587,12 +1598,17 @@ class SyncService : Service() {
             // scanned in every block (fixes not-confirming / undetected receives).
             val watched = (getSharedPreferences("dgb_watched_addrs", MODE_PRIVATE)
                 .getStringSet("addrs", emptySet()) ?: emptySet()).toMutableSet()
-            // ALWAYS include the deterministic DigiDollar receive address — even if the user
-            // never opened the DD Receive screen. A DD receive to it must be matched by the
-            // compact-filter scan, else it stays invisible until a manual "Scan for missing
-            // funds" reconcile (the Ultra missed-DD-receive bug). Null when DD isn't active.
-            runCatching { NativeBridge.getDigiDollarReceiveAddress() }.getOrNull()
-                ?.takeIf { it.isNotBlank() }?.let { watched.add(it) }
+            // NOTE: the DigiDollar receive address is deliberately NOT added here.
+            //
+            // v4.0.20 added it, claiming a DD receive would otherwise stay invisible until a
+            // manual "Scan for missing funds". Both halves of that were wrong, and measured:
+            // BRWalletAddWatchedAddress REJECTS a DD address (Base58Check over 34 bytes fails
+            // BRAddressIsValid), so the entry was silently discarded on every sync start while
+            // the log line below counted it — over-reporting the watch set by one and actively
+            // misleading anyone debugging it. And it was never needed: a DD token output is a
+            // plain P2TR script whose 34-byte element (OP_1 0x20 <X(Q)>) is already emitted by
+            // taprootExternalChain[0], since the DD address encodes that same output key.
+            // See WalletManager.getDigiDollarReceiveAddress and filter_elements_kat.
             if (watched.isNotEmpty()) {
                 try { NativeBridge.addWatchedAddresses(watched.toTypedArray()) } catch (t: Throwable) {
                     android.util.Log.e("SyncService", "addWatchedAddresses threw", t)
@@ -1834,16 +1850,7 @@ class SyncService : Service() {
                 // withheld DD/asset credit. Gated on pending>0 AND debounced so
                 // the node is only queried when something is actually stuck;
                 // self-limiting (a promoted tx is no longer pending).
-                runCatching {
-                    val now = System.currentTimeMillis()
-                    if (hasUnconfirmedTransactions() &&
-                        now - lastConfirmReconcileMs > CONFIRM_RECONCILE_DEBOUNCE_MS) {
-                        lastConfirmReconcileMs = now
-                        android.util.Log.i("SyncService",
-                            "sync complete with unconfirmed tx(s) — running confirmation-reconcile")
-                        ChainReconciliationService(DgbNodeClient(this@SyncService), assetManager).reconcile()
-                    }
-                }.onFailure { android.util.Log.w("SyncService", "confirmation-reconcile failed", it) }
+                maybeRunConfirmationReconcile("sync complete")
             }
         }
 
@@ -2551,6 +2558,38 @@ class SyncService : Service() {
         NativeBridge.getTransactionDetails().trim().lines().any { line ->
             line.split("|").getOrNull(3)?.toLongOrNull() == Int.MAX_VALUE.toLong()
         }
+
+    /**
+     * Ask the node for the real heights of any still-unconfirmed wallet tx and promote them.
+     *
+     * In CF-only mode the ONLY live event that attaches a confirming height is a cfilter
+     * match → getdata(full block) → block relay. That round-trip has no retry: the cfilter
+     * cursor advances when the request is SENT, not when it is answered, with no in-flight
+     * tracking, timeout, or rewind on peer disconnect. Lose it once and the tx strands at
+     * TX_UNCONFIRMED forever — and for a DigiDollar receive that means its $ credit stays
+     * withheld by the dust-pending gate, so the receive reads as $0 rather than "pending".
+     * `registerRawTransaction` supplies the node's height directly, which is exactly why
+     * "Scan for missing transactions" always recovered it and the live path never did.
+     *
+     * This used to run ONLY inside onSyncComplete. An already-synced wallet receiving live
+     * gets no further onSyncComplete, so the backstop was dormant precisely when it was
+     * needed — the user had to press the button. It now also runs on the keepalive tick.
+     *
+     * Cheap and self-limiting: gated on pending>0, debounced, and a promoted tx is no longer
+     * pending, so a healthy wallet never queries the node at all.
+     */
+    private suspend fun maybeRunConfirmationReconcile(reason: String) {
+        runCatching {
+            val now = System.currentTimeMillis()
+            if (hasUnconfirmedTransactions() &&
+                now - lastConfirmReconcileMs > CONFIRM_RECONCILE_DEBOUNCE_MS) {
+                lastConfirmReconcileMs = now
+                android.util.Log.i("SyncService",
+                    "$reason with unconfirmed tx(s) — running confirmation-reconcile")
+                ChainReconciliationService(DgbNodeClient(this@SyncService), assetManager).reconcile()
+            }
+        }.onFailure { android.util.Log.w("SyncService", "confirmation-reconcile failed", it) }
+    }
 
     companion object {
         const val CHANNEL_ID       = "dgb_sync_channel"

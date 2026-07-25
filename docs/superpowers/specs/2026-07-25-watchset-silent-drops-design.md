@@ -177,23 +177,25 @@ The invariant worth preserving is: **an address is safe to credit only if the wa
 it**, and signing works by index within a derived chain. Therefore *credit ⇔ derived*, which is
 exactly why `allAddrs` is the crediting gate.
 
-### 2.2 Fix — make watched addresses genuinely derived
+### 2.2 Fix — make watched addresses genuinely derived (SHIPPED)
 
-`BRWalletAddWatchedAddress` gains a bounded resolution step: given the address string, search the
-derivation space (each chain × script type, index 0..`WATCH_RESOLVE_MAX`) for a match. On a hit at
-index *k*, extend that chain via `BRWalletUnusedAddrs(wallet, NULL, k + gap, internal, scriptType)`
-so the address becomes **derived** — and therefore in `allAddrs`, creditable, and signable. The
-`watchedAddrs` entry is still kept as the filter-set belt-and-braces.
+`BRWalletAddWatchedAddress` gained a bounded resolution step. It first checks whether the address is
+already in `allAddrs` — the overwhelmingly common case, since the address was just handed out by
+`BRWalletUnusedAddrs`, and it short-circuits at zero cost. Otherwise it extends the chains in steps
+(50 at a time, up to `WATCH_RESOLVE_MAX_SPAN` = 200), re-checking after each step, so an address
+that belongs to one of our chains becomes **derived** — and therefore creditable *and signable*.
 
-On a miss (not ours, or beyond the bound) the address is kept watched-only and a one-shot warning
-records that it can match but never credit — the current behaviour, but no longer silent.
+Beyond that span the address stays watch-only: still matched, still not credited. That limitation is
+**pinned by a test assertion** rather than left implicit, because it is the honest boundary of the
+fix. The bound is deliberate — each step is EC point maths over six chain/scriptType combinations,
+and every derived address also becomes a compact-filter element, so an unbounded search would cost
+both CPU and filter bandwidth.
 
-This closes the hole without ever crediting an unsignable coin. Cost is a bounded derivation scan on
-a rare path (Receive-screen display, sync-start replay).
+Resolution runs **outside** `wallet->lock`: `BRWalletUnusedAddrs` takes it internally and it is
+non-recursive (§1.5).
 
-`BRWalletAddWatchedAddress` must not call `BRWalletUnusedAddrs` while holding `wallet->lock`
-(non-recursive — §1.5). The resolution runs **before** the lock is taken, or the lock is released
-around it.
+Verified as a genuine regression test — with the resolve call disabled, four `watched_credit_kat`
+checks fail, including "payment to a watched address is RECOGNISED as ours".
 
 ---
 
@@ -388,15 +390,39 @@ and was never connected to the symptom.
 
 - **U1 (`BRWallet.c:233-235`)** — stop letting a consensus-legal zero-value DD/asset token output
   poison the whole transaction's accounting. The gate exists to defend against unconfirmed dust
-  spam, not against a protocol-mandated 0-value token. See the open decision below for the variant.
+  spam, not against a protocol-mandated 0-value token.
+
+  **Chosen variant: visible immediately, credited on confirmation.**
+
+  **As implemented, this is narrower than first designed, and the reason matters.** The first
+  attempt exempted protocol 0-value outputs from the dust check outright. That worked — and broke
+  the confirmation path: dropping out of the dust check also drops the tx out of `pendingTx`, and
+  `BRWalletUpdateTransactions` gates its recompute-on-confirm on `pendingTx` membership
+  (`BRWallet.c:1751`). The DD credit then never landed at all. Caught by the KAT, which is why the
+  KAT asserts both halves.
+
+  Shipped instead: the tx stays pending exactly as before, but the pending branch now records
+  `tx->outputs[].address` into `usedAddrs` before it `continue`s. That is the whole observable
+  defect — an unconfirmed DD receive left *no trace* in the wallet's address bookkeeping, so the
+  Receive screen kept handing out the same address. Credit semantics are untouched: still nothing
+  at 0-conf, still released on confirmation, so no 0-conf DigiDollar credit is introduced.
+
+  The display amount was never the problem: `digiDollarTxAmount` (`jni_transaction.c:545`) computes
+  from the transaction directly via `BRDigiDollarOutputAmount` + `BRWalletContainsAddress`, none of
+  which depend on the output loop. A registered DD tx has always been able to show its dollar
+  amount; what it could not do was confirm, credit, or rotate the address.
 - **U2 (`SyncService.kt`)** — the confirmation-reconcile backstop that recovers a stranded tx runs
   **only** inside `onSyncComplete`, gated on `pending > 0` and 5-minute debounced
   (`SyncService.kt:1808-1818`). An already-synced wallet receiving live never gets another
   `onSyncComplete`, so the backstop is dormant exactly when it is needed. Move it onto the existing
   keepalive tick with a longer debounce and a tx-age condition. Pure Kotlin, zero native risk,
   self-heals the symptom under **every** surviving cause.
-- **U3** — de-document `ea590b14` as the resolution of this symptom in `CLAUDE.md`, so the project
-  narrative stops masking the real defect.
+- **U3** — de-document `ea590b14` as the resolution of this symptom, so the project narrative stops
+  masking the real defect. `CLAUDE.md` turned out to carry no such claim; the false attribution
+  lived in two code comments (`WalletManager.getDigiDollarReceiveAddress` and the SyncService pin
+  block), both now replaced with the measured facts and a "do not re-add this" note. The SyncService
+  block also stopped adding the DD address, which additionally fixes the `BIP158: pinned N …` log
+  over-reporting the watch set by one.
 
 **Routed to the `BRPeerManager.c` sequence** (see §8): cfilter delivery accounting + timeout +
 rewind-on-disconnect; wire up `BRPeerManagerRequestCompactFilters`; persist a real CF **scan**
