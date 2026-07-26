@@ -23,6 +23,7 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 clang -w -include stdint.h \
+    -fsanitize=address -fno-omit-frame-pointer -g \
     -I "$CORE_DIR" \
     "$SCRIPT_DIR/cf_scan_ledger_kat_main.c" \
     "$CORE_DIR/BRCFScanLedger.c" \
