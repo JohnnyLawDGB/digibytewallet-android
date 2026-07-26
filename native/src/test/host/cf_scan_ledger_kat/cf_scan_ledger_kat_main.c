@@ -185,6 +185,31 @@ static void case5_serialize_roundtrip(BRCFScanLedger *l1, BRCFScanLedger *l2) {
     check(need2 == need && memcmp(buf, buf2, need) == 0, "case5: Serialize->Parse->Serialize is byte-identical");
 }
 
+// ---- Phase 2 Task 1: overflow drop is never silent; requestedThrough advances ----
+
+#define ASSERT(cond) check((cond), #cond)
+
+static int test_overflow_reports_drop(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 p = UINT128_ZERO; p.u16[5]=0xffff; p.u32[3]=0x01020304;
+    BRCFScanLedgerRecordRequested(&l, 1000, 1000 + CF_OUTSTANDING_MAX - 1, p, 12024, 100); // fills [1000..5095]
+    ASSERT(BRCFScanLedgerOutstandingCount(&l) == CF_OUTSTANDING_MAX);
+    uint32_t lo=0, hi=0;
+    int dropped = BRCFScanLedgerRecordRequestedDropped(&l, 9000, 9000, p, 12024, 200, &lo, &hi); // 9000 > 5095 → evicts oldest
+    ASSERT(dropped == 1 && lo == 1000 && hi == 1000);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l) == CF_OUTSTANDING_MAX);
+    return 1;
+}
+// TRIPWIRE for the system invariant: requestedThrough (scannedThrough's ceiling) must advance.
+static int test_record_advances_requestedThrough(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);
+    UInt128 p = UINT128_ZERO; p.u16[5]=0xffff; p.u32[3]=0x01020304;
+    BRCFScanLedgerRecordRequested(&l, 100, 150, p, 12024, 0);
+    for (uint32_t h = 100; h <= 150; h++) BRCFScanLedgerMarkEvaluated(&l, h);
+    ASSERT(BRCFScanLedgerScannedThrough(&l) == 150);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -199,6 +224,10 @@ int main(void) {
 
     free(l);
     free(l2);
+
+    test_overflow_reports_drop();
+    test_record_advances_requestedThrough();
+
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
 }
