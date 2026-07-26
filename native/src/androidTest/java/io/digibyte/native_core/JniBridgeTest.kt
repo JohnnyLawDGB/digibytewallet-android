@@ -84,8 +84,12 @@ class JniBridgeTest {
         assertEquals(0, NativeBridge.getPeerCount())
     }
 
+    // getSyncProgress was retired in the lock-free status-reads refactor
+    // (bridge mirrors + Kotlin-side StateFlow/compute); progress is no longer a
+    // native pull. isStatusStale is the mirror-freshness channel; before any
+    // refresh it reads stale (never-refreshed → last == 0).
     @Test
-    fun getSyncProgress_withoutSync_returnsZero() {
-        assertEquals(0.0f, NativeBridge.getSyncProgress(), 0.001f)
+    fun isStatusStale_withoutSync_returnsTrue() {
+        assertEquals(true, NativeBridge.isStatusStale())
     }
 }

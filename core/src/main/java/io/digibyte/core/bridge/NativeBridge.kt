@@ -181,9 +181,6 @@ object NativeBridge {
      *  to find transactions matching the wallet's addresses. */
     external fun rescan()
 
-    /** Get sync progress as float 0.0 to 1.0. */
-    external fun getSyncProgress(): Float
-
     /** Get number of currently connected peers. */
     external fun getPeerCount(): Int
 
@@ -499,6 +496,15 @@ object NativeBridge {
     /** Current cfheaders chain tip height (0 if no headers received yet).
      *  Used by the watchdog to detect "no BIP158 progress." */
     external fun getCFChainTipHeight(): Int
+
+    /** True if the lock-free status mirrors (peer count, block heights, CF tip,
+     *  sync mode — read via [getPeerCount], [getLastBlockHeight], etc.) have not
+     *  been refreshed within the staleness bound, or never this session. The
+     *  value getters always return the last mirrored sample; this is the ONLY
+     *  staleness channel (never an in-band sentinel). A frozen sync loop reads
+     *  stale here — the intended supervisor signal. Reads are lock-free
+     *  (atomic-only), decoupled from PEER_GUARD/teardown. */
+    external fun isStatusStale(): Boolean
 
     /** Re-anchor the compact-filter chain at the block floor when cfTip is stuck
      *  below the downloaded chain (legacy deficit). Returns true if re-anchored. */

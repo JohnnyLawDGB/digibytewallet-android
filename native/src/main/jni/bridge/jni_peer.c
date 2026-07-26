@@ -7,13 +7,73 @@
  * All JNI function names match io.digibyte.core.bridge.NativeBridge.
  */
 
+#include <stdatomic.h>
 #include "jni_bridge.h"
 #include "BRCompactFilterChain.h"
 #include "BRNetwork.h"
 #include "saved_blocks_deserialize.h"
+#include "bridge_status_stale.h"
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
+
+/* ---------- Lock-free status mirrors (design: lockfree-status-reads) ----------
+ *
+ * BRPeerManager already exposes every status scalar via its OWN lock-free
+ * atomic mirrors (BRPeerManagerPeerCount / LastBlockHeight / EstimatedBlock-
+ * Height / CFChainTipHeight / GetSyncMode are pure atomic_loads — no
+ * manager->lock). The JNI layer used to wrap each of those in PEER_GUARD
+ * (g_peerManagerMutex — a DIFFERENT lock held across startSync/BRPeerManagerFree),
+ * so a status poll serialized behind teardown/rebuild → Dispatchers.Default
+ * starvation + PIN-screen ANR.
+ *
+ * These bridge-level _Atomic mirrors are refreshed from the manager's accessors
+ * at every already-safe site (peer-thread callbacks + PEER_GUARD-holding mutator
+ * tails), so a UI/watchdog status read becomes a pure atomic_load: NO PEER_GUARD,
+ * NO g_peerManager deref. Not dereferencing the freeable pointer is exactly what
+ * lets the guard drop — it simultaneously removes the UAF window the guard
+ * existed to close. All relaxed: these are independent scalar samples, not a
+ * lock-ordered snapshot; the staleness stamp (below) is the only cross-field
+ * invariant a consumer relies on. */
+static _Atomic int      g_mirrorPeerCount;
+static _Atomic uint32_t g_mirrorLastHeight;
+static _Atomic uint32_t g_mirrorEstimatedHeight;
+static _Atomic uint32_t g_mirrorCFTip;
+static _Atomic int      g_mirrorSyncMode;
+static _Atomic int64_t  g_mirrorLastRefreshMonotonicMs;  /* CLOCK_MONOTONIC ms; 0 = never */
+
+/* Monotonic milliseconds — immune to wall-clock jumps, the correct base for an
+ * age/staleness comparison. */
+static int64_t _nowMonotonicMs(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+}
+
+/* Copy g_peerManager's OWN lock-free atomic accessors into the bridge mirrors
+ * and stamp the monotonic ms.
+ *
+ * SAFE to call ONLY from: (a) a BRPeerManager callback (runs on a live manager's
+ * peer thread — BRPeerManagerFree joins that thread, so the manager can't be
+ * freed underneath it), or (b) the tail of a PEER_GUARD-holding JNI call. NEVER
+ * from an unguarded, non-callback context. Reads the global with a null-check
+ * exactly as the existing callbacks already do (bridge_syncStarted/txStatusUpdate
+ * read g_peerManager unguarded on peer threads) — never dereferences a freed
+ * pointer, because in both callers the global does not point at a manager being
+ * freed. The timestamp is stamped unconditionally (even at m==NULL) so the idle
+ * heartbeat keepAlivePeers keeps the "fresh" signal alive whether or not a
+ * manager currently exists. */
+static void _refreshBridgeStatusMirror(void) {
+    BRPeerManager *m = g_peerManager;
+    if (m) {
+        atomic_store_explicit(&g_mirrorPeerCount,       (int)BRPeerManagerPeerCount(m),           memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorLastHeight,      BRPeerManagerLastBlockHeight(m),          memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorEstimatedHeight, BRPeerManagerEstimatedBlockHeight(m),     memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorCFTip,           BRPeerManagerCFChainTipHeight(m),         memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorSyncMode,        (int)BRPeerManagerGetSyncMode(m),         memory_order_relaxed);
+    }
+    atomic_store_explicit(&g_mirrorLastRefreshMonotonicMs, _nowMonotonicMs(), memory_order_relaxed);
+}
 
 /* ---------- setSocksProxy / clearSocksProxy ---------- */
 
@@ -76,6 +136,8 @@ static void bridge_syncStarted(void *info) {
     } else {
         (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)0.0f, height);
     }
+
+    _refreshBridgeStatusMirror();
 }
 
 static void bridge_syncStopped(void *info, int error) {
@@ -129,6 +191,8 @@ static void bridge_syncStopped(void *info, int error) {
             }
         }
     }
+
+    _refreshBridgeStatusMirror();
 }
 
 static void bridge_txStatusUpdate(void *info) {
@@ -153,6 +217,8 @@ static void bridge_txStatusUpdate(void *info) {
                                    (jfloat)progress, height);
         }
     }
+
+    _refreshBridgeStatusMirror();
 }
 
 /* ── Block & Peer Persistence ────────────────────────────────────────────
@@ -230,6 +296,8 @@ static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
     free(buf);
 
     LOGD("bridge_saveBlocks: serialized %zu blocks (%zu bytes, replace=%d)", blocksCount, pos, replace);
+
+    _refreshBridgeStatusMirror();
 }
 
 static void bridge_savePeers(void *info, int replace, const BRPeer peers[], size_t peersCount) {
@@ -535,6 +603,7 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
     }
 
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+    _refreshBridgeStatusMirror();
 }
 
 /* ---------- setPinnedPeer / clearPinnedPeer / compactFilterPeerStatus ---------- */
@@ -566,6 +635,7 @@ Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thi
         }
     }
     if (ip) (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+    _refreshBridgeStatusMirror();
 }
 
 JNIEXPORT void JNICALL
@@ -615,6 +685,7 @@ Java_io_digibyte_core_bridge_NativeBridge_forceReconnect(JNIEnv *env, jobject th
     }
     LOGI("forceReconnect: flagging peer manager for a clean recreate");
     g_peerManagerNeedsRecreate = 1;
+    _refreshBridgeStatusMirror();
 }
 
 /* ---------- setMaxPeerConnections ---------- */
@@ -631,6 +702,7 @@ Java_io_digibyte_core_bridge_NativeBridge_setMaxPeerConnections(JNIEnv *env, job
     if (count < 1) count = 1;
     BRPeerManagerSetMaxConnectCount(g_peerManager, (size_t)count);
     LOGI("setMaxPeerConnections: target=%d", count);
+    _refreshBridgeStatusMirror();
 }
 
 /* ---------- startSync ---------- */
@@ -806,6 +878,7 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
 
     BRPeerManagerConnect(g_peerManager);
     LOGI("startSync: connecting to peers");
+    _refreshBridgeStatusMirror();
 }
 
 /* ---------- stopSync ---------- */
@@ -820,6 +893,7 @@ Java_io_digibyte_core_bridge_NativeBridge_stopSync(JNIEnv *env, jobject thiz) {
         BRPeerManagerDisconnect(g_peerManager);
         LOGI("stopSync: disconnected");
     }
+    _refreshBridgeStatusMirror();
 }
 
 /* ---------- rescan ---------- */
@@ -836,30 +910,36 @@ Java_io_digibyte_core_bridge_NativeBridge_rescan(JNIEnv *env, jobject thiz) {
     } else {
         LOGW("rescan: peer manager not initialized");
     }
+    _refreshBridgeStatusMirror();
 }
 
-/* ---------- getSyncProgress ---------- */
+/* ---------- isStatusStale ---------- */
 
-JNIEXPORT jfloat JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSyncProgress(JNIEnv *env, jobject thiz) {
-    (void)env;
-    (void)thiz;
-    PEER_GUARD();
-
-    if (!g_peerManager) return 0.0f;
-    return (jfloat)BRPeerManagerSyncProgress(g_peerManager, 0);
+/* Separate boolean staleness channel for the lock-free status mirrors — NOT an
+ * in-band sentinel (a "-1 peers" value would be misread as a real zero). The
+ * value getters below always return the last mirrored sample; this flag is the
+ * only way a consumer learns the sample is old (frozen loop) or never taken
+ * (cold start before the first refresh). Pure atomic_load + the pure predicate
+ * — no PEER_GUARD, no g_peerManager deref. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_isStatusStale(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    int64_t last = atomic_load_explicit(&g_mirrorLastRefreshMonotonicMs, memory_order_relaxed);
+    return bridge_status_is_stale(last, _nowMonotonicMs(), STATUS_STALE_MS) ? JNI_TRUE : JNI_FALSE;
 }
 
 /* ---------- getPeerCount ---------- */
 
+/* Lock-free mirror read — NO PEER_GUARD, NO g_peerManager deref. The mirror is
+ * refreshed from BRPeerManagerPeerCount (itself a pure atomic_load) at every
+ * safe site; reading it here removes the UAF window the guard existed to close
+ * (we no longer touch the freeable pointer) AND the teardown-serialization that
+ * was pure harm for a scalar read. Same treatment for the four accessors below. */
 JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
-    PEER_GUARD();
-
-    if (!g_peerManager) return 0;
-    return (jint)BRPeerManagerPeerCount(g_peerManager);
+    return (jint)atomic_load_explicit(&g_mirrorPeerCount, memory_order_relaxed);
 }
 
 /* ---------- keepAlivePeers ---------- */
@@ -871,6 +951,9 @@ Java_io_digibyte_core_bridge_NativeBridge_keepAlivePeers(JNIEnv *env, jobject th
     PEER_GUARD();
 
     if (g_peerManager) BRPeerManagerKeepAlive(g_peerManager);
+    /* Idle heartbeat: SyncService calls this every ~10s, so the mirror (and its
+     * freshness stamp) stays warm even when no blocks arrive to fire callbacks. */
+    _refreshBridgeStatusMirror();
 }
 
 /* ---------- getEstimatedBlockHeight ---------- */
@@ -879,10 +962,7 @@ JNIEXPORT jlong JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getEstimatedBlockHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
-    PEER_GUARD();
-
-    if (!g_peerManager) return 0;
-    return (jlong)BRPeerManagerEstimatedBlockHeight(g_peerManager);
+    return (jlong)atomic_load_explicit(&g_mirrorEstimatedHeight, memory_order_relaxed);
 }
 
 /* ---------- getLastBlockHeight ---------- */
@@ -891,10 +971,7 @@ JNIEXPORT jlong JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getLastBlockHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
-    PEER_GUARD();
-
-    if (!g_peerManager) return 0;
-    return (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
+    return (jlong)atomic_load_explicit(&g_mirrorLastHeight, memory_order_relaxed);
 }
 
 /* ---------- getSavedBlocksTip ----------
@@ -1284,14 +1361,13 @@ Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz,
      * depends on which mode got passed in. */
     BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
     LOGI("setSyncMode: mode=%d", (int)mode);
+    _refreshBridgeStatusMirror();
 }
 
 JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getSyncMode(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
-    PEER_GUARD();
-    if (!g_peerManager) return 0;
-    return (jint)BRPeerManagerGetSyncMode(g_peerManager);
+    return (jint)atomic_load_explicit(&g_mirrorSyncMode, memory_order_relaxed);
 }
 
 JNIEXPORT void JNICALL
@@ -1335,13 +1411,15 @@ Java_io_digibyte_core_bridge_NativeBridge_hasDandelionPeer(JNIEnv *env, jobject 
 JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
-    PEER_GUARD();
-    if (!g_peerManager) return 0;
-    return (jint)BRPeerManagerCFChainTipHeight(g_peerManager);
+    return (jint)atomic_load_explicit(&g_mirrorCFTip, memory_order_relaxed);
 }
 
-/* CF scan-ledger observe-only readouts (Phase 1). All guarded by PEER_GUARD +
- * a g_peerManager null-check, mirroring getCFChainTipHeight. */
+/* CF scan-ledger observe-only readouts (Phase 1). Both KEEP PEER_GUARD + a
+ * g_peerManager null-check: unlike the scalar status accessors above (which now
+ * read lock-free bridge mirrors), these dereference g_peerManager->ledger — the
+ * hole-ranges getter WALKS ledger structures to coalesce ranges. There is no
+ * scalar mirror to read, so the guard that closes the teardown UAF window must
+ * stay. Counts are polled at cadence; ranges are pulled occasionally by a human. */
 
 JNIEXPORT jlongArray JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerCounts(JNIEnv *env, jobject thiz) {

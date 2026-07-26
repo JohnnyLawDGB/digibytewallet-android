@@ -143,6 +143,30 @@ class SyncService : Service() {
      *  verifies the tx set) — the asset prune must gate on this, not that. */
     @Volatile private var syncedThisSession = false
 
+    // ── Sync progress (lock-free status-reads refactor) ───────────────────────
+    // The native getSyncProgress() pull was retired: its formula needs syncStart
+    // + hasDownloadPeer, which have no public submodule getter. Instead the
+    // native onSyncProgress callback PUSHES an internally-consistent float; we
+    // cache it here and read the flow instead of calling native. A cold poll
+    // (no recent push) computes the same formula Kotlin-side from the lock-free
+    // mirrored heights + a Kotlin-tracked syncStart + peerCount>0 as the
+    // hasDownloadPeer proxy (see [currentSyncProgress] / [computeSyncProgress]).
+    private val syncProgressFlow: kotlinx.coroutines.flow.MutableStateFlow<Float> =
+        kotlinx.coroutines.flow.MutableStateFlow(0f)
+
+    /** True once the first real onSyncProgress callback of THIS process/session
+     *  has landed. Until then the cold-poll computed float is PROVISIONAL — it
+     *  leans on the persisted syncStart anchor, and native isStatusStale() also
+     *  reads stale (never-refreshed) at cold start, corroborating the provisional
+     *  state for any future supervisor. */
+    @Volatile private var sawSyncProgressCallback = false
+
+    /** Height at which this session's sync run started — the Kotlin stand-in for
+     *  the native cachedSyncStartHeight (which has no public getter). PERSISTED
+     *  alongside has_synced so a cold start mid-sync computes real progress from
+     *  the true anchor instead of "reverts to Syncing 0%" garbage. */
+    @Volatile private var syncStartHeight = 0L
+
     /** Last time the post-sync confirmation-reconcile ran (ms), so a flaky
      *  network firing onSyncComplete repeatedly can't hammer the node. */
     @Volatile private var lastConfirmReconcileMs = 0L
@@ -347,8 +371,14 @@ class SyncService : Service() {
 
         // Restore persisted sync state so progress callbacks don't revert
         // "Connected" back to "Syncing 0%" on restart near the chain tip.
-        hasReachedSynced = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-            .getBoolean("has_synced", false)
+        run {
+            val syncPrefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+            hasReachedSynced = syncPrefs.getBoolean("has_synced", false)
+            // Restore the sync-start anchor on the SAME path as has_synced, so a
+            // cold poll before the first onSyncProgress callback computes real
+            // progress from the true floor rather than garbage.
+            syncStartHeight = syncPrefs.getLong("sync_start_height", 0L)
+        }
 
         // Wire C core → Kotlin before kicking off sync so no events are lost.
         NativeBridge.setCallbackHandler(syncCallback)
@@ -766,7 +796,7 @@ class SyncService : Service() {
                         if (assetPruneGateOpen(
                                 syncedThisSession = syncedThisSession,
                                 peerCount = NativeBridge.getPeerCount(),
-                                progress = NativeBridge.getSyncProgress(),
+                                progress = currentSyncProgress(),
                                 walletLoaded = NativeBridge.isWalletLoaded(),
                             )) {
                             runCatching { assetManager.pruneRemovedNativeAssetRows() }
@@ -872,7 +902,7 @@ class SyncService : Service() {
                     // Peers connected but sync may have stalled (download peer
                     // disconnected, remaining peers aren't driving the sync).
                     // Kick startSync to reassign a download peer.
-                    if (!hasReachedSynced && NativeBridge.getSyncProgress() < 1.0f) {
+                    if (!hasReachedSynced && currentSyncProgress() < 1.0f) {
                         NativeBridge.startSync()
                     }
                 }
@@ -959,7 +989,7 @@ class SyncService : Service() {
                         }
                     }
                 }
-                updateNotification(NativeBridge.getSyncProgress(), peers)
+                updateNotification(currentSyncProgress(), peers)
                 } catch (t: Throwable) {
                     // Swallow and continue. Losing a single 10s tick is fine;
                     // killing the poll forever is not. Log with stack so the
@@ -1710,6 +1740,53 @@ class SyncService : Service() {
         super.onDestroy()
     }
 
+    // ── Sync-progress read path (lock-free status-reads refactor) ─────────────
+
+    /** Persist + cache the sync-start anchor. Written on the same prefs as
+     *  has_synced so restore is a single path (onStartCommand). */
+    private fun setSyncStartHeight(h: Long) {
+        syncStartHeight = h
+        getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+            .edit().putLong("sync_start_height", h).apply()
+    }
+
+    /**
+     * Sync progress 0.0..1.0, replacing the retired native getSyncProgress()
+     * pull. Once the first onSyncProgress callback of the session has landed,
+     * the pushed float (an internally consistent native snapshot) is
+     * authoritative. Before that — a cold poll — compute it Kotlin-side from the
+     * lock-free mirrored heights + the (persisted) syncStart + peerCount>0 as
+     * the hasDownloadPeer proxy. The reads never touch PEER_GUARD, so this can
+     * run on the main thread without the ANR the old guarded pull could cause.
+     */
+    private fun currentSyncProgress(): Float {
+        if (sawSyncProgressCallback) return syncProgressFlow.value
+        val last = NativeBridge.getLastBlockHeight()
+        val est = NativeBridge.getEstimatedBlockHeight()
+        val hasDownloadPeer = NativeBridge.getPeerCount() > 0
+        return computeSyncProgress(last, est, syncStartHeight, hasDownloadPeer)
+    }
+
+    /**
+     * Verbatim port of BRPeerManagerSyncProgress (BRPeerManager.c) with
+     * startHeight bound to syncStart (the native startHeight==0 case).
+     * hasDownloadPeer is the peerCount>0 proxy.
+     */
+    private fun computeSyncProgress(
+        last: Long, est: Long, syncStart: Long, hasDownloadPeer: Boolean,
+    ): Float {
+        val startHeight = syncStart
+        return when {
+            !hasDownloadPeer && syncStart == 0L -> 0.0f
+            !hasDownloadPeer || last < est -> {
+                if (last > startHeight && est > startHeight)
+                    (0.001 + 0.999 * (last - startHeight).toDouble() / (est - startHeight).toDouble()).toFloat()
+                else 0.001f
+            }
+            else -> 1.0f
+        }
+    }
+
     // ── NativeCallback — called from C JNI threads ────────────────────────────
 
     // Initialized in onStartCommand from persisted flag so progress callbacks
@@ -1719,12 +1796,28 @@ class SyncService : Service() {
     private val syncCallback = object : NativeCallback {
 
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
+            // First real callback of this session — the PUSH path is now
+            // authoritative for progress; the cold-poll provisional window closes.
+            sawSyncProgressCallback = true
+
+            // progress <= 0 marks a fresh sync run: 0.0 = sync start, -1.0 =
+            // rescan start (bridge_syncStarted). Anchor syncStartHeight at the
+            // current tip and persist it so a cold restart mid-sync computes real
+            // progress from the true floor (the "reverts to Syncing 0%" class).
+            if (progress <= 0f && blockHeight > 0) {
+                setSyncStartHeight(blockHeight)
+            }
+
             // progress == -1 is a signal from C core that a rescan is starting.
             if (progress < 0f) {
                 hasReachedSynced = false // rescan resets sync status
                 walletManager.updateSyncState(SyncState.Rescanning)
                 return
             }
+
+            // Cache the pushed (internally consistent) float for the lock-free
+            // progress readers (currentSyncProgress).
+            syncProgressFlow.value = progress
 
             // After fully synced (headers + rescan), only update on new blocks
             if (hasReachedSynced) return
@@ -1776,7 +1869,7 @@ class SyncService : Service() {
         }
 
         override fun onPeerConnected(peerCount: Int) {
-            updateNotification(NativeBridge.getSyncProgress(), peerCount)
+            updateNotification(currentSyncProgress(), peerCount)
 
             // Persist newly connected peer address from the native side.
             // NativeBridge doesn't currently expose the address directly, so
@@ -1788,7 +1881,7 @@ class SyncService : Service() {
         }
 
         override fun onPeerDisconnected(peerCount: Int) {
-            updateNotification(NativeBridge.getSyncProgress(), peerCount)
+            updateNotification(currentSyncProgress(), peerCount)
             // Don't show failure if we already reached the chain tip —
             // peer drops are normal, the polling loop will reconnect.
         }

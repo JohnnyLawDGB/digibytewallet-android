@@ -31,7 +31,7 @@ object NativeBridge {
     external fun startSync()
     external fun stopSync()
     external fun rescan()
-    external fun getSyncProgress(): Float
+    external fun isStatusStale(): Boolean
     external fun getPeerCount(): Int
     external fun getEstimatedBlockHeight(): Long
     external fun getLastBlockHeight(): Long
