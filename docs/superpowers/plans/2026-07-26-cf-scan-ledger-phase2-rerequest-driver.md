@@ -381,13 +381,13 @@ Refactor the existing single-height `NextRerequest` to share `_cfLedgerMoveToGav
 - [ ] **Step 3: Implement EDIT 1** (drop site `:2445-2454`, inside `if(!b)` — the raw cfilter bytes + `blockHash` are in scope here, before verify/parse):
 ```c
 #if CF_LEDGER_DRIVE_REREQUEST
-    if (! BRCFScanLedgerBufferFilter(&manager->cfLedger, blockHash, filterBytes, filterLen, (uint32_t)time(NULL)))
+    if (! BRCFScanLedgerBufferFilter(&manager->cfLedger, blockHash, encoded, encodedLen, (uint32_t)time(NULL)))
         ; /* too big / not stored — height stays outstanding for the residual re-request path */
 #endif
 ```
-(Verify the local names for the raw filter bytes + length at `:2445`; if the handler hasn't sliced them yet, buffer from the message payload span.)
+(The raw filter bytes are the `encoded`/`encodedLen` locals used just below at the verify `:2456` and parse `:2472` sites — CONFIRM they are already in scope at the `if(!b)` drop site `:2445`; if the handler slices them only after the block-header check, hoist that slice above `:2445` or buffer from the message payload span so the bytes exist here.)
 
-- [ ] **Step 4: Implement EDIT 2.** FIRST refactor a **peer-parameterized** match+getdata helper out of the normal eval path `BRPeerManager.c:2484-2518` (fetch wallet elements → match GCS → on hit `BRPeerSendGetdataBlocks(peer,&blockHash,1)`), and make the live path call it — so `_cfBufEval` reuses it (DRY), not a copy. Then define the drain trampolines (the pure module stays BRPeerManager-free via the fn pointers). **`isReady` requires BOTH block header AND cfheader; `_cfBufEval` threads `blockHash`, fetches the block on a hit BEFORE `MarkEvaluated`, and KEEPS the entry (returns 0) when a hit cannot dispatch:**
+- [ ] **Step 4: Implement EDIT 2.** `_cfBufEval` uses the SAME real primitives the live eval path `BRPeerManager.c:2484-2518` already uses — `BRWalletGetFilterElements(m->wallet)` → `BRGCSFilterMatchAny(gcs, fe->elements, fe->elementLens, fe->count)` → on hit `BRPeerSendGetdataBlocks(peer, &blockHash, 1)`. Do NOT reimplement the match; call `BRGCSFilterMatchAny`. (Optional: factor a small `(m, fe, gcs, blockHash, peer)` helper to share the ~few-line match+getdata with the live path — nice-to-have, not required; the correctness requirement is reusing the real fns, not writing a placeholder.) Then define the drain trampolines (the pure module stays BRPeerManager-free via the fn pointers). **`isReady` requires BOTH block header AND cfheader; `_cfBufEval` threads `blockHash`, fetches the block on a hit BEFORE `MarkEvaluated`, and KEEPS the entry (returns 0) when a hit cannot dispatch:**
 ```c
 #if CF_LEDGER_DRIVE_REREQUEST
 struct _cfDrainCtx { BRPeerManager *m; BRWalletFilterElements *elems; };   // elems fetched ONCE per batch (perf)
@@ -395,15 +395,15 @@ static int _cfBufIsReady(void *vctx, UInt256 h, uint32_t *outH) {
     BRPeerManager *m = ((struct _cfDrainCtx*)vctx)->m;
     BRMerkleBlock *b = BRSetGet(m->blocks, &h);
     if (! b || b->height == BLOCK_UNKNOWN_HEIGHT) return 0;                 // block header not connected
-    if (BRCompactFilterChainNextHeight(m->cfChain) <= b->height) return 0;  // cfheader not yet present (verify would fail)
+    if (BRCompactFilterChainNextHeight(m->compactFilterChain) <= b->height) return 0;  // cfheader not yet present (verify would fail)
     *outH = b->height; return 1;
 }
 static int _cfBufEval(void *vctx, uint32_t height, UInt256 blockHash, const uint8_t *bytes, size_t len) {
     struct _cfDrainCtx *c = vctx; BRPeerManager *m = c->m;
-    if (! BRCompactFilterChainVerifyFilter(m->cfChain, height, bytes, len)) return 1; // bad bytes: drop, leave outstanding (re-request)
+    if (! BRCompactFilterChainVerifyFilter(m->compactFilterChain, height, bytes, len)) return 1; // bad bytes: drop, leave outstanding (re-request)
     BRGCSFilter *gcs = BRGCSFilterBasicParse(bytes, len, blockHash);        // ★ blockHash is the SipHash key (3-arg)
     if (! gcs) return 1;                                                    // unparseable: drop, leave outstanding
-    int hit = _cfFilterMatchesWallet(gcs, c->elems);                       // shared helper vs the pre-fetched elements
+    int hit = BRGCSFilterMatchAny(gcs, c->elems->elements, c->elems->elementLens, c->elems->count); // real match (see :2488)
     BRGCSFilterFree(gcs);
     if (hit) {
         BRPeer *p = NULL;                                                   // a connected CF-capable peer for the getdata
@@ -454,7 +454,7 @@ static int _cfBufEval(void *vctx, uint32_t height, UInt256 blockHash, const uint
     }
 #endif
 ```
-**Dispatch-vs-delivery (known pre-existing gap — do NOT scope-creep a fix):** after `getdata` is dispatched and the height `MarkEvaluated`, if the peer dies before the block arrives the block is not fetched — **identical to the LIVE match path's behaviour at `:2518`** (it also `getdata`s and moves on). Since the live path shares this window, it is a documented pre-existing gap (candidate for the confirmation-twin / pending machinery in a later phase), NOT a Phase-2 fix. (Verify names with grep: `BRWalletGetFilterElements`/`…Free`, `BRWalletFilterElements`, `BRCompactFilterChainNextHeight`/`…VerifyFilter`, `BRGCSFilterBasicParse(bytes,len,blockHash)`, `BRPeerSendGetdataBlocks`, `m->cfChain`/`m->wallet`, `BLOCK_UNKNOWN_HEIGHT`, and the real name of the factored `_cfFilterMatchesWallet` helper.)
+**Dispatch-vs-delivery (known pre-existing gap — do NOT scope-creep a fix):** after `getdata` is dispatched and the height `MarkEvaluated`, if the peer dies before the block arrives the block is not fetched — **identical to the LIVE match path's behaviour at `:2518`** (it also `getdata`s and moves on). Since the live path shares this window, it is a documented pre-existing gap (candidate for the confirmation-twin / pending machinery in a later phase), NOT a Phase-2 fix. (Verify names with grep: `BRWalletGetFilterElements`/`…Free`, `BRWalletFilterElements`, `BRCompactFilterChainNextHeight`/`…VerifyFilter`, `BRGCSFilterBasicParse(bytes,len,blockHash)`, `BRPeerSendGetdataBlocks`, `m->compactFilterChain`/`m->wallet`, `BLOCK_UNKNOWN_HEIGHT`, `BRGCSFilterMatchAny` + the `BRWalletFilterElements` field names (`->elements`/`->elementLens`/`->count`).)
 
 - [ ] **Step 5: Implement EDIT 3** — two gated edits: (1) back-pressure — widen the forward-fetch guard at `:2398` to `if (manager->autoFetchCFiltersEnabled #if CF_LEDGER_DRIVE_REREQUEST && BRCFScanLedgerOutstandingCount(&manager->cfLedger) < CF_OUTSTANDING_LOWWATER #endif ) {`; (2) loud overflow log — at the forward RecordRequested caller `:2409`, swap to `BRCFScanLedgerRecordRequestedDropped(&manager->cfLedger, reqStart, reqStop, peer->address, peer->port, (uint32_t)time(NULL), &dLo, &dHi)` and `peer_log(peer, "cf-ledger: OUTSTANDING OVERFLOW — dropped %d oldest holes [%u..%u]", nDrop, dLo, dHi)` when `nDrop>0` (confirm `reqStart`/`reqStop`/`peer` are in scope there).
 
@@ -503,4 +503,4 @@ static int _cfBufEval(void *vctx, uint32_t height, UInt256 blockHash, const uint
 - **Buffer is in-memory only, NOT persisted** — process death falls back to the normal floor re-anchor. Free all bytes in `BRCFScanLedgerFree`; the drive-KAT runs under ASan to prove no leak.
 - **Byte budget 256 KB** vs observed cfilters (median 4 B / max 675 B) — orders of magnitude of headroom over a ~1000-filter re-anchor burst.
 - **DRY:** `_cfBufEval` must reuse the normal eval path's wallet-match + getdata (factor it out of `:2512`), not duplicate it.
-- **Verify names with `grep -n` before each edit:** `BRCompactFilterChainVerifyFilter`, `BRGCSFilterBasicParse`/`Free`, `m->cfChain`, `BLOCK_UNKNOWN_HEIGHT`, the raw-filter-bytes locals at `:2445`, `BRPeerManagerSetSyncMode`/`BR_SYNC_MODE_COMPACT_FILTERS_ONLY`, `BRCFScanLedgerFree`.
+- **Verify names with `grep -n` before each edit:** `BRCompactFilterChainVerifyFilter`, `BRGCSFilterBasicParse`/`Free`, `m->compactFilterChain`, `BLOCK_UNKNOWN_HEIGHT`, the raw-filter-bytes locals at `:2445`, `BRPeerManagerSetSyncMode`/`BR_SYNC_MODE_COMPACT_FILTERS_ONLY`, `BRCFScanLedgerFree`.
