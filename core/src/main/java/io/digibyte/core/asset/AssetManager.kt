@@ -1749,7 +1749,7 @@ class AssetManager(
      *
      * (An earlier owned + `state==-1` "Rule B" was cut after adversarial review:
      * -1 is the steady state of a legitimate below-scan-floor backend holding —
-     * indistinguishable from a dead phantom — and `getSyncProgress()` is
+     * indistinguishable from a dead phantom — and reported sync progress is
      * header-honest, not cfilter-scan-honest, so nothing here can safely gate the
      * deletion of an owned row on native tx-absence. Deleting them destroyed funds.)
      *

@@ -109,6 +109,29 @@ Bloom (BIP 37) was fully excised in v4.0.0: `BRBloomFilter.c/.h`, the
 filterload/filteradd/merkleblock handlers, and the bloom filter loader
 are all deleted, so there is no bloom fallback.
 
+**Lock-free status reads.** The UI and the sync watchdogs poll status
+scalars — peer count, last/estimated block height, CF chain tip, sync
+mode — constantly. Those reads are served from bridge-level `_Atomic`
+mirrors in `jni_peer.c` (a pure `atomic_load`), NOT by dereferencing
+`g_peerManager` under `PEER_GUARD`. The mirrors are refreshed from
+`BRPeerManager`'s own lock-free accessors at safe sites only (the
+peer-thread callbacks and the tails of `PEER_GUARD`-holding mutators;
+`keepAlivePeers` at ~10s is the idle heartbeat). Because a status read
+never touches the freeable manager pointer, it is decoupled from
+`PEER_GUARD`/teardown — it can't block behind (or use-after-free
+against) a `startSync`/`BRPeerManagerFree` rebuild, which removes the
+`Dispatchers.Default` starvation and the PIN-screen ANR the guarded
+reads caused. A companion `isStatusStale()` boolean (staleness bound
+`STATUS_STALE_MS`) is the sole freshness channel — never an in-band
+sentinel — so a consumer can distinguish a real fresh "0 peers" from a
+frozen loop whose mirror stopped updating. Sync progress is likewise no
+longer a native pull: the native `onSyncProgress` callback pushes an
+internally-consistent float that Kotlin caches, with a Kotlin-side
+cold-poll fallback computed from the mirrored heights + a persisted
+`syncStart` anchor. The ledger getters (`getCfScanLedgerCounts`,
+`getCfScanLedgerHoleRanges`) keep `PEER_GUARD` — they walk
+`g_peerManager`-owned structures and have no scalar mirror.
+
 ### Send transaction
 
 ```

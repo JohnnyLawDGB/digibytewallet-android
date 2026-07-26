@@ -251,6 +251,19 @@ Cold start through to data-flowing sync.
     return, if wallet is unlocked and `peerCount == 0`, fire a
     `NativeBridge.startSync()` directly — escape hatch in case
     the SyncService's keepalive has stalled through Doze.
+14. **Status reads are lock-free.** Every `peerCount` / block-height /
+    CF-tip / sync-mode poll in steps 12–13 (and in the UI) reads a
+    bridge-level `_Atomic` mirror — a pure `atomic_load`, no `PEER_GUARD`,
+    no `g_peerManager` deref. The mirror is refreshed from the native
+    accessors only at safe sites (peer-thread callbacks + guarded-mutator
+    tails; `keepAlivePeers` is the ~10s heartbeat), so a status read is
+    decoupled from `startSync`/teardown and can't block the poll loop or
+    ANR the main thread. `NativeBridge.isStatusStale()` (bound
+    `STATUS_STALE_MS`) is the separate freshness flag distinguishing a
+    real "0 peers" from a frozen loop. Sync progress comes from the
+    pushed `onSyncProgress` callback (cached), falling back to a Kotlin
+    computation over the mirrored heights + a persisted `syncStart`
+    anchor when no push has arrived yet.
 
 ## Upgrade between versions
 
