@@ -1,3 +1,4 @@
 [submodule "native/src/main/jni/digibytewallet-core"]
 	path = native/src/main/jni/digibytewallet-core
 	url = https://github.com/JohnnyLawDGB/digibytewallet-core.git
+	branch = develop
