@@ -234,16 +234,23 @@ static jmethodID g_mid_onSavePeers = NULL;
 static jmethodID g_mid_onSaveFilterHeaders = NULL;
 static jmethodID g_mid_onSaveCfLedger = NULL;
 
-static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
-                               size_t blocksCount, uint64_t *memIntegrityCheck) {
+// The core (BRPeerManager _serializeSavedBlocks) now serializes the blocks to
+// `bytes` WHILE HOLDING manager->lock and hands us the immutable buffer — NOT
+// live BRMerkleBlock pointers. That closes the lock-release-then-use UAF: this
+// slow JNI upcall can no longer race a concurrent reorg freeing a block
+// mid-serialize (it used to serialize the live pointers here, after the unlock).
+// Wire format is unchanged (Kotlin onSaveBlocks parses it):
+//   [u32 count][ per block: u32 serLen, u32 height, serLen bytes ].
+static void bridge_saveBlocks(void *info, int replace, const uint8_t *bytes,
+                               size_t len, uint64_t *memIntegrityCheck) {
     (void)info;
     (void)memIntegrityCheck;
 
-    if (blocksCount == 0 || !blocks) return;
+    if (len == 0 || !bytes) return;
 
     JNIEnv *env = jni_get_env();
     if (!env || !g_callbackHandler) {
-        LOGD("bridge_saveBlocks: %zu blocks (no JNI env, skipping persist)", blocksCount);
+        LOGD("bridge_saveBlocks: %zu bytes (no JNI env, skipping persist)", len);
         return;
     }
 
@@ -258,44 +265,13 @@ static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
         }
     }
 
-    /* Serialize all blocks into a single buffer:
-     * [4 bytes: block count]
-     * For each block:
-     *   [4 bytes: serialized length]
-     *   [4 bytes: height]
-     *   [N bytes: serialized block data]
-     */
-    size_t totalSize = 4; /* block count */
-    size_t *blockSizes = malloc(blocksCount * sizeof(size_t));
-    if (!blockSizes) return;
-
-    for (size_t i = 0; i < blocksCount; i++) {
-        blockSizes[i] = BRMerkleBlockSerialize(blocks[i], NULL, 0);
-        totalSize += 4 + 4 + blockSizes[i]; /* length + height + data */
-    }
-
-    uint8_t *buf = malloc(totalSize);
-    if (!buf) { free(blockSizes); return; }
-
-    size_t pos = 0;
-    UInt32SetLE(&buf[pos], (uint32_t)blocksCount); pos += 4;
-
-    for (size_t i = 0; i < blocksCount; i++) {
-        UInt32SetLE(&buf[pos], (uint32_t)blockSizes[i]); pos += 4;
-        UInt32SetLE(&buf[pos], blocks[i]->height); pos += 4;
-        BRMerkleBlockSerialize(blocks[i], &buf[pos], blockSizes[i]);
-        pos += blockSizes[i];
-    }
-    free(blockSizes);
-
-    /* Pass to Kotlin */
-    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)pos);
-    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)pos, (jbyte *)buf);
+    /* Hand the already-serialized bytes to Kotlin. */
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)len);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)len, (jbyte *)bytes);
     (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveBlocks, jbuf, (jint)replace);
     (*env)->DeleteLocalRef(env, jbuf);
-    free(buf);
 
-    LOGD("bridge_saveBlocks: serialized %zu blocks (%zu bytes, replace=%d)", blocksCount, pos, replace);
+    LOGD("bridge_saveBlocks: %zu bytes, replace=%d", len, replace);
 
     _refreshBridgeStatusMirror();
 }
