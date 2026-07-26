@@ -278,6 +278,63 @@ static int test_buffer_clear(void) {
     return 1;
 }
 
+// ---- Phase 2 Task 3: residual re-request driver (peek/commit + retire) -----
+
+static int test_peek_coalesces_and_no_bump(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    UInt128 pb=UINT128_ZERO; pb.u16[5]=0xffff; pb.u32[3]=0x0A000203;
+    BRCFScanLedgerRecordRequested(&l, 100, 102, pa, 12024, 0);
+    BRCFScanLedgerRecordRequested(&l, 103, 103, pb, 12024, 0);   // different peer → splits
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==100 && e==102);
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==100 && e==102); // no mutation
+    return 1;
+}
+static int test_peek_gap_splits(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 200, 200, pa, 12024, 0);
+    BRCFScanLedgerRecordRequested(&l, 202, 202, pa, 12024, 0);   // gap at 201
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==200 && e==200);
+    return 1;
+}
+static int test_peek_minheight_skips_below(void) {                  // the livelock guard
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 100, 101, pa, 12024, 0);   // "below floor"
+    BRCFScanLedgerRecordRequested(&l, 200, 201, pa, 12024, 0);   // "in window"
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 200, &s, &e)==1 && s==200 && e==201);
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 101, &s, &e)==1 && s==101 && e==101); // straddle clamps
+    return 1;
+}
+static int test_commit_bumps_only_range(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    UInt128 pb=UINT128_ZERO; pb.u16[5]=0xffff; pb.u32[3]=0x0A000203;
+    BRCFScanLedgerRecordRequested(&l, 300, 302, pa, 12024, 0);
+    uint32_t s=0,e=0; BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e); // 300..302
+    BRCFScanLedgerCommitRerequest(&l, 300, 301, pb, 12024, CF_REREQ_BASE_SECS);            // sent only 300..301
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==302 && e==302); // 302 still due
+    return 1;
+}
+static int test_retire_caps_to_gaveup_and_holds_cursor(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 400, 400, pa, 12024, 0);
+    uint32_t s=0,e=0, t=0;
+    for (int k=0;k<CF_REREQ_MAX_ATTEMPTS;k++){ t+=CF_REREQ_BACKOFF_CAP_SECS;
+        BRCFScanLedgerRetireCapped(&l);                                   // once per "tick"
+        if (BRCFScanLedgerPeekRerequestRange(&l,t,0,&s,&e)) BRCFScanLedgerCommitRerequest(&l,s,e,pa,12024,t); }
+    BRCFScanLedgerRetireCapped(&l);                                       // capped entry → gaveUp
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, t+CF_REREQ_BACKOFF_CAP_SECS, 0, &s, &e)==0);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1);
+    ASSERT(BRCFScanLedgerScannedThrough(&l) < 400);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -300,6 +357,12 @@ int main(void) {
     test_buffer_drain_keeps_on_eval_zero();
     test_buffer_bytebudget_evicts_oldest();
     test_buffer_clear();
+
+    test_peek_coalesces_and_no_bump();
+    test_peek_gap_splits();
+    test_peek_minheight_skips_below();
+    test_commit_bumps_only_range();
+    test_retire_caps_to_gaveup_and_holds_cursor();
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
