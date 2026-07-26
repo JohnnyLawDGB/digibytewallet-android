@@ -86,63 +86,63 @@ dependencies {
     implementation(project(":game"))
 
     // Compose BOM
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    implementation("androidx.compose.material:material-icons-extended")
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.androidx.compose.material.icons.extended)
 
     // Activity + Navigation
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.navigation.compose)
 
     // Lifecycle
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.56.2")
-    ksp("com.google.dagger:hilt-android-compiler:2.56.2")
-    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
 
     // ZXing for QR code generation + scanning
-    implementation("com.google.zxing:core:3.5.3")
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation(libs.zxing.core)
+    implementation(libs.zxing.android.embedded)
 
     // CameraX
-    implementation("androidx.camera:camera-camera2:1.4.1")
-    implementation("androidx.camera:camera-lifecycle:1.4.1")
-    implementation("androidx.camera:camera-view:1.4.1")
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     // Core KTX
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation(libs.androidx.core.ktx)
 
     // Chrome Custom Tabs — for opening external URLs (marketplace, block
     // explorers, release downloads) in a Chrome-overlay tab with a clear
     // close affordance that returns to the wallet, instead of dropping the
     // user into a separate browser task with no way back.
-    implementation("androidx.browser:browser:1.8.0")
+    implementation(libs.androidx.browser)
 
     // Material 3 for XML theme (Theme.Material3.DayNight.NoActionBar)
-    implementation("com.google.android.material:material:1.12.0")
+    implementation(libs.android.material)
 
     // OkHttp (needed so Hilt/KSP can resolve OkHttpClient in NetworkModule + AppModule)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.okhttp)
 
     // Coil — Compose-native async image loading with a custom IPFS fetcher
     // that routes ipfs:// URIs through our hash-verifying IpfsClient.
-    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation(libs.coil.compose)
 
     // Room runtime (needed so app module can reference WalletDatabase from :core)
-    implementation("androidx.room:room-runtime:2.7.1")
+    implementation(libs.androidx.room.runtime)
 
     // WorkManager + Hilt integration (for SyncWorker background sync job)
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
-    implementation("androidx.hilt:hilt-work:1.2.0")
-    ksp("androidx.hilt:hilt-compiler:1.2.0")
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
 
     // Unit test deps (:app)
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
 }
