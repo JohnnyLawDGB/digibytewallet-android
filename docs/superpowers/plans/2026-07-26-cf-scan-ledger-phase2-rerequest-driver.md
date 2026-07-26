@@ -10,6 +10,12 @@
 
 **Tech Stack:** C (breadwallet-derived SPV core, submodule), clang host KATs, Gradle NDK. No Kotlin/JNI change this phase.
 
+## Deviation ledger — shipped code vs REV 4 (brief the final reviewer with THIS + the hardening record)
+Four passes hardened the plan; deviations are where the code is no longer the plan — exactly where the fresh reviewer's attention buys the most. Each entry: what departed, why, and the review verdict. **Every deliberate departure gets an entry; the final whole-branch reviewer distinguishes "intentional, reviewed departure" from "drift" from this list without re-litigating each.**
+
+- **D1 — `>=` (not `>`) eviction threshold in `BRCFScanLedgerBufferFilter`/insert (Task 2).** REV 4's Task-2 code wording implied strict `>`. Reason: `CF_FILTER_BUFFER_MAX_BYTES` (262144) is exactly divisible by the test's 512-byte filters, so a strict `>` let `bufferedBytes` settle at the cap and never evict, failing `test_buffer_bytebudget_evicts_oldest`. **Verdict: task-review verified BY HAND — the `bufferedBytes ≤ CAP` invariant holds at both call sites incl. the exact-equality boundary; `>=` only makes eviction fire one entry earlier (strictly more conservative), never evicts a live entry improperly, consistent with `BufferFilter` returning 0 for an over-budget single filter. A discovered fix, not drift.**
+- **D2 — `filterBufMagic` field + heuristic free-before-memset guard (Task 2).** REV 4 said "free the buffer at the top of `Init`/`Parse` before `memset`" but did not specify HOW to avoid `free()`-ing garbage pointers off the host-KAT's brief-mandated unzeroed-stack `BRCFScanLedger l;` pattern. The implementer added a `filterBufMagic` sentinel checked before the free. **Verdict: reviewed + a round-1 fix landed it as a CONTRACT — the comments now state the caller precondition (`l` must be Init/Parse'd or zeroed), explicitly call the magic a "defensive heuristic, not a memory-safety guarantee," and name that reading it is itself an indeterminate read that plain ASan cannot flag (MSan's territory). Production-safe (real ledger lives in a `calloc`'d `BRPeerManager`), but the precondition is now a documented contract, not reassurance — load-bearing for Task 5, which wires `BufferFilter` into a real call site.**
+
 ## Global Constraints
 
 - **Submodule:** all C edits in `native/src/main/jni/digibytewallet-core/` (fork `JohnnyLawDGB/digibytewallet-core`). Push the fork BEFORE bumping the pin. Submodule git ops use `GIT_DIR=.git/modules/native/src/main/jni/digibytewallet-core GIT_WORK_TREE=native/src/main/jni/digibytewallet-core git …`.
@@ -129,43 +135,61 @@ Declare `BRCFScanLedgerRecordRequestedDropped` in `.h`.
 
 - [ ] **Step 1: Write the failing tests:**
 ```c
-// harness eval/connected stubs
-static uint32_t g_evalHeights[64]; static int g_evalN;
-static int stub_eval(void *ctx, uint32_t h, const uint8_t *b, size_t n){ (void)ctx;(void)b;(void)n; g_evalHeights[g_evalN++]=h; return 1; }
-struct conn { UInt256 hash; uint32_t height; int connected; } ;
-static int stub_connected(void *ctx, UInt256 hash, uint32_t *outH){
+// harness stubs. evalFn signature MATCHES the interface: (ctx, height, blockHash, bytes, len).
+static uint32_t g_evalHeights[64]; static int g_evalN; static int g_evalRet = 1;   // g_evalRet controls remove(1)/keep(0)
+static int stub_eval(void *ctx, uint32_t h, UInt256 bh, const uint8_t *b, size_t n){
+    (void)ctx;(void)bh;(void)b;(void)n; g_evalHeights[g_evalN++]=h; return g_evalRet; }
+struct conn { UInt256 hash; uint32_t height; int ready; };
+static int stub_isready(void *ctx, UInt256 hash, uint32_t *outH){          // the isReady callback
     struct conn *c = (struct conn*)ctx;
-    for (int i=0;i<3;i++) if (c[i].connected && UInt256Eq(c[i].hash, hash)) { *outH=c[i].height; return 1; } return 0; }
+    for (int i=0;i<4;i++) if (c[i].ready && UInt256Eq(c[i].hash, hash)) { *outH=c[i].height; return 1; } return 0; }
 
 static int test_buffer_store_take_drain(void) {
-    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1); g_evalRet=1;
     UInt256 h1={.u8={1}}, h2={.u8={2}}, h3={.u8={3}};
     uint8_t f1[]={0xAA,0xBB}, f2[]={0xCC}, f3[]={0xDD,0xEE,0xFF};
     ASSERT(BRCFScanLedgerBufferFilter(&l,h1,f1,2,10)==1);
     ASSERT(BRCFScanLedgerBufferFilter(&l,h2,f2,1,11)==1);
     ASSERT(BRCFScanLedgerBufferFilter(&l,h3,f3,3,12)==1);
     ASSERT(BRCFScanLedgerBufferedCount(&l)==3);
-    struct conn cs[3] = { {h1,100,1}, {h2,101,0}, {h3,102,1} }; // only h1,h3 connected
+    struct conn cs[4] = { {h1,100,1}, {h2,101,0}, {h3,102,1}, {0} };        // only h1,h3 ready
     uint8_t scratch[64]; g_evalN=0;
-    size_t drained = BRCFScanLedgerDrainConnected(&l, stub_connected, cs, scratch, sizeof scratch, stub_eval, 8);
-    ASSERT(drained==2 && g_evalN==2);                  // h1,h3 evaluated; h2 stays (header not connected)
+    size_t removed = BRCFScanLedgerDrainConnected(&l, stub_isready, cs, scratch, sizeof scratch, stub_eval, 8);
+    ASSERT(removed==2 && g_evalN==2);                  // h1,h3 evaluated+removed; h2 stays (not ready)
     ASSERT(BRCFScanLedgerBufferedCount(&l)==1);
+    BRCFScanLedgerFree(&l);                             // LSan: free the malloc'd remainder
+    return 1;
+}
+// evalFn returning 0 (a HIT with no peer) must KEEP the entry, not remove it.
+static int test_buffer_drain_keeps_on_eval_zero(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt256 h1={.u8={7}}; uint8_t f[]={9,9}; BRCFScanLedgerBufferFilter(&l,h1,f,2,0);
+    struct conn cs[4]={{h1,100,1},{0},{0},{0}}; uint8_t sc[8]; g_evalN=0; g_evalRet=0;   // eval returns 0 → keep
+    size_t removed = BRCFScanLedgerDrainConnected(&l, stub_isready, cs, sc, sizeof sc, stub_eval, 8);
+    ASSERT(removed==0 && g_evalN==1 && BRCFScanLedgerBufferedCount(&l)==1);  // ran but kept
+    g_evalRet=1; BRCFScanLedgerFree(&l);
     return 1;
 }
 static int test_buffer_bytebudget_evicts_oldest(void) {
-    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
-    // A tiny synthetic budget can't be set at runtime, so assert the invariant instead:
-    // fill past CF_FILTER_BUFFER_MAX_BYTES and confirm bytes never exceed the cap and the oldest is gone.
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1); g_evalRet=1;
+    // Fill past the byte budget; assert bytes never exceed the cap, the OLDEST is gone, and a NEWEST survives.
     uint8_t big[512]; memset(big,7,sizeof big);
-    UInt256 first={.u8={1}}; BRCFScanLedgerBufferFilter(&l, first, big, sizeof big, 0);
-    for (int i=2; BRCFScanLedgerBufferedBytes(&l) + sizeof(big) <= CF_FILTER_BUFFER_MAX_BYTES + sizeof(big); i++) {
-        UInt256 h={.u8={(uint8_t)i,(uint8_t)(i>>8)}}; BRCFScanLedgerBufferFilter(&l,h,big,sizeof big,i);
-        if (i > CF_FILTER_BUFFER_MAX_BYTES/ (int)sizeof(big) + 4) break;
+    UInt256 first={.u8={0xF0}}; BRCFScanLedgerBufferFilter(&l, first, big, sizeof big, 0);
+    UInt256 newest = first; int i;
+    for (i=1; ; i++) {
+        UInt256 h={.u8={(uint8_t)i,(uint8_t)(i>>8),0xAB}}; BRCFScanLedgerBufferFilter(&l,h,big,sizeof big,i);
+        newest = h;
+        if (BRCFScanLedgerBufferedBytes(&l) + sizeof(big) > CF_FILTER_BUFFER_MAX_BYTES && i > 4) break; // filled past cap
+        if (i > (int)(CF_FILTER_BUFFER_MAX_BYTES/sizeof(big)) + 8) break;                                // safety
     }
     ASSERT(BRCFScanLedgerBufferedBytes(&l) <= CF_FILTER_BUFFER_MAX_BYTES);
-    struct conn cs[3] = { {first,1,1},{first,1,0},{first,1,0} }; uint8_t sc[512]; g_evalN=0;
-    BRCFScanLedgerDrainConnected(&l, stub_connected, cs, sc, sizeof sc, stub_eval, 100);
-    ASSERT(g_evalN==0);                                // the first (oldest) entry was evicted before we could drain it
+    struct conn cs[4] = { {first,1,1}, {newest,2,1}, {0}, {0} }; uint8_t sc[512]; g_evalN=0;
+    BRCFScanLedgerDrainConnected(&l, stub_isready, cs, sc, sizeof sc, stub_eval, 1000);
+    // the OLDEST (first) was evicted → never drained; the NEWEST survived → drained. Distinguishes evict-oldest from evict-all.
+    int drainedFirst=0, drainedNewest=0;
+    for (int k=0;k<g_evalN;k++){ if (g_evalHeights[k]==1) drainedFirst=1; if (g_evalHeights[k]==2) drainedNewest=1; }
+    ASSERT(drainedFirst==0 && drainedNewest==1);
+    BRCFScanLedgerFree(&l);
     return 1;
 }
 static int test_buffer_clear(void) {
@@ -174,10 +198,11 @@ static int test_buffer_clear(void) {
     BRCFScanLedgerBufferFilter(&l,h1,f,3,0);
     BRCFScanLedgerClearFilterBuffer(&l);
     ASSERT(BRCFScanLedgerBufferedCount(&l)==0 && BRCFScanLedgerBufferedBytes(&l)==0);
+    BRCFScanLedgerFree(&l);                             // no-op after clear, but proves Free is safe on empty
     return 1;
 }
 ```
-Register all three in `main()`.
+Register all four in `main()`.
 
 - [ ] **Step 2: Run to verify they fail** — `run.sh` → FAIL.
 
@@ -196,11 +221,125 @@ Register all three in `main()`.
 
 **Scope note:** this path now serves only **residual** drops (verify/parse/disconnect — block known at drop, near-tip, in-window, 36-min retention). The header-race floor cluster is handled by Task 2's buffer, so the earlier livelock/pruning concerns don't apply to the residual set. The caller (Task 5 EDIT 2) still uses `minHeight`/tip-cap defensively. Peek offers without bumping; Commit bumps only what sent (no attempt burned on a failed/partial send); `RetireCapped` runs once per tick (3-outcome: kept-on-gaveUp-full).
 
-- [ ] **Step 1: Write the failing tests** (identical set to the prior REV's Task-2 pure tests — `Peek` takes `minHeight`, `RetireCapped` is called explicitly): `test_peek_coalesces_and_no_bump`, `test_peek_gap_splits`, `test_peek_minheight_skips_below`, `test_commit_bumps_only_range`, `test_retire_caps_to_gaveup_and_holds_cursor`. (Reuse verbatim from the REV-2 Task-2 test block: same asserts, `Peek(&l, now, minHeight, &s, &e)`, explicit `BRCFScanLedgerRetireCapped(&l)` before the final peek in the retire test.) Register all five in `main()`.
+- [ ] **Step 1: Write the failing tests** (`Peek` takes `minHeight`; `RetireCapped` is called explicitly by the test, not inside `Peek`):
+```c
+static int test_peek_coalesces_and_no_bump(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    UInt128 pb=UINT128_ZERO; pb.u16[5]=0xffff; pb.u32[3]=0x0A000203;
+    BRCFScanLedgerRecordRequested(&l, 100, 102, pa, 12024, 0);
+    BRCFScanLedgerRecordRequested(&l, 103, 103, pb, 12024, 0);   // different peer → splits
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==100 && e==102);
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==100 && e==102); // no mutation
+    return 1;
+}
+static int test_peek_gap_splits(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 200, 200, pa, 12024, 0);
+    BRCFScanLedgerRecordRequested(&l, 202, 202, pa, 12024, 0);   // gap at 201
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==200 && e==200);
+    return 1;
+}
+static int test_peek_minheight_skips_below(void) {                  // the livelock guard
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 100, 101, pa, 12024, 0);   // "below floor"
+    BRCFScanLedgerRecordRequested(&l, 200, 201, pa, 12024, 0);   // "in window"
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 200, &s, &e)==1 && s==200 && e==201);
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 101, &s, &e)==1 && s==101 && e==101); // straddle clamps
+    return 1;
+}
+static int test_commit_bumps_only_range(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    UInt128 pb=UINT128_ZERO; pb.u16[5]=0xffff; pb.u32[3]=0x0A000203;
+    BRCFScanLedgerRecordRequested(&l, 300, 302, pa, 12024, 0);
+    uint32_t s=0,e=0; BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e); // 300..302
+    BRCFScanLedgerCommitRerequest(&l, 300, 301, pb, 12024, CF_REREQ_BASE_SECS);            // sent only 300..301
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==302 && e==302); // 302 still due
+    return 1;
+}
+static int test_retire_caps_to_gaveup_and_holds_cursor(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 400, 400, pa, 12024, 0);
+    uint32_t s=0,e=0, t=0;
+    for (int k=0;k<CF_REREQ_MAX_ATTEMPTS;k++){ t+=CF_REREQ_BACKOFF_CAP_SECS;
+        BRCFScanLedgerRetireCapped(&l);                                   // once per "tick"
+        if (BRCFScanLedgerPeekRerequestRange(&l,t,0,&s,&e)) BRCFScanLedgerCommitRerequest(&l,s,e,pa,12024,t); }
+    BRCFScanLedgerRetireCapped(&l);                                       // capped entry → gaveUp
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, t+CF_REREQ_BACKOFF_CAP_SECS, 0, &s, &e)==0);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1);
+    ASSERT(BRCFScanLedgerScannedThrough(&l) < 400);
+    return 1;
+}
+```
+Register all five in `main()`.
 
 - [ ] **Step 2: Run to verify they fail** — `run.sh` → FAIL.
 
-- [ ] **Step 3: Implement.** Add `#define CF_REREQ_MAX_RANGE 1000  // == MAX_CFILTERS_RESULTS (BRPeer.h:116)`. Extract `_cfLedgerMoveToGaveUp` (returns whether it removed — 3-outcome, kept on gaveUp-full), the public `BRCFScanLedgerRetireCapped`, the underflow-guarded `_cfLedgerDue`, and `Peek`/`Commit` — VERBATIM from the REV-2 Task-2 implementation block (public `RetireCapped` not called inside `Peek`; `Peek` scans from the first index with `height >= minHeight`; `Commit` bumps only still-outstanding heights in `[start..stop]`). Refactor the existing single-height `NextRerequest` to share `_cfLedgerMoveToGaveUp`/`_cfLedgerDue` (its KAT proves preservation). Declare the three public fns in `.h`.
+- [ ] **Step 3: Implement.** Add `#define CF_REREQ_MAX_RANGE 1000  // == MAX_CFILTERS_RESULTS (BRPeer.h:116)`. Then (verify `_cfLedgerAddGaveUp`/`_cfLedgerRerequestDelay` real names first):
+```c
+// returns 1 if the entry at index i was removed (moved to gaveUp), 0 if kept (gaveUp full) — 3-outcome.
+static int _cfLedgerMoveToGaveUp(BRCFScanLedger *l, size_t i) {
+    if (! _cfLedgerAddGaveUp(l, l->outstanding[i].height)) return 0;   // gaveUp full → keep outstanding
+    memmove(&l->outstanding[i], &l->outstanding[i+1],
+            (l->outstandingCount - i - 1) * sizeof(BRCFOutstanding));
+    l->outstandingCount--;
+    return 1;
+}
+void BRCFScanLedgerRetireCapped(BRCFScanLedger *l) {                    // PUBLIC — caller runs once/tick, NOT inside Peek
+    for (size_t i = 0; i < l->outstandingCount; ) {
+        if (l->outstanding[i].attempts >= CF_REREQ_MAX_ATTEMPTS) { if (! _cfLedgerMoveToGaveUp(l, i)) i++; }
+        else i++;
+    }
+}
+static int _cfLedgerDue(const BRCFOutstanding *e, uint32_t now) {       // underflow-guarded
+    uint32_t elapsed = (now >= e->requestedAt) ? (now - e->requestedAt) : 0;
+    return elapsed >= _cfLedgerRerequestDelay(e);
+}
+int BRCFScanLedgerPeekRerequestRange(BRCFScanLedger *l, uint32_t now, uint32_t minHeight,
+                                     uint32_t *outStart, uint32_t *outStop) {
+    size_t start = l->outstandingCount;                                // no retire here (caller's job)
+    for (size_t i = 0; i < l->outstandingCount; i++) {
+        if (l->outstanding[i].height < minHeight) continue;            // lower-bound cursor
+        if (l->outstanding[i].attempts < CF_REREQ_MAX_ATTEMPTS && _cfLedgerDue(&l->outstanding[i], now))
+            { start = i; break; }
+    }
+    if (start == l->outstandingCount) return 0;
+    const BRCFOutstanding *s = &l->outstanding[start];
+    size_t end = start;
+    while (end + 1 < l->outstandingCount) {
+        const BRCFOutstanding *nx = &l->outstanding[end + 1];
+        if (nx->height != l->outstanding[end].height + 1) break;
+        if (nx->attempts >= CF_REREQ_MAX_ATTEMPTS) break;
+        if (! _cfLedgerDue(nx, now)) break;
+        if (nx->port != s->port || ! UInt128Eq(nx->peer, s->peer)) break;
+        if (nx->height - s->height + 1 > CF_REREQ_MAX_RANGE) break;
+        end++;
+    }
+    *outStart = l->outstanding[start].height;
+    *outStop  = l->outstanding[end].height;
+    return 1;                                                          // NO mutation of the offered run
+}
+void BRCFScanLedgerCommitRerequest(BRCFScanLedger *l, uint32_t startH, uint32_t stopH,
+                                   UInt128 peer, uint16_t port, uint32_t now) {
+    for (size_t i = 0; i < l->outstandingCount; i++) {
+        uint32_t h = l->outstanding[i].height;
+        if (h >= startH && h <= stopH) {
+            l->outstanding[i].attempts++;
+            l->outstanding[i].requestedAt = now;
+            l->outstanding[i].peer = peer;
+            l->outstanding[i].port = port;
+        }
+    }
+}
+```
+Refactor the existing single-height `NextRerequest` to share `_cfLedgerMoveToGaveUp`/`_cfLedgerDue` (its existing KAT proves behavior preservation). Declare the three public fns (`RetireCapped`/`PeekRerequestRange`/`CommitRerequest`) in `.h`.
 
 - [ ] **Step 4: Run to verify** — `run.sh` → all pure cases PASS incl. the existing `NextRerequest` case, `EXIT=0`.
 - [ ] **Step 5: Commit** — `feat(cf-ledger): residual peek/commit re-request driver`.
@@ -317,7 +456,7 @@ static int _cfBufEval(void *vctx, uint32_t height, UInt256 blockHash, const uint
 ```
 **Dispatch-vs-delivery (known pre-existing gap — do NOT scope-creep a fix):** after `getdata` is dispatched and the height `MarkEvaluated`, if the peer dies before the block arrives the block is not fetched — **identical to the LIVE match path's behaviour at `:2518`** (it also `getdata`s and moves on). Since the live path shares this window, it is a documented pre-existing gap (candidate for the confirmation-twin / pending machinery in a later phase), NOT a Phase-2 fix. (Verify names with grep: `BRWalletGetFilterElements`/`…Free`, `BRWalletFilterElements`, `BRCompactFilterChainNextHeight`/`…VerifyFilter`, `BRGCSFilterBasicParse(bytes,len,blockHash)`, `BRPeerSendGetdataBlocks`, `m->cfChain`/`m->wallet`, `BLOCK_UNKNOWN_HEIGHT`, and the real name of the factored `_cfFilterMatchesWallet` helper.)
 
-- [ ] **Step 5: Implement EDIT 3** — back-pressure at `:2398` (`&& BRCFScanLedgerOutstandingCount(&manager->cfLedger) < CF_OUTSTANDING_LOWWATER`, gated) and the counted overflow log at `:2409` (swap `RecordRequested`→`RecordRequestedDropped`, `peer_log` the OVERFLOW on `nDrop>0`) — verbatim from the REV-2 Task-7 block.
+- [ ] **Step 5: Implement EDIT 3** — two gated edits: (1) back-pressure — widen the forward-fetch guard at `:2398` to `if (manager->autoFetchCFiltersEnabled #if CF_LEDGER_DRIVE_REREQUEST && BRCFScanLedgerOutstandingCount(&manager->cfLedger) < CF_OUTSTANDING_LOWWATER #endif ) {`; (2) loud overflow log — at the forward RecordRequested caller `:2409`, swap to `BRCFScanLedgerRecordRequestedDropped(&manager->cfLedger, reqStart, reqStop, peer->address, peer->port, (uint32_t)time(NULL), &dLo, &dHi)` and `peer_log(peer, "cf-ledger: OUTSTANDING OVERFLOW — dropped %d oldest holes [%u..%u]", nDrop, dLo, dHi)` when `nDrop>0` (confirm `reqStart`/`reqStop`/`peer` are in scope there).
 
 - [ ] **Step 6: Implement EDIT 4** — at every re-anchor / wipe site, add gated `BRCFScanLedgerClearFilterBuffer(&manager->cfLedger);` (target d — stale buffered bytes from the old scan must not survive a floor change): `BRPeerManagerEnableAutoCompactFilterFetch` re-arm (`:3762`), the snap-up re-anchor (`:2073`), `_BRPeerManagerReanchorAtFloorLocked` (`:3530`), **and `BRPeerManagerDisableAutoCompactFilterFetch` (`:3772`)** (hygiene — a disable must not leave stale bytes lingering). Grep for every `autoFetchCFiltersStart =` write to confirm the set is complete.
 
