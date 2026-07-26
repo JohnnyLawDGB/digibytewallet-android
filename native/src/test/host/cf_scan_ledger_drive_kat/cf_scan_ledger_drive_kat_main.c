@@ -419,6 +419,170 @@ static void test_buffered_waits_for_cfheader(BRWallet *wallet)
 }
 
 // ---------------------------------------------------------------------------
+// Test 3b (final-review Minor #2, CLEAN-MISS branch): a buffered filter that
+// VERIFIES and PARSES fine but does not match any wallet element (a genuine
+// miss, not a header-race hit) must be scanned through -- MarkEvaluated fires
+// (the height is truly resolved, nothing more will ever come for it) and,
+// crucially, NO getdata is dispatched (there is nothing to fetch on a miss;
+// dispatching one would be a wasted/wrong fetch). This is the `hit` branch of
+// _cfBufEval taking the `if (hit)` == false fork all the way through to the
+// shared `BRCFScanLedgerMarkEvaluated` / `return 1` tail.
+static void test_buffered_clean_miss_marks_no_getdata(BRWallet *wallet)
+{
+    printf("\n=== test_buffered_clean_miss_marks_no_getdata ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t H = 1100000;
+    BRMerkleBlock *bH  = dummyBlock(H,     0x10, 1700500000);
+    BRMerkleBlock *bH1 = dummyBlock(H + 1, 0x11, 1700500015);
+    bH1->prevBlock = bH->blockHash;
+    BRSetAdd(m->blocks, bH);
+    BRSetAdd(m->blocks, bH1); // block header for H+1 IS connected
+    m->lastBlock = bH1;
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x06; pa->port = 10006; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa); // present so a getdata COULD dispatch if (wrongly) triggered
+
+    // cfheader chain covering H and H+1 -> NextHeight()==H+2 > H+1 (isReady's
+    // cfheader gate passes), same shape as the crux test.
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, H, UINT256_ZERO);
+    UInt256 dummyFilterHash; memset(dummyFilterHash.u8, 0x77, sizeof(dummyFilterHash.u8));
+    check(BRCompactFilterChainAppend(m->compactFilterChain, BRCompactFilterChainTipHeader(m->compactFilterChain),
+                                     &dummyFilterHash, 1) == 1, "setup: dummy header appended for height H");
+
+    // Element deliberately NOT derived from the wallet at all (a fixed,
+    // structurally-distinct byte pattern) -- BRGCSFilterMatchAny against the
+    // real wallet elements must come back 0: a genuine clean miss, not a hit.
+    static const uint8_t notWalletElem[20] = {
+        0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1,
+        0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1, 0xC1
+    };
+    uint8_t encoded[16];
+    size_t encodedLen = buildSingleElementFilter(bH1->blockHash, notWalletElem, sizeof notWalletElem,
+                                                 encoded, sizeof encoded);
+    UInt256 filterHash; BRSHA256_2(filterHash.u8, encoded, encodedLen);
+    check(BRCompactFilterChainAppend(m->compactFilterChain, BRCompactFilterChainTipHeader(m->compactFilterChain),
+                                     &filterHash, 1) == 1, "setup: real filterHash appended for height H+1 (cfheader now present)");
+
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) > bH1->height,
+          "setup: cfheader present for H+1 (isReady's cfheader gate should pass)");
+    // Setup-time sanity (per task): a broken encoder must fail loudly HERE,
+    // not confusingly later inside the real drive path.
+    check(BRCompactFilterChainVerifyFilter(m->compactFilterChain, bH1->height, encoded, encodedLen) == 1,
+          "setup: hand-built filter verifies against the chain at H+1 (encoder sanity)");
+
+    BRCFScanLedgerInit(&m->cfLedger, H);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H + 1, H + 1, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 1, "setup: H+1 outstanding before drain");
+    check(BRCFScanLedgerBufferFilter(&m->cfLedger, bH1->blockHash, encoded, encodedLen, (uint32_t)time(NULL)) == 1,
+          "setup: filter buffered for H+1");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "setup: buffer holds 1 entry");
+
+    g_getdataCount = 0; g_capCount = 0;
+
+    BRPeerManagerKeepAlive(m);
+
+    check(g_getdataCount == 0, "CLEAN MISS: no getdata dispatched -- a miss must not fetch a block");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0,
+          "CLEAN MISS: MarkEvaluated fired -- H+1 no longer outstanding (fully resolved, non-hit)");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 0, "CLEAN MISS: buffer drained (entry removed after eval)");
+
+    BRPeerManagerFree(m);
+}
+
+// ---------------------------------------------------------------------------
+// Test 3c (final-review Minor #2, VERIFY-FAIL branch): a buffered entry whose
+// bytes do NOT verify against the cfheader commitment at that height (bytes
+// for a DIFFERENT filter than the one actually committed) must be dropped
+// from the buffer WITHOUT being marked evaluated -- it stays outstanding so
+// the residual re-request driver can pick it back up. isReady is content-
+// blind (block header connected + cfheader chain height gate only), so it
+// stays TRUE here even though the committed cfheader hash doesn't match these
+// bytes -- the drain genuinely enters _cfBufEval and fails at
+// `BRCompactFilterChainVerifyFilter`, it is not skipped by isReady==false.
+static void test_buffered_verify_fail_stays_outstanding(BRWallet *wallet)
+{
+    printf("\n=== test_buffered_verify_fail_stays_outstanding ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t H = 1200000;
+    BRMerkleBlock *bH  = dummyBlock(H,     0x20, 1700600000);
+    BRMerkleBlock *bH1 = dummyBlock(H + 1, 0x21, 1700600015);
+    bH1->prevBlock = bH->blockHash;
+    BRSetAdd(m->blocks, bH);
+    BRSetAdd(m->blocks, bH1); // block header for H+1 IS connected -> isReady's header gate passes
+    m->lastBlock = bH1;
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x07; pa->port = 10007; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa); // present so a getdata COULD dispatch if (wrongly) triggered
+
+    // cfheader chain covers H and H+1 -> NextHeight()==H+2 > H+1: isReady's
+    // cfheader-presence gate ALSO passes (this is what keeps isReady TRUE).
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, H, UINT256_ZERO);
+    UInt256 dummyFilterHash; memset(dummyFilterHash.u8, 0x77, sizeof(dummyFilterHash.u8));
+    check(BRCompactFilterChainAppend(m->compactFilterChain, BRCompactFilterChainTipHeader(m->compactFilterChain),
+                                     &dummyFilterHash, 1) == 1, "setup: dummy header appended for height H");
+
+    // The COMMITTED filter (its hash is what gets appended to the cfheader
+    // chain at H+1) is built over one element...
+    static const uint8_t committedElem[20] = {
+        0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+        0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA
+    };
+    uint8_t committedEncoded[16];
+    size_t committedLen = buildSingleElementFilter(bH1->blockHash, committedElem, sizeof committedElem,
+                                                    committedEncoded, sizeof committedEncoded);
+    UInt256 committedFilterHash; BRSHA256_2(committedFilterHash.u8, committedEncoded, committedLen);
+    check(BRCompactFilterChainAppend(m->compactFilterChain, BRCompactFilterChainTipHeader(m->compactFilterChain),
+                                     &committedFilterHash, 1) == 1,
+          "setup: COMMITTED filterHash appended for height H+1 (cfheader now present)");
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) > bH1->height,
+          "setup: cfheader present for H+1 (isReady's cfheader gate should pass)");
+
+    // ...but the bytes actually BUFFERED for H+1 are built over a DIFFERENT
+    // element -- a distinct, differently-encoded filter whose SHA256d will
+    // NOT match committedFilterHash. isReady only checks block-header-
+    // connected + cfheader-chain-height, never filter content, so this alone
+    // does not stop the drain from reaching _cfBufEval.
+    static const uint8_t buggeredElem[20] = {
+        0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+        0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB
+    };
+    uint8_t buggeredEncoded[16];
+    size_t buggeredLen = buildSingleElementFilter(bH1->blockHash, buggeredElem, sizeof buggeredElem,
+                                                   buggeredEncoded, sizeof buggeredEncoded);
+    check(BRCompactFilterChainVerifyFilter(m->compactFilterChain, bH1->height, buggeredEncoded, buggeredLen) == 0,
+          "setup: buffered bytes do NOT verify against the committed cfheader at H+1 (encoder-mismatch sanity)");
+
+    BRCFScanLedgerInit(&m->cfLedger, H);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H + 1, H + 1, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 1, "setup: H+1 outstanding before drain");
+    check(BRCFScanLedgerBufferFilter(&m->cfLedger, bH1->blockHash, buggeredEncoded, buggeredLen, (uint32_t)time(NULL)) == 1,
+          "setup: mismatched filter buffered for H+1");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "setup: buffer holds 1 entry");
+
+    g_getdataCount = 0; g_capCount = 0;
+
+    BRPeerManagerKeepAlive(m);
+
+    check(g_getdataCount == 0, "VERIFY FAIL: no getdata dispatched");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 1,
+          "VERIFY FAIL: MarkEvaluated did NOT fire -- H+1 outstanding count UNCHANGED");
+    check(findOutstanding(&m->cfLedger, H + 1) != NULL,
+          "VERIFY FAIL: H+1 specifically stays outstanding (residual re-request will retry it)");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 0,
+          "VERIFY FAIL: entry removed from the buffer (dropped, not left resident)");
+
+    BRPeerManagerFree(m);
+}
+
+// ---------------------------------------------------------------------------
 // Test 4: a residual (verify/parse/disconnect-class) hole with an EMPTY
 // buffer re-requests via getcfilters and rotates away from the peer the
 // original request targeted.
@@ -596,12 +760,15 @@ int main(void)
 
     BRPeerManagerFree(manager);
 
-    // --- Real Task 5 driver cases. All six reuse this same wallet (it is
-    // never mutated by BRPeerManagerNew/Free -- only referenced), each
-    // building its own fresh BRPeerManager so state never leaks test-to-test. ---
+    // --- Real Task 5 driver cases (plus the final-review Minor #2 CLEAN-MISS
+    // / VERIFY-FAIL additions). All reuse this same wallet (it is never
+    // mutated by BRPeerManagerNew/Free -- only referenced), each building its
+    // own fresh BRPeerManager so state never leaks test-to-test. ---
     test_buffered_drains_and_CREDITS_at_connect(wallet);
     test_buffered_hit_no_peer_stays(wallet);
     test_buffered_waits_for_cfheader(wallet);
+    test_buffered_clean_miss_marks_no_getdata(wallet);
+    test_buffered_verify_fail_stays_outstanding(wallet);
     test_residual_rerequests_and_rotates(wallet);
     test_residual_gated_by_buffer(wallet);
     test_residual_caps_at_tip(wallet);
