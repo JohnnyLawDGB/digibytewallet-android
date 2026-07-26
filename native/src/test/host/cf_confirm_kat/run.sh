@@ -21,9 +21,10 @@
 # BRTransaction.c (BRRand plus every BRTransaction* symbol the KAT's payTx/
 # finalizeTxHash helpers and BRWallet.c/BRPeer.c call), BRSet.c
 # (manager->blocks / wallet->allTx hash sets), BRMerkleBlock.c (the dummy
-# block + BRMerkleBlockHash/Eq), BRBloomFilter.c, BRCompactFilterChain.c,
-# BRGCSFilter.c, BRWalletFilterElements.c (BIP158 machinery BRPeerManager.c
-# references even though this KAT never exercises it), BRNetwork.c
+# block + BRMerkleBlockHash/Eq), BRCompactFilterChain.c,
+# BRGCSFilter.c, BRWalletFilterElements.c, BRCFScanLedger.c (BIP158 machinery
+# BRPeerManager.c references even though this KAT never exercises it -- the
+# CF scan-ledger's BRCFScanLedgerInit is called from BRPeerManager.c), BRNetwork.c
 # (BRNetworkIsTestnet, called from BRAddress.c/BRKey.c call sites), plus the
 # whole address/key/crypto chain those pull in (BRAddress, BRKey, BRBase58,
 # BRBech32, BRCrypto, BRBIP32Sequence, BRBIP39Mnemonic, BRDigiAsset,
@@ -57,10 +58,10 @@ clang -w -include stdint.h \
     "$CORE_DIR/BRWallet.c" \
     "$CORE_DIR/BRTransaction.c" \
     "$CORE_DIR/BRMerkleBlock.c" \
-    "$CORE_DIR/BRBloomFilter.c" \
     "$CORE_DIR/BRCompactFilterChain.c" \
     "$CORE_DIR/BRGCSFilter.c" \
     "$CORE_DIR/BRWalletFilterElements.c" \
+    "$CORE_DIR/BRCFScanLedger.c" \
     "$CORE_DIR/BRNetwork.c" \
     "$CORE_DIR/BRDigiDollar.c" \
     "$CORE_DIR/BRDigiAsset.c" \

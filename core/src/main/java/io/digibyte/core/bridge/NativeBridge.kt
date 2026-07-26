@@ -330,6 +330,25 @@ object NativeBridge {
      *  debugging "expected balance higher than detected" scenarios. */
     external fun dumpAllAddresses(): String
 
+    /**
+     * Counters from the most recent BIP158 filter-element build, pipe-separated:
+     * `addrs|elements|derived|watched|dropped|allocFailures|firstDroppedPrefix`,
+     * or `""` if no build has happened yet.
+     *
+     * `derived`/`watched` splits the element count BY SOURCE. There is no DigiDollar
+     * bucket: a DD token output is a plain P2TR script, so its element is emitted by the
+     * taproot chain and counts as derived.
+     *
+     * `dropped` should always be 0. Non-zero means an address in the wallet has no
+     * encodable scriptPubKey — i.e. `BRAddressIsValid` and `BRAddressScriptPubKey` have
+     * diverged and the compact-filter match set is quietly smaller than the address set,
+     * which is exactly how a missed receive hides. `firstDroppedPrefix` is 6 characters
+     * only, never a full address, since this is surfaced to logs.
+     *
+     * Cheap and lock-free; safe to poll.
+     */
+    external fun getFilterElementStats(): String
+
     /** Sovereign, chain-derived spent-state for an asset outpoint (tri-state):
      *  0 = SPENT (in the wallet's spentOutputs set), 1 = HELD (funding tx known
      *  and unspent), -1 = UNDETECTED (funding tx unknown — a backend-sourced

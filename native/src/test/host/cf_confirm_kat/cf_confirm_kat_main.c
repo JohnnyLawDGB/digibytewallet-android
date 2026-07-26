@@ -26,7 +26,7 @@
 // Because main.c #include-s BRPeerManager.c, BRPeerManager.c must NOT also
 // be passed as a separate compilation unit on the clang command line
 // (run.sh) -- every other BRPeerManager.c dependency (BRPeer.c, BRWallet.c,
-// BRSet.c, BRMerkleBlock.c, BRBloomFilter.c, BRCompactFilterChain.c,
+// BRSet.c, BRMerkleBlock.c, BRCompactFilterChain.c,
 // BRGCSFilter.c, BRWalletFilterElements.c, BRNetwork.c, plus the whole
 // address/key/crypto chain those pull in) IS linked separately, same "why so
 // many .c files" rationale as bip341_signtx_kat/run.sh.

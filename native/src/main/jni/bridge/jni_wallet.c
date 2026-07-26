@@ -10,6 +10,7 @@
 #include "jni_bridge.h"
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
+#include "BRWalletFilterElements.h"
 
 /* ---------- Global state definitions ---------- */
 
@@ -848,12 +849,13 @@ Java_io_digibyte_core_bridge_NativeBridge_dumpAllAddresses(JNIEnv *env, jobject 
     (void)thiz;
     if (!g_wallet) return (*env)->NewStringUTF(env, "");
 
-    size_t count = BRWalletAllAddrs(g_wallet, NULL, 0);
-    if (count == 0) return (*env)->NewStringUTF(env, "");
-
-    BRAddress *addrs = (BRAddress *)malloc(sizeof(BRAddress) * count);
-    if (!addrs) return (*env)->NewStringUTF(env, "");
-    count = BRWalletAllAddrs(g_wallet, addrs, count);
+    /* Single-call snapshot. The old two-call BRWalletAllAddrs form sized `count` from one
+     * call and refilled from another with the wallet lock released in between, then looped
+     * to the RETURN value -- so a chain growing in that window produced a heap over-read
+     * here as well as the over-write in the fill. */
+    size_t count = 0;
+    BRAddress *addrs = BRWalletCopyAllAddrs(g_wallet, &count, NULL);
+    if (!addrs || count == 0) { free(addrs); return (*env)->NewStringUTF(env, ""); }
 
     /* Each address is up to ~62 chars for bech32; reserve 80/address for safety */
     size_t cap = count * 80 + 1;
@@ -873,6 +875,40 @@ Java_io_digibyte_core_bridge_NativeBridge_dumpAllAddresses(JNIEnv *env, jobject 
     free(buf);
     free(addrs);
     return result;
+}
+
+/* ---------- getFilterElementStats ----------
+ * Counters from the most recent BIP158 filter-element build, as
+ *   addrs|elements|derived|watched|dropped|allocFailures|firstDroppedPrefix
+ * or "" if no build has happened yet.
+ *
+ * `derived` vs `watched` is the element count BY SOURCE: addresses from the derived
+ * chains vs explicitly-watched Receive pins. There is no DigiDollar bucket -- a DD
+ * token output is a plain P2TR script, so its element comes from the taproot chain and
+ * is counted as derived (see BRWalletFilterElements.h).
+ *
+ * `dropped` counts addresses with no encodable scriptPubKey. It should be 0; a non-zero
+ * value means BRAddressIsValid and BRAddressScriptPubKey have diverged and the match set
+ * is quietly smaller than the address set. firstDroppedPrefix is the first 6 characters
+ * ONLY -- never a full address, since these counters are surfaced to logs.
+ *
+ * Takes NO lock (the underlying accessor uses a private leaf mutex), so it must not be
+ * given PEER_GUARD: it touches neither g_peerManager nor g_wallet internals, and taking
+ * that guard would add contention plus a future deadlock foothold against
+ * BRPeerManagerFree's peer-thread join. */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getFilterElementStats(JNIEnv *env, jobject thiz)
+{
+    (void)thiz;
+
+    BRWalletFilterElementsStats st;
+    if (! BRWalletFilterElementsGetStats(g_wallet, &st)) return (*env)->NewStringUTF(env, "");
+
+    char buf[192];
+    snprintf(buf, sizeof(buf), "%zu|%zu|%zu|%zu|%zu|%zu|%s",
+             st.addrs, st.elements, st.derived, st.watched, st.dropped, st.allocFailures,
+             st.firstDroppedPrefix);
+    return (*env)->NewStringUTF(env, buf);
 }
 
 /* ---------- walletContainsAddress (test-only) ---------- */
