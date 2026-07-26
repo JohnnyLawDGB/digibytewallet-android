@@ -284,3 +284,96 @@ Wire `cf_scan_ledger_kat/run.sh` into the host-KAT set the pre-publish suite run
 3. **Persist attempts across restart: no.** Persist heights + `headerRace` flag + the `gaveUp` list; reset attempts/timestamps on load (fresh process → fresh peers). (§5.)
 4. **Phasing:** header-race requeue and pending-confirm drain stay **Phase 2** — Phase 1 must observe the dominant failure mode (the header race), not heal it. (§6.)
 5. **Submodule:** fork branch `seq/cf-scan-ledger-observe`, pin-bump in the same app PR. (§11.)
+
+---
+
+## Phase 2 — REVISED IMPLEMENTATION MODEL (2026-07-26, after on-device observe + code re-map)
+
+**This section SUPERSEDES the brief "Phase 2 — RE-REQUEST" above where they conflict.** Triggered by
+the item-3 on-device observe (`docs/bugs/2026-07-26-cf-ledger-missed-dd-receive-observed-clean-peer.md`),
+which reproduced the miss against a flawless local node and revealed the real hole shape, plus a
+ground-truth re-map of the merged code (post #29/#31; the §4 line numbers below the drift table are stale).
+
+### Revised hole model — BULK FLOOR CLUSTER, not a tip-race trickle
+§4 assumed a single header arriving a beat after its cfilter (→ short 10s retry catches it). OBSERVED:
+one re-anchor fired ONE ranged `getcfilters(23900001 → stop~23901000)`; the cfheaders chain wasn't
+built down to the floor yet, so ~1000 responses were header-race-dropped **at once** → `outstanding=1001`
+in a single shot. **Cap-overflow checked: NO `CF_OUTSTANDING_MAX` drop fired; 1001 is genuine, no
+fidelity gap.** Consequence: **the driver's unit of work is a RANGE, not a height.**
+
+### Driver design — RANGE-COALESCING (supersedes single-height re-requests at the call site)
+- Add a pure primitive `BRCFScanLedgerNextRerequestRange(l, now, *outStart, *outStop)`: returns the
+  lowest CONTIGUOUS run of outstanding heights that are ALL due (backoff elapsed) and share the same
+  recorded rotate-away peer, capped at `MAX_CFILTERS_RESULTS` (1000). Bumps `attempts` for every height
+  in the run in lockstep; heights hitting `CF_REREQ_MAX_ATTEMPTS` → `gaveUp`. Returns 0 when nothing due.
+  Keep the existing single-height `NextRerequest` for the pure unit test / degenerate case.
+- Call site (in `BRPeerManagerKeepAlive`, under `manager->lock`): loop the range primitive up to
+  `CF_REREQ_BATCH_PER_TICK` RANGES/tick; per range, pick a filter peer ≠ the range's recorded peer
+  (forced rotation), issue ONE `_BRPeerManagerRequestCFiltersLocked(start, stop, rotatedPeer)`, then
+  `RecordRequested([start..stop], rotatedPeer, now)` to refresh the rotate-away key. Range-coalescing
+  drains the 1001 floor in ~2 ranged requests (~2 ticks), vs. 1000 single-height messages that would
+  hammer the peer and take minutes.
+
+### Per-(range, peer) attempts + FORCED rotation
+A contiguous outstanding run shares one recorded peer (requested together). Rotation is per-range: the
+whole run re-requests from ONE new peer ≠ the recorded one; attempts bump per-height but in lockstep.
+**This is load-bearing:** it prevents the failure the operator flagged — one wedged peer causing 1000
+holes must NOT park all 1000 into `gaveUp` at the same dead peer (= permanent loss with extra steps).
+`BRCFScanLedgerReArmPeer` (drop site, disconnect) already clears the recorded peer so the driver re-picks.
+
+### Header-race wiring — the §5-D correction (design §4 was UNIMPLEMENTABLE)
+At the drop site `b == NULL` (height unknown — that IS the race), so `MarkHeaderRace(height)` cannot be
+called there; and `BRCFScanLedgerMarkHeaderRace` INSERTS-if-absent (calling it at header-connect for every
+block would inject phantom holes). FIX (EDITs 0/1/2a): record the **blockHash** in a hash-keyed header-race
+ring at the drop site (height-free), resolve at header-connect — `TakeHeaderRaceHash(blockHash)==1` for
+genuinely-raced blocks only → then `MarkHeaderRace(block->height)` (height now known) → 10s fast retry.
+**NOTE:** the driver already heals header-race holes at the 30s BASE without the hash-set (they stay
+outstanding; the re-request succeeds once the header connects). The hash-set is a LATENCY optimization for
+the dominant class (10s vs 30s). Ship behind the same gate; **separable if it slips schedule.**
+
+### Back-pressure — LOW-WATER, not `< CF_OUTSTANDING_MAX`
+`_cfLedgerInsertOutstanding` drops the OLDEST = lowest = floor holes (the receive-bearing ones) on overflow.
+Gating forward requests at `< 4096` still permits reaching 4096 then dropping exactly those. Add
+`CF_OUTSTANDING_LOWWATER` (¾ cap = 3072); the forward cursor pauses there so the driver reserves headroom
+for the floor cluster. Watch `CF_OUTSTANDING_MAX 4096` on large-gap re-anchors (the item-3 20k-block gap
+would blow past 4096 if the cursor un-wedges before the driver drains).
+
+### Driver home + peer selection
+- Home: `BRPeerManagerKeepAlive` — the only recurring wall-clock entry point wholly under `manager->lock`.
+  NOT the event-driven cfheaders kicks, NOT `BRPeerManagerRerequestHeadersFromTip` (the N-min tip-stall
+  watchdog). Respect the `KEEPALIVE_TICK_BUDGET` already spent on the ping loop → hence the per-tick cap.
+- **Liveness dependency (for the SyncSupervisor sequence):** the driver inherits keepalive's liveness —
+  keepalive is precisely the mechanism that historically DIED (v4.0.22 dead-keepalive fix + its 0-peer
+  watchdog revival exist because of it). If keepalive wedges, the re-request driver wedges with it.
+  Acceptable NOW because the `recoveryScope` 0-peer watchdog guards keepalive, but the future
+  **SyncSupervisor MUST treat "driver last ticked at T" as a monitored liveness signal** like every
+  other health stamp — the driver silently not-ticking is indistinguishable from no-holes-to-drain
+  without it. One line here so the supervisor sequence (runway item 6) inherits the requirement.
+- Selection: reuse the inline `connectedPeers` + `_BRPeerManagerPeerCanServeFilters` walk with the ledger's
+  per-range `.peer` as the rotate-away key. Do NOT reuse `cfTriedPeers`/`_BRPeerManagerNextUntriedFilterPeer`
+  — that set is owned by the cfheaders batch rotation; sharing it corrupts cfheaders rotation state.
+
+### Monitored risk (not a blocker)
+`NextRerequest[Range]` bumps `attempts` even when the send fails (unresolvable stop-hash = header still not
+connected). A height whose header stalls >~5.7 min could prematurely `gaveUp`. In practice headers connect
+sub-second << 30s BASE, so the first retry lands after the header connects. If it bites on-device: pure-module
+`peek`/`commit` split (offer-without-bump, commit-on-successful-send). Follow-up — do NOT pre-build.
+
+### Persistence across the wipe/restore acceptance test
+`gaveUp` persists (never lost from the report); outstanding heights + `headerRace` flag persist; attempts/
+timestamps reset on load (fresh peers). The acceptance test wipes SAVED state (blocks/filter-headers/cf-ledger)
+and restores the SEED → the ledger rebuilds from the re-anchor, reproducing the floor cluster; the driver then
+drains it. The header-race hash-ring is transient (not persisted) — same posture as `pending`.
+
+### ACCEPTANCE GATE (Phase-2 regression, verbatim — reproducible against a REAL mainnet tx)
+Same seed, same pinned own-node (`10.0.2.2:12024`, local node `listen=1`, filter-index synced), same on-chain
+$1 DD (block **23,920,918**, txid `813d6e46e1788e00c3a262776c3d59ed9a944860521821959a849193321ec76e`).
+**Wipe wallet state → restore seed → sync.** PASS iff: the DD credits via **CF alone (no reconcile)**, the
+ledger **drains to `outstanding=0`**, and `scannedThrough` reaches the block tip (past 23,920,918).
+Steady-state metrics: `gaveUp` stays 0 over a normal week; `outstanding` drains to 0 within minutes of any
+network blip; ZERO manual "Scan for missing funds" needed; no native SIGSEGV.
+
+### New constants (add to BRCFScanLedger.h next to the Phase-2 block)
+`CF_OUTSTANDING_LOWWATER 3072` (¾ of MAX) · `CF_REREQ_BATCH_PER_TICK 64` (ranges/tick). Existing pinned
+constants unchanged (header-race 10s, base 30, cap 120, MAX_ATTEMPTS 5) — sanity-checked against the real
+floor-cluster shape and retained.

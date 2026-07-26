@@ -185,6 +185,156 @@ static void case5_serialize_roundtrip(BRCFScanLedger *l1, BRCFScanLedger *l2) {
     check(need2 == need && memcmp(buf, buf2, need) == 0, "case5: Serialize->Parse->Serialize is byte-identical");
 }
 
+// ---- Phase 2 Task 1: overflow drop is never silent; requestedThrough advances ----
+
+#define ASSERT(cond) check((cond), #cond)
+
+static int test_overflow_reports_drop(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 p = UINT128_ZERO; p.u16[5]=0xffff; p.u32[3]=0x01020304;
+    BRCFScanLedgerRecordRequested(&l, 1000, 1000 + CF_OUTSTANDING_MAX - 1, p, 12024, 100); // fills [1000..5095]
+    ASSERT(BRCFScanLedgerOutstandingCount(&l) == CF_OUTSTANDING_MAX);
+    uint32_t lo=0, hi=0;
+    int dropped = BRCFScanLedgerRecordRequestedDropped(&l, 9000, 9000, p, 12024, 200, &lo, &hi); // 9000 > 5095 → evicts oldest
+    ASSERT(dropped == 1 && lo == 1000 && hi == 1000);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l) == CF_OUTSTANDING_MAX);
+    return 1;
+}
+// TRIPWIRE for the system invariant: requestedThrough (scannedThrough's ceiling) must advance.
+static int test_record_advances_requestedThrough(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);
+    UInt128 p = UINT128_ZERO; p.u16[5]=0xffff; p.u32[3]=0x01020304;
+    BRCFScanLedgerRecordRequested(&l, 100, 150, p, 12024, 0);
+    for (uint32_t h = 100; h <= 150; h++) BRCFScanLedgerMarkEvaluated(&l, h);
+    ASSERT(BRCFScanLedgerScannedThrough(&l) == 150);
+    return 1;
+}
+
+// ---- Phase 2 Task 2: byte-budgeted filter-byte buffer (header-race hold) ----
+// harness stubs. evalFn signature MATCHES the interface: (ctx, height, blockHash, bytes, len).
+static uint32_t g_evalHeights[64]; static int g_evalN; static int g_evalRet = 1;   // g_evalRet controls remove(1)/keep(0)
+static int stub_eval(void *ctx, uint32_t h, UInt256 bh, const uint8_t *b, size_t n){
+    (void)ctx;(void)bh;(void)b;(void)n; g_evalHeights[g_evalN++]=h; return g_evalRet; }
+struct conn { UInt256 hash; uint32_t height; int ready; };
+static int stub_isready(void *ctx, UInt256 hash, uint32_t *outH){          // the isReady callback
+    struct conn *c = (struct conn*)ctx;
+    for (int i=0;i<4;i++) if (c[i].ready && UInt256Eq(c[i].hash, hash)) { *outH=c[i].height; return 1; } return 0; }
+
+static int test_buffer_store_take_drain(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1); g_evalRet=1;
+    UInt256 h1={.u8={1}}, h2={.u8={2}}, h3={.u8={3}};
+    uint8_t f1[]={0xAA,0xBB}, f2[]={0xCC}, f3[]={0xDD,0xEE,0xFF};
+    ASSERT(BRCFScanLedgerBufferFilter(&l,h1,f1,2,10)==1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l,h2,f2,1,11)==1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l,h3,f3,3,12)==1);
+    ASSERT(BRCFScanLedgerBufferedCount(&l)==3);
+    struct conn cs[4] = { {h1,100,1}, {h2,101,0}, {h3,102,1}, {0} };        // only h1,h3 ready
+    uint8_t scratch[64]; g_evalN=0;
+    size_t removed = BRCFScanLedgerDrainConnected(&l, stub_isready, cs, scratch, sizeof scratch, stub_eval, 8);
+    ASSERT(removed==2 && g_evalN==2);                  // h1,h3 evaluated+removed; h2 stays (not ready)
+    ASSERT(BRCFScanLedgerBufferedCount(&l)==1);
+    BRCFScanLedgerFree(&l);                             // LSan: free the malloc'd remainder
+    return 1;
+}
+// evalFn returning 0 (a HIT with no peer) must KEEP the entry, not remove it.
+static int test_buffer_drain_keeps_on_eval_zero(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt256 h1={.u8={7}}; uint8_t f[]={9,9}; BRCFScanLedgerBufferFilter(&l,h1,f,2,0);
+    struct conn cs[4]={{h1,100,1},{0},{0},{0}}; uint8_t sc[8]; g_evalN=0; g_evalRet=0;   // eval returns 0 → keep
+    size_t removed = BRCFScanLedgerDrainConnected(&l, stub_isready, cs, sc, sizeof sc, stub_eval, 8);
+    ASSERT(removed==0 && g_evalN==1 && BRCFScanLedgerBufferedCount(&l)==1);  // ran but kept
+    g_evalRet=1; BRCFScanLedgerFree(&l);
+    return 1;
+}
+static int test_buffer_bytebudget_evicts_oldest(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1); g_evalRet=1;
+    // Fill past the byte budget; assert bytes never exceed the cap, the OLDEST is gone, and a NEWEST survives.
+    uint8_t big[512]; memset(big,7,sizeof big);
+    UInt256 first={.u8={0xF0}}; BRCFScanLedgerBufferFilter(&l, first, big, sizeof big, 0);
+    UInt256 newest = first; int i;
+    for (i=1; ; i++) {
+        UInt256 h={.u8={(uint8_t)i,(uint8_t)(i>>8),0xAB}}; BRCFScanLedgerBufferFilter(&l,h,big,sizeof big,i);
+        newest = h;
+        if (BRCFScanLedgerBufferedBytes(&l) + sizeof(big) > CF_FILTER_BUFFER_MAX_BYTES && i > 4) break; // filled past cap
+        if (i > (int)(CF_FILTER_BUFFER_MAX_BYTES/sizeof(big)) + 8) break;                                // safety
+    }
+    ASSERT(BRCFScanLedgerBufferedBytes(&l) <= CF_FILTER_BUFFER_MAX_BYTES);
+    struct conn cs[4] = { {first,1,1}, {newest,2,1}, {0}, {0} }; uint8_t sc[512]; g_evalN=0;
+    BRCFScanLedgerDrainConnected(&l, stub_isready, cs, sc, sizeof sc, stub_eval, 1000);
+    // the OLDEST (first) was evicted → never drained; the NEWEST survived → drained. Distinguishes evict-oldest from evict-all.
+    int drainedFirst=0, drainedNewest=0;
+    for (int k=0;k<g_evalN;k++){ if (g_evalHeights[k]==1) drainedFirst=1; if (g_evalHeights[k]==2) drainedNewest=1; }
+    ASSERT(drainedFirst==0 && drainedNewest==1);
+    BRCFScanLedgerFree(&l);
+    return 1;
+}
+static int test_buffer_clear(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt256 h1={.u8={1}}; uint8_t f[]={1,2,3};
+    BRCFScanLedgerBufferFilter(&l,h1,f,3,0);
+    BRCFScanLedgerClearFilterBuffer(&l);
+    ASSERT(BRCFScanLedgerBufferedCount(&l)==0 && BRCFScanLedgerBufferedBytes(&l)==0);
+    BRCFScanLedgerFree(&l);                             // no-op after clear, but proves Free is safe on empty
+    return 1;
+}
+
+// ---- Phase 2 Task 3: residual re-request driver (peek/commit + retire) -----
+
+static int test_peek_coalesces_and_no_bump(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    UInt128 pb=UINT128_ZERO; pb.u16[5]=0xffff; pb.u32[3]=0x0A000203;
+    BRCFScanLedgerRecordRequested(&l, 100, 102, pa, 12024, 0);
+    BRCFScanLedgerRecordRequested(&l, 103, 103, pb, 12024, 0);   // different peer → splits
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==100 && e==102);
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==100 && e==102); // no mutation
+    return 1;
+}
+static int test_peek_gap_splits(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 200, 200, pa, 12024, 0);
+    BRCFScanLedgerRecordRequested(&l, 202, 202, pa, 12024, 0);   // gap at 201
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==200 && e==200);
+    return 1;
+}
+static int test_peek_minheight_skips_below(void) {                  // the livelock guard
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 100, 101, pa, 12024, 0);   // "below floor"
+    BRCFScanLedgerRecordRequested(&l, 200, 201, pa, 12024, 0);   // "in window"
+    uint32_t s=0,e=0;
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 200, &s, &e)==1 && s==200 && e==201);
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 101, &s, &e)==1 && s==101 && e==101); // straddle clamps
+    return 1;
+}
+static int test_commit_bumps_only_range(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    UInt128 pb=UINT128_ZERO; pb.u16[5]=0xffff; pb.u32[3]=0x0A000203;
+    BRCFScanLedgerRecordRequested(&l, 300, 302, pa, 12024, 0);
+    uint32_t s=0,e=0; BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e); // 300..302
+    BRCFScanLedgerCommitRerequest(&l, 300, 301, pb, 12024, CF_REREQ_BASE_SECS);            // sent only 300..301
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, CF_REREQ_BASE_SECS, 0, &s, &e)==1 && s==302 && e==302); // 302 still due
+    return 1;
+}
+static int test_retire_caps_to_gaveup_and_holds_cursor(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa=UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 400, 400, pa, 12024, 0);
+    uint32_t s=0,e=0, t=0;
+    for (int k=0;k<CF_REREQ_MAX_ATTEMPTS;k++){ t+=CF_REREQ_BACKOFF_CAP_SECS;
+        BRCFScanLedgerRetireCapped(&l);                                   // once per "tick"
+        if (BRCFScanLedgerPeekRerequestRange(&l,t,0,&s,&e)) BRCFScanLedgerCommitRerequest(&l,s,e,pa,12024,t); }
+    BRCFScanLedgerRetireCapped(&l);                                       // capped entry → gaveUp
+    ASSERT(BRCFScanLedgerPeekRerequestRange(&l, t+CF_REREQ_BACKOFF_CAP_SECS, 0, &s, &e)==0);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1);
+    ASSERT(BRCFScanLedgerScannedThrough(&l) < 400);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -199,6 +349,21 @@ int main(void) {
 
     free(l);
     free(l2);
+
+    test_overflow_reports_drop();
+    test_record_advances_requestedThrough();
+
+    test_buffer_store_take_drain();
+    test_buffer_drain_keeps_on_eval_zero();
+    test_buffer_bytebudget_evicts_oldest();
+    test_buffer_clear();
+
+    test_peek_coalesces_and_no_bump();
+    test_peek_gap_splits();
+    test_peek_minheight_skips_below();
+    test_commit_bumps_only_range();
+    test_retire_caps_to_gaveup_and_holds_cursor();
+
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
 }
