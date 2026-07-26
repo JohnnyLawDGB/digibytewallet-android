@@ -166,6 +166,7 @@ static void bridge_txStatusUpdate(void *info) {
 static jmethodID g_mid_onSaveBlocks = NULL;
 static jmethodID g_mid_onSavePeers = NULL;
 static jmethodID g_mid_onSaveFilterHeaders = NULL;
+static jmethodID g_mid_onSaveCfLedger = NULL;
 
 static void bridge_saveBlocks(void *info, int replace, BRMerkleBlock *blocks[],
                                size_t blocksCount, uint64_t *memIntegrityCheck) {
@@ -1100,6 +1101,7 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedPeers(JNIEnv *env, jobject th
 /* ---------- BIP 158 bridge ---------- */
 
 static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *chain);
+static void bridge_saveCFLedger(void *info, const uint8_t *bytes, size_t len);
 
 /* Pending state for BIP 158 setters that get called before the peer manager
  * exists. SyncService.kt configures sync mode / chain / auto-fetch BEFORE
@@ -1148,6 +1150,9 @@ static void _applyPendingBip158State(void) {
      * which mode lands (the wallet is always CF-only, so this never loses
      * filter-header persistence). */
     BRPeerManagerSetSaveFilterHeaders(g_peerManager, NULL, bridge_saveFilterHeaders);
+    /* Same lifetime as the filter-header persistence callback: install the CF
+     * scan-ledger persistence hook on every manager (re)creation (Phase 1). */
+    BRPeerManagerSetSaveCFLedger(g_peerManager, NULL, bridge_saveCFLedger);
     LOGI("BIP158: applied syncMode=%d (pendingSet=%d)", g_pendingSyncMode, g_pendingSyncModeSet);
     g_pendingSyncModeSet = 0;
 
@@ -1231,6 +1236,36 @@ static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *cha
     free(buf);
 }
 
+/* CF scan-ledger persistence callback (mirror of bridge_saveFilterHeaders).
+ * Fired from inside the manager lock after each cfheaders extend, with a blob
+ * already serialized by BRPeerManager. Hands it to Kotlin's onSaveCfLedger([B),
+ * which coalesces + persists (same contract as onSaveFilterHeaders). */
+static void bridge_saveCFLedger(void *info, const uint8_t *bytes, size_t len) {
+    (void)info;
+    if (!bytes || len == 0) return;
+
+    JNIEnv *env = jni_get_env();
+    if (!env || !g_callbackHandler) {
+        LOGD("bridge_saveCFLedger: no JNI env, skipping persist");
+        return;
+    }
+
+    if (!g_mid_onSaveCfLedger) {
+        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
+        g_mid_onSaveCfLedger = (*env)->GetMethodID(env, cls, "onSaveCfLedger", "([B)V");
+        (*env)->DeleteLocalRef(env, cls);
+        if (!g_mid_onSaveCfLedger) {
+            LOGW("bridge_saveCFLedger: onSaveCfLedger method not found");
+            return;
+        }
+    }
+
+    jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)len);
+    (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)len, (const jbyte *)bytes);
+    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveCfLedger, jbuf);
+    (*env)->DeleteLocalRef(env, jbuf);
+}
+
 JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz, jint mode) {
     (void)env; (void)thiz;
@@ -1303,6 +1338,66 @@ Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobje
     PEER_GUARD();
     if (!g_peerManager) return 0;
     return (jint)BRPeerManagerCFChainTipHeight(g_peerManager);
+}
+
+/* CF scan-ledger observe-only readouts (Phase 1). All guarded by PEER_GUARD +
+ * a g_peerManager null-check, mirroring getCFChainTipHeight. */
+
+JNIEXPORT jlongArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerCounts(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    PEER_GUARD();
+    uint32_t scannedThrough = 0, outstanding = 0, gaveUp = 0, pending = 0;
+    if (g_peerManager) {
+        BRPeerManagerCFLedgerCounts(g_peerManager, &scannedThrough, &outstanding, &gaveUp, &pending);
+    }
+    jlong vals[4] = { (jlong)scannedThrough, (jlong)outstanding, (jlong)gaveUp, (jlong)pending };
+    jlongArray out = (*env)->NewLongArray(env, 4);
+    if (out) (*env)->SetLongArrayRegion(env, out, 0, 4, vals);
+    return out;
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerHoleRanges(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return (*env)->NewLongArray(env, 0);
+
+    enum { CF_LEDGER_HOLE_RANGES_CAP = 128 };
+    uint32_t starts[CF_LEDGER_HOLE_RANGES_CAP];
+    uint32_t ends[CF_LEDGER_HOLE_RANGES_CAP];
+    size_t n = BRPeerManagerCFLedgerHoleRanges(g_peerManager, starts, ends, CF_LEDGER_HOLE_RANGES_CAP);
+
+    jlongArray out = (*env)->NewLongArray(env, (jsize)(n * 2));
+    if (!out) return NULL;
+    if (n > 0) {
+        jlong *flat = malloc(n * 2 * sizeof(jlong));
+        if (!flat) return out; /* empty-ish array on OOM; caller sees length but no data */
+        for (size_t i = 0; i < n; i++) {
+            flat[i * 2]     = (jlong)starts[i];
+            flat[i * 2 + 1] = (jlong)ends[i];
+        }
+        (*env)->SetLongArrayRegion(env, out, 0, (jsize)(n * 2), flat);
+        free(flat);
+    }
+    return out;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jbyteArray data) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager || !data) return JNI_FALSE;
+
+    jsize len = (*env)->GetArrayLength(env, data);
+    if (len <= 0) return JNI_FALSE;
+    jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
+    if (!buf) return JNI_FALSE;
+
+    int ok = BRPeerManagerCFLedgerRestore(g_peerManager, (const uint8_t *)buf, (size_t)len);
+    (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
+    LOGI("restoreCfScanLedger: %s (%d bytes)", ok ? "restored" : "rejected", (int)len);
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
