@@ -159,3 +159,12 @@ Logical progression — each step is testable before the next begins:
    standing legibility rule).
 6. Never start a new sequence with the previous sequence's branch
    unmerged.
+7. **Crash-triage BuildId gate (HARD):** a native tombstone/backtrace
+   drives NO decision until its `.so` BuildId matches the retained
+   unstripped `.so` you symbolize against. `readelf -n <so> | grep 'Build ID'`
+   vs the tombstone's `(BuildId: …)` — a 10-second check. (2026-07-26: one
+   wrong-BuildId symbolization sent a crash hunt down a false CF-parser-RCE
+   path — private branch, a 33-min fuzz run, disclosure panic — all to unwind
+   a stack read off the wrong binary. Gradle can package a stale native lib
+   into the APK while the cmake obj re-links to a different BuildId; the
+   installed APK's `.so` is the source of truth — extract it and match.)
