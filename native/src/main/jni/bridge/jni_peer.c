@@ -582,6 +582,31 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
         ? (uint64_t)servicesHex
         : INJECT_DEFAULT_SERVICES;
 
+    /* Exclusive-mode enforcement (acceptance rig, 2026-07-26): when the user
+     * pinned an own-node in exclusive mode, do NOT inject public seeder/priority
+     * peers — only the pinned node may enter the pool. Kotlin's seeder injection
+     * calls this on a cadence; without the guard it floods public CF peers in
+     * even when the user chose exclusive (privacy / sovereignty / metered) mode.
+     * The resulting cfilters-from-one-peer-while-headers-climb-from-another
+     * racing chain views were what wedged the CF scan on the rig. The own-node
+     * is itself injected through this same path (see setPinnedPeer's contract),
+     * so it MUST be allowed through — the guard drops only NON-pin peers. */
+    if (g_ownNodeExclusive) {
+        UInt128 injAddr = UINT128_ZERO;
+        struct in_addr ip4x;
+        int isPin = (inet_pton(AF_INET, ip, &ip4x) == 1);
+        if (isPin) {
+            injAddr.u16[5] = 0xffff;
+            injAddr.u32[3] = ip4x.s_addr;
+            isPin = UInt128Eq(injAddr, g_pinnedAddr) && (uint16_t)port == g_pinnedPort;
+        }
+        if (! isPin) {
+            LOGD("injectPeerByIp: exclusive mode — dropping non-pin peer %s", ip);
+            (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+            return;
+        }
+    }
+
     /* Update g_savedPeers for the cold-start case when peer manager doesn't
      * exist yet — _injectPriorityPeer dedupes and prepends. */
     _injectPriorityPeer(ip, (uint16_t)port, services);
@@ -619,7 +644,15 @@ Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thi
                                                         jstring ipStr, jint port, jboolean exclusive) {
     (void)thiz;
     PEER_GUARD();
-    g_ownNodeExclusive = exclusive ? 1 : 0;
+    /* INVARIANT: exclusivity must never be live without a matching pin. Default
+     * it OFF and arm it only once a valid IPv4 pin is actually stored below.
+     * Otherwise a malformed IP with exclusive=true would leave
+     * g_ownNodeExclusive=1 against a stale/zero pin, and injectPeerByIp's
+     * exclusive guard would then drop EVERY peer (incl. the own-node's own
+     * re-injection) → 0 peers → sync never starts. (Near-zero in practice — the
+     * only caller passes a validated IPv4 — but the guard makes the failure
+     * total, so close the invariant at the source.) */
+    g_ownNodeExclusive = 0;
     /* Parse and REMEMBER the pin unconditionally — before the null-check — so a
      * pin set pre-sync (cold start, or against a manager forceReconnect is about
      * to free) survives into the next manager via startSync's re-apply. */
@@ -629,6 +662,7 @@ Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thi
         UInt128 addr = UINT128_ZERO; addr.u16[5] = 0xffff; addr.u32[3] = ip4.s_addr;
         g_pinnedAddr = addr;
         g_pinnedPort = (uint16_t)port;
+        g_ownNodeExclusive = exclusive ? 1 : 0;  /* armed only WITH a valid pin */
         /* Also pin the live manager immediately, if one exists. */
         if (g_peerManager) {
             BRPeerManagerSetPinnedPeer(g_peerManager, addr, (uint16_t)port, exclusive ? 1 : 0);
