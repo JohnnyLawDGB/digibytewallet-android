@@ -478,6 +478,202 @@ static int test_buffered_hashes_enumerates(void) {
     return 1;
 }
 
+// ---- Task 1 (CF retention scan-floor): LowestNeededHeight + abandonedBelow --
+// hard floor + AbandonGaveUpBelow. Little-endian u32 helper for the hand-built
+// pre-version (v1) persistence blob in the back-compat case.
+static void putLE32(uint8_t *p, uint32_t v) {
+    p[0]=(uint8_t)(v&0xff); p[1]=(uint8_t)((v>>8)&0xff);
+    p[2]=(uint8_t)((v>>16)&0xff); p[3]=(uint8_t)((v>>24)&0xff);
+}
+
+// LowestNeededHeight = max(scannedThrough+1, abandonedBelow). gaveUp-INCLUSIVE by
+// construction: _cfLedgerAdvance caps scannedThrough at min(outstanding[0],gaveUp[0])-1,
+// so scannedThrough+1 already folds in the gaveUp hole — its header must be retained
+// so _cfBufEval can eventually drain+credit it (excluding it silently loses a receive).
+static int test_lowest_needed_height(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);   // scannedThrough=99
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    BRCFScanLedgerRecordRequested(&l, 100, 120, pa, 12024, 1000);
+    for (uint32_t h=100; h<=104; h++) BRCFScanLedgerMarkEvaluated(&l, h);   // scannedThrough -> 104
+    // Drive 105 (lowest outstanding) to gaveUp via the attempt cap.
+    uint32_t now=1000, out=0;
+    for (int i=0;i<CF_REREQ_MAX_ATTEMPTS;i++){ now+=1000; BRCFScanLedgerNextRerequest(&l, now, &out); }
+    now+=1000; BRCFScanLedgerNextRerequest(&l, now, &out);                  // retire 105 -> gaveUp
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==105);
+    ASSERT(BRCFScanLedgerScannedThrough(&l)==104);                         // stops just below the gaveUp hole
+
+    // gaveUp-INCLUSION: lowest-needed == scannedThrough+1 == 105 (the gaveUp hole).
+    ASSERT(BRCFScanLedgerLowestNeededHeight(&l)==105);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==0);
+
+    // abandonedBelow above scannedThrough+1 → lowest-needed follows the hard floor.
+    l.abandonedBelow = 200;
+    ASSERT(BRCFScanLedgerLowestNeededHeight(&l)==200);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==200);
+
+    // abandonedBelow below scannedThrough+1 → scannedThrough+1 wins (max semantics).
+    l.abandonedBelow = 50;
+    ASSERT(BRCFScanLedgerLowestNeededHeight(&l)==105);
+    return 1;
+}
+
+// AbandonGaveUpBelow: drops gaveUp<clamp (reporting count/range), advances the
+// hard floor to min(clamp, lowest-outstanding) NEVER past a still-retrying hole,
+// monotonic, returns the new lowest-still-needed height.
+static int test_abandon_gaveup_below(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);   // scannedThrough=99
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    // A still-retrying outstanding hole O=500 (< clamp, sub-cap).
+    BRCFScanLedgerRecordRequested(&l, 500, 500, pa, 12024, 1000);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);
+    // gaveUp = {200, 300, 2000}: G1=200,G2=300 (< clamp=1000) < 2000 (> clamp).
+    // Both G1,G2 sit below O so abandoning them is covered by the floor.
+    l.gaveUp[0]=200; l.gaveUp[1]=300; l.gaveUp[2]=2000; l.gaveUpCount=3;
+
+    uint32_t cnt=999, lo=999, hi=999;
+    uint32_t newFloor = BRCFScanLedgerAbandonGaveUpBelow(&l, 1000, &cnt, &lo, &hi);
+
+    // G1,G2 dropped (< clamp), G3=2000 kept.
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==2000);
+    // count + [lo..hi] returned for the caller's WARN log.
+    ASSERT(cnt==2 && lo==200 && hi==300);
+    // abandonedBelow advanced to min(clamp=1000, lowest-outstanding O=500) = 500 (NOT past O).
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==500);
+    // O is UNTOUCHED — still a live outstanding hole.
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);
+    // returns the new lowest-still-needed height == O.
+    ASSERT(newFloor==500 && BRCFScanLedgerLowestNeededHeight(&l)==500);
+
+    // Second call, higher clamp: O still outstanding & below clamp → the floor
+    // STAYS at O (never past a retrying hole), and because the drop is bounded by
+    // target==O, 2000 (which sits ABOVE O) is KEPT — not abandoned while O is
+    // recoverable. Nothing dropped this call.
+    uint32_t nf2 = BRCFScanLedgerAbandonGaveUpBelow(&l, 5000, &cnt, &lo, &hi);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==2000 && cnt==0);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==500 && nf2==500);
+
+    // Resolve O → no outstanding hole caps the floor any more; only NOW can the
+    // floor advance past 2000 and abandon it.
+    BRCFScanLedgerMarkEvaluated(&l, 500);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==0);
+    uint32_t nf3 = BRCFScanLedgerAbandonGaveUpBelow(&l, 5000, &cnt, &lo, &hi);
+    ASSERT(cnt==1 && lo==2000 && hi==2000);           // 2000 abandoned once recoverable-hole O is gone
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==0);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==5000 && nf3==5000);   // now reaches clamp
+
+    // Monotonic: a lower clamp NEVER regresses the floor.
+    uint32_t nf4 = BRCFScanLedgerAbandonGaveUpBelow(&l, 3000, &cnt, &lo, &hi);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==5000 && nf4==5000);
+    return 1;
+}
+
+// Silent-loss guard: abandonedBelow is the SINGLE PERSISTED source of truth for
+// abandonment. AbandonGaveUpBelow must NEVER drop a gaveUp height that sits ABOVE
+// the new watermark — such a height would vanish from the persisted gaveUp list
+// (removed from HoleRanges) while abandonedBelow (capped at the still-outstanding
+// hole O) doesn't cover it, so after a process restart it is lost entirely: not in
+// gaveUp, not below the persisted floor, never scanned. Drop only < target, keep
+// gaveUp in [O, clamp).
+static int test_abandon_keeps_gaveup_above_watermark(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    // Still-retrying outstanding hole O=500 (attempts < MAX, below clamp).
+    BRCFScanLedgerRecordRequested(&l, 500, 500, pa, 12024, 1000);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);
+    // gaveUp = {300, 700}: INTERLEAVED — G1=300 < O=500 < G2=700 < clamp=1000.
+    l.gaveUp[0]=300; l.gaveUp[1]=700; l.gaveUpCount=2;
+
+    uint32_t cnt=999, lo=999, hi=999;
+    uint32_t nf = BRCFScanLedgerAbandonGaveUpBelow(&l, 1000, &cnt, &lo, &hi);
+
+    // Only G1 (below the new watermark O=500) is abandoned; G2 in [O,clamp) is KEPT.
+    ASSERT(cnt==1 && lo==300 && hi==300);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==700);
+    // abandonedBelow == O; nothing dropped sits above it (single source of truth).
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==500);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);   // O untouched
+    ASSERT(nf==500);
+    // G2=700 is still a REPORTED hole (survives a restart via the persisted gaveUp list).
+    uint32_t starts[8], ends[8];
+    size_t n = BRCFScanLedgerHoleRanges(&l, starts, ends, 8);
+    int found700 = 0;
+    for (size_t i=0;i<n;i++) if (starts[i]<=700 && 700<=ends[i]) found700 = 1;
+    ASSERT(found700);
+    return 1;
+}
+
+// abandonedBelow is a HARD FLOOR: RecordRequested / MarkHeaderRace reject (no-op)
+// heights < abandonedBelow; PeekRerequestRange never offers a height < abandonedBelow.
+static int test_abandoned_is_hard_floor(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    l.abandonedBelow = 1000;   // floor
+
+    // RecordRequested drops the below-floor part, keeps [1000..1002].
+    BRCFScanLedgerRecordRequested(&l, 900, 1002, pa, 12024, 100);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==3 && l.outstanding[0].height==1000);
+    // A request wholly below the floor is a complete no-op.
+    BRCFScanLedgerRecordRequested(&l, 500, 800, pa, 12024, 100);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==3);
+    // MarkHeaderRace below the floor is a no-op (never resurrects an abandoned height).
+    BRCFScanLedgerMarkHeaderRace(&l, 700);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==3);
+    // MarkHeaderRace at/above the floor still records.
+    BRCFScanLedgerMarkHeaderRace(&l, 1005);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==4);
+
+    // PeekRerequestRange clamps to the floor even for heights recorded BEFORE it rose.
+    BRCFScanLedger l2; BRCFScanLedgerInit(&l2, 1);
+    BRCFScanLedgerRecordRequested(&l2, 100, 105, pa, 12024, 0);   // recorded first
+    l2.abandonedBelow = 103;                                       // floor raised after the fact
+    uint32_t s=0, e=0;
+    int got = BRCFScanLedgerPeekRerequestRange(&l2, CF_REREQ_BASE_SECS, 0, &s, &e);
+    ASSERT(got==1 && s==103);   // never offers 100..102 despite them being outstanding & due
+    return 1;
+}
+
+// abandonedBelow round-trips through Serialize/Parse (blob v2), and a pre-version
+// (v1) blob parses with abandonedBelow == 0 (backward compatible).
+static int test_abandonedBelow_roundtrips(void) {
+    BRCFScanLedger l1; BRCFScanLedgerInit(&l1, 100);
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    BRCFScanLedgerRecordRequested(&l1, 100, 110, pa, 12024, 0);
+    l1.abandonedBelow = 777;   // non-zero floor to persist
+    uint8_t buf[4096];
+    size_t need = BRCFScanLedgerSerialize(&l1, buf, sizeof buf);
+    ASSERT(need > 0 && need <= sizeof buf);
+
+    BRCFScanLedger l2;
+    ASSERT(BRCFScanLedgerParse(&l2, buf, need)==1);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l2)==777);                       // survived
+    ASSERT(l2.start==100 && l2.requestedThrough==l1.requestedThrough);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l2)==11);
+    // byte-identical re-serialize.
+    uint8_t buf2[4096];
+    size_t need2 = BRCFScanLedgerSerialize(&l2, buf2, sizeof buf2);
+    ASSERT(need2==need && memcmp(buf, buf2, need)==0);
+
+    // Back-compat: hand-build a pre-version (v1) blob and confirm it parses with
+    // abandonedBelow == 0. Reuse the real magic bytes from a v2 serialize so the
+    // test never hardcodes the module's private CF_LEDGER_MAGIC.
+    BRCFScanLedger probeL; BRCFScanLedgerInit(&probeL, 1);
+    uint8_t probe[64]; BRCFScanLedgerSerialize(&probeL, probe, sizeof probe);
+    uint8_t v1[28];
+    v1[0]=probe[0]; v1[1]=probe[1]; v1[2]=probe[2]; v1[3]=probe[3];   // magic (LE) from v2 output
+    putLE32(v1+4, 1);        // version = 1 (pre-abandonedBelow layout)
+    putLE32(v1+8, 500);      // start
+    putLE32(v1+12, 499);     // scannedThrough
+    putLE32(v1+16, 499);     // requestedThrough
+    putLE32(v1+20, 0);       // outstandingCount
+    putLE32(v1+24, 0);       // gaveUpCount
+    BRCFScanLedger lv1;
+    ASSERT(BRCFScanLedgerParse(&lv1, v1, sizeof v1)==1);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&lv1)==0);                        // back-compat default
+    ASSERT(lv1.start==500 && lv1.scannedThrough==499 && lv1.requestedThrough==499);
+    ASSERT(BRCFScanLedgerOutstandingCount(&lv1)==0 && BRCFScanLedgerGaveUpCount(&lv1)==0);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -511,6 +707,12 @@ int main(void) {
     test_ageout_leaves_ledger_scan_state_byte_identical();
 
     test_buffered_hashes_enumerates();
+
+    test_lowest_needed_height();
+    test_abandon_gaveup_below();
+    test_abandon_keeps_gaveup_above_watermark();
+    test_abandoned_is_hard_floor();
+    test_abandonedBelow_roundtrips();
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
