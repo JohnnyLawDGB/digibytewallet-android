@@ -335,6 +335,109 @@ static int test_retire_caps_to_gaveup_and_holds_cursor(void) {
     return 1;
 }
 
+// ---- Task 3 (stale-buffer livelock fix): age-out byte-reclamation backstop --
+// A pruned/orphaned-hash entry can sit in the filter buffer forever (a
+// re-serving peer keeps re-buffering it, and BufferFilter's de-dup path resets
+// `at` on every re-buffer). BRCFScanLedgerEvictAgedFilters is a pure
+// byte-budget backstop, keyed off the IMMUTABLE `firstAt` (set once, on
+// insert, never rejuvenated by a re-buffer) rather than the mutable `at`.
+
+// Case A: age-out keys off firstAt (immutable), NOT at (reset on re-buffer).
+static int test_ageout_keys_off_first_buffered(void) {
+    UInt256 hash = {.u8={0x11}};
+    uint8_t bytes[] = {1,2,3};
+
+    // Part A: buffer at (now-901), then RE-BUFFER the same hash at `now` —
+    // `at` resets to `now` but `firstAt` must stay pinned at (now-901). If
+    // eviction were keyed off `at` this entry would look fresh and survive;
+    // keyed off `firstAt` (901s old, past CF_FILTER_BUF_MAX_AGE_SECS=900) it
+    // must be evicted.
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+    uint32_t now = 10000;
+    ASSERT(BRCFScanLedgerBufferFilter(&l, hash, bytes, sizeof(bytes), now - 901) == 1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l, hash, bytes, sizeof(bytes), now) == 1); // re-buffer (de-dup path)
+    ASSERT(BRCFScanLedgerBufferedCount(&l) == 1);
+
+    BRCFScanLedgerEvictAgedFilters(&l, now);
+
+    ASSERT(BRCFScanLedgerBufferedCount(&l) == 0);
+    ASSERT(BRCFScanLedgerBufferedBytes(&l) == 0);
+    BRCFScanLedgerFree(&l);
+
+    // Part B: a FRESH entry (firstAt == now, never re-buffered) at the same
+    // `now` must NOT be evicted — proves the age check isn't just "evict
+    // everything".
+    BRCFScanLedger l2; BRCFScanLedgerInit(&l2, 1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l2, hash, bytes, sizeof(bytes), now) == 1);
+    BRCFScanLedgerEvictAgedFilters(&l2, now);
+    ASSERT(BRCFScanLedgerBufferedCount(&l2) == 1);
+    BRCFScanLedgerFree(&l2);
+
+    // Part C: exact boundary — firstAt == now - CF_FILTER_BUF_MAX_AGE_SECS
+    // (age == 900) must NOT be evicted; the check is strictly `age > MAX`, so
+    // only 901+ evicts. Pins the off-by-one that the whole firstAt clock rests on.
+    BRCFScanLedger l3; BRCFScanLedgerInit(&l3, 1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l3, hash, bytes, sizeof(bytes), now - CF_FILTER_BUF_MAX_AGE_SECS) == 1);
+    BRCFScanLedgerEvictAgedFilters(&l3, now);
+    ASSERT(BRCFScanLedgerBufferedCount(&l3) == 1); // age == 900 == MAX, not > MAX → kept
+    BRCFScanLedgerFree(&l3);
+    return 1;
+}
+
+// Case B: the silent-loss invariant — EvictAgedFilters touches ONLY the
+// filter-byte buffer. outstanding/scannedThrough/requestedThrough/gaveUp must
+// come out byte-for-byte identical, and it must never call MarkEvaluated
+// (which would fabricate a "no cfilter needed here" hole).
+static int test_ageout_leaves_ledger_scan_state_byte_identical(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);
+    UInt128 pa = UINT128_ZERO; pa.u16[5]=0xffff; pa.u32[3]=0x0A000202;
+    BRCFScanLedgerRecordRequested(&l, 100, 110, pa, 12024, 0);          // 11 outstanding
+    for (uint32_t h = 100; h <= 104; h++) BRCFScanLedgerMarkEvaluated(&l, h); // scannedThrough -> 104
+
+    // Drive the lowest remaining outstanding height (105) to gaveUp via the
+    // attempt cap, so the snapshot has a MIXED outstanding+gaveUp set.
+    uint32_t now = 1000, out = 0;
+    for (int i = 0; i < CF_REREQ_MAX_ATTEMPTS; i++) { now += 1000; BRCFScanLedgerNextRerequest(&l, now, &out); }
+    now += 1000; BRCFScanLedgerNextRerequest(&l, now, &out);            // retires 105 -> gaveUp
+    ASSERT(BRCFScanLedgerGaveUpCount(&l) == 1 && l.gaveUp[0] == 105);
+    ASSERT(BRCFScanLedgerOutstandingCount(&l) == 5);                    // 106..110
+
+    // Snapshot every scan-state field BEFORE touching the filter buffer.
+    uint32_t snapScanned    = l.scannedThrough;
+    uint32_t snapRequested  = l.requestedThrough;
+    size_t   snapOutCount   = l.outstandingCount;
+    BRCFOutstanding snapOut[CF_OUTSTANDING_MAX];
+    memcpy(snapOut, l.outstanding, snapOutCount * sizeof(BRCFOutstanding));
+    size_t   snapGaveUpCount = l.gaveUpCount;
+    uint32_t snapGaveUp[CF_GAVEUP_MAX];
+    memcpy(snapGaveUp, l.gaveUp, snapGaveUpCount * sizeof(uint32_t));
+
+    // Buffer several entries, all aged past CF_FILTER_BUF_MAX_AGE_SECS.
+    uint8_t bytes[] = {1,2,3,4};
+    for (int i = 0; i < 5; i++) {
+        UInt256 h = {.u8={(uint8_t)(0x50+i)}};
+        ASSERT(BRCFScanLedgerBufferFilter(&l, h, bytes, sizeof(bytes), now - CF_FILTER_BUF_MAX_AGE_SECS - 1) == 1);
+    }
+    ASSERT(BRCFScanLedgerBufferedCount(&l) == 5);
+
+    BRCFScanLedgerEvictAgedFilters(&l, now);
+
+    // Only the filter-buffer fields changed.
+    ASSERT(BRCFScanLedgerBufferedCount(&l) == 0);
+    ASSERT(BRCFScanLedgerBufferedBytes(&l) == 0);
+
+    // Everything else is byte-for-byte identical to the pre-evict snapshot.
+    ASSERT(l.scannedThrough == snapScanned);
+    ASSERT(l.requestedThrough == snapRequested);
+    ASSERT(l.outstandingCount == snapOutCount);
+    ASSERT(memcmp(l.outstanding, snapOut, snapOutCount * sizeof(BRCFOutstanding)) == 0);
+    ASSERT(l.gaveUpCount == snapGaveUpCount);
+    ASSERT(memcmp(l.gaveUp, snapGaveUp, snapGaveUpCount * sizeof(uint32_t)) == 0);
+
+    BRCFScanLedgerFree(&l);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -363,6 +466,9 @@ int main(void) {
     test_peek_minheight_skips_below();
     test_commit_bumps_only_range();
     test_retire_caps_to_gaveup_and_holds_cursor();
+
+    test_ageout_keys_off_first_buffered();
+    test_ageout_leaves_ledger_scan_state_byte_identical();
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
