@@ -438,6 +438,46 @@ static int test_ageout_leaves_ledger_scan_state_byte_identical(void) {
     return 1;
 }
 
+// ---- Task 4: pure buffered-hash enumerator (reverse-map input) --------------
+// BRCFScanLedgerBufferedHashes copies up to `cap` buffered blockHashes (FIFO
+// order, oldest first) into out[] and returns the count written
+// (min(filterBufCount, cap)). It is the pure, BRPeerManager-free input the
+// residual re-request suppressor reverse-maps to heights via manager->blocks.
+static int test_buffered_hashes_enumerates(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 1);
+
+    // Empty buffer -> 0 written.
+    UInt256 out[8];
+    ASSERT(BRCFScanLedgerBufferedHashes(&l, out, 8) == 0);
+
+    UInt256 h1 = {.u8={0xA1}}, h2 = {.u8={0xB2}}, h3 = {.u8={0xC3}};
+    uint8_t f[] = {1, 2, 3};
+    ASSERT(BRCFScanLedgerBufferFilter(&l, h1, f, sizeof f, 0) == 1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l, h2, f, sizeof f, 0) == 1);
+    ASSERT(BRCFScanLedgerBufferFilter(&l, h3, f, sizeof f, 0) == 1);
+    ASSERT(BRCFScanLedgerBufferedCount(&l) == 3);
+
+    // Full copy: returns 3 and writes the 3 hashes in FIFO order.
+    memset(out, 0, sizeof out);
+    size_t n = BRCFScanLedgerBufferedHashes(&l, out, 8);
+    ASSERT(n == 3);
+    ASSERT(UInt256Eq(out[0], h1) && UInt256Eq(out[1], h2) && UInt256Eq(out[2], h3));
+
+    // cap smaller than count truncates to cap and returns cap.
+    memset(out, 0, sizeof out);
+    ASSERT(BRCFScanLedgerBufferedHashes(&l, out, 2) == 2);
+    ASSERT(UInt256Eq(out[0], h1) && UInt256Eq(out[1], h2));
+
+    // cap 0 -> nothing written, returns 0.
+    ASSERT(BRCFScanLedgerBufferedHashes(&l, out, 0) == 0);
+
+    // NULL out -> 0 (the guard the caller relies on to never write through NULL).
+    ASSERT(BRCFScanLedgerBufferedHashes(&l, NULL, 8) == 0);
+
+    BRCFScanLedgerFree(&l);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -469,6 +509,8 @@ int main(void) {
 
     test_ageout_keys_off_first_buffered();
     test_ageout_leaves_ledger_scan_state_byte_identical();
+
+    test_buffered_hashes_enumerates();
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;

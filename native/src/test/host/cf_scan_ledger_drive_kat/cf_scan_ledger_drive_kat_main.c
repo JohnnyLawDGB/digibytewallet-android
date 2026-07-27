@@ -644,38 +644,128 @@ static void test_residual_rerequests_and_rotates(BRWallet *wallet)
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: the residual re-request path is gated OFF entirely while the
-// buffer is non-empty, even when a separate, otherwise-resolvable residual
-// hole exists -- undrained-but-outstanding header-race heights belong to the
-// buffer path and must never be duplicate-requested by this one.
-static void test_residual_gated_by_buffer(BRWallet *wallet)
+// Test 5 (Task 4 -- livelock break): the residual re-request path is NO LONGER
+// gated on an empty buffer. This REPLACES the old test_residual_gated_by_buffer
+// (which locked in the very `if (BufferedCount==0)` gate Task 4 deletes). A
+// STALE buffered entry whose blockHash was orphaned by a header re-sync (NOT in
+// manager->blocks) keeps BufferedCount>0 forever; under the old global gate that
+// starved residual re-request for EVERY height (the production livelock). With
+// the gate deleted + the O(1) reverse-map suppressor, the orphaned hash resolves
+// to NULL (contributes no skip height), so a genuinely-due residual hole is
+// still re-requested despite the stale buffer. RED against the gate-present code
+// (the gate suppresses the send -> g_capCount stays 0).
+static void test_residual_not_starved_by_stale_buffer(BRWallet *wallet)
 {
-    printf("\n=== test_residual_gated_by_buffer ===\n");
+    printf("\n=== test_residual_not_starved_by_stale_buffer (Task 4 livelock break) ===\n");
 
     BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
 
-    uint32_t H = 900000;
+    uint32_t H = 200;
+    BRMerkleBlock *bH = dummyBlock(H, 0xA0, 1700000000);
+    BRSetAdd(m->blocks, bH);
+    m->lastBlock = bH; // tip == 200 so the residual [200..200] run is not tip-clipped
+
+    // A connected CF-capable peer, else `if (!chosen) break` (BRPeerManager.c)
+    // would (falsely) suppress the send -- a setup bug, not a result.
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x11; pa->port = 11001; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
     BRCFScanLedgerInit(&m->cfLedger, H);
+    // Height 200 outstanding + DUE: requestedAt=0 vs the real time(NULL) clock the
+    // driver reads (>> the 30s base backoff), so PeekRerequestRange offers it.
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H, H, UINT128_ZERO, 0, 0);
+    check(findOutstanding(&m->cfLedger, H) != NULL, "setup: height 200 outstanding");
 
-    // One buffered entry keyed to a blockHash with NO known header -- isReady
-    // returns 0 (BRSetGet finds nothing), so it will not drain regardless of
-    // the residual gate below.
-    UInt256 unknownHash; memset(unknownHash.u8, 0xEE, sizeof(unknownHash.u8));
+    // A STALE buffered entry: its blockHash is NOT in m->blocks (orphaned by a
+    // header re-sync). It cannot drain (isReady -> BRSetGet NULL) and keeps
+    // BufferedCount>0 forever -- exactly the residual-starving wedge.
+    UInt256 orphanHash; memset(orphanHash.u8, 0xEE, sizeof(orphanHash.u8));
     uint8_t junk[4] = { 0x01, 0x00, 0x00, 0x00 };
-    BRCFScanLedgerBufferFilter(&m->cfLedger, unknownHash, junk, sizeof junk, (uint32_t)time(NULL));
-    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "setup: 1 buffered (header-unresolvable) entry");
+    BRCFScanLedgerBufferFilter(&m->cfLedger, orphanHash, junk, sizeof junk, (uint32_t)time(NULL));
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "setup: 1 stale (orphaned-hash) buffered entry -> BufferedCount>0");
 
-    // A separate, due, otherwise-resolvable residual hole -- nothing about it
-    // individually would block a re-request.
-    BRCFScanLedgerRecordRequested(&m->cfLedger, H + 50, H + 50, UINT128_ZERO, 0, 0);
-
-    g_capCount = 0;
+    g_capCount = 0; g_capStart = 0;
 
     BRPeerManagerKeepAlive(m);
 
-    check(g_capCount == 0, "residual re-request is gated OFF entirely while BufferedCount>0");
-    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "buffered entry untouched (still unresolvable)");
+    check(g_capCount >= 1,
+          "livelock break: residual getcfilters STILL fired despite the stale buffer (gate deleted)");
+    check(g_capStart == H,
+          "livelock break: the residual re-request targeted the outstanding hole (height 200)");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "stale buffered entry untouched (orphan hash still unresolvable, suppresses nothing)");
+
+    BRPeerManagerFree(m);
+}
+
+// ---------------------------------------------------------------------------
+// Test 6 (Task 4 -- suppressor skips the in-flight height): a buffered entry
+// whose blockHash IS in manager->blocks at height H, but whose cfheader chain
+// has NOT advanced past H (cfheader-lag), stays buffered AND stays outstanding.
+// The O(1) reverse-map suppressor must resolve that buffered hash -> height H
+// and SKIP re-requesting H (it is in-flight via the buffer path), while a
+// SIBLING genuine residual hole at a different height IS re-requested. Proves
+// the skip is height-targeted (via the reverse map), not a blanket
+// re-suppression, and that NO forward canonical(H) walk is used. RED against the
+// gate-present code (buffer non-empty -> the whole residual path is gated off ->
+// the sibling is NOT re-requested either).
+static void test_residual_skips_cfheader_lag_height(BRWallet *wallet)
+{
+    printf("\n=== test_residual_skips_cfheader_lag_height (Task 4 suppressor) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t H   = 200;   // cfheader-lag buffered height (in blocks, cfheader NOT advanced past it)
+    uint32_t SIB = 205;   // sibling genuine residual hole (not buffered)
+    BRMerkleBlock *bH   = dummyBlock(H,   0xB0, 1700000000);
+    BRMerkleBlock *bSib = dummyBlock(SIB, 0xB5, 1700000075);
+    BRSetAdd(m->blocks, bH);
+    BRSetAdd(m->blocks, bSib);
+    m->lastBlock = bSib;  // tip == 205 so the sibling [205..205] run is not tip-clipped
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x12; pa->port = 11002; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // cfheader chain that has NOT advanced past H: NextHeight()==200 <= H(200),
+    // so isReady gates the buffered entry OFF -> it stays buffered (in-flight),
+    // NOT drained. (A fresh chain reports NextHeight == startHeight.)
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, H, UINT256_ZERO);
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) <= bH->height,
+          "setup: cfheader chain has NOT advanced past H (cfheader-lag -> entry stays buffered)");
+
+    BRCFScanLedgerInit(&m->cfLedger, H);
+    // Both H and the sibling outstanding + due (requestedAt=0 vs the real clock).
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H,   H,   UINT128_ZERO, 0, 0);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, SIB, SIB, UINT128_ZERO, 0, 0);
+
+    // Buffer a filter keyed to bH's OWN hash: its header IS present at height 200,
+    // but the cfheader-lag keeps it buffered -> the reverse map resolves it to 200.
+    uint8_t junk[4] = { 0x01, 0x00, 0x00, 0x00 };
+    BRCFScanLedgerBufferFilter(&m->cfLedger, bH->blockHash, junk, sizeof junk, (uint32_t)time(NULL));
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "setup: 1 cfheader-lag buffered entry (hash IS in blocks at H)");
+
+    g_capCount = 0; g_capStart = 0;
+
+    BRPeerManagerKeepAlive(m);
+
+    check(g_capCount == 1, "suppressor: exactly one residual getcfilters sent (the sibling, not H)");
+    check(g_capStart == SIB,
+          "suppressor: the send targeted the SIBLING hole (205), skipping the in-flight H (200)");
+
+    const BRCFOutstanding *eH   = findOutstanding(&m->cfLedger, H);
+    const BRCFOutstanding *eSib = findOutstanding(&m->cfLedger, SIB);
+    check(eH && eH->attempts == 0,
+          "suppressor: H (200) was SKIPPED via the reverse map -- attempts still 0 (never committed)");
+    check(eSib && eSib->attempts == 1,
+          "suppressor: the sibling (205) WAS re-requested -- attempts bumped to 1");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "cfheader-lag entry stays buffered (still in-flight)");
 
     BRPeerManagerFree(m);
 }
@@ -770,7 +860,8 @@ int main(void)
     test_buffered_clean_miss_marks_no_getdata(wallet);
     test_buffered_verify_fail_stays_outstanding(wallet);
     test_residual_rerequests_and_rotates(wallet);
-    test_residual_gated_by_buffer(wallet);
+    test_residual_not_starved_by_stale_buffer(wallet); // Task 4: livelock break (was test_residual_gated_by_buffer)
+    test_residual_skips_cfheader_lag_height(wallet);    // Task 4: O(1) reverse-map suppressor
     test_residual_caps_at_tip(wallet);
 
     BRWalletFree(wallet);
