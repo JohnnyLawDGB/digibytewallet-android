@@ -79,6 +79,58 @@ static void check(int c, const char *d) { printf(c ? "PASS: %s\n" : "FAIL: %s\n"
 static int g_capCount = 0;
 static uint32_t g_capStart = 0;
 
+// --- Task 5: stopHash->height registry + cumulative everRequested set ---------
+//
+// THE CAUSALITY SPINE. The residual driver reaches a peer through
+// BRPeerSendGetCFilters(peer, type, startHeight, stopHash). stopHash is
+// _BRPeerManagerBlockHashAtHeight(stopHeight) -- the hash of the block at the
+// stop height in manager->blocks, a block THIS test populated. So the wrap
+// resolves stopHash -> stop-height through a registry the test fills for its
+// own dummy blocks, then folds every height in the inclusive [start..stop] into
+// a CUMULATIVE test-side everRequested set. serveSome() (below) may ONLY
+// MarkEvaluated heights present in everRequested -- a height that was never
+// actually re-requested is never served. That is what makes the acceptance
+// property gate-sensitive at production scale: with the deleted `if
+// (BufferedCount==0)` gate re-added, a stale buffer keeps the residual path
+// shut, NO getcfilters is captured, everRequested stays empty, serveSome serves
+// nothing, and `outstanding` is frozen (the livelock reproduced).
+#define REG_MAX 8192
+static struct { UInt256 hash; uint32_t height; } g_blockReg[REG_MAX];
+static size_t g_blockRegCount = 0;
+#define REG_NOT_FOUND 0xFFFFFFFFu
+
+static void blockRegReset(void) { g_blockRegCount = 0; }
+static void blockRegAdd(const BRMerkleBlock *b)
+{
+    if (g_blockRegCount < REG_MAX) {
+        g_blockReg[g_blockRegCount].hash   = b->blockHash;
+        g_blockReg[g_blockRegCount].height = b->height;
+        g_blockRegCount++;
+    }
+}
+static uint32_t blockRegLookup(UInt256 h)
+{
+    for (size_t i = 0; i < g_blockRegCount; i++)
+        if (UInt256Eq(g_blockReg[i].hash, h)) return g_blockReg[i].height;
+    return REG_NOT_FOUND;
+}
+
+#define EVERREQ_MAX 8192
+static uint32_t g_everReq[EVERREQ_MAX];
+static size_t g_everReqCount = 0;
+
+static void everReqReset(void) { g_everReqCount = 0; }
+static int everReqContains(uint32_t h)
+{
+    for (size_t i = 0; i < g_everReqCount; i++) if (g_everReq[i] == h) return 1;
+    return 0;
+}
+static void everReqAdd(uint32_t h)
+{
+    if (everReqContains(h)) return;
+    if (g_everReqCount < EVERREQ_MAX) g_everReq[g_everReqCount++] = h;
+}
+
 BRPeerStatus __wrap_BRPeerConnectStatus(BRPeer *peer)
 {
     (void)peer;
@@ -93,9 +145,23 @@ int __wrap_BRPeerIsSocketOpen(BRPeer *peer)
 
 void __wrap_BRPeerSendGetCFilters(BRPeer *peer, uint8_t filterType, uint32_t startHeight, UInt256 stopHash)
 {
-    (void)peer; (void)filterType; (void)stopHash;
+    (void)peer; (void)filterType;
     g_capStart = startHeight;
     g_capCount++;
+
+    // Resolve stopHash -> stop height via the test's own dummy-block registry,
+    // then fold the whole inclusive [start..stop] range into the cumulative
+    // everRequested set. A stopHash the test never registered (e.g. the
+    // pre-existing cases, which don't call blockRegAdd) resolves to
+    // REG_NOT_FOUND and leaves everRequested untouched -- g_capStart/g_capCount
+    // still update exactly as before, so those cases are unaffected.
+    uint32_t stopH = blockRegLookup(stopHash);
+    if (stopH != REG_NOT_FOUND && stopH >= startHeight) {
+        for (uint32_t h = startHeight; ; h++) {   // guarded against a UINT32_MAX wrap
+            everReqAdd(h);
+            if (h == stopH) break;
+        }
+    }
 }
 
 static int g_getdataCount = 0;
@@ -135,6 +201,142 @@ static const BRCFOutstanding *findOutstanding(const BRCFScanLedger *l, uint32_t 
         if (l->outstanding[i].height == height) return &l->outstanding[i];
     }
     return NULL;
+}
+
+// Mutable twin of findOutstanding, for pre-seeding attempts/requestedAt directly
+// on a ledger outstanding entry (Scenario B: exercise RetireCapped at its exact
+// attempt cap without a 7.5-min wall-clock advance). Full struct access via the
+// #include "BRPeerManager.c" pattern.
+static BRCFOutstanding *mutOutstanding(BRCFScanLedger *l, uint32_t height)
+{
+    for (size_t i = 0; i < l->outstandingCount; i++) {
+        if (l->outstanding[i].height == height) return &l->outstanding[i];
+    }
+    return NULL;
+}
+
+static int gaveUpContains(const BRCFScanLedger *l, uint32_t height)
+{
+    for (size_t i = 0; i < l->gaveUpCount; i++) if (l->gaveUp[i] == height) return 1;
+    return 0;
+}
+
+static int uint32InArr(const uint32_t *a, size_t n, uint32_t h)
+{
+    for (size_t i = 0; i < n; i++) if (a[i] == h) return 1;
+    return 0;
+}
+
+// serveSome: MarkEvaluated up to n still-outstanding heights that are in the
+// cumulative everRequested set, drawn LOWEST-first (outstanding[] is sorted
+// ascending, so a plain forward scan is lowest-first). Models CF responses
+// trickling in over ticks. It NEVER serves a height that was not captured as
+// re-requested -- the causality that keeps the property test gate-sensitive.
+// Writes the served heights into servedOut[] (caller sizes it >= n) and returns
+// the count served. Heights are gathered before any MarkEvaluated so the
+// mid-scan array mutation MarkEvaluated performs cannot skip a candidate.
+static int serveSome(BRPeerManager *m, int n, uint32_t *servedOut)
+{
+    uint32_t toServe[128];
+    int k = 0;
+    for (size_t i = 0; i < m->cfLedger.outstandingCount && k < n && k < 128; i++) {
+        uint32_t h = m->cfLedger.outstanding[i].height;
+        if (everReqContains(h)) toServe[k++] = h;
+    }
+    for (int j = 0; j < k; j++) {
+        BRCFScanLedgerMarkEvaluated(&m->cfLedger, toServe[j]);
+        if (servedOut) servedOut[j] = toServe[j];
+    }
+    return k;
+}
+
+// --- per-tick invariant snapshot + checker (Scenario A) ----------------------
+// The acceptance property is asserted AT EVERY TICK, not just at the endpoint:
+// a fix can be per-tick-correct yet fail to converge on a cross-tick
+// interaction, and a false-green here would let a non-converging fix reach a
+// 30-minute device run undetected.
+typedef struct {
+    size_t   outstandingCount;
+    uint32_t scannedThrough;
+    uint32_t requestedThrough;
+    size_t   gaveUpCount;
+    uint32_t gaveUp[CF_GAVEUP_MAX];
+    size_t   heightCount;
+    uint32_t heights[CF_OUTSTANDING_MAX];
+} LedgerSnap;
+
+static void snapLedger(const BRCFScanLedger *l, LedgerSnap *s)
+{
+    s->outstandingCount  = l->outstandingCount;
+    s->scannedThrough    = l->scannedThrough;
+    s->requestedThrough  = l->requestedThrough;
+    s->gaveUpCount       = l->gaveUpCount;
+    for (size_t i = 0; i < l->gaveUpCount; i++) s->gaveUp[i] = l->gaveUp[i];
+    s->heightCount       = l->outstandingCount;
+    for (size_t i = 0; i < l->outstandingCount; i++) s->heights[i] = l->outstanding[i].height;
+}
+
+// Assert the four cross-tick invariants for one drive tick (KeepAlive+serve),
+// comparing the current ledger to the previous tick's snapshot. `served`/
+// `nServed` are the heights MarkEvaluated this tick; `expBuffered` is the
+// buffered-entry count that must hold throughout (the stale orphan never
+// drains inside the sub-second loop).
+static void checkTick(BRPeerManager *m, const LedgerSnap *prev,
+                      const uint32_t *served, int nServed, size_t expBuffered, int tick)
+{
+    BRCFScanLedger *l = &m->cfLedger;
+    char lbl[192];
+
+    // (a) outstanding monotonically NON-INCREASING vs the previous tick, and it
+    // fell by EXACTLY the number served (KeepAlive's drain/re-request must not
+    // add or spuriously drop a hole -- only serveSome removes).
+    snprintf(lbl, sizeof lbl, "tick %d (a): outstanding non-increasing (%zu <= %zu)",
+             tick, l->outstandingCount, prev->outstandingCount);
+    check(l->outstandingCount <= prev->outstandingCount, lbl);
+    snprintf(lbl, sizeof lbl, "tick %d (a): outstanding fell by exactly nServed (%zu == %zu - %d)",
+             tick, l->outstandingCount, prev->outstandingCount, nServed);
+    check(l->outstandingCount + (size_t)nServed == prev->outstandingCount, lbl);
+
+    // (b) scannedThrough only advances over genuinely-evaluated heights: it is
+    // non-decreasing and never sits at/above the lowest still-outstanding hole.
+    snprintf(lbl, sizeof lbl, "tick %d (b): scannedThrough non-decreasing (%u >= %u)",
+             tick, l->scannedThrough, prev->scannedThrough);
+    check(l->scannedThrough >= prev->scannedThrough, lbl);
+    int bOk = (l->outstandingCount == 0) || (l->scannedThrough < l->outstanding[0].height);
+    snprintf(lbl, sizeof lbl, "tick %d (b): scannedThrough (%u) below lowest outstanding hole (%u)",
+             tick, l->scannedThrough, l->outstandingCount ? l->outstanding[0].height : 0);
+    check(bOk, lbl);
+
+    // (c) Task-3 byte-identity: the age-out/suppressor must touch NO scan-state
+    // field. gaveUp set byte-identical, requestedThrough unchanged, and the
+    // outstanding height-set == prev minus exactly the heights served.
+    int gaveUpSame = (l->gaveUpCount == prev->gaveUpCount) &&
+                     (memcmp(l->gaveUp, prev->gaveUp, l->gaveUpCount * sizeof(uint32_t)) == 0);
+    snprintf(lbl, sizeof lbl, "tick %d (c): gaveUp set byte-identical (count %zu)", tick, l->gaveUpCount);
+    check(gaveUpSame, lbl);
+    snprintf(lbl, sizeof lbl, "tick %d (c): requestedThrough unchanged (%u == %u)",
+             tick, l->requestedThrough, prev->requestedThrough);
+    check(l->requestedThrough == prev->requestedThrough, lbl);
+
+    int setOk = 1;
+    for (int j = 0; j < nServed; j++) {                            // each served height: was outstanding, now gone
+        if (! uint32InArr(prev->heights, prev->heightCount, served[j])) setOk = 0;
+        if (findOutstanding(l, served[j]) != NULL) setOk = 0;
+    }
+    for (size_t i = 0; i < l->outstandingCount; i++) {            // each survivor: was in prev, not served this tick
+        uint32_t h = l->outstanding[i].height;
+        if (! uint32InArr(prev->heights, prev->heightCount, h)) setOk = 0;
+        if (uint32InArr(served, (size_t)nServed, h)) setOk = 0;
+    }
+    snprintf(lbl, sizeof lbl, "tick %d (c): outstanding set == prev minus served (no spurious perturbation)", tick);
+    check(setOk, lbl);
+
+    // (d) the stale buffered entry never blocked a hole: it is still resident
+    // (age-out is 900s, far beyond this sub-second loop) yet the drain still
+    // progressed this tick. "remains, suppressing nothing" per the brief.
+    snprintf(lbl, sizeof lbl, "tick %d (d): stale buffer resident but blocking nothing (buffered %zu == %zu)",
+             tick, BRCFScanLedgerBufferedCount(l), expBuffered);
+    check(BRCFScanLedgerBufferedCount(l) == expBuffered, lbl);
 }
 
 // ---------------------------------------------------------------------------
@@ -644,38 +846,128 @@ static void test_residual_rerequests_and_rotates(BRWallet *wallet)
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: the residual re-request path is gated OFF entirely while the
-// buffer is non-empty, even when a separate, otherwise-resolvable residual
-// hole exists -- undrained-but-outstanding header-race heights belong to the
-// buffer path and must never be duplicate-requested by this one.
-static void test_residual_gated_by_buffer(BRWallet *wallet)
+// Test 5 (Task 4 -- livelock break): the residual re-request path is NO LONGER
+// gated on an empty buffer. This REPLACES the old test_residual_gated_by_buffer
+// (which locked in the very `if (BufferedCount==0)` gate Task 4 deletes). A
+// STALE buffered entry whose blockHash was orphaned by a header re-sync (NOT in
+// manager->blocks) keeps BufferedCount>0 forever; under the old global gate that
+// starved residual re-request for EVERY height (the production livelock). With
+// the gate deleted + the O(1) reverse-map suppressor, the orphaned hash resolves
+// to NULL (contributes no skip height), so a genuinely-due residual hole is
+// still re-requested despite the stale buffer. RED against the gate-present code
+// (the gate suppresses the send -> g_capCount stays 0).
+static void test_residual_not_starved_by_stale_buffer(BRWallet *wallet)
 {
-    printf("\n=== test_residual_gated_by_buffer ===\n");
+    printf("\n=== test_residual_not_starved_by_stale_buffer (Task 4 livelock break) ===\n");
 
     BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
 
-    uint32_t H = 900000;
+    uint32_t H = 200;
+    BRMerkleBlock *bH = dummyBlock(H, 0xA0, 1700000000);
+    BRSetAdd(m->blocks, bH);
+    m->lastBlock = bH; // tip == 200 so the residual [200..200] run is not tip-clipped
+
+    // A connected CF-capable peer, else `if (!chosen) break` (BRPeerManager.c)
+    // would (falsely) suppress the send -- a setup bug, not a result.
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x11; pa->port = 11001; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
     BRCFScanLedgerInit(&m->cfLedger, H);
+    // Height 200 outstanding + DUE: requestedAt=0 vs the real time(NULL) clock the
+    // driver reads (>> the 30s base backoff), so PeekRerequestRange offers it.
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H, H, UINT128_ZERO, 0, 0);
+    check(findOutstanding(&m->cfLedger, H) != NULL, "setup: height 200 outstanding");
 
-    // One buffered entry keyed to a blockHash with NO known header -- isReady
-    // returns 0 (BRSetGet finds nothing), so it will not drain regardless of
-    // the residual gate below.
-    UInt256 unknownHash; memset(unknownHash.u8, 0xEE, sizeof(unknownHash.u8));
+    // A STALE buffered entry: its blockHash is NOT in m->blocks (orphaned by a
+    // header re-sync). It cannot drain (isReady -> BRSetGet NULL) and keeps
+    // BufferedCount>0 forever -- exactly the residual-starving wedge.
+    UInt256 orphanHash; memset(orphanHash.u8, 0xEE, sizeof(orphanHash.u8));
     uint8_t junk[4] = { 0x01, 0x00, 0x00, 0x00 };
-    BRCFScanLedgerBufferFilter(&m->cfLedger, unknownHash, junk, sizeof junk, (uint32_t)time(NULL));
-    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "setup: 1 buffered (header-unresolvable) entry");
+    BRCFScanLedgerBufferFilter(&m->cfLedger, orphanHash, junk, sizeof junk, (uint32_t)time(NULL));
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "setup: 1 stale (orphaned-hash) buffered entry -> BufferedCount>0");
 
-    // A separate, due, otherwise-resolvable residual hole -- nothing about it
-    // individually would block a re-request.
-    BRCFScanLedgerRecordRequested(&m->cfLedger, H + 50, H + 50, UINT128_ZERO, 0, 0);
-
-    g_capCount = 0;
+    g_capCount = 0; g_capStart = 0;
 
     BRPeerManagerKeepAlive(m);
 
-    check(g_capCount == 0, "residual re-request is gated OFF entirely while BufferedCount>0");
-    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "buffered entry untouched (still unresolvable)");
+    check(g_capCount >= 1,
+          "livelock break: residual getcfilters STILL fired despite the stale buffer (gate deleted)");
+    check(g_capStart == H,
+          "livelock break: the residual re-request targeted the outstanding hole (height 200)");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "stale buffered entry untouched (orphan hash still unresolvable, suppresses nothing)");
+
+    BRPeerManagerFree(m);
+}
+
+// ---------------------------------------------------------------------------
+// Test 6 (Task 4 -- suppressor skips the in-flight height): a buffered entry
+// whose blockHash IS in manager->blocks at height H, but whose cfheader chain
+// has NOT advanced past H (cfheader-lag), stays buffered AND stays outstanding.
+// The O(1) reverse-map suppressor must resolve that buffered hash -> height H
+// and SKIP re-requesting H (it is in-flight via the buffer path), while a
+// SIBLING genuine residual hole at a different height IS re-requested. Proves
+// the skip is height-targeted (via the reverse map), not a blanket
+// re-suppression, and that NO forward canonical(H) walk is used. RED against the
+// gate-present code (buffer non-empty -> the whole residual path is gated off ->
+// the sibling is NOT re-requested either).
+static void test_residual_skips_cfheader_lag_height(BRWallet *wallet)
+{
+    printf("\n=== test_residual_skips_cfheader_lag_height (Task 4 suppressor) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t H   = 200;   // cfheader-lag buffered height (in blocks, cfheader NOT advanced past it)
+    uint32_t SIB = 205;   // sibling genuine residual hole (not buffered)
+    BRMerkleBlock *bH   = dummyBlock(H,   0xB0, 1700000000);
+    BRMerkleBlock *bSib = dummyBlock(SIB, 0xB5, 1700000075);
+    BRSetAdd(m->blocks, bH);
+    BRSetAdd(m->blocks, bSib);
+    m->lastBlock = bSib;  // tip == 205 so the sibling [205..205] run is not tip-clipped
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x12; pa->port = 11002; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // cfheader chain that has NOT advanced past H: NextHeight()==200 <= H(200),
+    // so isReady gates the buffered entry OFF -> it stays buffered (in-flight),
+    // NOT drained. (A fresh chain reports NextHeight == startHeight.)
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, H, UINT256_ZERO);
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) <= bH->height,
+          "setup: cfheader chain has NOT advanced past H (cfheader-lag -> entry stays buffered)");
+
+    BRCFScanLedgerInit(&m->cfLedger, H);
+    // Both H and the sibling outstanding + due (requestedAt=0 vs the real clock).
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H,   H,   UINT128_ZERO, 0, 0);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, SIB, SIB, UINT128_ZERO, 0, 0);
+
+    // Buffer a filter keyed to bH's OWN hash: its header IS present at height 200,
+    // but the cfheader-lag keeps it buffered -> the reverse map resolves it to 200.
+    uint8_t junk[4] = { 0x01, 0x00, 0x00, 0x00 };
+    BRCFScanLedgerBufferFilter(&m->cfLedger, bH->blockHash, junk, sizeof junk, (uint32_t)time(NULL));
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "setup: 1 cfheader-lag buffered entry (hash IS in blocks at H)");
+
+    g_capCount = 0; g_capStart = 0;
+
+    BRPeerManagerKeepAlive(m);
+
+    check(g_capCount == 1, "suppressor: exactly one residual getcfilters sent (the sibling, not H)");
+    check(g_capStart == SIB,
+          "suppressor: the send targeted the SIBLING hole (205), skipping the in-flight H (200)");
+
+    const BRCFOutstanding *eH   = findOutstanding(&m->cfLedger, H);
+    const BRCFOutstanding *eSib = findOutstanding(&m->cfLedger, SIB);
+    check(eH && eH->attempts == 0,
+          "suppressor: H (200) was SKIPPED via the reverse map -- attempts still 0 (never committed)");
+    check(eSib && eSib->attempts == 1,
+          "suppressor: the sibling (205) WAS re-requested -- attempts bumped to 1");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "cfheader-lag entry stays buffered (still in-flight)");
 
     BRPeerManagerFree(m);
 }
@@ -720,6 +1012,200 @@ static void test_residual_caps_at_tip(BRWallet *wallet)
     check(eH1 && eH1->attempts == 1, "caps-at-tip: H+1 committed (attempts=1, send covers H..H+1)");
     check(eH2 && eH2->attempts == 0,
           "caps-at-tip: H+2 stays outstanding, attempts==0 (beyond tip, not committed)");
+
+    BRPeerManagerFree(m);
+}
+
+// ---------------------------------------------------------------------------
+// Scenario A (Task 5 acceptance property): a whole RESIDUAL cluster converges
+// to outstanding==0 across ticks WITH a stale buffer resident throughout -- the
+// exact wedge regime. The drain is CAUSAL on real residual re-requests (the
+// drive-KAT runs the real BRPeerManagerKeepAlive residual loop; serveSome only
+// evaluates heights that loop actually captured on the wire), so the gate-
+// present build (re-add of the deleted `if (BufferedCount==0)`) freezes here:
+// no capture -> nothing served -> outstanding never reaches 0. Task 4's Test 5/6
+// prove the per-tick mechanism; THIS proves the emergent convergence they don't.
+static void test_cluster_drains_to_zero_with_stale_buffer(BRWallet *wallet)
+{
+    printf("\n=== test_cluster_drains_to_zero_with_stale_buffer (Scenario A: acceptance property) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    blockRegReset();
+    everReqReset();
+
+    // Contiguous, prevBlock-chained header chain [FLOOR..TIP] so
+    // _BRPeerManagerBlockHashAtHeight (which walks lastBlock backward via
+    // prevBlock) resolves the stopHash of every residual re-request. Realistic
+    // residual regime: headers are fully synced, only the cfilters were dropped.
+    // Register each block into the test-side stopHash->height map.
+    const uint32_t FLOOR = 1000, TIP = 1060;
+    BRMerkleBlock *prevB = NULL;
+    for (uint32_t h = FLOOR; h <= TIP; h++) {
+        BRMerkleBlock *b = dummyBlock(h, (uint8_t)(h - FLOOR + 1), 1700000000u + (h - FLOOR) * 15);
+        if (prevB) b->prevBlock = prevB->blockHash;
+        BRSetAdd(m->blocks, b);
+        blockRegAdd(b);
+        prevB = b;
+    }
+    m->lastBlock = prevB; // tip == TIP, past the whole cluster (no tip-clip)
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x21; pa->port = 12001; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // 40 RESIDUAL outstanding holes across TWO gaps -> two coalesced peek runs:
+    //   [1000..1019] and [1030..1049]   (1020..1029 already evaluated: the gap).
+    // All DUE (requestedAt=0 vs the real time(NULL) clock >> the 30s base
+    // backoff). They hold NO buffered bytes of their own, so they can ONLY be
+    // resolved via residual re-request -- never the ungated buffer-drain path.
+    BRCFScanLedgerInit(&m->cfLedger, FLOOR);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1000, 1019, UINT128_ZERO, 0, 0);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1030, 1049, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 40, "setup: 40 residual holes outstanding across 2 gaps");
+
+    // One ORPHANED stale buffered entry: its hash is NOT in m->blocks (a header
+    // re-sync orphaned it). It can never drain (isReady -> BRSetGet NULL) and
+    // can never age out inside this sub-second loop (firstAt=now, 900s
+    // threshold), so BufferedCount stays 1 throughout -- exactly the residual-
+    // starving wedge the old `if (BufferedCount==0)` gate created.
+    UInt256 orphanHash; memset(orphanHash.u8, 0xEE, sizeof orphanHash.u8);
+    uint8_t junk[4] = { 0x01, 0x00, 0x00, 0x00 };
+    BRCFScanLedgerBufferFilter(&m->cfLedger, orphanHash, junk, sizeof junk, (uint32_t)time(NULL));
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "setup: 1 stale orphan buffered -> BufferedCount>0 throughout");
+
+    // Drive: KeepAlive (the real residual re-request) then serve a STAGGERED
+    // subset (k=8) of the CUMULATIVE captured re-request set, modeling responses
+    // trickling in over ticks. Assert the invariant AT EVERY TICK.
+    LedgerSnap prev; snapLedger(&m->cfLedger, &prev);
+    const int K = 8;
+    int drained = 0;
+    for (int tick = 1; tick <= 20; tick++) {
+        BRPeerManagerKeepAlive(m);
+        uint32_t served[128];
+        int nServed = serveSome(m, K, served);
+        checkTick(m, &prev, served, nServed, /*expBuffered=*/1, tick);
+        snapLedger(&m->cfLedger, &prev);
+        if (BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0) { drained = 1; break; }
+    }
+
+    check(drained, "ACCEPTANCE: cluster converged to outstanding==0 within the tick budget");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0, "ACCEPTANCE endpoint: outstanding == 0");
+    check(BRCFScanLedgerGaveUpCount(&m->cfLedger) == 0,
+          "ACCEPTANCE endpoint: gaveUp == 0 (every hole was served, none abandoned)");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == 1049,
+          "ACCEPTANCE endpoint: scannedThrough advanced to the cluster top (== requestedThrough)");
+
+    // (d) reclamation: the orphan never blocked a hole (the cluster drained
+    // while it stayed buffered). Now prove it is ALSO eventually reclaimed by
+    // age-out -- backdate its IMMUTABLE firstAt past the 900s threshold and run
+    // one more tick. EvictAgedFilters frees it; touches only the buffer
+    // (outstanding is already 0).
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1,
+          "post-drain: orphan still buffered (it never blocked and never drained)");
+    if (m->cfLedger.filterBufCount == 1) {
+        m->cfLedger.filterBuf[0]->firstAt = (uint32_t)time(NULL) - (CF_FILTER_BUF_MAX_AGE_SECS + 100);
+    }
+    BRPeerManagerKeepAlive(m);
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 0,
+          "post-drain: aged orphan reclaimed by age-out (buffer empty) -- invariant (d)");
+
+    BRPeerManagerFree(m);
+}
+
+// ---------------------------------------------------------------------------
+// Scenario B (Task 5): gaveUp is the now-LIVE RetireCapped signal, exercised in
+// BOTH directions at the exact attempt cap. RetireCapped moved inside
+// BRPeerManagerKeepAlive when Task 4 deleted the buffer gate (it was dead code
+// behind it). Verified against BRCFScanLedger.c BRCFScanLedgerRetireCapped:
+//   for (...) if (l->outstanding[i].attempts >= CF_REREQ_MAX_ATTEMPTS) moveToGaveUp
+// so the comparison is `>=` -- attempts == CF_REREQ_MAX_ATTEMPTS retires, and
+// attempts == CF_REREQ_MAX_ATTEMPTS-1 does NOT. Tested WITHOUT a 7.5-min clock
+// advance by pre-seeding `attempts` directly.
+static void test_gaveup_retires_dead_hole_at_exact_cap(BRWallet *wallet)
+{
+    printf("\n=== test_gaveup_retires_dead_hole_at_exact_cap (Scenario B: RetireCapped both directions) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    blockRegReset();
+    everReqReset();
+
+    // Contiguous header chain [FLOOR..TIP] so the slow hole's re-request stop
+    // resolves; register each block for stopHash->height resolution.
+    const uint32_t FLOOR = 300, TIP = 315;
+    BRMerkleBlock *prevB = NULL;
+    for (uint32_t h = FLOOR; h <= TIP; h++) {
+        BRMerkleBlock *b = dummyBlock(h, (uint8_t)(h - FLOOR + 1), 1700000000u + (h - FLOOR) * 15);
+        if (prevB) b->prevBlock = prevB->blockHash;
+        BRSetAdd(m->blocks, b);
+        blockRegAdd(b);
+        prevB = b;
+    }
+    m->lastBlock = prevB;
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x31; pa->port = 13001; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    const uint32_t H_DEAD = 300, H_SIB = 301, H_SLOW = 310;
+    uint32_t nowSec = (uint32_t)time(NULL);
+
+    BRCFScanLedgerInit(&m->cfLedger, FLOOR);
+    // now=0 -> requestedAt=0 (DUE) by default; overridden below for the two
+    // capped/near-capped holes.
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H_DEAD, H_DEAD, UINT128_ZERO, 0, 0);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H_SIB,  H_SIB,  UINT128_ZERO, 0, 0);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H_SLOW, H_SLOW, UINT128_ZERO, 0, 0);
+
+    // Pre-seed attempts DIRECTLY (full struct access; no 7.5-min clock advance).
+    // The dead + sibling holes are made NON-DUE (requestedAt=nowSec, so the real
+    // time(NULL) clock KeepAlive reads shows ~0 elapsed << their backoff): this
+    // stops the peek loop from re-requesting+re-committing them this tick, which
+    // would bump attempts and confound the boundary. Only RetireCapped (which
+    // ignores due-ness) acts on them. H_SLOW keeps requestedAt=0 (DUE) so the
+    // driver re-requests it -> a legitimate captured serve.
+    BRCFOutstanding *ed = mutOutstanding(&m->cfLedger, H_DEAD);
+    BRCFOutstanding *es = mutOutstanding(&m->cfLedger, H_SIB);
+    check(ed && es, "setup: dead + sibling outstanding entries located");
+    ed->attempts    = CF_REREQ_MAX_ATTEMPTS;       // exactly AT the cap -> must retire
+    ed->requestedAt = nowSec;                       // non-due (moot: retired before peek)
+    es->attempts    = CF_REREQ_MAX_ATTEMPTS - 1;   // one BELOW the cap -> must NOT retire
+    es->requestedAt = nowSec;                       // non-due so peek won't bump it to the cap
+
+    g_capCount = 0; g_capStart = 0;
+
+    BRPeerManagerKeepAlive(m);
+
+    // (i) exact-cap dead hole retired to gaveUp.
+    check(findOutstanding(&m->cfLedger, H_DEAD) == NULL,
+          "(i) dead hole at attempts==CAP retired -> gone from outstanding");
+    check(gaveUpContains(&m->cfLedger, H_DEAD),
+          "(i) dead hole at attempts==CAP present in gaveUp");
+
+    // (ii) "not before the cap": sibling one below cap stays outstanding, untouched.
+    const BRCFOutstanding *sibAfter = findOutstanding(&m->cfLedger, H_SIB);
+    check(sibAfter != NULL, "(ii) sibling at attempts==CAP-1 still outstanding (NOT retired)");
+    check(sibAfter && sibAfter->attempts == CF_REREQ_MAX_ATTEMPTS - 1,
+          "(ii) sibling attempts unchanged at CAP-1 (non-due -> peek left it alone)");
+    check(! gaveUpContains(&m->cfLedger, H_SIB), "(ii) sibling NOT in gaveUp");
+
+    // The slow hole WAS re-requested this tick (its serve below is causal).
+    check(g_capStart == H_SLOW, "slow hole re-requested this tick (getcfilters start == H_SLOW)");
+
+    // (iii) "slow but served": serve it via the captured re-request -> drains
+    // clean, NEVER touches gaveUp.
+    uint32_t served[4];
+    int n = serveSome(m, 4, served);
+    check(n == 1 && served[0] == H_SLOW, "(iii) slow hole served from the captured re-request set");
+    check(findOutstanding(&m->cfLedger, H_SLOW) == NULL, "(iii) slow hole drained -> gone from outstanding");
+    check(! gaveUpContains(&m->cfLedger, H_SLOW), "(iii) slow hole NEVER touched gaveUp");
+
+    // Boundary pinned in both directions: gaveUp holds EXACTLY the one dead hole.
+    check(BRCFScanLedgerGaveUpCount(&m->cfLedger) == 1,
+          "gaveUp holds exactly the one dead hole (both directions of the cap pinned)");
 
     BRPeerManagerFree(m);
 }
@@ -770,8 +1256,11 @@ int main(void)
     test_buffered_clean_miss_marks_no_getdata(wallet);
     test_buffered_verify_fail_stays_outstanding(wallet);
     test_residual_rerequests_and_rotates(wallet);
-    test_residual_gated_by_buffer(wallet);
+    test_residual_not_starved_by_stale_buffer(wallet); // Task 4: livelock break (was test_residual_gated_by_buffer)
+    test_residual_skips_cfheader_lag_height(wallet);    // Task 4: O(1) reverse-map suppressor
     test_residual_caps_at_tip(wallet);
+    test_cluster_drains_to_zero_with_stale_buffer(wallet); // Task 5 Scenario A: multi-tick cluster drain-to-zero
+    test_gaveup_retires_dead_hole_at_exact_cap(wallet);    // Task 5 Scenario B: RetireCapped both directions at cap
 
     BRWalletFree(wallet);
 
