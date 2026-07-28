@@ -1050,7 +1050,6 @@ class SyncService : Service() {
     private fun startTipStallWatchdog() {
         tipStallWatchdogJob?.cancel()
         tipStallWatchdogJob = serviceScope.launch {
-            var lastTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
             // PACED-CONVOY RE-KEY (spec Part D). The convoy DELIBERATELY freezes the
             // block-header frontier at scanFrontier + CF_CONVOY_WINDOW, so
             // getLastBlockHeight() is no longer a liveness signal — it is the pacing
@@ -1062,10 +1061,16 @@ class SyncService : Service() {
             // after a B2 abandonment (abandonedBelow is raised without _cfLedgerAdvance
             // running), so a watchdog keyed on it would read a genuinely-progressing
             // convoy as frozen and fire tier 1 — the exact misfire this re-key prevents.
-            var lastScan = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
-            var lastAdvanceMs = System.currentTimeMillis()      // last CF SCAN advance
-            var lastTipAdvanceMs = lastAdvanceMs                // last raw block-tip advance
-            var tier1Fired = false
+            //
+            // All of the tracking (signal selection, the tier-1 latch, and the
+            // frontier-RE-INIT handling that keeps a post-recovery re-climb from reading
+            // as an unbounded stall) lives in the pure [TipStallState] so it is testable
+            // on the host JVM — NativeBridge is JNI and cannot be mocked there.
+            var state = initialTipStallState(
+                tip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L },
+                scan = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L },
+                nowMs = System.currentTimeMillis(),
+            )
             var lastTier2Ms = 0L
             var lastFastMs = 0L          // fast-tier (orphan / can't-hold-filter-peer) throttle
             var pinRotation = 0          // rotate through the validated filter pool when pinning
@@ -1078,40 +1083,20 @@ class SyncService : Service() {
                 val pendingCycles = try { NativeBridge.getConvoyAbandonmentPending() } catch (_: Throwable) { 0 }
                 val nowMs = System.currentTimeMillis()
 
-                // Before the CF scan ledger is armed (no peer manager => 0, freshly
-                // calloc'd ledger => 1) the scan frontier is not a signal at all. Fall
-                // back to the legacy block-tip keying for that window, otherwise a
-                // constant 0/1 would read as "frozen forever" and escalate on a wallet
-                // that is simply still coming up.
-                val scanArmed = isScanFrontierArmed(scan)
-
-                // Clearing the tier-1 latch + the canon pin follows whichever signal is
-                // authoritative this poll. Under the convoy that is the SCAN: clearing on
-                // a block-tip advance instead would let the gate's periodic 2000-header
-                // re-kick reset tier1Fired forever, and tier 2 (which requires
-                // tier1Fired) could then never escalate a genuine scan wedge.
-                var progressed = false
-                if (tip > lastTip) {
-                    lastTip = tip
-                    lastTipAdvanceMs = nowMs
-                    if (!scanArmed) progressed = true
-                }
-                if (scan > lastScan) {
-                    lastScan = scan
-                    lastAdvanceMs = nowMs
-                    if (scanArmed) progressed = true
-                }
-                if (progressed) {
-                    tier1Fired = false
-                    // Recovered — release any pinned canon peer so the pool re-diversifies.
+                state = state.step(tipNow = tip, scanNow = scan, nowMs = nowMs)
+                if (state.progressed) {
+                    // Recovered (or legitimately re-initialised at a new floor) — release
+                    // any pinned canon peer so the pool re-diversifies. The tier-1 latch
+                    // is cleared inside [TipStallState.step].
                     if (pinnedThisStall) {
                         runCatching { NativeBridge.clearPinnedPeer() }
                         pinnedThisStall = false
                     }
                 }
 
-                val scanStalledMs = if (scanArmed) nowMs - lastAdvanceMs else nowMs - lastTipAdvanceMs
-                val blockTipStalledMs = nowMs - lastTipAdvanceMs
+                val tier1Fired = state.tier1Fired
+                val scanStalledMs = state.scanStalledMs(nowMs)
+                val blockTipStalledMs = state.blockTipStalledMs(nowMs)
                 val windowFull = isConvoyWindowFull(tip, scan)
 
                 if (shouldForceReconnectOnStall(
@@ -1125,7 +1110,7 @@ class SyncService : Service() {
                 ) {
                     android.util.Log.w(
                         "SyncService",
-                        "tip-stall: CF scan frontier still frozen at $lastScan (block tip $tip, " +
+                        "tip-stall: CF scan frontier still frozen at ${state.lastScan} (block tip $tip, " +
                             "W_hdr full=$windowFull) for ${scanStalledMs / 1000}s after " +
                             "re-request ($peers peers) — recreating peer manager (tier 2)"
                     )
@@ -1134,7 +1119,7 @@ class SyncService : Service() {
                     injectPeers()
                     injectCustomNode()
                     runCatching { NativeBridge.startSync() }
-                    tier1Fired = false // re-arm tier 1 against the fresh manager
+                    state = state.copy(tier1Fired = false) // re-arm tier 1 against the fresh manager
                 } else if (shouldRerequestHeadersOnStall(
                         peerCount = peers,
                         scanStalledMs = scanStalledMs,
@@ -1145,12 +1130,12 @@ class SyncService : Service() {
                 ) {
                     android.util.Log.w(
                         "SyncService",
-                        "tip-stall: CF scan frontier frozen at $lastScan (block tip $tip, " +
+                        "tip-stall: CF scan frontier frozen at ${state.lastScan} (block tip $tip, " +
                             "W_hdr full=$windowFull) for ${scanStalledMs / 1000}s with $peers " +
                             "peers — proactively re-requesting headers (tier 1)"
                     )
                     runCatching { NativeBridge.rerequestHeadersFromTip() }
-                    tier1Fired = true
+                    state = state.copy(tier1Fired = true)
                 } else if (shouldFastRecoverOnStall(
                         peerCount = peers,
                         scanStalledMs = scanStalledMs,
@@ -1273,8 +1258,12 @@ class SyncService : Service() {
             // SCAN frontier being frozen. Under the convoy, cfTip freezing while the
             // block tip climbs is a NORMAL, designed decoupling — the old keying read it
             // as a wedge and threw the whole descent away. Tracked as a session
-            // running-max for the same reason cfNetMax is: the frontier must never be
-            // read as regressing.
+            // running-max for the same reason cfNetMax is — EXCEPT that a regression to a
+            // real floor is adopted as a legitimate re-init (see [stepScanFrontier]).
+            // The explicit resets after this loop's own destructive branches cover only
+            // the re-inits IT causes; a deep reorg re-inits the ledger natively
+            // (BRPeerManager.c:4035) with no branch involved, and a forward-only tracker
+            // would then read the whole clean re-climb as one unbounded freeze.
             var scanNetMax = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
             var scanProgressMs = startedAt
             while (true) {
@@ -1336,7 +1325,9 @@ class SyncService : Service() {
                 // ledger it is deciding on). The suppression is BOUNDED — see
                 // [isConvoySuppressed].
                 val scanNow = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
-                if (scanNow > scanNetMax) { scanNetMax = scanNow; scanProgressMs = nowMs }
+                val scanStep = stepScanFrontier(scanNetMax, scanProgressMs, scanNow, nowMs)
+                scanNetMax = scanStep.frontier
+                scanProgressMs = scanStep.lastChangeMs
                 val scanStalledMs = nowMs - scanProgressMs
                 val pendingCycles = try { NativeBridge.getConvoyAbandonmentPending() } catch (_: Throwable) { 0 }
 

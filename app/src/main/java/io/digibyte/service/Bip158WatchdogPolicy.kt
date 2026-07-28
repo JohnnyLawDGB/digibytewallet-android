@@ -404,3 +404,123 @@ internal fun isTipStallArmed(
     thresholdMs: Long,
 ): Boolean = scanStalledMs >= thresholdMs &&
     (!convoyWindowFull || blockTipStalledMs >= thresholdMs)
+
+// ── CF scan-frontier progress tracking (the watchdogs' liveness clock) ──
+
+/** One poll of a CF scan-frontier tracker: the frontier to carry forward, the
+ *  wall-clock of its last CHANGE, and whether this poll observed one. */
+internal data class FrontierProgress(
+    val frontier: Long,
+    val lastChangeMs: Long,
+    val changed: Boolean,
+)
+
+/**
+ * Step a CF scan-frontier tracker one poll: MOTION restarts the stall clock, and a
+ * REGRESSION is motion.
+ *
+ * A forward-only tracker (what both watchdogs did before this fix) has a blind spot
+ * that inverts the watchdog into an attacker. Every destructive recovery in
+ * [SyncService] — the frozen-CF recovery, the corrupt-chain heal, the post-timeout
+ * re-anchor — deletes `CfScanLedgerStore` and recreates the manager, so native
+ * re-`Init`s the CF scan ledger at the floor and `getLowestNeededHeight()` drops far
+ * BELOW the last observed value. A deep reorg re-inits it the same way with no app
+ * branch involved at all (`BRPeerManager.c:4035`), which no post-branch reset could
+ * ever cover. The frontier is then below the high-water mark for the whole hours-long
+ * clean re-climb, so a forward-only clock never restarts: the stall grows without
+ * bound and the tier-1 latch can never clear, and the tip-stall watchdog spends the
+ * rest of the session issuing ungated getheaders and recreating the peer manager once
+ * per throttle window — harassing the very recovery that just ran, mid-descent.
+ *
+ * A regression is therefore adopted as a legitimate re-init. The one exception is an
+ * UNARMED reading (`0` while the peer manager is absent — the window between
+ * `forceReconnect` and `startSync` — or `1` on a freshly `calloc`'d ledger): those are
+ * not frontiers at all, and adopting them would let a flapping read hold the stall
+ * clock near zero and silently disable the backstop. They are dropped, so the tracker
+ * keeps the last real frontier and its clock keeps running.
+ */
+internal fun stepScanFrontier(
+    prevFrontier: Long,
+    prevChangeMs: Long,
+    frontierNow: Long,
+    nowMs: Long,
+): FrontierProgress = when {
+    frontierNow == prevFrontier -> FrontierProgress(prevFrontier, prevChangeMs, false)
+    frontierNow > prevFrontier -> FrontierProgress(frontierNow, nowMs, true)
+    isScanFrontierArmed(frontierNow) -> FrontierProgress(frontierNow, nowMs, true)   // re-init
+    else -> FrontierProgress(prevFrontier, prevChangeMs, false)                      // transient
+}
+
+/**
+ * The tip-stall watchdog's liveness state, lifted out of the coroutine body so the
+ * signal selection is unit-testable (`NativeBridge` is JNI and unmockable on the host
+ * JVM, so the pure predicate is the only testable seam).
+ */
+internal data class TipStallState(
+    /** Last observed CF scan frontier (`getLowestNeededHeight()`). */
+    val lastScan: Long,
+    /** Wall-clock of the last scan-frontier CHANGE (advance or re-init). */
+    val lastScanChangeMs: Long,
+    /** Last observed raw block-header tip (`getLastBlockHeight()`). */
+    val lastTip: Long,
+    /** Wall-clock of the last block-tip advance. */
+    val lastTipAdvanceMs: Long,
+    /** Is the scan frontier a usable signal this poll? */
+    val scanArmed: Boolean,
+    /** Has tier 1 already fired for the current stall? */
+    val tier1Fired: Boolean,
+    /** Did this poll observe progress on the AUTHORITATIVE signal? The caller also
+     *  releases any pinned canon peer on it. */
+    val progressed: Boolean,
+)
+
+/** Seed the tracker from the first readings taken at watchdog start. */
+internal fun initialTipStallState(tip: Long, scan: Long, nowMs: Long): TipStallState =
+    TipStallState(
+        lastScan = scan,
+        lastScanChangeMs = nowMs,
+        lastTip = tip,
+        lastTipAdvanceMs = nowMs,
+        scanArmed = isScanFrontierArmed(scan),
+        tier1Fired = false,
+        progressed = false,
+    )
+
+/**
+ * Advance the tip-stall tracker by one poll.
+ *
+ * AUTHORITATIVE SIGNAL: the CF scan frontier while it is armed, else the raw block
+ * tip. Clearing the tier-1 latch / the canon pin follows whichever that is — clearing
+ * on a block-tip advance while the scan is armed would let the convoy gate's periodic
+ * 2000-header re-kick reset [TipStallState.tier1Fired] forever, so tier 2 (which
+ * requires it) could never escalate a genuine scan wedge.
+ */
+internal fun TipStallState.step(tipNow: Long, scanNow: Long, nowMs: Long): TipStallState {
+    val scanArmedNow = isScanFrontierArmed(scanNow)
+    val tipAdvanced = tipNow > lastTip
+    val scanStep = stepScanFrontier(lastScan, lastScanChangeMs, scanNow, nowMs)
+    val progressedNow = if (scanArmedNow) scanStep.changed else tipAdvanced
+    return TipStallState(
+        lastScan = scanStep.frontier,
+        lastScanChangeMs = scanStep.lastChangeMs,
+        lastTip = if (tipAdvanced) tipNow else lastTip,
+        lastTipAdvanceMs = if (tipAdvanced) nowMs else lastTipAdvanceMs,
+        scanArmed = scanArmedNow,
+        tier1Fired = if (progressedNow) false else tier1Fired,
+        progressed = progressedNow,
+    )
+}
+
+/**
+ * How long the authoritative liveness signal has been stopped. Before the CF scan
+ * ledger is armed (no peer manager => 0, freshly calloc'd ledger => 1) the scan
+ * frontier is not a signal at all, so fall back to the legacy block-tip keying —
+ * otherwise a constant 0/1 would read as "frozen forever" and escalate on a wallet
+ * that is simply still coming up.
+ */
+internal fun TipStallState.scanStalledMs(nowMs: Long): Long =
+    if (scanArmed) nowMs - lastScanChangeMs else nowMs - lastTipAdvanceMs
+
+/** How long the RAW block-header tip has been frozen (the residual dead-branch
+ *  conjunct in [isTipStallArmed]). */
+internal fun TipStallState.blockTipStalledMs(nowMs: Long): Long = nowMs - lastTipAdvanceMs

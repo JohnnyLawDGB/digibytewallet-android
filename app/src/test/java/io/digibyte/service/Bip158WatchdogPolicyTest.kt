@@ -668,6 +668,166 @@ class Bip158WatchdogPolicyTest {
         assertEquals(true, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
     }
 
+    // ── CF scan-frontier tracking: a frontier RE-INIT is not a stall ──
+    //
+    // Every destructive recovery in the app deletes CfScanLedgerStore and recreates the
+    // manager, so native re-Inits the CF scan ledger at the floor and
+    // getLowestNeededHeight() drops far BELOW the last observed value. A deep reorg
+    // re-inits it too (BRPeerManager.c:4035), with no app-side branch involved at all.
+    // A forward-only tracker never sees that as motion: the stall clock freezes and
+    // grows without bound for the whole hours-long clean re-climb.
+
+    private val FLOOR = 20_000_000L
+    private val TIP_AT_START = 23_900_000L
+
+    @Test fun `frontier tracker treats forward motion as progress and restarts the clock`() {
+        val p = stepScanFrontier(prevFrontier = FLOOR, prevChangeMs = 1_000L, frontierNow = FLOOR + 500, nowMs = 9_000L)
+        assertEquals(true, p.changed)
+        assertEquals(FLOOR + 500, p.frontier)
+        assertEquals(9_000L, p.lastChangeMs)
+    }
+
+    @Test fun `frontier tracker holds the clock when the frontier is unchanged`() {
+        val p = stepScanFrontier(prevFrontier = FLOOR, prevChangeMs = 1_000L, frontierNow = FLOOR, nowMs = 9_000L)
+        assertEquals(false, p.changed)
+        assertEquals(FLOOR, p.frontier)
+        assertEquals(1_000L, p.lastChangeMs)
+    }
+
+    @Test fun `frontier REGRESSION to a real floor is a re-init — it restarts the clock, it is not a stall`() {
+        // THE BUG: after a corrupt-heal / frozen-CF recovery / re-anchor wipes
+        // CfScanLedgerStore, or after a deep reorg, the frontier re-inits far below the
+        // last observed value. Forward-only tracking freezes the clock there.
+        val p = stepScanFrontier(
+            prevFrontier = 23_890_000L, prevChangeMs = 1_000L, frontierNow = FLOOR, nowMs = 9_000L,
+        )
+        assertEquals(true, p.changed)
+        assertEquals(FLOOR, p.frontier)
+        assertEquals(9_000L, p.lastChangeMs)
+    }
+
+    @Test fun `a transient UNARMED reading is ignored — it neither restarts nor freezes the clock`() {
+        // getLowestNeededHeight() reads 0 while the peer manager is absent (the window
+        // between forceReconnect and startSync) and 1 on a calloc'd ledger. Adopting
+        // that as a re-init would let a flapping read hold the stall clock at zero and
+        // silently disable the backstop, so it must be dropped, not adopted.
+        for (transient in longArrayOf(0L, 1L)) {
+            val p = stepScanFrontier(
+                prevFrontier = 23_890_000L, prevChangeMs = 1_000L, frontierNow = transient, nowMs = 9_000L,
+            )
+            assertEquals(false, p.changed)
+            assertEquals(23_890_000L, p.frontier)
+            assertEquals(1_000L, p.lastChangeMs)
+        }
+    }
+
+    // ── TipStallState: signal selection, the tier-1 latch, the stall clocks ──
+
+    @Test fun `tip-stall clock restarts and the tier-1 latch clears on a frontier re-init`() {
+        // THE HARASSMENT BUG, at the level it actually lives: the tip-stall watchdog is
+        // a SEPARATE coroutine with separate state from the BIP158 loop, so the
+        // post-recovery resets in the BIP158 branches do not reach it. Without this,
+        // scanStalledMs grows without bound across the whole clean re-climb and
+        // tier1Fired can never clear.
+        val armed = initialTipStallState(tip = TIP_AT_START, scan = 23_890_000L, nowMs = 0L)
+            .copy(tier1Fired = true)
+        val after = armed.step(tipNow = TIP_AT_START, scanNow = FLOOR, nowMs = 60 * 60 * 1000L)
+
+        assertEquals(true, after.progressed)
+        assertEquals(false, after.tier1Fired)
+        assertEquals(0L, after.scanStalledMs(nowMs = 60 * 60 * 1000L))
+        assertEquals(FLOOR, after.lastScan)
+    }
+
+    @Test fun `a re-init does NOT leave tier2 free to recreate the manager every hour`() {
+        // End-to-end over the pure layer: re-init, then a full tier-2 window of the
+        // clean re-climb making steady progress. Neither tier may fire.
+        var s = initialTipStallState(tip = TIP_AT_START, scan = 23_890_000L, nowMs = 0L).copy(tier1Fired = true)
+        var t = 60 * 60 * 1000L
+        s = s.step(tipNow = TIP_AT_START, scanNow = FLOOR, nowMs = t)   // the re-init
+        // ...then climb, one poll per minute, for well past 2x TIP_STALL_TIMEOUT_MS.
+        repeat(90) {
+            t += 60_000L
+            s = s.step(tipNow = TIP_AT_START, scanNow = FLOOR + (it + 1) * 20L, nowMs = t)
+        }
+        assertEquals(
+            false,
+            shouldRerequestHeadersOnStall(
+                peerCount = 6,
+                scanStalledMs = s.scanStalledMs(t),
+                blockTipStalledMs = s.blockTipStalledMs(t),
+                convoyWindowFull = false,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldForceReconnectOnStall(
+                peerCount = 6,
+                scanStalledMs = s.scanStalledMs(t),
+                blockTipStalledMs = s.blockTipStalledMs(t),
+                convoyWindowFull = false,
+                tier1Fired = true,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+    }
+
+    @Test fun `a genuinely frozen frontier still accumulates the stall clock and keeps the latch`() {
+        // The backstop must survive the fix: no motion at all is still a stall.
+        var s = initialTipStallState(tip = TIP_AT_START, scan = FLOOR, nowMs = 0L).copy(tier1Fired = true)
+        s = s.step(tipNow = TIP_AT_START, scanNow = FLOOR, nowMs = TIP_STALL_TIMEOUT_MS)
+        assertEquals(false, s.progressed)
+        assertEquals(true, s.tier1Fired)
+        assertEquals(TIP_STALL_TIMEOUT_MS, s.scanStalledMs(TIP_STALL_TIMEOUT_MS))
+        assertEquals(
+            true,
+            shouldRerequestHeadersOnStall(
+                peerCount = 6,
+                scanStalledMs = s.scanStalledMs(TIP_STALL_TIMEOUT_MS),
+                blockTipStalledMs = s.blockTipStalledMs(TIP_STALL_TIMEOUT_MS),
+                convoyWindowFull = false,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+    }
+
+    @Test fun `while the scan is armed a block-tip advance is NOT progress`() {
+        // The convoy gate re-kicks 2000 headers every time the scan climbs out of the
+        // window, so a tip advance must not clear the tier-1 latch — tier 2 requires
+        // that latch and could otherwise never escalate a real scan wedge.
+        var s = initialTipStallState(tip = TIP_AT_START, scan = FLOOR, nowMs = 0L).copy(tier1Fired = true)
+        s = s.step(tipNow = TIP_AT_START + 2000, scanNow = FLOOR, nowMs = 60_000L)
+        assertEquals(false, s.progressed)
+        assertEquals(true, s.tier1Fired)
+        assertEquals(60_000L, s.scanStalledMs(60_000L))       // scan clock still running
+        assertEquals(0L, s.blockTipStalledMs(60_000L))        // tip clock reset
+    }
+
+    @Test fun `while the scan is UNARMED the block tip is the authoritative signal`() {
+        // Legacy keying for the window before the CF scan ledger is armed: a constant
+        // 0/1 frontier must not read as "frozen forever" and escalate on a wallet that
+        // is simply still coming up.
+        var s = initialTipStallState(tip = TIP_AT_START, scan = 0L, nowMs = 0L).copy(tier1Fired = true)
+        s = s.step(tipNow = TIP_AT_START + 1, scanNow = 0L, nowMs = 60_000L)
+        assertEquals(false, s.scanArmed)
+        assertEquals(true, s.progressed)
+        assertEquals(false, s.tier1Fired)
+        assertEquals(0L, s.scanStalledMs(60_000L))
+
+        // ...and a frozen tip while unarmed DOES still arm the watchdog.
+        val frozen = s.step(tipNow = TIP_AT_START + 1, scanNow = 0L, nowMs = 60_000L + TIP_STALL_TIMEOUT_MS)
+        assertEquals(TIP_STALL_TIMEOUT_MS, frozen.scanStalledMs(60_000L + TIP_STALL_TIMEOUT_MS))
+    }
+
+    @Test fun `arming the ledger mid-session hands the signal over without a false stall`() {
+        var s = initialTipStallState(tip = TIP_AT_START, scan = 0L, nowMs = 0L)
+        s = s.step(tipNow = TIP_AT_START, scanNow = FLOOR, nowMs = 30_000L)
+        assertEquals(true, s.scanArmed)
+        assertEquals(true, s.progressed)
+        assertEquals(0L, s.scanStalledMs(30_000L))
+    }
+
     @Test fun `heal cooldown is wider than the freeze threshold to survive reconnect latency`() {
         // Regression guard for the heal-cascade finding: a heal's forceReconnect drops
         // all peers, so cfTip reads 0 (== the reset cfNetMax) until the re-fetch
