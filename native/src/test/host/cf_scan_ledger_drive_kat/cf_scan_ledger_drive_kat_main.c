@@ -1917,6 +1917,64 @@ static void test_clearmemory_ceiling_scan_started(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
+// ---- Paced-convoy fetch, Task 1: scan-frontier + abandonment accessors -----
+// Semantics anchor for the frontier the convoy gate/driver polls: it is
+// BRCFScanLedgerLowestNeededHeight (== max(scannedThrough+1, abandonedBelow)),
+// NOT scannedThrough alone. BRCFScanLedgerLowestNeededHeight/AbandonedBelow
+// already exist (CF-retention scan-floor Task 1) — the new code under test
+// here is the BRPeerManager*/JNI accessor layer the convoy actually calls
+// (BRPeerManagerLowestNeededHeight/AbandonedBelow/AbandonedCount), proven by
+// threading the exact same shape through a real manager's embedded cfLedger.
+static void test_lowest_needed_accessor(BRWallet *wallet)
+{
+    printf("\n=== test_lowest_needed_accessor (paced-convoy Task 1: frontier semantics anchor) ===\n");
+
+    // --- Pure ledger: locks the exact semantics the convoy's frontier read relies on. ---
+    BRCFScanLedger l;
+    BRCFScanLedgerInit(&l, 1000);   // scannedThrough = 999
+    UInt128 peer = UINT128_ZERO; peer.u8[15] = 1;
+    BRCFScanLedgerRecordRequested(&l, 1000, 1005, peer, 12024, 1700000000u);
+    for (uint32_t h = 1000; h <= 1002; h++) BRCFScanLedgerMarkEvaluated(&l, h);
+    check(BRCFScanLedgerScannedThrough(&l) == 1002, "scannedThrough advanced to 1002 (1000..1002 evaluated)");
+    check(BRCFScanLedgerLowestNeededHeight(&l) == 1003,
+          "LowestNeededHeight == scannedThrough+1 == 1003 (still-outstanding 1003..1005 hold the frontier back)");
+
+    // Raise the hard retention floor above the still-outstanding scan frontier
+    // (production path: BRCFScanLedgerAbandonGaveUpBelow; anchored directly
+    // here the same way cf_scan_ledger_kat's test_lowest_needed_height moves
+    // the watermark, since AbandonGaveUpBelow itself never advances past a
+    // still-outstanding hole — that guard is proven separately by
+    // test_clearmemory_ceiling_scan_started above).
+    l.abandonedBelow = 1010;
+    check(BRCFScanLedgerAbandonedBelow(&l) == 1010, "abandonedBelow raised to 1010");
+    check(BRCFScanLedgerLowestNeededHeight(&l) == 1010,
+          "LowestNeededHeight folds in abandonedBelow (1010 > scannedThrough+1==1003) -- the convoy's fetch "
+          "frontier is LowestNeededHeight, not scannedThrough");
+
+    // --- BRPeerManager* accessors (the actual new code this task adds): lock ->
+    // read ledger -> unlock wrappers the JNI layer (getLowestNeededHeight /
+    // getAbandonedBelow / getAbandonedCount) calls. Same shape, on a real
+    // manager's embedded cfLedger, plus AbandonedCount (start..abandonedBelow-1). ---
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    check(m != NULL, "setup: peer manager created");
+    if (m) {
+        BRCFScanLedgerInit(&m->cfLedger, 2000);   // scannedThrough = 1999, start = 2000
+        BRCFScanLedgerRecordRequested(&m->cfLedger, 2000, 2005, peer, 12024, 1700000000u);
+        for (uint32_t h = 2000; h <= 2002; h++) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+
+        check(BRPeerManagerLowestNeededHeight(m) == 2003, "BRPeerManagerLowestNeededHeight mirrors the ledger fn (2003)");
+        check(BRPeerManagerAbandonedBelow(m) == 0, "BRPeerManagerAbandonedBelow starts at 0 (nothing abandoned yet)");
+        check(BRPeerManagerAbandonedCount(m) == 0, "BRPeerManagerAbandonedCount is 0 when abandonedBelow == start");
+
+        m->cfLedger.abandonedBelow = 2010;
+        check(BRPeerManagerLowestNeededHeight(m) == 2010, "BRPeerManagerLowestNeededHeight folds in the raised abandonedBelow (2010)");
+        check(BRPeerManagerAbandonedBelow(m) == 2010, "BRPeerManagerAbandonedBelow reads the raised watermark (2010)");
+        check(BRPeerManagerAbandonedCount(m) == 10, "BRPeerManagerAbandonedCount == abandonedBelow(2010) - start(2000) == 10");
+
+        BRPeerManagerFree(m);
+    }
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -1999,6 +2057,7 @@ int main(void)
     test_clearmemory_descent_frees(wallet);                // Task 4: full descent frees below the floor (no leak)
     test_clearmemory_ceiling_scan_not_started(wallet);     // Task 4b: ceiling timing branch 1 — scan-not-started wrong-balance guard
     test_clearmemory_ceiling_scan_started(wallet);         // Task 4b: ceiling timing branch 2 — abandon gaveUp, keep outstanding
+    test_lowest_needed_accessor(wallet);                   // paced-convoy-fetch Task 1: frontier semantics anchor + BRPeerManager accessors
 
     BRWalletFree(wallet);
 

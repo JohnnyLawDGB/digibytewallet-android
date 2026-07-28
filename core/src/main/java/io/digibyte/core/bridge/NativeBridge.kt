@@ -212,6 +212,32 @@ object NativeBridge {
      */
     external fun getWalletBirthCheckpointHeight(): Long
 
+    // === Deep-restore depth gate ===
+    /**
+     * Highest hardcoded chain checkpoint height for the active network. An
+     * OFFLINE lower-bound approximation of the chain tip, usable before
+     * startSync() exists (getLastBlockHeight() returns 0 that early). Does not
+     * require a loaded wallet or peer manager.
+     */
+    external fun getHighestCheckpointHeight(): Long
+
+    /**
+     * Depth in blocks a CF restore with the given creation time would require:
+     * highestCheckpointHeight − birthCheckpointHeight(creationTimeSecs). Computed
+     * from hardcoded checkpoints OFFLINE (no peers, wallet need not be loaded), so
+     * the onboarding flow can decide whether a restore is too deep to scan
+     * on-device BEFORE persisting the seed. Returns 0 (never negative) for a
+     * fresh/near-tip birth. Pairs with [restoreScanDepthLimit].
+     */
+    external fun restoreScanDepthBlocks(creationTimeSecs: Long): Long
+
+    /**
+     * The native CF-retention scan-depth ceiling (CF_RETENTION_MAX_SPAN in
+     * BRPeerManager.h). Exposed so the Kotlin depth gate has no hand-mirrored
+     * magic number that could drift from the native #define.
+     */
+    external fun restoreScanDepthLimit(): Long
+
     /** Register callback handler for native events. */
     external fun setCallbackHandler(handler: NativeCallback)
 
@@ -549,4 +575,19 @@ object NativeBridge {
     /** Restore a previously persisted CF scan ledger. Returns false on malformed
      *  input OR if called before startSync (the native peer manager must exist). */
     external fun restoreCfScanLedger(data: ByteArray): Boolean
+
+    /** CF scan frontier: lowest height the scan still needs a header retained
+     *  for == max(scannedThrough+1, abandonedBelow). This — NOT scannedThrough
+     *  alone — is the paced-convoy fetch's fetch frontier. 0 if the peer
+     *  manager doesn't exist yet. */
+    external fun getLowestNeededHeight(): Long
+
+    /** CF retention hard-floor watermark: heights below this have been
+     *  permanently abandoned (too deep to retain) and are never re-requested.
+     *  Monotonic. 0 if the peer manager doesn't exist yet. */
+    external fun getAbandonedBelow(): Long
+
+    /** Cumulative count of heights abandoned so far (max(abandonedBelow -
+     *  start, 0)). 0 if the peer manager doesn't exist yet. */
+    external fun getAbandonedCount(): Long
 }

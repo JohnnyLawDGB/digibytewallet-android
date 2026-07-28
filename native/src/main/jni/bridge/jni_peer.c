@@ -1032,6 +1032,75 @@ Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv 
     return (jlong)result;
 }
 
+/* ---------- restore-depth accessors (deep-restore UI depth gate) ----------
+ *
+ * These let the app compute — OFFLINE, before any peer exists and before the
+ * wallet is even recovered — how deep a CF scan a given restore would require,
+ * and compare it to the native CF-retention ceiling (CF_RETENTION_MAX_SPAN in
+ * BRPeerManager.h). If the depth exceeds the ceiling the app refuses the restore
+ * up front (a plain "coming in a future update" answer) instead of syncing to a
+ * wrong balance or OOMing. This is the app-layer half that pairs with the native
+ * CF-retention memory-ceiling / determinism guard.
+ */
+
+/* Highest hardcoded checkpoint height for the active network. Usable as an
+ * OFFLINE lower-bound approximation of the chain tip before startSync() exists
+ * (getLastBlockHeight() returns 0 that early). Does NOT require a loaded wallet
+ * or a peer manager. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getHighestCheckpointHeight(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+
+    const BRChainParams *params = BRNetworkIsTestnet() ? &BRTestNetParams : &BRMainNetParams;
+    if (params->checkpointsCount == 0) return 0;
+    return (jlong)params->checkpoints[params->checkpointsCount - 1].height;
+}
+
+/* Depth (in blocks) of the CF scan a restore with the given creation time would
+ * require: highestCheckpointHeight − birthCheckpointHeight(creationTimeSecs).
+ *
+ * The birth-checkpoint walk mirrors getWalletBirthCheckpointHeight() exactly
+ * (latest checkpoint at least a week before the creation time) but is
+ * PARAMETERIZED by the passed timestamp instead of g_walletCreationTime, so it
+ * can be evaluated BEFORE recoverWallet() loads the wallet. Returns 0 (never
+ * negative) if the derived floor is at or above the highest checkpoint (a
+ * fresh/near-tip birth). creationTimeSecs is cast to uint32_t to match the
+ * recoverWallet() creation-time path. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_restoreScanDepthBlocks(JNIEnv *env, jobject thiz,
+                                                                 jlong creationTimeSecs) {
+    (void)env;
+    (void)thiz;
+
+    const BRChainParams *params = BRNetworkIsTestnet() ? &BRTestNetParams : &BRMainNetParams;
+    if (params->checkpointsCount == 0) return 0;
+
+    uint32_t creationTime = (creationTimeSecs > 0) ? (uint32_t)creationTimeSecs : 0;
+
+    uint32_t birthHeight = 0;
+    for (size_t i = 0; i < params->checkpointsCount; i++) {
+        if (i == 0 ||
+            params->checkpoints[i].timestamp + 7*24*60*60 < creationTime) {
+            birthHeight = params->checkpoints[i].height;
+        }
+    }
+
+    uint32_t highest = params->checkpoints[params->checkpointsCount - 1].height;
+    if (highest <= birthHeight) return 0;
+    return (jlong)(highest - birthHeight);
+}
+
+/* The CF-retention scan-depth ceiling (CF_RETENTION_MAX_SPAN, BRPeerManager.h).
+ * Exposed so the Kotlin gate has no hand-mirrored magic number that could drift
+ * from the native #define. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_restoreScanDepthLimit(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jlong)CF_RETENTION_MAX_SPAN;
+}
+
 /* ---------- setCallbackHandler ---------- */
 
 JNIEXPORT void JNICALL
@@ -1486,6 +1555,35 @@ Java_io_digibyte_core_bridge_NativeBridge_restoreCfScanLedger(JNIEnv *env, jobje
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
     LOGI("restoreCfScanLedger: %s (%d bytes)", ok ? "restored" : "rejected", (int)len);
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+/* CF scan-frontier + abandonment accessors (paced-convoy fetch, Task 1). Same
+ * PEER_GUARD + g_peerManager null-check shape as getCfScanLedgerCounts above
+ * (these dereference g_peerManager->cfLedger via a locked manager call, so
+ * there is no lock-free scalar mirror to read). */
+
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getLowestNeededHeight(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerLowestNeededHeight(g_peerManager);
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getAbandonedBelow(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerAbandonedBelow(g_peerManager);
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerAbandonedCount(g_peerManager);
 }
 
 JNIEXPORT jboolean JNICALL
