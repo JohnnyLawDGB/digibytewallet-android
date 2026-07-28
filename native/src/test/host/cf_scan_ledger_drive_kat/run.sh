@@ -230,6 +230,32 @@ else
     echo "RED confirmed: without the episode reset a window reopen waits out the stale pre-gate backoff (expected)."
 fi
 
+# ---- RED: the resume cursor reconciliation snap compiled to a no-op MUST fail ----
+# (paced-convoy Task 4, spec Part B1-resume). BRPeerManagerSnapAutoFetchThroughToScanFrontier's
+# body is skipped under -DRESUME_SNAP_UNFIXED, so a wallet resumed after the
+# ledger's scannedThrough advanced past birth still has its forward-fetch cursor
+# stuck at birth-1. The next forward-fetch tick then re-requests already-scanned
+# history from birth, and RecordRequested re-inserts those heights as
+# outstanding, dragging scannedThrough back down and discarding the persisted
+# scan progress -- and under the paced convoy's ~10 s KeepAlive drive, it would
+# repeat every tick. The same assertion also catches the off-by-one in the other
+# direction (snapping to LowestNeededHeight instead of LowestNeededHeight-1
+# would silently skip one height forever), but that shape isn't separately
+# red/green gated here -- the unfixed (no-op) build already proves the gate can
+# go red, and the arithmetic (lowest - 1) is a one-line, directly-inspectable
+# expression in BRPeerManagerSnapAutoFetchThroughToScanFrontier.
+build "$BUILD_DIR/kat_resume_snap_unfixed" -DRESUME_SNAP_UNFIXED -DKAT_RESUME_SNAP_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_resume_snap_unfixed"; then
+    echo "GATE FAILURE: the RESUME-SNAP-UNFIXED build PASSED. The resume cursor"
+    echo "reconciliation's red-before-green cannot go red -- a wallet resumed after the"
+    echo "ledger's scannedThrough advanced past birth would have its forward-fetch cursor"
+    echo "stuck stale, re-request already-scanned history on the very next tick, and drag"
+    echo "scannedThrough back down every KeepAlive tick, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the snap the forward-fetch cursor stays stale at birth-1 after a restore (expected)."
+fi
+
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------
 build "$BUILD_DIR/kat_fixed" -DCF_RETENTION_MAX_SPAN=4000
 "$BUILD_DIR/kat_fixed"

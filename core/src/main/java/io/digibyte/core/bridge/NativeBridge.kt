@@ -590,4 +590,21 @@ object NativeBridge {
     /** Cumulative count of heights abandoned so far (max(abandonedBelow -
      *  start, 0)). 0 if the peer manager doesn't exist yet. */
     external fun getAbandonedCount(): Long
+
+    /** Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume).
+     *  enableAutoCompactFilterFetch arms the forward-fetch cursor at
+     *  birthHeight-1 BEFORE the persisted CF scan ledger is restored via
+     *  restoreCfScanLedger, which can set scannedThrough far above birthHeight.
+     *  Call this ONCE, immediately after restoreCfScanLedger, to snap the
+     *  cursor up to the restored scan frontier (LowestNeededHeight-1) — else
+     *  the next forward fetch re-requests already-scanned history from
+     *  birthHeight and drags scannedThrough back down, silently discarding the
+     *  persisted progress. MONOTONIC (only ever raises the cursor). Returns
+     *  the resulting cursor (post-snap), 0 if the peer manager doesn't exist. */
+    external fun snapAutoFetchThroughToScanFrontier(): Long
+
+    /** Current forward-fetch cursor (autoFetchCFiltersThrough). For before/after
+     *  logging around snapAutoFetchThroughToScanFrontier. 0 if the peer manager
+     *  doesn't exist yet. */
+    external fun getAutoFetchCFiltersThrough(): Long
 }

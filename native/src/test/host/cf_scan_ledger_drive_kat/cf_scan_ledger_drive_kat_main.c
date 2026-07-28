@@ -2725,6 +2725,147 @@ static void test_b1_rekick_backoff_not_stale_across_gated_period(BRWallet *walle
     BRPeerManagerFree(m);
 }
 
+// ---- Paced-convoy fetch, Task 4: RESUME CURSOR RECONCILIATION --------------
+// (spec 2026-07-28-paced-convoy-fetch-design.md, Part B1-resume)
+//
+// Production resume order (SyncService.kt): enableAutoCompactFilterFetch(birth)
+// arms autoFetchCFiltersThrough = birth-1, THEN startSync(), THEN
+// restoreCfScanLedger() overwrites the ledger with the PERSISTED one, whose
+// scannedThrough can sit far above birth. The cursor is not itself persisted, so
+// without a reconciliation step it stays at birth-1 while the ledger says the
+// scan already got far past that. The next forward-fetch tick then computes
+// reqStart = autoFetchCFiltersThrough+1 == birth, re-requests ALREADY-SCANNED
+// history, and BRCFScanLedgerRecordRequested re-inserts those heights as
+// outstanding -- dragging scannedThrough back down and discarding the persisted
+// progress. Under the paced convoy's KeepAlive drive (B1.1, ~10 s ticks) this
+// would repeat every tick, not just once per resume.
+//
+// THE OFF-BY-ONE: the fix must snap to LowestNeededHeight-1, NOT
+// LowestNeededHeight itself. reqStart is autoFetchCFiltersThrough+1, so snapping
+// to LowestNeededHeight would make the very next fetch start at
+// LowestNeededHeight+1 -- silently skipping exactly the one height the scan was
+// waiting on, forever. The single g_capStart==LOWEST assertion below is
+// discriminating in BOTH directions: it fails if the snap doesn't run at all
+// (g_capStart lands at BASE, the re-scan), and it fails if the snap uses LOWEST
+// instead of LOWEST-1 (g_capStart lands at LOWEST+1, the skip).
+//
+// RED-before-green: run.sh builds this case with -DRESUME_SNAP_UNFIXED (the
+// snap compiled to a no-op -- BRPeerManagerSnapAutoFetchThroughToScanFrontier's
+// body skipped, cursor stays at birth-1) and HARD-FAILS if it passes.
+static void test_resume_snaps_cursor(BRWallet *wallet)
+{
+    printf("\n=== test_resume_snaps_cursor (paced-convoy Task 4: resume cursor reconciliation) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 3000u;
+
+    // ---- Session 1: the scan descended partway, then PERSISTED. Serialize/Parse
+    // (not a hand-built struct) so the resume goes through the same path
+    // production uses (CfScanLedgerStore.save -> ... -> restoreCfScanLedger). ----
+    BRCFScanLedger persisted;
+    BRCFScanLedgerInit(&persisted, BASE);
+    BRCFScanLedgerRecordRequested(&persisted, BASE, BASE + 2499u, UINT128_ZERO, 0, 1700000000u);
+    for (uint32_t h = BASE; h <= BASE + 2499u; h++) BRCFScanLedgerMarkEvaluated(&persisted, h);
+    check(BRCFScanLedgerScannedThrough(&persisted) == BASE + 2499u, "session 1: scannedThrough == BASE+2499");
+
+    size_t blobLen = BRCFScanLedgerSerialize(&persisted, NULL, 0);
+    uint8_t *blob  = (blobLen > 0) ? malloc(blobLen) : NULL;
+    check(blob != NULL && BRCFScanLedgerSerialize(&persisted, blob, blobLen) == blobLen,
+          "session 1: ledger serialized (the persisted blob the resume restores)");
+    BRCFScanLedgerFree(&persisted);
+    if (! blob) return;
+
+    // ---- Session 2: fresh manager. Reproduce the PRODUCTION RESUME ORDER
+    // exactly: enableAutoCompactFilterFetch(birth) arms the cursor at birth-1
+    // FIRST, the persisted ledger is restored SECOND. ----
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "session 2: manager+chain built");
+    if (! m) { free(blob); return; }
+    (void)baseCount;
+
+    BRPeerManagerEnableAutoCompactFilterFetch(m, BASE);
+    check(m->autoFetchCFiltersThrough == BASE - 1u,
+          "ARM: enableAutoCompactFilterFetch(birth) sets the cursor to birth-1 (BASE-1)");
+
+    // The cfheader chain got ahead of the scan before the kill (same shape as
+    // test_b1_resumes_drain_trough); keep it below the block tip so a real next
+    // batch exists for the behavioral drive below.
+    BRCompactFilterChainFree(m->compactFilterChain);
+    const uint32_t CFH_NEXT = BASE + 2900u;
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, CFH_NEXT, UINT256_ZERO);
+
+    check(BRCFScanLedgerParse(&m->cfLedger, blob, blobLen) == 1,
+          "RESTORE: the persisted ledger (scannedThrough far above birth) parsed back in");
+    free(blob);
+
+    const uint32_t LOWEST = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+    check(LOWEST == BASE + 2500u, "setup: LowestNeededHeight == scannedThrough+1 == BASE+2500 (far above birth)");
+
+    // ---- THE BUG, caught pre-snap: the cursor is STILL birth-1 after the
+    // restore -- the resume order left it stale. ----
+    check(m->autoFetchCFiltersThrough == BASE - 1u,
+          "PRE-SNAP: cursor is still birth-1 after the restore -- THE BUG (unreconciled, would re-scan from birth)");
+
+    // ---- THE FIX ----
+    BRPeerManagerSnapAutoFetchThroughToScanFrontier(m);
+    check(m->autoFetchCFiltersThrough == LOWEST - 1u,
+          "SNAP (RED on -DRESUME_SNAP_UNFIXED): autoFetchCFiltersThrough raised to LowestNeededHeight-1 "
+          "(BASE+2499) -- NOT birth-1, and NOT LowestNeededHeight itself");
+
+    // ---- Behavioral consequence: drive ONE KeepAlive tick (the B1.1 forward
+    // drive) and assert the getcfilters reqStart == LOWEST EXACTLY. This is the
+    // off-by-one catch: reqStart would be BASE if the snap never ran (re-scan of
+    // already-scanned history), or LOWEST+1 if the snap landed on LOWEST instead
+    // of LOWEST-1 (a silently skipped height). Only the correct snap produces
+    // reqStart == LOWEST. ----
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x41; pa->port = 12041; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    blockRegReset(); everReqReset(); capLogReset();
+    rhRegisterChain(BASE, TIP);
+    g_capCount = 0; g_capStart = 0;
+
+    BRPeerManagerKeepAlive(m);
+
+    check(g_capCount >= 1, "DRIVE: KeepAlive issued a forward getcfilters after the snap");
+    check(g_capStart == LOWEST,
+          "THE OFF-BY-ONE CATCH (RED on -DRESUME_SNAP_UNFIXED): reqStart == LowestNeededHeight exactly -- "
+          "no re-request of already-scanned [BASE..BASE+2499] AND no skipped height");
+
+    BRPeerManagerFree(m);
+
+    // ---- Abandonment case: the ledger's hard retention floor (abandonedBelow)
+    // must win over scannedThrough+1 when it is higher -- the snap must never
+    // leave the cursor low enough to re-request a permanently abandoned height. ----
+    BRPeerManager *m2 = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m2 != NULL, "abandonment case: manager+chain built");
+    if (! m2) return;
+
+    BRPeerManagerEnableAutoCompactFilterFetch(m2, BASE);
+    check(m2->autoFetchCFiltersThrough == BASE - 1u, "abandonment: armed at birth-1 before restore");
+
+    // scannedThrough == BASE+49 (contiguous evaluated prefix; BASE+50..BASE+99
+    // stay outstanding) -- then raise the hard floor ABOVE scannedThrough+1, the
+    // same way test_lowest_needed_accessor anchors abandonedBelow directly
+    // (production reaches this via BRCFScanLedgerAbandonGaveUpBelow, the
+    // CF-retention memory ceiling).
+    BRCFScanLedgerInit(&m2->cfLedger, BASE);
+    BRCFScanLedgerRecordRequested(&m2->cfLedger, BASE, BASE + 99u, UINT128_ZERO, 0, 1700000000u);
+    for (uint32_t h = BASE; h <= BASE + 49u; h++) BRCFScanLedgerMarkEvaluated(&m2->cfLedger, h);
+    m2->cfLedger.abandonedBelow = BASE + 200u;
+    check(BRCFScanLedgerLowestNeededHeight(&m2->cfLedger) == BASE + 200u,
+          "abandonment setup: LowestNeededHeight folds in the raised abandonedBelow (200 > scannedThrough+1==50)");
+
+    BRPeerManagerSnapAutoFetchThroughToScanFrontier(m2);
+    check(m2->autoFetchCFiltersThrough == BASE + 199u,
+          "ABANDONMENT (RED on -DRESUME_SNAP_UNFIXED): the snap lands at abandonedBelow-1 (BASE+199) -- the "
+          "ledger's hard floor is respected, no pointless re-request below it");
+
+    BRPeerManagerFree(m2);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -2837,6 +2978,22 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_RESUME_SNAP_REDGREEN_ONLY
+    // run.sh builds this twice for the resume cursor reconciliation's
+    // red-before-green gate: once with the snap compiled to a no-op
+    // (-DRESUME_SNAP_UNFIXED -- the pre-fix shape: the forward-fetch cursor
+    // stays at birth-1 after a ledger restore whose scannedThrough sits far
+    // above birth, so the next forward-fetch tick re-requests already-scanned
+    // history and drags scannedThrough back down, discarding persisted scan
+    // progress every KeepAlive tick -- must FAIL == RED) and once with the fix
+    // (must PASS == GREEN), running ONLY this case so the RED is unambiguously
+    // the missing snap and nothing incidental.
+    test_resume_snaps_cursor(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
     BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     check(manager != NULL, "smoke: peer manager created");
     if (!manager) { BRWalletFree(wallet); printf("\nFATAL\n"); return 1; }
@@ -2882,6 +3039,7 @@ int main(void)
     test_b1_rekicks_getheaders_when_tip_frozen(wallet);    // paced-convoy-fetch Task 3: B1.3 getheaders re-kick (manager side)
     test_b1_getheaders_rekick_is_throttled(wallet);        // paced-convoy-fetch Task 3 fix 1: B1.3 rate limit (red-before-green)
     test_b1_rekick_backoff_not_stale_across_gated_period(wallet); // paced-convoy-fetch Task 3 fix 2: GATED->open episode reset (red-before-green)
+    test_resume_snaps_cursor(wallet);                      // paced-convoy-fetch Task 4: resume cursor reconciliation (red-before-green)
 
     BRWalletFree(wallet);
 

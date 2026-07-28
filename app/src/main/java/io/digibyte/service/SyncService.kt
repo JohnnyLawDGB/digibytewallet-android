@@ -1697,6 +1697,20 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
         }
 
+        // Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume):
+        // enableAutoCompactFilterFetch above armed the forward-fetch cursor at
+        // birthHeight-1 BEFORE the restore just above could set scannedThrough far
+        // higher. Snap the cursor up to the restored scan frontier now — MUST run
+        // after the restore (there is nothing to snap to before it), or the next
+        // forward fetch re-requests already-scanned history from birthHeight and
+        // drags scannedThrough back down, silently throwing away persisted scan
+        // progress (and under the paced convoy's ~10s KeepAlive drive, it would
+        // re-do that every tick).
+        val cursorBefore = NativeBridge.getAutoFetchCFiltersThrough()
+        val cursorAfter = NativeBridge.snapAutoFetchThroughToScanFrontier()
+        android.util.Log.i("SyncService",
+            "cf-ledger: resume cursor snap $cursorBefore -> $cursorAfter")
+
         // Dandelion durability recovery: re-broadcast any recorded send the
         // wallet still sees as unconfirmed. A stem killed mid-embargo (process
         // death before the in-memory fluff timer fires) strands the tx — never

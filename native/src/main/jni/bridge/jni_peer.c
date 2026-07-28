@@ -1718,3 +1718,34 @@ Java_io_digibyte_core_bridge_NativeBridge_disableAutoCompactFilterFetch(JNIEnv *
     BRPeerManagerDisableAutoCompactFilterFetch(g_peerManager);
     LOGI("disableAutoCompactFilterFetch");
 }
+
+/* Resume cursor reconciliation (paced-convoy fetch, Task 4, spec Part
+ * B1-resume). Call exactly once, right after restoreCfScanLedger, so the
+ * forward-fetch cursor (armed at birthHeight-1 by enableAutoCompactFilterFetch,
+ * BEFORE the ledger restore) catches up to the restored scan frontier instead of
+ * re-requesting already-scanned history on the next forward-fetch tick. Returns
+ * the resulting cursor (post-snap) so the Kotlin caller can log before/after
+ * without a second round-trip. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_snapAutoFetchThroughToScanFrontier(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) {
+        LOGI("snapAutoFetchThroughToScanFrontier: peer manager not created — ignoring");
+        return 0;
+    }
+    BRPeerManagerSnapAutoFetchThroughToScanFrontier(g_peerManager);
+    uint32_t cursor = BRPeerManagerGetAutoFetchCFiltersThrough(g_peerManager);
+    LOGI("snapAutoFetchThroughToScanFrontier: cursor now %u", cursor);
+    return (jlong)cursor;
+}
+
+/* Read back the current forward-fetch cursor (autoFetchCFiltersThrough), for
+ * before/after logging around snapAutoFetchThroughToScanFrontier above. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getAutoFetchCFiltersThrough(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerGetAutoFetchCFiltersThrough(g_peerManager);
+}
