@@ -337,6 +337,102 @@ else
     echo "RED confirmed: without the gate a >100k-block descent grows manager->blocks to chain length (expected)."
 fi
 
+# ==== Paced-convoy Task 7: THE REORG FORK-JOIN NULL GUARD — a CRASH gate ======
+# The convoy gives manager->blocks a bottom edge, so _peerRelayedBlock's fork-join
+# walk (BRPeerManager.c:1812) can now exit with b == NULL when the join point has
+# been pruned — and the next two lines dereferenced b->height. That is a SIGSEGV,
+# not a failed assertion, so this gate is shaped differently from every other one
+# above: a nonzero exit is NOT sufficient evidence.
+#
+# ASan's default exitcode for a fatal signal is 1 — byte-identical to the exit code
+# `check()` produces on a failed assertion — so the exit status ALONE cannot tell
+# "crashed as expected" from "an assertion failed" or "the case never ran". The gate
+# therefore requires ALL of:
+#   1. the build itself SUCCEEDED — `build` is a bare statement, so `set -e` aborts
+#      run.sh before the gate is even reached if compilation/link fails;
+#   2. an ASan SEGV report is present in the output (a real fatal signal);
+#   3. the FAULTING ADDRESS equals offsetof(BRMerkleBlock, height) — i.e. the fault is
+#      a read of `->height` through a NULL pointer, which is precisely the unguarded
+#      deref. The case prints that offset itself (REORG-KAT: ...) so the expected
+#      address is DERIVED, never hardcoded, and stays correct if the struct changes;
+#   4. NO "FAIL:" line was printed — the process died crashing, not asserting;
+#   5. the construction's own preconditions were reached and PASSED first, i.e. the
+#      join block really was absent from manager->blocks at the moment of the walk
+#      ("JOIN POINT ABSENT" + "THE WINDOW EDGE IS EXACTLY AT THE JOIN"). Without (5)
+#      a crash somewhere earlier in setup would satisfy the gate for the wrong reason.
+# (3) deliberately replaces a symbolized-backtrace check: symbolizing this binary costs
+# ~90 s (llvm-symbolizer) and would make the gate depend on a symbolizer being present,
+# so the crash build runs under ASAN_OPTIONS=symbolize=0. For a human backtrace, re-run
+# "$BUILD_DIR/kat_reorg_unguarded" without that option — the frame is
+# _peerRelayedBlock in BRPeerManager.c, in the fork-join branch.
+#
+# NB the join height is not free: b (fork side) and b2 (main side) descend in
+# lockstep, so a join BELOW floor-1 kills b2 FIRST and does NOT crash. The case pins
+# the join at exactly floor-1 — see the long comment on test_reorg_below_window_no_crash.
+build "$BUILD_DIR/kat_reorg_unguarded" -DREORG_NULLGUARD_UNFIXED -DKAT_REORG_NULLGUARD_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+reorg_log="$BUILD_DIR/reorg_unguarded.log"
+set +e
+ASAN_OPTIONS=symbolize=0 "$BUILD_DIR/kat_reorg_unguarded" > "$reorg_log" 2>&1
+reorg_rc=$?
+set -e
+
+# NB: `grep -q X && var=1` under `set -e` ABORTS the script when the grep misses
+# (the AND-list's own nonzero status is what errexit sees), which would turn every
+# "gate did not go red" case into a silent early exit. if/then keeps it a decision.
+reorg_segv=0
+if grep -q "AddressSanitizer: SEGV on unknown address" "$reorg_log"; then reorg_segv=1; fi
+reorg_asserted=0
+if grep -q "^FAIL:" "$reorg_log"; then reorg_asserted=1; fi
+reorg_precond=0
+if grep -q "^PASS: JOIN POINT ABSENT" "$reorg_log" && \
+   grep -q "^PASS: THE WINDOW EDGE IS EXACTLY AT THE JOIN" "$reorg_log"; then reorg_precond=1; fi
+
+# The expected faulting address == offsetof(BRMerkleBlock, height), as printed by the
+# case itself. Compared NUMERICALLY so ASan's zero-padding width is irrelevant.
+reorg_addr=0
+reorg_off="$(sed -n 's/^REORG-KAT: offsetof(BRMerkleBlock, height) = \([0-9][0-9]*\)$/\1/p' "$reorg_log" | head -1)"
+reorg_fault="$(sed -n 's/.*SEGV on unknown address 0x\([0-9a-fA-F][0-9a-fA-F]*\).*/\1/p' "$reorg_log" | head -1)"
+if [ -n "$reorg_off" ] && [ -n "$reorg_fault" ] && [ "$((16#$reorg_fault))" -eq "$reorg_off" ]; then reorg_addr=1; fi
+
+if [ "$reorg_rc" -eq 0 ]; then
+    echo "GATE FAILURE: the REORG-NULLGUARD-UNFIXED build exited 0. The NULL-guard's"
+    echo "red-before-green cannot go red -- the fork-join walk never terminated at b == NULL,"
+    echo "which means the construction did NOT actually free the join point (a join below"
+    echo "floor-1 kills the MAIN-side walk first and never crashes). Refusing to green."
+    sed 's/^/    | /' "$reorg_log"
+    exit 1
+elif [ "$reorg_segv" -ne 1 ]; then
+    echo "GATE FAILURE: the REORG-NULLGUARD-UNFIXED build exited $reorg_rc WITHOUT crashing."
+    echo "This gate demands a real SIGSEGV (ASan SEGV report); a failed assertion or any other"
+    echo "nonzero exit is NOT evidence the unguarded deref was reached. Refusing to green."
+    sed 's/^/    | /' "$reorg_log"
+    exit 1
+elif [ "$reorg_asserted" -ne 0 ]; then
+    echo "GATE FAILURE: the REORG-NULLGUARD-UNFIXED build crashed, but a check() had ALREADY"
+    echo "FAILED before it did -- so the construction was broken and the crash cannot be"
+    echo "attributed to the unguarded fork-join deref. Refusing to green."
+    sed 's/^/    | /' "$reorg_log"
+    exit 1
+elif [ "$reorg_precond" -ne 1 ]; then
+    echo "GATE FAILURE: the REORG-NULLGUARD-UNFIXED build crashed BEFORE its construction"
+    echo "preconditions were reached (no 'JOIN POINT ABSENT' / 'THE WINDOW EDGE IS EXACTLY AT"
+    echo "THE JOIN' PASS in the log), so the crash is not the fork-join deref. Refusing to green."
+    sed 's/^/    | /' "$reorg_log"
+    exit 1
+elif [ "$reorg_addr" -ne 1 ]; then
+    echo "GATE FAILURE: the REORG-NULLGUARD-UNFIXED build produced an ASan SEGV, but the faulting"
+    echo "address (0x${reorg_fault:-?}) is NOT offsetof(BRMerkleBlock, height) (${reorg_off:-?}), so the"
+    echo "fault is not a NULL '->height' read and cannot be attributed to the unguarded fork-join"
+    echo "deref. This gate will not green on unattributed crash evidence."
+    sed 's/^/    | /' "$reorg_log"
+    exit 1
+else
+    echo "RED confirmed: unguarded fork-join walk dereferences the NULL b after the bounded window freed"
+    echo "the join point (expected). Crash signature:"
+    grep -m1 "AddressSanitizer: SEGV on unknown address" "$reorg_log" | sed 's/^/    /'
+    echo "    faulting address 0x$reorg_fault == offsetof(BRMerkleBlock, height) == $reorg_off  (a NULL '->height' read)"
+fi
+
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------
 build "$BUILD_DIR/kat_fixed" -DCF_RETENTION_MAX_SPAN=4000
 "$BUILD_DIR/kat_fixed"

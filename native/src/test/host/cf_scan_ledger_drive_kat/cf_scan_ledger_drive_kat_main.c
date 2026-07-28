@@ -3800,21 +3800,278 @@ static void test_reorg_mid_descent(void)
           "BOUNDED THROUGH THE REORG: manager->blocks grew by at most the fork's own length");
     check(! rhBlockPresent(m, FLOOR - 1u), "the retention floor still holds below the reorged window");
 
-    // ---- THE OTHER EDGE (spec Task 7, NOT asserted here) --------------------
-    // If the fork's join point were BELOW the retained floor -- reachable in
+    // ---- THE OTHER EDGE (now covered, in its own case) ----------------------
+    // If the fork's join point is BELOW the retained floor -- reachable in
     // production whenever the scan frontier climbs (raising cfFloor past the join)
     // between the fork's first block and the one that overtakes the main chain --
     // then the walk at BRPeerManager.c:1812
     //     while (b && b2 && ! BRMerkleBlockEq(b, b2)) { b = BRSetGet(blocks, &b->prevBlock); ... }
-    // exits with b == NULL, and :1817 (peer_log b->height) / :1819
-    // (BRWalletSetTxUnconfirmedAfter(wallet, b->height)) dereference it: a SIGSEGV,
-    // not a failed assertion. Running that case before the sibling task's NULL-guard
-    // lands would take the whole host-KAT suite down with a crash instead of a
-    // diagnosis, so only its structural PRECONDITION is asserted here.
-    check(! rhBlockPresent(m, FLOOR - 1u) && (FLOOR - 1u) < H_JOIN,
-          "TASK-7 PRECONDITION (documented, not dereferenced): a join point below the retained floor is "
-          "genuinely absent from manager->blocks, so the fork-join walk WOULD terminate at b == NULL and "
-          "the next line dereferences it -- that guard is the sibling task's");
+    // exits with b == NULL, and :1817/:1819 dereference it. That edge is NOT
+    // asserted here (it is a SIGSEGV, not a failed assertion, so it belongs in a
+    // case run under its own red gate): see test_reorg_below_window_no_crash below,
+    // which builds the join point's absence for real and is gated red-before-green
+    // against -DREORG_NULLGUARD_UNFIXED.
+
+    BRPeerManagerFree(m);
+    BRWalletFree(w);
+}
+
+// ============================================================================
+// Paced-convoy fetch, Task 7: REORG WHOSE JOIN POINT IS BELOW THE RETAINED WINDOW
+// ============================================================================
+//
+// THE crash the sibling case above deliberately declined to run. The convoy makes
+// manager->blocks a bounded WINDOW; _peerRelayedBlock's fork/reorg branch walks the
+// fork back to its join with the main chain THROUGH THAT SET (BRPeerManager.c:1812).
+// Once the window has a bottom edge the join point can be gone, the walk exits with
+// b == NULL, and :1817/:1819 dereference b->height. Before the window existed the
+// whole chain was resident and the join was always found, which is why this was
+// unreachable and is not any more.
+//
+// THE CONSTRUCTION IS THE HARD PART. _BRPeerManagerClearMemory frees the join block
+// only when BOTH of these hold, and either one missed leaves the join resident, the
+// walk never reaching NULL, and this case GREEN WITHOUT EVER EXERCISING THE GUARD:
+//
+//   (1) BRSetCount(manager->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER (5000). Below
+//       that the pruner returns having freed nothing at all. The chain here is 6000
+//       blocks and the count is ASSERTED at the trigger, not assumed. (This is also
+//       why the prune happens EXACTLY ONCE: pruning earlier would drop the count
+//       under 5000 and silently no-op the pass that matters.)
+//
+//   (2) The pruner only walks the prevBlock descent FROM manager->lastBlock, and it
+//       skips everything at/above the retention floor. So it reaches the join point
+//       only on a pass that runs AFTER the scan frontier has climbed past it. The
+//       ordering below is therefore load-bearing:
+//         a. the fork's FIRST block is relayed while the join is still resident --
+//            it has to be, or the block attaches as an ORPHAN and there is no fork
+//            at all (prev == NULL takes the orphan branch at :1683);
+//         b. THEN the scan frontier advances past the join (floor climbs above it);
+//         c. THEN a main-chain block is relayed, which is the production trigger for
+//            _BRPeerManagerClearMemory (BRPeerManager.c:1750) -- and that pass takes
+//            the join block with it;
+//         d. THEN the rest of the fork is relayed, the last block overtaking the main
+//            chain and running the fork-join walk into the hole.
+//
+// The join's absence is asserted DIRECTLY -- BRSetGet(manager->blocks, &joinHash)
+// == NULL, immediately before the overtaking block is relayed -- so a green here
+// cannot mean "the walk never hit NULL".
+//
+// AND THE JOIN HEIGHT IS NOT FREE. The walk descends b (the fork) and b2 (the main
+// chain) IN LOCKSTEP at equal heights. b dies where the fork's parent is missing --
+// at the join, H_JOIN. b2 dies where the main chain's parent is missing -- one below
+// the retention floor, FLOOR-1. Whichever dies FIRST ends the loop, and only a
+// b == NULL exit reaches the unguarded deref:
+//   * H_JOIN >= FLOOR      -> the join is still resident, no NULL at all, normal reorg
+//                             (that is the sibling case, test_reorg_mid_descent);
+//   * H_JOIN <  FLOOR - 1  -> main(H_JOIN+1) was pruned too, so b2 goes NULL FIRST and
+//                             the loop exits with b VALID at height FLOOR-1: no crash,
+//                             but a roll-back to the wrong (too high) height -- a real,
+//                             separate residual, noted in the task report, NOT this bug;
+//   * H_JOIN == FLOOR - 1  -> b looks up the join and gets NULL while b2 is still alive
+//                             on the floor block. THIS is the b == NULL exit.
+// So the case is pinned at H_JOIN == FLOOR-1 -- the exact and only height at which the
+// fork-join walk terminates on the fork side. An earlier draft of this case used a join
+// 356 blocks below the floor; it built a genuinely absent join, printed every
+// precondition PASS, and did NOT crash the unguarded build, because b2 died first. That
+// is the false green this comment exists to prevent.
+//
+// RED-BEFORE-GREEN: run.sh builds this case alone with -DREORG_NULLGUARD_UNFIXED
+// (the guard compiled out) and requires an ASan SEGV report whose faulting address is
+// offsetof(BRMerkleBlock, height) -- NOT merely a nonzero exit, which a failed
+// assertion produces too. NOTE that on this host build _peer_log expands to nothing
+// (no -DDEBUG), so the peer_log's b->height is not evaluated and the crash lands on
+// the BRWalletSetTxUnconfirmedAfter(wallet, b->height) below it; on Android _peer_log
+// is __android_log_print and the peer_log dereferences too. The guard covers both.
+static void test_reorg_below_window_no_crash(void)
+{
+    printf("\n=== test_reorg_below_window_no_crash (paced-convoy Task 7: join point below the retained window) ===\n");
+
+    // A FRESH wallet: this case registers real transactions, and the suite's shared
+    // wallet is used by every other case.
+    uint8_t seed[64];
+    BRBIP39DeriveKey(seed, kMnemonic, NULL);
+    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    BRWallet *w = BRWalletNew(NULL, 0, mpk);
+    check(w != NULL, "fresh wallet created for the credit assertions");
+    if (! w) return;
+
+    // Same BASE as the sibling case and for the same reason: ABOVE the highest
+    // mainnet checkpoint (23,660,000), or _peerRelayedBlock discards the fork
+    // outright at :1797 and this case would silently test nothing.
+    const uint32_t BASE     = 24000000u;
+    const uint32_t COUNT    = 6000u;                  // > CLEAR_MEM_BLOCKS_COUNT_TRIGGER (trap 1)
+    const uint32_t MAIN_TIP = BASE + COUNT - 1u;      // 24,005,999
+
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(w, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL && TIP == MAIN_TIP, "main chain built [BASE .. BASE+5999]");
+    if (! m) { BRWalletFree(w); return; }
+
+    // The fork joins ~3000 below the tip. The pruner never touches the first
+    // (CLEAR_MEM_BLOCKS_COUNT_TRIGGER - CLEAR_MEM_BLOCKS_COUNT_TAIL_LEN) == 800
+    // blocks below lastBlock, so a shallower join would be structurally unprunable.
+    // The eventual retention floor is pinned ONE ABOVE it (see the header comment):
+    // the join is the topmost pruned main-chain block, which is the only height at
+    // which the fork-side walk goes NULL before the main-side walk does.
+    const uint32_t H_JOIN  = BASE + 3000u;                                   // 24,003,000
+    const uint32_t FLOOR_B = H_JOIN + 1u;                                    // the post-climb retention floor
+    const uint32_t SCAN_B  = FLOOR_B + CLEAR_MEM_CF_RETENTION_MARGIN;        // the scan frontier that produces it
+    check(H_JOIN + (CLEAR_MEM_BLOCKS_COUNT_TRIGGER - CLEAR_MEM_BLOCKS_COUNT_TAIL_LEN) < MAIN_TIP,
+          "setup: the join sits below the pruner's untouchable 800-block head, so the tail descent reaches it");
+
+    // ---- phase A: frontier still BELOW the join, so the join is resident --------
+    const uint32_t SCAN_A = H_JOIN;
+    BRCompactFilterChainFree(m->compactFilterChain);
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, MAIN_TIP + 1u, UINT256_ZERO);
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = SCAN_A;
+    m->autoFetchCFiltersThrough = SCAN_A - 1u;
+    m->estimatedHeight          = MAIN_TIP + 1000u;   // keep _BRPeerManagerLoadMempools out of this case
+    BRCFScanLedgerInit(&m->cfLedger, SCAN_A);
+    check(SCAN_A - CLEAR_MEM_CF_RETENTION_MARGIN < H_JOIN,
+          "setup: the phase-A retention floor is BELOW the join, so the join is resident when the fork attaches");
+
+    // ---- wallet credits straddling the join point ------------------------------
+    BRAddress a0 = BRWalletReceiveAddress(w, 1);      // segwit: the BIP84 wallet's own receive address
+    uint8_t spk[64];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), a0.s);
+    check(spkLen > 0, "setup: wallet receive address -> scriptPubKey");
+
+    const uint64_t AMT = 500000000ULL;                // 5 DGB, far above dust
+    UInt256 hBelow = UINT256_ZERO, hAbove = UINT256_ZERO;
+    for (int k = 0; k < 2; k++) {
+        UInt256 prevOut; memset(prevOut.u8, (uint8_t)(0xD0 + k), sizeof(prevOut.u8));
+        BRTransaction *tx = BRTransactionNew();
+        static const uint8_t placeholder[1] = { 0 };
+        BRTransactionAddInput(tx, prevOut, 0, 0, spk, spkLen, placeholder, 0, placeholder, 0, 0xffffffff);
+        BRTransactionAddOutput(tx, AMT, spk, spkLen);
+        {   // finalize txHash the way the wire would
+            uint8_t data[BRTransactionSerialize(tx, NULL, 0)];
+            size_t len = BRTransactionSerialize(tx, data, sizeof(data));
+            BRTransaction *t = BRTransactionParse(data, len);
+            if (t) { tx->txHash = t->txHash; tx->wtxHash = t->wtxHash; BRTransactionFree(t); }
+        }
+        tx->timestamp   = 1700000000u;
+        tx->blockHeight = (k == 0) ? H_JOIN : (H_JOIN + 1u);
+        check(BRWalletRegisterTransaction(w, tx) != 0, "credit registered into the wallet");
+        if (k == 0) hBelow = tx->txHash; else hAbove = tx->txHash;
+    }
+    const uint64_t balanceBefore = BRWalletBalance(w);
+    check(balanceBefore == 2u * AMT, "setup: both credits are in the balance before the reorg");
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x62; pa->port = 12062; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+    BRPeerCallbackInfo info = { pa, m, UINT256_ZERO };
+
+    // ---- (2a) the fork's FIRST block, relayed while the join IS resident --------
+    check(rhBlockPresent(m, H_JOIN), "setup: the join block is resident at the instant the fork's first block arrives");
+    {
+        BRMerkleBlock *fb = BRMerkleBlockNew();
+        fb->blockHash = rhForkHash(H_JOIN + 1u);
+        fb->prevBlock = rhUniqueHash(H_JOIN);         // -> the MAIN-chain block at the join height
+        fb->height    = H_JOIN + 1u;
+        fb->timestamp = (uint32_t)time(NULL) - 60u;   // recent: never aged out as a stale orphan
+        _peerRelayedBlock(&info, fb);
+    }
+    {
+        UInt256 fh = rhForkHash(H_JOIN + 1u);
+        check(BRSetGet(m->blocks, &fh) != NULL,
+              "the fork's first block ATTACHED AS A FORK (it is in manager->blocks, not the orphan set) -- it "
+              "found its parent, which is the whole reason it had to be relayed BEFORE the prune");
+    }
+
+    // ---- (2b) the scan frontier climbs PAST the join ---------------------------
+    m->autoFetchCFiltersStart   = SCAN_B;
+    m->autoFetchCFiltersThrough = SCAN_B - 1u;
+    BRCFScanLedgerInit(&m->cfLedger, SCAN_B);                                // re-init is filter-buffer-safe
+    check(SCAN_B - CLEAR_MEM_CF_RETENTION_MARGIN == H_JOIN + 1u,
+          "setup: the retention floor has climbed to EXACTLY one above the join -- the join is the topmost "
+          "pruned main-chain block, the only height at which the walk goes NULL on the FORK side");
+
+    // TRAP (1), ASSERTED not assumed: below 5000 the pruner frees NOTHING.
+    check(BRSetCount(m->blocks) >= (size_t)CLEAR_MEM_BLOCKS_COUNT_TRIGGER,
+          "PRUNER WILL ACTUALLY RUN: BRSetCount(manager->blocks) is at/above the 5000-block trigger, so the "
+          "prune below is a real prune and not a silent no-op");
+
+    // ---- (2c) the production ClearMemory trigger: a main-chain extension --------
+    {
+        BRMerkleBlock *nb = rhChainBlock(MAIN_TIP + 1u);
+        _peerRelayedBlock(&info, nb);   // "new block extends main chain" -> _BRPeerManagerClearMemory (:1750)
+    }
+    check(m->lastBlock && m->lastBlock->height == MAIN_TIP + 1u,
+          "the main chain extended by one -- the branch that invokes _BRPeerManagerClearMemory in production");
+
+    // ---- THE EVIDENCE: the join point is genuinely GONE from manager->blocks ----
+    UInt256 joinHash = rhUniqueHash(H_JOIN);
+    check(BRSetGet(m->blocks, &joinHash) == NULL,
+          "JOIN POINT ABSENT: the bounded window FREED the fork's join block, so the walk at :1812 will "
+          "terminate at b == NULL (without this the case would green without ever exercising the guard)");
+    {
+        UInt256 fh = rhForkHash(H_JOIN + 1u);
+        check(BRSetGet(m->blocks, &fh) != NULL,
+              "the fork's first block SURVIVED the prune (the pruner walks only the main-chain descent from "
+              "lastBlock), so the walk really does descend into the missing parent rather than stopping above it");
+    }
+    check(rhBlockPresent(m, FLOOR_B),
+          "the retained window's low edge is still resident -- the prune was a WINDOW, not a wipe");
+    check(rhBlockPresent(m, H_JOIN + 1u),
+          "THE MAIN-SIDE WALK SURVIVES: main(H_JOIN+1) (== the floor block) is resident, so b2 does NOT go "
+          "NULL first -- b, the FORK side, is the pointer that dies, and it dies at exactly the join");
+    check(! rhBlockPresent(m, H_JOIN) && rhBlockPresent(m, H_JOIN + 1u),
+          "THE WINDOW EDGE IS EXACTLY AT THE JOIN: pruned at H_JOIN, resident at H_JOIN+1");
+
+    // ---- (2d) the rest of the fork; the last block overtakes and runs the walk --
+    // The unguarded build's SEGV faults at NULL + offsetof(BRMerkleBlock, height) --
+    // the byte offset of the ONE field the reorg branch reads off `b`. Publishing the
+    // offset lets run.sh's red gate check the faulting address NUMERICALLY, which
+    // attributes the crash to `b->height` on a NULL b without needing a symbolized
+    // backtrace (llvm-symbolizer costs ~90 s on this binary, and would make the gate
+    // depend on a symbolizer being installed; the gate therefore runs the crash build
+    // with ASAN_OPTIONS=symbolize=0 and reads this instead).
+    printf("REORG-KAT: offsetof(BRMerkleBlock, height) = %zu\n", (size_t)offsetof(BRMerkleBlock, height));
+
+    // Flush FIRST: the unguarded build dies on SIGSEGV inside the loop below, and a
+    // buffered stdout would be lost with it -- leaving the crash log with no evidence
+    // of WHY it crashed. run.sh's red gate greps this log for the precondition PASSes
+    // above (and for the absence of any FAIL) so that a crash for the wrong reason
+    // cannot satisfy the gate.
+    fflush(stdout);
+
+    for (uint32_t h = H_JOIN + 2u; h <= MAIN_TIP + 2u; h++) {
+        BRMerkleBlock *fb = BRMerkleBlockNew();
+        fb->blockHash = rhForkHash(h);
+        fb->prevBlock = rhForkHash(h - 1u);
+        fb->height    = h;
+        fb->timestamp = (uint32_t)time(NULL) - 60u;
+        _peerRelayedBlock(&info, fb);   // the h == MAIN_TIP+2 pass runs the fork-join walk into the hole
+    }
+
+    // Executing at all past that loop IS the crash assertion: unguarded, :1819
+    // dereferences the NULL b and the process dies on SIGSEGV mid-loop.
+    check(m->lastBlock != NULL && m->lastBlock->height == MAIN_TIP + 2u,
+          "NO CRASH, AND THE REORG STILL COMPLETED: the fork-join walk terminated at b == NULL, the reorg "
+          "branch did not dereference it, and the longer fork was still adopted (RED on "
+          "-DREORG_NULLGUARD_UNFIXED: ASan SEGV in _peerRelayedBlock on the unguarded "
+          "BRWalletSetTxUnconfirmedAfter(wallet, b->height))");
+    check(m->lastBlock && UInt256Eq(m->lastBlock->blockHash, rhForkHash(MAIN_TIP + 2u)),
+          "the adopted tip is the FORK's tip block, not the old main-chain tip");
+
+    // NOT VACUOUS: nothing re-added the join between the evidence above and the walk.
+    check(BRSetGet(m->blocks, &joinHash) == NULL,
+          "NOT VACUOUS: the join point was STILL absent when the overtaking block ran the walk");
+
+    // Funds are not lost by the unresolvable-join reorg. NOTE: with no resolvable
+    // join height there is nothing to roll back TO, so the
+    // BRWalletSetTxUnconfirmedAfter un-confirm is skipped and a credit confirmed on
+    // the abandoned branch keeps its (now stale) height until it is re-relayed or the
+    // chain is reconciled. That is a real residual of the minimal guard, recorded
+    // here as a comment rather than asserted as correct -- what IS asserted is the
+    // property that actually matters: no credit is dropped and no balance moves.
+    check(BRWalletTransactionForHash(w, hBelow) != NULL && BRWalletTransactionForHash(w, hAbove) != NULL,
+          "NO CREDIT DROPPED: both transactions survive the unresolvable-join reorg in the wallet");
+    check(BRWalletBalance(w) == balanceBefore,
+          "CREDITS PRESERVED ACROSS THE REORG: the balance is unchanged -- the user's money is not lost");
 
     BRPeerManagerFree(m);
     BRWalletFree(w);
@@ -3974,6 +4231,20 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_REORG_NULLGUARD_REDGREEN_ONLY
+    // run.sh builds this twice for the reorg fork-join NULL-guard's red-before-green
+    // gate: once with the guard compiled out (-DREORG_NULLGUARD_UNFIXED == the pre-fix
+    // shape, where a fork whose join point the bounded window already freed makes the
+    // :1812 walk exit at b == NULL and :1819 dereference it -- must CRASH, and run.sh
+    // requires an actual ASan SEGV report, NOT merely a nonzero exit, so a failed
+    // assertion or a broken build cannot satisfy the gate) and once guarded (must PASS
+    // == GREEN). Only this case runs, so the RED is unambiguously the missing guard.
+    test_reorg_below_window_no_crash();
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
 #ifdef KAT_RESUME_SNAP_REDGREEN_ONLY
     // run.sh builds this twice for the resume cursor reconciliation's
     // red-before-green gate: once with the snap compiled to a no-op
@@ -4039,6 +4310,7 @@ int main(void)
     test_pending_abandonment_accessor(wallet);             // paced-convoy-fetch Task 6: the valve/watchdog ordering signal (boundable count)
     test_convoy_scale_bounded(wallet);                     // paced-convoy-fetch Task 6: THE memory bound, >100k descent (red-before-green)
     test_reorg_mid_descent();                              // paced-convoy-fetch Task 6: reorg at the retained-window boundary
+    test_reorg_below_window_no_crash();                    // paced-convoy-fetch Task 7: fork-join below the window (red-before-green CRASH gate)
 
     BRWalletFree(wallet);
 
