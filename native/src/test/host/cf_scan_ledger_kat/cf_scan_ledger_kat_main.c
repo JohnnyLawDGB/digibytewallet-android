@@ -715,6 +715,123 @@ static int test_abandonedBelow_roundtrips(void) {
     return 1;
 }
 
+// ---- Paced-convoy Task 5: the B2 valve's ledger primitives -----------------
+
+// BRCFScanLedgerReArmGaveUp: a parked hole goes back to `outstanding` with a
+// FRESH cycle and EXACTLY ONE HOME, and its re-arm cycle count SURVIVES the
+// outstanding -> gaveUp -> outstanding round trip. That survival is the whole
+// mechanism: BRCFOutstanding is destroyed on retirement, so without the parked
+// carry the counter would restart at 0 every cycle, CF_CONVOY_REARM_MAX could
+// never be reached, and the valve would re-arm forever without ever abandoning —
+// a permanent convoy wedge dressed up as caution.
+static int test_rearm_gaveup_roundtrip(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);   // scannedThrough = 99
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    BRCFScanLedgerRecordRequested(&l, 100, 120, pa, 12024, 1000);
+    for (uint32_t h=100; h<=104; h++) BRCFScanLedgerMarkEvaluated(&l, h);
+
+    // Drive 105 (the lowest outstanding) to gaveUp via the attempt cap.
+    uint32_t now=1000, out=0;
+    for (int i=0;i<CF_REREQ_MAX_ATTEMPTS;i++){ now+=1000; BRCFScanLedgerNextRerequest(&l, now, &out); }
+    now+=1000; BRCFScanLedgerNextRerequest(&l, now, &out);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==105);
+
+    uint32_t gh=0; uint8_t gc=99, gl=99;
+    ASSERT(BRCFScanLedgerLowestGaveUp(&l, &gh, &gc, &gl)==1);
+    ASSERT(gh==105 && gc==0 && gl==1);   // never re-armed yet; its original cycle was untainted
+
+    // --- cycle 1 ---
+    ASSERT(BRCFScanLedgerReArmGaveUp(&l, 105)==1);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==0);                       // EXACTLY ONE HOME: gone from gaveUp
+    ASSERT(l.outstanding[0].height==105);                            // back in outstanding, still the lowest
+    ASSERT(l.outstanding[0].attempts==0);                            // a FRESH full retry cycle
+    ASSERT(l.outstanding[0].rearmCycles==1);
+    ASSERT(l.outstanding[0].offersReachedLivePeer==1);               // new cycle starts untainted
+    ASSERT(BRCFScanLedgerLowestNeededHeight(&l)==105);               // the frontier is still pinned there
+
+    // Taint it, then re-exhaust: the parked verdict must carry BOTH bytes out.
+    BRCFScanLedgerMarkOffersMissedLivePeer(&l, 105, 105);
+    ASSERT(l.outstanding[0].offersReachedLivePeer==0);
+    for (int i=0;i<CF_REREQ_MAX_ATTEMPTS;i++){ now+=1000; BRCFScanLedgerNextRerequest(&l, now, &out); }
+    now+=1000; BRCFScanLedgerNextRerequest(&l, now, &out);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==105);
+    ASSERT(BRCFScanLedgerLowestGaveUp(&l, &gh, &gc, &gl)==1);
+    ASSERT(gh==105 && gc==1 && gl==0);   // THE CARRY: cycle count survived, taint survived
+
+    // --- cycle 2 --- the counter keeps CLIMBING (it does not restart at 0/1).
+    ASSERT(BRCFScanLedgerReArmGaveUp(&l, 105)==1);
+    ASSERT(l.outstanding[0].rearmCycles==2);
+    ASSERT(l.outstanding[0].offersReachedLivePeer==1);               // the new cycle is clean again
+
+    // Not-a-parked-hole and below-the-hard-floor are both no-ops.
+    ASSERT(BRCFScanLedgerReArmGaveUp(&l, 105)==0);                   // it is outstanding, not parked
+    ASSERT(BRCFScanLedgerReArmGaveUp(&l, 999)==0);                   // never parked at all
+    l.gaveUp[0]=50; l.gaveUpRearmCycles[0]=0; l.gaveUpOffersLive[0]=1; l.gaveUpCount=1;
+    l.abandonedBelow = 60;
+    ASSERT(BRCFScanLedgerReArmGaveUp(&l, 50)==0);                    // below the abandoned hard floor
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==1);                        // and it was NOT silently dropped
+    return 1;
+}
+
+// Blob v3: the parked valve bytes round-trip, an outstanding entry's rearmCycles
+// round-trips (its per-cycle latch does not — it follows `attempts` into the
+// unpersisted set), and a v2 blob still parses with all of them 0.
+static int test_valve_state_persists_v3(void) {
+    BRCFScanLedger l1; BRCFScanLedgerInit(&l1, 100);
+    UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
+    BRCFScanLedgerRecordRequested(&l1, 100, 102, pa, 12024, 0);
+    l1.outstanding[1].rearmCycles           = 2;
+    l1.outstanding[1].offersReachedLivePeer = 0;   // transient: must NOT survive
+    l1.gaveUp[0]=200; l1.gaveUpRearmCycles[0]=2; l1.gaveUpOffersLive[0]=1;
+    l1.gaveUp[1]=201; l1.gaveUpRearmCycles[1]=1; l1.gaveUpOffersLive[1]=0;
+    l1.gaveUpCount=2;
+
+    uint8_t buf[4096];
+    size_t need = BRCFScanLedgerSerialize(&l1, buf, sizeof buf);
+    ASSERT(need > 0 && need <= sizeof buf);
+
+    BRCFScanLedger l2;
+    ASSERT(BRCFScanLedgerParse(&l2, buf, need)==1);
+    ASSERT(l2.outstandingCount==3 && l2.outstanding[1].rearmCycles==2);   // survived
+    ASSERT(l2.outstanding[1].offersReachedLivePeer==1);                   // fresh cycle -> clean latch
+    ASSERT(l2.gaveUpCount==2);
+    ASSERT(l2.gaveUp[0]==200 && l2.gaveUpRearmCycles[0]==2 && l2.gaveUpOffersLive[0]==1);
+    ASSERT(l2.gaveUp[1]==201 && l2.gaveUpRearmCycles[1]==1 && l2.gaveUpOffersLive[1]==0);
+
+    // Byte-identical re-serialize (unconditionally, because nothing written is
+    // re-derived on load).
+    uint8_t buf2[4096];
+    size_t need2 = BRCFScanLedgerSerialize(&l2, buf2, sizeof buf2);
+    ASSERT(need2==need && memcmp(buf, buf2, need)==0);
+
+    // Back-compat: hand-build a v2 blob (narrower entries, no valve bytes) and
+    // confirm it parses with every valve byte at 0 — i.e. every parked hole simply
+    // gets its full re-arm budget back after the upgrade. Same shape as the v1
+    // case above; magic reused from a real serialize, never hardcoded.
+    uint8_t probe[64]; BRCFScanLedger probeL; BRCFScanLedgerInit(&probeL, 1);
+    BRCFScanLedgerSerialize(&probeL, probe, sizeof probe);
+    uint8_t v2[28 + 2*(4+1) + 4 + 1*4];
+    v2[0]=probe[0]; v2[1]=probe[1]; v2[2]=probe[2]; v2[3]=probe[3];   // magic
+    putLE32(v2+4, 2);          // version = 2 (pre-valve-bytes layout)
+    putLE32(v2+8, 300);        // start
+    putLE32(v2+12, 299);       // scannedThrough
+    putLE32(v2+16, 320);       // requestedThrough
+    putLE32(v2+20, 0);         // abandonedBelow
+    putLE32(v2+24, 2);         // outstandingCount
+    putLE32(v2+28, 310); v2[32]=0;     // outstanding[0] = {310, headerRace 0}
+    putLE32(v2+33, 311); v2[37]=1;     // outstanding[1] = {311, headerRace 1}
+    putLE32(v2+38, 1);                 // gaveUpCount
+    putLE32(v2+42, 305);               // gaveUp[0] = 305
+    BRCFScanLedger lv2;
+    ASSERT(BRCFScanLedgerParse(&lv2, v2, sizeof v2)==1);
+    ASSERT(lv2.start==300 && lv2.requestedThrough==320);
+    ASSERT(lv2.outstandingCount==2 && lv2.outstanding[0].height==310 && lv2.outstanding[1].headerRace==1);
+    ASSERT(lv2.outstanding[0].rearmCycles==0 && lv2.outstanding[1].rearmCycles==0);
+    ASSERT(lv2.gaveUpCount==1 && lv2.gaveUp[0]==305);
+    ASSERT(lv2.gaveUpRearmCycles[0]==0 && lv2.gaveUpOffersLive[0]==0);
+    return 1;
+}
+
 int main(void) {
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -756,6 +873,9 @@ int main(void) {
     test_abandon_advance_covers_dropped_only();
     test_abandoned_is_hard_floor();
     test_abandonedBelow_roundtrips();
+
+    test_rearm_gaveup_roundtrip();      // paced-convoy Task 5: B2 re-arm primitive + the parked-state carry
+    test_valve_state_persists_v3();     // paced-convoy Task 5: blob v3 + v2 back-compat
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;

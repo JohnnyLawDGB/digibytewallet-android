@@ -35,21 +35,27 @@
 #     build unexpectedly PASSES.
 #   * FIXED (default): floors at min(cfNext,lowestNeeded)-144 == scan-floor-144,
 #     so the header SURVIVES -> the full suite PASSES (exit 0 == GREEN).
-# CF_RETENTION_MAX_SPAN is overridden small (4000) in BOTH builds so the ceiling
-# case exercises the clamp without a 30k-block chain; the retain/descent cases
-# keep tip-floor < that override so their ceilings never fire.
+# CF_RETENTION_MAX_SPAN=4000 is still passed to every build, but is now INERT:
+# paced-convoy Task 5 deleted the tip-anchored depth ceiling that read it, and no
+# code in this TU references it any more. The flag (and the #define itself) come
+# out with the rest of the depth-refusal removal.
 #
-# ==== Task 4b CEILING DETERMINISM-GUARD RED-BEFORE-GREEN GATE ================
+# ==== DETERMINISM-GUARD RED-BEFORE-GREEN GATE (re-homed onto the B2 valve) ===
 # The Part-3b determinism guard (BRCFScanLedgerAbandonGaveUpBelow advances
 # abandonedBelow ONLY to cover gaveUp actually dropped, never preemptively) is
-# proven by building the scan-not-started ceiling case TWICE:
+# proven by building test_abandon_guard_no_preemptive_advance TWICE:
 #   * PRE-GUARD (-DRETENTION_PREEMPTIVE_ADVANCE): AbandonGaveUpBelow raises
-#     abandonedBelow to `target`/`clamp` even when NOTHING was dropped, so an
-#     empty-scan deep restore raises the scan floor and would COMPLETE with a
-#     WRONG BALANCE -> the case FAILS (nonzero exit == RED). A guard that can't
-#     go red is worthless, so we HARD-FAIL run.sh if this build unexpectedly PASSES.
+#     abandonedBelow to `target`/`clamp` even when NOTHING was dropped, so a scan
+#     that never ran raises its own floor and would COMPLETE with a WRONG BALANCE
+#     -> the case FAILS (nonzero exit == RED). A guard that can't go red is
+#     worthless, so we HARD-FAIL run.sh if this build unexpectedly PASSES.
 #   * FIXED (default): abandonedBelow stays 0, the floor is not raised -> GREEN.
 # KAT_CEILING_REDGREEN_ONLY runs ONLY that one case so the RED is unambiguous.
+# (Paced-convoy Task 5 deleted the tip-anchored DEPTH ceiling this gate used to
+# run, but the guard itself is RETAINED and the B2 abandonment valve is now its
+# only production caller — the valve's "every abandonment is warn-logged and
+# abandonedBelow==0 is a verified fact" contract rests on it — so the gate moved
+# onto the guard's own case rather than being dropped.)
 #
 # ==== Paced-convoy Task 2 GATE RED-BEFORE-GREEN GATES =======================
 # The convoy gate (spec Part A) is proven by two more twice-built cases:
@@ -254,6 +260,58 @@ if "$BUILD_DIR/kat_resume_snap_unfixed"; then
     exit 1
 else
     echo "RED confirmed: without the snap the forward-fetch cursor stays stale at birth-1 after a restore (expected)."
+fi
+
+# ==== Paced-convoy Task 5: B2 ABANDONMENT VALVE — MATCHED-SET RED GATES ======
+# The valve decides whether a retry-exhausted (gaveUp) hole is abandoned (visible,
+# recoverable loss) or kept being retried (a permanent convoy wedge if it is never
+# resolvable). A mistake in EITHER direction is severe, so the matched set is
+# gated four ways — one shape per axis the valve must get right. Each MUST fail.
+
+# ---- RED: no valve at all (today's shape) MUST fail -------------------------
+build "$BUILD_DIR/kat_b2_novalve" -DCONVOY_NO_B2_VALVE -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_b2_novalve"; then
+    echo "GATE FAILURE: the NO-B2-VALVE build PASSED. The abandonment valve's red-before-green"
+    echo "cannot go red -- with the depth ceiling removed and no valve, a retry-exhausted hole is"
+    echo "never re-armed and never abandoned, so it pins the scan frontier the whole paced convoy"
+    echo "keys on and the wallet wedges forever, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the B2 valve a gaveUp hole pins the scan frontier forever (expected)."
+fi
+
+# ---- RED: peer-blind valve (abandons an un-offered height) MUST fail --------
+build "$BUILD_DIR/kat_b2_peerblind" -DCONVOY_B2_PEER_BLIND -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_b2_peerblind"; then
+    echo "GATE FAILURE: the PEER-BLIND B2 build PASSED. The valve's 'never abandon when it isn't"
+    echo "the height's fault' rule cannot go red -- a wallet that simply has no connected CF peer"
+    echo "would abandon real, servable history it never offered to anyone, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: a peer-blind valve abandons a height no live CF peer was ever asked for (expected)."
+fi
+
+# ---- RED: valve that checks peer presence at the abandon INSTANT MUST fail --
+build "$BUILD_DIR/kat_b2_latchblind" -DCONVOY_B2_IGNORE_OFFER_LATCH -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_b2_latchblind"; then
+    echo "GATE FAILURE: the IGNORE-OFFER-LATCH B2 build PASSED. The offered-vs-UN-offered axis"
+    echo "cannot go red -- a CF peer that flapped away DURING the deciding cycle and came back"
+    echo "before the check would read identically to five live refusals, so a transiently"
+    echo "unreachable height would be abandoned, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the per-cycle latch a mid-cycle peer flap reads as live refusal (expected)."
+fi
+
+# ---- RED: abandoning after ONE re-arm cycle MUST fail -----------------------
+build "$BUILD_DIR/kat_b2_rearmonce" -DCONVOY_B2_REARM_ONCE -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_b2_rearmonce"; then
+    echo "GATE FAILURE: the REARM-ONCE B2 build PASSED. The CF_CONVOY_REARM_MAX=2 tuning cannot"
+    echo "go red -- a single unlucky peer-rotation cycle would be enough to abandon a servable"
+    echo "height, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: one re-arm cycle lets a single unlucky rotation cycle false-positive (expected)."
 fi
 
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------

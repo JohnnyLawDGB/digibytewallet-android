@@ -54,14 +54,16 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
-// --- CF-retention memory-ceiling WARN-log capture seam (Task 4) --------------
-// _cfApplyRetentionCeiling warn-logs an "ABANDONED ..." line whenever the memory
-// ceiling abandons >=1 retry-exhausted (gaveUp) height. In production that line
-// routes to the platform logger at WARN (tag "bread"); on this host build it is
-// otherwise silent. BRPeerManager.c #ifndef-guards CF_RETENTION_WLOG so this KAT
-// can pre-#define it to capture the line and assert (a) it FIRED with the right
-// count on the ceiling case, and (b) it did NOT fire on the no-abandon retain
-// case (== the LAB "abandonedBelow stayed 0, no ABANDONED line" acceptance).
+// --- CF-scan ABANDONMENT WARN-log capture seam ------------------------------
+// The B2 abandonment valve (BRPeerManagerKeepAlive) warn-logs an "ABANDONED ..."
+// line whenever it abandons >=1 retry-exhausted (gaveUp) height. In production
+// that line routes to the platform logger at WARN (tag "bread"); on this host
+// build it is otherwise silent. BRPeerManager.c #ifndef-guards CF_RETENTION_WLOG
+// so this KAT can pre-#define it to capture the line and assert both directions:
+// it FIRED exactly once on a genuine abandonment, and it did NOT fire on any of
+// the must-not-abandon paths (== the LAB "abandonedBelow stayed 0, no ABANDONED
+// line" acceptance). Because the ledger's determinism guard makes cnt>0 <=>
+// abandonedBelow advanced <=> this WARN, the log count IS the abandonment count.
 static int  g_wlogCount = 0;
 static char g_wlogLast[512];
 static int  test_cf_retention_wlog(const char *fmt, ...)
@@ -1275,7 +1277,20 @@ static void test_gaveup_retires_dead_hole_at_exact_cap(BRWallet *wallet)
     pa->address.u8[15] = 0x31; pa->port = 13001; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
     array_add(m->connectedPeers, pa);
 
-    const uint32_t H_DEAD = 300, H_SIB = 301, H_SLOW = 310;
+    // ORDERING IS LOAD-BEARING (paced-convoy Task 5): the sibling sits BELOW the
+    // dead hole. This case isolates BRCFScanLedgerRetireCapped, and the B2
+    // abandonment valve now runs in the SAME KeepAlive tick, immediately after
+    // RetireCapped — by design, since a retry-exhausted hole that PINS the scan
+    // frontier must never be left un-retried while a CF peer is connected (it would
+    // pin the whole convoy forever). With the dead hole lowest, the valve would
+    // correctly re-arm it straight back into `outstanding` on this very tick and
+    // this case would be measuring the valve, not RetireCapped. Keeping a
+    // still-outstanding sibling BELOW it means the dead hole is not the
+    // frontier-pinning hole, so the valve correctly stands aside and the
+    // RetireCapped boundary is observed clean. (The re-arm-on-the-retiring-tick
+    // behaviour itself is covered by test_valve_matched_set case (a).)
+    // Do NOT "simplify" this back to H_DEAD < H_SIB.
+    const uint32_t H_SIB = 300, H_DEAD = 301, H_SLOW = 310;
     uint32_t nowSec = (uint32_t)time(NULL);
 
     BRCFScanLedgerInit(&m->cfLedger, FLOOR);
@@ -1825,8 +1840,8 @@ static void test_clearmemory_retains_scan_floor(BRWallet *wallet)
     check(BRSetCount(m->blocks) == baseCount + COUNT, "distinct-hash chain grew by exactly COUNT (no collisions)");
 
     // Scan floor: BELOW the tail boundary (tip-801) AND below the cfheader margin
-    // (cfNext-144, cfNext==tip). tip - H_floor is kept < CF_RETENTION_MAX_SPAN so
-    // the ceiling never fires on this retain path.
+    // (cfNext-144, cfNext==tip). (Depth is no longer a factor at all since the
+    // tip-anchored ceiling was removed — the floor is purely min(cfNext,lowestNeeded).)
     const uint32_t H_floor = TIP - 3000u;
     BRCFScanLedgerInit(&m->cfLedger, H_floor);        // scannedThrough=H_floor-1 -> lowestNeeded=H_floor
     BRCFScanLedgerRecordRequested(&m->cfLedger, H_floor, H_floor, UINT128_ZERO, 0, 1700000000u);
@@ -1881,113 +1896,414 @@ static void test_clearmemory_descent_frees(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
-// Tip-anchored ceiling — TIMING BRANCH 1: SCAN NOT STARTED (Part 3b determinism
-// guard, the wrong-balance regression baseline). ClearMemory fires during header
-// sync, before the cfilter scan requests anything: empty outstanding, and NO
-// gaveUp below the clamp — nothing legitimately abandonable. The guard must NOT
-// advance abandonedBelow and must NOT raise the scan floor; a preemptive raise
-// here would let a deep restore COMPLETE with a WRONG BALANCE (deep history never
-// scanned). RED against the pre-guard abandonedBelow=target shape
-// (-DRETENTION_PREEMPTIVE_ADVANCE, run.sh's ceiling red-before-green gate).
-// Built with -DCF_RETENTION_MAX_SPAN overridden small so the birth floor can sit
-// > MAX_SPAN below the tip without a 30k-block chain.
-static void test_clearmemory_ceiling_scan_not_started(BRWallet *wallet)
+// ---- Part-3b determinism guard, RE-HOMED onto the B2 valve's primitive ------
+//
+// BRCFScanLedgerAbandonGaveUpBelow advances abandonedBelow ONLY to cover gaveUp
+// heights it ACTUALLY dropped (highest-dropped + 1) — never preemptively to the
+// clamp. That equivalence (cnt>0 <=> abandonedBelow advanced <=> the caller's
+// WARN fires) is the whole reason the B2 valve's operator contract holds:
+// "every abandonment is a visible, warn-logged, countable event, and
+// abandonedBelow == 0 is a VERIFIED fact, not an assumption". A preemptive raise
+// would let a scan that never ran raise its own floor and complete with a WRONG
+// BALANCE — deep history never scanned — the single worst outcome this subsystem
+// can produce.
+//
+// This case used to be carried by test_clearmemory_ceiling_scan_not_started,
+// which tested the tip-anchored DEPTH ceiling (_cfApplyRetentionCeiling) that
+// paced-convoy Task 5 deletes. The guard itself is retained and the B2 valve is
+// now its only production caller, so the red-before-green gate
+// (-DRETENTION_PREEMPTIVE_ADVANCE, run.sh's kat_ceiling_unguarded build) is
+// re-pointed here rather than dropped.
+static void test_abandon_guard_no_preemptive_advance(BRWallet *wallet)
 {
-    printf("\n=== test_clearmemory_ceiling_scan_not_started (Part 3b wrong-balance guard) ===\n");
-    check(CF_RETENTION_MAX_SPAN <= 5000u, "harness: CF_RETENTION_MAX_SPAN overridden small for this case");
+    printf("\n=== test_abandon_guard_no_preemptive_advance (Part 3b guard, re-homed onto B2) ===\n");
+    (void)wallet;
 
-    const uint32_t BASE  = 20000000u;
-    const uint32_t COUNT = 5600u;   // > trigger; birth floor sits > MAX_SPAN below tip
-    uint32_t TIP; size_t baseCount;
-    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
-    check(m != NULL, "manager+chain built");
+    // The "scan not started" shape: a deep birth floor, nothing requested yet, so
+    // there is NOTHING legitimately abandonable anywhere below the clamp.
+    BRCFScanLedger l;
+    BRCFScanLedgerInit(&l, 20000000u);
+    check(BRCFScanLedgerOutstandingCount(&l) == 0 && BRCFScanLedgerGaveUpCount(&l) == 0,
+          "setup: empty outstanding + empty gaveUp (nothing legitimately abandonable)");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 0, "setup: abandonedBelow starts at 0");
+
+    uint32_t cnt = 999, lo = 999, hi = 999;
+    uint32_t newFloor = BRCFScanLedgerAbandonGaveUpBelow(&l, 20500000u, &cnt, &lo, &hi);
+
+    check(cnt == 0 && lo == CF_LEDGER_NO_DROP && hi == CF_LEDGER_NO_DROP,
+          "nothing was dropped (cnt == 0, no [lo..hi] range)");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 0,
+          "GUARD: abandonedBelow did NOT advance (stays 0) — no preemptive raise (RED on the pre-guard shape)");
+    check(newFloor == 20000000u && BRCFScanLedgerLowestNeededHeight(&l) == 20000000u,
+          "GUARD: the scan floor is NOT raised past unscanned history");
+}
+
+// ============================================================================
+// Paced-convoy fetch, Task 5: THE B2 ABANDONMENT VALVE — MATCHED SET (a/b/c/d)
+// (spec 2026-07-28-paced-convoy-fetch-design.md, Part B2 + Part F KAT #3)
+// ============================================================================
+//
+// A gaveUp hole pins BRCFScanLedgerLowestNeededHeight forever (no driver ever
+// re-requests a gaveUp height), and the paced convoy keys its fetch windows on
+// exactly that frontier — so an un-retired gaveUp hole halts the WHOLE convoy
+// permanently. But `gaveUp` means only "5 retries elapsed", which is a HEURISTIC
+// for unservable: during a convoy climb retries can exhaust for transient,
+// convoy-induced reasons. Abandon too eagerly and a real wallet receive is
+// silently dropped; abandon too reluctantly and the sync convoy wedges forever.
+//
+// So this is ONE harness with ONE variable flipped four ways. It must discriminate
+// on the OFFERED-vs-UN-OFFERED axis, not merely eager-vs-reluctant:
+//   (a) slow-but-real     -> served on a re-armed cycle: NEVER abandoned. Fails a
+//                            too-EAGER valve.
+//   (b) unservable        -> abandoned after EXACTLY CF_CONVOY_REARM_MAX cycles,
+//                            not one earlier and not one later, then the convoy
+//                            proceeds. Fails a too-RELUCTANT valve AND pins the
+//                            =2 tuning (a valve that re-arms N>2 times is a slow
+//                            wedge).
+//   (c) no CF peer        -> NEVER abandoned while no connected CF peer exists,
+//                            even at the exact abandon threshold — then abandoned
+//                            the moment one appears (so the assertion is not
+//                            vacuous). Fails a PEER-BLIND valve.
+//   (d) peer flap         -> CF peer present at cycle start, gone during the
+//                            retries, back at the abandon check: NOT abandoned —
+//                            then abandoned on the next CLEAN cycle (again, not
+//                            vacuous). Fails a valve that checks peer presence at
+//                            the abandon INSTANT instead of THROUGHOUT, which is
+//                            precisely the fleet-saturation case.
+//
+// Red-before-green: run.sh builds this case four times, once per shape
+// (-DCONVOY_NO_B2_VALVE / -DCONVOY_B2_PEER_BLIND / -DCONVOY_B2_IGNORE_OFFER_LATCH
+// / -DCONVOY_B2_REARM_ONCE) and HARD-FAILS if any of them passes.
+
+#define B2_CHAIN_BASE   500000u
+#define B2_CHAIN_COUNT  40u
+
+// Build the shared harness: a real prevBlock-linked chain, CF-only syncMode, the
+// stopHash->height registry primed (so __wrap_BRPeerSendGetCFilters can fold each
+// send into the causal everRequested set), and ONE CF-capable peer connected.
+// autoFetchCFiltersEnabled is deliberately left 0 so the B1 convoy driver stays
+// inert and the ONLY things under test are RetireCapped -> the valve -> the
+// residual re-request driver.
+static BRPeerManager *b2BuildHarness(BRWallet *wallet, uint32_t *outTip, BRPeer **outPeer)
+{
+    uint32_t tip; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, B2_CHAIN_BASE, B2_CHAIN_COUNT, &tip, &baseCount);
+    if (! m) return NULL;
+
+    blockRegReset();
+    everReqReset();
+    capLogReset();
+    rhRegisterChain(B2_CHAIN_BASE, tip);
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x51; pa->port = 13051;
+    pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    if (outTip)  *outTip  = tip;
+    if (outPeer) *outPeer = pa;
+    return m;
+}
+
+// Model "the peer set currently has / has no CF-capable member" WITHOUT removing
+// the peer from connectedPeers (which would have to free it and would perturb the
+// LSan-clean teardown). _BRPeerManagerPeerCanServeFilters — the exact predicate
+// both the residual driver's Pass A and the valve use — keys on the services bit,
+// so toggling it is a faithful stand-in for "the fleet rotated onto peers that
+// don't serve filters".
+static void b2SetPeerServesFilters(BRPeer *p, int serves)
+{
+    if (serves) p->services |=  SERVICES_NODE_COMPACT_FILTERS;
+    else        p->services &= ~(uint64_t)SERVICES_NODE_COMPACT_FILTERS;
+}
+
+// Tick the driver until `height` has burned its full CF_REREQ_MAX_ATTEMPTS, by
+// forcing its backoff clock to "elapsed" between ticks (requestedAt = 0). This
+// exercises the REAL Pass A -> Pass C -> CommitRerequest path (and therefore the
+// real latch wiring) without 7.5 minutes of wall clock. Stops early if the hole
+// drained or is no longer outstanding. Returns the ticks spent.
+static int b2RunCycleToExhaustion(BRPeerManager *m, uint32_t height, int maxTicks)
+{
+    int t = 0;
+    for (; t < maxTicks; t++) {
+        BRCFOutstanding *e = mutOutstanding(&m->cfLedger, height);
+        if (! e) break;                                   // served, or already retired
+        if (e->attempts >= CF_REREQ_MAX_ATTEMPTS) break;   // cycle burned
+        e->requestedAt = 0;                                // backoff elapsed
+        BRPeerManagerKeepAlive(m);
+    }
+    return t;
+}
+
+// The tick where RetireCapped parks the exhausted hole in gaveUp and the valve
+// gets to decide (re-arm or abandon). Deliberately SEPARATE from the loop above
+// so each case can change the peer set right before the decision.
+static void b2TickValveDecision(BRPeerManager *m)
+{
+    BRPeerManagerKeepAlive(m);
+}
+
+// Run a whole valve round: burn the current cycle, then take the decision tick.
+static void b2RunRound(BRPeerManager *m, uint32_t height)
+{
+    b2RunCycleToExhaustion(m, height, 16);
+    b2TickValveDecision(m);
+}
+
+static uint8_t b2ParkedCycles(const BRCFScanLedger *l, uint32_t height)
+{
+    for (size_t i = 0; i < l->gaveUpCount; i++) if (l->gaveUp[i] == height) return l->gaveUpRearmCycles[i];
+    return 0xFF;   // not parked
+}
+
+static uint8_t b2OutstandingCycles(const BRCFScanLedger *l, uint32_t height)
+{
+    const BRCFOutstanding *e = findOutstanding(l, height);
+    return e ? e->rearmCycles : 0xFF;
+}
+
+// ---- (a) SLOW-BUT-REAL: served on a re-armed cycle -> NEVER abandoned -------
+static void test_valve_case_a_slow_but_real(BRWallet *wallet)
+{
+    printf("\n--- (a) slow-but-real: the hole IS served on a re-armed cycle ---\n");
+
+    uint32_t TIP; BRPeer *pa = NULL;
+    BRPeerManager *m = b2BuildHarness(wallet, &TIP, &pa);
+    check(m != NULL, "(a) setup: harness built");
     if (! m) return;
 
-    const uint32_t clamp = TIP - CF_RETENTION_MAX_SPAN;
-    // Birth floor at BASE (> MAX_SPAN below the tip); scan not started: empty
-    // outstanding, empty gaveUp — the deep-restore-during-header-sync shape.
-    BRCFScanLedgerInit(&m->cfLedger, BASE);
-    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == BASE && BASE < clamp,
-          "setup: birth floor BASE is > MAX_SPAN below the tip (below the clamp)");
-    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0 && BRCFScanLedgerGaveUpCount(&m->cfLedger) == 0,
-          "setup: empty outstanding + empty gaveUp (nothing legitimately abandonable)");
-    check(BRSetCount(m->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER, "setup: BRSetCount >= 5000 before the pass");
-    // A sub-clamp probe header: FREED iff the floor is (wrongly) raised to the
-    // clamp, RETAINED iff the floor stays at the birth floor. clamp-500 sits below
-    // the retained tail (tip-801) so the descent actually visits it.
-    const uint32_t H_probe = clamp - 500u;
-    check(rhBlockPresent(m, H_probe), "setup: sub-clamp probe header present pre-prune");
+    const uint32_t H = B2_CHAIN_BASE + 10u;
+    BRCFScanLedgerInit(&m->cfLedger, B2_CHAIN_BASE);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H, H, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == B2_CHAIN_BASE,
+          "(a) setup: scan frontier at the birth floor, hole H outstanding");
 
     int wlogBefore = g_wlogCount;
-    _BRPeerManagerClearMemory(m);
 
-    // THE guard: nothing dropped → abandonedBelow does NOT advance (stays 0), so a
-    // caller reading abandonedBelow==0 is reading a verified fact.
+    // Round 0: the ORIGINAL cycle exhausts -> parked -> the valve must RE-ARM
+    // (never abandon: rearmCycles 0 < CF_CONVOY_REARM_MAX).
+    b2RunRound(m, H);
+    check(! gaveUpContains(&m->cfLedger, H), "(a) after cycle 0: hole is NOT left parked in gaveUp");
+    check(findOutstanding(&m->cfLedger, H) != NULL, "(a) after cycle 0: hole RE-ARMED back into outstanding");
+    check(b2OutstandingCycles(&m->cfLedger, H) == 1, "(a) after cycle 0: rearmCycles == 1 (one fresh cycle granted)");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0, "(a) after cycle 0: abandonedBelow still 0");
+
+    // The re-armed cycle is when the slow peer finally serves it. serveSome may
+    // ONLY serve heights the driver actually re-requested (the causality spine),
+    // so this is a genuine "a live CF peer answered the re-armed offer".
+    check(everReqContains(H), "(a) the re-armed hole WAS re-requested on the wire (causality)");
+    uint32_t served[4];
+    int n = serveSome(m, 4, served);
+    check(n == 1 && served[0] == H, "(a) the re-armed hole is SERVED");
+
+    // Settle: several more ticks must not resurrect any abandonment.
+    for (int i = 0; i < 4; i++) BRPeerManagerKeepAlive(m);
+
     check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
-          "GUARD: abandonedBelow did NOT advance (stays 0) — no preemptive raise (RED on pre-guard)");
-    check(g_wlogCount == wlogBefore, "GUARD: no ABANDONED warn-log fired (nothing was abandoned)");
-    check(rhBlockPresent(m, H_probe),
-          "GUARD: scan floor NOT raised — the sub-clamp probe header is RETAINED (deep history still scannable)");
+          "(a) NOT ABANDONED: abandonedBelow never advanced (cnt == 0 on every tick)");
+    check(g_wlogCount == wlogBefore, "(a) NOT ABANDONED: no ABANDONED warn-log ever fired");
+    check(BRCFScanLedgerGaveUpCount(&m->cfLedger) == 0, "(a) gaveUp is empty (the hole drained cleanly)");
+    check(findOutstanding(&m->cfLedger, H) == NULL, "(a) the hole is gone from outstanding (evaluated)");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) >= H,
+          "(a) scannedThrough climbed PAST the served height — the scan frontier is unblocked");
 
     BRPeerManagerFree(m);
 }
 
-// Tip-anchored ceiling — TIMING BRANCH 2: SCAN STARTED. A still-outstanding
-// (attempts<cap) hole below the clamp is NEVER abandoned (recoverable), while
-// retry-exhausted gaveUp holes below it ARE abandoned. abandonedBelow advances
-// ONLY to cover the gaveUp actually dropped (highest-dropped+1, ≤ the outstanding
-// hole — never past it), the WARN fires, and a deep-enough abandoned header is
-// FREED, while the outstanding hole's header is RETAINED. Uses TWO gaveUp holes:
-// the highest sets the watermark (it sits within the 144-block retention margin
-// of the new floor, so it stays resident this pass), the deeper one is below the
-// margin and is freed — the visible "abandoned header freed" evidence.
-static void test_clearmemory_ceiling_scan_started(BRWallet *wallet)
+// ---- (b) GENUINELY UNSERVABLE: abandoned after EXACTLY REARM_MAX cycles -----
+static void test_valve_case_b_unservable(BRWallet *wallet)
 {
-    printf("\n=== test_clearmemory_ceiling_scan_started (Part 3b: abandon gaveUp, keep outstanding) ===\n");
-    check(CF_RETENTION_MAX_SPAN <= 5000u, "harness: CF_RETENTION_MAX_SPAN overridden small for this case");
+    printf("\n--- (b) genuinely unservable: abandoned after EXACTLY CF_CONVOY_REARM_MAX cycles ---\n");
+    check(CF_CONVOY_REARM_MAX == 2, "(b) harness: CF_CONVOY_REARM_MAX is the pinned 2");
 
-    const uint32_t BASE  = 20000000u;
-    const uint32_t COUNT = 5600u;   // > trigger; room for holes > MAX_SPAN below tip
-    uint32_t TIP; size_t baseCount;
-    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
-    check(m != NULL, "manager+chain built");
+    uint32_t TIP; BRPeer *pa = NULL;
+    BRPeerManager *m = b2BuildHarness(wallet, &TIP, &pa);
+    check(m != NULL, "(b) setup: harness built");
     if (! m) return;
 
-    const uint32_t clamp    = TIP - CF_RETENTION_MAX_SPAN;   // BASE+1599 at MAX_SPAN=4000
-    const uint32_t H_out    = clamp - 300u;   // still-outstanding hole below clamp (recoverable)
-    const uint32_t H_gvHi   = clamp - 400u;   // highest gaveUp below H_out (sets the watermark)
-    const uint32_t H_gvLo   = clamp - 1300u;  // deeper gaveUp, > margin below H_gvHi → freed
-    BRCFScanLedgerInit(&m->cfLedger, BASE);
-    BRCFScanLedgerRecordRequested(&m->cfLedger, H_out, H_out, UINT128_ZERO, 0, 1700000000u);
-    const BRCFOutstanding *eo = findOutstanding(&m->cfLedger, H_out);
-    check(eo != NULL && eo->attempts < CF_REREQ_MAX_ATTEMPTS, "setup: H_out outstanding, attempts < cap (recoverable)");
-    m->cfLedger.gaveUp[0]   = H_gvLo;   // sorted ascending
-    m->cfLedger.gaveUp[1]   = H_gvHi;
-    m->cfLedger.gaveUpCount = 2;
-    check(H_gvLo < H_gvHi && H_gvHi < H_out && H_out < clamp, "setup: H_gvLo < H_gvHi < H_out < clamp");
-    check(BRSetCount(m->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER, "setup: BRSetCount >= 5000 before the pass");
+    const uint32_t H = B2_CHAIN_BASE + 10u;
+    BRCFScanLedgerInit(&m->cfLedger, B2_CHAIN_BASE);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H, H, UINT128_ZERO, 0, 0);
 
     int wlogBefore = g_wlogCount;
-    _BRPeerManagerClearMemory(m);
 
-    // GUARD: abandonedBelow advances ONLY to cover the dropped gaveUp — to the
-    // highest dropped (H_gvHi)+1, NEVER past the still-outstanding hole H_out.
-    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == H_gvHi + 1u,
-          "abandonedBelow == highest-dropped gaveUp + 1 (NOT the clamp, NOT the outstanding hole)");
-    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) <= H_out,
-          "abandonedBelow never advances past the still-outstanding (recoverable) hole");
-    // The still-outstanding hole is untouched + its header retained.
-    check(findOutstanding(&m->cfLedger, H_out) != NULL, "the still-outstanding hole is NOT abandoned");
-    check(rhBlockPresent(m, H_out), "the outstanding hole's header is RETAINED");
-    // Both gaveUp holes dropped from the ledger (abandoned), WARN fired for them.
-    check(! gaveUpContains(&m->cfLedger, H_gvHi) && ! gaveUpContains(&m->cfLedger, H_gvLo),
-          "both gaveUp holes below the clamp were abandoned (dropped from the ledger)");
-    check(g_wlogCount == wlogBefore + 1, "exactly one ABANDONED warn-log fired for the dropped gaveUp");
-    check(strstr(g_wlogLast, "ABANDONED") != NULL, "the captured warn-log names the ABANDONED event");
-    // The deep abandoned header (below the retention margin) is FREED — visible loss.
-    check(! rhBlockPresent(m, H_gvLo), "the deep abandoned gaveUp header is FREED");
+    // Cycle 0 (the original exhaustion) -> re-arm #1. NOTHING is ever served.
+    b2RunRound(m, H);
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "(b) end of cycle 0: NOT abandoned (the original exhaustion alone is never a licence)");
+    check(b2OutstandingCycles(&m->cfLedger, H) == 1, "(b) end of cycle 0: rearmCycles == 1");
+
+    // Cycle REARM_MAX-1 == cycle 1 -> re-arm #2. THE TUNING PIN: a valve that
+    // abandons here (REARM_MAX effectively 1) lets a single unlucky peer-rotation
+    // cycle false-positive, so this must still be un-abandoned.
+    b2RunRound(m, H);
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "(b) END OF CYCLE REARM_MAX-1: abandonedBelow has NOT advanced (RED on a re-arm-once valve)");
+    check(g_wlogCount == wlogBefore, "(b) end of cycle REARM_MAX-1: still no ABANDONED warn-log");
+    check(b2OutstandingCycles(&m->cfLedger, H) == CF_CONVOY_REARM_MAX,
+          "(b) end of cycle REARM_MAX-1: rearmCycles == CF_CONVOY_REARM_MAX (the deciding cycle is armed)");
+
+    // Cycle REARM_MAX == cycle 2 -> re-exhausted, fully offered-and-refused by a
+    // live CF peer, with a CF peer still connected -> ABANDON.
+    b2RunRound(m, H);
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == H + 1u,
+          "(b) END OF CYCLE REARM_MAX: ABANDONED — abandonedBelow == H+1 (RED on a too-reluctant valve)");
+    check(g_wlogCount == wlogBefore + 1, "(b) exactly ONE ABANDONED warn-log fired (cnt>0 <=> WARN <=> advance)");
+    check(strstr(g_wlogLast, "ABANDONED") != NULL, "(b) the captured warn-log names the ABANDONED event");
+    check(! gaveUpContains(&m->cfLedger, H), "(b) the abandoned hole is dropped from gaveUp");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == H + 1u,
+          "(b) the scan frontier JUMPED past the abandoned hole (the convoy windows re-open)");
+
+    // ...and the convoy actually PROCEEDS: the next heights are requestable,
+    // servable, and the frontier keeps climbing. No wedge.
+    const uint32_t H2 = H + 1u, H3 = H + 3u;
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H2, H3, UINT128_ZERO, 0, 0);
+    for (int i = 0; i < 3 && BRCFScanLedgerOutstandingCount(&m->cfLedger) > 0; i++) {
+        for (size_t k = 0; k < m->cfLedger.outstandingCount; k++) m->cfLedger.outstanding[k].requestedAt = 0;
+        BRPeerManagerKeepAlive(m);
+        uint32_t srv[8];
+        serveSome(m, 8, srv);
+    }
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0, "(b) NO WEDGE: the following heights all drained");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) >= H3,
+          "(b) NO WEDGE: scannedThrough climbed past the abandoned band and kept going");
 
     BRPeerManagerFree(m);
+}
+
+// ---- (c) NOT THE HEIGHT'S FAULT: zero connected CF peers -> never abandoned --
+static void test_valve_case_c_no_cf_peer(BRWallet *wallet)
+{
+    printf("\n--- (c) no CF peer connected: NEVER abandoned (then abandoned once one returns) ---\n");
+
+    uint32_t TIP; BRPeer *pa = NULL;
+    BRPeerManager *m = b2BuildHarness(wallet, &TIP, &pa);
+    check(m != NULL, "(c) setup: harness built");
+    if (! m) return;
+
+    const uint32_t H = B2_CHAIN_BASE + 10u;
+    BRCFScanLedgerInit(&m->cfLedger, B2_CHAIN_BASE);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H, H, UINT128_ZERO, 0, 0);
+
+    int wlogBefore = g_wlogCount;
+
+    // Bring the hole to the EXACT abandon threshold with a CF peer present:
+    // cycles 0 and 1 re-arm it, cycle REARM_MAX burns fully against a live peer.
+    b2RunRound(m, H);                       // -> rearmCycles 1
+    b2RunRound(m, H);                       // -> rearmCycles 2 == CF_CONVOY_REARM_MAX
+    b2RunCycleToExhaustion(m, H, 16);       // deciding cycle burned, still outstanding
+    check(b2OutstandingCycles(&m->cfLedger, H) == CF_CONVOY_REARM_MAX,
+          "(c) setup: the hole is at the EXACT abandon threshold (rearmCycles == REARM_MAX, cycle burned)");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0, "(c) setup: nothing abandoned yet");
+
+    // Now the fleet rotates onto peers that do not serve filters — zero connected
+    // CF-capable peers at the decision. This stall is NOT the height's fault.
+    b2SetPeerServesFilters(pa, 0);
+    check(_BRPeerManagerPeerCanServeFilters(pa) == 0, "(c) setup: no connected peer can serve filters");
+
+    b2TickValveDecision(m);
+    check(gaveUpContains(&m->cfLedger, H), "(c) the hole is parked in gaveUp (RetireCapped ran)");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "(c) NEVER ABANDONED with zero CF peers (RED on a peer-blind valve)");
+    check(g_wlogCount == wlogBefore, "(c) no ABANDONED warn-log fired");
+    check(b2ParkedCycles(&m->cfLedger, H) == CF_CONVOY_REARM_MAX,
+          "(c) the parked hole's re-arm state is untouched — the valve did NOTHING AT ALL");
+
+    // Stay peer-less for a long while: still never abandoned, and still not
+    // silently discarded either (it remains a reported hole).
+    for (int i = 0; i < 12; i++) BRPeerManagerKeepAlive(m);
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "(c) still NEVER abandoned after 12 more peer-less ticks");
+    check(gaveUpContains(&m->cfLedger, H), "(c) the hole is still REPORTED in gaveUp (never silently dropped)");
+    check(g_wlogCount == wlogBefore, "(c) still no ABANDONED warn-log");
+
+    // NON-VACUITY: the ONLY thing withholding abandonment was peer absence. Put a
+    // CF peer back and the very next tick abandons.
+    b2SetPeerServesFilters(pa, 1);
+    b2TickValveDecision(m);
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == H + 1u,
+          "(c) NON-VACUOUS: with a CF peer back, the same state abandons immediately");
+    check(g_wlogCount == wlogBefore + 1, "(c) NON-VACUOUS: the ABANDONED warn-log fires only now");
+
+    BRPeerManagerFree(m);
+}
+
+// ---- (d) PEER FLAP during the deciding cycle -> NOT abandoned ---------------
+static void test_valve_case_d_peer_flap(BRWallet *wallet)
+{
+    printf("\n--- (d) peer flap during the deciding cycle: NOT abandoned (then abandoned on a clean cycle) ---\n");
+
+    uint32_t TIP; BRPeer *pa = NULL;
+    BRPeerManager *m = b2BuildHarness(wallet, &TIP, &pa);
+    check(m != NULL, "(d) setup: harness built");
+    if (! m) return;
+
+    const uint32_t H = B2_CHAIN_BASE + 10u;
+    BRCFScanLedgerInit(&m->cfLedger, B2_CHAIN_BASE);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H, H, UINT128_ZERO, 0, 0);
+
+    int wlogBefore = g_wlogCount;
+
+    // Cycles 0 and 1: clean, with a CF peer -> the hole reaches the deciding cycle.
+    b2RunRound(m, H);
+    b2RunRound(m, H);
+    check(b2OutstandingCycles(&m->cfLedger, H) == CF_CONVOY_REARM_MAX,
+          "(d) setup: the DECIDING cycle is armed (rearmCycles == REARM_MAX)");
+    const BRCFOutstanding *e0 = findOutstanding(&m->cfLedger, H);
+    check(e0 && e0->offersReachedLivePeer == 1, "(d) setup: the deciding cycle starts UNTAINTED");
+
+    // --- THE FLAP ---
+    // Two offers land on the live peer...
+    for (int i = 0; i < 2; i++) {
+        BRCFOutstanding *e = mutOutstanding(&m->cfLedger, H);
+        if (e) e->requestedAt = 0;
+        BRPeerManagerKeepAlive(m);
+    }
+    // ...then the peer DISCONNECTS with an offer in flight. This is exactly what
+    // production does on a drop (_peerDisconnected -> BRCFScanLedgerReArmPeer),
+    // plus the peer no longer being CF-usable for the next few ticks.
+    BRCFScanLedgerReArmPeer(&m->cfLedger, pa->address, pa->port);
+    b2SetPeerServesFilters(pa, 0);
+    const BRCFOutstanding *e1 = findOutstanding(&m->cfLedger, H);
+    check(e1 && e1->offersReachedLivePeer == 0,
+          "(d) THE LATCH: the in-flight offer's peer vanished -> the deciding cycle is TAINTED");
+    for (int i = 0; i < 2; i++) {                 // due, but nobody to offer to
+        BRCFOutstanding *e = mutOutstanding(&m->cfLedger, H);
+        if (e) e->requestedAt = 0;
+        BRPeerManagerKeepAlive(m);
+    }
+    // ...and it is BACK by the abandon check — the fleet-saturation shape.
+    b2SetPeerServesFilters(pa, 1);
+    b2RunCycleToExhaustion(m, H, 16);
+    b2TickValveDecision(m);
+
+    check(_BRPeerManagerPeerCanServeFilters(pa) == 1, "(d) a CF peer IS connected at the abandon check");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "(d) NOT ABANDONED: the deciding cycle's offers did not all reach a live peer "
+          "(RED on a valve that checks peer presence at the abandon INSTANT)");
+    check(g_wlogCount == wlogBefore, "(d) no ABANDONED warn-log fired");
+    check(findOutstanding(&m->cfLedger, H) != NULL,
+          "(d) the hole is RE-ARMED again instead — a tainted cycle is never the deciding one");
+    check(b2OutstandingCycles(&m->cfLedger, H) == CF_CONVOY_REARM_MAX + 1,
+          "(d) rearmCycles kept climbing past REARM_MAX (the valve keeps working the hole, it does not wedge)");
+
+    // NON-VACUITY: the ONLY thing withholding abandonment was the taint. One CLEAN
+    // cycle with the peer present and it abandons.
+    b2RunRound(m, H);
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == H + 1u,
+          "(d) NON-VACUOUS: the next CLEAN, fully-live-offered cycle DOES abandon");
+    check(g_wlogCount == wlogBefore + 1, "(d) NON-VACUOUS: exactly one ABANDONED warn-log, and only now");
+
+    BRPeerManagerFree(m);
+}
+
+static void test_valve_matched_set(BRWallet *wallet)
+{
+    printf("\n=== test_valve_matched_set (paced-convoy Task 5: B2 connected-subset-refusal valve) ===\n");
+    test_valve_case_a_slow_but_real(wallet);
+    test_valve_case_b_unservable(wallet);
+    test_valve_case_c_no_cf_peer(wallet);
+    test_valve_case_d_peer_flap(wallet);
 }
 
 // ---- Paced-convoy fetch, Task 1: scan-frontier + abandonment accessors -----
@@ -2013,11 +2329,12 @@ static void test_lowest_needed_accessor(BRWallet *wallet)
           "LowestNeededHeight == scannedThrough+1 == 1003 (still-outstanding 1003..1005 hold the frontier back)");
 
     // Raise the hard retention floor above the still-outstanding scan frontier
-    // (production path: BRCFScanLedgerAbandonGaveUpBelow; anchored directly
-    // here the same way cf_scan_ledger_kat's test_lowest_needed_height moves
-    // the watermark, since AbandonGaveUpBelow itself never advances past a
-    // still-outstanding hole — that guard is proven separately by
-    // test_clearmemory_ceiling_scan_started above).
+    // (production path: BRCFScanLedgerAbandonGaveUpBelow, driven by the B2 valve;
+    // anchored directly here the same way cf_scan_ledger_kat's
+    // test_lowest_needed_height moves the watermark, since AbandonGaveUpBelow
+    // itself never advances past a still-outstanding hole — that guard is proven
+    // separately by test_abandon_guard_no_preemptive_advance and by
+    // cf_scan_ledger_kat's test_abandon_advance_covers_dropped_only).
     l.abandonedBelow = 1010;
     check(BRCFScanLedgerAbandonedBelow(&l) == 1010, "abandonedBelow raised to 1010");
     check(BRCFScanLedgerLowestNeededHeight(&l) == 1010,
@@ -2901,11 +3218,39 @@ int main(void)
 #ifdef KAT_CEILING_REDGREEN_ONLY
     // run.sh builds this twice for the Part-3b determinism guard's red-before-green
     // gate: once with the pre-guard preemptive advance (-DRETENTION_PREEMPTIVE_ADVANCE,
-    // must FAIL == RED — an empty-scan deep restore would raise the floor and complete
-    // with a WRONG BALANCE) and once fixed (must PASS == GREEN), running ONLY the
-    // scan-not-started case so the RED is unambiguously the preemptive abandonedBelow
-    // raise and nothing incidental.
-    test_clearmemory_ceiling_scan_not_started(wallet);
+    // must FAIL == RED) and once fixed (must PASS == GREEN), running ONLY that one
+    // case so the RED is unambiguously the preemptive abandonedBelow raise.
+    //
+    // RE-HOMED (paced-convoy Task 5): the case this gate used to run
+    // (test_clearmemory_ceiling_scan_not_started) tested _cfApplyRetentionCeiling,
+    // the DEPTH trigger this task deletes, so it went with it. The determinism
+    // guard itself is RETAINED and is now MORE load-bearing, not less: the B2 valve
+    // is its only production caller, and the valve's whole operator contract —
+    // "cnt>0 <=> WARN <=> abandonedBelow advanced", i.e. every abandonment is a
+    // visible, warn-logged event and abandonedBelow==0 is a verified fact — rests on
+    // it. So the gate is re-pointed at the guard's own case rather than deleted.
+    test_abandon_guard_no_preemptive_advance(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_B2_REDGREEN_ONLY
+    // run.sh builds this FOUR times for the B2 abandonment valve's matched set --
+    // one shape per axis the valve must get right, each of which must FAIL == RED:
+    //   -DCONVOY_NO_B2_VALVE           : no valve at all (today's shape: the only
+    //                                    abandonment was the deleted depth ceiling).
+    //                                    A gaveUp hole is never re-armed and never
+    //                                    abandoned -> the convoy wedges forever.
+    //   -DCONVOY_B2_PEER_BLIND         : the valve ignores whether any CF peer is
+    //                                    connected -> abandons an un-offered height.
+    //   -DCONVOY_B2_IGNORE_OFFER_LATCH : the valve checks CF-peer presence at the
+    //                                    abandon INSTANT instead of THROUGHOUT the
+    //                                    deciding cycle -> a peer flap reads as five
+    //                                    live refusals.
+    //   -DCONVOY_B2_REARM_ONCE         : the valve abandons after ONE re-arm cycle
+    //                                    -> one unlucky rotation cycle false-positives.
+    test_valve_matched_set(wallet);
     BRWalletFree(wallet);
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
@@ -3029,9 +3374,8 @@ int main(void)
     test_no_stale_between_pass_recommit(wallet);           // Task 3: between-pass staleness guard (RED before the guard)
     test_clearmemory_retains_scan_floor(wallet);           // Task 4: floor tracks the SCAN frontier (red-before-green)
     test_clearmemory_descent_frees(wallet);                // Task 4: full descent frees below the floor (no leak)
-    test_clearmemory_ceiling_scan_not_started(wallet);     // Task 4b: ceiling timing branch 1 — scan-not-started wrong-balance guard
-    test_clearmemory_ceiling_scan_started(wallet);         // Task 4b: ceiling timing branch 2 — abandon gaveUp, keep outstanding
-    test_lowest_needed_accessor(wallet);                   // paced-convoy-fetch Task 1: frontier semantics anchor + BRPeerManager accessors
+    test_abandon_guard_no_preemptive_advance(wallet);      // Task 4b guard, re-homed onto the B2 valve's primitive (red-before-green)
+    test_lowest_needed_accessor(wallet);                // paced-convoy-fetch Task 1: frontier semantics anchor + BRPeerManager accessors
     test_convoy_gate_suppresses_continuations(wallet);     // paced-convoy-fetch Task 2: gate the tip-racers, exempt recovery (red-before-green)
     test_convoy_gate_null_chain_open(wallet);              // paced-convoy-fetch Task 2: NULL-chain carve-out (red-before-green)
     test_b1_resumes_drain_trough(wallet);                  // paced-convoy-fetch Task 3: B1.1 forward drive out of the drain trough (red-before-green)
@@ -3040,6 +3384,7 @@ int main(void)
     test_b1_getheaders_rekick_is_throttled(wallet);        // paced-convoy-fetch Task 3 fix 1: B1.3 rate limit (red-before-green)
     test_b1_rekick_backoff_not_stale_across_gated_period(wallet); // paced-convoy-fetch Task 3 fix 2: GATED->open episode reset (red-before-green)
     test_resume_snaps_cursor(wallet);                      // paced-convoy-fetch Task 4: resume cursor reconciliation (red-before-green)
+    test_valve_matched_set(wallet);                        // paced-convoy-fetch Task 5: B2 valve MATCHED SET a/b/c/d (red-before-green x4)
 
     BRWalletFree(wallet);
 
