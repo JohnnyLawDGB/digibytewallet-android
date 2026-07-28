@@ -76,13 +76,23 @@ class SettingsViewModel @Inject constructor(
      *  call. 0 until first poll; matches the main wallet screen's denominator. */
     private val _externalTip = MutableStateFlow(0L)
 
+    /** CF SCAN frontier (`getLowestNeededHeight()`) — the only honest progress
+     *  signal under the paced convoy, which deliberately holds the header/cfheader
+     *  frontiers a full CF_CONVOY_WINDOW ahead of it. 0 before the ledger exists. */
+    private val _scanFrontier = MutableStateFlow(0L)
+
+    /** True while an abandoned compact-filter band awaits recovery — withholds
+     *  "Synced" here exactly as it does on the main screen. */
+    private val _abandonedBandUnrecovered = MutableStateFlow(false)
+
     /** CF-gated sync frontier — the SAME derivation ([deriveSyncFrontier]) the
      *  main wallet screen uses, so the Network Info screen shares its CF-gated
      *  STAGE and can't categorically diverge (e.g. show "Synced" while cfheaders
      *  lags). Inputs are polled per-VM, so the exact block number can differ by
      *  a poll interval during active sync; it converges in steady state. */
     val syncFrontier: StateFlow<SyncFrontier> = combine(
-        syncState, _peerCount, _lastBlockHeight, _estimatedHeight, _externalTip, _cfTip
+        syncState, _peerCount, _lastBlockHeight, _estimatedHeight, _externalTip, _cfTip,
+        _scanFrontier, _abandonedBandUnrecovered,
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         deriveSyncFrontier(
@@ -92,6 +102,12 @@ class SettingsViewModel @Inject constructor(
             targetHeight = values[3] as Long,
             externalTip = values[4] as Long,
             cfTip = values[5] as Long,
+            // Same convoy re-key + band gate as the main wallet screen. If only one
+            // of the two surfaces took these, Network Info would go back to claiming
+            // "Synced" while the main card honestly showed a scan still descending —
+            // the exact categorical divergence deriveSyncFrontier exists to prevent.
+            scanFrontier = values[6] as Long,
+            abandonedBandUnrecovered = values[7] as Boolean,
         )
     }.stateIn(
         viewModelScope, SharingStarted.Eagerly,
@@ -290,6 +306,10 @@ class SettingsViewModel @Inject constructor(
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
             _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)
+            _scanFrontier.value =
+                runCatching { NativeBridge.getLowestNeededHeight() }.getOrDefault(0L)
+            _abandonedBandUnrecovered.value =
+                io.digibyte.core.sync.CfAbandonmentStore.unrecoveredBand(context) != null
             // CF scan ledger (Phase-1 observe-only). Guarded like the other native
             // reads — native returns empty/short arrays before startSync.
             runCatching {

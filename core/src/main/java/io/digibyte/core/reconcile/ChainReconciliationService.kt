@@ -35,6 +35,13 @@ class ChainReconciliationService(
      *  utxos table never got is_asset=1 rows (processAssetUtxo had no
      *  callers pre-v3.5.27). */
     private val assetManager: io.digibyte.core.asset.AssetManager? = null,
+    /** Optional — when wired, a reconcile whose address-history pass actually
+     *  COVERED the owned set sets the `abandonedBandRecovered` signal
+     *  ([CfAbandonmentStore.markRecovered]), clearing the abandoned-band banner and
+     *  letting the wallet reach "Synced" again. Nullable + defaulted so existing
+     *  pure-JVM constructions keep compiling; without it the reconcile still works,
+     *  it just can't clear the surfacing. */
+    private val appContext: android.content.Context? = null,
 ) {
 
     sealed class State {
@@ -81,6 +88,18 @@ class ChainReconciliationService(
                 android.util.Log.i("ChainReconciliation",
                     "address-history reconcile imported $historyImported tx(s)")
             }
+            // GATE 3 (paced-convoy fetch, spec Part E): the address-history pass is
+            // the CF-INDEPENDENT one — it enumerates the whole owned address set and
+            // imports every tx the node reports touching it, at ANY height, with its
+            // confirming block. That, and only that, is what covers a compact-filter
+            // band the B2 valve abandoned. The UTXO half below cannot: it only
+            // surfaces outputs that are still unspent. So the recovered signal is
+            // gated on [lastHistoryPassCovered] — a pass that reached the node AND
+            // fetched every tx it planned to import — not on the reconcile returning
+            // Done. Marking recovered on a partial pass would clear the banner and
+            // flip the wallet to "Synced" over history that is still missing, which
+            // is precisely the silent loss the valve is only tolerable without.
+            if (lastHistoryPassCovered) markAbandonedBandRecovered()
 
             _state.value = State.Scanning("Listing wallet addresses…")
             val addrs = NativeBridge.dumpAllAddresses()
@@ -196,6 +215,7 @@ class ChainReconciliationService(
      * list — cannot). Returns the count imported.
      */
     suspend fun reconcileAddressHistory(): Int {
+        lastHistoryPassCovered = false
         val addrs = NativeBridge.dumpAllAddresses().trim().lines().filter { it.isNotBlank() }
         if (addrs.isEmpty()) return 0
         val known = extractKnownTxids(NativeBridge.getTransactionDetails())
@@ -205,19 +225,44 @@ class ChainReconciliationService(
         val history = nodeClient.addressHistoryBatch(addrs) ?: return 0
         val toImport = planHistoryImport(listOf(history), known)
         var imported = 0
+        var unfetched = 0
         for ((i, tx) in toImport.withIndex()) {
             _state.value = State.Scanning(
                 "Recovering tx ${i + 1}/${toImport.size}…",
                 progress = 0.5f + (i + 1).toFloat() / toImport.size * 0.5f,
             )
-            val raw = nodeClient.fetchRawTx(tx.txid, tx.height) ?: continue
-            val bytes = runCatching { hexToBytes(raw.hex) }.getOrNull() ?: continue
+            val raw = nodeClient.fetchRawTx(tx.txid, tx.height)
+            if (raw == null) { unfetched++; continue }
+            val bytes = runCatching { hexToBytes(raw.hex) }.getOrNull()
+            if (bytes == null) { unfetched++; continue }
             if (NativeBridge.registerRawTransaction(bytes, raw.blockHeight, raw.blockTime)) {
                 imported++
                 android.util.Log.i("ChainReconciliation", "history-recovered ${tx.txid} @${tx.height}")
             }
+            // A false from registerRawTransaction means "already known", not a
+            // failure — it does not compromise coverage.
         }
+        // Coverage means: the node answered for the whole owned address set AND every
+        // tx we planned to import was actually fetched and decoded. Anything less and
+        // we cannot claim an abandoned band was re-covered.
+        lastHistoryPassCovered = (unfetched == 0)
         return imported
+    }
+
+    /** Set by [reconcileAddressHistory]: did that pass actually reach the node for
+     *  the whole owned address set and retrieve everything it planned to import? */
+    @Volatile private var lastHistoryPassCovered = false
+
+    /** Record the `abandonedBandRecovered` signal — see [CfAbandonmentStore]. */
+    private fun markAbandonedBandRecovered() {
+        val ctx = appContext ?: return
+        val cleared = runCatching {
+            io.digibyte.core.sync.CfAbandonmentStore.markRecovered(ctx)
+        }.getOrDefault(false)
+        if (cleared) {
+            android.util.Log.i("ChainReconciliation",
+                "abandoned CF band recovered by node reconcile — banner cleared, Synced unblocked")
+        }
     }
 
     /** Txids of wallet transactions still unconfirmed — blockHeight is the

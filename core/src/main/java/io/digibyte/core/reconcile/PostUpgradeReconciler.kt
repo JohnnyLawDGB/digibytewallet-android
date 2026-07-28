@@ -90,7 +90,9 @@ object PostUpgradeReconciler {
         context: Context,
         assetManager: io.digibyte.core.asset.AssetManager? = null,
     ) {
-        runIfNeeded(context) { ctx -> ChainReconciliationService(DgbNodeClient(ctx), assetManager) }
+        runIfNeeded(context) { ctx ->
+            ChainReconciliationService(DgbNodeClient(ctx), assetManager, appContext = ctx)
+        }
     }
 
     /**

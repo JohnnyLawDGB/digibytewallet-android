@@ -20,6 +20,8 @@ import io.digibyte.core.model.SyncStage
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.model.deriveSyncFrontier
 import io.digibyte.core.networkSuffix
+import io.digibyte.core.sync.AbandonedBand
+import io.digibyte.core.sync.CfAbandonmentStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.digibyte.core.tor.TorManager
@@ -124,6 +126,30 @@ class WalletViewModel @Inject constructor(
      *  wallet never shows "Synced" while cfheaders lags the (fast) header chain. */
     private val _cfTip = MutableStateFlow(0L)
 
+    /** Compact-filter SCAN frontier (`getLowestNeededHeight()`) — under the paced
+     *  convoy this is the ONLY height that indicates progress. The convoy
+     *  deliberately holds the block-header and cfheader frontiers within
+     *  CF_CONVOY_WINDOW (10000) of it, so on a deep restore both of those report
+     *  ~100% while millions of blocks are still unscanned. 0 before the native
+     *  ledger exists; [deriveSyncFrontier] then falls back to cfTip/header height.
+     *  Deliberately NOT `getCfScanLedgerCounts()[0]` — that index is
+     *  `scannedThrough`, which LAGS after a B2 abandonment. */
+    private val _scanFrontier = MutableStateFlow(0L)
+
+    /** The abandoned compact-filter band still awaiting recovery, or null. Read
+     *  from [CfAbandonmentStore] on each poll so a reconcile that sets the
+     *  recovered signal clears the banner within one tick. */
+    private val _abandonedBand = MutableStateFlow<AbandonedBand?>(null)
+
+    /** Last CF scan frontier observed while the B2 valve was mid-decision
+     *  (`getConvoyAbandonmentPending() > 0`) — i.e. the height the valve had the
+     *  frontier PINNED at. That height is the bottom of the band it is about to
+     *  abandon, and native keeps no record of it (`getAbandonedCount()` is
+     *  `abandonedBelow - start`, the whole scanned range, NOT the abandoned
+     *  heights). Captured here so the banner can name a real range instead of a
+     *  misleading count. 0 = never observed → the band records low-unknown. */
+    @Volatile private var pendingAbandonmentLowHint: Long = 0L
+
     /** Stable sync-target tip, used as the progress denominator so the UI
      *  percent anchors to a stable value rather than peer-quorum
      *  estimated_height (which churns as peers come and go with different tip
@@ -190,7 +216,9 @@ class WalletViewModel @Inject constructor(
         _targetBlock,
         _recoveryFromTimestamp,
         _externalTip,
-        _cfTip
+        _cfTip,
+        _scanFrontier,
+        _abandonedBand
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val state = values[0] as SyncState
@@ -202,6 +230,8 @@ class WalletViewModel @Inject constructor(
         val recoveryTs = values[6] as Long?
         val externalTip = values[7] as Long
         val cfTip = values[8] as Long
+        val scanFrontier = values[9] as Long
+        val abandonedBand = values[10] as AbandonedBand?
 
         // CF-gated sync frontier — the single source of truth shared with the
         // Network Info screen and the DigiRunner overlay (see deriveSyncFrontier
@@ -214,14 +244,33 @@ class WalletViewModel @Inject constructor(
             targetHeight = target,
             externalTip = externalTip,
             cfTip = cfTip,
+            scanFrontier = scanFrontier,
+            abandonedBandUnrecovered = abandonedBand != null,
         )
 
         // Latch hasReachedSyncedOnce — gates the anti-flash balance guard in
         // pollNativeBalance so that post-sync sends correctly debit the shown balance.
-        if (frontier.stage == SyncStage.Synced) hasReachedSyncedOnce = true
+        // ALSO latches when an un-recovered abandoned band is the only thing
+        // withholding Synced: the scan itself HAS finished, so the native balance is
+        // authoritative, and without this a wallet with a surfaced band could never
+        // show a genuine spend-to-zero (the guard would pin the stale higher value
+        // forever — the original "4 DGB shown but all spent" symptom).
+        if (frontier.stage == SyncStage.Synced || frontier.abandonedBandHolding) {
+            hasReachedSyncedOnce = true
+        }
 
-        // ETA from the raw header height toward the effective tip (rolling samples).
-        val eta: Long? = computeEta(current, frontier.targetBlock)
+        // ETA and blocks-remaining from the SAME frontier the bar uses (the CF scan
+        // frontier under the convoy), so "% · N remaining" can't be three different
+        // heights' opinions. etaReference MUST mirror the sampler in
+        // pollNativeBalance exactly — a rate computed from scan-frontier samples but
+        // projected from the header height is meaningless.
+        val etaReference = when {
+            scanFrontier > 0 -> scanFrontier
+            cfTip > 0 -> cfTip
+            else -> current
+        }
+        val eta: Long? = computeEta(etaReference, frontier.targetBlock)
+        val behind = (frontier.targetBlock - frontier.currentBlock).coerceAtLeast(0L)
 
         SyncProgressInfo(
             stage = frontier.stage,
@@ -232,7 +281,10 @@ class WalletViewModel @Inject constructor(
             runningBalanceSat = balance,
             etaSeconds = eta,
             peerCount = peers,
-            recoveryFromTimestamp = recoveryTs
+            recoveryFromTimestamp = recoveryTs,
+            blocksBehind = behind,
+            abandonedBand = abandonedBand,
+            abandonedBandHolding = frontier.abandonedBandHolding,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly,
         SyncProgressInfo(SyncStage.Connecting, 0, 0, 0f, 0, 0, null, 0, null))
@@ -563,8 +615,55 @@ class WalletViewModel @Inject constructor(
                 // CF frontier (functional sync height in CF-only). Poll every cycle so the
                 // honesty gate un-latches when cfheaders catches up (must keep polling post-Complete).
                 _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)
-                if (currentHeight > 0) {
-                    scanSamples.addLast(System.currentTimeMillis() to currentHeight)
+
+                // ── Paced-convoy progress + abandonment surfacing (spec Part E) ──
+                // The CF SCAN frontier is the only honest progress signal under the
+                // convoy (it holds the header/cfheader frontiers a full window ahead
+                // on purpose). NOT getCfScanLedgerCounts()[0] — that is
+                // scannedThrough, which LAGS after a B2 abandonment.
+                val scanFrontier =
+                    runCatching { NativeBridge.getLowestNeededHeight() }.getOrDefault(0L)
+                _scanFrontier.value = scanFrontier
+
+                // Capture the bottom of a band the valve is ABOUT to abandon. While
+                // getConvoyAbandonmentPending() > 0 the valve owns the hole that PINS
+                // the frontier, and it holds it there across CF_CONVOY_REARM_MAX
+                // re-arm cycles (~22 min) before deciding — so a 5s poll sees it. This
+                // is the only way to name the range: native exposes abandonedBelow
+                // (the top) but nothing for the bottom, and getAbandonedCount() is
+                // abandonedBelow - ledger.start, i.e. the whole scanned range rather
+                // than the heights actually abandoned.
+                val abandonPending =
+                    runCatching { NativeBridge.getConvoyAbandonmentPending() }.getOrDefault(0)
+                if (abandonPending > 0 && scanFrontier > 0) {
+                    pendingAbandonmentLowHint = scanFrontier
+                }
+                val abandonedBelow =
+                    runCatching { NativeBridge.getAbandonedBelow() }.getOrDefault(0L)
+                if (abandonedBelow > 0) {
+                    val recorded = CfAbandonmentStore.noteAbandonment(
+                        application, abandonedBelow, pendingAbandonmentLowHint,
+                    )
+                    if (recorded) {
+                        android.util.Log.w("WalletVM",
+                            "CF band abandoned — abandonedBelow=$abandonedBelow " +
+                                "lowHint=$pendingAbandonmentLowHint; surfacing recover-me banner")
+                    }
+                }
+                // Re-read every tick (in-memory prefs map): a reconcile that sets the
+                // recovered signal must clear the banner within one poll.
+                _abandonedBand.value = CfAbandonmentStore.unrecoveredBand(application)
+
+                // ETA samples ride the SAME frontier the bar shows, so "% · N
+                // remaining" is internally consistent. Falls back exactly as
+                // deriveSyncFrontier does when the scan frontier isn't up yet.
+                val etaSample = when {
+                    scanFrontier > 0 -> scanFrontier
+                    _cfTip.value > 0 -> _cfTip.value
+                    else -> currentHeight
+                }
+                if (etaSample > 0) {
+                    scanSamples.addLast(System.currentTimeMillis() to etaSample)
                     while (scanSamples.size > 24) scanSamples.removeFirst()
                 }
                 val txDetails = NativeBridge.getTransactionDetails()

@@ -325,7 +325,11 @@ fun AppNavigation(
                         navController.navigate("transaction_detail/${txid}")
                     },
                     onNavigateAssets = { navController.navigate("assets") },
-                    onNavigateNetworkInfo = { navController.navigate("settings_network") }
+                    onNavigateNetworkInfo = { navController.navigate("settings_network") },
+                    // Abandoned-band banner action — the reconcile screen hosts BOTH
+                    // recovery paths ("Scan for missing transactions" and "Full
+                    // rebuild from chain").
+                    onNavigateReconcile = { navController.navigate("settings_reconcile") }
                 )
             }
 

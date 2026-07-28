@@ -20,7 +20,20 @@ data class SyncProgressInfo(
     val runningBalanceSat: Long,   // wallet balance found so far
     val etaSeconds: Long?,         // null if rate isn't yet stable
     val peerCount: Int,
-    val recoveryFromTimestamp: Long? // unix seconds; null = no scan window
+    val recoveryFromTimestamp: Long?, // unix seconds; null = no scan window
+    /** Blocks between the displayed frontier and the tip. Derived from the SAME
+     *  numerator as [progressFraction] and [etaSeconds] (the compact-filter SCAN
+     *  frontier under the paced convoy), so "% · N remaining · ETA" is internally
+     *  consistent rather than three different heights' opinions. */
+    val blocksBehind: Long = 0L,
+    /** The compact-filter band the B2 abandonment valve gave up on and that no
+     *  recovery has covered yet. Non-null → the persistent recover-me banner is
+     *  shown and "Synced" is withheld (paced-convoy fetch, spec Part E / GATE 3). */
+    val abandonedBand: io.digibyte.core.sync.AbandonedBand? = null,
+    /** True iff the un-recovered [abandonedBand] is the ONLY thing withholding
+     *  "Synced" — the scan itself has finished. Lets the card say "history gap"
+     *  instead of pretending a completed scan is still running. */
+    val abandonedBandHolding: Boolean = false,
 ) {
     val isWorking: Boolean get() = stage == SyncStage.Connecting || stage == SyncStage.Syncing
 }

@@ -6,6 +6,8 @@ import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.asset.DeadSendPredicate
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.sync.CfAbandonmentStore
+import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
@@ -480,6 +482,22 @@ class WalletManager(
             .remove("last_balance")
             .commit()
         FilterHeaderStore.delete(context) // also nuke the file-backed CF-header chain (synchronous)
+        // …and the file-backed CF SCAN LEDGER. This is load-bearing, not tidiness
+        // (paced-convoy fetch, spec Part E / GATE 3(iii)): on the forced restart
+        // startSync() Inits the native ledger fresh at `abandonedBelow = 0`, and
+        // SyncService then feeds whatever survives here straight into
+        // restoreCfScanLedger(), which Parses the OLD `abandonedBelow` right back
+        // over that Init. `abandonedBelow` is a monotonic hard floor clamping every
+        // CF request (BRCFScanLedger.c:433/600/666), so leaving the blob in place
+        // means the CF path can NEVER re-cover an abandoned band — the "a full
+        // rescan re-covers it" half of the recovery guarantee would be a lie, and
+        // the B2 valve's residual (it can only prove refusal by the peers it is
+        // connected to, so a servable height CAN be abandoned) would become
+        // permanent silent loss instead of a recoverable inconvenience.
+        CfScanLedgerStore.delete(context)
+        // The surfaced band goes with it: after the re-Init `abandonedBelow` really
+        // is 0, so there is nothing left to recover and nothing to nag about.
+        CfAbandonmentStore.clear(context)
         OutgoingTxStore(context).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).

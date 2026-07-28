@@ -2821,7 +2821,10 @@ class SyncService : Service() {
                 lastConfirmReconcileMs = now
                 android.util.Log.i("SyncService",
                     "$reason with unconfirmed tx(s) — running confirmation-reconcile")
-                ChainReconciliationService(DgbNodeClient(this@SyncService), assetManager).reconcile()
+                ChainReconciliationService(
+                    DgbNodeClient(this@SyncService), assetManager,
+                    appContext = this@SyncService,
+                ).reconcile()
             }
         }.onFailure { android.util.Log.w("SyncService", "confirmation-reconcile failed", it) }
     }

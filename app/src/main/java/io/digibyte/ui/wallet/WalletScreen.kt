@@ -47,6 +47,9 @@ fun WalletScreen(
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
     onNavigateNetworkInfo: () -> Unit = {},
+    /** Opens the reconcile / full-rebuild screen — both recovery paths for an
+     *  abandoned compact-filter band (see [AbandonedBandBanner]). */
+    onNavigateReconcile: () -> Unit = {},
     viewModel: WalletViewModel = hiltViewModel()
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
@@ -151,6 +154,22 @@ fun WalletScreen(
                     onRetry = { viewModel.retryPostUpgradeReconcile() },
                     onDismiss = { viewModel.dismissReconcileFailedBanner() },
                 )
+            }
+        }
+
+        // Abandoned compact-filter band (paced-convoy fetch, spec Part E —
+        // operator GATE 3). The B2 valve can only prove a height is unservable by
+        // the peers it is CURRENTLY connected to, never fleet-wide, so under fleet
+        // saturation it can abandon a height that was in fact servable. That
+        // residual is acceptable ONLY because the band stays visible and
+        // recoverable — this banner is the "visible" half, and it is deliberately
+        // NOT inside SyncProgressCard (which is gated on isWorking): it must
+        // SURVIVE the flip to Synced. It clears only on the recovered signal
+        // (a reconcile that covered the owned set, or a full rescan), never on
+        // the monotonic abandonedBelow watermark, which no recovery clears.
+        syncProgressInfo.abandonedBand?.let { band ->
+            item {
+                AbandonedBandBanner(band = band, onScan = onNavigateReconcile)
             }
         }
 
@@ -328,14 +347,19 @@ private fun SyncProgressCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Stage-specific headline.
-            val (icon, headline) = when (info.stage) {
-                SyncStage.Connecting -> Icons.Filled.CloudSync to
+            // Stage-specific headline. An un-recovered abandoned band holds the stage
+            // at Syncing even though the scan itself has finished — say so, rather
+            // than pretending a completed scan is still grinding (the banner above
+            // carries the range and the recovery action).
+            val (icon, headline) = when {
+                info.abandonedBandHolding -> Icons.Filled.ErrorOutline to
+                    "Scan complete — part of your history is unverified"
+                info.stage == SyncStage.Connecting -> Icons.Filled.CloudSync to
                     "Connecting to DigiByte network"
-                SyncStage.Syncing -> Icons.Filled.Search to
+                info.stage == SyncStage.Syncing -> Icons.Filled.Search to
                     "Scanning for your transactions"
-                SyncStage.Synced -> Icons.Filled.CheckCircle to "Up to date"
-                SyncStage.Failed -> Icons.Filled.ErrorOutline to "Sync failed"
+                info.stage == SyncStage.Synced -> Icons.Filled.CheckCircle to "Up to date"
+                else -> Icons.Filled.ErrorOutline to "Sync failed"
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -362,8 +386,10 @@ private fun SyncProgressCard(
                 )
             }
 
-            // Progress bar — meaningful only during Syncing.
-            if (info.stage == SyncStage.Syncing) {
+            // Progress bar — meaningful only during Syncing, and NOT when the only
+            // thing left is the surfaced band (the scan has finished; an animated
+            // bar pinned at 100% would read as "still working").
+            if (info.stage == SyncStage.Syncing && !info.abandonedBandHolding) {
                 LinearProgressIndicator(
                     progress = { info.progressFraction.coerceIn(0f, 1f) },
                     modifier = Modifier
@@ -374,14 +400,17 @@ private fun SyncProgressCard(
                 )
             }
 
-            // ETA + percent line.
-            if (info.stage == SyncStage.Syncing) {
+            // ETA + percent line. Percent, blocks-remaining and ETA all derive from
+            // the SAME frontier (the CF scan frontier under the paced convoy), so
+            // they can no longer disagree with each other or with "Block X of Y".
+            if (info.stage == SyncStage.Syncing && !info.abandonedBandHolding) {
                 val pct = (info.progressFraction * 100).toInt()
                 val etaSeconds = info.etaSeconds
+                val blocks = "${formatThousands(info.blocksBehind)} blocks"
                 val text = when {
                     pct >= 100 -> "Finishing up — verifying recent blocks"
-                    etaSeconds != null -> "$pct% complete · ${formatEta(etaSeconds)} remaining"
-                    else -> "$pct% complete · estimating…"
+                    etaSeconds != null -> "$pct% complete · $blocks · ${formatEta(etaSeconds)} remaining"
+                    else -> "$pct% complete · $blocks remaining · estimating…"
                 }
                 Text(
                     text = text,
@@ -698,6 +727,98 @@ private fun SyncIndicator(info: SyncProgressInfo) {
                     color = DigiByteAccent.copy(alpha = 0.85f)
                 )
             }
+        }
+    }
+}
+
+/**
+ * The exact sentence the abandoned-band banner shows, given a band. Pure, so the
+ * honesty of what it claims is unit-testable (see `AbandonedBandBannerTextTest`).
+ *
+ * Two shapes, because the band's TOP is exact but its BOTTOM may not be:
+ *  - bottom observed → "blocks 23,900,120–23,900,124"
+ *  - bottom unknown  → "blocks below 23,900,125"
+ *
+ * It deliberately never renders a COUNT. The only native counter,
+ * `getAbandonedCount()`, returns `abandonedBelow - ledger.start` — the size of the
+ * whole scanned range below the watermark, not the number of heights abandoned. On
+ * a wallet that abandoned one deep height it reads as the entire history, so
+ * "N blocks abandoned" would be a straight lie.
+ */
+internal fun abandonedBandMessage(band: io.digibyte.core.sync.AbandonedBand): String {
+    val range = if (band.lowKnown && band.low in 1..band.high) {
+        "blocks ${formatThousands(band.low)}–${formatThousands(band.high)}"
+    } else {
+        "blocks below ${formatThousands(band.high + 1)}"
+    }
+    return "Part of your history ($range) couldn't be verified from the filter " +
+        "fleet — tap to scan for missing transactions."
+}
+
+/**
+ * Persistent recover-me banner for an abandoned compact-filter band (paced-convoy
+ * fetch, spec Part E — operator GATE 3).
+ *
+ * This is the surfacing half of the safety coupling that makes the B2 abandonment
+ * valve tolerable: the valve can only prove a height unservable by the peers it is
+ * connected to, so under fleet saturation it can abandon a height that was really
+ * servable. Accepting that residual is conditional on the band never being silent.
+ *
+ * Consequently this banner is NOT dismissible and NOT inside the sync card: it
+ * survives the flip to "Synced" and clears only when a recovery has actually
+ * covered the band ([io.digibyte.core.sync.CfAbandonmentStore]). Both recovery
+ * paths live behind [onScan]: "Scan for missing transactions" (the node reconcile,
+ * CF-independent, covers any height) and "Full rebuild from chain" (the rescan,
+ * which now also deletes the persisted CF scan ledger so the re-`Init` really does
+ * clear `abandonedBelow`).
+ */
+@androidx.compose.runtime.Composable
+private fun AbandonedBandBanner(
+    band: io.digibyte.core.sync.AbandonedBand,
+    onScan: () -> Unit,
+) {
+    androidx.compose.material3.Card(
+        onClick = onScan,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0x33FFCC66),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "History gap — some blocks weren't verified",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFD580),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = abandonedBandMessage(band),
+                style = MaterialTheme.typography.bodySmall,
+                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            androidx.compose.material3.Button(
+                onClick = onScan,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = DigiByteAccent,
+                ),
+            ) { Text("Scan for missing transactions") }
         }
     }
 }

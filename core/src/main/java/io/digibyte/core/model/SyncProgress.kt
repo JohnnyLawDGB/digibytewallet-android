@@ -31,6 +31,13 @@ data class SyncFrontier(
     val targetBlock: Long,
     /** 0.0–1.0, tracking [currentBlock] toward [targetBlock]. */
     val progressFraction: Float,
+    /** True iff the ONLY thing keeping this out of [SyncStage.Synced] is an
+     *  un-recovered abandoned compact-filter band. Everything else (headers, the
+     *  CF scan frontier, peers, [SyncState.Complete]) says "done" — the band is
+     *  the hold. Lets callers distinguish "still grinding" from "caught up, but a
+     *  slice of history was never verified", and lets the anti-flash balance
+     *  latch treat this as reached-synced-once. */
+    val abandonedBandHolding: Boolean = false,
 )
 
 /** Blocks-behind-tip past which the UI honestly shows catch-up progress
@@ -59,6 +66,18 @@ const val CF_BEHIND_THRESHOLD = 100L
  *                      (this fn maxes them), so a spiked estimate self-heals.
  * @param cfTip         compact-filter chain tip (getCFChainTipHeight), or 0 if
  *                      CF hasn't started this session
+ * @param scanFrontier  compact-filter SCAN frontier (`getLowestNeededHeight()`),
+ *                      or 0 before the ledger is initialised / the native peer
+ *                      manager exists. Under the paced convoy this — NOT the
+ *                      header tip, NOT [cfTip] — is the only thing that indicates
+ *                      progress: the convoy deliberately holds the header and
+ *                      cfheader frontiers within CF_CONVOY_WINDOW of it.
+ * @param abandonedBandUnrecovered
+ *                      true while a compact-filter band was ABANDONED by the B2
+ *                      valve and neither recovery path (node reconcile / full
+ *                      rescan) has covered it yet. NOT `abandonedBelow > 0`:
+ *                      that watermark is a monotonic hard floor no recovery
+ *                      clears, so keying on it directly makes recovery terminal.
  */
 fun deriveSyncFrontier(
     state: SyncState,
@@ -67,6 +86,8 @@ fun deriveSyncFrontier(
     targetHeight: Long,
     externalTip: Long,
     cfTip: Long,
+    scanFrontier: Long = 0L,
+    abandonedBandUnrecovered: Boolean = false,
 ): SyncFrontier {
     // Prefer the authoritative external tip when available; fall back to the
     // peer-quorum target only when the fetch has never succeeded. Never let the
@@ -79,11 +100,33 @@ fun deriveSyncFrontier(
     val materiallyBehind = currentHeight > 0 && effectiveTarget > 0 &&
         (effectiveTarget - currentHeight) > SYNC_BEHIND_THRESHOLD
 
-    // CF-first honesty: never claim "Synced" while cfheaders materially lags.
-    // cfTip == 0 means CF hasn't started yet → fall back to header logic.
-    val cfBehind = cfTip > 0 && effectiveTarget > 0 &&
-        (effectiveTarget - cfTip) > CF_BEHIND_THRESHOLD
-    val behind = materiallyBehind || cfBehind
+    // PACED-CONVOY RE-KEY (spec Part E). The functional frontier is the compact-
+    // filter SCAN frontier, not cfTip: the convoy deliberately runs the header and
+    // cfheader frontiers a full CF_CONVOY_WINDOW (10000) AHEAD of the scan, so on a
+    // deep restore both of them report ~100% while the scan is still millions of
+    // blocks down. Fall back cfTip-then-currentHeight only when the scan frontier is
+    // unavailable (0 = ledger not initialised yet / null native peer manager),
+    // which is the pre-convoy behaviour this replaces.
+    val effectiveScan = when {
+        scanFrontier > 0 -> scanFrontier
+        cfTip > 0 -> cfTip
+        else -> currentHeight
+    }
+
+    // CF-first honesty: never claim "Synced" while the filter SCAN materially lags —
+    // tx/deposit detection only reaches that height. effectiveScan == 0 means nothing
+    // is known yet → fall back to header logic rather than reading it as "at genesis".
+    val cfBehind = effectiveScan > 0 && effectiveTarget > 0 &&
+        (effectiveTarget - effectiveScan) > CF_BEHIND_THRESHOLD
+
+    // GATE 3 (spec Part E, blocker-fix B-2): an abandoned compact-filter band that no
+    // recovery has covered means a slice of history was NEVER verified — the wallet's
+    // balance may be quietly short. It must not read as "Synced". Note this keys on the
+    // RECOVERED signal, never on the native `abandonedBelow` watermark: that watermark
+    // is a monotonic hard floor which NEITHER recovery path clears, so gating on it
+    // would make recovery terminal (funds restored by a reconcile, wallet permanently
+    // non-Synced and permanently nagging).
+    val behind = materiallyBehind || cfBehind || abandonedBandUnrecovered
 
     val stage = when {
         state is SyncState.Failed -> SyncStage.Failed
@@ -93,11 +136,20 @@ fun deriveSyncFrontier(
         else -> SyncStage.Syncing
     }
 
-    // The bottleneck frontier: the CF tip when cfheaders lags (so the bar moves
-    // with filter catch-up instead of freezing at ~100% on headers), else headers.
-    val frontier = if (cfBehind && cfTip > 0) cfTip else currentHeight
+    // True when the band — and nothing else — is what holds Synced back. Lets the UI
+    // say "history gap, tap to scan" instead of pretending a finished scan is still
+    // running, and lets the anti-flash balance latch treat this as reached-synced-once
+    // (otherwise a wallet with an un-recovered band could never trust a genuine
+    // spend-to-zero).
+    val abandonedBandHolding = abandonedBandUnrecovered && !materiallyBehind &&
+        !cfBehind && peerCount > 0 && state is SyncState.Complete
+
+    // The bottleneck frontier to DISPLAY: the scan frontier whenever the filter layer
+    // is what we're waiting on, else the header height.
+    val frontier = if (cfBehind && effectiveScan > 0) effectiveScan else currentHeight
 
     val progress = when {
+        abandonedBandHolding -> 1.0f   // everything scanned except the surfaced band
         behind && effectiveTarget > 0 ->
             (frontier.toFloat() / effectiveTarget.toFloat()).coerceIn(0f, 1f)
         state is SyncState.Complete -> 1.0f
@@ -112,5 +164,6 @@ fun deriveSyncFrontier(
         currentBlock = frontier,
         targetBlock = effectiveTarget,
         progressFraction = progress.coerceIn(0f, 1f),
+        abandonedBandHolding = abandonedBandHolding,
     )
 }

@@ -65,7 +65,9 @@ fun ReconcileScreen(navController: NavController) {
     }
     val assetManager = remember { entryPoint.assetManager() }
     val walletManager = remember { entryPoint.walletManager() }
-    val service = remember { ChainReconciliationService(client, assetManager) }
+    val service = remember {
+        ChainReconciliationService(client, assetManager, appContext = context.applicationContext)
+    }
     val scope = rememberCoroutineScope()
     var stuckResult by remember { mutableStateOf<String?>(null) }
 
