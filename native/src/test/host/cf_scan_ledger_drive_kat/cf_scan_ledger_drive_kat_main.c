@@ -241,6 +241,44 @@ void __wrap_BRPeerSendGetdataBlocks(BRPeer *peer, const UInt256 blockHashes[], s
     if (blockCount > 0) g_getdataHash = blockHashes[0];
 }
 
+// --- paced-convoy Task 2: getcfheaders + convoy-flag-push capture ------------
+//
+// The convoy gate's ONLY observable is "did this call actually put a
+// getcfheaders on the wire". _BRPeerManagerRequestNextCFHeaders reaches the peer
+// through BRPeer.c's public BRPeerSendGetCFHeaders, so the same link-wrap seam
+// the getcfilters capture already uses works verbatim here. Signature verified
+// against BRPeer.h:278 (do not hand-wave -- a mismatched --wrap shim silently
+// fails to bind).
+//   void BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t startHeight, UInt256 stopHash);
+static int      g_cfhCount = 0;
+static uint32_t g_cfhStart = 0;
+
+void __wrap_BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t startHeight, UInt256 stopHash)
+{
+    (void)peer; (void)filterType; (void)stopHash;
+    g_cfhStart = startHeight;
+    g_cfhCount++;
+}
+
+// The getheaders half of the gate cannot be driven from this TU:
+// _BRPeerAcceptHeadersMessage (BRPeer.c:622, where the CF-only 2000-header
+// continuation is suppressed) is file-static to BRPeer.c, which is a SEPARATE
+// compilation unit here (only BRPeerManager.c is #include-d). What IS testable
+// -- and is the part that lives in BRPeerManager.c, i.e. the code this task adds
+// -- is the PUSH: the manager recomputing the header-window verdict and stamping
+// it onto every connected peer. Wrapping the setter observes that push without
+// adding a production-side getter that exists only for tests.
+//   void BRPeerSetConvoyHdrGated(BRPeer *peer, int gated);
+static int g_convoyPushCount = 0;
+static int g_convoyPushLast  = -1;
+
+void __wrap_BRPeerSetConvoyHdrGated(BRPeer *peer, int gated)
+{
+    (void)peer;
+    g_convoyPushLast = gated;
+    g_convoyPushCount++;
+}
+
 // canonical all-zeros mnemonic, same one digidollar_wallet_kat/cf_confirm_kat
 // use elsewhere in this tree
 static const char *kMnemonic =
@@ -1975,6 +2013,179 @@ static void test_lowest_needed_accessor(BRWallet *wallet)
     }
 }
 
+// ---- Paced-convoy fetch, Task 2: THE CONVOY GATE ---------------------------
+// (spec 2026-07-28-paced-convoy-fetch-design.md, Part A)
+//
+// Block-header sync fast-forwards to the chain tip UNPACED, so on a deep restore
+// manager->blocks fills with [birth..tip] before the cfilter SCAN has processed
+// anything (the OOM). The gate suppresses ONLY the two tip-racing continuations,
+// keeping the header/cfheader frontiers within CF_CONVOY_WINDOW of the SCAN
+// frontier. Suppressing a RECOVERY or SYNC-START send instead would deadlock the
+// convoy from the other side -- hence the per-call-site isConvoyAdvance flag,
+// and hence the EXEMPT half of this case, which is as load-bearing as the
+// suppressed half.
+//
+// RED-before-green: run.sh builds this case with -DCONVOY_UNGATED (the
+// suppression compiled out, the pre-fix shape) and HARD-FAILS if it passes.
+
+static void test_convoy_gate_suppresses_continuations(BRWallet *wallet)
+{
+    printf("\n=== test_convoy_gate_suppresses_continuations (paced-convoy Task 2: gate the tip-racers only) ===\n");
+
+    // Deep-restore shape: both fetch frontiers have raced a full
+    // CF_CONVOY_WINDOW ahead of the CF SCAN frontier. The scan frontier
+    // deliberately sits BELOW the retained header span -- that IS the production
+    // shape (headers below the scan floor are pruned; the window is a height
+    // arithmetic relation, not a set-membership one), and it keeps the chain this
+    // case has to actually build small.
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 3000u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+    (void)baseCount;
+
+    // rhBuildChainManager anchors the CF chain AT the block tip; this case needs
+    // the cfheader frontier BELOW the block tip (so a real next batch exists to
+    // request) yet still a full window above the scan frontier.
+    BRCompactFilterChainFree(m->compactFilterChain);
+    const uint32_t CFH_NEXT = BASE + 1000u;          // cfheader frontier == CFH_NEXT - 1
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, CFH_NEXT, UINT256_ZERO);
+
+    const uint32_t SCAN = BASE - 11000u;
+    BRCFScanLedgerInit(&m->cfLedger, SCAN);          // scannedThrough = SCAN-1 -> lowestNeeded = SCAN
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == SCAN,
+          "setup: scan frontier (LowestNeededHeight) == SCAN");
+    check(m->lastBlock && m->lastBlock->height == TIP, "setup: lastBlock is the block tip");
+    check(TIP - SCAN >= CF_CONVOY_WINDOW, "setup: W_hdr >= CF_CONVOY_WINDOW (header frontier raced ahead)");
+    check((CFH_NEXT - 1u) - SCAN >= CF_CONVOY_WINDOW, "setup: W_cfh >= CF_CONVOY_WINDOW (cfheader frontier raced ahead)");
+    check(CFH_NEXT <= TIP, "setup: a real next cfheaders batch exists below the block tip (send is otherwise possible)");
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x21; pa->port = 12021; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // --- ARMING GUARD, asserted BEFORE the gate is armed (wedge-class) --------
+    // A calloc'd manager's cfLedger has scannedThrough == 0, so
+    // LowestNeededHeight == 1 and the RAW window against a mainnet-height tip is
+    // ~23M -- "full" by arithmetic. But the CF scan is not armed yet
+    // (autoFetchCFiltersEnabled == 0), and block-header sync is precisely what
+    // has to run BEFORE the scan can be armed at a real floor. A predicate that
+    // reported GATED here would suppress header sync on every fresh start and
+    // wedge the wallet permanently. Both predicates must read OPEN until armed.
+    check(m->autoFetchCFiltersEnabled == 0, "setup: CF scan not armed yet (calloc'd manager default)");
+    check(_cfConvoyHdrGated(m) == 0, "ARMING GUARD: hdr predicate OPEN while the CF scan is unarmed (no fresh-start header wedge)");
+    check(_cfConvoyCfhGated(m) == 0, "ARMING GUARD: cfh predicate OPEN while the CF scan is unarmed");
+
+    m->autoFetchCFiltersEnabled = 1;   // the scan is now armed at a real floor
+    m->autoFetchCFiltersStart   = SCAN;
+
+    // --- the two window predicates read FULL ---
+    check(_cfConvoyHdrGated(m) == 1, "WINDOW: _cfConvoyHdrGated == 1 (block-header frontier a full window ahead of the scan)");
+    check(_cfConvoyCfhGated(m) == 1, "WINDOW: _cfConvoyCfhGated == 1 (cfheader frontier a full window ahead of the scan)");
+
+    // --- getcfheaders: a CONVOY ADVANCE is SUPPRESSED at a full window ---
+    g_cfhCount = 0; g_cfhStart = 0;
+    _BRPeerManagerRequestNextCFHeaders(m, pa, /*isConvoyAdvance=*/1);
+    check(g_cfhCount == 0,
+          "GATE: convoy-advance getcfheaders SUPPRESSED at a full window (RED on -DCONVOY_UNGATED)");
+    check(m->cfHeadersRequestedThrough == 0,
+          "GATE: the suppressed advance left cfHeadersRequestedThrough at 0 (no phantom in-flight batch)");
+
+    // --- ...while a RECOVERY / SYNC-START send is EXEMPT. Suppressing THIS is
+    // what would deadlock the convoy, so it is asserted, not assumed. ---
+    _BRPeerManagerRequestNextCFHeaders(m, pa, /*isConvoyAdvance=*/0);
+    check(g_cfhCount == 1, "EXEMPT: isConvoyAdvance=0 (sync-start / re-anchor / recovery) STILL sends at a full window");
+    check(g_cfhStart == CFH_NEXT, "EXEMPT: the recovery send asked for the real next batch start (CFH_NEXT)");
+
+    // --- the getheaders half: KeepAlive recomputes the window and PUSHES the
+    // verdict onto every connected peer (BRPeer.c's :622 continuation reads it
+    // from the peer read thread, where the opaque manager is unreachable). ---
+    g_convoyPushCount = 0; g_convoyPushLast = -1;
+    BRPeerManagerKeepAlive(m);
+    check(g_convoyPushCount >= 1, "PUSH: KeepAlive pushed the convoy header-gate verdict onto the connected peer");
+    check(g_convoyPushLast == 1, "PUSH: the pushed verdict is GATED(1) at a full window (RED on -DCONVOY_UNGATED)");
+
+    // --- CONTROL on the WINDOW axis. Without this, "sent 0" above could be any
+    // unrelated early return in the driver rather than the gate. Same manager,
+    // same peer, same chain -- only the scan frontier moves up so BOTH windows
+    // fall below W; everything must re-open. ---
+    const uint32_t SCAN_NEAR = BASE - 7000u;
+    BRCFScanLedgerInit(&m->cfLedger, SCAN_NEAR);
+    check(TIP - SCAN_NEAR < CF_CONVOY_WINDOW, "control setup: W_hdr < CF_CONVOY_WINDOW");
+    check((CFH_NEXT - 1u) - SCAN_NEAR < CF_CONVOY_WINDOW, "control setup: W_cfh < CF_CONVOY_WINDOW");
+    check(_cfConvoyHdrGated(m) == 0, "CONTROL: hdr window predicate OPEN below W");
+    check(_cfConvoyCfhGated(m) == 0, "CONTROL: cfh window predicate OPEN below W");
+
+    m->cfHeadersRequestedThrough = 0;   // clear the exempt send's in-flight marker
+    g_cfhCount = 0; g_cfhStart = 0;
+    _BRPeerManagerRequestNextCFHeaders(m, pa, /*isConvoyAdvance=*/1);
+    check(g_cfhCount == 1,
+          "CONTROL: the SAME convoy advance DOES send below the window (the gate is window-keyed, not a blanket mute)");
+
+    g_convoyPushCount = 0; g_convoyPushLast = -1;
+    BRPeerManagerKeepAlive(m);
+    check(g_convoyPushLast == 0, "CONTROL: KeepAlive pushes UNGATED(0) below the window");
+
+    BRPeerManagerFree(m);
+}
+
+// NULL-chain carve-out (spec blocker B-3). compactFilterChain is created LAZILY
+// on the first cfheaders RESPONSE, so on a fresh restore it is NULL and
+// BRCompactFilterChainNextHeight(NULL) == 0. A naive `NextHeight - 1` therefore
+// reads 0xFFFFFFFF, scores the cfheader window as permanently FULL, and
+// suppresses the very FIRST cfheaders request -- deadlocking the fresh deep
+// restore forever (nothing else ever creates the chain). The carve-out treats a
+// NULL chain as an OPEN gate. The header window is deliberately kept BELOW W in
+// this case so the cfheader formula is the ONLY variable.
+//
+// RED-before-green: run.sh builds this case with -DCONVOY_NULLCHAIN_NAIVE (the
+// carve-out compiled out, i.e. the underflowing formula) and HARD-FAILS if it passes.
+static void test_convoy_gate_null_chain_open(BRWallet *wallet)
+{
+    printf("\n=== test_convoy_gate_null_chain_open (paced-convoy Task 2: NULL-chain carve-out, blocker B-3) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 300u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+    (void)baseCount;
+
+    // Fresh restore: no cfheaders response has landed yet, so no chain exists.
+    BRCompactFilterChainFree(m->compactFilterChain);
+    m->compactFilterChain = NULL;
+
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = BASE;              // the TOFU birth height the first batch starts at
+    m->autoFetchCFiltersThrough = BASE - 1u;
+
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) == 0,
+          "setup: NextHeight(NULL) == 0 -- a naive `NextHeight - 1` underflows to 0xFFFFFFFF");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == BASE, "setup: scan frontier == BASE");
+    check(TIP - BASE < CF_CONVOY_WINDOW, "setup: the HEADER window is below W (the cfheader formula is the only variable)");
+    check(_cfConvoyHdrGated(m) == 0, "setup: hdr window predicate OPEN (shallow header lead)");
+
+    check(_cfConvoyCfhGated(m) == 0,
+          "CARVE-OUT: NULL compactFilterChain -> cfh window predicate OPEN, no 0xFFFFFFFF underflow "
+          "(RED on -DCONVOY_NULLCHAIN_NAIVE)");
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x22; pa->port = 12022; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    g_cfhCount = 0; g_cfhStart = 0;
+    _BRPeerManagerRequestNextCFHeaders(m, pa, /*isConvoyAdvance=*/1);
+    check(g_cfhCount == 1,
+          "CARVE-OUT: the FIRST convoy advance on a NULL chain is NOT suppressed (a fresh deep restore can start at all)");
+    check(g_cfhStart == BASE, "CARVE-OUT: that first request starts at the configured CF birth height");
+
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -2020,6 +2231,30 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_CONVOY_REDGREEN_ONLY
+    // run.sh builds this twice for the convoy gate's red-before-green gate: once
+    // with the suppression compiled out (-DCONVOY_UNGATED == the pre-fix shape:
+    // the advance sends regardless and the peer flag is never raised, must FAIL
+    // == RED) and once gated (must PASS == GREEN), running ONLY the gate case so
+    // the RED is unambiguously the missing gate and nothing incidental.
+    test_convoy_gate_suppresses_continuations(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_CONVOY_NULL_REDGREEN_ONLY
+    // run.sh builds this twice for the NULL-chain carve-out (blocker B-3): once
+    // with the naive `NextHeight(chain) - 1` formula (-DCONVOY_NULLCHAIN_NAIVE,
+    // which underflows to 0xFFFFFFFF on a NULL chain, scores the window FULL and
+    // suppresses the first cfheaders request -- the fresh-deep-restore deadlock,
+    // must FAIL == RED) and once with the carve-out (must PASS == GREEN).
+    test_convoy_gate_null_chain_open(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
     BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     check(manager != NULL, "smoke: peer manager created");
     if (!manager) { BRWalletFree(wallet); printf("\nFATAL\n"); return 1; }
@@ -2058,6 +2293,8 @@ int main(void)
     test_clearmemory_ceiling_scan_not_started(wallet);     // Task 4b: ceiling timing branch 1 — scan-not-started wrong-balance guard
     test_clearmemory_ceiling_scan_started(wallet);         // Task 4b: ceiling timing branch 2 — abandon gaveUp, keep outstanding
     test_lowest_needed_accessor(wallet);                   // paced-convoy-fetch Task 1: frontier semantics anchor + BRPeerManager accessors
+    test_convoy_gate_suppresses_continuations(wallet);     // paced-convoy-fetch Task 2: gate the tip-racers, exempt recovery (red-before-green)
+    test_convoy_gate_null_chain_open(wallet);              // paced-convoy-fetch Task 2: NULL-chain carve-out (red-before-green)
 
     BRWalletFree(wallet);
 

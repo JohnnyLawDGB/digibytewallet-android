@@ -51,7 +51,19 @@
 #   * FIXED (default): abandonedBelow stays 0, the floor is not raised -> GREEN.
 # KAT_CEILING_REDGREEN_ONLY runs ONLY that one case so the RED is unambiguous.
 #
-# Exit code 0 = both red-before-green gates satisfied AND the fixed full suite passed.
+# ==== Paced-convoy Task 2 GATE RED-BEFORE-GREEN GATES =======================
+# The convoy gate (spec Part A) is proven by two more twice-built cases:
+#   * -DCONVOY_UNGATED: the SUPPRESSION is compiled out (the window predicates
+#     stay live as pure measurement, so what is being proven is the gate, not the
+#     arithmetic). The convoy advance then sends at a full window and the peer
+#     flag is never raised -> the case FAILS (nonzero exit == RED).
+#   * -DCONVOY_NULLCHAIN_NAIVE: the NULL-chain carve-out is compiled out, so
+#     BRCompactFilterChainNextHeight(NULL) - 1 underflows to 0xFFFFFFFF, the
+#     window reads permanently FULL and the FIRST cfheaders request of a fresh
+#     deep restore is suppressed forever -> the case FAILS (== RED).
+# Both HARD-FAIL run.sh if they unexpectedly PASS.
+#
+# Exit code 0 = every red-before-green gate satisfied AND the fixed full suite passed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,6 +114,8 @@ build() {
         -Wl,--wrap=BRPeerIsSocketOpen \
         -Wl,--wrap=BRPeerSendGetCFilters \
         -Wl,--wrap=BRPeerSendGetdataBlocks \
+        -Wl,--wrap=BRPeerSendGetCFHeaders \
+        -Wl,--wrap=BRPeerSetConvoyHdrGated \
         -lm -lpthread \
         -o "$out"
 }
@@ -125,6 +139,29 @@ if "$BUILD_DIR/kat_ceiling_unguarded"; then
     exit 1
 else
     echo "RED confirmed: pre-guard AbandonGaveUpBelow raises abandonedBelow with nothing dropped (expected)."
+fi
+
+# ---- RED: convoy gate compiled OUT (the pre-fix shape) MUST fail ------------
+build "$BUILD_DIR/kat_convoy_ungated" -DCONVOY_UNGATED -DKAT_CONVOY_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_convoy_ungated"; then
+    echo "GATE FAILURE: the CONVOY-UNGATED build PASSED. The convoy gate's red-before-green"
+    echo "cannot go red -- an unpaced header/cfheader fast-forward to the tip would not be"
+    echo "detected, and a deep restore would OOM undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the gate the convoy advance sends at a full window (expected)."
+fi
+
+# ---- RED: naive NextHeight-1 on a NULL chain (0xFFFFFFFF underflow) MUST fail ----
+build "$BUILD_DIR/kat_convoy_nullnaive" -DCONVOY_NULLCHAIN_NAIVE -DKAT_CONVOY_NULL_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_convoy_nullnaive"; then
+    echo "GATE FAILURE: the NAIVE NULL-CHAIN build PASSED. The B-3 carve-out's red-before-green"
+    echo "cannot go red -- a NULL compactFilterChain would underflow to 0xFFFFFFFF, score the"
+    echo "window permanently FULL and deadlock the first cfheaders request of every fresh deep"
+    echo "restore, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: the naive NextHeight-1 formula suppresses the first request on a NULL chain (expected)."
 fi
 
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------
