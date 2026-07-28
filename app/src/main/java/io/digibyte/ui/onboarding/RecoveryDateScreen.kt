@@ -227,6 +227,34 @@ fun RecoveryDateScreen(
                     textAlign = TextAlign.Center
                 )
             }
+
+            // Deep-restore depth gate (spec Part 3c): a plain, honest refusal when
+            // the chosen restore is deeper than this build can scan on-device.
+            // Not an error state — a "coming in a future update" message.
+            if (uiState is OnboardingUiState.TooDeep) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x33FFAA00), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFFAA00),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = OnboardingUiState.RESTORE_TOO_DEEP_MESSAGE,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFFFCC66),
+                        lineHeight = 20.sp
+                    )
+                }
+            }
         }
     }
 }
