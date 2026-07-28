@@ -63,6 +63,19 @@
 #     deep restore is suppressed forever -> the case FAILS (== RED).
 # Both HARD-FAIL run.sh if they unexpectedly PASS.
 #
+# ==== Paced-convoy Task 3 B1 DRIVER RED-BEFORE-GREEN GATE ====================
+# The Task-2 gate ALONE is a silent permanent wedge: suppressing a continuation
+# removes the only thing that re-fires it, and the forward getcfilters auto-fetch
+# has exactly ONE production trigger (a cfheaders arrival). The B1 KeepAlive
+# driver is the un-suppressor. It is proven by a third twice-built shape:
+#   * -DCONVOY_NO_B1_DRIVER: the whole KeepAlive convoy driver is compiled out
+#     (the Task-2 gate stays in). A wallet resumed at a DRAIN TROUGH
+#     (outstanding==0, gaveUp==0, cfHeadersFrontier > scannedThrough+1) then has
+#     nothing that can create the first outstanding entry -- no hole for the
+#     residual driver, no cfheaders arrival for the forward fetch -- so the scan
+#     never advances and deep history is silently never scanned -> RED.
+# HARD-FAILS run.sh if it unexpectedly PASSES.
+#
 # Exit code 0 = every red-before-green gate satisfied AND the fixed full suite passed.
 set -euo pipefail
 
@@ -115,6 +128,7 @@ build() {
         -Wl,--wrap=BRPeerSendGetCFilters \
         -Wl,--wrap=BRPeerSendGetdataBlocks \
         -Wl,--wrap=BRPeerSendGetCFHeaders \
+        -Wl,--wrap=BRPeerSendGetheaders \
         -Wl,--wrap=BRPeerSetConvoyHdrGated \
         -lm -lpthread \
         -o "$out"
@@ -162,6 +176,19 @@ if "$BUILD_DIR/kat_convoy_nullnaive"; then
     exit 1
 else
     echo "RED confirmed: the naive NextHeight-1 formula suppresses the first request on a NULL chain (expected)."
+fi
+
+# ---- RED: the B1 KeepAlive convoy DRIVER compiled OUT (gate-only shape) MUST fail ----
+build "$BUILD_DIR/kat_convoy_nob1" -DCONVOY_NO_B1_DRIVER -DKAT_B1_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_convoy_nob1"; then
+    echo "GATE FAILURE: the NO-B1-DRIVER build PASSED. The convoy driver's red-before-green"
+    echo "cannot go red -- with the gate installed but no KeepAlive driver, a wallet resumed at a"
+    echo "drain trough (outstanding==0, gaveUp==0, cfHeadersFrontier > scannedThrough+1) would"
+    echo "never re-prime the forward cfilter fetch and would silently never scan deep history,"
+    echo "while reporting itself as progressing. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the B1 KeepAlive driver the resumed drain trough never re-primes (expected)."
 fi
 
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------

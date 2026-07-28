@@ -260,14 +260,14 @@ void __wrap_BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t st
     g_cfhCount++;
 }
 
-// The getheaders half of the gate cannot be driven from this TU:
-// _BRPeerAcceptHeadersMessage (BRPeer.c:622, where the CF-only 2000-header
-// continuation is suppressed) is file-static to BRPeer.c, which is a SEPARATE
+// The SUPPRESSION half of the getheaders gate cannot be driven from this TU:
+// _BRPeerAcceptHeadersMessage (BRPeer.c:648, where the CF-only 2000-header
+// continuation is held) is file-static to BRPeer.c, which is a SEPARATE
 // compilation unit here (only BRPeerManager.c is #include-d). What IS testable
-// -- and is the part that lives in BRPeerManager.c, i.e. the code this task adds
-// -- is the PUSH: the manager recomputing the header-window verdict and stamping
-// it onto every connected peer. Wrapping the setter observes that push without
-// adding a production-side getter that exists only for tests.
+// -- and is the part that lives in BRPeerManager.c -- is the PUSH: the manager
+// recomputing the header-window verdict and stamping it onto every connected
+// peer. Wrapping the setter observes that push without adding a production-side
+// getter that exists only for tests.
 //   void BRPeerSetConvoyHdrGated(BRPeer *peer, int gated);
 static int g_convoyPushCount = 0;
 static int g_convoyPushLast  = -1;
@@ -277,6 +277,26 @@ void __wrap_BRPeerSetConvoyHdrGated(BRPeer *peer, int gated)
     (void)peer;
     g_convoyPushLast = gated;
     g_convoyPushCount++;
+}
+
+// --- paced-convoy Task 3 (B1.3): getheaders capture --------------------------
+//
+// The B1 driver's third leg RE-ISSUES the CF-only header continuation from the
+// manager side (BRPeerManagerKeepAlive), i.e. through BRPeer.c's public
+// BRPeerSendGetheaders -- reachable by exactly the same link-wrap seam. This
+// covers the RE-KICK end-to-end (the code Task 3 adds); it does NOT cover
+// BRPeer.c:648's suppression, which stays out of reach for the reason above.
+// Signature verified against BRPeer.h:270 (do not hand-wave -- a mismatched
+// --wrap shim silently fails to bind):
+//   void BRPeerSendGetheaders(BRPeer *peer, const UInt256 locators[], size_t locatorsCount, UInt256 hashStop);
+static int    g_hdrCount     = 0;
+static size_t g_hdrLocators  = 0;
+
+void __wrap_BRPeerSendGetheaders(BRPeer *peer, const UInt256 locators[], size_t locatorsCount, UInt256 hashStop)
+{
+    (void)peer; (void)locators; (void)hashStop;
+    g_hdrLocators = locatorsCount;
+    g_hdrCount++;
 }
 
 // canonical all-zeros mnemonic, same one digidollar_wallet_kat/cf_confirm_kat
@@ -1369,6 +1389,21 @@ static BRMerkleBlock *rhChainBlock(uint32_t height)
     return b;
 }
 
+// Register an rhUniqueHash-keyed chain span [base..tip] into the test-side
+// stopHash->height registry, so __wrap_BRPeerSendGetCFilters can resolve the
+// stop hash of a send into a height range and fold it into the cumulative
+// everRequested set (the causality spine serveSome depends on). Writes the same
+// (hash, height) pairs blockRegAdd would, without needing the BRMerkleBlock
+// objects — the chain built by rhBuildChainManager is owned by the manager.
+static void rhRegisterChain(uint32_t base, uint32_t tip)
+{
+    for (uint32_t h = base; h <= tip && g_blockRegCount < REG_MAX; h++) {
+        g_blockReg[g_blockRegCount].hash   = rhUniqueHash(h);
+        g_blockReg[g_blockRegCount].height = h;
+        g_blockRegCount++;
+    }
+}
+
 // Deterministic PRNG (xorshift32, fixed seed) — NO Math.random / time(); the
 // randomized height sets are reproducible run-to-run.
 static uint32_t rhRngState = 0x1234567u;
@@ -2186,6 +2221,310 @@ static void test_convoy_gate_null_chain_open(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
+// ---- Paced-convoy fetch, Task 3: THE B1 KEEPALIVE CONVOY DRIVER ------------
+// (spec 2026-07-28-paced-convoy-fetch-design.md, Part B1)
+//
+// Task 2's gate ALONE is a silent permanent wedge. Suppressing a continuation
+// removes the only thing that re-fires it, and the forward getcfilters auto-fetch
+// has exactly ONE production trigger: a cfheaders arrival
+// (_peerRelayedCFHeaders). B1 is the un-suppressor: KeepAlive drives the convoy
+// itself every tick.
+//
+// RED-before-green: run.sh builds these cases with -DCONVOY_NO_B1_DRIVER (the
+// driver compiled out, gate still installed) and HARD-FAILS if they pass.
+
+// THE load-bearing case (spec Part B1 step 1 + self-healing mode (e)).
+//
+// The DRAIN TROUGH: a wallet killed and resumed mid-descent at the exact moment
+// the ledger had drained EMPTY -- outstanding == 0, gaveUp == 0 -- while the
+// cfheader frontier still sits well above scannedThrough+1. There is:
+//   * no hole for the residual peek/commit driver to work (outstanding is empty,
+//     and PeekRerequestRange/NextRerequest iterate `outstanding` only), and
+//   * no cfheaders arrival to fire the forward fetch (the chain is already
+//     appended through CFH_FRONTIER; nothing is in flight).
+// Nothing can create the first outstanding entry, the scan never advances, the
+// convoy window never re-opens, and deep history is silently never scanned --
+// while the wallet reports itself progressing. B1's forward drive is what breaks
+// that, and it must mirror the CALLER-side steps of the :2803 cfheaders-arrival
+// path, because _BRPeerManagerRequestCFiltersLocked does NEITHER of them: the
+// cursor advance (else the drive re-requests the same batch forever) and the
+// ledger RecordRequested (else the in-flight heights are untracked and
+// _cfLedgerAdvance sails scannedThrough PAST an unscanned height -- a silent
+// missed receive, the exact bug class this whole subsystem exists to prevent).
+static void test_b1_resumes_drain_trough(BRWallet *wallet)
+{
+    printf("\n=== test_b1_resumes_drain_trough (paced-convoy Task 3 / B1.1: the resumed drain trough) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 3000u;
+
+    // ---- Session 1: a mid-descent ledger that drained to EMPTY, then PERSISTED.
+    // Serialize/Parse (not a hand-built struct) so the trough is reached the way
+    // production reaches it: saveCFLedger on the way down, restoreCfScanLedger on
+    // the way back up. Parse also drops peer/attempts/requestedAt (§5), which is
+    // exactly why nothing is left in flight after the resume.
+    BRCFScanLedger persisted;
+    BRCFScanLedgerInit(&persisted, BASE);
+    BRCFScanLedgerRecordRequested(&persisted, BASE, BASE + 499u, UINT128_ZERO, 0, 1700000000u);
+    for (uint32_t h = BASE; h <= BASE + 499u; h++) BRCFScanLedgerMarkEvaluated(&persisted, h);
+    check(BRCFScanLedgerOutstandingCount(&persisted) == 0 && BRCFScanLedgerGaveUpCount(&persisted) == 0,
+          "session 1: the ledger drained to EMPTY (outstanding == 0, gaveUp == 0)");
+    check(BRCFScanLedgerScannedThrough(&persisted) == BASE + 499u, "session 1: scannedThrough == BASE+499");
+
+    size_t blobLen = BRCFScanLedgerSerialize(&persisted, NULL, 0);
+    uint8_t *blob  = (blobLen > 0) ? malloc(blobLen) : NULL;
+    check(blob != NULL && BRCFScanLedgerSerialize(&persisted, blob, blobLen) == blobLen,
+          "session 1: ledger serialized (the persisted blob the resume restores)");
+    BRCFScanLedgerFree(&persisted);
+    if (! blob) return;
+
+    // ---- Session 2: fresh process -> fresh manager, restore the blob. ----
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "session 2: manager+chain built (the recreated manager)");
+    if (! m) { free(blob); return; }
+    (void)baseCount;
+
+    // The cfheader chain got ahead of the scan before the kill, and is restored
+    // from FilterHeaderStore ahead of the ledger. Keep it BELOW the block tip so
+    // this case says nothing about the cfheaders re-kick (covered separately).
+    BRCompactFilterChainFree(m->compactFilterChain);
+    const uint32_t CFH_NEXT     = BASE + 2500u;
+    const uint32_t CFH_FRONTIER = CFH_NEXT - 1u;
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, CFH_NEXT, UINT256_ZERO);
+
+    check(BRCFScanLedgerParse(&m->cfLedger, blob, blobLen) == 1, "resume: the persisted ledger parsed back in");
+    free(blob);
+
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = BASE;
+    // The B1-resume cursor snap is a SEPARATE task; pinned explicitly here so what
+    // this case exercises is the forward DRIVE, not the snap.
+    m->autoFetchCFiltersThrough = BRCFScanLedgerScannedThrough(&m->cfLedger);
+
+    const uint32_t SCAN0 = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);   // BASE+500
+    check(SCAN0 == BASE + 500u, "resume: scan frontier == scannedThrough+1 == BASE+500");
+    check(CFH_FRONTIER > SCAN0,
+          "THE TROUGH: cfHeadersFrontier > scannedThrough+1 -- unscanned heights sit below the cfheader frontier");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0 && BRCFScanLedgerGaveUpCount(&m->cfLedger) == 0,
+          "THE TROUGH: outstanding == 0 AND gaveUp == 0 -- the residual driver has NOTHING to work");
+    check(_cfConvoyCfhGated(m) == 0 && _cfConvoyHdrGated(m) == 0,
+          "THE TROUGH: BOTH convoy windows are OPEN -- so this is not a gate wedge, it is a MISSING DRIVER");
+    check(CFH_NEXT <= TIP, "setup: the cfheader frontier sits below the block tip");
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x31; pa->port = 12031; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    blockRegReset(); everReqReset(); capLogReset();
+    rhRegisterChain(BASE, TIP);
+    g_capCount = 0; g_capStart = 0;
+
+    // ---- ONE KeepAlive tick. No cfheaders ever arrives in this case. ----
+    BRPeerManagerKeepAlive(m);
+
+    check(g_capCount >= 1,
+          "B1.1: KeepAlive issued a FORWARD getcfilters with NO cfheaders arrival (RED on -DCONVOY_NO_B1_DRIVER)");
+    check(g_capStart == SCAN0, "B1.1: the forward fetch starts at the scan frontier (scannedThrough+1)");
+
+    const uint32_t EXP_STOP = SCAN0 + (MAX_CFILTERS_RESULTS - 1u);
+    check(EXP_STOP < CFH_FRONTIER, "setup: this first batch is MAX_CFILTERS_RESULTS-capped, not frontier-capped");
+    check(m->autoFetchCFiltersThrough == EXP_STOP,
+          "B1.1 CALLER-SIDE STEP 1: autoFetchCFiltersThrough advanced to reqStop "
+          "(_BRPeerManagerRequestCFiltersLocked does NOT do this -- omit it and the drive re-requests forever)");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == MAX_CFILTERS_RESULTS,
+          "B1.1 CALLER-SIDE STEP 2: the in-flight heights were RECORDED in the ledger "
+          "(omit it and _cfLedgerAdvance sails scannedThrough PAST an unscanned height = a silent missed receive)");
+    check(findOutstanding(&m->cfLedger, SCAN0) != NULL && findOutstanding(&m->cfLedger, EXP_STOP) != NULL,
+          "B1.1: both ends of the requested range are outstanding in the ledger");
+    const BRCFOutstanding *e0 = findOutstanding(&m->cfLedger, SCAN0);
+    check(e0 && e0->port == pa->port && UInt128Eq(e0->peer, pa->address),
+          "B1.1: the ledger recorded the peer the getcfilters actually went to (re-request rotation stays correct)");
+
+    // ---- The scan RESUMES CLIMBING: responses to the newly-created holes. ----
+    uint32_t served[128];
+    uint32_t scanBefore = BRCFScanLedgerScannedThrough(&m->cfLedger);
+    int nServed = serveSome(m, 64, served);
+    check(nServed == 64, "responses: 64 of the heights B1 actually requested were evaluated");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == scanBefore + 64u,
+          "SCAN RESUMES CLIMBING: scannedThrough advanced over the served heights (the trough is broken)");
+
+    // ---- Multi-tick: the convoy keeps climbing on KeepAlive ALONE. ----
+    for (int t = 0; t < 4; t++) {
+        BRPeerManagerKeepAlive(m);
+        serveSome(m, 128, served);
+    }
+    check(m->autoFetchCFiltersThrough == CFH_FRONTIER,
+          "CONVERGENCE: the forward cursor climbed to the cfheader frontier across ticks (never past it)");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == BASE + 499u + 64u + 4u*128u,
+          "CONVERGENCE: scannedThrough kept climbing every tick (64 + 4x128 served, contiguous)");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) < BRCFScanLedgerLowestNeededHeight(&m->cfLedger),
+          "INVARIANT: scannedThrough still sits below the lowest still-outstanding hole (no sail-past)");
+
+    BRPeerManagerFree(m);
+}
+
+// B1.2 -- the cfheaders advance re-kick. The gate holds the clean-append
+// continuation while W_cfh >= CF_CONVOY_WINDOW; once the SCAN frontier climbs
+// enough to re-open the window, nothing in the reactive wire path re-fires it
+// (the suppressed advance deliberately left cfHeadersRequestedThrough untouched,
+// so there is no timeout to expire and no response to arrive). KeepAlive must.
+static void test_b1_rekicks_cfheaders_on_window_reopen(BRWallet *wallet)
+{
+    printf("\n=== test_b1_rekicks_cfheaders_on_window_reopen (paced-convoy Task 3 / B1.2) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 3000u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+    (void)baseCount;
+
+    BRCompactFilterChainFree(m->compactFilterChain);
+    const uint32_t CFH_NEXT = BASE + 1000u;          // cfheader frontier == CFH_NEXT-1, a real next batch exists
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, CFH_NEXT, UINT256_ZERO);
+
+    const uint32_t SCAN = BASE - 11000u;
+    BRCFScanLedgerInit(&m->cfLedger, SCAN);
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = SCAN;
+    // Forward cursor pinned AT the cfheader frontier: the forward cfilter drive has
+    // nothing to do, so cfheaders is the only variable in this case.
+    m->autoFetchCFiltersThrough = CFH_NEXT - 1u;
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x32; pa->port = 12032; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    check(_cfConvoyCfhGated(m) == 1, "setup: the cfheader window is FULL (W_cfh >= CF_CONVOY_WINDOW)");
+    g_cfhCount = 0; g_cfhStart = 0;
+    _BRPeerManagerRequestNextCFHeaders(m, pa, /*isConvoyAdvance=*/1);
+    check(g_cfhCount == 0, "setup: the convoy advance really is suppressed at a full window");
+    check(m->cfHeadersRequestedThrough == 0,
+          "setup: the suppressed advance left NO in-flight marker -- nothing will ever re-fire it by itself");
+
+    g_cfhCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_cfhCount == 0,
+          "B1.2: KeepAlive does NOT re-kick cfheaders while the window is STILL FULL (the driver respects the gate)");
+
+    // The scan frontier climbs (a run of cfilters evaluated) -> the window re-opens.
+    BRCFScanLedgerRecordRequested(&m->cfLedger, SCAN, SCAN + 1999u, UINT128_ZERO, 0, (uint32_t)time(NULL));
+    for (uint32_t h = SCAN; h <= SCAN + 1999u; h++) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == SCAN + 2000u,
+          "the scan frontier advanced by 2000 (MarkEvaluated run)");
+    check(_cfConvoyCfhGated(m) == 0, "the cfheader window RE-OPENED (W_cfh now < CF_CONVOY_WINDOW)");
+
+    g_cfhCount = 0; g_cfhStart = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_cfhCount == 1,
+          "B1.2: the next KeepAlive tick RE-ISSUES the suppressed cfheaders advance "
+          "(RED on -DCONVOY_NO_B1_DRIVER: nothing else can)");
+    check(g_cfhStart == CFH_NEXT, "B1.2: the re-kick asks for the real next batch start (CFH_NEXT)");
+
+    // ...and it is SERIALIZED, not a per-tick storm: the batch it just put in
+    // flight blocks the next tick's re-kick (the driver reuses the existing
+    // cfHeadersRequestedThrough guard rather than inventing a second throttle).
+    g_cfhCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_cfhCount == 0, "B1.2: the re-kick is serialized by the in-flight guard (no per-tick cfheaders storm)");
+
+    BRPeerManagerFree(m);
+}
+
+// B1.3 -- the getheaders advance re-kick, asserted on the MANAGER side.
+//
+// SCOPE (stated, not faked): BRPeer.c:648 -- where the CF-only 2000-header
+// continuation is actually suppressed -- is file-static to a SEPARATE
+// compilation unit here, so it cannot be driven from this TU. What this case
+// covers end-to-end is the code Task 3 adds: KeepAlive re-issuing the
+// continuation from the block-header tip. The suppression side stays covered
+// only by the pushed-verdict assertion in test_convoy_gate_suppresses_continuations.
+//
+// The re-kick is deliberately conditioned on an OBSERVED FROZEN TIP (the header
+// frontier not advancing across a whole tick) rather than firing every tick:
+// during ordinary open-window header sync BRPeer.c's own continuation is already
+// running, and an unconditional per-tick full-locator getheaders would duplicate
+// every 2000-header batch -- ~0.44 MB of redundant traffic per tick on exactly
+// the deep restore this feature exists to make cheap. Both directions are
+// asserted below.
+static void test_b1_rekicks_getheaders_when_tip_frozen(BRWallet *wallet)
+{
+    printf("\n=== test_b1_rekicks_getheaders_when_tip_frozen (paced-convoy Task 3 / B1.3) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 300u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+    (void)baseCount;
+
+    // rhBuildChainManager anchors the CF chain NextHeight AT the block tip, so
+    // pinning the forward cursor at NextHeight-1 leaves BOTH cfilter legs of the
+    // driver with nothing to do: getheaders is the only variable in this case.
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = BASE;
+    m->autoFetchCFiltersThrough = TIP - 1u;
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    m->estimatedHeight = TIP + 5000u;                 // the network is ahead: header work remains
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x33; pa->port = 12033; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+    m->downloadPeer = pa;
+
+    check(_cfConvoyHdrGated(m) == 0, "setup: the header window is OPEN");
+    check(m->lastBlock && m->lastBlock->height == TIP && TIP < m->estimatedHeight,
+          "setup: the block-header frontier sits below the network tip (header work remains)");
+
+    g_hdrCount = 0; g_hdrLocators = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 0,
+          "B1.3: the first tick only SAMPLES the header tip -- no re-kick without an OBSERVED freeze");
+
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 1,
+          "B1.3: a header tip frozen across a whole tick, below the network tip, RE-ISSUES getheaders "
+          "(RED on -DCONVOY_NO_B1_DRIVER)");
+    check(g_hdrLocators >= 1, "B1.3: the re-kick carries real block locators (walk-back capable, same as the orphan re-anchor)");
+
+    // CONTROL 1 -- a tip that ADVANCED this tick is NOT re-kicked. Without this,
+    // "sent 1" above could be an unconditional per-tick getheaders (a duplicate-
+    // header storm during ordinary sync) rather than a stall re-kick.
+    BRMerkleBlock *nb = rhChainBlock(TIP + 1u);
+    BRSetAdd(m->blocks, nb);
+    m->lastBlock = nb;
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 0, "CONTROL: no re-kick on a tick where the header tip ADVANCED (no duplicate-header storm)");
+
+    // CONTROL 2 -- a FULL header window suppresses the re-kick even with the tip
+    // frozen: the driver un-suppresses the convoy, it does not defeat it.
+    BRCFScanLedgerInit(&m->cfLedger, BASE - 11000u);
+    check(_cfConvoyHdrGated(m) == 1, "control setup: the header window is FULL again");
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 0, "CONTROL: a FULL header window suppresses the re-kick (the convoy still paces)");
+
+    // ...and re-opening the window releases that same frozen tip on the next tick.
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    check(_cfConvoyHdrGated(m) == 0, "control setup: the header window re-opened");
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 1, "B1.3: re-opening the window releases the frozen header tip on the very next tick");
+
+    // CONTROL 3 -- at the network tip there is no header work, so no re-kick
+    // (a healthy at-tip wallet must not be nagged every 10 s).
+    m->estimatedHeight = m->lastBlock->height;
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 0, "CONTROL: at the network tip (nothing left to fetch) the re-kick stays silent");
+
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -2255,6 +2594,22 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_B1_REDGREEN_ONLY
+    // run.sh builds this twice for the B1 KeepAlive convoy driver's red-before-green
+    // gate: once with the driver compiled out (-DCONVOY_NO_B1_DRIVER == the Task-2
+    // gate WITHOUT its un-suppressor, i.e. the silent permanent wedge: a wallet
+    // resumed at a drain trough never re-primes the forward fetch, the scan never
+    // advances and deep history is silently never scanned -- must FAIL == RED) and
+    // once with the driver (must PASS == GREEN), running ONLY the three B1 cases so
+    // the RED is unambiguously the missing driver and nothing incidental.
+    test_b1_resumes_drain_trough(wallet);
+    test_b1_rekicks_cfheaders_on_window_reopen(wallet);
+    test_b1_rekicks_getheaders_when_tip_frozen(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
     BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     check(manager != NULL, "smoke: peer manager created");
     if (!manager) { BRWalletFree(wallet); printf("\nFATAL\n"); return 1; }
@@ -2295,6 +2650,9 @@ int main(void)
     test_lowest_needed_accessor(wallet);                   // paced-convoy-fetch Task 1: frontier semantics anchor + BRPeerManager accessors
     test_convoy_gate_suppresses_continuations(wallet);     // paced-convoy-fetch Task 2: gate the tip-racers, exempt recovery (red-before-green)
     test_convoy_gate_null_chain_open(wallet);              // paced-convoy-fetch Task 2: NULL-chain carve-out (red-before-green)
+    test_b1_resumes_drain_trough(wallet);                  // paced-convoy-fetch Task 3: B1.1 forward drive out of the drain trough (red-before-green)
+    test_b1_rekicks_cfheaders_on_window_reopen(wallet);    // paced-convoy-fetch Task 3: B1.2 cfheaders re-kick on window re-open
+    test_b1_rekicks_getheaders_when_tip_frozen(wallet);    // paced-convoy-fetch Task 3: B1.3 getheaders re-kick (manager side)
 
     BRWalletFree(wallet);
 
