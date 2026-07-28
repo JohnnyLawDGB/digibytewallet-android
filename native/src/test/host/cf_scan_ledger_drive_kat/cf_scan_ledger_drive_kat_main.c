@@ -1210,6 +1210,238 @@ static void test_gaveup_retires_dead_hole_at_exact_cap(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
+// ============================================================================
+// Task 2: single-descent batch stop-hash resolver — ADVERSARIAL equivalence KAT
+// ============================================================================
+//
+// _BRPeerManagerResolveHashesAtHeightsLocked(manager, heights, n, outHashes)
+// resolves N heights to block hashes in ONE descent from lastBlock. It MUST
+// return, for every heights[i], the BYTE-IDENTICAL UInt256 that N independent
+// _BRPeerManagerBlockHashAtHeight(manager, heights[i]) calls return. A wrong
+// hash here becomes a wrong getcfilters stop-hash = a silent wrong-range fetch,
+// so this equivalence is the linchpin of the whole retention-floor approach.
+//
+// dummyBlock() (above) sets blockHash = memset(single seed byte) -> only 256
+// distinct hashes; BRSet dedups by hash so a many-block chain collapses to ~256
+// and the prevBlock walk is meaningless (false-green trap). This test instead
+// writes the HEIGHT into the hash (rhUniqueHash) so every height owns a unique,
+// never-zero hash, and links each block's prevBlock to the previous height's
+// unique hash — a real prevBlock-linked chain the naive walk actually traverses.
+
+// Unique, never-UINT256_ZERO hash keyed by height. u32[0] carries the height
+// (distinct per height); the rest carry a fixed non-zero magic so no real block
+// ever collides with the UINT256_ZERO "not found" sentinel the resolvers emit.
+static UInt256 rhUniqueHash(uint32_t height)
+{
+    UInt256 h = UINT256_ZERO;
+    h.u32[0] = height;
+    h.u32[1] = 0x9E3779B9u ^ height;   // extra mixing (u32[0] alone already unique)
+    h.u32[2] = 0xA5A5A5A5u;
+    h.u32[7] = 0x5A5A5A5Au;            // guarantees hash != UINT256_ZERO
+    return h;
+}
+
+// A DIFFERENT, still-unique, non-zero hash for the same height — used for the
+// orphan/fork block. Differs from rhUniqueHash(height) in u32[3] (which the
+// main-chain hash leaves 0), so it can never equal any main-chain hash.
+static UInt256 rhForkHash(uint32_t height)
+{
+    UInt256 h = rhUniqueHash(height);
+    h.u32[3] = 0xDEADBEEFu;
+    return h;
+}
+
+// Real prevBlock-linked main-chain header: unique hash at `height`, prevBlock =
+// the unique hash of `height-1` (whose block is only in the set if that height
+// was built, so the chain terminates cleanly below the base height).
+static BRMerkleBlock *rhChainBlock(uint32_t height)
+{
+    BRMerkleBlock *b = BRMerkleBlockNew();
+    b->blockHash = rhUniqueHash(height);
+    b->prevBlock = rhUniqueHash(height - 1);
+    b->height    = height;
+    b->timestamp = 1700000000u + height;
+    return b;
+}
+
+// Deterministic PRNG (xorshift32, fixed seed) — NO Math.random / time(); the
+// randomized height sets are reproducible run-to-run.
+static uint32_t rhRngState = 0x1234567u;
+static uint32_t rhRand(void)
+{
+    uint32_t x = rhRngState;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    rhRngState = x;
+    return x;
+}
+
+#define RH_MAXN 200
+
+// Run one explicit height set through BOTH resolvers; 1 iff byte-identical for
+// every element (same order). The batch output is poisoned first with a value
+// no naive result can equal (rhForkHash's u32[3]=0xDEADBEEF vs. main-chain 0,
+// and non-zero vs. the ZERO sentinel) so a slot the resolver forgot to write is
+// caught as a mismatch, not silently accepted.
+static int rhBatchEqualsNaive(BRPeerManager *m, const uint32_t *hs, size_t n)
+{
+    UInt256 nv[RH_MAXN], bt[RH_MAXN];
+    for (size_t i = 0; i < n; i++) nv[i] = _BRPeerManagerBlockHashAtHeight(m, hs[i]);
+    for (size_t i = 0; i < n; i++) bt[i] = rhForkHash(0xFFFFFFFFu);   // poison
+    _BRPeerManagerResolveHashesAtHeightsLocked(m, hs, n, bt);
+    for (size_t i = 0; i < n; i++) if (! UInt256Eq(bt[i], nv[i])) return 0;
+    return 1;
+}
+
+static void test_batch_resolve_equals_naive(BRWallet *wallet)
+{
+    printf("\n=== test_batch_resolve_equals_naive (Task 2 linchpin) ===\n");
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    check(m != NULL, "manager created");
+    if (! m) return;
+
+    const uint32_t BASE  = 1000;
+    const uint32_t COUNT = 4000;
+    const uint32_t TIP   = BASE + COUNT - 1;   // 4999
+
+    // BRPeerManagerNew pre-seeds manager->blocks with the params' checkpoint
+    // headers (mainnet has one at height 0 and one at 5000, both OUTSIDE the
+    // [BASE..TIP] chain we build, so neither is ever on the walk from lastBlock),
+    // so the set is NOT empty here. Capture that baseline and assert on the DELTA:
+    // the point is that the COUNT distinct-hash blocks we add below never
+    // dedup/collide (dummyBlock's 256-hash trap would show up as a shortfall).
+    const size_t baseCount = BRSetCount(m->blocks);
+
+    // Build a real prevBlock-linked main chain with distinct-per-height hashes.
+    BRMerkleBlock *tip = NULL;
+    for (uint32_t hgt = BASE; hgt <= TIP; hgt++) {
+        BRMerkleBlock *b = rhChainBlock(hgt);
+        BRSetAdd(m->blocks, b);
+        tip = b;
+    }
+    m->lastBlock = tip;
+
+    // No collisions: distinct hashes => the set holds EXACTLY COUNT blocks
+    // (dummyBlock's 256-collision trap would surface right here).
+    check(BRSetCount(m->blocks) == baseCount + COUNT, "distinct-hash chain: BRSetCount grew by exactly block count (no collisions)");
+    check(m->lastBlock && m->lastBlock->height == TIP, "lastBlock is the tip");
+    check(UInt256Eq(_BRPeerManagerBlockHashAtHeight(m, BASE + 1234), rhUniqueHash(BASE + 1234)),
+          "sanity: naive resolves a present mid-chain height to its unique hash");
+
+    // (g) FORK: an orphan at H_FORK with a DIFFERENT hash, NOT reachable from
+    // lastBlock's prevBlock chain (no block's prevBlock points at it). It
+    // coexists in the set (distinct hash, not deduped); both resolvers must
+    // return the MAIN-chain hash, never the orphan.
+    const uint32_t H_FORK = BASE + 2000;   // 3000
+    BRMerkleBlock *orphan = BRMerkleBlockNew();
+    orphan->blockHash = rhForkHash(H_FORK);
+    orphan->prevBlock = rhUniqueHash(H_FORK - 1);
+    orphan->height    = H_FORK;
+    orphan->timestamp = 1700000000u + H_FORK;
+    BRSetAdd(m->blocks, orphan);
+    check(BRSetCount(m->blocks) == baseCount + COUNT + 1, "orphan coexists in set (distinct hash, not deduped)");
+
+    // ---- randomized property engine: batch byte-identical to naive ----
+    // Range spans BELOW base, the whole chain, and ABOVE tip so every draw
+    // exercises present / off-the-bottom / above-tip. Deterministic (rhRand).
+    uint32_t heights[RH_MAXN];
+    int mismatches = 0, coveredAboveTip = 0, coveredBelow = 0, coveredPresent = 0;
+    for (int iter = 0; iter < 400; iter++) {
+        size_t n = 1 + (rhRand() % RH_MAXN);        // 1..RH_MAXN (empty tested separately)
+        for (size_t i = 0; i < n; i++) {
+            heights[i] = (BASE - 200) + (rhRand() % (COUNT + 400));   // [800 .. 5199]
+            if (heights[i] > TIP) coveredAboveTip = 1;
+            else if (heights[i] < BASE) coveredBelow = 1;
+            else coveredPresent = 1;
+        }
+        UInt256 nv[RH_MAXN], bt[RH_MAXN];
+        for (size_t i = 0; i < n; i++) nv[i] = _BRPeerManagerBlockHashAtHeight(m, heights[i]);
+        for (size_t i = 0; i < n; i++) bt[i] = rhForkHash(0xFFFFFFFFu);   // poison
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, heights, n, bt);
+        for (size_t i = 0; i < n; i++) if (! UInt256Eq(bt[i], nv[i])) mismatches++;
+    }
+    check(mismatches == 0, "randomized sets (400 iters, n up to 200): batch byte-identical to naive");
+    check(coveredAboveTip && coveredBelow && coveredPresent,
+          "randomized coverage spanned present + off-bottom + above-tip heights");
+
+    // ---- (a) unsorted input ----
+    uint32_t hs_a[] = { BASE + 2500, BASE + 10, TIP, BASE + 1200, BASE, BASE + 3999 };
+    check(rhBatchEqualsNaive(m, hs_a, 6), "(a) unsorted input: batch==naive");
+
+    // ---- (b) duplicate heights -> same hash twice ----
+    uint32_t hs_b[] = { BASE + 2500, BASE + 2500, BASE + 2500, BASE + 4000, BASE + 4000 };
+    check(rhBatchEqualsNaive(m, hs_b, 5), "(b) duplicate heights: batch==naive");
+    {
+        UInt256 outb[5];
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, hs_b, 5, outb);
+        check(UInt256Eq(outb[0], outb[1]) && UInt256Eq(outb[1], outb[2]) &&
+              UInt256Eq(outb[0], rhUniqueHash(BASE + 2500)),
+              "(b) duplicate height resolves to the SAME unique hash each time");
+    }
+
+    // ---- (c) heights ABOVE the tip -> ZERO ----
+    uint32_t hs_c[] = { TIP + 1, TIP + 100, TIP + 5000, 0xFFFFFF00u };
+    check(rhBatchEqualsNaive(m, hs_c, 4), "(c) above-tip heights: batch==naive");
+    {
+        UInt256 outc[4];
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, hs_c, 4, outc);
+        int allZero = 1;
+        for (int i = 0; i < 4; i++) if (! UInt256Eq(outc[i], UINT256_ZERO)) allZero = 0;
+        check(allZero, "(c) above-tip heights resolve to UINT256_ZERO (clean)");
+    }
+
+    // ---- (d) heights BELOW the retained window / not present -> ZERO cleanly ----
+    uint32_t hs_d[] = { BASE - 1, BASE - 100, 0, 500 };
+    // confirm the naive truth is itself ZERO here (setup really makes them absent)
+    {
+        int allNaiveZero = 1;
+        for (int i = 0; i < 4; i++)
+            if (! UInt256Eq(_BRPeerManagerBlockHashAtHeight(m, hs_d[i]), UINT256_ZERO)) allNaiveZero = 0;
+        check(allNaiveZero, "(d) below-window heights are genuinely absent (naive == ZERO)");
+    }
+    check(rhBatchEqualsNaive(m, hs_d, 4), "(d) below-window heights: batch==naive");
+    {
+        UInt256 outd[4];
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, hs_d, 4, outd);
+        int allZero = 1;
+        for (int i = 0; i < 4; i++) if (! UInt256Eq(outd[i], UINT256_ZERO)) allZero = 0;
+        check(allZero, "(d) below-window heights resolve to UINT256_ZERO (clean, not garbage)");
+    }
+
+    // ---- (e) a single height ----
+    uint32_t hs_e[] = { BASE + 1777 };
+    check(rhBatchEqualsNaive(m, hs_e, 1), "(e) single height: batch==naive");
+    {
+        UInt256 oute[1];
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, hs_e, 1, oute);
+        check(UInt256Eq(oute[0], rhUniqueHash(BASE + 1777)), "(e) single present height resolves to its unique hash");
+    }
+
+    // ---- (f) the empty set (n==0): a no-op; must not write or crash ----
+    {
+        UInt256 canary = rhForkHash(0x12345678u);
+        UInt256 out0 = canary;
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, heights, 0, &out0);
+        check(UInt256Eq(out0, canary), "(f) empty set (n==0): output untouched, no crash");
+        // NULL args with n==0 must also be a clean no-op.
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, NULL, 0, NULL);
+        check(1, "(f) NULL heights/out with n==0: clean no-op (no crash)");
+    }
+
+    // ---- (g) heights straddling the FORK point ----
+    uint32_t hs_g[] = { H_FORK, H_FORK - 1, H_FORK + 1 };
+    check(rhBatchEqualsNaive(m, hs_g, 3), "(g) fork-straddling heights: batch==naive");
+    {
+        UInt256 outg[3];
+        _BRPeerManagerResolveHashesAtHeightsLocked(m, hs_g, 3, outg);
+        check(UInt256Eq(outg[0], rhUniqueHash(H_FORK)), "(g) fork height resolves to the MAIN-chain hash");
+        check(! UInt256Eq(outg[0], rhForkHash(H_FORK)), "(g) fork height NEVER resolves to the orphan hash");
+        check(UInt256Eq(_BRPeerManagerBlockHashAtHeight(m, H_FORK), rhUniqueHash(H_FORK)),
+              "(g) naive also resolves the fork height to the MAIN-chain hash");
+    }
+
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -1261,6 +1493,7 @@ int main(void)
     test_residual_caps_at_tip(wallet);
     test_cluster_drains_to_zero_with_stale_buffer(wallet); // Task 5 Scenario A: multi-tick cluster drain-to-zero
     test_gaveup_retires_dead_hole_at_exact_cap(wallet);    // Task 5 Scenario B: RetireCapped both directions at cap
+    test_batch_resolve_equals_naive(wallet);               // Task 2: batch stop-hash resolver == naive (adversarial)
 
     BRWalletFree(wallet);
 
