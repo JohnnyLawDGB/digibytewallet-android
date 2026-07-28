@@ -116,6 +116,97 @@ class HistoryImportCoverageTest {
         assertFalse(out.covered)
     }
 
+    // ── the known-set / duplicate interaction (fix round 2) ───────────────────
+    //
+    // Every case above stubs `register` directly, which bypasses the real
+    // known-set→plan→duplicate interaction entirely. That is exactly why nothing
+    // caught the regression these tests now pin.
+    //
+    // `NativeBridge.getTransactionDetails()` truncates to the 100 MOST RECENT wallet
+    // txs (`jni_wallet.c:781`, `startIdx = txCount - 100`), while
+    // `DgbNodeClient.addressHistoryBatch` returns the FULL unbounded per-address
+    // history. So on a wallet with >100 txs, every already-confirmed txid older than
+    // the cap survives `planHistoryImport` into `toImport`, fetches and decodes
+    // fine, and then hits `registerRawTransaction`'s duplicate branch
+    // (`jni_transaction.c:418`, `existing->blockHeight != TX_UNCONFIRMED` →
+    // `JNI_FALSE`). Now that a `false` counts against coverage, that would make
+    // `covered` essentially unreachable for exactly the wallets that matter — old,
+    // deep ones, which are precisely the wallets that accumulate both >100 txs AND
+    // deep abandoned bands. Result: the reconcile genuinely closes the gap but the
+    // banner never clears and Synced is withheld forever.
+
+    /** A 150-tx wallet: the plan must exclude every already-confirmed txid, not
+     *  just the 100 the capped details string happened to carry. */
+    @Test fun knownSetIsUncapped_soTruncatedOutOlderTxidsNeverEnterThePlan() {
+        val walletTxids = (1..150).map { "wallet-tx-%03d".format(it) }
+        val known = knownTxidsForHistoryPlan(
+            allHashes = walletTxids.toTypedArray(),
+            details = cappedDetails(walletTxids),
+        )
+        walletTxids.forEach {
+            assertTrue("$it is wallet-known but absent from the plan's known set", it in known)
+        }
+
+        val nodeHistory = (walletTxids + "missing-from-the-band").map { AddressTx(it, 23_900_121L) }
+        val toImport = planHistoryImport(listOf(nodeHistory), known)
+        assertEquals(listOf("missing-from-the-band"), toImport.map { it.txid })
+    }
+
+    /**
+     * End-to-end through the REAL plan path, with `register` simulating the actual
+     * JNI contract (`false` for anything the wallet already holds). Coverage must
+     * still be achievable on a >100-tx wallet — otherwise the CF-independent
+     * recovery backstop is permanently dead where it is needed most.
+     */
+    @Test fun wideWallet_reconcileCanStillAchieveCoverage() = runTest {
+        val walletTxids = (1..150).map { "wallet-tx-%03d".format(it) }
+        val alreadyInWallet = walletTxids.toSet()
+        val missing = "missing-from-the-band"
+
+        val known = knownTxidsForHistoryPlan(walletTxids.toTypedArray(), cappedDetails(walletTxids))
+        val nodeHistory = (walletTxids + missing).map { AddressTx(it, 23_900_121L) }
+        val toImport = planHistoryImport(listOf(nodeHistory), known)
+
+        val out = importPlannedHistory(
+            toImport = toImport,
+            // Carry the txid through as the hex so `register` can act like the wallet.
+            fetch = { tx -> RawTxEntry(tx.txid, tx.height, 1_700_000_000L) },
+            decodeHex = { hex -> hex.toByteArray() },
+            // The real jni_transaction.c behaviour: a tx already in the wallet
+            // returns JNI_FALSE from the duplicate branch.
+            register = { bytes, _, _ -> String(bytes) !in alreadyInWallet },
+        )
+
+        assertEquals(1, out.imported)
+        assertEquals(0, out.unrecovered)
+        assertTrue(
+            "a >100-tx wallet can never prove coverage — the reconcile re-fetches the " +
+                "missing tx but the truncated-out older txids ride along as duplicates " +
+                "and sink the pass, so the banner nags forever over a gap that closed",
+            out.covered,
+        )
+    }
+
+    /** Null array (no wallet loaded) must not blow up or silently widen the plan;
+     *  it degrades to the details-derived set. */
+    @Test fun nullHashArray_fallsBackToTheDetailsDerivedSet() {
+        val known = knownTxidsForHistoryPlan(null, cappedDetails(listOf("a", "b")))
+        assertEquals(setOf("a", "b"), known)
+    }
+
+    /** Blank/short entries in the native array are ignored rather than poisoning
+     *  the known set with an empty txid that would drop a real entry. */
+    @Test fun blankHashEntriesAreIgnored() {
+        val known = knownTxidsForHistoryPlan(arrayOf("aaa", "", "  ", "bbb"), "")
+        assertEquals(setOf("aaa", "bbb"), known)
+    }
+
+    /** Production truncation: `getTransactionDetails` carries only the 100 most
+     *  recent txs, oldest-first ordering (`BRWalletTransactions`). */
+    private fun cappedDetails(walletTxids: List<String>): String =
+        walletTxids.takeLast(100)
+            .joinToString("\n") { "$it|100|1|23900000|1700000000|0|100" }
+
     /** The block metadata the node supplied is what gets registered — a pass that
      *  silently dropped the confirming height would leave the tx at TX_UNCONFIRMED
      *  and withhold its DigiDollar/asset credit. */

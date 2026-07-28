@@ -218,7 +218,14 @@ class ChainReconciliationService(
         lastHistoryPassCovered = false
         val addrs = NativeBridge.dumpAllAddresses().trim().lines().filter { it.isNotBlank() }
         if (addrs.isEmpty()) return 0
-        val known = extractKnownTxids(NativeBridge.getTransactionDetails())
+        // UNCAPPED known set — load-bearing for the GATE-3 coverage proof, see
+        // [knownTxidsForHistoryPlan]. getTransactionDetails() alone caps at the 100
+        // most-recent txs, which would let a >100-tx wallet's older confirmed txids
+        // ride into the import plan as duplicates and permanently sink `covered`.
+        val known = knownTxidsForHistoryPlan(
+            allHashes = runCatching { NativeBridge.getAllTransactionHashes() }.getOrNull(),
+            details = NativeBridge.getTransactionDetails(),
+        )
         _state.value = State.Scanning("Reading address history…", progress = 0.2f)
         // ONE batched POST per 500 addresses (not one GET per address) — stays
         // well under the server's request limiter that the per-address loop tripped.
@@ -334,23 +341,68 @@ internal suspend fun importPlannedHistory(
             imported++
             onImported(tx)
         } else {
-            // NOT "already known" — a wallet-known txid can never reach this loop,
-            // because planHistoryImport drops every txid already in
-            // getTransactionDetails(). Per jni_transaction.c:372-434 a JNI_FALSE
-            // here means null wallet, BRTransactionParse failure, unsigned tx, or
-            // BRWalletRegisterTransaction rejecting the tx as not associated with
-            // the wallet — in every one of those cases the tx did NOT land, so this
-            // pass has not covered the band and must not be allowed to clear the
-            // surfacing. (The duplicate branch that does return false is
-            // unreachable from here.)
+            // A `false` here is a FAILURE, not "already known" — but that is true
+            // only BECAUSE of a coupling that is easy to break, so read this before
+            // changing either side.
+            //
+            // registerRawTransaction returns JNI_FALSE for five reasons
+            // (jni_transaction.c:372-434): null wallet, BRTransactionParse failure,
+            // unsigned tx, BRWalletRegisterTransaction rejecting it as not
+            // associated with the wallet — and a DUPLICATE that has nothing to
+            // promote (:418). The first four mean the tx did not land, so the pass
+            // has not covered the band and must not clear the surfacing.
+            //
+            // The duplicate branch is unreachable HERE, and only here, because the
+            // caller planned this list against the UNCAPPED known set built by
+            // [knownTxidsForHistoryPlan] — so every wallet-known txid was already
+            // dropped by planHistoryImport and BRWalletTransactionForHash cannot
+            // hit. ⚠️ If that known set is ever narrowed back to the 100-capped
+            // getTransactionDetails(), a >100-tx wallet's older confirmed txids
+            // start arriving here as legitimate duplicates, each counted as a
+            // failure, and `covered` becomes unreachable — the abandoned-band banner
+            // would then nag forever on exactly the deep wallets that need the
+            // reconcile most.
             unrecovered++
         }
     }
     return HistoryImportOutcome(imported, unrecovered)
 }
 
+/**
+ * The set of wallet-known txids used to plan an address-history import.
+ *
+ * **This MUST come from the UNCAPPED accessor**, and the GATE-3 coverage predicate
+ * depends on it (see [importPlannedHistory]'s `register == false` branch).
+ * [NativeBridge.getAllTransactionHashes] walks the whole `BRWalletTransactions`
+ * array with no truncation (`jni_wallet.c:733`), whereas
+ * [NativeBridge.getTransactionDetails] keeps only the 100 MOST RECENT
+ * (`jni_wallet.c:781`, `startIdx = txCount - 100`) while
+ * [DgbNodeClient.addressHistoryBatch] returns the FULL unbounded per-address
+ * history. Planning against the capped source therefore lets every already-confirmed
+ * txid older than the cap survive into `toImport` on any wallet with >100 txs; each
+ * then returns `JNI_FALSE` from `registerRawTransaction`'s duplicate branch
+ * (`jni_transaction.c:418`) and sinks the coverage proof — so a reconcile that
+ * genuinely closed an abandoned band could never say so, and the banner would nag
+ * forever. Old, deep wallets are exactly the ones with both >100 txs and deep bands.
+ *
+ * [details] is unioned in purely defensively (it is a strict subset of [allHashes]
+ * when the array is present, and the fallback when it is null because no wallet is
+ * loaded). The union direction is always safe: both sources are derived from the
+ * wallet's own transaction list, so anything in either genuinely IS wallet-known,
+ * and over-dropping from `toImport` can only skip a re-import that would have been
+ * a no-op duplicate.
+ */
+internal fun knownTxidsForHistoryPlan(allHashes: Array<String>?, details: String): Set<String> {
+    val fromNative = allHashes
+        ?.mapNotNull { it.trim().takeIf(String::isNotBlank) }
+        ?: emptyList()
+    return fromNative.toSet() + extractKnownTxids(details)
+}
+
 /** Known wallet txids = field 0 of each getTransactionDetails line
- *  (`txHash|amount|fee|blockHeight|timestamp|sent|received`). */
+ *  (`txHash|amount|fee|blockHeight|timestamp|sent|received`).
+ *  **Capped at the 100 most-recent txs by the native side** — never use this alone
+ *  to plan a history import; see [knownTxidsForHistoryPlan]. */
 internal fun extractKnownTxids(details: String): Set<String> =
     details.trim().lines().mapNotNull { line ->
         line.split("|").getOrNull(0)?.trim()?.takeIf { it.isNotBlank() }
