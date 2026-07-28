@@ -79,6 +79,36 @@ static void check(int c, const char *d) { printf(c ? "PASS: %s\n" : "FAIL: %s\n"
 static int g_capCount = 0;
 static uint32_t g_capStart = 0;
 
+// --- Task 3: full send-log + between-pass drain hook -------------------------
+//
+// The pre-restructure residual loop peeked/sent/committed ONE range per
+// iteration, so g_capStart (last start) + g_capCount sufficed. The Pass A->B->C
+// restructure sends MULTIPLE ranges per tick, so the batched-semantics test
+// needs the WHOLE captured set, not just the last start. g_capLog records every
+// getcfilters (start, resolved-stop) pair in send order. stop is resolved via
+// the same test-side blockReg map the everRequested spine already uses; a send
+// whose stopHash the test never registered logs stop==REG_NOT_FOUND (the
+// pre-existing single-send cases don't read g_capLog, so they're unaffected).
+#define CAPLOG_MAX 256
+static struct { uint32_t start; uint32_t stop; } g_capLog[CAPLOG_MAX];
+static int g_capLogCount = 0;
+static void capLogReset(void) { g_capLogCount = 0; }
+static int capLogHasStart(uint32_t start)
+{
+    for (int i = 0; i < g_capLogCount; i++) if (g_capLog[i].start == start) return 1;
+    return 0;
+}
+
+// Between-pass staleness hook: when armed, the Nth captured getcfilters send
+// (post-increment g_capCount == g_drainHookAfterNSends) MarkEvaluates
+// g_drainHookHeight on g_drainHookMgr's ledger -- modeling a height DRAINING
+// between Pass A's collect and Pass C's send of a LATER collected range, so the
+// staleness guard can be driven RED-before-green. One-shot: it disarms itself
+// after firing so it never perturbs a later send or a later test.
+static BRPeerManager *g_drainHookMgr = NULL;
+static uint32_t g_drainHookHeight = 0;
+static int g_drainHookAfterNSends = -1;
+
 // --- Task 5: stopHash->height registry + cumulative everRequested set ---------
 //
 // THE CAUSALITY SPINE. The residual driver reaches a peer through
@@ -161,6 +191,21 @@ void __wrap_BRPeerSendGetCFilters(BRPeer *peer, uint8_t filterType, uint32_t sta
             everReqAdd(h);
             if (h == stopH) break;
         }
+    }
+
+    // Task 3: log the whole (start, stop) send set for the batched-semantics test.
+    if (g_capLogCount < CAPLOG_MAX) {
+        g_capLog[g_capLogCount].start = startHeight;
+        g_capLog[g_capLogCount].stop  = stopH;   // REG_NOT_FOUND if unregistered
+        g_capLogCount++;
+    }
+
+    // Task 3: between-pass drain hook (one-shot). Fires AFTER g_capCount was
+    // bumped for this send, so "after N sends" counts inclusively.
+    if (g_drainHookMgr && g_capCount == g_drainHookAfterNSends) {
+        BRPeerManager *dm = g_drainHookMgr;
+        g_drainHookMgr = NULL;   // disarm before mutating so a re-entrant send can't re-fire
+        BRCFScanLedgerMarkEvaluated(&dm->cfLedger, g_drainHookHeight);
     }
 }
 
@@ -1442,6 +1487,180 @@ static void test_batch_resolve_equals_naive(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
+// ============================================================================
+// Task 3: residual-loop Pass A(collect) -> B(one-descent resolve) -> C(send)
+// restructure. Two properties:
+//   1. The batched restructure sends the BYTE-SAME getcfilters set the fused
+//      loop did, bumps attempts ONLY for ranges that actually sent, and keeps
+//      the reverse-map suppressor + rotate-away + send-fail-no-bump discipline.
+//   2. Staleness guard: a height that DRAINS between Pass A's collect and Pass
+//      C's send is NOT re-requested nor committed.
+// ============================================================================
+
+// (1) Batched restructure preserves the fused loop's send set + discipline.
+// A single tick with three residual ranges exercising every branch at once:
+//   - [1000..1000]  send FAILS (stop unreachable from tip -> stopHash ZERO)  -> no bump
+//   - [1006..1006]  cfheader-lag buffered -> reverse-map SUPPRESSED           -> not sent, no bump
+//   - [1008..1008]  resolvable, targeted at pa -> SENDS, rotate-away to pb     -> attempts=1, peer=pb
+// The captured set must be EXACTLY {[1008..1008]} -- identical to the fused
+// loop (verified: this test is GREEN on the pre-restructure code too).
+static void test_residual_batched_preserves_semantics(BRWallet *wallet)
+{
+    printf("\n=== test_residual_batched_preserves_semantics (Task 3 Pass A/B/C) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    blockRegReset();
+    everReqReset();
+    capLogReset();
+    g_drainHookMgr = NULL;
+
+    // Lower segment L=[1000..1002] present but UNREACHABLE from the tip: the
+    // gap at 1003..1004 severs 1005->prevBlock(1004), so a descent from the tip
+    // stops at 1005 and every height <= 1004 resolves to ZERO (send-fail).
+    // Upper segment U=[1005..1010] IS reachable -> its stops resolve.
+    BRMerkleBlock *prevB = NULL;
+    for (uint32_t h = 1000; h <= 1002; h++) {
+        BRMerkleBlock *b = dummyBlock(h, (uint8_t)(h - 1000 + 1), 1700000000u + h);
+        if (prevB) b->prevBlock = prevB->blockHash;
+        BRSetAdd(m->blocks, b); blockRegAdd(b); prevB = b;
+    }
+    prevB = NULL;
+    BRMerkleBlock *bU5 = NULL, *bU6 = NULL, *bU8 = NULL;
+    for (uint32_t h = 1005; h <= 1010; h++) {
+        BRMerkleBlock *b = dummyBlock(h, (uint8_t)(h - 1005 + 0x40), 1700000000u + h);
+        if (prevB) b->prevBlock = prevB->blockHash;   // 1005->prevBlock left pointing at absent 1004's default
+        else       b->prevBlock = rhUniqueHash(1004); // severed link: 1004 is NOT in the set
+        BRSetAdd(m->blocks, b); blockRegAdd(b); prevB = b;
+        if (h == 1005) bU5 = b;
+        if (h == 1006) bU6 = b;
+        if (h == 1008) bU8 = b;
+    }
+    m->lastBlock = prevB; // tip == 1010
+    check(bU5 && bU6 && bU8, "setup: upper-segment blocks materialized");
+    check(UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, 1000)),
+          "setup: 1000 is UNREACHABLE from tip (stop resolves ZERO -> send will fail)");
+    check(! UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, 1008)),
+          "setup: 1008 is reachable from tip (stop resolves -> send will go)");
+
+    BRPeer *pb = BRPeerNew(BRMainNetParams.magicNumber);
+    pb->address.u8[15] = 0x51; pb->port = 15001; pb->services |= SERVICES_NODE_COMPACT_FILTERS;
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x52; pa->port = 15002; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pb);
+    array_add(m->connectedPeers, pa); // pa LAST -> checked first in the reverse walk (exercises avoid-skip)
+
+    // cfheader chain that has NOT advanced past 1006 (NextHeight==1005 <= 1006):
+    // the buffered entry for 1006 stays in-flight (isReady false) -> suppressed.
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, 1005, UINT256_ZERO);
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) <= bU6->height,
+          "setup: cfheader chain has NOT advanced past 1006 (buffered entry stays in-flight)");
+
+    BRCFScanLedgerInit(&m->cfLedger, 1000);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1000, 1000, UINT128_ZERO, 0, 0);         // send-fail
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1006, 1006, UINT128_ZERO, 0, 0);         // suppressed
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1008, 1008, pa->address, pa->port, 0);   // sends, targeted at pa
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 3, "setup: 3 residual holes outstanding");
+
+    // Buffer a filter keyed to 1006's OWN hash (header present at 1006, cfheader
+    // lag) -> reverse map resolves it to 1006 -> the residual loop skips 1006.
+    uint8_t junk[4] = { 0x01, 0x00, 0x00, 0x00 };
+    BRCFScanLedgerBufferFilter(&m->cfLedger, bU6->blockHash, junk, sizeof junk, (uint32_t)time(NULL));
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "setup: 1 cfheader-lag buffered entry (hash IS in blocks at 1006)");
+
+    g_capCount = 0; g_capStart = 0; capLogReset();
+
+    BRPeerManagerKeepAlive(m);
+
+    // Captured set is EXACTLY {[1008..1008]} -- byte-same as the fused loop.
+    check(g_capLogCount == 1, "batched: exactly one getcfilters sent this tick");
+    check(g_capLogCount >= 1 && g_capLog[0].start == 1008 && g_capLog[0].stop == 1008,
+          "batched: the one send is [1008..1008] (resolvable range)");
+    check(! capLogHasStart(1000), "batched: 1000 NOT sent (stop unresolvable -> send failed)");
+    check(! capLogHasStart(1006), "batched: 1006 NOT sent (reverse-map suppressed -- cfheader lag)");
+
+    // attempts bumped ONLY for the range that actually sent.
+    const BRCFOutstanding *e1000 = findOutstanding(&m->cfLedger, 1000);
+    const BRCFOutstanding *e1006 = findOutstanding(&m->cfLedger, 1006);
+    const BRCFOutstanding *e1008 = findOutstanding(&m->cfLedger, 1008);
+    check(e1000 && e1000->attempts == 0, "batched: send-fail hole 1000 got NO attempt bump (send returned 0)");
+    check(e1006 && e1006->attempts == 0, "batched: suppressed hole 1006 got NO attempt bump (never committed)");
+    check(e1008 && e1008->attempts == 1, "batched: sent hole 1008 bumped to attempts=1 (committed)");
+
+    // rotate-away survived: 1008 was targeted at pa, committed to pb.
+    check(e1008 && e1008->port == pb->port && UInt128Eq(e1008->peer, pb->address),
+          "batched: rotate-away -- 1008 re-committed to pb (not pa, the peer it was last sent to)");
+
+    // suppressor kept the cfheader-lag entry buffered (still in-flight).
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 1, "batched: cfheader-lag entry stays buffered (suppressor)");
+
+    BRPeerManagerFree(m);
+}
+
+// (2) Staleness guard (operator condition). Two collected ranges [1000] and
+// [1005]. The between-pass drain hook MarkEvaluates 1005 the moment [1000] is
+// sent in Pass C -- so by the time Pass C reaches [1005] it has DRAINED. The
+// guard must re-check outstanding and NOT re-request nor commit 1005.
+// RED against the pre-guard restructure (which sends 1005 from stale Pass-A
+// state); GREEN once the Pass C re-check lands.
+static void test_no_stale_between_pass_recommit(BRWallet *wallet)
+{
+    printf("\n=== test_no_stale_between_pass_recommit (Task 3 staleness guard) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    blockRegReset();
+    everReqReset();
+    capLogReset();
+    g_drainHookMgr = NULL;
+
+    // Contiguous, fully-reachable chain [1000..1010]: both holes' stops resolve,
+    // so absent the guard BOTH would send. tip past the whole cluster (no clip).
+    BRMerkleBlock *prevB = NULL;
+    for (uint32_t h = 1000; h <= 1010; h++) {
+        BRMerkleBlock *b = dummyBlock(h, (uint8_t)(h - 1000 + 1), 1700000000u + h);
+        if (prevB) b->prevBlock = prevB->blockHash;
+        BRSetAdd(m->blocks, b); blockRegAdd(b); prevB = b;
+    }
+    m->lastBlock = prevB; // tip == 1010
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x61; pa->port = 16001; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // Two NON-contiguous holes -> two separate coalesced peek ranges, both DUE.
+    BRCFScanLedgerInit(&m->cfLedger, 1000);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1000, 1000, UINT128_ZERO, 0, 0);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, 1005, 1005, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 2, "setup: 2 residual holes outstanding (1000, 1005)");
+
+    // Arm the between-pass drain: MarkEvaluate 1005 right after the FIRST send
+    // (of [1000]) -- i.e. after Pass A collected [1005] but before Pass C sends it.
+    g_drainHookMgr = m;
+    g_drainHookHeight = 1005;
+    g_drainHookAfterNSends = 1;
+
+    g_capCount = 0; g_capStart = 0; capLogReset();
+
+    BRPeerManagerKeepAlive(m);
+
+    // Only [1000] went on the wire; the drained 1005 was NOT re-requested.
+    check(g_capLogCount == 1, "staleness guard: exactly one getcfilters sent (drained 1005 suppressed)");
+    check(capLogHasStart(1000), "staleness guard: [1000] WAS sent (still outstanding at Pass C)");
+    check(! capLogHasStart(1005),
+          "staleness guard: [1005] was NOT re-requested (drained between Pass A collect and Pass C send)");
+
+    // 1005 stays drained (evaluated); a stray commit must not resurrect it.
+    check(findOutstanding(&m->cfLedger, 1005) == NULL, "staleness guard: 1005 stays evaluated (not re-added)");
+    const BRCFOutstanding *e1000 = findOutstanding(&m->cfLedger, 1000);
+    check(e1000 && e1000->attempts == 1, "staleness guard: 1000 sent+committed (attempts=1)");
+    check(g_drainHookMgr == NULL, "staleness guard: the between-pass drain hook actually fired");
+
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -1494,6 +1713,8 @@ int main(void)
     test_cluster_drains_to_zero_with_stale_buffer(wallet); // Task 5 Scenario A: multi-tick cluster drain-to-zero
     test_gaveup_retires_dead_hole_at_exact_cap(wallet);    // Task 5 Scenario B: RetireCapped both directions at cap
     test_batch_resolve_equals_naive(wallet);               // Task 2: batch stop-hash resolver == naive (adversarial)
+    test_residual_batched_preserves_semantics(wallet);     // Task 3: Pass A/B/C sends the fused set, discipline intact
+    test_no_stale_between_pass_recommit(wallet);           // Task 3: between-pass staleness guard (RED before the guard)
 
     BRWalletFree(wallet);
 
