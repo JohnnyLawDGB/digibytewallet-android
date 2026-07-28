@@ -101,15 +101,30 @@ New `native/src/test/host/cf_clearmemory_retention_kat/` (or extend `cf_scan_led
 - **Batching correctness:** batched `_BRPeerManagerResolveHashesAtHeightsLocked` returns the SAME hashes as N individual `_BRPeerManagerBlockHashAtHeight` calls (property test over random heights incl. tip, floor, gaps, out-of-range→ZERO).
 - **Silent-loss guard:** abandon a deep band, `MarkEvaluated` a height above clamp, assert `abandonedBelow` reflects the band AND the status surfaces it (not folded into a "complete" claim without the abandoned count).
 
+## Part 3b — determinism guard + the wrong-balance regression (REV 3, operator 2026-07-28)
+The tip-anchored ceiling as first implemented picks between two failure modes by RACE, and the branch INTRODUCES the worse one (old core develop `e9246c8` only prunes → deep restores *wedge*, never completing; verified). The two modes:
+- **scan-not-started** (empty `outstanding`, e.g. ClearMemory fires during header sync): `AbandonGaveUpBelow` advanced `abandonedBelow → clamp`, RAISING the scan floor → the sync **completes with a WRONG BALANCE** (deep history never scanned). This is the SILENT mode — the WARN lands in a log nobody opens; a confident wrong balance on a restored seed is the worst outcome this codebase can produce.
+- **scan-started** (`outstanding` at the birth floor): floor not raised → memory = full deficit → **OOM** (honest crash).
+
+**Determinism guard (collapse case 1 into the loud case 2):** `BRCFScanLedgerAbandonGaveUpBelow` must advance `abandonedBelow` ONLY to cover gaveUp heights it ACTUALLY dropped (to `highest-dropped + 1`), capped so it never exceeds the lowest still-outstanding hole and NEVER advances preemptively (empty gaveUp-below-clamp → no advance). Consequences: (a) `abandonedBelow`-advances ⟺ `cnt > 0` ⟺ the WARN fires — so **`abandonedBelow==0` becomes a verified log fact** (the Part-1 WARN-gate requirement, now unified with the guard); (b) an empty-outstanding deep restore can NEVER raise the scan floor → no wrong balance; it fails toward OOM, which Part 3c refuses up front. The ceiling is thereby demoted from a load-bearing OOM-preventer to a minor "prune the headers of already-reported gaveUp losses" reclaim; deep-restore memory is governed by Part 3c + windowed-scan.
+
+## Part 3c — deep-restore UI depth gate (app layer, IN this branch, before merge)
+If the restore depth `tip − birthHeight > CF_RETENTION_MAX_SPAN`, the app must REFUSE to start the CF scan and say so plainly ("this wallet's history is deeper than this version can scan on-device yet — full historical restore is coming in a future update"), rather than sync to a wrong balance or OOM. A real answer to the user, unlike an abandoned-height count. The deterministic loud failure that pairs with the Part-3b guard.
+
+## Ceiling KAT MUST exercise BOTH timing branches
+The floor KAT fires; the ceiling had no test (the shallow 26k acceptance wallet stays under the clamp), so windowed-scan would have no regression baseline. Red-before-green KAT: (i) **scan-not-started** (empty outstanding) below the clamp → assert `abandonedBelow` does NOT advance / no floor-raise (the wrong-balance guard); (ii) **scan-started** with gaveUp holes below the clamp → assert they are abandoned (`cnt>0`, WARN, `abandonedBelow = highest-dropped+1 ≤ lowest-outstanding`), while a still-outstanding hole below the clamp is NOT abandoned.
+
 ## Out of scope (follow-ups; note, don't do)
-- **height→hash persistent index memoization** — the definitive O(1) walk fix, but a new correctness surface (stale entry → wrong stop-hash) in the most concurrency-sensitive code; batching (Part 2) removes the ANR without it. Evidence-gated on the LAB re-run's floor-cluster drain.
-- **Header-sync pacing** (throttle so cfheaders can't outrun the scan) — would keep the span small and make Part 3 rarely fire. Separate spec.
+- **⛔ WINDOWED-SCAN / paced-fetch = v4 BLOCKER, NOT polish (re-labeled 2026-07-28).** Retention that FOLLOWS the scan (scan the whole [birth..tip] history in ≤MAX_SPAN windows, retention window moving with `scannedThrough`, cfilter fetch paced so it can't outrun the scan) — no skip, no OOM, at any depth. The wallet's HEADLINE feature is universal seed restore across all historical derivation paths; the cohort that feature exists for is holders restoring 2014–2017 seeds — MILLIONS of blocks deep, not thousands — so "deeper than MAX_SPAN(~5 days)" is the ENTIRE use case, off by 2+ orders of magnitude. Filter volume over a genesis-depth scan cannot be held on a phone under ANY ceiling policy. This branch (floor-fix + batching + ceiling + Part-3c gate) makes CF sync CORRECT and refuses what it can't do; windowed-scan is what makes universal restore WORK. Its own sequence, next.
+- **height→hash persistent index memoization** — the definitive O(1) walk fix, but a new stale-entry→wrong-stop-hash surface; batching (Part 2) removes the ANR without it. Evidence-gated.
 - **`BRCFScanLedgerMarkHeaderRace` is dead in production** (only the KAT calls it) — the 10s header-race retry isn't wired. Orthogonal Phase-2 gap.
 
 ## Task decomposition (for SDD)
-1. `BRCFScanLedgerLowestNeededHeight` + `abandonedBelow` field + `BRCFScanLedgerAbandonGaveUpBelow` + hard-floor guards in Peek/RecordRequested/MarkHeaderRace + Serialize/Parse version bump + `BRCFScanLedgerAbandonedBelow` accessor — pure ledger, host-KAT.
-2. `_BRPeerManagerResolveHashesAtHeightsLocked` batch resolver + prove-equivalent KAT.
-3. Residual-loop restructure (Pass A/B/C) to use the batch resolver; `_BRPeerManagerRequestCFiltersLocked` pre-resolved-hash variant.
-4. `_BRPeerManagerClearMemory` floor = `min(cfNext, lowestNeeded)` + `_cfApplyRetentionCeiling` (both branches), full descent — the production-scale KAT (Part 4).
-5. JNI/status plumbing for `abandonedBelow` → UI "abandoned (too deep)" surfacing.
-6. Whole-branch review, then the LAB acceptance re-run.
+1. ✅ `BRCFScanLedgerLowestNeededHeight` + `abandonedBelow` + `AbandonGaveUpBelow` + hard-floor guards + persistence v2 (DONE).
+2. ✅ `_BRPeerManagerResolveHashesAtHeightsLocked` batch resolver + adversarial equivalence KAT (DONE).
+3. ✅ Residual-loop Pass A/B/C restructure + pre-resolved-hash variant + staleness guard (DONE).
+4. ✅ `_BRPeerManagerClearMemory` floor = `min(cfNext, lowestNeeded)` + tip-anchored ceiling + production-scale floor KAT (DONE).
+4b. **Determinism guard (Part 3b):** `AbandonGaveUpBelow` advances `abandonedBelow` only to cover dropped gaveUp (never preemptive, never past lowest-outstanding); WARN ⟺ advance; the two-timing-branch ceiling KAT. (ledger + BRPeerManager, host-KAT)
+5. **Deep-restore UI depth gate (Part 3c):** refuse restore if `tip − birth > CF_RETENTION_MAX_SPAN`, plain message. (app/Kotlin)
+6. Whole-branch review, then the LAB acceptance re-run (verify `abandonedBelow==0` in the warn-log — now a real fact).
+7. [next sequence] windowed-scan / paced-fetch (v4 blocker).

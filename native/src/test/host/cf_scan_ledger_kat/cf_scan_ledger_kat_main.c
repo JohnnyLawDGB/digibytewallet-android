@@ -517,53 +517,54 @@ static int test_lowest_needed_height(void) {
     return 1;
 }
 
-// AbandonGaveUpBelow: drops gaveUp<clamp (reporting count/range), advances the
-// hard floor to min(clamp, lowest-outstanding) NEVER past a still-retrying hole,
-// monotonic, returns the new lowest-still-needed height.
+// AbandonGaveUpBelow: drops gaveUp<target (target=min(clamp, lowest-outstanding)),
+// reporting count/range, and (Part 3b guard) advances the hard floor ONLY to cover
+// the gaveUp actually dropped (highest-dropped+1), NEVER preemptively to target/clamp
+// and NEVER past a still-retrying hole; monotonic; returns the new lowest-still-needed.
 static int test_abandon_gaveup_below(void) {
     BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);   // scannedThrough=99
     UInt128 pa = UINT128_ZERO; pa.u8[15]=1;
     // A still-retrying outstanding hole O=500 (< clamp, sub-cap).
     BRCFScanLedgerRecordRequested(&l, 500, 500, pa, 12024, 1000);
     ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);
-    // gaveUp = {200, 300, 2000}: G1=200,G2=300 (< clamp=1000) < 2000 (> clamp).
+    // gaveUp = {200, 300, 2000}: G1=200,G2=300 (< target=O=500) < 2000 (> clamp).
     // Both G1,G2 sit below O so abandoning them is covered by the floor.
     l.gaveUp[0]=200; l.gaveUp[1]=300; l.gaveUp[2]=2000; l.gaveUpCount=3;
 
     uint32_t cnt=999, lo=999, hi=999;
     uint32_t newFloor = BRCFScanLedgerAbandonGaveUpBelow(&l, 1000, &cnt, &lo, &hi);
 
-    // G1,G2 dropped (< clamp), G3=2000 kept.
+    // G1,G2 dropped (< target=O=500), G3=2000 kept.
     ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==2000);
     // count + [lo..hi] returned for the caller's WARN log.
     ASSERT(cnt==2 && lo==200 && hi==300);
-    // abandonedBelow advanced to min(clamp=1000, lowest-outstanding O=500) = 500 (NOT past O).
-    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==500);
+    // GUARD: abandonedBelow advances ONLY to cover the highest dropped (300)+1 = 301
+    // — NOT preemptively to target(O=500) or clamp(1000). Never past a still-retrying hole.
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==301);
     // O is UNTOUCHED — still a live outstanding hole.
     ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);
-    // returns the new lowest-still-needed height == O.
-    ASSERT(newFloor==500 && BRCFScanLedgerLowestNeededHeight(&l)==500);
+    // returns the new lowest-still-needed height == abandonedBelow == 301.
+    ASSERT(newFloor==301 && BRCFScanLedgerLowestNeededHeight(&l)==301);
 
-    // Second call, higher clamp: O still outstanding & below clamp → the floor
-    // STAYS at O (never past a retrying hole), and because the drop is bounded by
-    // target==O, 2000 (which sits ABOVE O) is KEPT — not abandoned while O is
-    // recoverable. Nothing dropped this call.
+    // Second call, higher clamp: O still outstanding & below clamp so target stays O;
+    // 2000 sits ABOVE O so it is KEPT (drop bounded by target). NOTHING dropped this
+    // call (k==0) → abandonedBelow STAYS at 301 (no preemptive raise to O/clamp).
     uint32_t nf2 = BRCFScanLedgerAbandonGaveUpBelow(&l, 5000, &cnt, &lo, &hi);
     ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==2000 && cnt==0);
-    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==500 && nf2==500);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==301 && nf2==301);
 
-    // Resolve O → no outstanding hole caps the floor any more; only NOW can the
-    // floor advance past 2000 and abandon it.
+    // Resolve O → no outstanding hole caps the floor any more; only NOW can 2000 be
+    // abandoned. Floor advances to cover it: highest-dropped(2000)+1 = 2001 (NOT clamp=5000).
     BRCFScanLedgerMarkEvaluated(&l, 500);
     ASSERT(BRCFScanLedgerOutstandingCount(&l)==0);
     uint32_t nf3 = BRCFScanLedgerAbandonGaveUpBelow(&l, 5000, &cnt, &lo, &hi);
     ASSERT(cnt==1 && lo==2000 && hi==2000);           // 2000 abandoned once recoverable-hole O is gone
     ASSERT(BRCFScanLedgerGaveUpCount(&l)==0);
-    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==5000 && nf3==5000);   // now reaches clamp
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==2001 && nf3==2001);   // covers the dropped 2000, NOT the clamp
 
-    // Monotonic: a lower clamp NEVER regresses the floor.
+    // Monotonic: a lower clamp with nothing to drop NEVER regresses the floor.
     uint32_t nf4 = BRCFScanLedgerAbandonGaveUpBelow(&l, 3000, &cnt, &lo, &hi);
-    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==5000 && nf4==5000);
+    ASSERT(cnt==0 && BRCFScanLedgerAbandonedBelow(&l)==2001 && nf4==2001);
     return 1;
 }
 
@@ -586,19 +587,59 @@ static int test_abandon_keeps_gaveup_above_watermark(void) {
     uint32_t cnt=999, lo=999, hi=999;
     uint32_t nf = BRCFScanLedgerAbandonGaveUpBelow(&l, 1000, &cnt, &lo, &hi);
 
-    // Only G1 (below the new watermark O=500) is abandoned; G2 in [O,clamp) is KEPT.
+    // Only G1 (below target=O=500) is abandoned; G2 in [O,clamp) is KEPT.
     ASSERT(cnt==1 && lo==300 && hi==300);
     ASSERT(BRCFScanLedgerGaveUpCount(&l)==1 && l.gaveUp[0]==700);
-    // abandonedBelow == O; nothing dropped sits above it (single source of truth).
-    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==500);
+    // GUARD: abandonedBelow advances only to cover the dropped G1 → highest-dropped(300)+1
+    // = 301 (NOT preemptively to target O=500). Everything dropped sits below it (300 < 301).
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==301);
     ASSERT(BRCFScanLedgerOutstandingCount(&l)==1 && l.outstanding[0].height==500);   // O untouched
-    ASSERT(nf==500);
+    ASSERT(nf==301);
     // G2=700 is still a REPORTED hole (survives a restart via the persisted gaveUp list).
     uint32_t starts[8], ends[8];
     size_t n = BRCFScanLedgerHoleRanges(&l, starts, ends, 8);
     int found700 = 0;
     for (size_t i=0;i<n;i++) if (starts[i]<=700 && 700<=ends[i]) found700 = 1;
     ASSERT(found700);
+    return 1;
+}
+
+// Part 3b determinism guard (the LOAD-BEARING wrong-balance test): empty
+// outstanding + NO gaveUp below the clamp — the "scan-not-started" shape
+// (ClearMemory fires during header sync, before the cfilter scan requests
+// anything). With nothing legitimately abandonable, AbandonGaveUpBelow must
+// return cnt==0 AND leave abandonedBelow UNCHANGED. A preemptive raise here would
+// let a deep restore COMPLETE with a WRONG BALANCE (deep history never scanned).
+static int test_abandon_no_advance_when_nothing_dropped(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);   // scannedThrough=99, abandonedBelow=0
+    ASSERT(BRCFScanLedgerOutstandingCount(&l)==0 && BRCFScanLedgerGaveUpCount(&l)==0);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==0);
+
+    uint32_t cnt=999, lo=999, hi=999;
+    uint32_t nf = BRCFScanLedgerAbandonGaveUpBelow(&l, 1000000, &cnt, &lo, &hi);
+
+    // Nothing dropped → NO advance. This is the guard: abandonedBelow stays 0.
+    ASSERT(cnt==0 && lo==CF_LEDGER_NO_DROP && hi==CF_LEDGER_NO_DROP);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==0);                 // UNCHANGED — no preemptive raise
+    ASSERT(nf==100 && BRCFScanLedgerLowestNeededHeight(&l)==100); // == scannedThrough+1 (floor NOT raised)
+    return 1;
+}
+
+// Part 3b: with gaveUp below the clamp and NO outstanding, the floor advances
+// ONLY to cover the gaveUp actually dropped (highest-dropped+1), NEVER to the clamp.
+static int test_abandon_advance_covers_dropped_only(void) {
+    BRCFScanLedger l; BRCFScanLedgerInit(&l, 100);   // scannedThrough=99
+    // No outstanding; two retry-exhausted gaveUp holes G1,G2 both below the clamp.
+    l.gaveUp[0]=4000; l.gaveUp[1]=4200; l.gaveUpCount=2;   // G1=4000, G2=4200
+
+    uint32_t cnt=999, lo=999, hi=999;
+    uint32_t nf = BRCFScanLedgerAbandonGaveUpBelow(&l, 100000, &cnt, &lo, &hi);
+
+    // Both dropped; abandonedBelow == highest-dropped(G2=4200)+1 = 4201, NOT clamp(100000).
+    ASSERT(cnt==2 && lo==4000 && hi==4200);
+    ASSERT(BRCFScanLedgerGaveUpCount(&l)==0);
+    ASSERT(BRCFScanLedgerAbandonedBelow(&l)==4201);             // G2+1, NOT the clamp
+    ASSERT(nf==4201 && BRCFScanLedgerLowestNeededHeight(&l)==4201);
     return 1;
 }
 
@@ -711,6 +752,8 @@ int main(void) {
     test_lowest_needed_height();
     test_abandon_gaveup_below();
     test_abandon_keeps_gaveup_above_watermark();
+    test_abandon_no_advance_when_nothing_dropped();
+    test_abandon_advance_covers_dropped_only();
     test_abandoned_is_hard_floor();
     test_abandonedBelow_roundtrips();
 

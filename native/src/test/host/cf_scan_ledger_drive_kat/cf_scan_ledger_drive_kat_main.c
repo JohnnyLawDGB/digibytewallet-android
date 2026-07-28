@@ -52,6 +52,28 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdarg.h>
+
+// --- CF-retention memory-ceiling WARN-log capture seam (Task 4) --------------
+// _cfApplyRetentionCeiling warn-logs an "ABANDONED ..." line whenever the memory
+// ceiling abandons >=1 retry-exhausted (gaveUp) height. In production that line
+// routes to the platform logger at WARN (tag "bread"); on this host build it is
+// otherwise silent. BRPeerManager.c #ifndef-guards CF_RETENTION_WLOG so this KAT
+// can pre-#define it to capture the line and assert (a) it FIRED with the right
+// count on the ceiling case, and (b) it did NOT fire on the no-abandon retain
+// case (== the LAB "abandonedBelow stayed 0, no ABANDONED line" acceptance).
+static int  g_wlogCount = 0;
+static char g_wlogLast[512];
+static int  test_cf_retention_wlog(const char *fmt, ...)
+{
+    va_list ap; va_start(ap, fmt);
+    vsnprintf(g_wlogLast, sizeof g_wlogLast, fmt, ap);
+    va_end(ap);
+    g_wlogCount++;
+    printf("WLOG> %s\n", g_wlogLast);
+    return 0;
+}
+#define CF_RETENTION_WLOG(...) test_cf_retention_wlog(__VA_ARGS__)
 
 #include "BRPeerManager.c"
 
@@ -1661,6 +1683,240 @@ static void test_no_stale_between_pass_recommit(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
+// ===========================================================================
+// Task 4: _BRPeerManagerClearMemory retention floor tracks the SCAN frontier +
+// tip-anchored memory ceiling. PRODUCTION-SCALE (>5000-block) red-before-green.
+// A <5000-block test never crosses CLEAR_MEM_BLOCKS_COUNT_TRIGGER, so the prune
+// body never runs — a structural false-green. These build a real prevBlock-
+// linked, DISTINCT-per-height chain (rhChainBlock / rhUniqueHash — NOT
+// dummyBlock's 256-colliding single-byte fill) so BRSetCount actually crosses
+// 5000 and the descent has a chain deep enough (>800) to walk.
+// ===========================================================================
+
+// height -> present in manager->blocks? BRSet is keyed by BRMerkleBlockHash,
+// which reads blockHash at offset 0, so a bare UInt256* is a valid lookup key —
+// the exact pattern _BRPeerManagerClearMemory's own descent uses.
+static int rhBlockPresent(BRPeerManager *m, uint32_t height)
+{
+    UInt256 h = rhUniqueHash(height);
+    return BRSetGet(m->blocks, &h) != NULL;
+}
+
+// Build a manager backed by a real prevBlock-linked, distinct-per-height chain
+// [base .. base+count-1], CF-only syncMode (else the CF floor logic is skipped),
+// and a compact-filter chain whose NextHeight == the tip. NextHeight is
+// startHeight+count, so startHeight=tip / count=0 gives NextHeight==tip cheaply,
+// WITHOUT appending `count` filters. Writes the tip height + the pre-chain
+// baseline block count (mainnet pre-seeds a couple of checkpoints) so callers
+// assert on the DELTA.
+static BRPeerManager *rhBuildChainManager(BRWallet *wallet, uint32_t base, uint32_t count,
+                                          uint32_t *outTip, size_t *outBaseCount)
+{
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    if (! m) return NULL;
+    m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+
+    size_t baseCount = BRSetCount(m->blocks);
+    uint32_t tip = base + count - 1;
+    BRMerkleBlock *last = NULL;
+    for (uint32_t hgt = base; hgt <= tip; hgt++) {
+        BRMerkleBlock *b = rhChainBlock(hgt);   // distinct hash; prevBlock -> unique(height-1)
+        BRSetAdd(m->blocks, b);
+        last = b;
+    }
+    m->lastBlock = last;
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, tip, UINT256_ZERO);
+
+    if (outTip) *outTip = tip;
+    if (outBaseCount) *outBaseCount = baseCount;
+    return m;
+}
+
+// THE red-before-green case. Unfixed (-DRETENTION_UNFIXED) floors at the
+// cfHEADER frontier (cfNext-144), which is ABOVE the lagging scan floor, so the
+// scan-floor header is pruned -> RED. Fixed floors at min(cfNext,lowestNeeded)-144
+// == scan-floor -144, so the scan-floor header SURVIVES -> GREEN.
+static void test_clearmemory_retains_scan_floor(BRWallet *wallet)
+{
+    printf("\n=== test_clearmemory_retains_scan_floor (Task 4 red-before-green, production scale) ===\n");
+
+    const uint32_t BASE  = 20000000u;   // realistic mainnet-ish; above all checkpoints
+    const uint32_t COUNT = 5300u;       // > trigger(5000) with tail-hop(800) headroom
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+
+    // Distinct hashes: the set grew by EXACTLY COUNT (dummyBlock's 256-collision
+    // trap would surface here as a shortfall) and is over the prune trigger.
+    check(BRSetCount(m->blocks) == baseCount + COUNT, "distinct-hash chain grew by exactly COUNT (no collisions)");
+
+    // Scan floor: BELOW the tail boundary (tip-801) AND below the cfheader margin
+    // (cfNext-144, cfNext==tip). tip - H_floor is kept < CF_RETENTION_MAX_SPAN so
+    // the ceiling never fires on this retain path.
+    const uint32_t H_floor = TIP - 3000u;
+    BRCFScanLedgerInit(&m->cfLedger, H_floor);        // scannedThrough=H_floor-1 -> lowestNeeded=H_floor
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H_floor, H_floor, UINT128_ZERO, 0, 1700000000u);
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == H_floor, "setup: lowestNeeded == H_floor (scan lags here)");
+    check(BRCompactFilterChainNextHeight(m->compactFilterChain) == TIP, "setup: cfNext == tip (headers raced ahead)");
+    check(H_floor < TIP - 801u && H_floor < TIP - CLEAR_MEM_CF_RETENTION_MARGIN,
+          "setup: H_floor below tail boundary AND below cfNext-margin (WOULD be pruned unfixed)");
+    check(rhBlockPresent(m, H_floor), "setup: floor header present pre-prune");
+    check(BRSetCount(m->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER, "setup: BRSetCount >= 5000 BEFORE the pass (prune body runs)");
+
+    int wlogBefore = g_wlogCount;
+    _BRPeerManagerClearMemory(m);
+
+    check(rhBlockPresent(m, H_floor), "FLOOR RETAINED: scan-floor header survives the prune (RED on unfixed, GREEN on fix)");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0, "no abandonment: abandonedBelow stayed 0");
+    check(g_wlogCount == wlogBefore, "no ABANDONED warn-log on the clean retain path");
+
+    BRPeerManagerFree(m);
+}
+
+// The descent is the ONLY code that calls BRMerkleBlockFree; a sub-floor header
+// below the tail boundary MUST be freed (guards against a leak / an early-out
+// that would skip the descent across the whole deficit).
+static void test_clearmemory_descent_frees(BRWallet *wallet)
+{
+    printf("\n=== test_clearmemory_descent_frees (Task 4: full descent frees below the floor) ===\n");
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 5300u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+
+    const uint32_t H_floor = TIP - 3000u;
+    BRCFScanLedgerInit(&m->cfLedger, H_floor);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H_floor, H_floor, UINT128_ZERO, 0, 1700000000u);
+
+    const uint32_t H_deep = BASE + 50u;   // far below cfFloor and below the tail boundary
+    check(rhBlockPresent(m, H_deep), "setup: deep header present pre-prune");
+    check(H_deep < H_floor - CLEAR_MEM_CF_RETENTION_MARGIN, "setup: deep height is below cfFloor");
+    check(BRSetCount(m->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER, "setup: BRSetCount >= 5000 before the pass");
+
+    _BRPeerManagerClearMemory(m);
+
+    check(! rhBlockPresent(m, H_deep), "DESCENT FREES: deep sub-floor header removed from the set");
+    check(rhBlockPresent(m, H_floor), "floor header still retained");
+    int allOutstandingRetained = 1;
+    for (size_t i = 0; i < m->cfLedger.outstandingCount; i++)
+        if (! rhBlockPresent(m, m->cfLedger.outstanding[i].height)) allOutstandingRetained = 0;
+    check(allOutstandingRetained, "INVARIANT: every still-outstanding height keeps its header");
+
+    BRPeerManagerFree(m);
+}
+
+// Tip-anchored ceiling — TIMING BRANCH 1: SCAN NOT STARTED (Part 3b determinism
+// guard, the wrong-balance regression baseline). ClearMemory fires during header
+// sync, before the cfilter scan requests anything: empty outstanding, and NO
+// gaveUp below the clamp — nothing legitimately abandonable. The guard must NOT
+// advance abandonedBelow and must NOT raise the scan floor; a preemptive raise
+// here would let a deep restore COMPLETE with a WRONG BALANCE (deep history never
+// scanned). RED against the pre-guard abandonedBelow=target shape
+// (-DRETENTION_PREEMPTIVE_ADVANCE, run.sh's ceiling red-before-green gate).
+// Built with -DCF_RETENTION_MAX_SPAN overridden small so the birth floor can sit
+// > MAX_SPAN below the tip without a 30k-block chain.
+static void test_clearmemory_ceiling_scan_not_started(BRWallet *wallet)
+{
+    printf("\n=== test_clearmemory_ceiling_scan_not_started (Part 3b wrong-balance guard) ===\n");
+    check(CF_RETENTION_MAX_SPAN <= 5000u, "harness: CF_RETENTION_MAX_SPAN overridden small for this case");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 5600u;   // > trigger; birth floor sits > MAX_SPAN below tip
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+
+    const uint32_t clamp = TIP - CF_RETENTION_MAX_SPAN;
+    // Birth floor at BASE (> MAX_SPAN below the tip); scan not started: empty
+    // outstanding, empty gaveUp — the deep-restore-during-header-sync shape.
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == BASE && BASE < clamp,
+          "setup: birth floor BASE is > MAX_SPAN below the tip (below the clamp)");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0 && BRCFScanLedgerGaveUpCount(&m->cfLedger) == 0,
+          "setup: empty outstanding + empty gaveUp (nothing legitimately abandonable)");
+    check(BRSetCount(m->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER, "setup: BRSetCount >= 5000 before the pass");
+    // A sub-clamp probe header: FREED iff the floor is (wrongly) raised to the
+    // clamp, RETAINED iff the floor stays at the birth floor. clamp-500 sits below
+    // the retained tail (tip-801) so the descent actually visits it.
+    const uint32_t H_probe = clamp - 500u;
+    check(rhBlockPresent(m, H_probe), "setup: sub-clamp probe header present pre-prune");
+
+    int wlogBefore = g_wlogCount;
+    _BRPeerManagerClearMemory(m);
+
+    // THE guard: nothing dropped → abandonedBelow does NOT advance (stays 0), so a
+    // caller reading abandonedBelow==0 is reading a verified fact.
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "GUARD: abandonedBelow did NOT advance (stays 0) — no preemptive raise (RED on pre-guard)");
+    check(g_wlogCount == wlogBefore, "GUARD: no ABANDONED warn-log fired (nothing was abandoned)");
+    check(rhBlockPresent(m, H_probe),
+          "GUARD: scan floor NOT raised — the sub-clamp probe header is RETAINED (deep history still scannable)");
+
+    BRPeerManagerFree(m);
+}
+
+// Tip-anchored ceiling — TIMING BRANCH 2: SCAN STARTED. A still-outstanding
+// (attempts<cap) hole below the clamp is NEVER abandoned (recoverable), while
+// retry-exhausted gaveUp holes below it ARE abandoned. abandonedBelow advances
+// ONLY to cover the gaveUp actually dropped (highest-dropped+1, ≤ the outstanding
+// hole — never past it), the WARN fires, and a deep-enough abandoned header is
+// FREED, while the outstanding hole's header is RETAINED. Uses TWO gaveUp holes:
+// the highest sets the watermark (it sits within the 144-block retention margin
+// of the new floor, so it stays resident this pass), the deeper one is below the
+// margin and is freed — the visible "abandoned header freed" evidence.
+static void test_clearmemory_ceiling_scan_started(BRWallet *wallet)
+{
+    printf("\n=== test_clearmemory_ceiling_scan_started (Part 3b: abandon gaveUp, keep outstanding) ===\n");
+    check(CF_RETENTION_MAX_SPAN <= 5000u, "harness: CF_RETENTION_MAX_SPAN overridden small for this case");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 5600u;   // > trigger; room for holes > MAX_SPAN below tip
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+
+    const uint32_t clamp    = TIP - CF_RETENTION_MAX_SPAN;   // BASE+1599 at MAX_SPAN=4000
+    const uint32_t H_out    = clamp - 300u;   // still-outstanding hole below clamp (recoverable)
+    const uint32_t H_gvHi   = clamp - 400u;   // highest gaveUp below H_out (sets the watermark)
+    const uint32_t H_gvLo   = clamp - 1300u;  // deeper gaveUp, > margin below H_gvHi → freed
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, H_out, H_out, UINT128_ZERO, 0, 1700000000u);
+    const BRCFOutstanding *eo = findOutstanding(&m->cfLedger, H_out);
+    check(eo != NULL && eo->attempts < CF_REREQ_MAX_ATTEMPTS, "setup: H_out outstanding, attempts < cap (recoverable)");
+    m->cfLedger.gaveUp[0]   = H_gvLo;   // sorted ascending
+    m->cfLedger.gaveUp[1]   = H_gvHi;
+    m->cfLedger.gaveUpCount = 2;
+    check(H_gvLo < H_gvHi && H_gvHi < H_out && H_out < clamp, "setup: H_gvLo < H_gvHi < H_out < clamp");
+    check(BRSetCount(m->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER, "setup: BRSetCount >= 5000 before the pass");
+
+    int wlogBefore = g_wlogCount;
+    _BRPeerManagerClearMemory(m);
+
+    // GUARD: abandonedBelow advances ONLY to cover the dropped gaveUp — to the
+    // highest dropped (H_gvHi)+1, NEVER past the still-outstanding hole H_out.
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == H_gvHi + 1u,
+          "abandonedBelow == highest-dropped gaveUp + 1 (NOT the clamp, NOT the outstanding hole)");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) <= H_out,
+          "abandonedBelow never advances past the still-outstanding (recoverable) hole");
+    // The still-outstanding hole is untouched + its header retained.
+    check(findOutstanding(&m->cfLedger, H_out) != NULL, "the still-outstanding hole is NOT abandoned");
+    check(rhBlockPresent(m, H_out), "the outstanding hole's header is RETAINED");
+    // Both gaveUp holes dropped from the ledger (abandoned), WARN fired for them.
+    check(! gaveUpContains(&m->cfLedger, H_gvHi) && ! gaveUpContains(&m->cfLedger, H_gvLo),
+          "both gaveUp holes below the clamp were abandoned (dropped from the ledger)");
+    check(g_wlogCount == wlogBefore + 1, "exactly one ABANDONED warn-log fired for the dropped gaveUp");
+    check(strstr(g_wlogLast, "ABANDONED") != NULL, "the captured warn-log names the ABANDONED event");
+    // The deep abandoned header (below the retention margin) is FREED — visible loss.
+    check(! rhBlockPresent(m, H_gvLo), "the deep abandoned gaveUp header is FREED");
+
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -1681,6 +1937,30 @@ int main(void)
     BRWallet *wallet = BRWalletNew(NULL, 0, mpk);
     check(wallet != NULL, "smoke: wallet created");
     if (!wallet) { printf("\nFATAL\n"); return 1; }
+
+#ifdef KAT_REDGREEN_ONLY
+    // run.sh builds this twice for the retention floor's red-before-green gate:
+    // once unfixed (-DRETENTION_UNFIXED, must FAIL == RED) and once fixed (must
+    // PASS == GREEN), running ONLY the scan-floor-retention case so the RED is
+    // unambiguously the floor prune and nothing incidental.
+    test_clearmemory_retains_scan_floor(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_CEILING_REDGREEN_ONLY
+    // run.sh builds this twice for the Part-3b determinism guard's red-before-green
+    // gate: once with the pre-guard preemptive advance (-DRETENTION_PREEMPTIVE_ADVANCE,
+    // must FAIL == RED — an empty-scan deep restore would raise the floor and complete
+    // with a WRONG BALANCE) and once fixed (must PASS == GREEN), running ONLY the
+    // scan-not-started case so the RED is unambiguously the preemptive abandonedBelow
+    // raise and nothing incidental.
+    test_clearmemory_ceiling_scan_not_started(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
 
     BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     check(manager != NULL, "smoke: peer manager created");
@@ -1715,6 +1995,10 @@ int main(void)
     test_batch_resolve_equals_naive(wallet);               // Task 2: batch stop-hash resolver == naive (adversarial)
     test_residual_batched_preserves_semantics(wallet);     // Task 3: Pass A/B/C sends the fused set, discipline intact
     test_no_stale_between_pass_recommit(wallet);           // Task 3: between-pass staleness guard (RED before the guard)
+    test_clearmemory_retains_scan_floor(wallet);           // Task 4: floor tracks the SCAN frontier (red-before-green)
+    test_clearmemory_descent_frees(wallet);                // Task 4: full descent frees below the floor (no leak)
+    test_clearmemory_ceiling_scan_not_started(wallet);     // Task 4b: ceiling timing branch 1 — scan-not-started wrong-balance guard
+    test_clearmemory_ceiling_scan_started(wallet);         // Task 4b: ceiling timing branch 2 — abandon gaveUp, keep outstanding
 
     BRWalletFree(wallet);
 
