@@ -212,32 +212,6 @@ object NativeBridge {
      */
     external fun getWalletBirthCheckpointHeight(): Long
 
-    // === Deep-restore depth gate ===
-    /**
-     * Highest hardcoded chain checkpoint height for the active network. An
-     * OFFLINE lower-bound approximation of the chain tip, usable before
-     * startSync() exists (getLastBlockHeight() returns 0 that early). Does not
-     * require a loaded wallet or peer manager.
-     */
-    external fun getHighestCheckpointHeight(): Long
-
-    /**
-     * Depth in blocks a CF restore with the given creation time would require:
-     * highestCheckpointHeight − birthCheckpointHeight(creationTimeSecs). Computed
-     * from hardcoded checkpoints OFFLINE (no peers, wallet need not be loaded), so
-     * the onboarding flow can decide whether a restore is too deep to scan
-     * on-device BEFORE persisting the seed. Returns 0 (never negative) for a
-     * fresh/near-tip birth. Pairs with [restoreScanDepthLimit].
-     */
-    external fun restoreScanDepthBlocks(creationTimeSecs: Long): Long
-
-    /**
-     * The native CF-retention scan-depth ceiling (CF_RETENTION_MAX_SPAN in
-     * BRPeerManager.h). Exposed so the Kotlin depth gate has no hand-mirrored
-     * magic number that could drift from the native #define.
-     */
-    external fun restoreScanDepthLimit(): Long
-
     /** Register callback handler for native events. */
     external fun setCallbackHandler(handler: NativeCallback)
 

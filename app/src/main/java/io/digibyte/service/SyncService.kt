@@ -1729,28 +1729,17 @@ class SyncService : Service() {
             val tip = if (savedTip > 0) savedTip else NativeBridge.getWalletBirthCheckpointHeight()
             val birthHeight = settings.getLong("cf_birth_height", maxOf(0L, tip - 100L))
 
-            // Defense-in-depth for the deep-restore depth gate (RestoreDepthGate,
-            // spec Part 3c). The onboarding VM already refuses a too-deep restore;
-            // this is the belt-and-suspenders for a floor that slipped that gate
-            // (e.g. an upgrade path that wrote cf_birth_height directly). Only
-            // meaningful for a FRESH scan (savedTip <= 0): once savedTip > 0 the
-            // scan has progressed and the C-side window clamp governs the span, so
-            // a deep birth checkpoint on a long-synced wallet is NORMAL and must
-            // NOT be refused. Don't crash — just refuse to arm the hopeless deep
-            // scan and WARN.
-            val depthLimit = NativeBridge.restoreScanDepthLimit()
-            val highestCheckpoint = NativeBridge.getHighestCheckpointHeight()
-            val floorDepth = highestCheckpoint - birthHeight
-            val tooDeepFloor = savedTip <= 0L && depthLimit > 0L && floorDepth > depthLimit
-            if (tooDeepFloor) {
-                android.util.Log.w("SyncService",
-                    "BIP158: NOT arming auto-fetch — birth floor $birthHeight is " +
-                    "$floorDepth blocks below highest checkpoint $highestCheckpoint " +
-                    "(> retention limit $depthLimit). Deep historical restore is not " +
-                    "supported on-device yet; refusing the hopeless deep scan.")
-            } else {
-                NativeBridge.enableAutoCompactFilterFetch(birthHeight)
-            }
+            // Auto-fetch is armed UNCONDITIONALLY, at every depth. The old
+            // defense-in-depth branch here refused to arm for a birth floor deeper
+            // than the native retention ceiling, which was exactly backwards: on the
+            // deepest restores — the ones that need pacing most — it left the convoy
+            // gate inert (autoFetchCFiltersEnabled stayed 0) and let header sync run
+            // UNPACED, causing the very OOM the refusal claimed to avoid. Depth-based
+            // refusal is gone (a backup you can't restore from isn't a backup); the
+            // paced convoy makes any depth restorable, and arming it is what bounds
+            // the memory. Unservable individual heights are handled downstream by the
+            // B2 abandonment valve, not by refusing the restore.
+            NativeBridge.enableAutoCompactFilterFetch(birthHeight)
             // Re-pin every Receive-screen address into the native BIP158 watch set so a
             // receive to an address that fell outside the derived gap window is still
             // scanned in every block (fixes not-confirming / undetected receives).

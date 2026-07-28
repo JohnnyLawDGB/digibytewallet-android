@@ -131,25 +131,10 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
 
-            // Deep-restore depth gate (spec Part 3c): if the CF scan this restore
-            // needs is deeper than the native retention ceiling, REFUSE up front —
-            // starting it would sync to a wrong balance or OOM. Computed OFFLINE
-            // from hardcoded checkpoints (no peers, wallet not yet loaded), so we
-            // decide BEFORE persisting the seed / rescanning. Belt-and-suspenders
-            // for this lives in SyncService.startSyncWithTor.
-            val tooDeep = withContext(Dispatchers.Default) {
-                val depth = NativeBridge.restoreScanDepthBlocks(ts)
-                val limit = NativeBridge.restoreScanDepthLimit()
-                io.digibyte.core.sync.RestoreDepthGate.isRestoreTooDeep(depth, limit)
-            }
-            if (tooDeep) {
-                // No seed persist, no rescan — leave the in-memory mnemonic intact
-                // so the user can go back without re-entering their words.
-                _uiState.value = OnboardingUiState.TooDeep
-                onResult(false)
-                return@launch
-            }
-
+            // NOTE: no depth gate here. Restores are accepted at ANY depth — the
+            // paced convoy bounds the memory of an arbitrarily deep CF scan, so
+            // there is nothing to refuse. (A backup you can't restore from isn't a
+            // backup.)
             val success = withContext(Dispatchers.Default) {
                 // Clear any stale PIN from a previous install so the user
                 // is routed to PIN setup, not the unlock screen. Done inside
@@ -209,17 +194,4 @@ sealed class OnboardingUiState {
     data object WalletCreated : OnboardingUiState()
     data class Error(val message: String) : OnboardingUiState()
 
-    /**
-     * The chosen restore is deeper than this build can scan on-device (spec
-     * Part 3c). A plain, honest refusal — NOT an error and NOT a failure the
-     * user can fix by retrying; full historical restore ships with windowed-scan.
-     */
-    data object TooDeep : OnboardingUiState()
-
-    companion object {
-        /** User-facing copy for [TooDeep]. Kept here so UI and VM agree on one string. */
-        const val RESTORE_TOO_DEEP_MESSAGE: String =
-            "This wallet's history is deeper than this version can scan on your " +
-            "phone yet. Full historical restore is coming in a future update."
-    }
 }

@@ -35,10 +35,11 @@
 #     build unexpectedly PASSES.
 #   * FIXED (default): floors at min(cfNext,lowestNeeded)-144 == scan-floor-144,
 #     so the header SURVIVES -> the full suite PASSES (exit 0 == GREEN).
-# CF_RETENTION_MAX_SPAN=4000 is still passed to every build, but is now INERT:
-# paced-convoy Task 5 deleted the tip-anchored depth ceiling that read it, and no
-# code in this TU references it any more. The flag (and the #define itself) come
-# out with the rest of the depth-refusal removal.
+# CF_RETENTION_MAX_SPAN is GONE: paced-convoy Task 5 deleted the tip-anchored
+# depth ceiling that read it, and the depth-refusal removal deleted the #define
+# in BRPeerManager.h along with the app-layer refusal gate and its three JNI
+# accessors. No build here passes -DCF_RETENTION_MAX_SPAN any more. The retention
+# FLOOR below is a different mechanism and is unaffected.
 #
 # ==== DETERMINISM-GUARD RED-BEFORE-GREEN GATE (re-homed onto the B2 valve) ===
 # The Part-3b determinism guard (BRCFScanLedgerAbandonGaveUpBelow advances
@@ -155,7 +156,7 @@ build() {
 }
 
 # ---- RED: unfixed retention prunes the scan floor (MUST fail) ----------------
-build "$BUILD_DIR/kat_unfixed" -DRETENTION_UNFIXED -DKAT_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_unfixed" -DRETENTION_UNFIXED -DKAT_REDGREEN_ONLY
 if "$BUILD_DIR/kat_unfixed"; then
     echo "GATE FAILURE: the UNFIXED retention build PASSED. The red-before-green gate"
     echo "cannot go red -- the scan-floor prune was not detected. Refusing to green."
@@ -165,7 +166,7 @@ else
 fi
 
 # ---- RED: pre-guard preemptive abandonedBelow raise (scan-not-started) MUST fail ----
-build "$BUILD_DIR/kat_ceiling_unguarded" -DRETENTION_PREEMPTIVE_ADVANCE -DKAT_CEILING_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_ceiling_unguarded" -DRETENTION_PREEMPTIVE_ADVANCE -DKAT_CEILING_REDGREEN_ONLY
 if "$BUILD_DIR/kat_ceiling_unguarded"; then
     echo "GATE FAILURE: the PRE-GUARD (preemptive abandonedBelow) build PASSED. The"
     echo "determinism-guard red-before-green cannot go red -- an empty-scan deep restore"
@@ -176,7 +177,7 @@ else
 fi
 
 # ---- RED: convoy gate compiled OUT (the pre-fix shape) MUST fail ------------
-build "$BUILD_DIR/kat_convoy_ungated" -DCONVOY_UNGATED -DKAT_CONVOY_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_convoy_ungated" -DCONVOY_UNGATED -DKAT_CONVOY_REDGREEN_ONLY
 if "$BUILD_DIR/kat_convoy_ungated"; then
     echo "GATE FAILURE: the CONVOY-UNGATED build PASSED. The convoy gate's red-before-green"
     echo "cannot go red -- an unpaced header/cfheader fast-forward to the tip would not be"
@@ -187,7 +188,7 @@ else
 fi
 
 # ---- RED: naive NextHeight-1 on a NULL chain (0xFFFFFFFF underflow) MUST fail ----
-build "$BUILD_DIR/kat_convoy_nullnaive" -DCONVOY_NULLCHAIN_NAIVE -DKAT_CONVOY_NULL_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_convoy_nullnaive" -DCONVOY_NULLCHAIN_NAIVE -DKAT_CONVOY_NULL_REDGREEN_ONLY
 if "$BUILD_DIR/kat_convoy_nullnaive"; then
     echo "GATE FAILURE: the NAIVE NULL-CHAIN build PASSED. The B-3 carve-out's red-before-green"
     echo "cannot go red -- a NULL compactFilterChain would underflow to 0xFFFFFFFF, score the"
@@ -199,7 +200,7 @@ else
 fi
 
 # ---- RED: the B1 KeepAlive convoy DRIVER compiled OUT (gate-only shape) MUST fail ----
-build "$BUILD_DIR/kat_convoy_nob1" -DCONVOY_NO_B1_DRIVER -DKAT_B1_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_convoy_nob1" -DCONVOY_NO_B1_DRIVER -DKAT_B1_REDGREEN_ONLY
 if "$BUILD_DIR/kat_convoy_nob1"; then
     echo "GATE FAILURE: the NO-B1-DRIVER build PASSED. The convoy driver's red-before-green"
     echo "cannot go red -- with the gate installed but no KeepAlive driver, a wallet resumed at a"
@@ -212,7 +213,7 @@ else
 fi
 
 # ---- RED: the B1.3 getheaders re-kick RATE LIMIT compiled OUT MUST fail -----
-build "$BUILD_DIR/kat_convoy_unthrottled" -DCONVOY_HDR_REKICK_UNTHROTTLED -DKAT_B1_THROTTLE_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_convoy_unthrottled" -DCONVOY_HDR_REKICK_UNTHROTTLED -DKAT_B1_THROTTLE_REDGREEN_ONLY
 if "$BUILD_DIR/kat_convoy_unthrottled"; then
     echo "GATE FAILURE: the UNTHROTTLED B1.3 re-kick build PASSED. The rate limit's"
     echo "red-before-green cannot go red -- a permanently frozen header tip (stale-HIGH"
@@ -224,7 +225,7 @@ else
 fi
 
 # ---- RED: the B1.3 GATED->open episode reset compiled OUT MUST fail ---------
-build "$BUILD_DIR/kat_convoy_stalegate" -DCONVOY_HDR_REKICK_STALE_ACROSS_GATE -DKAT_B1_GATERESET_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_convoy_stalegate" -DCONVOY_HDR_REKICK_STALE_ACROSS_GATE -DKAT_B1_GATERESET_REDGREEN_ONLY
 if "$BUILD_DIR/kat_convoy_stalegate"; then
     echo "GATE FAILURE: the STALE-BACKOFF-ACROSS-GATE build PASSED. The episode reset's"
     echo "red-before-green cannot go red -- a genuinely stalled header tip that escalated to"
@@ -250,7 +251,7 @@ fi
 # red/green gated here -- the unfixed (no-op) build already proves the gate can
 # go red, and the arithmetic (lowest - 1) is a one-line, directly-inspectable
 # expression in BRPeerManagerSnapAutoFetchThroughToScanFrontier.
-build "$BUILD_DIR/kat_resume_snap_unfixed" -DRESUME_SNAP_UNFIXED -DKAT_RESUME_SNAP_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_resume_snap_unfixed" -DRESUME_SNAP_UNFIXED -DKAT_RESUME_SNAP_REDGREEN_ONLY
 if "$BUILD_DIR/kat_resume_snap_unfixed"; then
     echo "GATE FAILURE: the RESUME-SNAP-UNFIXED build PASSED. The resume cursor"
     echo "reconciliation's red-before-green cannot go red -- a wallet resumed after the"
@@ -269,7 +270,7 @@ fi
 # gated four ways — one shape per axis the valve must get right. Each MUST fail.
 
 # ---- RED: no valve at all (today's shape) MUST fail -------------------------
-build "$BUILD_DIR/kat_b2_novalve" -DCONVOY_NO_B2_VALVE -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_b2_novalve" -DCONVOY_NO_B2_VALVE -DKAT_B2_REDGREEN_ONLY
 if "$BUILD_DIR/kat_b2_novalve"; then
     echo "GATE FAILURE: the NO-B2-VALVE build PASSED. The abandonment valve's red-before-green"
     echo "cannot go red -- with the depth ceiling removed and no valve, a retry-exhausted hole is"
@@ -281,7 +282,7 @@ else
 fi
 
 # ---- RED: peer-blind valve (abandons an un-offered height) MUST fail --------
-build "$BUILD_DIR/kat_b2_peerblind" -DCONVOY_B2_PEER_BLIND -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_b2_peerblind" -DCONVOY_B2_PEER_BLIND -DKAT_B2_REDGREEN_ONLY
 if "$BUILD_DIR/kat_b2_peerblind"; then
     echo "GATE FAILURE: the PEER-BLIND B2 build PASSED. The valve's 'never abandon when it isn't"
     echo "the height's fault' rule cannot go red -- a wallet that simply has no connected CF peer"
@@ -292,7 +293,7 @@ else
 fi
 
 # ---- RED: valve that checks peer presence at the abandon INSTANT MUST fail --
-build "$BUILD_DIR/kat_b2_latchblind" -DCONVOY_B2_IGNORE_OFFER_LATCH -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_b2_latchblind" -DCONVOY_B2_IGNORE_OFFER_LATCH -DKAT_B2_REDGREEN_ONLY
 if "$BUILD_DIR/kat_b2_latchblind"; then
     echo "GATE FAILURE: the IGNORE-OFFER-LATCH B2 build PASSED. The offered-vs-UN-offered axis"
     echo "cannot go red -- a CF peer that flapped away DURING the deciding cycle and came back"
@@ -304,7 +305,7 @@ else
 fi
 
 # ---- RED: abandoning after ONE re-arm cycle MUST fail -----------------------
-build "$BUILD_DIR/kat_b2_rearmonce" -DCONVOY_B2_REARM_ONCE -DKAT_B2_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_b2_rearmonce" -DCONVOY_B2_REARM_ONCE -DKAT_B2_REDGREEN_ONLY
 if "$BUILD_DIR/kat_b2_rearmonce"; then
     echo "GATE FAILURE: the REARM-ONCE B2 build PASSED. The CF_CONVOY_REARM_MAX=2 tuning cannot"
     echo "go red -- a single unlucky peer-rotation cycle would be enough to abandon a servable"
@@ -327,7 +328,7 @@ fi
 #     manager->blocks grows to the full chain length (~105k headers, ~23 MB) instead
 #     of ~14k, and the deep-restore OOM is back -> the case FAILS (== RED).
 # HARD-FAILS run.sh if it unexpectedly PASSES.
-build "$BUILD_DIR/kat_scale_ungated" -DCONVOY_UNGATED -DKAT_SCALE_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_scale_ungated" -DCONVOY_UNGATED -DKAT_SCALE_REDGREEN_ONLY
 if "$BUILD_DIR/kat_scale_ungated"; then
     echo "GATE FAILURE: the CONVOY-UNGATED SCALE build PASSED. The memory bound's red-before-green"
     echo "cannot go red -- an unpaced header fast-forward would fill manager->blocks with the whole"
@@ -369,7 +370,7 @@ fi
 # NB the join height is not free: b (fork side) and b2 (main side) descend in
 # lockstep, so a join BELOW floor-1 kills b2 FIRST and does NOT crash. The case pins
 # the join at exactly floor-1 — see the long comment on test_reorg_below_window_no_crash.
-build "$BUILD_DIR/kat_reorg_unguarded" -DREORG_NULLGUARD_UNFIXED -DKAT_REORG_NULLGUARD_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_reorg_unguarded" -DREORG_NULLGUARD_UNFIXED -DKAT_REORG_NULLGUARD_REDGREEN_ONLY
 reorg_log="$BUILD_DIR/reorg_unguarded.log"
 set +e
 ASAN_OPTIONS=symbolize=0 "$BUILD_DIR/kat_reorg_unguarded" > "$reorg_log" 2>&1
@@ -434,5 +435,5 @@ else
 fi
 
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------
-build "$BUILD_DIR/kat_fixed" -DCF_RETENTION_MAX_SPAN=4000
+build "$BUILD_DIR/kat_fixed"
 "$BUILD_DIR/kat_fixed"
