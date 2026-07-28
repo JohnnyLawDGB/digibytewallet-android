@@ -314,6 +314,29 @@ else
     echo "RED confirmed: one re-arm cycle lets a single unlucky rotation cycle false-positive (expected)."
 fi
 
+# ==== Paced-convoy Task 6: THE MEMORY BOUND — the feature's headline claim ====
+# Everything else in this branch exists to make ONE property true: a genuinely deep
+# restore does not grow manager->blocks without bound. No other case can observe it
+# — they all run on 300..6000-block chains, where an unpaced fast-forward and a
+# paced convoy are indistinguishable. test_convoy_scale_bounded drives a >100k-block
+# descent from a deep birth floor to the tip and asserts BRSetCount(manager->blocks)
+# never exceeds CF_CONVOY_WINDOW + the 2-batch stale-flag overshoot + the retention
+# margin, at EVERY tick.
+#   * -DCONVOY_UNGATED (reusing the Task-2 gate shape): with the suppression compiled
+#     out the modeled peer's header continuation fast-forwards straight to the tip,
+#     manager->blocks grows to the full chain length (~105k headers, ~23 MB) instead
+#     of ~14k, and the deep-restore OOM is back -> the case FAILS (== RED).
+# HARD-FAILS run.sh if it unexpectedly PASSES.
+build "$BUILD_DIR/kat_scale_ungated" -DCONVOY_UNGATED -DKAT_SCALE_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_scale_ungated"; then
+    echo "GATE FAILURE: the CONVOY-UNGATED SCALE build PASSED. The memory bound's red-before-green"
+    echo "cannot go red -- an unpaced header fast-forward would fill manager->blocks with the whole"
+    echo "[birth..tip] span on every deep restore and OOM the wallet, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the gate a >100k-block descent grows manager->blocks to chain length (expected)."
+fi
+
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------
 build "$BUILD_DIR/kat_fixed" -DCF_RETENTION_MAX_SPAN=4000
 "$BUILD_DIR/kat_fixed"

@@ -102,6 +102,14 @@ static void check(int c, const char *d) { printf(c ? "PASS: %s\n" : "FAIL: %s\n"
 
 static int g_capCount = 0;
 static uint32_t g_capStart = 0;
+// Task 6 (scale KAT): the RAW stopHash of the last captured getcfilters. The
+// existing g_capLog resolves stopHash -> height through the test-side blockReg
+// registry, which is REG_MAX(8192)-bounded and O(n) -- unusable on a >100k chain.
+// The scale case instead knows the expected stop HEIGHT itself and compares the
+// raw hash against rhUniqueHash(expected), which is the sharper assertion anyway:
+// it proves the manager's tip-down prevBlock walk resolved the right block at
+// that frontier position, not merely that it resolved something.
+static UInt256 g_capStopHash;
 
 // --- Task 3: full send-log + between-pass drain hook -------------------------
 //
@@ -201,6 +209,7 @@ void __wrap_BRPeerSendGetCFilters(BRPeer *peer, uint8_t filterType, uint32_t sta
 {
     (void)peer; (void)filterType;
     g_capStart = startHeight;
+    g_capStopHash = stopHash;
     g_capCount++;
 
     // Resolve stopHash -> stop height via the test's own dummy-block registry,
@@ -254,11 +263,13 @@ void __wrap_BRPeerSendGetdataBlocks(BRPeer *peer, const UInt256 blockHashes[], s
 //   void BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t startHeight, UInt256 stopHash);
 static int      g_cfhCount = 0;
 static uint32_t g_cfhStart = 0;
+static UInt256  g_cfhStopHash;   // Task 6 (scale KAT): raw stop hash, same reason as g_capStopHash
 
 void __wrap_BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t startHeight, UInt256 stopHash)
 {
-    (void)peer; (void)filterType; (void)stopHash;
+    (void)peer; (void)filterType;
     g_cfhStart = startHeight;
+    g_cfhStopHash = stopHash;
     g_cfhCount++;
 }
 
@@ -3183,6 +3194,632 @@ static void test_resume_snaps_cursor(BRWallet *wallet)
     BRPeerManagerFree(m2);
 }
 
+// ============================================================================
+// Paced-convoy fetch, Task 6: BRPeerManagerHasPendingAbandonment (spec Part C)
+// ============================================================================
+//
+// The ordering signal between the B2 valve and the Kotlin tip-stall watchdog. The
+// two scan-stall watchers must not race: while the valve is mid-decision on the
+// hole that PINS the scan frontier, its re-arm IS productive work and the
+// watchdog's escalation (ungated getheaders, then a manager recreate) is churn.
+//
+// It returns a COUNT (rearmCycles + 1), not a boolean, and that is the whole point:
+// on a churny fleet every deciding cycle can be tainted, so the valve can re-arm
+// INDEFINITELY -- a consumer suppressing on a bare boolean would stand down forever,
+// exactly when the backstop is needed. The count lets the consumer BOUND its
+// suppression. Both properties are pinned below.
+static void test_pending_abandonment_accessor(BRWallet *wallet)
+{
+    printf("\n=== test_pending_abandonment_accessor (paced-convoy Task 6: the watchdog ordering signal) ===\n");
+
+    const uint32_t BASE = 700000u;
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    check(m != NULL, "manager created");
+    if (! m) return;
+    m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    check(BRPeerManagerHasPendingAbandonment(m) == 0,
+          "no gaveUp hole at all -> 0 (nothing pending; the watchdog is NOT suppressed)");
+
+    // A hole that is merely OUTSTANDING (still being retried on its original cycle)
+    // is not the valve's business either -- the residual driver owns it.
+    BRCFScanLedgerRecordRequested(&m->cfLedger, BASE, BASE + 9u, UINT128_ZERO, 0, 1700000000u);
+    check(BRPeerManagerHasPendingAbandonment(m) == 0,
+          "an OUTSTANDING (not yet retry-exhausted) hole -> 0: the valve is not deciding anything yet");
+
+    // Retire it to gaveUp the production way: attempts at the cap, then RetireCapped.
+    BRCFOutstanding *e = mutOutstanding(&m->cfLedger, BASE);
+    check(e != NULL, "setup: the hole is outstanding before retirement");
+    if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
+    BRCFScanLedgerRetireCapped(&m->cfLedger);
+    check(gaveUpContains(&m->cfLedger, BASE), "setup: the hole was retired to gaveUp (RetireCapped)");
+
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "PENDING, ORIGINAL CYCLE: a gaveUp hole pinning the scan frontier -> 1 (== rearmCycles 0 + 1)");
+
+    // One re-arm cycle granted (what the valve does on a tainted/early cycle). The
+    // hole is OUTSTANDING again for ~7.5 min of rotated retry -- the larger half of
+    // the valve's window, and still the valve's work, so it must still read pending.
+    check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: the valve re-armed the hole once");
+    check(gaveUpContains(&m->cfLedger, BASE) == 0, "setup: a re-armed hole has exactly one home (out of gaveUp)");
+    check(BRPeerManagerHasPendingAbandonment(m) == 2,
+          "RE-ARM CYCLE IN FLIGHT: an OUTSTANDING hole with rearmCycles>0 still reads pending (2) -- spec "
+          "Part C defers the watchdog while a re-arm is pending, not only at the decision instant");
+
+    // ...and back to gaveUp with the cycle count carried across the round trip.
+    e = mutOutstanding(&m->cfLedger, BASE);
+    if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
+    BRCFScanLedgerRetireCapped(&m->cfLedger);
+    check(BRPeerManagerHasPendingAbandonment(m) == 2,
+          "BOUNDABLE: after one re-arm the signal reads 2 (rearmCycles 1 + 1) -- a CONSUMER CAN BOUND ITS "
+          "SUPPRESSION ON THIS, which a bare boolean could not (an indefinitely re-arming hole on a churny "
+          "fleet would otherwise suppress the watchdog forever)");
+
+    // The count keeps CLIMBING past CF_CONVOY_REARM_MAX+1 when the valve cannot
+    // converge (every deciding cycle tainted by peer churn) -- which is precisely
+    // the signal Task 8 must bound its suppression on. If this saturated at the
+    // valve's own threshold there would be nothing to bound against.
+    check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: a second re-arm cycle granted");
+    e = mutOutstanding(&m->cfLedger, BASE);
+    if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
+    BRCFScanLedgerRetireCapped(&m->cfLedger);
+    check(BRPeerManagerHasPendingAbandonment(m) == CF_CONVOY_REARM_MAX + 1,
+          "the signal reaches CF_CONVOY_REARM_MAX+1 == the cycle at which the valve becomes ABANDON-ELIGIBLE "
+          "(the exact ceiling a consumer bounds its suppression at)");
+    check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: a THIRD re-arm (the non-converging fleet)");
+    e = mutOutstanding(&m->cfLedger, BASE);
+    if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
+    BRCFScanLedgerRetireCapped(&m->cfLedger);
+    check(BRPeerManagerHasPendingAbandonment(m) > (uint32_t)(CF_CONVOY_REARM_MAX + 1),
+          "NON-CONVERGING VALVE IS VISIBLE: the count climbs PAST the abandon-eligible cycle, so a consumer "
+          "can tell 'the valve is working' from 'the valve is looping' and stop suppressing (the Task-5 "
+          "review's permanent-stand-down failure)");
+
+    // A gaveUp height ABOVE a still-outstanding hole does NOT pin the frontier and is
+    // not the valve's business -- same predicate the valve itself uses.
+    BRCFScanLedgerRecordRequested(&m->cfLedger, BASE - 5u, BASE - 5u, UINT128_ZERO, 0, 1700000000u);
+    check(m->cfLedger.outstandingCount > 0 && m->cfLedger.outstanding[0].height < BASE,
+          "setup: a LOWER still-outstanding hole now sits below the gaveUp one");
+    check(BRPeerManagerHasPendingAbandonment(m) == 0,
+          "NOT PINNING: a gaveUp height above a still-outstanding hole -> 0 (byte-identical to the valve's "
+          "own pinning predicate, so the watchdog can never defer to a decision that is not happening)");
+
+    BRPeerManagerFree(m);
+}
+
+// ============================================================================
+// Paced-convoy fetch, Task 6: THE MEMORY-BOUND PROOF (spec Part C + Part F #4)
+// ============================================================================
+//
+// This is the headline claim of the whole feature: a genuinely DEEP restore no
+// longer grows manager->blocks without bound. Everything else in this branch --
+// the gate, the KeepAlive driver, the resume snap, the abandonment valve -- exists
+// to make THIS property true, and none of the other cases can observe it, because
+// they all run on 300..6000-block chains where an unpaced fast-forward is
+// indistinguishable from a paced one.
+//
+// WHAT IS DRIVEN FOR REAL (not modeled):
+//   * the convoy window predicates (_cfConvoyHdrGated / _cfConvoyCfhGated) through
+//     the production CF_CONVOY_*_GATED macros -- so -DCONVOY_UNGATED reds this case;
+//   * _BRPeerManagerClearMemory -- the real retention floor + descent;
+//   * BRPeerManagerKeepAlive -- the real B1.1 forward cfilter drive (which resolves
+//     its own stop hash by the real tip-down prevBlock walk), B1.2 cfheaders
+//     re-kick, B1.3 getheaders re-kick, residual driver and B2 valve;
+//   * BRCFScanLedger* -- the real ledger, RecordRequested/MarkEvaluated/advance;
+//   * BRCompactFilterChainAppend -- real filter-header chaining.
+//
+// WHAT IS MODELED (the network, i.e. everything outside the manager):
+//   * the PEER's CF-only 2000-header continuation. BRPeer.c:648 is file-static to a
+//     separate compilation unit, so the header supply is issued here instead --
+//     but it is issued THROUGH the production gate verdict, and in 2-batch groups,
+//     because the peer reads a pushed volatile flag that is one batch stale
+//     (spec Part A, "bounded overshoot"). That makes the modeled supply the
+//     PESSIMISTIC shape, not a convenient one.
+//   * the cfheaders RESPONSE: appended only for a getcfheaders the manager
+//     actually put on the wire, for exactly the [start..batchEnd] it asked for.
+//     A suppressed request advances nothing -- the causality spine.
+//   * the cfilter RESPONSES: MarkEvaluated only for heights that are OUTSTANDING,
+//     and a height only becomes outstanding because _BRPeerManagerRequestCFiltersLocked
+//     returned a real send (it returns 0 with no CF peer or an unresolvable stop
+//     hash) and B1.1 then recorded the range. Same causality, without the
+//     REG_MAX(8192)-bounded everRequested registry, which cannot span 100k+ heights.
+
+#define SCALE_BIRTH      23800000u   // deep birth floor; above the highest mainnet checkpoint
+#define SCALE_CHAIN_LEN  105000u     // > 100k: a genuinely deep restore, not a scaled-down proxy
+#define SCALE_TIP        (SCALE_BIRTH + SCALE_CHAIN_LEN - 1u)
+#define SCALE_HDR_BATCH  2000u       // wire max headers per `headers` message (BRPeer.c's continuation quantum)
+#define SCALE_MAX_TICKS  400         // >> the ~105 ticks the descent needs at MAX_CFILTERS_RESULTS/tick
+
+// Append `count` filter headers to the manager's chain -- the cfheaders RESPONSE.
+// Content is irrelevant to this case (Append just dSHA256-chains them); what
+// matters is that NextHeight advances by exactly the batch the manager asked for.
+static int scaleAppendCfHeaders(BRPeerManager *m, uint32_t count)
+{
+    static UInt256 fh[MAX_CFHEADERS_RESULTS];
+    if (count == 0 || count > MAX_CFHEADERS_RESULTS || ! m->compactFilterChain) return 0;
+    uint32_t next = BRCompactFilterChainNextHeight(m->compactFilterChain);
+    for (uint32_t i = 0; i < count; i++) fh[i] = rhUniqueHash(next + i);
+    return BRCompactFilterChainAppend(m->compactFilterChain,
+                                      BRCompactFilterChainTipHeader(m->compactFilterChain), fh, count);
+}
+
+// One modeled header batch: append up to SCALE_HDR_BATCH prevBlock-linked,
+// distinct-per-height blocks (rhChainBlock -- NEVER dummyBlock, whose uint8_t hash
+// seed collides after 256 blocks and would silently cap this "105k-block" chain at
+// ~256 entries, making the whole bound assertion vacuous). Returns the count added.
+//
+// Production calls _BRPeerManagerClearMemory once per RELAYED BLOCK
+// (_peerRelayedBlock:1750); calling it once per BATCH here is EQUIVALENT for the
+// resident-set bound -- the pruner only ever frees blocks strictly BELOW cfFloor,
+// and every block a batch adds is far ABOVE it, so no intra-batch call could free
+// anything the batch-end call does not -- and ~2000x cheaper.
+static uint32_t scaleSupplyHeaderBatch(BRPeerManager *m, uint32_t chainTip)
+{
+    if (! m->lastBlock || m->lastBlock->height >= chainTip) return 0;
+    uint32_t from = m->lastBlock->height + 1u;
+    uint32_t to   = from + (SCALE_HDR_BATCH - 1u);
+    if (to > chainTip) to = chainTip;
+    for (uint32_t h = from; h <= to; h++) {
+        BRMerkleBlock *b = rhChainBlock(h);
+        BRSetAdd(m->blocks, b);
+        m->lastBlock = b;
+    }
+    _BRPeerManagerClearMemory(m);
+    return to - from + 1u;
+}
+
+// Model up to `n` cfilter responses: MarkEvaluated the LOWEST outstanding heights
+// (outstanding[] is sorted ascending), so the scan frontier climbs contiguously.
+static int scaleServe(BRPeerManager *m, int n)
+{
+    int k = 0;
+    while (k < n && m->cfLedger.outstandingCount > 0) {
+        BRCFScanLedgerMarkEvaluated(&m->cfLedger, m->cfLedger.outstanding[0].height);
+        k++;
+    }
+    return k;
+}
+
+// The stop-hash resolver property, asserted at a live frontier position.
+//
+// Ground truth is rhUniqueHash(h) -- the hash the chain BUILDER used -- so the
+// expectations are derived from the chain, never from what the resolver returns.
+// Three requirement-level rules, checked over a spread of heights:
+//   (1) every height the retention floor GUARANTEES is resident -- i.e. at/above
+//       cfFloor, at/below the header frontier, AND at/above the restore's own
+//       anchor height (nothing below the anchor was ever part of the chain, so a
+//       fresh restore legitimately has no header there) -- must resolve to its
+//       true main-chain hash. This is what makes the bounded window usable: a
+//       short walk that cannot resolve the scan frontier would be a wedge, not a win.
+//   (2) every height ABOVE the header frontier must resolve to UINT256_ZERO --
+//       cleanly absent, never garbage read off the end of a pruned chain.
+//   (3) heights BELOW the retention floor MAY have been pruned; if the resolver
+//       still returns something it must be the true hash, never garbage.
+// And the BATCHED resolver must be byte-identical to the naive walk everywhere
+// (it is what every getcfilters/getcfheaders stop hash goes through).
+// Returns 1 on success; writes a reason on failure.
+static int scaleResolverOk(BRPeerManager *m, uint32_t chainBase, char *why, size_t whyLen)
+{
+    uint32_t scanFrontier = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+    uint32_t cfNext       = m->compactFilterChain ? BRCompactFilterChainNextHeight(m->compactFilterChain) : 0;
+    uint32_t floorH       = (cfNext && cfNext < scanFrontier) ? cfNext : scanFrontier;
+    uint32_t cfFloor      = (floorH > CLEAR_MEM_CF_RETENTION_MARGIN)
+                            ? floorH - CLEAR_MEM_CF_RETENTION_MARGIN : 1u;
+    if (cfFloor < chainBase) cfFloor = chainBase;   // nothing below the restore anchor was ever built
+    uint32_t hdrFrontier  = m->lastBlock ? m->lastBlock->height : 0;
+
+    uint32_t hs[24];
+    size_t n = 0;
+    hs[n++] = cfFloor;                        // the retained window's guaranteed low edge
+    hs[n++] = cfFloor + 1u;
+    hs[n++] = scanFrontier;                   // the scan frontier itself
+    hs[n++] = scanFrontier + 1u;
+    hs[n++] = scanFrontier + MAX_CFILTERS_RESULTS - 1u;   // the forward fetch's stop position
+    hs[n++] = hdrFrontier;                    // the header frontier (lastBlock)
+    hs[n++] = hdrFrontier - 1u;
+    hs[n++] = hdrFrontier + 1u;               // above the frontier -> ZERO
+    hs[n++] = hdrFrontier + 5000u;            // far above -> ZERO
+    hs[n++] = SCALE_TIP + 1u;                 // above the whole chain -> ZERO
+    hs[n++] = SCALE_BIRTH;                    // the birth floor (pruned once the scan climbs past)
+    hs[n++] = SCALE_BIRTH - 1u;               // the pre-birth anchor
+    for (int i = 1; i <= 10; i++)             // a spread across the middle of the retained window
+        hs[n++] = cfFloor + (uint32_t)i * ((hdrFrontier > cfFloor) ? (hdrFrontier - cfFloor) / 11u : 1u);
+
+    UInt256 naive[24], batch[24];
+    for (size_t i = 0; i < n; i++) naive[i] = _BRPeerManagerBlockHashAtHeight(m, hs[i]);
+    for (size_t i = 0; i < n; i++) batch[i] = rhForkHash(0xFFFFFFFFu);   // poison: catch an unwritten slot
+    _BRPeerManagerResolveHashesAtHeightsLocked(m, hs, n, batch);
+
+    for (size_t i = 0; i < n; i++) {
+        if (! UInt256Eq(batch[i], naive[i])) {
+            snprintf(why, whyLen, "batch != naive at height %u", hs[i]);
+            return 0;
+        }
+        if (hs[i] >= cfFloor && hs[i] <= hdrFrontier) {
+            if (! UInt256Eq(batch[i], rhUniqueHash(hs[i]))) {
+                snprintf(why, whyLen, "retained height %u did NOT resolve to its true chain hash "
+                         "(cfFloor %u, hdrFrontier %u)", hs[i], cfFloor, hdrFrontier);
+                return 0;
+            }
+        }
+        else if (hs[i] > hdrFrontier) {
+            if (! UInt256Eq(batch[i], UINT256_ZERO)) {
+                snprintf(why, whyLen, "height %u above the header frontier %u resolved to a NON-ZERO hash",
+                         hs[i], hdrFrontier);
+                return 0;
+            }
+        }
+        else {   // below the retention floor: may be pruned, but never garbage
+            if (! UInt256Eq(batch[i], UINT256_ZERO) && ! UInt256Eq(batch[i], rhUniqueHash(hs[i]))) {
+                snprintf(why, whyLen, "sub-floor height %u resolved to neither ZERO nor its true hash", hs[i]);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static void test_convoy_scale_bounded(BRWallet *wallet)
+{
+    printf("\n=== test_convoy_scale_bounded (paced-convoy Task 6: THE memory bound, >100k-block descent) ===\n");
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    check(m != NULL, "manager created");
+    if (! m) return;
+    m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+
+    // The params' checkpoint headers are pre-seeded into manager->blocks and are NOT
+    // on the prevBlock walk from our synthetic chain, so the pruner's descent never
+    // reaches them and they are resident for the whole run. Counted into the bound.
+    const size_t baseCount = BRSetCount(m->blocks);
+
+    // The header the restore starts from: one below birth, so the chain the convoy
+    // builds is exactly [SCALE_BIRTH .. SCALE_TIP].
+    BRMerkleBlock *anchor = rhChainBlock(SCALE_BIRTH - 1u);
+    BRSetAdd(m->blocks, anchor);
+    m->lastBlock = anchor;
+    m->estimatedHeight = SCALE_TIP;
+
+    // Arm the CF scan at the deep birth floor -- the fresh-deep-restore shape.
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, SCALE_BIRTH, UINT256_ZERO);
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = SCALE_BIRTH;
+    m->autoFetchCFiltersThrough  = SCALE_BIRTH - 1u;
+    BRCFScanLedgerInit(&m->cfLedger, SCALE_BIRTH);
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x51; pa->port = 12051; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // The blockReg/everRequested spine is deliberately left EMPTY: it is
+    // REG_MAX(8192)-bounded with O(n) lookups and cannot span 105k heights. This
+    // case gets its causality from `outstanding` instead (see the header comment)
+    // and its stop-hash truth from g_capStopHash/g_cfhStopHash directly.
+    blockRegReset(); everReqReset(); capLogReset();
+    g_capCount = 0; g_cfhCount = 0;
+
+    check(SCALE_CHAIN_LEN > 100000u, "setup: this is a genuinely DEEP restore (>100k blocks below the tip)");
+    check(_cfConvoyScanArmed(m) == 1, "setup: the convoy is ARMED (CF-only syncMode + auto-fetch enabled)");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == SCALE_BIRTH,
+          "setup: the scan frontier starts at the deep birth floor");
+    check(_cfConvoyHdrGated(m) == 0 && _cfConvoyCfhGated(m) == 0,
+          "setup: both convoy windows start OPEN (nothing suppressed before the descent begins)");
+
+    // ---- THE BOUND, derived from the requirement (spec Part C), not measured ----
+    //   resident heights  = [cfFloor .. blockHeaderFrontier]
+    //   cfFloor           = scanFrontier - CLEAR_MEM_CF_RETENTION_MARGIN   (Tasks 1-4 floor)
+    //   blockHeaderFrontier <= scanFrontier + (CF_CONVOY_WINDOW - 1) + 2*SCALE_HDR_BATCH
+    //         (the gate is only ever evaluated OPEN at W_hdr <= W-1, and the peer reads
+    //          the pushed verdict one batch stale, so at most two more batches land)
+    //   => count <= CF_CONVOY_WINDOW + 2*SCALE_HDR_BATCH + CLEAR_MEM_CF_RETENTION_MARGIN
+    //               + the never-pruned checkpoint headers.
+    const size_t BOUND = (size_t)CF_CONVOY_WINDOW + 2u * SCALE_HDR_BATCH
+                       + CLEAR_MEM_CF_RETENTION_MARGIN + baseCount;
+    check(BOUND * 4u < (size_t)SCALE_CHAIN_LEN,
+          "the bound is a REAL bound: < 1/4 of the chain length, so an unbounded build cannot slip under it");
+
+    size_t   peak = 0;
+    int      boundViolations = 0, resolverFails = 0, stopHashFails = 0;
+    int      scanRegressions = 0, contiguityBreaks = 0, cfhStartBreaks = 0;
+    uint32_t prevScan = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+    uint32_t peakHdrLead = 0;
+    int      tick = 0, checkpoints = 0, ticksWithFetch = 0;
+    char     lbl[224], why[192];
+    why[0] = '\0';
+
+    for (tick = 0; tick < SCALE_MAX_TICKS &&
+                   BRCFScanLedgerScannedThrough(&m->cfLedger) < SCALE_TIP; tick++) {
+
+        // ---- (1) HEADER SUPPLY: the peer keeps its 2000-header continuation
+        // running until the manager's pushed verdict says the window is full.
+        // Two batches per verdict == the documented bounded overshoot.
+        while (! CF_CONVOY_HDR_GATED(m) && m->lastBlock->height < SCALE_TIP) {
+            for (int b = 0; b < 2; b++) if (scaleSupplyHeaderBatch(m, SCALE_TIP) == 0) break;
+            size_t c = BRSetCount(m->blocks);
+            if (c > peak) peak = c;
+            if (c > BOUND) boundViolations++;
+        }
+        {   // observed window lead, for the report line
+            uint32_t sf = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+            uint32_t hf = m->lastBlock->height;
+            if (hf > sf && hf - sf > peakHdrLead) peakHdrLead = hf - sf;
+        }
+
+        // ---- (2) the PRODUCTION convoy driver ----
+        uint32_t cfhNextBefore = BRCompactFilterChainNextHeight(m->compactFilterChain);
+        uint32_t throughBefore = m->autoFetchCFiltersThrough;
+        int      capBefore = g_capCount, cfhBefore = g_cfhCount;
+
+        BRPeerManagerKeepAlive(m);
+
+        // ---- (3) the forward getcfilters that KeepAlive actually sent ----
+        if (g_capCount > capBefore) {
+            ticksWithFetch++;
+            uint32_t reqStop = m->autoFetchCFiltersThrough;   // B1.1 advances this to reqStop on a real send
+            // The stop hash MUST be the hash of the block at the stop height: this is
+            // the tip-down prevBlock walk resolving correctly from a WINDOW, at a
+            // frontier ~CF_CONVOY_WINDOW below lastBlock.
+            if (! UInt256Eq(g_capStopHash, rhUniqueHash(reqStop))) stopHashFails++;
+            // CONTIGUITY: the fetch resumes exactly where the last one stopped. A gap
+            // would be a silently unscanned height; an overlap would be re-work.
+            if (g_capStart != throughBefore + 1u) contiguityBreaks++;
+            if (reqStop < g_capStart) contiguityBreaks++;
+        }
+
+        // ---- (4) the cfheaders RESPONSE, only for a request that really went out ----
+        if (g_cfhCount > cfhBefore) {
+            uint32_t reqEnd = m->cfHeadersRequestedThrough;   // batchEnd, set on a real send
+            if (g_cfhStart != cfhNextBefore) cfhStartBreaks++;
+            if (! UInt256Eq(g_cfhStopHash, rhUniqueHash(reqEnd))) stopHashFails++;
+            if (reqEnd >= g_cfhStart) scaleAppendCfHeaders(m, reqEnd - g_cfhStart + 1u);
+            m->cfHeadersRequestedThrough = 0;   // the response landed (_peerRelayedCFHeaders:2657)
+        }
+
+        // ---- (5) the cfilter responses ----
+        scaleServe(m, MAX_CFILTERS_RESULTS);
+
+        // ---- (6) the property, EVERY tick ----
+        size_t nowCount = BRSetCount(m->blocks);
+        if (nowCount > peak) peak = nowCount;
+        if (nowCount > BOUND) boundViolations++;
+        uint32_t scanNow = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+        if (scanNow < prevScan) scanRegressions++;
+        prevScan = scanNow;
+
+        // ---- (7) the CHECKPOINT schedule: an emitted assertion at tick
+        // 0/1/2/5 (the ramp, where the window first fills) and every 10th tick
+        // thereafter. The per-tick accumulators above cover the ticks in between,
+        // so nothing is unchecked -- this only bounds the output volume.
+        if (tick <= 2 || tick == 5 || (tick % 10) == 0) {
+            checkpoints++;
+            snprintf(lbl, sizeof lbl,
+                     "tick %d: BRSetCount %zu <= bound %zu (scan %u, hdr %u, lead %u, chain %u)",
+                     tick, nowCount, BOUND, scanNow, m->lastBlock->height,
+                     m->lastBlock->height > scanNow ? m->lastBlock->height - scanNow : 0, SCALE_CHAIN_LEN);
+            check(nowCount <= BOUND, lbl);
+
+            if (! scaleResolverOk(m, SCALE_BIRTH - 1u, why, sizeof why)) {
+                resolverFails++;
+                snprintf(lbl, sizeof lbl, "tick %d: stop-hash resolver correct at this frontier -- %s", tick, why);
+                check(0, lbl);
+            }
+        }
+    }
+
+    // ---- the acceptance property ----
+    check(boundViolations == 0,
+          "MEMORY BOUND HELD AT EVERY TICK: BRSetCount(manager->blocks) never exceeded "
+          "CF_CONVOY_WINDOW + overshoot + margin across the WHOLE >100k descent "
+          "(RED on -DCONVOY_UNGATED: the headers fast-forward to the tip and it grows to chain length)");
+    snprintf(lbl, sizeof lbl, "peak BRSetCount %zu <= bound %zu (chain is %u blocks -- %.1f%% resident)",
+             peak, BOUND, SCALE_CHAIN_LEN, 100.0 * (double)peak / (double)SCALE_CHAIN_LEN);
+    check(peak <= BOUND, lbl);
+
+    // ...and NOT vacuous: the convoy actually climbed the whole chain.
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == SCALE_TIP,
+          "NOT VACUOUS: the SCAN reached the chain tip -- every one of the >100k heights was scanned, "
+          "so the bound was held by PACING, not by the descent stalling");
+    check(m->lastBlock && m->lastBlock->height == SCALE_TIP,
+          "NOT VACUOUS: the block-header frontier also reached the tip (the convoy converges)");
+    check(tick < SCALE_MAX_TICKS, "the descent converged inside the tick budget");
+    check(ticksWithFetch > 50, "NOT VACUOUS: the forward cfilter fetch fired on most ticks (real work happened)");
+    check(scanRegressions == 0, "the scan frontier never regressed across the descent");
+    check(contiguityBreaks == 0,
+          "every forward getcfilters resumed exactly at the previous stop + 1 -- no gap (silently unscanned "
+          "height) and no overlap");
+    check(cfhStartBreaks == 0, "every getcfheaders started at the chain's real NextHeight");
+    check(stopHashFails == 0,
+          "STOP-HASH RESOLVER: every getcfilters/getcfheaders stop hash was the true chain hash at that "
+          "height, at every frontier position across the descent");
+    check(resolverFails == 0,
+          "BATCHED RESOLVER: byte-identical to the naive walk, correct for every retained height and clean "
+          "ZERO above the frontier, at every checkpoint");
+    check(checkpoints >= 10, "the checkpoint schedule actually ran (>=10 emitted checkpoints)");
+
+    // The memory was really RETURNED, not merely counted: the birth-height header
+    // is gone from the set once the scan climbed past it.
+    check(! rhBlockPresent(m, SCALE_BIRTH),
+          "MEMORY ACTUALLY FREED: the birth-height header was released once the scan climbed past it");
+    check(rhBlockPresent(m, SCALE_TIP), "the tip header is resident at the end of the descent");
+
+    printf("   [scale] chain %u blocks | ticks %d | peak BRSetCount %zu / bound %zu | peak header lead %u "
+           "(W=%d) | %.2f%% of chain resident\n",
+           SCALE_CHAIN_LEN, tick, peak, BOUND, peakHdrLead, CF_CONVOY_WINDOW,
+           100.0 * (double)peak / (double)SCALE_CHAIN_LEN);
+
+    BRPeerManagerFree(m);
+}
+
+// ============================================================================
+// Paced-convoy fetch, Task 6: REORG MID-DESCENT AT THE RETAINED-WINDOW BOUNDARY
+// ============================================================================
+//
+// The convoy makes manager->blocks a WINDOW, and a window has a bottom edge that
+// today's code never had. _peerRelayedBlock's reorg path walks the fork back to
+// where it joins the main chain (BRPeerManager.c:1812) through exactly that set,
+// so the join point is now something that can be BELOW the retained floor.
+//
+// This case drives the reorg the production way -- real fork headers through the
+// real _peerRelayedBlock -- with the join point sitting just ABOVE the retained
+// floor: the deepest join the convoy still guarantees is resolvable. It asserts
+// the reorg completes correctly there (right join point found, credits preserved,
+// the abandoned branch's confirmations rolled back, no crash) AND that
+// manager->blocks stays bounded across the reorg.
+//
+// THE OTHER EDGE IS NOT ASSERTED HERE, DELIBERATELY -- see the note at the end of
+// this function: a fork whose join point is BELOW the retained floor makes that
+// walk terminate with b == NULL, and :1817/:1819 dereference b->height with no
+// guard. That NULL-guard is the sibling task's (spec Task 7); running the case
+// before the guard exists would SIGSEGV the whole suite rather than fail one
+// assertion. The structural PRECONDITION is asserted instead, without the deref.
+static void test_reorg_mid_descent(void)
+{
+    printf("\n=== test_reorg_mid_descent (paced-convoy Task 6: reorg at the retained-window boundary) ===\n");
+
+    // A FRESH wallet: this case registers real transactions, and the suite's shared
+    // wallet is used by every other case.
+    uint8_t seed[64];
+    BRBIP39DeriveKey(seed, kMnemonic, NULL);
+    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
+    BRWallet *w = BRWalletNew(NULL, 0, mpk);
+    check(w != NULL, "fresh wallet created for the credit assertions");
+    if (! w) return;
+
+    // ABOVE the highest mainnet checkpoint (23,660,000): _peerRelayedBlock discards
+    // forks at/below the last checkpoint outright (:1798), so a lower base would
+    // make this case silently test nothing.
+    const uint32_t BASE  = 24000000u;
+    const uint32_t COUNT = 6000u;                 // > CLEAR_MEM_BLOCKS_COUNT_TRIGGER, so the pruner runs
+    const uint32_t MAIN_TIP = BASE + COUNT - 1u;
+
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(w, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL && TIP == MAIN_TIP, "main chain built [BASE .. BASE+5999]");
+    if (! m) { BRWalletFree(w); return; }
+
+    // Mid-descent state: the scan sits 2000 below the header frontier (a legitimate
+    // convoy position, W_hdr = 2000 < CF_CONVOY_WINDOW), and the cfheader frontier
+    // has raced to the header tip inside the window.
+    const uint32_t SCAN = MAIN_TIP - 2000u;
+    BRCompactFilterChainFree(m->compactFilterChain);
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, MAIN_TIP + 1u, UINT256_ZERO);
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = SCAN;
+    m->autoFetchCFiltersThrough = SCAN - 1u;
+    m->estimatedHeight          = MAIN_TIP + 1000u;   // keep _BRPeerManagerLoadMempools out of this case
+    BRCFScanLedgerInit(&m->cfLedger, SCAN);
+
+    // Prune to the convoy's retained window. This is the REAL floor, not a hand-set one.
+    _BRPeerManagerClearMemory(m);
+    const uint32_t FLOOR = SCAN - CLEAR_MEM_CF_RETENTION_MARGIN;
+    check(rhBlockPresent(m, FLOOR), "the retained window's low edge (scanFrontier-144) is resident");
+    check(! rhBlockPresent(m, FLOOR - 1u),
+          "THE WINDOW BOUNDARY: one height below the retention floor is PRUNED (this is the edge the "
+          "convoy newly creates, and the edge this reorg is injected at)");
+    check(_cfConvoyHdrGated(m) == 0, "setup: the header window is open (W_hdr = 2000 < CF_CONVOY_WINDOW)");
+
+    // ---- wallet credits either side of the fork point ----
+    const uint32_t H_JOIN = SCAN - 100u;          // 44 above the retained floor: the deepest resolvable join
+    check(H_JOIN > FLOOR, "setup: the fork joins ABOVE the retained floor (resolvable by construction)");
+
+    BRAddress a0 = BRWalletReceiveAddress(w, 1);   // segwit: the BIP84 wallet's own receive address
+    uint8_t spk[64];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), a0.s);
+    check(spkLen > 0, "setup: wallet receive address -> scriptPubKey");
+
+    const uint64_t AMT = 500000000ULL;            // 5 DGB, far above dust (no pending-gate interference)
+    BRTransaction *txBelow = NULL, *txAbove = NULL;
+    UInt256 hBelow = UINT256_ZERO, hAbove = UINT256_ZERO;
+    for (int k = 0; k < 2; k++) {
+        UInt256 prevOut; memset(prevOut.u8, (uint8_t)(0xC0 + k), sizeof(prevOut.u8));
+        BRTransaction *tx = BRTransactionNew();
+        static const uint8_t placeholder[1] = { 0 };
+        BRTransactionAddInput(tx, prevOut, 0, 0, spk, spkLen, placeholder, 0, placeholder, 0, 0xffffffff);
+        BRTransactionAddOutput(tx, AMT, spk, spkLen);
+        {   // finalize txHash the way the wire would
+            uint8_t data[BRTransactionSerialize(tx, NULL, 0)];
+            size_t len = BRTransactionSerialize(tx, data, sizeof(data));
+            BRTransaction *t = BRTransactionParse(data, len);
+            if (t) { tx->txHash = t->txHash; tx->wtxHash = t->wtxHash; BRTransactionFree(t); }
+        }
+        // Straddle the join point by EXACTLY one block, so the assertions below pin
+        // the fork-join walk to H_JOIN precisely rather than to a loose range:
+        // BRWalletSetTxUnconfirmedAfter(join) un-confirms strictly ABOVE `join`.
+        tx->timestamp   = 1700000000u;
+        tx->blockHeight = (k == 0) ? H_JOIN : (H_JOIN + 1u);
+        check(BRWalletRegisterTransaction(w, tx) != 0, "credit registered into the wallet");
+        if (k == 0) { txBelow = tx; hBelow = tx->txHash; } else { txAbove = tx; hAbove = tx->txHash; }
+    }
+    const uint64_t balanceBefore = BRWalletBalance(w);
+    check(balanceBefore == 2u * AMT, "setup: both credits are in the balance before the reorg");
+    check(txBelow && txAbove, "setup: both transactions built");
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x61; pa->port = 12061; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+    BRPeerCallbackInfo info = { pa, m, UINT256_ZERO };
+
+    // ---- inject the fork: [H_JOIN+1 .. MAIN_TIP+1], one longer than the main chain,
+    // relayed in ascending order through the production handler. Every block up to
+    // MAIN_TIP takes the "new block is on a fork" branch; the one at MAIN_TIP+1
+    // overtakes and triggers the fork-join walk + reorg. ----
+    const size_t countBeforeFork = BRSetCount(m->blocks);
+    for (uint32_t h = H_JOIN + 1u; h <= MAIN_TIP + 1u; h++) {
+        BRMerkleBlock *fb = BRMerkleBlockNew();
+        fb->blockHash = rhForkHash(h);
+        fb->prevBlock = (h == H_JOIN + 1u) ? rhUniqueHash(H_JOIN) : rhForkHash(h - 1u);
+        fb->height    = h;
+        fb->timestamp = (uint32_t)time(NULL) - 60u;   // recent: never aged out as a stale orphan
+        _peerRelayedBlock(&info, fb);                 // <- NO CRASH is itself an assertion
+    }
+
+    // ---- correctness after the reorg ----
+    check(m->lastBlock != NULL && m->lastBlock->height == MAIN_TIP + 1u,
+          "REORG COMPLETED: the longer fork became the main chain (lastBlock at MAIN_TIP+1)");
+    check(m->lastBlock && UInt256Eq(m->lastBlock->blockHash, rhForkHash(MAIN_TIP + 1u)),
+          "REORG COMPLETED: lastBlock is the FORK's tip block, not the old main-chain tip");
+
+    BRTransaction *tb = BRWalletTransactionForHash(w, hBelow);
+    BRTransaction *ta = BRWalletTransactionForHash(w, hAbove);
+    check(tb != NULL && ta != NULL, "both transactions survive the reorg in the wallet (no credit dropped)");
+    check(tb && tb->blockHeight == H_JOIN,
+          "JOIN POINT EXACT: the credit AT the join height keeps its confirmation -- the fork-join walk "
+          "stopped at H_JOIN, not one block deeper (which would have needlessly un-confirmed it)");
+    check(ta && ta->blockHeight == TX_UNCONFIRMED,
+          "JOIN POINT EXACT: the credit ONE block above the join was rolled back to unconfirmed -- it was "
+          "confirmed on the branch the reorg abandoned, and the walk did not stop one block too high");
+    check(BRWalletBalance(w) == balanceBefore,
+          "CREDITS PRESERVED ACROSS THE REORG: the balance is unchanged -- an un-confirmed credit is "
+          "still the user's money, it is not lost");
+
+    // ...and the reorg did not blow the window open: the fork's blocks are bounded
+    // by the fork length, and the retained floor still holds underneath.
+    size_t countAfter = BRSetCount(m->blocks);
+    check(countAfter <= countBeforeFork + (size_t)(MAIN_TIP + 1u - H_JOIN),
+          "BOUNDED THROUGH THE REORG: manager->blocks grew by at most the fork's own length");
+    check(! rhBlockPresent(m, FLOOR - 1u), "the retention floor still holds below the reorged window");
+
+    // ---- THE OTHER EDGE (spec Task 7, NOT asserted here) --------------------
+    // If the fork's join point were BELOW the retained floor -- reachable in
+    // production whenever the scan frontier climbs (raising cfFloor past the join)
+    // between the fork's first block and the one that overtakes the main chain --
+    // then the walk at BRPeerManager.c:1812
+    //     while (b && b2 && ! BRMerkleBlockEq(b, b2)) { b = BRSetGet(blocks, &b->prevBlock); ... }
+    // exits with b == NULL, and :1817 (peer_log b->height) / :1819
+    // (BRWalletSetTxUnconfirmedAfter(wallet, b->height)) dereference it: a SIGSEGV,
+    // not a failed assertion. Running that case before the sibling task's NULL-guard
+    // lands would take the whole host-KAT suite down with a crash instead of a
+    // diagnosis, so only its structural PRECONDITION is asserted here.
+    check(! rhBlockPresent(m, FLOOR - 1u) && (FLOOR - 1u) < H_JOIN,
+          "TASK-7 PRECONDITION (documented, not dereferenced): a join point below the retained floor is "
+          "genuinely absent from manager->blocks, so the fork-join walk WOULD terminate at b == NULL and "
+          "the next line dereferences it -- that guard is the sibling task's");
+
+    BRPeerManagerFree(m);
+    BRWalletFree(w);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -3323,6 +3960,20 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_SCALE_REDGREEN_ONLY
+    // run.sh builds this twice for the MEMORY BOUND's red-before-green gate -- the
+    // headline claim of the whole paced-convoy feature: once with the suppression
+    // compiled out (-DCONVOY_UNGATED == the pre-fix shape, where the header
+    // continuation fast-forwards straight to the tip and manager->blocks grows to the
+    // full 105k-block chain length instead of staying at ~W+margin -- the deep-restore
+    // OOM, which MUST FAIL == RED) and once gated (must PASS == GREEN). Only the scale
+    // case runs, so the RED is unambiguously the unbounded resident set.
+    test_convoy_scale_bounded(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
 #ifdef KAT_RESUME_SNAP_REDGREEN_ONLY
     // run.sh builds this twice for the resume cursor reconciliation's
     // red-before-green gate: once with the snap compiled to a no-op
@@ -3385,6 +4036,9 @@ int main(void)
     test_b1_rekick_backoff_not_stale_across_gated_period(wallet); // paced-convoy-fetch Task 3 fix 2: GATED->open episode reset (red-before-green)
     test_resume_snaps_cursor(wallet);                      // paced-convoy-fetch Task 4: resume cursor reconciliation (red-before-green)
     test_valve_matched_set(wallet);                        // paced-convoy-fetch Task 5: B2 valve MATCHED SET a/b/c/d (red-before-green x4)
+    test_pending_abandonment_accessor(wallet);             // paced-convoy-fetch Task 6: the valve/watchdog ordering signal (boundable count)
+    test_convoy_scale_bounded(wallet);                     // paced-convoy-fetch Task 6: THE memory bound, >100k descent (red-before-green)
+    test_reorg_mid_descent();                              // paced-convoy-fetch Task 6: reorg at the retained-window boundary
 
     BRWalletFree(wallet);
 
