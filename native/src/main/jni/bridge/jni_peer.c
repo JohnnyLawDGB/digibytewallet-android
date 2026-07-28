@@ -1586,6 +1586,26 @@ Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject
     return (jlong)BRPeerManagerAbandonedCount(g_peerManager);
 }
 
+/* B2 valve / watchdog ORDERING (paced-convoy fetch, spec Part C/D). Returns the
+ * valve's RE-ARM CYCLE COUNT for the hole that pins the CF scan frontier — 0 when
+ * the valve owns nothing there. A COUNT, not a boolean, deliberately: the Kotlin
+ * tip-stall watchdog must BOUND its suppression on it (suppress only while
+ * N <= CF_CONVOY_REARM_MAX + 1), because a churny fleet can taint every deciding
+ * cycle and re-arm the hole indefinitely — a bare "pending" flag would stand the
+ * backstop down forever. See BRPeerManager.h above BRPeerManagerHasPendingAbandonment.
+ *
+ * LOCKING: BRPeerManagerHasPendingAbandonment takes manager->lock itself, so it must
+ * be called from OUTSIDE that lock — which the JNI layer always is. PEER_GUARD() is
+ * the JNI-level g_peerLock (recursive, guards g_peerManager lifetime), not
+ * manager->lock, exactly as for the three accessors above. */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getConvoyAbandonmentPending(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jint)BRPeerManagerHasPendingAbandonment(g_peerManager);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;

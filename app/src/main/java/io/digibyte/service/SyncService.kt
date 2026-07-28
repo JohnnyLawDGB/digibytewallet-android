@@ -1026,21 +1026,45 @@ class SyncService : Service() {
      * doesn't have). Runs independently for the whole session so the BIP158
      * watchdog's early "healthy" return can't take it down with it.
      *
-     * Tier 1 (tip frozen >= TIP_STALL_TIMEOUT_MS, peers connected): re-issue a
+     * Tier 1 (scan frozen >= TIP_STALL_TIMEOUT_MS, peers connected): re-issue a
      *   full-locator getheaders — un-sticks behind-and-stopped and connectable
      *   dead-branch. Benign 0-header no-op on a healthy at-tip wallet.
      * Tier 2 (still frozen a full window after Tier 1): recreate the manager
      *   (forceReconnect + re-inject + startSync) — a fresh handshake cohort, for a
      *   dead-branch whose current peers won't serve the real chain. Throttled.
      *
-     * Resets on any tip advance; DGB's ~15s blocks reset it constantly so a healthy
-     * wallet never arms it (20 min ≈ 80 missed blocks).
+     * PACED-CONVOY RE-KEY (spec Part D). Every tier now arms on the CF SCAN frontier
+     * (`getLowestNeededHeight`), not the block-header tip: the convoy holds the header
+     * frontier at `scanFrontier + CF_CONVOY_WINDOW` on purpose, so a frozen tip is the
+     * pacing signal, and tier 1's UNGATED getheaders / tier 2's manager recreate would
+     * be pure churn — or outright destructive — mid-descent. Two convoy guards ride on
+     * top: (a) a RESIDUAL dead-branch conjunct — while the window is FULL the header
+     * frontier is pinned by the gate, so escalation additionally requires the raw block
+     * tip to be frozen too (if it is still re-kicking, the header layer is alive and a
+     * scan stall belongs to the filter layer / the B2 valve); (b) a BOUNDED suppression
+     * while the B2 abandonment valve owns the stall — see [isConvoySuppressed].
+     *
+     * Resets on any CF scan advance; DGB's ~15s blocks are scanned as they arrive so a
+     * healthy at-tip wallet resets it constantly and never arms it (20 min ≈ 80 blocks).
      */
     private fun startTipStallWatchdog() {
         tipStallWatchdogJob?.cancel()
         tipStallWatchdogJob = serviceScope.launch {
             var lastTip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
-            var lastAdvanceMs = System.currentTimeMillis()
+            // PACED-CONVOY RE-KEY (spec Part D). The convoy DELIBERATELY freezes the
+            // block-header frontier at scanFrontier + CF_CONVOY_WINDOW, so
+            // getLastBlockHeight() is no longer a liveness signal — it is the pacing
+            // signal. The CF SCAN frontier (getLowestNeededHeight) is what actually
+            // proves the wallet is making progress, so arm/reset on THAT. The raw tip
+            // is still tracked, for the residual dead-branch conjunct below.
+            //
+            // NOT getCfScanLedgerCounts()[0]: that index is scannedThrough, which LAGS
+            // after a B2 abandonment (abandonedBelow is raised without _cfLedgerAdvance
+            // running), so a watchdog keyed on it would read a genuinely-progressing
+            // convoy as frozen and fire tier 1 — the exact misfire this re-key prevents.
+            var lastScan = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
+            var lastAdvanceMs = System.currentTimeMillis()      // last CF SCAN advance
+            var lastTipAdvanceMs = lastAdvanceMs                // last raw block-tip advance
             var tier1Fired = false
             var lastTier2Ms = 0L
             var lastFastMs = 0L          // fast-tier (orphan / can't-hold-filter-peer) throttle
@@ -1049,12 +1073,35 @@ class SyncService : Service() {
             while (true) {
                 kotlinx.coroutines.delay(TIP_STALL_WATCHDOG_POLL_MS)
                 val tip = try { NativeBridge.getLastBlockHeight() } catch (_: Throwable) { 0L }
+                val scan = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
                 val peers = try { NativeBridge.getPeerCount() } catch (_: Throwable) { 0 }
+                val pendingCycles = try { NativeBridge.getConvoyAbandonmentPending() } catch (_: Throwable) { 0 }
                 val nowMs = System.currentTimeMillis()
 
+                // Before the CF scan ledger is armed (no peer manager => 0, freshly
+                // calloc'd ledger => 1) the scan frontier is not a signal at all. Fall
+                // back to the legacy block-tip keying for that window, otherwise a
+                // constant 0/1 would read as "frozen forever" and escalate on a wallet
+                // that is simply still coming up.
+                val scanArmed = isScanFrontierArmed(scan)
+
+                // Clearing the tier-1 latch + the canon pin follows whichever signal is
+                // authoritative this poll. Under the convoy that is the SCAN: clearing on
+                // a block-tip advance instead would let the gate's periodic 2000-header
+                // re-kick reset tier1Fired forever, and tier 2 (which requires
+                // tier1Fired) could then never escalate a genuine scan wedge.
+                var progressed = false
                 if (tip > lastTip) {
                     lastTip = tip
+                    lastTipAdvanceMs = nowMs
+                    if (!scanArmed) progressed = true
+                }
+                if (scan > lastScan) {
+                    lastScan = scan
                     lastAdvanceMs = nowMs
+                    if (scanArmed) progressed = true
+                }
+                if (progressed) {
                     tier1Fired = false
                     // Recovered — release any pinned canon peer so the pool re-diversifies.
                     if (pinnedThisStall) {
@@ -1062,14 +1109,24 @@ class SyncService : Service() {
                         pinnedThisStall = false
                     }
                 }
-                val stalledMs = nowMs - lastAdvanceMs
 
-                if (shouldForceReconnectOnStall(peers, stalledMs, tier1Fired) &&
-                    nowMs - lastTier2Ms >= TIP_STALL_TIER2_THROTTLE_MS
+                val scanStalledMs = if (scanArmed) nowMs - lastAdvanceMs else nowMs - lastTipAdvanceMs
+                val blockTipStalledMs = nowMs - lastTipAdvanceMs
+                val windowFull = isConvoyWindowFull(tip, scan)
+
+                if (shouldForceReconnectOnStall(
+                        peerCount = peers,
+                        scanStalledMs = scanStalledMs,
+                        blockTipStalledMs = blockTipStalledMs,
+                        convoyWindowFull = windowFull,
+                        tier1Fired = tier1Fired,
+                        abandonmentPendingCycles = pendingCycles,
+                    ) && nowMs - lastTier2Ms >= TIP_STALL_TIER2_THROTTLE_MS
                 ) {
                     android.util.Log.w(
                         "SyncService",
-                        "tip-stall: block tip still frozen at $tip for ${stalledMs / 1000}s after " +
+                        "tip-stall: CF scan frontier still frozen at $lastScan (block tip $tip, " +
+                            "W_hdr full=$windowFull) for ${scanStalledMs / 1000}s after " +
                             "re-request ($peers peers) — recreating peer manager (tier 2)"
                     )
                     lastTier2Ms = nowMs
@@ -1078,19 +1135,35 @@ class SyncService : Service() {
                     injectCustomNode()
                     runCatching { NativeBridge.startSync() }
                     tier1Fired = false // re-arm tier 1 against the fresh manager
-                } else if (shouldRerequestHeadersOnStall(peers, stalledMs) && !tier1Fired) {
+                } else if (shouldRerequestHeadersOnStall(
+                        peerCount = peers,
+                        scanStalledMs = scanStalledMs,
+                        blockTipStalledMs = blockTipStalledMs,
+                        convoyWindowFull = windowFull,
+                        abandonmentPendingCycles = pendingCycles,
+                    ) && !tier1Fired
+                ) {
                     android.util.Log.w(
                         "SyncService",
-                        "tip-stall: block tip frozen at $tip for ${stalledMs / 1000}s with $peers " +
+                        "tip-stall: CF scan frontier frozen at $lastScan (block tip $tip, " +
+                            "W_hdr full=$windowFull) for ${scanStalledMs / 1000}s with $peers " +
                             "peers — proactively re-requesting headers (tier 1)"
                     )
                     runCatching { NativeBridge.rerequestHeadersFromTip() }
                     tier1Fired = true
-                } else if (peers > 0 && stalledMs >= TIP_STALL_FAST_MS &&
-                    nowMs - lastFastMs >= TIP_STALL_FAST_MS
+                } else if (shouldFastRecoverOnStall(
+                        peerCount = peers,
+                        scanStalledMs = scanStalledMs,
+                        blockTipStalledMs = blockTipStalledMs,
+                        convoyWindowFull = windowFull,
+                        abandonmentPendingCycles = pendingCycles,
+                        thresholdMs = TIP_STALL_FAST_MS,
+                    ) && nowMs - lastFastMs >= TIP_STALL_FAST_MS
                 ) {
-                    // FAST tier — connected but the tip hasn't advanced for a few minutes
-                    // (multi-algo DGB mines every ~15s, so this is genuinely stuck, not slow).
+                    // FAST tier — connected but the CF scan frontier hasn't advanced for a
+                    // few minutes (multi-algo DGB mines every ~15s, so this is genuinely
+                    // stuck, not slow — and under the convoy the scan, not the paced block
+                    // tip, is the thing that must keep moving).
                     // Two causes, both handled: (1) a short ORPHAN — a full-locator getheaders
                     // walks back + reorgs off it; (2) ROAMING — the wallet holds peers but not a
                     // filter-capable one, so PIN a validated canon CF peer (rotating) to lock it
@@ -1101,7 +1174,7 @@ class SyncService : Service() {
                     if (fp != null) {
                         android.util.Log.i(
                             "SyncService",
-                            "tip-stall FAST: frozen ${stalledMs / 1000}s, $peers peers — re-request " +
+                            "tip-stall FAST: scan frozen ${scanStalledMs / 1000}s, $peers peers — re-request " +
                                 "headers + pinning canon filter peer ${fp.first}:${fp.second}"
                         )
                         runCatching { NativeBridge.setPinnedPeer(fp.first, fp.second, false) }
@@ -1109,7 +1182,7 @@ class SyncService : Service() {
                     } else {
                         android.util.Log.i(
                             "SyncService",
-                            "tip-stall FAST: frozen ${stalledMs / 1000}s, $peers peers — re-request " +
+                            "tip-stall FAST: scan frozen ${scanStalledMs / 1000}s, $peers peers — re-request " +
                                 "headers (no validated filter peer in pool to pin)"
                         )
                     }
@@ -1194,6 +1267,16 @@ class SyncService : Service() {
             var corruptHeals = 0
             var lastCorruptHealMs = 0L
             var corruptHealRotation = 0
+            // PACED-CONVOY RE-KEY (spec Part D). Every DESTRUCTIVE branch below
+            // (frozen-CF recovery, corrupt-chain heal, post-timeout re-anchor) deletes
+            // persisted filter/ledger state, so each is now additionally gated on the CF
+            // SCAN frontier being frozen. Under the convoy, cfTip freezing while the
+            // block tip climbs is a NORMAL, designed decoupling — the old keying read it
+            // as a wedge and threw the whole descent away. Tracked as a session
+            // running-max for the same reason cfNetMax is: the frontier must never be
+            // read as regressing.
+            var scanNetMax = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
+            var scanProgressMs = startedAt
             while (true) {
                 kotlinx.coroutines.delay(BIP158_WATCHDOG_POLL_MS)
                 val cfTipNow = try { NativeBridge.getCFChainTipHeight() } catch (_: Throwable) { 0 }
@@ -1245,8 +1328,21 @@ class SyncService : Service() {
                 // recreate (fresh peers + reset native CF continuity budget), which
                 // re-fetches cfheaders from the floor.
                 if (cfTipNow > cfNetMax) { cfNetMax = cfTipNow; cfNetProgressMs = nowMs }
+
+                // CF SCAN frontier progress — the convoy-era liveness signal shared by
+                // all three destructive branches below, plus the B2 valve's cycle count
+                // (a gaveUp hole PINS the scan frontier by construction, so scan-frozen
+                // alone would hand the valve's own stall to the branch that deletes the
+                // ledger it is deciding on). The suppression is BOUNDED — see
+                // [isConvoySuppressed].
+                val scanNow = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L }
+                if (scanNow > scanNetMax) { scanNetMax = scanNow; scanProgressMs = nowMs }
+                val scanStalledMs = nowMs - scanProgressMs
+                val pendingCycles = try { NativeBridge.getConvoyAbandonmentPending() } catch (_: Throwable) { 0 }
+
                 if (shouldRecoverFrozenCf(
-                        blockClimbing, nowMs - cfNetProgressMs, cfNetMax, cfFrozenRecoveredThisSession)) {
+                        blockClimbing, nowMs - cfNetProgressMs, cfNetMax, cfFrozenRecoveredThisSession,
+                        scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles)) {
                     cfFrozenRecoveredThisSession = true
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: cfTip WEDGED at net-max $cfNetMax for " +
@@ -1261,6 +1357,11 @@ class SyncService : Service() {
                     injectPeers()
                     injectCustomNode()
                     runCatching { NativeBridge.startSync() }
+                    // The ledger was just deleted, so the scan frontier re-inits at the
+                    // floor: reset the tracker or the stale running-max would keep the
+                    // scan-frozen gate satisfied through the entire clean re-climb.
+                    scanNetMax = 0
+                    scanProgressMs = nowMs
                     continue
                 }
 
@@ -1309,6 +1410,8 @@ class SyncService : Service() {
                         reanchored = reanchoredThisSession,
                         msSinceReanchor = nowMs - reanchorAtMs,
                         healsSoFar = corruptHeals,
+                        scanStalledMs = scanStalledMs,
+                        abandonmentPendingCycles = pendingCycles,
                     ) && nowMs - lastCorruptHealMs >= CF_CORRUPT_HEAL_COOLDOWN_MS
                 ) {
                     corruptHeals++
@@ -1343,6 +1446,12 @@ class SyncService : Service() {
                     cfNetMax = 0
                     cfNetProgressMs = nowMs
                     lastCfTip = 0
+                    // Same reset for the scan frontier: the heal deletes CfScanLedgerStore,
+                    // so the ledger re-inits at the floor and the frontier legitimately
+                    // restarts low. Without this the stale scanNetMax would keep the
+                    // scan-frozen gate satisfied through the whole clean re-climb.
+                    scanNetMax = 0
+                    scanProgressMs = nowMs
                     continue
                 }
 
@@ -1354,7 +1463,10 @@ class SyncService : Service() {
                 // filters at the floor. The skipped gap was already bloom-scanned —
                 // gated on hasReachedSynced, which is that guarantee.
                 if (elapsedMs >= BIP158_FALLBACK_TIMEOUT_MS) {
-                    when (decidePostTimeoutAction(hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs)) {
+                    when (decidePostTimeoutAction(
+                        hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs,
+                        scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles,
+                    )) {
                         PostTimeoutAction.REANCHOR -> {
                             val reanchored = try {
                                 NativeBridge.reanchorCompactFilterChainAtFloor()
@@ -1373,6 +1485,9 @@ class SyncService : Service() {
                                 filterHeadersDirty = false
                                 CfScanLedgerStore.delete(this@SyncService)
                                 pendingCfLedger = null
+                                // Ledger deleted => the scan frontier re-inits at the floor.
+                                scanNetMax = 0
+                                scanProgressMs = nowMs
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
                                     "(cfTip was $cfTipNow, below floor) — staying on filters")

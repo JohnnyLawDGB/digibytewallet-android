@@ -18,6 +18,13 @@ import org.junit.Test
  */
 class Bip158WatchdogPolicyTest {
 
+    /** "The CF scan frontier has not moved in a long time" — the convoy-era liveness
+     *  signal every recovery branch is now keyed on. */
+    private val SCAN_FROZEN = 10 * 60 * 1000L
+
+    /** "The CF scan frontier just advanced" — the convoy is descending healthily. */
+    private val SCAN_ADVANCING = 0L
+
     @Test
     fun `synced wallet that has not re-anchored attempts a re-anchor`() {
         assertEquals(
@@ -26,6 +33,8 @@ class Bip158WatchdogPolicyTest {
                 hasReachedSynced = true,
                 reanchoredThisSession = false,
                 msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -40,6 +49,8 @@ class Bip158WatchdogPolicyTest {
                 hasReachedSynced = false,
                 reanchoredThisSession = false,
                 msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -54,6 +65,8 @@ class Bip158WatchdogPolicyTest {
                 hasReachedSynced = true,
                 reanchoredThisSession = true,
                 msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
         assertEquals(
@@ -62,6 +75,8 @@ class Bip158WatchdogPolicyTest {
                 hasReachedSynced = true,
                 reanchoredThisSession = true,
                 msSinceReanchor = REANCHOR_GRACE_MS - 1,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -77,6 +92,8 @@ class Bip158WatchdogPolicyTest {
                 hasReachedSynced = true,
                 reanchoredThisSession = true,
                 msSinceReanchor = REANCHOR_GRACE_MS,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -91,6 +108,60 @@ class Bip158WatchdogPolicyTest {
                 hasReachedSynced = false,
                 reanchoredThisSession = false,
                 msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+    }
+
+    // ── Part D: the post-timeout re-anchor is keyed on SCAN progress ──
+
+    @Test
+    fun `post-timeout re-anchor does NOT fire while the convoy scan is advancing`() {
+        // CONVOY: the paced fetch deliberately freezes the cfheader frontier within
+        // CF_CONVOY_WINDOW of the scan frontier, so "headers caught up + cfheaders
+        // not advancing" is the DESIGNED steady state, not a deficit. Re-anchoring
+        // there deletes FilterHeaderStore + CfScanLedgerStore and throws away the
+        // whole descent. While the SCAN advances there is nothing to recover.
+        assertEquals(
+            PostTimeoutAction.STAY_ON_FILTERS,
+            decidePostTimeoutAction(
+                hasReachedSynced = true,
+                reanchoredThisSession = false,
+                msSinceReanchor = 0L,
+                scanStalledMs = SCAN_ADVANCING,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun `post-timeout re-anchor is suppressed while the abandonment valve owns the stall`() {
+        // The valve's re-arm cycle IS productive work and it PINS the scan frontier
+        // by construction (a gaveUp hole caps scannedThrough). Re-anchoring on top of
+        // it destroys the ledger the valve is deciding on.
+        assertEquals(
+            PostTimeoutAction.STAY_ON_FILTERS,
+            decidePostTimeoutAction(
+                hasReachedSynced = true,
+                reanchoredThisSession = false,
+                msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES,
+            ),
+        )
+    }
+
+    @Test
+    fun `post-timeout re-anchor is re-enabled once the valve exceeds its cycle budget`() {
+        assertEquals(
+            PostTimeoutAction.REANCHOR,
+            decidePostTimeoutAction(
+                hasReachedSynced = true,
+                reanchoredThisSession = false,
+                msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1,
             ),
         )
     }
@@ -151,13 +222,27 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
+    @Test
+    fun `convoy at the window top reads healthy — both frontiers ride together`() {
+        // Convoy disposition of the HEALTHY check (spec Part D): unchanged. Under the
+        // paced convoy the cfheader frontier sits at the window top right behind the
+        // block-header frontier, so the gap stays inside HEALTHY_CF_GAP_BLOCKS and the
+        // watchdog exits without running any destructive branch. That exit IS the
+        // desired convoy disposition — no re-key needed.
+        assertEquals(
+            true,
+            isFilterSyncHealthy(gap = 0L, cfAdvancedSinceStart = true, blocksCaughtUp = false),
+        )
+    }
+
     // ── shouldRecoverFrozenCf — the CF-wedge (cfheaders-frozen) recovery gate ──
 
     @Test
     fun `cfTip frozen past the window while headers climb triggers recovery`() {
         // THE WEDGE: cfheaders made progress (netMax > 0) then stuck in a continuity
         // re-anchor loop; block headers keep importing. This is exactly the case the
-        // blocksCaughtUp short-circuit is blind to.
+        // blocksCaughtUp short-circuit is blind to. The SCAN is frozen too — nothing
+        // is draining — so the recovery is warranted.
         assertEquals(
             true,
             shouldRecoverFrozenCf(
@@ -165,6 +250,66 @@ class Bip158WatchdogPolicyTest {
                 cfFrozenMs = CF_FROZEN_RECOVERY_MS,
                 cfNetMax = 23_779_855,
                 alreadyRecovered = false,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun `does not recover when the block tip climbs but the convoy SCAN is advancing`() {
+        // THE CONVOY REGRESSION THIS TASK EXISTS FOR: during a healthy paced descent
+        // the single connected filter-capable peer drops, so getCFChainTipHeight()
+        // freezes while the buffered cfilters keep draining (scan frontier advancing)
+        // and the B1 driver keeps the block tip climbing — i.e. exactly
+        // blockClimbing && cfTip-frozen. The old keying then DELETED FilterHeaderStore
+        // + CfScanLedgerStore and recreated the manager, wiping the whole descent, and
+        // re-fired every session so a deep restore could loop forever. Scan progress is
+        // the proof that the CF path is alive: do not fire.
+        assertEquals(
+            false,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = false,
+                scanStalledMs = SCAN_ADVANCING,
+                abandonmentPendingCycles = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun `frozen-cf recovery is suppressed while the abandonment valve owns the stall`() {
+        // A gaveUp hole PINS the scan frontier by construction, so scan-frozen alone
+        // would hand the valve's own stall straight to the most destructive branch —
+        // deleting the very ledger whose rearmCycles/latch state the valve is deciding
+        // on. Stand down while the valve is inside its budget.
+        assertEquals(
+            false,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = false,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES,
+            ),
+        )
+    }
+
+    @Test
+    fun `frozen-cf recovery is re-enabled once the valve exceeds its cycle budget`() {
+        // BOUNDED SUPPRESSION: an indefinitely re-arming hole must re-expose itself.
+        assertEquals(
+            true,
+            shouldRecoverFrozenCf(
+                blockClimbing = true,
+                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
+                cfNetMax = 23_779_855,
+                alreadyRecovered = false,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1,
             ),
         )
     }
@@ -178,6 +323,8 @@ class Bip158WatchdogPolicyTest {
                 cfFrozenMs = CF_FROZEN_RECOVERY_MS - 1,
                 cfNetMax = 23_779_855,
                 alreadyRecovered = false,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -193,6 +340,8 @@ class Bip158WatchdogPolicyTest {
                 cfFrozenMs = CF_FROZEN_RECOVERY_MS * 3,
                 cfNetMax = 23_779_855,
                 alreadyRecovered = false,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -209,6 +358,8 @@ class Bip158WatchdogPolicyTest {
                 cfFrozenMs = CF_FROZEN_RECOVERY_MS * 3,
                 cfNetMax = 0,
                 alreadyRecovered = false,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -222,33 +373,222 @@ class Bip158WatchdogPolicyTest {
                 cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
                 cfNetMax = 23_779_855,
                 alreadyRecovered = true,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 0,
             ),
         )
     }
 
-    // ── tip-stall recovery (frozen BLOCK-header tip — the "no confirms for days") ──
+    // ── convoy window arithmetic (W_hdr >= CF_CONVOY_WINDOW) ──
 
-    @Test fun `re-requests headers when block tip frozen past the window with peers`() {
-        assertEquals(true, shouldRerequestHeadersOnStall(peerCount = 5, tipStalledMs = TIP_STALL_TIMEOUT_MS))
+    @Test fun `window is full exactly at W and open one below it`() {
+        val scan = 1_000_000L
+        assertEquals(true, isConvoyWindowFull(scan + CF_CONVOY_WINDOW, scan))
+        assertEquals(false, isConvoyWindowFull(scan + CF_CONVOY_WINDOW - 1, scan))
+    }
+
+    @Test fun `window reads OPEN when the scan frontier is not armed`() {
+        // LowestNeededHeight is 0 with no peer manager and 1 on a calloc'd ledger.
+        // Measuring either against a mainnet tip scores the window permanently full,
+        // which would suppress the watchdog's residual check forever (and, natively,
+        // the block-header sync that must run FIRST). Not armed => not full.
+        assertEquals(false, isConvoyWindowFull(23_900_000L, 0L))
+        assertEquals(false, isConvoyWindowFull(23_900_000L, 1L))
+    }
+
+    @Test fun `window reads OPEN when the scan frontier sits ABOVE the block tip`() {
+        // UNDERFLOW GUARD (mirrors the native gate): an abandonment watermark can sit
+        // past a not-yet-synced tip. Subtracting first would read "permanently full".
+        assertEquals(false, isConvoyWindowFull(1_000_000L, 1_000_050L))
+    }
+
+    // ── BOUNDED abandonment suppression (spec Part C, "BOUND THE SUPPRESSION") ──
+
+    @Test fun `nothing pending means no suppression`() {
+        assertEquals(false, isConvoySuppressed(0))
+    }
+
+    @Test fun `suppressed through the cycles the valve is entitled to`() {
+        // N == rearmCycles + 1: N=1 original cycle, N=2 first re-arm, N=3 the deciding
+        // cycle (CF_CONVOY_REARM_MAX + 1). The valve may abandon at N=3, so it owns the
+        // stall right through there.
+        assertEquals(true, isConvoySuppressed(1))
+        assertEquals(true, isConvoySuppressed(2))
+        assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES))
+        assertEquals(3, CONVOY_SUPPRESSION_MAX_CYCLES)
+    }
+
+    @Test fun `suppression LIFTS once the valve re-arms past its budget`() {
+        // THE TASK-5 REVIEW FINDING: the per-cycle offersReachedLivePeer latch is
+        // cleared by ANY disconnect of the peer stamped on the hole, and a deciding
+        // cycle is 5 offers over ~7.5 min — so on a churny fleet EVERY cycle can be
+        // tainted and the valve re-arms INDEFINITELY. A bare `pending > 0` suppression
+        // would then be permanently active and the backstop would stand down forever,
+        // in exactly the case that needs it. Above the bound the watchdog escalates.
+        assertEquals(false, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+        assertEquals(false, isConvoySuppressed(9))
+        assertEquals(false, isConvoySuppressed(255))
+    }
+
+    // ── tip-stall recovery, re-keyed on the CF SCAN frontier ──
+
+    private fun tier1(
+        peerCount: Int = 5,
+        scanStalledMs: Long = TIP_STALL_TIMEOUT_MS,
+        blockTipStalledMs: Long = TIP_STALL_TIMEOUT_MS,
+        convoyWindowFull: Boolean = false,
+        abandonmentPendingCycles: Int = 0,
+    ) = shouldRerequestHeadersOnStall(
+        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, abandonmentPendingCycles,
+    )
+
+    private fun tier2(
+        peerCount: Int = 5,
+        scanStalledMs: Long = TIP_STALL_TIMEOUT_MS * 2,
+        blockTipStalledMs: Long = TIP_STALL_TIMEOUT_MS * 2,
+        convoyWindowFull: Boolean = false,
+        tier1Fired: Boolean = true,
+        abandonmentPendingCycles: Int = 0,
+    ) = shouldForceReconnectOnStall(
+        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, tier1Fired, abandonmentPendingCycles,
+    )
+
+    private fun fast(
+        peerCount: Int = 5,
+        scanStalledMs: Long = 3 * 60 * 1000L,
+        blockTipStalledMs: Long = 3 * 60 * 1000L,
+        convoyWindowFull: Boolean = false,
+        abandonmentPendingCycles: Int = 0,
+    ) = shouldFastRecoverOnStall(
+        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, abandonmentPendingCycles,
+        thresholdMs = 3 * 60 * 1000L,
+    )
+
+    @Test fun `re-requests headers when the SCAN frontier is frozen past the window with peers`() {
+        // The idle-wallet wedge the tip-stall watchdog was built for still fires: at the
+        // network tip with silent peers nothing is scanned either, so the scan frontier
+        // freezes with it.
+        assertEquals(true, tier1())
     }
 
     @Test fun `does not re-request before the stall window elapses`() {
-        assertEquals(false, shouldRerequestHeadersOnStall(peerCount = 5, tipStalledMs = TIP_STALL_TIMEOUT_MS - 1))
+        assertEquals(false, tier1(scanStalledMs = TIP_STALL_TIMEOUT_MS - 1, blockTipStalledMs = TIP_STALL_TIMEOUT_MS - 1))
     }
 
     @Test fun `does not re-request with zero peers`() {
         // 0 peers is the existing watchdogs' job; this gate only handles live-but-silent peers.
-        assertEquals(false, shouldRerequestHeadersOnStall(peerCount = 0, tipStalledMs = TIP_STALL_TIMEOUT_MS * 3))
+        assertEquals(false, tier1(peerCount = 0, scanStalledMs = TIP_STALL_TIMEOUT_MS * 3))
+    }
+
+    @Test fun `tier1 does NOT fire when the header tip is frozen at the window top but the SCAN advances`() {
+        // THE CONVOY MISFIRE: the paced fetch holds the header frontier at
+        // scanFrontier + CF_CONVOY_WINDOW, so getLastBlockHeight() is frozen BY DESIGN
+        // for the whole time the scan climbs that window. Tier 1 issues an UNGATED
+        // getheaders that blows straight past the convoy window; tier 2 recreates the
+        // peer manager mid-descent. Neither may fire while the scan is draining.
+        assertEquals(
+            false,
+            tier1(
+                scanStalledMs = 0L,
+                blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 10,
+                convoyWindowFull = true,
+            ),
+        )
+    }
+
+    @Test fun `tier1 does NOT fire when the SCAN advances even with the window open`() {
+        assertEquals(
+            false,
+            tier1(scanStalledMs = 0L, blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 10, convoyWindowFull = false),
+        )
+    }
+
+    @Test fun `residual dead-branch check FIRES when the block tip is frozen, the window is FULL and the scan is frozen`() {
+        // A dead-branch tip pinned at the window top: the header frontier cannot advance
+        // (the peers' real chain is below our fork tip), the gate reads the window as
+        // full, and the scan cannot climb past it. Both clocks are stopped — escalate.
+        assertEquals(
+            true,
+            tier1(
+                scanStalledMs = TIP_STALL_TIMEOUT_MS,
+                blockTipStalledMs = TIP_STALL_TIMEOUT_MS,
+                convoyWindowFull = true,
+            ),
+        )
+    }
+
+    @Test fun `does NOT escalate on a scan stall while the gated header frontier is still re-kicking`() {
+        // Window full + block tip STILL advancing (the B1 driver just landed another
+        // 2000-header batch) = the header layer is alive and the scan stall belongs to
+        // the filter layer (the BIP158 watchdog / the B2 valve). An ungated getheaders
+        // cannot help and only overshoots the convoy window.
+        assertEquals(
+            false,
+            tier1(
+                scanStalledMs = TIP_STALL_TIMEOUT_MS * 5,
+                blockTipStalledMs = 0L,
+                convoyWindowFull = true,
+            ),
+        )
+    }
+
+    @Test fun `tier1 SUPPRESSED while an abandonment is pending below the cycle bound`() {
+        assertEquals(false, tier1(abandonmentPendingCycles = 1))
+        assertEquals(false, tier1(abandonmentPendingCycles = 2))
+        assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
+    }
+
+    @Test fun `tier1 NOT suppressed once the pending cycle count exceeds the bound`() {
+        assertEquals(true, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
     }
 
     @Test fun `tier2 forceReconnect only after tier1 fired and a full extra window`() {
-        assertEquals(false, shouldForceReconnectOnStall(5, TIP_STALL_TIMEOUT_MS * 2, tier1Fired = false))
-        assertEquals(false, shouldForceReconnectOnStall(5, TIP_STALL_TIMEOUT_MS * 2 - 1, tier1Fired = true))
-        assertEquals(true, shouldForceReconnectOnStall(5, TIP_STALL_TIMEOUT_MS * 2, tier1Fired = true))
+        assertEquals(false, tier2(tier1Fired = false))
+        assertEquals(
+            false,
+            tier2(
+                scanStalledMs = TIP_STALL_TIMEOUT_MS * 2 - 1,
+                blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 2 - 1,
+            ),
+        )
+        assertEquals(true, tier2())
     }
 
     @Test fun `tier2 needs peers`() {
-        assertEquals(false, shouldForceReconnectOnStall(0, TIP_STALL_TIMEOUT_MS * 5, tier1Fired = true))
+        assertEquals(false, tier2(peerCount = 0, scanStalledMs = TIP_STALL_TIMEOUT_MS * 5))
+    }
+
+    @Test fun `tier2 manager-recreate does NOT fire while the convoy SCAN advances`() {
+        // Recreating the peer manager mid-descent is the most expensive possible churn.
+        assertEquals(
+            false,
+            tier2(scanStalledMs = 0L, blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 10, convoyWindowFull = true),
+        )
+    }
+
+    @Test fun `tier2 SUPPRESSED while an abandonment is pending below the cycle bound, released above it`() {
+        assertEquals(false, tier2(abandonmentPendingCycles = 1))
+        assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
+        assertEquals(true, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+    }
+
+    @Test fun `FAST tier fires on a frozen scan and needs peers`() {
+        assertEquals(true, fast())
+        assertEquals(false, fast(peerCount = 0))
+        assertEquals(false, fast(scanStalledMs = 0L, blockTipStalledMs = 0L))
+    }
+
+    @Test fun `FAST tier does NOT fire while the header tip is gated at the window top and the scan advances`() {
+        assertEquals(
+            false,
+            fast(scanStalledMs = 0L, blockTipStalledMs = 60 * 60 * 1000L, convoyWindowFull = true),
+        )
+    }
+
+    @Test fun `FAST tier SUPPRESSED while an abandonment is pending below the cycle bound, released above it`() {
+        assertEquals(false, fast(abandonmentPendingCycles = 1))
+        assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
+        assertEquals(true, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
     }
 
     // ── shouldHealCorruptFilterChain — the poisoned-persisted-chain clean-slate heal ──
@@ -260,8 +600,11 @@ class Bip158WatchdogPolicyTest {
         reanchored: Boolean = true,
         msSinceReanchor: Long = REANCHOR_GRACE_MS,
         healsSoFar: Int = 0,
+        scanStalledMs: Long = SCAN_FROZEN,
+        abandonmentPendingCycles: Int = 0,
     ) = shouldHealCorruptFilterChain(
         blocksCaughtUp, peerCount, cfFrozenMs, reanchored, msSinceReanchor, healsSoFar,
+        scanStalledMs, abandonmentPendingCycles,
     )
 
     @Test fun `heals when re-anchor already fired and grace elapsed but cfTip still frozen at tip`() {
@@ -310,6 +653,19 @@ class Bip158WatchdogPolicyTest {
         assertEquals(true, heal(healsSoFar = MAX_CF_CORRUPT_HEALS - 1))
         assertEquals(false, heal(healsSoFar = MAX_CF_CORRUPT_HEALS))
         assertEquals(false, heal(healsSoFar = MAX_CF_CORRUPT_HEALS + 1))
+    }
+
+    @Test fun `does NOT heal while the convoy SCAN is still advancing`() {
+        // Same convoy misfire as shouldRecoverFrozenCf, one branch later: the heal
+        // deletes FilterHeaderStore AND CfScanLedgerStore and force-reconnects. A
+        // draining scan proves the CF path is alive — nothing to heal.
+        assertEquals(false, heal(scanStalledMs = SCAN_ADVANCING))
+    }
+
+    @Test fun `heal is SUPPRESSED while an abandonment is pending below the bound, released above it`() {
+        assertEquals(false, heal(abandonmentPendingCycles = 1))
+        assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
+        assertEquals(true, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
     }
 
     @Test fun `heal cooldown is wider than the freeze threshold to survive reconnect latency`() {

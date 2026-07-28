@@ -62,8 +62,18 @@ internal fun decidePostTimeoutAction(
     hasReachedSynced: Boolean,
     reanchoredThisSession: Boolean,
     msSinceReanchor: Long,
+    scanStalledMs: Long,
+    abandonmentPendingCycles: Int,
+    scanFrozenThresholdMs: Long = CF_FROZEN_RECOVERY_MS,
 ): PostTimeoutAction = when {
-    hasReachedSynced && !reanchoredThisSession -> PostTimeoutAction.REANCHOR
+    // PACED-CONVOY GATE (spec Part D). The re-anchor is destructive — its caller
+    // deletes FilterHeaderStore AND CfScanLedgerStore — and under the convoy its
+    // trigger condition ("headers caught up, cfheaders not advancing") is the DESIGNED
+    // steady state at the window top, not a legacy filter-header deficit. Only a frozen
+    // SCAN frontier warrants it, and never while the B2 valve owns the stall (bounded).
+    hasReachedSynced && !reanchoredThisSession &&
+        scanStalledMs >= scanFrozenThresholdMs &&
+        !isConvoySuppressed(abandonmentPendingCycles) -> PostTimeoutAction.REANCHOR
     reanchoredThisSession && msSinceReanchor < REANCHOR_GRACE_MS -> PostTimeoutAction.AWAIT_REANCHOR
     else -> PostTimeoutAction.STAY_ON_FILTERS
 }
@@ -127,9 +137,25 @@ internal fun shouldRecoverFrozenCf(
     cfFrozenMs: Long,
     cfNetMax: Int,
     alreadyRecovered: Boolean,
+    scanStalledMs: Long,
+    abandonmentPendingCycles: Int,
     thresholdMs: Long = CF_FROZEN_RECOVERY_MS,
 ): Boolean =
-    !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs
+    !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs &&
+        // PACED-CONVOY GATE (spec Part D fix I-2) — THE dangerous branch. During a
+        // healthy convoy climb the single connected filter-capable peer can drop:
+        // getCFChainTipHeight() then freezes while the buffered cfilters keep draining
+        // and the B1 driver keeps the block tip climbing, i.e. EXACTLY
+        // blockClimbing && cfTip-frozen. The recovery deletes FilterHeaderStore AND
+        // CfScanLedgerStore and recreates the manager, throwing away every block of
+        // convoy scan progress; it fires once per session but RE-fires each session, so
+        // a deep restore can loop forever and never complete. A draining scan frontier
+        // is the proof that the CF path is alive — only a frozen SCAN is a real wedge.
+        scanStalledMs >= thresholdMs &&
+        // ...and never on the valve's own stall: a gaveUp hole PINS the scan frontier
+        // by construction, so scan-frozen alone would hand the valve's decision window
+        // straight to the branch that deletes the ledger it is deciding on. Bounded.
+        !isConvoySuppressed(abandonmentPendingCycles)
 
 /**
  * How long the compact-filter tip may stay frozen AFTER the ordinary one-time
@@ -193,12 +219,20 @@ internal fun shouldHealCorruptFilterChain(
     reanchored: Boolean,
     msSinceReanchor: Long,
     healsSoFar: Int,
+    scanStalledMs: Long,
+    abandonmentPendingCycles: Int,
     thresholdMs: Long = CF_CORRUPT_HEAL_MS,
     maxHeals: Int = MAX_CF_CORRUPT_HEALS,
 ): Boolean =
     blocksCaughtUp && peerCount > 0 && reanchored &&
         msSinceReanchor >= REANCHOR_GRACE_MS &&
-        healsSoFar < maxHeals && cfFrozenMs >= thresholdMs
+        healsSoFar < maxHeals && cfFrozenMs >= thresholdMs &&
+        // PACED-CONVOY GATE (spec Part D): same reasoning as [shouldRecoverFrozenCf],
+        // one branch later and with a bigger blast radius (this wipes ALL persisted
+        // filter state AND force-reconnects). A cfTip frozen at the convoy window top
+        // while the scan drains is the designed steady state, not a poisoned chain.
+        scanStalledMs >= thresholdMs &&
+        !isConvoySuppressed(abandonmentPendingCycles)
 
 /**
  * How long the BLOCK-header tip may make no forward progress — while peers are
@@ -213,29 +247,160 @@ internal const val TIP_STALL_TIMEOUT_MS = 20 * 60 * 1000L
 
 /**
  * Tier 1 — should the watchdog proactively re-request headers this poll? True when
- * the block-header tip has been frozen for [tipStalledMs] >= [thresholdMs] while
- * peers are connected. Deliberately INDEPENDENT of hasReachedSynced / gap /
- * blocksCaughtUp / blockClimbing — those are exactly the flags that misclassify a
- * frozen tip as "healthy" and blind every existing recovery path. Only inputs:
- * peers connected + wall-clock since the last tip advance. The recovery it drives
- * (a full-locator getheaders) is a benign 0-header no-op on a healthy at-tip wallet.
+ * the wallet is armed per [isTipStallArmed] (the CF SCAN frontier frozen for
+ * [scanStalledMs] >= [thresholdMs], plus the residual dead-branch conjunct) while
+ * peers are connected and the B2 valve is not mid-decision. Deliberately INDEPENDENT
+ * of hasReachedSynced / gap / blocksCaughtUp / blockClimbing — those are exactly the
+ * flags that misclassify a frozen wallet as "healthy" and blind every existing
+ * recovery path. The recovery it drives is a full-locator getheaders — benign as a
+ * 0-header no-op on a healthy at-tip wallet, but UNGATED with respect to the convoy
+ * window, which is why it must not fire on the convoy's designed pacing.
  */
 internal fun shouldRerequestHeadersOnStall(
     peerCount: Int,
-    tipStalledMs: Long,
+    scanStalledMs: Long,
+    blockTipStalledMs: Long,
+    convoyWindowFull: Boolean,
+    abandonmentPendingCycles: Int,
     thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
-): Boolean = peerCount > 0 && tipStalledMs >= thresholdMs
+): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles) &&
+    isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs)
 
 /**
- * Tier 2 — escalate to a full manager recreate ([forceReconnect]) when a Tier-1
- * header re-request already fired this stall ([tier1Fired]) and the tip is STILL
- * frozen a full window later ([tipStalledMs] >= 2×[thresholdMs]). Covers the
- * dead-branch case where the connected peers can't (or won't) serve the real chain
- * and only a fresh handshake cohort will. The caller throttles the actual recreate.
+ * Tier 2 — escalate to a full manager recreate when a Tier-1 header re-request
+ * already fired this stall ([tier1Fired]) and the wallet is STILL armed a full window
+ * later ([scanStalledMs] >= 2×[thresholdMs]). Covers the dead-branch case where the
+ * connected peers can't (or won't) serve the real chain and only a fresh handshake
+ * cohort will. The caller throttles the actual recreate. The most expensive action in
+ * the whole watchdog — a manager recreate mid-descent throws away in-flight convoy
+ * state — so it carries the same convoy arming + bounded suppression as Tier 1.
  */
 internal fun shouldForceReconnectOnStall(
     peerCount: Int,
-    tipStalledMs: Long,
+    scanStalledMs: Long,
+    blockTipStalledMs: Long,
+    convoyWindowFull: Boolean,
     tier1Fired: Boolean,
+    abandonmentPendingCycles: Int,
     thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
-): Boolean = peerCount > 0 && tier1Fired && tipStalledMs >= thresholdMs * 2
+): Boolean = peerCount > 0 && tier1Fired && !isConvoySuppressed(abandonmentPendingCycles) &&
+    isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs * 2)
+
+/**
+ * FAST tier — the sub-window nudge (re-request headers + pin a canon filter peer).
+ * Extracted from [SyncService.startTipStallWatchdog] so the convoy re-key and the
+ * abandonment suppression are unit-testable.
+ */
+internal fun shouldFastRecoverOnStall(
+    peerCount: Int,
+    scanStalledMs: Long,
+    blockTipStalledMs: Long,
+    convoyWindowFull: Boolean,
+    abandonmentPendingCycles: Int,
+    thresholdMs: Long,
+): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles) &&
+    isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs)
+
+// ── paced-convoy fetch (spec Part C/D) — window + abandonment-suppression ──
+
+/** Mirror of the native `CF_CONVOY_WINDOW` (BRPeerManager.h): the max the block-header
+ *  / cfheader frontier may lead the CF SCAN frontier before the fetch gate suppresses
+ *  the tip-racing continuations. */
+internal const val CF_CONVOY_WINDOW = 10_000L
+
+/** Mirror of the native `CF_CONVOY_REARM_MAX` (BRPeerManager.h): fresh retry cycles the
+ *  B2 valve grants a gaveUp hole against a live CF-peer set before it may abandon it. */
+internal const val CF_CONVOY_REARM_MAX = 2
+
+/**
+ * Upper bound on the abandonment cycle count for which the tip-stall watchdog stands
+ * down. `BRPeerManagerHasPendingAbandonment` returns a CYCLE COUNT, not a boolean:
+ * `N == rearmCycles + 1`, and the valve is entitled to decide at `N == CF_CONVOY_REARM_MAX + 1`
+ * (the deciding cycle). See [isConvoySuppressed] for why the bound is mandatory.
+ */
+internal const val CONVOY_SUPPRESSION_MAX_CYCLES = CF_CONVOY_REARM_MAX + 1
+
+/** The CF scan ledger reports `LowestNeededHeight == 0` when the peer manager doesn't
+ *  exist and `1` on a freshly calloc'd (unarmed) ledger. Neither is a real scan
+ *  frontier, so the convoy re-key must fall back to the legacy block-tip keying. */
+internal fun isScanFrontierArmed(scanFrontier: Long): Boolean = scanFrontier > 1L
+
+/**
+ * Is the convoy's header window FULL (`W_hdr >= CF_CONVOY_WINDOW`)? When it is, the
+ * block-header frontier is frozen BY DESIGN — the native gate suppresses the
+ * tip-racing getheaders continuations — so a frozen block tip carries no information.
+ *
+ * Compares before subtracting: the scan frontier can legitimately sit ABOVE
+ * `lastBlock->height` (an abandonment watermark past a not-yet-synced tip), and an
+ * unsigned-style wrap there would read as "permanently full" (the same UNDERFLOW
+ * GUARD the native gate carries).
+ */
+internal fun isConvoyWindowFull(
+    blockHeaderFrontier: Long,
+    scanFrontier: Long,
+    window: Long = CF_CONVOY_WINDOW,
+): Boolean = isScanFrontierArmed(scanFrontier) &&
+    blockHeaderFrontier >= scanFrontier &&
+    blockHeaderFrontier - scanFrontier >= window
+
+/**
+ * Should the tip-stall watchdog stand down because the B2 abandonment valve owns the
+ * scan-frontier stall? [abandonmentPendingCycles] is the count from
+ * `BRPeerManagerHasPendingAbandonment` (0 = nothing pending).
+ *
+ * **THE BOUND IS LOAD-BEARING — do NOT reduce this to `cycles > 0`.** The valve's
+ * per-cycle `offersReachedLivePeer` latch is cleared by ANY disconnect of the peer
+ * stamped on the hole, and a deciding cycle is 5 offers over ~7.5 min. On this
+ * wallet's documented fleet — canon oracles at `maxconnections`, errno-101 blips,
+ * ~8 peers rotating — EVERY cycle can be tainted, so the valve re-arms INDEFINITELY
+ * and the accessor returns non-zero forever. A bare-boolean suppression would then be
+ * PERMANENTLY active and the watchdog would stand down forever, in exactly the case
+ * the backstop exists for. So suppress only while the valve is inside the cycles it
+ * is actually entitled to (`N <= CF_CONVOY_REARM_MAX + 1`, i.e. through the deciding
+ * cycle); above that the hole is re-arming without converging and MUST be re-exposed
+ * to the watchdog's escalation.
+ */
+internal fun isConvoySuppressed(abandonmentPendingCycles: Int): Boolean =
+    abandonmentPendingCycles in 1..CONVOY_SUPPRESSION_MAX_CYCLES
+
+/**
+ * Is the tip-stall watchdog armed this poll?
+ *
+ * PRIMARY SIGNAL — the CF SCAN frontier ([scanStalledMs], from
+ * `getLowestNeededHeight()`). The paced convoy deliberately freezes the block-header
+ * frontier at `scanFrontier + CF_CONVOY_WINDOW`, so `getLastBlockHeight()` is the
+ * PACING signal now, not a liveness signal; a watchdog keyed on it reads intentional
+ * pacing as a stall. Scan progress is what actually proves the wallet is advancing,
+ * and it degrades gracefully to the original behaviour: an idle wallet at the network
+ * tip with live-but-silent peers scans nothing either, so the frontier freezes with
+ * the tip and the "no confirms for days" wedge is still caught.
+ *
+ * RESIDUAL DEAD-BRANCH CONJUNCT (spec Part D fix M-2) — while the convoy window is
+ * FULL the header frontier is pinned BY THE GATE, so escalation additionally requires
+ * the raw block tip to be frozen too. If the tip is still re-kicking (the B1 driver
+ * just landed another 2000-header batch) the header layer is alive and a scan stall
+ * belongs to the filter layer — the BIP158 watchdog and the B2 valve own it, and tier
+ * 1's UNGATED getheaders (which blows straight past the window) cannot help. When the
+ * window is OPEN there is no gating to explain a frozen tip, so the scan signal stands
+ * alone.
+ *
+ * DELIBERATE DEVIATION FROM THE SPEC SKETCH, stated: M-2 reads as "ALSO arm when the
+ * block tip is frozen and the window is full", i.e. a DISJUNCT that would arm while
+ * the scan still climbs, so a dead branch pinned at the window top is caught before
+ * the scan climbs the whole window to reach it. That input state is indistinguishable
+ * from a healthy gated descent (block tip frozen + window full is the convoy's steady
+ * state between header batches — the discriminator is only whether the tip eventually
+ * re-kicks), so as a disjunct it false-fires tier 1 on any descent whose 2000-block
+ * gated interval exceeds the threshold, and it directly contradicts the mandated
+ * behaviour "tier 1 must NOT fire when the header tip is frozen at scanFrontier + W
+ * while the scan advances". The conjunctive form keeps the dead-branch case (both
+ * clocks stop, so it still fires) and drops only the early-catch; the dead branch is
+ * still caught, just when the scan reaches it.
+ */
+internal fun isTipStallArmed(
+    scanStalledMs: Long,
+    blockTipStalledMs: Long,
+    convoyWindowFull: Boolean,
+    thresholdMs: Long,
+): Boolean = scanStalledMs >= thresholdMs &&
+    (!convoyWindowFull || blockTipStalledMs >= thresholdMs)
