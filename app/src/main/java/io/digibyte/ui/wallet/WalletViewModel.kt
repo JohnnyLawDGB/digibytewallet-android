@@ -649,6 +649,22 @@ class WalletViewModel @Inject constructor(
                             "CF band abandoned — abandonedBelow=$abandonedBelow " +
                                 "lowHint=$pendingAbandonmentLowHint; surfacing recover-me banner")
                     }
+                } else if (CfAbandonmentStore.noteScanCoverage(
+                        application, abandonedBelow, scanFrontier,
+                    )
+                ) {
+                    // THIRD recovery path, and the only unattended one. SyncService's
+                    // frozen-CF recovery / corrupt-chain heal / post-timeout re-anchor
+                    // each delete CfScanLedgerStore and re-Init the native ledger at
+                    // the floor, so abandonedBelow returns to 0 and the ORDINARY scan
+                    // re-covers the band — no reconcile, no rescan, nothing on either
+                    // of those paths called. Without this the wallet would nag
+                    // "History gap" and refuse Synced forever over a gap that has
+                    // already closed. Gated on BOTH conjuncts inside noteScanCoverage:
+                    // a re-anchor floor above the band must NOT clear it.
+                    android.util.Log.i("WalletVM",
+                        "abandoned CF band re-covered by the ordinary scan " +
+                            "(abandonedBelow=0, scanFrontier=$scanFrontier) — banner cleared")
                 }
                 // Re-read every tick (in-memory prefs map): a reconcile that sets the
                 // recovered signal must clear the banner within one poll.

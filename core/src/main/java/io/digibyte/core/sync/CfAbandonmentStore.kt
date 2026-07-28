@@ -151,6 +151,40 @@ object CfAbandonmentStore {
     }
 
     /**
+     * The ORDINARY CF scan re-covered the band — the third recovery path, and the
+     * only one nobody explicitly triggers.
+     *
+     * `SyncService`'s frozen-CF recovery (`:1345`), corrupt-filter-chain heal
+     * (`:1421`) and post-timeout re-anchor (`:1477`) each `CfScanLedgerStore.delete()`
+     * and recreate the manager, so native re-`Init`s the ledger at the floor and
+     * `abandonedBelow` genuinely returns to 0. The hard floor is gone, the scan
+     * descends through the abandoned heights again, and the gap closes — with no
+     * reconcile and no rescan, so nothing on either of those paths is ever called.
+     * Without this check the banner would nag and "Synced" would be withheld
+     * FOREVER over a gap that no longer exists.
+     *
+     * **Both conjuncts are load-bearing.** `abandonedBelow == 0` alone is NOT
+     * coverage: the re-anchor floor can land ABOVE the band, in which case those
+     * heights are still unscanned and clearing the surfacing would be precisely the
+     * silent loss this mechanism exists to prevent. And a high `scanFrontier` while
+     * the watermark still stands is just the hard floor reading back at us, not
+     * progress. So both must hold: the floor is gone AND the scan frontier has moved
+     * PAST the top of the band.
+     *
+     * `scanFrontier` is `getLowestNeededHeight()` — the lowest height still NEEDED —
+     * so it must be strictly greater than [AbandonedBand.high] for `high` itself to
+     * have been scanned.
+     *
+     * Returns true iff this call set the recovered signal.
+     */
+    fun noteScanCoverage(ctx: Context, abandonedBelow: Long, scanFrontier: Long): Boolean {
+        val band = unrecoveredBand(ctx) ?: return false
+        if (abandonedBelow != 0L) return false        // hard floor still clamping
+        if (scanFrontier <= band.high) return false   // scan hasn't passed the band
+        return markRecovered(ctx)
+    }
+
+    /**
      * Forget the band entirely. Used by the full rescan, which deletes the persisted
      * native ledger so `abandonedBelow` genuinely returns to 0 — there is no band
      * left to surface or recover. commit() (synchronous), NOT apply(): the rescan

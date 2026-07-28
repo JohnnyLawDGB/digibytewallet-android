@@ -6,6 +6,7 @@ import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -110,6 +111,60 @@ class CfAbandonmentStoreTest {
         repeat(5) { assertFalse(CfAbandonmentStore.noteAbandonment(ctx, 1_000L, 900L)) }
         assertTrue(CfAbandonmentStore.isRecovered(ctx))
         assertNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    // ── recovery by the ordinary CF scan (watchdog-heal path) ────────────────
+    //
+    // SyncService's frozen-CF recovery (:1345), corrupt-chain heal (:1421) and
+    // post-timeout re-anchor (:1477) each delete CfScanLedgerStore and re-Init the
+    // native ledger at the floor. That drops `abandonedBelow` back to 0 and lets the
+    // ORDINARY CF scan re-cover the band — with no reconcile and no rescan, so
+    // nothing on the reconcile path is ever called. Without an explicit coverage
+    // check the banner would nag and Synced would be withheld FOREVER over a gap
+    // that no longer exists.
+    //
+    // The proof is two conjuncts, and both are load-bearing: `abandonedBelow == 0`
+    // alone is not coverage (the re-anchor floor can sit ABOVE the band, in which
+    // case those heights are still unscanned and a blanket clear would be exactly
+    // the silent loss this whole mechanism exists to prevent).
+
+    @Test fun scanPassedTheBandAfterReInit_countsAsRecovery() {
+        val ctx = fakeContext()
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        // watermark re-Init'd to 0 AND the scan frontier is now past the band top (999)
+        assertTrue(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_000L))
+        assertNull(CfAbandonmentStore.unrecoveredBand(ctx))
+        assertTrue(CfAbandonmentStore.isRecovered(ctx))
+    }
+
+    @Test fun watermarkClearedButScanNotYetPastTheBand_isNotRecovery() {
+        val ctx = fakeContext()
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        // Re-anchored at a floor ABOVE the band: those heights are still unscanned.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 500L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+        // Exactly at the band top is NOT past it — LowestNeededHeight is the lowest
+        // height still NEEDED, so it must exceed `high` for `high` to be scanned.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 999L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    /** While the watermark still stands, the hard floor still clamps every CF
+     *  request — a high scan frontier there is the floor itself, not coverage. */
+    @Test fun watermarkStillStanding_isNeverRecovery() {
+        val ctx = fakeContext()
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 1_000L, scanFrontier = 9_999L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    /** No band, or an already-recovered one → nothing to do, no writes. */
+    @Test fun scanCoverage_isANoOpWithoutAnUnrecoveredBand() {
+        val ctx = fakeContext()
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 9_999L))
+        CfAbandonmentStore.noteAbandonment(ctx, 1_000L, 900L)
+        CfAbandonmentStore.markRecovered(ctx)
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 9_999L))
     }
 
     /** The full rescan re-`Init`s the native ledger at abandonedBelow = 0, so the

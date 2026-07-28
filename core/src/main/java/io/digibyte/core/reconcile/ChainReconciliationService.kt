@@ -224,29 +224,32 @@ class ChainReconciliationService(
         // well under the server's request limiter that the per-address loop tripped.
         val history = nodeClient.addressHistoryBatch(addrs) ?: return 0
         val toImport = planHistoryImport(listOf(history), known)
-        var imported = 0
-        var unfetched = 0
-        for ((i, tx) in toImport.withIndex()) {
-            _state.value = State.Scanning(
-                "Recovering tx ${i + 1}/${toImport.size}…",
-                progress = 0.5f + (i + 1).toFloat() / toImport.size * 0.5f,
-            )
-            val raw = nodeClient.fetchRawTx(tx.txid, tx.height)
-            if (raw == null) { unfetched++; continue }
-            val bytes = runCatching { hexToBytes(raw.hex) }.getOrNull()
-            if (bytes == null) { unfetched++; continue }
-            if (NativeBridge.registerRawTransaction(bytes, raw.blockHeight, raw.blockTime)) {
-                imported++
+        val outcome = importPlannedHistory(
+            toImport = toImport,
+            fetch = { tx -> nodeClient.fetchRawTx(tx.txid, tx.height) },
+            decodeHex = { hex -> runCatching { hexToBytes(hex) }.getOrNull() },
+            register = { bytes, h, t -> NativeBridge.registerRawTransaction(bytes, h, t) },
+            onProgress = { i, total ->
+                _state.value = State.Scanning(
+                    "Recovering tx ${i + 1}/$total…",
+                    progress = 0.5f + (i + 1).toFloat() / total * 0.5f,
+                )
+            },
+            onImported = { tx ->
                 android.util.Log.i("ChainReconciliation", "history-recovered ${tx.txid} @${tx.height}")
-            }
-            // A false from registerRawTransaction means "already known", not a
-            // failure — it does not compromise coverage.
-        }
+            },
+        )
         // Coverage means: the node answered for the whole owned address set AND every
-        // tx we planned to import was actually fetched and decoded. Anything less and
-        // we cannot claim an abandoned band was re-covered.
-        lastHistoryPassCovered = (unfetched == 0)
-        return imported
+        // tx we planned to import actually landed in the wallet. Anything less and we
+        // cannot claim an abandoned band was re-covered.
+        lastHistoryPassCovered = outcome.covered
+        if (!outcome.covered) {
+            android.util.Log.w("ChainReconciliation",
+                "address-history pass did NOT cover the owned set " +
+                    "(${outcome.unrecovered}/${toImport.size} tx unrecovered) — " +
+                    "an abandoned CF band must stay surfaced")
+        }
+        return outcome.imported
     }
 
     /** Set by [reconcileAddressHistory]: did that pass actually reach the node for
@@ -288,6 +291,62 @@ class ChainReconciliationService(
         }
         return out
     }
+}
+
+/**
+ * Outcome of the address-history import loop.
+ *
+ * [covered] is the GATE-3 predicate: did this pass actually put every tx the node
+ * reported for the owned address set into the wallet? Only a covered pass may set
+ * the `abandonedBandRecovered` signal — clearing the abandoned-band banner while a
+ * planned tx is still missing is exactly the silent loss the B2 valve is only
+ * tolerable without.
+ */
+internal data class HistoryImportOutcome(val imported: Int, val unrecovered: Int) {
+    val covered: Boolean get() = unrecovered == 0
+}
+
+/**
+ * Fetch → decode → register each planned tx, classifying every per-tx outcome as
+ * recovered or NOT recovered.
+ *
+ * Extracted from [ChainReconciliationService.reconcileAddressHistory] purely so the
+ * classification is testable on the host JVM — the real loop's collaborators are
+ * `NativeBridge` (JNI, unmockable off-device) and an HTTP client.
+ */
+internal suspend fun importPlannedHistory(
+    toImport: List<AddressTx>,
+    fetch: suspend (AddressTx) -> RawTxEntry?,
+    decodeHex: (String) -> ByteArray?,
+    register: (ByteArray, Long, Long) -> Boolean,
+    onProgress: (index: Int, total: Int) -> Unit = { _, _ -> },
+    onImported: (AddressTx) -> Unit = { },
+): HistoryImportOutcome {
+    var imported = 0
+    var unrecovered = 0
+    for ((i, tx) in toImport.withIndex()) {
+        onProgress(i, toImport.size)
+        val raw = fetch(tx)
+        if (raw == null) { unrecovered++; continue }
+        val bytes = decodeHex(raw.hex)
+        if (bytes == null) { unrecovered++; continue }
+        if (register(bytes, raw.blockHeight, raw.blockTime)) {
+            imported++
+            onImported(tx)
+        } else {
+            // NOT "already known" — a wallet-known txid can never reach this loop,
+            // because planHistoryImport drops every txid already in
+            // getTransactionDetails(). Per jni_transaction.c:372-434 a JNI_FALSE
+            // here means null wallet, BRTransactionParse failure, unsigned tx, or
+            // BRWalletRegisterTransaction rejecting the tx as not associated with
+            // the wallet — in every one of those cases the tx did NOT land, so this
+            // pass has not covered the band and must not be allowed to clear the
+            // surfacing. (The duplicate branch that does return false is
+            // unreachable from here.)
+            unrecovered++
+        }
+    }
+    return HistoryImportOutcome(imported, unrecovered)
 }
 
 /** Known wallet txids = field 0 of each getTransactionDetails line
