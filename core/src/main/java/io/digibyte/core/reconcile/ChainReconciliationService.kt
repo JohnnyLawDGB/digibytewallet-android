@@ -222,10 +222,20 @@ class ChainReconciliationService(
         // [knownTxidsForHistoryPlan]. getTransactionDetails() alone caps at the 100
         // most-recent txs, which would let a >100-tx wallet's older confirmed txids
         // ride into the import plan as duplicates and permanently sink `covered`.
-        val known = knownTxidsForHistoryPlan(
-            allHashes = runCatching { NativeBridge.getAllTransactionHashes() }.getOrNull(),
-            details = NativeBridge.getTransactionDetails(),
-        )
+        val allHashes = runCatching { NativeBridge.getAllTransactionHashes() }
+            .onFailure { android.util.Log.w("ChainReconciliation", "getAllTransactionHashes threw", it) }
+            .getOrNull()
+        val details = NativeBridge.getTransactionDetails()
+        if (isCappedKnownSetFallback(allHashes, details)) {
+            // NEVER let this degrade silently — see [isCappedKnownSetFallback].
+            android.util.Log.w("ChainReconciliation",
+                "getAllTransactionHashes unavailable — falling back to the 100-CAPPED " +
+                    "known set. On a wallet with >100 transactions the older confirmed " +
+                    "txids will ride into the import plan as duplicates and sink the " +
+                    "coverage proof, so an abandoned CF band can never be marked " +
+                    "recovered (banner nags, Synced withheld) until this recovers.")
+        }
+        val known = knownTxidsForHistoryPlan(allHashes, details)
         _state.value = State.Scanning("Reading address history…", progress = 0.2f)
         // ONE batched POST per 500 addresses (not one GET per address) — stays
         // well under the server's request limiter that the per-address loop tripped.
@@ -392,12 +402,34 @@ internal suspend fun importPlannedHistory(
  * and over-dropping from `toImport` can only skip a re-import that would have been
  * a no-op duplicate.
  */
-internal fun knownTxidsForHistoryPlan(allHashes: Array<String>?, details: String): Set<String> {
+internal fun knownTxidsForHistoryPlan(allHashes: Array<out String?>?, details: String): Set<String> {
+    // Elements are nullable despite the JNI declaration's `Array<String>`:
+    // jni_wallet.c:729 returns a NON-null array of txCount NULL slots when the
+    // BRTransaction** malloc fails, and a failed NewStringUTF leaves an individual
+    // slot NULL. A bare `it.trim()` throws NPE straight out of
+    // reconcileAddressHistory() — OOM-only, but this sits on the GATE-3 path.
     val fromNative = allHashes
-        ?.mapNotNull { it.trim().takeIf(String::isNotBlank) }
+        ?.mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
         ?: emptyList()
     return fromNative.toSet() + extractKnownTxids(details)
 }
+
+/**
+ * Did the uncapped known set fail to materialise, leaving the plan to fall back to
+ * the 100-capped [extractKnownTxids]?
+ *
+ * That fallback SILENTLY reinstates the exact regression the uncapped accessor
+ * exists to prevent: on a wallet with >100 txs the older confirmed txids ride into
+ * `toImport` as duplicates, every one counts against coverage, `covered` becomes
+ * unreachable, and the abandoned-band banner nags forever with Synced withheld —
+ * with nothing in logcat to explain it. Callers MUST warn on this, naming the
+ * consequence, so a field logcat is diagnosable.
+ *
+ * Only meaningful when the wallet actually has transactions: a null array with a
+ * blank `details` just means no wallet is loaded, which is not a degradation.
+ */
+internal fun isCappedKnownSetFallback(allHashes: Array<out String?>?, details: String): Boolean =
+    allHashes == null && details.isNotBlank()
 
 /** Known wallet txids = field 0 of each getTransactionDetails line
  *  (`txHash|amount|fee|blockHeight|timestamp|sent|received`).

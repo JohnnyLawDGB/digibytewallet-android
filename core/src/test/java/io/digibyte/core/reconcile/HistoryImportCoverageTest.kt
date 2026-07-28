@@ -201,6 +201,63 @@ class HistoryImportCoverageTest {
         assertEquals(setOf("aaa", "bbb"), known)
     }
 
+    /**
+     * NULL elements must not throw. `jni_wallet.c:729` returns a NON-null array of
+     * `txCount` NULL slots when the `BRTransaction**` malloc fails, and a failed
+     * `NewStringUTF` leaves an individual slot NULL — despite the JNI declaration
+     * saying `Array<String>`. A bare `it.trim()` throws NPE straight out of
+     * `reconcileAddressHistory()`, on the GATE-3 recovery path.
+     */
+    @Test fun nullHashElementsAreSkipped_notThrown() {
+        val known = knownTxidsForHistoryPlan(arrayOf("aaa", null, "bbb", null), "")
+        assertEquals(setOf("aaa", "bbb"), known)
+    }
+
+    /** The all-NULL array the malloc-failure path produces degrades to the details
+     *  set rather than exploding. */
+    @Test fun allNullHashArray_degradesToTheDetailsSet() {
+        val known = knownTxidsForHistoryPlan(
+            arrayOfNulls<String>(3),
+            "ccc|100|1|23900000|1700000000|0|100",
+        )
+        assertEquals(setOf("ccc"), known)
+    }
+
+    // ── the capped-fallback degradation must be LOUD (fix round 3a) ───────────
+    //
+    // If getAllTransactionHashes() ever returns null or throws, the known set
+    // silently reverts to the 100-capped details set — which silently reinstates the
+    // Critical fixed in round 2. These pin the CONDITION the warn keys on. (The
+    // emission itself is not asserted: android.util.Log is not stubbed in this
+    // module's unit tests, and reconcileAddressHistory() is not host-reachable
+    // anyway — see the report. Contorting the code for an injectable logger was not
+    // worth it; what matters is that the predicate is right and the caller warns.)
+
+    @Test fun nullArrayWithTransactionsPresent_isADegradationWorthWarningAbout() {
+        assertTrue(isCappedKnownSetFallback(null, "aaa|100|1|23900000|1700000000|0|100"))
+    }
+
+    /** No wallet loaded → both sources empty. That is not a degradation, and warning
+     *  on it every reconcile would make the real signal invisible. */
+    @Test fun nullArrayWithNoTransactions_isNotADegradation() {
+        assertFalse(isCappedKnownSetFallback(null, ""))
+        assertFalse(isCappedKnownSetFallback(null, "   \n  "))
+    }
+
+    /** A present array — even an empty or all-null one — is not the fallback case;
+     *  only a NULL array loses the uncapped source entirely. */
+    @Test fun presentArray_isNeverTheFallbackCase() {
+        assertFalse(isCappedKnownSetFallback(emptyArray<String>(), "aaa|1|1|1|1|0|1"))
+        assertFalse(isCappedKnownSetFallback(arrayOf("aaa"), "aaa|1|1|1|1|0|1"))
+    }
+
+    /** Behaviour on the fallback is unchanged — it still plans, just off the capped
+     *  set. The warn is diagnostics, not a behaviour change. */
+    @Test fun fallbackStillProducesTheCappedKnownSet() {
+        val details = "aaa|100|1|23900000|1700000000|0|100\nbbb|100|1|23900001|1700000000|0|100"
+        assertEquals(setOf("aaa", "bbb"), knownTxidsForHistoryPlan(null, details))
+    }
+
     /** Production truncation: `getTransactionDetails` carries only the 100 most
      *  recent txs, oldest-first ordering (`BRWalletTransactions`). */
     private fun cappedDetails(walletTxids: List<String>): String =
