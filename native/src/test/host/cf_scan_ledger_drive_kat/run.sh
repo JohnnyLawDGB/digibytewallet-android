@@ -74,7 +74,14 @@
 #     nothing that can create the first outstanding entry -- no hole for the
 #     residual driver, no cfheaders arrival for the forward fetch -- so the scan
 #     never advances and deep history is silently never scanned -> RED.
-# HARD-FAILS run.sh if it unexpectedly PASSES.
+#   * -DCONVOY_HDR_REKICK_UNTHROTTLED (fix round 1): B1.3's re-kick RATE LIMIT is
+#     compiled out (the backoff bookkeeping stays live, so what is proven red is
+#     the throttle, not the arithmetic). A permanently frozen header tip -- a
+#     stale-HIGH estimatedHeight on a fully synced wallet, or a slow link mid-batch
+#     -- then re-issues a full-locator getheaders on EVERY ~10 s tick forever
+#     (~10 MB/day upstream, and on a slow link every duplicate reply spawns its own
+#     persistent continuation chain) -> RED.
+# Both HARD-FAIL run.sh if they unexpectedly PASS.
 #
 # Exit code 0 = every red-before-green gate satisfied AND the fixed full suite passed.
 set -euo pipefail
@@ -189,6 +196,18 @@ if "$BUILD_DIR/kat_convoy_nob1"; then
     exit 1
 else
     echo "RED confirmed: without the B1 KeepAlive driver the resumed drain trough never re-primes (expected)."
+fi
+
+# ---- RED: the B1.3 getheaders re-kick RATE LIMIT compiled OUT MUST fail -----
+build "$BUILD_DIR/kat_convoy_unthrottled" -DCONVOY_HDR_REKICK_UNTHROTTLED -DKAT_B1_THROTTLE_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_convoy_unthrottled"; then
+    echo "GATE FAILURE: the UNTHROTTLED B1.3 re-kick build PASSED. The rate limit's"
+    echo "red-before-green cannot go red -- a permanently frozen header tip (stale-HIGH"
+    echo "estimatedHeight on a synced wallet, or a slow link mid-batch) would re-issue a"
+    echo "full-locator getheaders on EVERY ~10 s tick forever, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the rate limit a permanently frozen tip re-kicks every tick (expected)."
 fi
 
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------

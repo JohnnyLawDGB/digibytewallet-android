@@ -2508,12 +2508,24 @@ static void test_b1_rekicks_getheaders_when_tip_frozen(BRWallet *wallet)
     BRPeerManagerKeepAlive(m);
     check(g_hdrCount == 0, "CONTROL: a FULL header window suppresses the re-kick (the convoy still paces)");
 
-    // ...and re-opening the window releases that same frozen tip on the next tick.
+    // ...and re-opening the window does NOT bypass the rate limit: the throttle is
+    // cleared by real header PROGRESS, never by a mere window transition.
     BRCFScanLedgerInit(&m->cfLedger, BASE);
     check(_cfConvoyHdrGated(m) == 0, "control setup: the header window re-opened");
     g_hdrCount = 0;
     BRPeerManagerKeepAlive(m);
-    check(g_hdrCount == 1, "B1.3: re-opening the window releases the frozen header tip on the very next tick");
+    check(g_hdrCount == 0,
+          "THROTTLE: the re-kick interval has not elapsed, so re-opening the window does not fire one yet");
+
+    // Once the interval HAS elapsed, the very next tick releases the frozen tip.
+    // The stamp is backdated because the KAT cannot advance the real time(NULL)
+    // clock the driver reads -- the same idiom the residual cases use with
+    // requestedAt=0 to make a hole "immediately due".
+    m->convoyLastHdrKickAt -= (time_t)(m->convoyHdrKickBackoff + 1u);
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 1,
+          "B1.3: with the interval elapsed, re-opening the window releases the frozen header tip");
 
     // CONTROL 3 -- at the network tip there is no header work, so no re-kick
     // (a healthy at-tip wallet must not be nagged every 10 s).
@@ -2521,6 +2533,97 @@ static void test_b1_rekicks_getheaders_when_tip_frozen(BRWallet *wallet)
     g_hdrCount = 0;
     BRPeerManagerKeepAlive(m);
     check(g_hdrCount == 0, "CONTROL: at the network tip (nothing left to fetch) the re-kick stays silent");
+
+    BRPeerManagerFree(m);
+}
+
+// B1.3 RATE LIMIT (Task 3 fix round 1, review IMPORTANT-1).
+//
+// A frozen tip is necessary but NOT sufficient to justify a re-kick, and the
+// frozen condition can be PERMANENT:
+//   (a) slow link -- BRPeer.c issues its continuation BEFORE the relay loop, so
+//       lastBlock does not move until a whole ~440 KB batch is parsed. One
+//       injected getheaders per ~10 s tick then means several per batch, and
+//       because count >= 2000 each reply spawns its OWN persistent, lockstep
+//       continuation chain: N x ~2.2 MB of duplicate headers per window-open
+//       period, recurring on every re-open of a multi-hour deep restore.
+//   (b) THIS CASE -- estimatedHeight is only ever RAISED (never lowered), so a
+//       peer that advertised a height we never reach leaves a FULLY SYNCED wallet
+//       permanently `lastBlock->height < estimatedHeight` with W_hdr ~ 0, i.e.
+//       the window permanently OPEN and the tip permanently frozen. Unthrottled
+//       that is a ~1.2 KB full-locator getheaders every 10 s FOREVER (~10 MB/day
+//       upstream), each answered with 0 headers. Steady state, not a transient.
+//
+// RED-before-green: run.sh builds this case with -DCONVOY_HDR_REKICK_UNTHROTTLED
+// (the interval check compiled out, the backoff bookkeeping still live, so what
+// goes red is the THROTTLE and not the arithmetic) and HARD-FAILS if it passes.
+static void test_b1_getheaders_rekick_is_throttled(BRWallet *wallet)
+{
+    printf("\n=== test_b1_getheaders_rekick_is_throttled (Task 3 fix round 1: B1.3 rate limit) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 300u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+    (void)baseCount;
+
+    // Forward cursor pinned at the cfheader frontier: both cfilter legs idle, so
+    // getheaders is the only variable (same isolation as the B1.3 case above).
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = BASE;
+    m->autoFetchCFiltersThrough = TIP - 1u;
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    m->estimatedHeight = TIP + 50000u;     // stale-HIGH forever: estimatedHeight is only ever RAISED
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x34; pa->port = 12034; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+    m->downloadPeer = pa;
+
+    check(_cfConvoyHdrGated(m) == 0,
+          "setup: the header window is PERMANENTLY open (a synced wallet has W_hdr ~ 0, nowhere near W)");
+    check(m->lastBlock && m->lastBlock->height < m->estimatedHeight,
+          "setup: stale-HIGH estimatedHeight leaves a fully-synced wallet permanently 'below the network tip'");
+
+    // ---- 12 consecutive frozen ticks. Unthrottled that is 11 getheaders. ----
+    g_hdrCount = 0;
+    for (int t = 0; t < 12; t++) BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 1,
+          "THROTTLE: 12 consecutive frozen ticks re-kick getheaders EXACTLY ONCE "
+          "(RED on -DCONVOY_HDR_REKICK_UNTHROTTLED: one per tick, forever)");
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_BASE_SECS * 2u,
+          "THROTTLE: the interval BACKED OFF after that unproductive re-kick (30 -> 60)");
+
+    // ---- Only ELAPSED TIME releases the next one. The stamp is backdated because
+    // the KAT cannot advance the real time(NULL) clock the driver reads. ----
+    m->convoyLastHdrKickAt -= (time_t)(m->convoyHdrKickBackoff + 1u);
+    g_hdrCount = 0;
+    for (int t = 0; t < 5; t++) BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 1, "THROTTLE: one elapsed interval buys exactly ONE more re-kick, not one per tick");
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_BASE_SECS * 4u,
+          "THROTTLE: the interval keeps doubling while the tip stays frozen (60 -> 120)");
+
+    // ---- ...and SATURATES: bounded by the ceiling, never unbounded (and never
+    // stuck below it, which would leave the steady-state leak only half-fixed). ----
+    for (int i = 0; i < 12; i++) {
+        m->convoyLastHdrKickAt -= (time_t)(m->convoyHdrKickBackoff + 1u);
+        BRPeerManagerKeepAlive(m);
+    }
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_MAX_SECS,
+          "THROTTLE: the backoff saturates at CF_CONVOY_HDR_REKICK_MAX_SECS (the steady-state leak is bounded)");
+
+    // ---- RESET ON PROGRESS. This is what keeps the ceiling free: a tick where the
+    // header tip actually ADVANCED clears the backoff, so a genuine window re-open
+    // during a descent is re-kicked at BASE and is never billed the ceiling. ----
+    BRMerkleBlock *nb = rhChainBlock(TIP + 1u);
+    BRSetAdd(m->blocks, nb);
+    m->lastBlock = nb;
+    BRPeerManagerKeepAlive(m);
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_BASE_SECS,
+          "RESET: real header progress clears the backoff to BASE "
+          "(a genuine window re-open is never billed the ceiling -- the descent pays nothing)");
 
     BRPeerManagerFree(m);
 }
@@ -2605,6 +2708,19 @@ int main(void)
     test_b1_resumes_drain_trough(wallet);
     test_b1_rekicks_cfheaders_on_window_reopen(wallet);
     test_b1_rekicks_getheaders_when_tip_frozen(wallet);
+    test_b1_getheaders_rekick_is_throttled(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_B1_THROTTLE_REDGREEN_ONLY
+    // run.sh builds this twice for the B1.3 rate limit's red-before-green gate:
+    // once with the interval check compiled out (-DCONVOY_HDR_REKICK_UNTHROTTLED ==
+    // the pre-fix shape, one getheaders per frozen tick forever -- must FAIL == RED)
+    // and once throttled (must PASS == GREEN), running ONLY the throttle case so the
+    // RED is unambiguously the missing rate limit and nothing incidental.
+    test_b1_getheaders_rekick_is_throttled(wallet);
     BRWalletFree(wallet);
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
@@ -2653,6 +2769,7 @@ int main(void)
     test_b1_resumes_drain_trough(wallet);                  // paced-convoy-fetch Task 3: B1.1 forward drive out of the drain trough (red-before-green)
     test_b1_rekicks_cfheaders_on_window_reopen(wallet);    // paced-convoy-fetch Task 3: B1.2 cfheaders re-kick on window re-open
     test_b1_rekicks_getheaders_when_tip_frozen(wallet);    // paced-convoy-fetch Task 3: B1.3 getheaders re-kick (manager side)
+    test_b1_getheaders_rekick_is_throttled(wallet);        // paced-convoy-fetch Task 3 fix 1: B1.3 rate limit (red-before-green)
 
     BRWalletFree(wallet);
 
