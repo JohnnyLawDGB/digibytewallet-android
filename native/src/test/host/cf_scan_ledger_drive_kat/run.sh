@@ -81,7 +81,14 @@
 #     -- then re-issues a full-locator getheaders on EVERY ~10 s tick forever
 #     (~10 MB/day upstream, and on a slow link every duplicate reply spawns its own
 #     persistent continuation chain) -> RED.
-# Both HARD-FAIL run.sh if they unexpectedly PASS.
+#   * -DCONVOY_HDR_REKICK_STALE_ACROSS_GATE (fix round 2): B1.3's GATED->open
+#     EPISODE RESET is compiled out (the convoyHdrWasGated tracking stays live, so
+#     what is proven red is the reset, not the transition detection). A stalled tip
+#     that escalated the backoff to the ceiling then carries that interval straight
+#     through a gated period, so re-opening the window does NOT resume the held
+#     continuation on the next tick -- it waits out up to 600 s, in exactly the case
+#     B1.3 exists to serve -> RED.
+# All three HARD-FAIL run.sh if they unexpectedly PASS.
 #
 # Exit code 0 = every red-before-green gate satisfied AND the fixed full suite passed.
 set -euo pipefail
@@ -208,6 +215,19 @@ if "$BUILD_DIR/kat_convoy_unthrottled"; then
     exit 1
 else
     echo "RED confirmed: without the rate limit a permanently frozen tip re-kicks every tick (expected)."
+fi
+
+# ---- RED: the B1.3 GATED->open episode reset compiled OUT MUST fail ---------
+build "$BUILD_DIR/kat_convoy_stalegate" -DCONVOY_HDR_REKICK_STALE_ACROSS_GATE -DKAT_B1_GATERESET_REDGREEN_ONLY -DCF_RETENTION_MAX_SPAN=4000
+if "$BUILD_DIR/kat_convoy_stalegate"; then
+    echo "GATE FAILURE: the STALE-BACKOFF-ACROSS-GATE build PASSED. The episode reset's"
+    echo "red-before-green cannot go red -- a genuinely stalled header tip that escalated to"
+    echo "the ceiling would carry that interval through a gated period, so re-opening the"
+    echo "window would NOT resume the held continuation on the next tick but wait out up to"
+    echo "CF_CONVOY_HDR_REKICK_MAX_SECS, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the episode reset a window reopen waits out the stale pre-gate backoff (expected)."
 fi
 
 # ---- GREEN: fixed full suite (ceiling override small) -----------------------

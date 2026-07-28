@@ -2508,24 +2508,22 @@ static void test_b1_rekicks_getheaders_when_tip_frozen(BRWallet *wallet)
     BRPeerManagerKeepAlive(m);
     check(g_hdrCount == 0, "CONTROL: a FULL header window suppresses the re-kick (the convoy still paces)");
 
-    // ...and re-opening the window does NOT bypass the rate limit: the throttle is
-    // cleared by real header PROGRESS, never by a mere window transition.
+    // ...and re-opening the window releases that same frozen tip on the VERY NEXT
+    // tick: a gated period issues no re-kicks, so it earns no penalty and carries
+    // none across (fix round 2 -- the GATED->open episode reset). The escalated
+    // form of this is test_b1_rekick_backoff_not_stale_across_gated_period below.
     BRCFScanLedgerInit(&m->cfLedger, BASE);
     check(_cfConvoyHdrGated(m) == 0, "control setup: the header window re-opened");
     g_hdrCount = 0;
     BRPeerManagerKeepAlive(m);
-    check(g_hdrCount == 0,
-          "THROTTLE: the re-kick interval has not elapsed, so re-opening the window does not fire one yet");
+    check(g_hdrCount == 1, "B1.3: re-opening the window releases the frozen header tip on the very next tick");
 
-    // Once the interval HAS elapsed, the very next tick releases the frozen tip.
-    // The stamp is backdated because the KAT cannot advance the real time(NULL)
-    // clock the driver reads -- the same idiom the residual cases use with
-    // requestedAt=0 to make a hole "immediately due".
-    m->convoyLastHdrKickAt -= (time_t)(m->convoyHdrKickBackoff + 1u);
+    // ...and the rate limit is immediately back in force for the NEXT one: the
+    // transition buys exactly one prompt re-kick, never a standing bypass.
     g_hdrCount = 0;
     BRPeerManagerKeepAlive(m);
-    check(g_hdrCount == 1,
-          "B1.3: with the interval elapsed, re-opening the window releases the frozen header tip");
+    check(g_hdrCount == 0,
+          "THROTTLE: the interval is back in force straight after the reopen re-kick (the transition is not a bypass)");
 
     // CONTROL 3 -- at the network tip there is no header work, so no re-kick
     // (a healthy at-tip wallet must not be nagged every 10 s).
@@ -2628,6 +2626,105 @@ static void test_b1_getheaders_rekick_is_throttled(BRWallet *wallet)
     BRPeerManagerFree(m);
 }
 
+// B1.3 GATED->open EPISODE RESET (Task 3 fix round 2, re-review IMPORTANT).
+//
+// The round-1 backoff punishes UNPRODUCTIVE RE-KICKS, and it was reset only on
+// `!hdrFrozen` -- real header-tip progress. But `hdrFrozen` and the window
+// verdict are INDEPENDENT predicates: _cfConvoyHdrGated flips on the SCAN
+// frontier, which B1.2's floor-snap/re-anchor moves (and which climbs on its own
+// during a descent), so the window can go open->full->open with lastBlock->height
+// never advancing once. A genuinely stalled tip that had already escalated to the
+// 600 s ceiling therefore carried that stale interval straight through the gated
+// period, and the reopen -- the exact event B1.3 exists to serve -- was NOT
+// released on the next tick but waited out up to 600 s. Pre-throttle, a reopen
+// always fired on the very next ~10 s tick, so that was a latency regression
+// introduced by the round-1 fix.
+//
+// This case models the sharpest form: the gated period is SHORT (one tick) and
+// the carried backoff is at the ceiling, so nothing but the episode reset can
+// make the reopen prompt.
+//
+// RED-before-green: run.sh builds this case with
+// -DCONVOY_HDR_REKICK_STALE_ACROSS_GATE (the reset compiled out, the
+// convoyHdrWasGated tracking still live, so what goes red is the RESET and not the
+// transition detection) and HARD-FAILS if it passes.
+static void test_b1_rekick_backoff_not_stale_across_gated_period(BRWallet *wallet)
+{
+    printf("\n=== test_b1_rekick_backoff_not_stale_across_gated_period (Task 3 fix round 2: episode reset) ===\n");
+
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 300u;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "manager+chain built");
+    if (! m) return;
+    (void)baseCount;
+
+    // Forward cursor pinned at the cfheader frontier: both cfilter legs idle, so
+    // getheaders is the only variable.
+    m->autoFetchCFiltersEnabled = 1;
+    m->autoFetchCFiltersStart   = BASE;
+    m->autoFetchCFiltersThrough = TIP - 1u;
+    BRCFScanLedgerInit(&m->cfLedger, BASE);       // W_hdr == 299 -> window OPEN
+    m->estimatedHeight = TIP + 50000u;            // header work remains; the tip is genuinely stalled
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x35; pa->port = 12035; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+    m->downloadPeer = pa;
+
+    // ---- A genuinely stalled tip (dead/slow peer) escalates the backoff all the
+    // way to the ceiling. Stamps are backdated because the KAT cannot advance the
+    // real time(NULL) clock the driver reads. ----
+    for (int i = 0; i < 8; i++) {
+        m->convoyLastHdrKickAt -= (time_t)(m->convoyHdrKickBackoff + 1u);
+        BRPeerManagerKeepAlive(m);
+    }
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_MAX_SECS,
+          "setup: a genuinely stalled tip escalated the backoff to the ceiling (600 s)");
+
+    // ---- The convoy CLOSES the header window (B1.2's floor-snap/re-anchor moving
+    // the scan frontier, or the scan falling a full window behind). NOTE the header
+    // tip never advances anywhere in this case, so the !hdrFrozen reset can never
+    // fire -- the episode reset is the ONLY thing that can clear the backoff. ----
+    BRCFScanLedgerInit(&m->cfLedger, BASE - 11000u);
+    check(_cfConvoyHdrGated(m) == 1, "the header window CLOSED (scan frontier moved; no re-kick is possible now)");
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 0, "gated: no re-kick goes out while the window is shut (so no penalty can be earned)");
+
+    // ---- ...and it REOPENS with the tip STILL frozen. This is the resume-a-held-
+    // continuation event B1.3 exists for: it must be served NOW, not after the
+    // stale pre-gate 600 s interval runs out. ----
+    BRCFScanLedgerInit(&m->cfLedger, BASE);
+    check(_cfConvoyHdrGated(m) == 0, "the header window RE-OPENED with the tip still frozen");
+    g_hdrCount = 0;
+    BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 1,
+          "EPISODE RESET: the reopen is served on the VERY NEXT tick, not after the stale pre-gate interval "
+          "(RED on -DCONVOY_HDR_REKICK_STALE_ACROSS_GATE: waits out up to 600 s)");
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_BASE_SECS * 2u,
+          "EPISODE RESET: the stall episode RESTARTED at BASE (30 -> 60), it did not continue from the ceiling");
+
+    // ---- NOT A BYPASS: the transition buys exactly ONE prompt re-kick; the rate
+    // limit is immediately back in force (round-1's bandwidth property, locally). ----
+    g_hdrCount = 0;
+    for (int t = 0; t < 6; t++) BRPeerManagerKeepAlive(m);
+    check(g_hdrCount == 0,
+          "NOT A BYPASS: 6 further open-window ticks issue NO re-kick (the interval re-armed at BASE)");
+
+    // ---- ROUND-1 PROPERTY INTACT: with the window staying open, a permanently
+    // frozen tip still decays all the way back to the 600 s ceiling. ----
+    for (int i = 0; i < 10; i++) {
+        m->convoyLastHdrKickAt -= (time_t)(m->convoyHdrKickBackoff + 1u);
+        BRPeerManagerKeepAlive(m);
+    }
+    check(m->convoyHdrKickBackoff == CF_CONVOY_HDR_REKICK_MAX_SECS,
+          "ROUND-1 PROPERTY INTACT: an open window + permanently frozen tip still decays to the 600 s ceiling");
+
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -2709,6 +2806,20 @@ int main(void)
     test_b1_rekicks_cfheaders_on_window_reopen(wallet);
     test_b1_rekicks_getheaders_when_tip_frozen(wallet);
     test_b1_getheaders_rekick_is_throttled(wallet);
+    test_b1_rekick_backoff_not_stale_across_gated_period(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_B1_GATERESET_REDGREEN_ONLY
+    // run.sh builds this twice for the B1.3 GATED->open episode reset's
+    // red-before-green gate: once with the reset compiled out
+    // (-DCONVOY_HDR_REKICK_STALE_ACROSS_GATE == the round-1 shape, where a stale
+    // pre-gate backoff makes a window reopen wait out up to 600 s in exactly the
+    // case B1.3 exists to serve -- must FAIL == RED) and once with the reset (must
+    // PASS == GREEN), running ONLY that case so the RED is unambiguous.
+    test_b1_rekick_backoff_not_stale_across_gated_period(wallet);
     BRWalletFree(wallet);
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
@@ -2770,6 +2881,7 @@ int main(void)
     test_b1_rekicks_cfheaders_on_window_reopen(wallet);    // paced-convoy-fetch Task 3: B1.2 cfheaders re-kick on window re-open
     test_b1_rekicks_getheaders_when_tip_frozen(wallet);    // paced-convoy-fetch Task 3: B1.3 getheaders re-kick (manager side)
     test_b1_getheaders_rekick_is_throttled(wallet);        // paced-convoy-fetch Task 3 fix 1: B1.3 rate limit (red-before-green)
+    test_b1_rekick_backoff_not_stale_across_gated_period(wallet); // paced-convoy-fetch Task 3 fix 2: GATED->open episode reset (red-before-green)
 
     BRWalletFree(wallet);
 
