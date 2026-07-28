@@ -65,6 +65,7 @@ internal fun decidePostTimeoutAction(
     scanStalledMs: Long,
     abandonmentPendingCycles: Int,
     scanFrozenThresholdMs: Long = CF_FROZEN_RECOVERY_MS,
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
 ): PostTimeoutAction = when {
     // PACED-CONVOY GATE (spec Part D). The re-anchor is destructive — its caller
     // deletes FilterHeaderStore AND CfScanLedgerStore — and under the convoy its
@@ -73,7 +74,7 @@ internal fun decidePostTimeoutAction(
     // SCAN frontier warrants it, and never while the B2 valve owns the stall (bounded).
     hasReachedSynced && !reanchoredThisSession &&
         scanStalledMs >= scanFrozenThresholdMs &&
-        !isConvoySuppressed(abandonmentPendingCycles) -> PostTimeoutAction.REANCHOR
+        !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) -> PostTimeoutAction.REANCHOR
     reanchoredThisSession && msSinceReanchor < REANCHOR_GRACE_MS -> PostTimeoutAction.AWAIT_REANCHOR
     else -> PostTimeoutAction.STAY_ON_FILTERS
 }
@@ -140,6 +141,7 @@ internal fun shouldRecoverFrozenCf(
     scanStalledMs: Long,
     abandonmentPendingCycles: Int,
     thresholdMs: Long = CF_FROZEN_RECOVERY_MS,
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
 ): Boolean =
     !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs &&
         // PACED-CONVOY GATE (spec Part D fix I-2) — THE dangerous branch. During a
@@ -155,7 +157,7 @@ internal fun shouldRecoverFrozenCf(
         // ...and never on the valve's own stall: a gaveUp hole PINS the scan frontier
         // by construction, so scan-frozen alone would hand the valve's decision window
         // straight to the branch that deletes the ledger it is deciding on. Bounded.
-        !isConvoySuppressed(abandonmentPendingCycles)
+        !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles)
 
 /**
  * How long the compact-filter tip may stay frozen AFTER the ordinary one-time
@@ -223,6 +225,7 @@ internal fun shouldHealCorruptFilterChain(
     abandonmentPendingCycles: Int,
     thresholdMs: Long = CF_CORRUPT_HEAL_MS,
     maxHeals: Int = MAX_CF_CORRUPT_HEALS,
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
 ): Boolean =
     blocksCaughtUp && peerCount > 0 && reanchored &&
         msSinceReanchor >= REANCHOR_GRACE_MS &&
@@ -232,7 +235,7 @@ internal fun shouldHealCorruptFilterChain(
         // filter state AND force-reconnects). A cfTip frozen at the convoy window top
         // while the scan drains is the designed steady state, not a poisoned chain.
         scanStalledMs >= thresholdMs &&
-        !isConvoySuppressed(abandonmentPendingCycles)
+        !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles)
 
 /**
  * How long the BLOCK-header tip may make no forward progress — while peers are
@@ -263,7 +266,8 @@ internal fun shouldRerequestHeadersOnStall(
     convoyWindowFull: Boolean,
     abandonmentPendingCycles: Int,
     thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
-): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles) &&
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) &&
     isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs)
 
 /**
@@ -283,7 +287,8 @@ internal fun shouldForceReconnectOnStall(
     tier1Fired: Boolean,
     abandonmentPendingCycles: Int,
     thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
-): Boolean = peerCount > 0 && tier1Fired && !isConvoySuppressed(abandonmentPendingCycles) &&
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+): Boolean = peerCount > 0 && tier1Fired && !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) &&
     isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs * 2)
 
 /**
@@ -298,27 +303,49 @@ internal fun shouldFastRecoverOnStall(
     convoyWindowFull: Boolean,
     abandonmentPendingCycles: Int,
     thresholdMs: Long,
-): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles) &&
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) &&
     isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs)
 
 // ── paced-convoy fetch (spec Part C/D) — window + abandonment-suppression ──
 
-/** Mirror of the native `CF_CONVOY_WINDOW` (BRPeerManager.h): the max the block-header
- *  / cfheader frontier may lead the CF SCAN frontier before the fetch gate suppresses
- *  the tip-racing continuations. */
-internal const val CF_CONVOY_WINDOW = 10_000L
+/**
+ * ⚠️ THESE TWO ARE FALLBACKS, NOT THE SOURCE OF TRUTH (fix-wave I-3). The live
+ * values come from native at runtime — `NativeBridge.getConvoyWindow()` and
+ * `NativeBridge.getConvoyRearmMax()`, read once per sync start in [SyncService] and
+ * threaded through the `window` / `suppressionMaxCycles` parameters below. They were
+ * previously HAND-MIRRORED here from `BRPeerManager.h` with no build-time check,
+ * which is a drift trap the spec actively walks into: its own tuning signal tells the
+ * operator to RAISE `CF_CONVOY_REARM_MAX` in the C header when an abandoned height
+ * later reconciles. Doing that would have left this file releasing its suppression at
+ * 4 while the valve was still legitimately working cycles 4..N — the tip-stall
+ * watchdog escalating INTO a productive valve, up to a tier-2 manager recreate. A
+ * `CF_CONVOY_WINDOW` lowered natively is worse: Kotlin would read "window not full",
+ * drop the tip-frozen conjunct and arm tier 1/tier 2 during a HEALTHY paced descent.
+ *
+ * These constants are therefore used ONLY when the native read is unavailable (a
+ * stale/unloadable `.so`), where holding the last-known values is the fail-open
+ * direction — the same call Task 8 made for the pending-abandonment accessor. Keep
+ * them equal to the header's values on a best-effort basis; nothing depends on it.
+ */
+internal const val CF_CONVOY_WINDOW_FALLBACK = 10_000L
 
-/** Mirror of the native `CF_CONVOY_REARM_MAX` (BRPeerManager.h): fresh retry cycles the
- *  B2 valve grants a gaveUp hole against a live CF-peer set before it may abandon it. */
-internal const val CF_CONVOY_REARM_MAX = 2
+/** @see CF_CONVOY_WINDOW_FALLBACK — fallback only; the live value is native. */
+internal const val CF_CONVOY_REARM_MAX_FALLBACK = 2
 
 /**
  * Upper bound on the abandonment cycle count for which the tip-stall watchdog stands
- * down. `BRPeerManagerHasPendingAbandonment` returns a CYCLE COUNT, not a boolean:
- * `N == rearmCycles + 1`, and the valve is entitled to decide at `N == CF_CONVOY_REARM_MAX + 1`
- * (the deciding cycle). See [isConvoySuppressed] for why the bound is mandatory.
+ * down, DERIVED from the valve's re-arm budget. `BRPeerManagerHasPendingAbandonment`
+ * returns a CYCLE COUNT, not a boolean: `N == rearmCycles + 1`, and the valve is
+ * entitled to decide at `N == rearmMax + 1` (the deciding cycle). Pass the NATIVE
+ * `getConvoyRearmMax()` so this tracks the header automatically.
+ * See [isConvoySuppressed] for why the bound is mandatory.
  */
-internal const val CONVOY_SUPPRESSION_MAX_CYCLES = CF_CONVOY_REARM_MAX + 1
+internal fun convoySuppressionMaxCycles(rearmMax: Int): Int = rearmMax + 1
+
+/** Fallback bound, used only when the native `getConvoyRearmMax()` read fails. */
+internal val CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK =
+    convoySuppressionMaxCycles(CF_CONVOY_REARM_MAX_FALLBACK)
 
 /** The CF scan ledger reports `LowestNeededHeight == 0` when the peer manager doesn't
  *  exist and `1` on a freshly calloc'd (unarmed) ledger. Neither is a real scan
@@ -338,7 +365,7 @@ internal fun isScanFrontierArmed(scanFrontier: Long): Boolean = scanFrontier > 1
 internal fun isConvoyWindowFull(
     blockHeaderFrontier: Long,
     scanFrontier: Long,
-    window: Long = CF_CONVOY_WINDOW,
+    window: Long = CF_CONVOY_WINDOW_FALLBACK,
 ): Boolean = isScanFrontierArmed(scanFrontier) &&
     blockHeaderFrontier >= scanFrontier &&
     blockHeaderFrontier - scanFrontier >= window
@@ -356,12 +383,18 @@ internal fun isConvoyWindowFull(
  * and the accessor returns non-zero forever. A bare-boolean suppression would then be
  * PERMANENTLY active and the watchdog would stand down forever, in exactly the case
  * the backstop exists for. So suppress only while the valve is inside the cycles it
- * is actually entitled to (`N <= CF_CONVOY_REARM_MAX + 1`, i.e. through the deciding
- * cycle); above that the hole is re-arming without converging and MUST be re-exposed
- * to the watchdog's escalation.
+ * is actually entitled to (`N <= rearmMax + 1`, i.e. through the deciding cycle);
+ * above that the hole is re-arming without converging and MUST be re-exposed to the
+ * watchdog's escalation.
+ *
+ * [suppressionMaxCycles] MUST come from the NATIVE re-arm budget
+ * (`convoySuppressionMaxCycles(NativeBridge.getConvoyRearmMax())`) — the default is a
+ * fail-open fallback for an unreadable `.so` only. See [CF_CONVOY_WINDOW_FALLBACK].
  */
-internal fun isConvoySuppressed(abandonmentPendingCycles: Int): Boolean =
-    abandonmentPendingCycles in 1..CONVOY_SUPPRESSION_MAX_CYCLES
+internal fun isConvoySuppressed(
+    abandonmentPendingCycles: Int,
+    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+): Boolean = abandonmentPendingCycles in 1..suppressionMaxCycles
 
 /**
  * Is the tip-stall watchdog armed this poll?

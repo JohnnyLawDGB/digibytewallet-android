@@ -1691,6 +1691,28 @@ Java_io_digibyte_core_bridge_NativeBridge_snapAutoFetchThroughToScanFrontier(JNI
     return (jlong)cursor;
 }
 
+/* Runtime-readable convoy constants (paced-convoy spec Part C, fix-wave I-3).
+ * CF_CONVOY_WINDOW / CF_CONVOY_REARM_MAX used to be HAND-MIRRORED in
+ * Bip158WatchdogPolicy.kt with no build-time check, while the spec's own tuning
+ * signal tells the operator to raise CF_CONVOY_REARM_MAX in the C header — which
+ * would have left the Kotlin suppression bound releasing early and escalating the
+ * tip-stall watchdog into a still-productive valve. These two accessors let Kotlin
+ * DERIVE both values, so there is no second copy to drift.
+ *
+ * No PEER_GUARD and no g_peerManager access: these are pure constant readers, so
+ * they are valid before the peer manager exists (and cannot deadlock anything). */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getConvoyWindow(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return (jint)BRPeerManagerConvoyWindow();
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getConvoyRearmMax(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return (jint)BRPeerManagerConvoyRearmMax();
+}
+
 /* Read back the current forward-fetch cursor (autoFetchCFiltersThrough), for
  * before/after logging around snapAutoFetchThroughToScanFrontier above. */
 JNIEXPORT jlong JNICALL

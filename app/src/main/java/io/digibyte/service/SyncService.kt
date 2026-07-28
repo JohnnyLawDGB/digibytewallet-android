@@ -1071,6 +1071,10 @@ class SyncService : Service() {
                 scan = try { NativeBridge.getLowestNeededHeight() } catch (_: Throwable) { 0L },
                 nowMs = System.currentTimeMillis(),
             )
+            // Read ONCE from native — both are compile-time constants over there, so a
+            // per-poll JNI round trip would buy nothing. See [nativeConvoyWindow].
+            val convoyWindow = nativeConvoyWindow()
+            val suppressionMax = nativeConvoySuppressionMaxCycles()
             var lastTier2Ms = 0L
             var lastFastMs = 0L          // fast-tier (orphan / can't-hold-filter-peer) throttle
             var pinRotation = 0          // rotate through the validated filter pool when pinning
@@ -1097,7 +1101,7 @@ class SyncService : Service() {
                 val tier1Fired = state.tier1Fired
                 val scanStalledMs = state.scanStalledMs(nowMs)
                 val blockTipStalledMs = state.blockTipStalledMs(nowMs)
-                val windowFull = isConvoyWindowFull(tip, scan)
+                val windowFull = isConvoyWindowFull(tip, scan, convoyWindow)
 
                 if (shouldForceReconnectOnStall(
                         peerCount = peers,
@@ -1106,6 +1110,7 @@ class SyncService : Service() {
                         convoyWindowFull = windowFull,
                         tier1Fired = tier1Fired,
                         abandonmentPendingCycles = pendingCycles,
+                        suppressionMaxCycles = suppressionMax,
                     ) && nowMs - lastTier2Ms >= TIP_STALL_TIER2_THROTTLE_MS
                 ) {
                     android.util.Log.w(
@@ -1126,6 +1131,7 @@ class SyncService : Service() {
                         blockTipStalledMs = blockTipStalledMs,
                         convoyWindowFull = windowFull,
                         abandonmentPendingCycles = pendingCycles,
+                        suppressionMaxCycles = suppressionMax,
                     ) && !tier1Fired
                 ) {
                     android.util.Log.w(
@@ -1143,6 +1149,7 @@ class SyncService : Service() {
                         convoyWindowFull = windowFull,
                         abandonmentPendingCycles = pendingCycles,
                         thresholdMs = TIP_STALL_FAST_MS,
+                        suppressionMaxCycles = suppressionMax,
                     ) && nowMs - lastFastMs >= TIP_STALL_FAST_MS
                 ) {
                     // FAST tier — connected but the CF scan frontier hasn't advanced for a
@@ -1174,6 +1181,57 @@ class SyncService : Service() {
                 }
             }
         }
+    }
+
+    /**
+     * Live native `CF_CONVOY_WINDOW`, read from the `.so` rather than mirrored in
+     * Kotlin (fix-wave I-3). A Kotlin copy that drifts LOW makes [isConvoyWindowFull]
+     * read "window not full", which drops the tip-frozen conjunct and arms tier 1 /
+     * tier 2 during a HEALTHY paced descent.
+     */
+    private fun nativeConvoyWindow(): Long {
+        val w = try {
+            NativeBridge.getConvoyWindow().toLong()
+        } catch (t: Throwable) {
+            android.util.Log.w("SyncService",
+                "convoy: getConvoyWindow() unavailable — falling back to the Kotlin mirror " +
+                "$CF_CONVOY_WINDOW_FALLBACK; if the native window was retuned, the watchdogs " +
+                "will misread the gate", t)
+            return CF_CONVOY_WINDOW_FALLBACK
+        }
+        if (w <= 0L) {
+            android.util.Log.w("SyncService",
+                "convoy: getConvoyWindow() returned $w — falling back to $CF_CONVOY_WINDOW_FALLBACK")
+            return CF_CONVOY_WINDOW_FALLBACK
+        }
+        return w
+    }
+
+    /**
+     * Live suppression bound, DERIVED from the native `CF_CONVOY_REARM_MAX` (fix-wave
+     * I-3). The spec's own tuning signal tells the operator to RAISE that constant in
+     * `BRPeerManager.h`; without this read, the Kotlin bound would keep releasing at
+     * the old value while the valve was still legitimately working later cycles, and
+     * the tip-stall watchdog would escalate into a productive valve (tier 2 recreates
+     * the manager).
+     */
+    private fun nativeConvoySuppressionMaxCycles(): Int {
+        val n = try {
+            NativeBridge.getConvoyRearmMax()
+        } catch (t: Throwable) {
+            android.util.Log.w("SyncService",
+                "convoy: getConvoyRearmMax() unavailable — falling back to a suppression bound of " +
+                "$CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK; if the native re-arm budget was raised, " +
+                "the watchdogs will escalate into a still-productive B2 valve", t)
+            return CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK
+        }
+        if (n <= 0) {
+            android.util.Log.w("SyncService",
+                "convoy: getConvoyRearmMax() returned $n — falling back to " +
+                "$CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK")
+            return CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK
+        }
+        return convoySuppressionMaxCycles(n)
     }
 
     /**
@@ -1252,6 +1310,11 @@ class SyncService : Service() {
             var corruptHeals = 0
             var lastCorruptHealMs = 0L
             var corruptHealRotation = 0
+            // Live native suppression bound, read ONCE (compile-time constant natively).
+            // See [nativeConvoySuppressionMaxCycles] — every destructive branch below is
+            // gated on it, so a stale hand-mirrored copy would escalate into a valve that
+            // is still legitimately working.
+            val suppressionMax = nativeConvoySuppressionMaxCycles()
             // PACED-CONVOY RE-KEY (spec Part D). Every DESTRUCTIVE branch below
             // (frozen-CF recovery, corrupt-chain heal, post-timeout re-anchor) deletes
             // persisted filter/ledger state, so each is now additionally gated on the CF
@@ -1333,7 +1396,8 @@ class SyncService : Service() {
 
                 if (shouldRecoverFrozenCf(
                         blockClimbing, nowMs - cfNetProgressMs, cfNetMax, cfFrozenRecoveredThisSession,
-                        scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles)) {
+                        scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles,
+                        suppressionMaxCycles = suppressionMax)) {
                     cfFrozenRecoveredThisSession = true
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: cfTip WEDGED at net-max $cfNetMax for " +
@@ -1403,6 +1467,7 @@ class SyncService : Service() {
                         healsSoFar = corruptHeals,
                         scanStalledMs = scanStalledMs,
                         abandonmentPendingCycles = pendingCycles,
+                        suppressionMaxCycles = suppressionMax,
                     ) && nowMs - lastCorruptHealMs >= CF_CORRUPT_HEAL_COOLDOWN_MS
                 ) {
                     corruptHeals++
@@ -1457,6 +1522,7 @@ class SyncService : Service() {
                     when (decidePostTimeoutAction(
                         hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs,
                         scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles,
+                        suppressionMaxCycles = suppressionMax,
                     )) {
                         PostTimeoutAction.REANCHOR -> {
                             val reanchored = try {

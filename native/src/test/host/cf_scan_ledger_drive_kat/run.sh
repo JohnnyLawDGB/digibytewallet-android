@@ -42,21 +42,36 @@
 # FLOOR below is a different mechanism and is unaffected.
 #
 # ==== DETERMINISM-GUARD RED-BEFORE-GREEN GATE (re-homed onto the B2 valve) ===
+# NAMING (fix wave, Task-10 M3): this gate and its two -D flags used to be called
+# kat_ceiling_unguarded / KAT_CEILING_REDGREEN_ONLY / RETENTION_PREEMPTIVE_ADVANCE.
+# There is no ceiling any more -- paced-convoy Task 5 deleted the tip-anchored depth
+# ceiling -- and what these actually toggle is the DETERMINISM GUARD, so they are
+# renamed to say so.
+#
 # The Part-3b determinism guard (BRCFScanLedgerAbandonGaveUpBelow advances
 # abandonedBelow ONLY to cover gaveUp actually dropped, never preemptively) is
 # proven by building test_abandon_guard_no_preemptive_advance TWICE:
-#   * PRE-GUARD (-DRETENTION_PREEMPTIVE_ADVANCE): AbandonGaveUpBelow raises
+#   * PRE-GUARD (-DDETERMINISM_GUARD_PREEMPTIVE_ADVANCE): AbandonGaveUpBelow raises
 #     abandonedBelow to `target`/`clamp` even when NOTHING was dropped, so a scan
 #     that never ran raises its own floor and would COMPLETE with a WRONG BALANCE
 #     -> the case FAILS (nonzero exit == RED). A guard that can't go red is
 #     worthless, so we HARD-FAIL run.sh if this build unexpectedly PASSES.
 #   * FIXED (default): abandonedBelow stays 0, the floor is not raised -> GREEN.
-# KAT_CEILING_REDGREEN_ONLY runs ONLY that one case so the RED is unambiguous.
+# KAT_DETERMINISM_GUARD_REDGREEN_ONLY runs ONLY that one case so the RED is unambiguous.
 # (Paced-convoy Task 5 deleted the tip-anchored DEPTH ceiling this gate used to
 # run, but the guard itself is RETAINED and the B2 abandonment valve is now its
 # only production caller — the valve's "every abandonment is warn-logged and
 # abandonedBelow==0 is a verified fact" contract rests on it — so the gate moved
 # onto the guard's own case rather than being dropped.)
+#
+# ⚠️ WHAT THIS GATE IS, PRECISELY (fix wave, Task-10 M3 -- an earlier report
+# OVERSTATED it and that overstatement invites deleting a live safety gate): this
+# is the only RED-BEFORE-GREEN GATE on the determinism guard, NOT the only
+# coverage of it. cf_scan_ledger_kat's test_abandon_no_advance_when_nothing_dropped
+# (cf_scan_ledger_kat_main.c) asserts the same property GREEN-ONLY -- its runner has
+# no pre-fix -D build, so it can pass against a broken guard. Do NOT delete this
+# build on the strength of "the property is already covered elsewhere"; the green-only
+# case cannot go red, and a gate that cannot fail proves nothing.
 #
 # ==== Paced-convoy Task 2 GATE RED-BEFORE-GREEN GATES =======================
 # The convoy gate (spec Part A) is proven by two more twice-built cases:
@@ -166,8 +181,8 @@ else
 fi
 
 # ---- RED: pre-guard preemptive abandonedBelow raise (scan-not-started) MUST fail ----
-build "$BUILD_DIR/kat_ceiling_unguarded" -DRETENTION_PREEMPTIVE_ADVANCE -DKAT_CEILING_REDGREEN_ONLY
-if "$BUILD_DIR/kat_ceiling_unguarded"; then
+build "$BUILD_DIR/kat_determinism_guard_unguarded" -DDETERMINISM_GUARD_PREEMPTIVE_ADVANCE -DKAT_DETERMINISM_GUARD_REDGREEN_ONLY
+if "$BUILD_DIR/kat_determinism_guard_unguarded"; then
     echo "GATE FAILURE: the PRE-GUARD (preemptive abandonedBelow) build PASSED. The"
     echo "determinism-guard red-before-green cannot go red -- an empty-scan deep restore"
     echo "would raise the scan floor and complete with a WRONG BALANCE undetected. Refusing to green."
@@ -434,6 +449,34 @@ else
     echo "    faulting address 0x$reorg_fault == offsetof(BRMerkleBlock, height) == $reorg_off  (a NULL '->height' read)"
 fi
 
-# ---- GREEN: fixed full suite (ceiling override small) -----------------------
+# ==== FIX WAVE C-1: RESUME MID-DESCENT MUST NOT SILENTLY SKIP ================
+# On a resume BRPeerManagerNewEx chains FORWARD from the highest saved block, so
+# manager->blocks holds the checkpoints plus exactly ONE saved block and the block
+# FLOOR is the saved tip. enableAutoCompactFilterFetch is then called with the
+# never-advanced deep cf_birth_height, which cannot resolve, so its clamp arms both
+# autoFetchCFiltersStart and the cursor AT that tip -- a full CF_CONVOY_WINDOW above
+# the scan frontier the ledger restore puts back a moment later.
+#   * -DCONVOY_C1_UNFIXED: the resume reconciliation is compiled out (the snap goes
+#     back to RAISE-ONLY and nothing surfaces an unscannable band; the window/ledger
+#     machinery stays live, so what is proven red is the RECONCILIATION, not the
+#     arithmetic). The next forward fetch then starts at the clamped tip and
+#     _cfLedgerAdvance sails scannedThrough over ~10,000 never-requested heights with
+#     abandonedBelow still 0 -- no WARN, no banner, wallet reaches Synced -- and a
+#     restored outstanding hole below the floor pins the frontier where no valve can
+#     ever see it (its getcfilters can never be sent, so `attempts` never advances and
+#     it can never reach gaveUp) -> the case FAILS (== RED).
+# HARD-FAILS run.sh if it unexpectedly PASSES.
+build "$BUILD_DIR/kat_resume_c1_unfixed" -DCONVOY_C1_UNFIXED -DKAT_RESUME_C1_REDGREEN_ONLY
+if "$BUILD_DIR/kat_resume_c1_unfixed"; then
+    echo "GATE FAILURE: the C1-UNFIXED build PASSED. The resume reconciliation's red-before-green"
+    echo "cannot go red -- a wallet resumed mid-descent would mark up to CF_CONVOY_WINDOW"
+    echo "never-requested heights SCANNED with abandonedBelow still 0 (no warn, no banner, and it"
+    echo "reaches Synced), on every single resume of a deep restore. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the resume reconciliation a resumed descent silently skips the window (expected)."
+fi
+
+# ---- GREEN: fixed full suite ------------------------------------------------
 build "$BUILD_DIR/kat_fixed"
 "$BUILD_DIR/kat_fixed"

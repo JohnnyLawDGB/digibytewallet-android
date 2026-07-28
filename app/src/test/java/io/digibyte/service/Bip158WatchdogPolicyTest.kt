@@ -147,7 +147,7 @@ class Bip158WatchdogPolicyTest {
                 reanchoredThisSession = false,
                 msSinceReanchor = 0L,
                 scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
             ),
         )
     }
@@ -161,7 +161,7 @@ class Bip158WatchdogPolicyTest {
                 reanchoredThisSession = false,
                 msSinceReanchor = 0L,
                 scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1,
             ),
         )
     }
@@ -293,7 +293,7 @@ class Bip158WatchdogPolicyTest {
                 cfNetMax = 23_779_855,
                 alreadyRecovered = false,
                 scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
             ),
         )
     }
@@ -309,7 +309,7 @@ class Bip158WatchdogPolicyTest {
                 cfNetMax = 23_779_855,
                 alreadyRecovered = false,
                 scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1,
+                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1,
             ),
         )
     }
@@ -383,8 +383,8 @@ class Bip158WatchdogPolicyTest {
 
     @Test fun `window is full exactly at W and open one below it`() {
         val scan = 1_000_000L
-        assertEquals(true, isConvoyWindowFull(scan + CF_CONVOY_WINDOW, scan))
-        assertEquals(false, isConvoyWindowFull(scan + CF_CONVOY_WINDOW - 1, scan))
+        assertEquals(true, isConvoyWindowFull(scan + CF_CONVOY_WINDOW_FALLBACK, scan))
+        assertEquals(false, isConvoyWindowFull(scan + CF_CONVOY_WINDOW_FALLBACK - 1, scan))
     }
 
     @Test fun `window reads OPEN when the scan frontier is not armed`() {
@@ -414,8 +414,57 @@ class Bip158WatchdogPolicyTest {
         // stall right through there.
         assertEquals(true, isConvoySuppressed(1))
         assertEquals(true, isConvoySuppressed(2))
-        assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES))
-        assertEquals(3, CONVOY_SUPPRESSION_MAX_CYCLES)
+        assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
+    }
+
+    // ── fix-wave I-3: the bound is DERIVED from the native re-arm budget ──
+
+    @Test fun `the suppression bound is derived from the re-arm budget, not pinned`() {
+        // The OLD test here asserted `assertEquals(3, CONVOY_SUPPRESSION_MAX_CYCLES)`.
+        // That pinned the KOTLIN mirror and detected NOTHING about native — the actual
+        // risk — and it would have spuriously FAILED on anyone who correctly raised the
+        // Kotlin copy to track a retuned header. Pin the DERIVATION instead.
+        assertEquals(3, convoySuppressionMaxCycles(2))
+        assertEquals(5, convoySuppressionMaxCycles(4))
+        assertEquals(9, convoySuppressionMaxCycles(8))
+        assertEquals(convoySuppressionMaxCycles(CF_CONVOY_REARM_MAX_FALLBACK),
+            CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK)
+    }
+
+    @Test fun `raising the native re-arm budget widens the suppression window`() {
+        // THE DRIFT THE SPEC ACTIVELY INVITES: its own tuning signal tells the operator
+        // to RAISE CF_CONVOY_REARM_MAX in BRPeerManager.h when an abandoned height later
+        // reconciles. With the value hand-mirrored, Kotlin kept releasing at 3 while the
+        // valve was legitimately working cycles 3..N, so the tip-stall watchdog escalated
+        // INTO a productive valve and tier 2 recreated the manager. Derived from the
+        // native budget, the bound moves with it.
+        val retuned = convoySuppressionMaxCycles(4)   // operator raised CF_CONVOY_REARM_MAX to 4
+        assertEquals(true, isConvoySuppressed(3, retuned))
+        assertEquals(true, isConvoySuppressed(4, retuned))
+        assertEquals(true, isConvoySuppressed(5, retuned))
+        assertEquals(false, isConvoySuppressed(6, retuned))
+        // ...and every branch that keys on it moves with it too, not just the predicate.
+        assertEquals(false, tier1(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
+        assertEquals(true, tier1(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, tier2(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
+        assertEquals(true, tier2(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, fast(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
+        assertEquals(true, fast(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, heal(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
+        assertEquals(true, heal(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+    }
+
+    @Test fun `the convoy window comes from the caller, not a Kotlin constant`() {
+        // A Kotlin CF_CONVOY_WINDOW that drifted BELOW a retuned native one would read
+        // "window not full", drop the tip-frozen conjunct and arm tier 1/tier 2 during a
+        // HEALTHY paced descent. The window is a parameter so SyncService can pass the
+        // value it read from the .so.
+        val scan = 20_000_000L
+        assertEquals(true, isConvoyWindowFull(scan + 4_000L, scan, window = 4_000L))
+        assertEquals(false, isConvoyWindowFull(scan + 3_999L, scan, window = 4_000L))
+        // ...and the same frontier pair reads NOT-full against the larger default,
+        // which is exactly the misread a stale mirror would produce.
+        assertEquals(false, isConvoyWindowFull(scan + 4_000L, scan))
     }
 
     @Test fun `suppression LIFTS once the valve re-arms past its budget`() {
@@ -425,7 +474,7 @@ class Bip158WatchdogPolicyTest {
         // tainted and the valve re-arms INDEFINITELY. A bare `pending > 0` suppression
         // would then be permanently active and the backstop would stand down forever,
         // in exactly the case that needs it. Above the bound the watchdog escalates.
-        assertEquals(false, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+        assertEquals(false, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
         assertEquals(false, isConvoySuppressed(9))
         assertEquals(false, isConvoySuppressed(255))
     }
@@ -438,8 +487,10 @@ class Bip158WatchdogPolicyTest {
         blockTipStalledMs: Long = TIP_STALL_TIMEOUT_MS,
         convoyWindowFull: Boolean = false,
         abandonmentPendingCycles: Int = 0,
+        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
     ) = shouldRerequestHeadersOnStall(
         peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, abandonmentPendingCycles,
+        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     private fun tier2(
@@ -449,8 +500,10 @@ class Bip158WatchdogPolicyTest {
         convoyWindowFull: Boolean = false,
         tier1Fired: Boolean = true,
         abandonmentPendingCycles: Int = 0,
+        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
     ) = shouldForceReconnectOnStall(
         peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, tier1Fired, abandonmentPendingCycles,
+        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     private fun fast(
@@ -459,9 +512,11 @@ class Bip158WatchdogPolicyTest {
         blockTipStalledMs: Long = 3 * 60 * 1000L,
         convoyWindowFull: Boolean = false,
         abandonmentPendingCycles: Int = 0,
+        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
     ) = shouldFastRecoverOnStall(
         peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, abandonmentPendingCycles,
         thresholdMs = 3 * 60 * 1000L,
+        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     @Test fun `re-requests headers when the SCAN frontier is frozen past the window with peers`() {
@@ -535,11 +590,11 @@ class Bip158WatchdogPolicyTest {
     @Test fun `tier1 SUPPRESSED while an abandonment is pending below the cycle bound`() {
         assertEquals(false, tier1(abandonmentPendingCycles = 1))
         assertEquals(false, tier1(abandonmentPendingCycles = 2))
-        assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
+        assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
     }
 
     @Test fun `tier1 NOT suppressed once the pending cycle count exceeds the bound`() {
-        assertEquals(true, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+        assertEquals(true, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     @Test fun `tier2 forceReconnect only after tier1 fired and a full extra window`() {
@@ -568,8 +623,8 @@ class Bip158WatchdogPolicyTest {
 
     @Test fun `tier2 SUPPRESSED while an abandonment is pending below the cycle bound, released above it`() {
         assertEquals(false, tier2(abandonmentPendingCycles = 1))
-        assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
-        assertEquals(true, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+        assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
+        assertEquals(true, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     @Test fun `FAST tier fires on a frozen scan and needs peers`() {
@@ -587,8 +642,8 @@ class Bip158WatchdogPolicyTest {
 
     @Test fun `FAST tier SUPPRESSED while an abandonment is pending below the cycle bound, released above it`() {
         assertEquals(false, fast(abandonmentPendingCycles = 1))
-        assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
-        assertEquals(true, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+        assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
+        assertEquals(true, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     // ── shouldHealCorruptFilterChain — the poisoned-persisted-chain clean-slate heal ──
@@ -602,9 +657,11 @@ class Bip158WatchdogPolicyTest {
         healsSoFar: Int = 0,
         scanStalledMs: Long = SCAN_FROZEN,
         abandonmentPendingCycles: Int = 0,
+        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
     ) = shouldHealCorruptFilterChain(
         blocksCaughtUp, peerCount, cfFrozenMs, reanchored, msSinceReanchor, healsSoFar,
         scanStalledMs, abandonmentPendingCycles,
+        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     @Test fun `heals when re-anchor already fired and grace elapsed but cfTip still frozen at tip`() {
@@ -664,8 +721,8 @@ class Bip158WatchdogPolicyTest {
 
     @Test fun `heal is SUPPRESSED while an abandonment is pending below the bound, released above it`() {
         assertEquals(false, heal(abandonmentPendingCycles = 1))
-        assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES))
-        assertEquals(true, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES + 1))
+        assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
+        assertEquals(true, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     // ── CF scan-frontier tracking: a frontier RE-INIT is not a stall ──

@@ -832,7 +832,143 @@ static int test_valve_state_persists_v3(void) {
     return 1;
 }
 
+// ---- fix-wave C-1: BRCFScanLedgerAbandonUnscannableBelow ---------------------
+//
+// The primitive behind the "no height is ever marked scanned without being scanned
+// or being surfaced as abandoned" invariant. Pinned here at the ledger level; the
+// production RESUME path that drives it is pinned in cf_scan_ledger_drive_kat.
+static int test_abandon_unscannable_below(void) {
+    // (a) NO preemptive raise — the same determinism discipline AbandonGaveUpBelow
+    // carries. A floor at or below the low edge surfaces nothing, so abandonedBelow
+    // must not move and the caller must not warn.
+    BRCFScanLedger a; BRCFScanLedgerInit(&a, 1000);
+    uint32_t cnt = 0xffffffffu;
+    BRCFScanLedgerAbandonUnscannableBelow(&a, 1000, 1000, &cnt);
+    ASSERT(cnt==0 && a.abandonedBelow==0);
+    BRCFScanLedgerAbandonUnscannableBelow(&a, 1000, 900, &cnt);
+    ASSERT(cnt==0 && a.abandonedBelow==0);
+    BRCFScanLedgerAbandonUnscannableBelow(&a, 0, 5000, &cnt);      // unarmed low edge
+    ASSERT(cnt==0 && a.abandonedBelow==0);
+    BRCFScanLedgerAbandonUnscannableBelow(&a, 1000, 0, &cnt);      // no block floor yet
+    ASSERT(cnt==0 && a.abandonedBelow==0);
+
+    // (b) THE RESUME SHAPE: the scan frontier sits far below the block floor, and
+    // the band is surfaced (count + watermark) rather than skipped.
+    BRCFScanLedger b; BRCFScanLedgerInit(&b, 1000);
+    BRCFScanLedgerRecordRequested(&b, 1000, 1499, UINT128_ZERO, 0, 100);
+    for (uint32_t h = 1000; h <= 1499; h++) BRCFScanLedgerMarkEvaluated(&b, h);
+    ASSERT(BRCFScanLedgerLowestNeededHeight(&b)==1500);
+    const uint32_t FLOOR = 11500;                      // scan frontier + 10000 (a full convoy window)
+    uint32_t lo = BRCFScanLedgerLowestNeededHeight(&b);
+    uint32_t newLowest = BRCFScanLedgerAbandonUnscannableBelow(&b, lo, FLOOR, &cnt);
+    check(cnt == FLOOR - 1500, "unscannable: the surfaced count is exactly the band [1500..11499]");
+    check(b.abandonedBelow == FLOOR, "unscannable: abandonedBelow raised to the block floor");
+    check(newLowest == FLOOR, "unscannable: LowestNeededHeight is now the floor (the convoy can advance)");
+
+    // (c) THE VARIANT: an outstanding hole below the floor is DROPPED, not left to
+    // pin the frontier. It can never be served (its getcfilters stop hash cannot
+    // resolve, so `attempts` never advances, so it never reaches gaveUp and the B2
+    // valve is structurally blind to it) — leaving it is the invisible permanent pin.
+    BRCFScanLedger c; BRCFScanLedgerInit(&c, 1000);
+    BRCFScanLedgerRecordRequested(&c, 1000, 1999, UINT128_ZERO, 0, 100);
+    for (uint32_t h = 1000; h <= 1499; h++) BRCFScanLedgerMarkEvaluated(&c, h);
+    c.gaveUp[0] = 1600; c.gaveUpRearmCycles[0] = 2; c.gaveUpOffersLive[0] = 1;
+    c.gaveUp[1] = 90000; c.gaveUpRearmCycles[1] = 1; c.gaveUpOffersLive[1] = 0;
+    c.gaveUpCount = 2;
+    ASSERT(BRCFScanLedgerOutstandingCount(&c) == 500);              // [1500..1999]
+    ASSERT(BRCFScanLedgerLowestNeededHeight(&c) == 1500);
+    BRCFScanLedgerAbandonUnscannableBelow(&c, 1500, FLOOR, &cnt);
+    check(BRCFScanLedgerOutstandingCount(&c) == 0,
+          "unscannable: every outstanding hole below the floor is dropped (no invisible pin)");
+    check(BRCFScanLedgerGaveUpCount(&c) == 1 && c.gaveUp[0] == 90000,
+          "unscannable: a gaveUp hole below the floor is dropped, one ABOVE it is KEPT");
+    check(c.gaveUpRearmCycles[0] == 1 && c.gaveUpOffersLive[0] == 0,
+          "unscannable: the surviving gaveUp entry keeps ITS OWN index-parallel valve bytes");
+    check(BRCFScanLedgerLowestNeededHeight(&c) == FLOOR,
+          "unscannable: the frontier is no longer pinned below the floor");
+
+    // (d) MONOTONIC + EXACT COUNT: a lower floor never walks the watermark back
+    // down, AND it must report count 0 — history already below the watermark was
+    // surfaced by the earlier call, so counting it again would break
+    // "count>0 <=> advance <=> WARN" and warn about an abandonment that did not
+    // happen. (`lo` is deliberately passed as the ORIGINAL low edge here, i.e. the
+    // stale value a careless caller would supply.)
+    BRCFScanLedgerAbandonUnscannableBelow(&c, 1500, FLOOR - 5000, &cnt);
+    check(c.abandonedBelow == FLOOR, "unscannable: abandonedBelow is monotonic");
+    check(cnt == 0,
+          "unscannable: a floor below the existing watermark reports count 0 "
+          "(count>0 <=> advance <=> WARN stays exact; no double-warn)");
+
+    // (e) ...and a floor only PARTLY above the watermark counts only the NEW band.
+    uint32_t newLow = BRCFScanLedgerAbandonUnscannableBelow(&c, 1500, FLOOR + 400, &cnt);
+    check(cnt == 400 && c.abandonedBelow == FLOOR + 400 && newLow == FLOOR + 400,
+          "unscannable: only the heights newly surfaced are counted (the band above the old watermark)");
+    return 1;
+}
+
+// ---- fix-wave I-2: the v3 entry stride must survive the NEXT version bump ----
+//
+// Every back-compat branch in Parse must compare against its OWN numbered constant.
+// The v2 branch does (`version >= CF_LEDGER_VERSION_2`, a fix an earlier task
+// earned after exactly this bug); the v3 branch was written `version >=
+// CF_LEDGER_VERSION`, which means "the layout Serialize writes TODAY" and therefore
+// silently changes meaning at the next bump: every already-shipped v3 blob would
+// take the NARROWER v2 entry stride and mis-parse outstanding[]/gaveUp[].
+//
+// This case hand-builds a REAL v3 blob and parses it. Run normally it is a plain
+// (green) round-trip guard. Run under the run.sh gate build, which simulates the
+// next bump with -DCF_LEDGER_VERSION=4u, it is the red-before-green proof: with the
+// pre-fix comparison the blob takes the v2 stride, Parse still returns 1 (the
+// length checks PASS — a narrower stride needs FEWER bytes, which is exactly why
+// the corruption is silent) and gaveUp[1] comes back as garbage while the parked
+// valve bytes come back as 0. A garbage low gaveUp height then feeds the B2 valve,
+// which can raise the MONOTONIC hard floor abandonedBelow to an arbitrary height =
+// a permanent skip of real history.
+//
+// The geometry is chosen so the mis-parse is SILENT rather than a rejected blob:
+// outstandingCount == 0 and gaveUpCount == 2, so the narrow stride mis-reads only
+// gaveUp[1] and the two parked bytes, and no length/CF_GAVEUP_MAX check trips.
+static int test_v3_stride_survives_a_future_version_bump(void) {
+    uint8_t probe[64]; BRCFScanLedger probeL; BRCFScanLedgerInit(&probeL, 1);
+    BRCFScanLedgerSerialize(&probeL, probe, sizeof probe);   // magic, never hardcoded
+
+    // 28-byte fixed header + outCount(4) + gaveUpCount(4) + 2 x 6-byte gaveUp entries
+    uint8_t v3[28 + 4 + 2*(4+1+1)];
+    v3[0]=probe[0]; v3[1]=probe[1]; v3[2]=probe[2]; v3[3]=probe[3];   // magic
+    putLE32(v3+4, 3);            // version = 3 (the CURRENT shipped layout)
+    putLE32(v3+8, 20000000);     // start
+    putLE32(v3+12, 20000499);    // scannedThrough
+    putLE32(v3+16, 20001000);    // requestedThrough
+    putLE32(v3+20, 0);           // abandonedBelow
+    putLE32(v3+24, 0);           // outstandingCount = 0
+    putLE32(v3+28, 2);           // gaveUpCount = 2
+    putLE32(v3+32, 20000600); v3[36]=2; v3[37]=1;   // gaveUp[0] = {600, cycles 2, offersLive 1}
+    putLE32(v3+38, 20000700); v3[42]=1; v3[43]=0;   // gaveUp[1] = {700, cycles 1, offersLive 0}
+
+    BRCFScanLedger l;
+    ASSERT(BRCFScanLedgerParse(&l, v3, sizeof v3)==1);
+    ASSERT(l.start==20000000 && l.scannedThrough==20000499 && l.requestedThrough==20001000);
+    ASSERT(l.gaveUpCount==2);
+    // The four discriminating reads. Under the pre-fix comparison with a bumped
+    // CF_LEDGER_VERSION these are: gaveUp[1] garbage, and every parked byte 0.
+    check(l.gaveUp[0]==20000600, "v3 stride: gaveUp[0] height parsed at the v3 stride");
+    check(l.gaveUp[1]==20000700,
+          "v3 stride: gaveUp[1] height parsed at the v3 stride (RED under a simulated "
+          "version bump with the pre-fix `version >= CF_LEDGER_VERSION` comparison)");
+    check(l.gaveUpRearmCycles[0]==2 && l.gaveUpOffersLive[0]==1,
+          "v3 stride: gaveUp[0]'s parked B2 valve bytes survived");
+    check(l.gaveUpRearmCycles[1]==1 && l.gaveUpOffersLive[1]==0,
+          "v3 stride: gaveUp[1]'s parked B2 valve bytes survived");
+    return 1;
+}
+
 int main(void) {
+#ifdef KAT_LEDGER_STRIDE_REDGREEN_ONLY
+    // Gate build: run ONLY the stride case so the RED is unambiguous.
+    test_v3_stride_survives_a_future_version_bump();
+    printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
+    return g_failures ? 1 : 0;
+#else
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
     BRCFScanLedger *l2 = calloc(1, sizeof(*l2));
@@ -876,7 +1012,10 @@ int main(void) {
 
     test_rearm_gaveup_roundtrip();      // paced-convoy Task 5: B2 re-arm primitive + the parked-state carry
     test_valve_state_persists_v3();     // paced-convoy Task 5: blob v3 + v2 back-compat
+    test_v3_stride_survives_a_future_version_bump();   // fix-wave I-2: the version-gate trap, one line over
+    test_abandon_unscannable_below();                  // fix-wave C-1: the unscannable-band primitive
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
+#endif
 }

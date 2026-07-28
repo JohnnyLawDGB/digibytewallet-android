@@ -586,12 +586,39 @@ object NativeBridge {
      *  cursor up to the restored scan frontier (LowestNeededHeight-1) — else
      *  the next forward fetch re-requests already-scanned history from
      *  birthHeight and drags scannedThrough back down, silently discarding the
-     *  persisted progress. MONOTONIC (only ever raises the cursor). Returns
-     *  the resulting cursor (post-snap), 0 if the peer manager doesn't exist. */
+     *  persisted progress. Returns the resulting cursor (post-snap), 0 if the
+     *  peer manager doesn't exist.
+     *
+     *  NOT raise-only any more (fix wave C-1): on a resume the native arming clamp
+     *  lands on the SAVED-BLOCKS TIP (a resumed manager's in-memory chain is the
+     *  checkpoints plus exactly ONE saved block, so a deep birth height cannot
+     *  resolve), which put both the cursor and autoFetchCFiltersStart ~CF_CONVOY_WINDOW
+     *  ABOVE the restored scan frontier and made the next forward fetch start there —
+     *  marking ~10,000 never-requested heights scanned, silently. This call now also
+     *  lowers them back to the frontier and SURFACES any still-needed history below
+     *  the in-memory block floor as abandoned (visible via getAbandonedBelow ->
+     *  CfAbandonmentStore banner -> rescan/reconcile), so nothing is ever marked
+     *  scanned without being scanned or surfaced. */
     external fun snapAutoFetchThroughToScanFrontier(): Long
 
     /** Current forward-fetch cursor (autoFetchCFiltersThrough). For before/after
      *  logging around snapAutoFetchThroughToScanFrontier. 0 if the peer manager
      *  doesn't exist yet. */
     external fun getAutoFetchCFiltersThrough(): Long
+
+    /** Native `CF_CONVOY_WINDOW` (BRPeerManager.h): the max the block-header /
+     *  cfheader frontier may lead the CF SCAN frontier before the fetch gate
+     *  suppresses the tip-racing continuations. Read at runtime rather than mirrored
+     *  in Kotlin — a Kotlin copy that drifts LOW makes the watchdogs read "window not
+     *  full", drop the tip-frozen conjunct and escalate during a healthy paced
+     *  descent. Pure constant reader: valid before the peer manager exists. */
+    external fun getConvoyWindow(): Int
+
+    /** Native `CF_CONVOY_REARM_MAX` (BRPeerManager.h): fresh retry cycles the B2 valve
+     *  grants a gaveUp hole before it may abandon it. The spec's tuning signal tells
+     *  the operator to RAISE this in the C header; read at runtime so the Kotlin
+     *  suppression bound (`CF_CONVOY_REARM_MAX + 1`) tracks it instead of releasing
+     *  early and escalating the tip-stall watchdog into a still-productive valve.
+     *  Pure constant reader: valid before the peer manager exists. */
+    external fun getConvoyRearmMax(): Int
 }
