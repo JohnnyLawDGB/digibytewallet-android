@@ -1841,12 +1841,15 @@ static BRPeerManager *rhBuildChainManager(BRWallet *wallet, uint32_t base, uint3
 //
 // This builds session 2 the way BRPeerManagerNewEx really does — hand it the
 // deserialized saved-blocks run and let it do what it does with it: every saved
-// block goes into `orphans`, and it chains FORWARD from the HIGHEST one, so
-// manager->blocks ends up holding the checkpoints plus EXACTLY ONE saved block.
-// Nothing below the saved tip is resolvable for the rest of the session
-// (_BRPeerManagerBlockHashAtHeight walks prevBlock through `blocks`, and the
-// parent lives in `orphans`). savedCount mirrors SAVE_BLOCK_COUNT, the real size
-// of the persisted window.
+// block goes into `orphans`, then the persisted run is chained DOWNWARD from the
+// highest one (fix wave R2), so manager->blocks ends up holding the checkpoints
+// plus the WHOLE [savedTip-(savedCount-1) .. savedTip] run and `orphans` empties.
+// The resolvable block FLOOR is therefore savedTip-(savedCount-1), NOT the saved
+// tip: before R2 the chaining ran FORWARD, looked for a CHILD of the highest saved
+// block, found none, and left savedCount-1 headers stranded in `orphans` —
+// unreachable for the whole session, so an ordinary abrupt kill of a healthy wallet
+// surfaced a spurious 1–2 height "history gap" band over heights that WERE scanned.
+// savedCount mirrors SAVE_BLOCK_COUNT, the real size of the persisted window.
 static BRPeerManager *rhBuildResumedManager(BRWallet *wallet, uint32_t savedTip, uint32_t savedCount)
 {
     BRMerkleBlock *saved[SAVE_BLOCK_COUNT];
@@ -2673,8 +2676,9 @@ static void test_b1_resumes_drain_trough(BRWallet *wallet)
     // SCOPE, STATED (fix wave C-1): this case deliberately models a manager whose
     // block window still COVERS the scan frontier — a live mid-session state. It
     // says nothing about the resumed-process shape, where BRPeerManagerNewEx leaves
-    // the block floor at the SAVED TIP, far above the restored frontier; that is
-    // test_resume_below_block_floor_surfaces. Asserted, not assumed:
+    // the block floor at savedTip-(SAVE_BLOCK_COUNT-1), still far above a frontier a
+    // full convoy window down; that is test_resume_below_block_floor_surfaces.
+    // Asserted, not assumed:
     check(_BRPeerManagerBlockFloor(m) <= SCAN0,
           "SCOPE: the block floor is at or below the scan frontier here (the resumed-process "
           "shape, floor ABOVE the frontier, is covered by test_resume_below_block_floor_surfaces)");
@@ -3258,14 +3262,23 @@ static void test_resume_snaps_cursor(BRWallet *wallet)
 //   at exactly S + CF_CONVOY_WINDOW. The process is killed. `saved_blocks` holds
 //   the top SAVE_BLOCK_COUNT headers of that window; `saved_cf_ledger` holds the
 //   scan ledger; `saved_filter_headers` holds the cfheader chain.
-//   session 2: BRPeerManagerNewEx chains forward from the highest saved block, so
-//   the block FLOOR is the saved tip A = S + W. enableAutoCompactFilterFetch is
-//   called with the (never-advanced) deep cf_birth_height, which cannot resolve,
-//   so its clamp arms start AND cursor at A. THEN the ledger is restored, putting
-//   the scan frontier back at S — a full window BELOW everything the manager can
-//   resolve.
+//   session 2: BRPeerManagerNewEx chains the persisted run DOWNWARD from the
+//   highest saved block (fix wave R2), so the block FLOOR is
+//   F = savedTip - (SAVE_BLOCK_COUNT-1) = S + W - 299 — still ~a full convoy
+//   window above the restored scan frontier, because 300 << CF_CONVOY_WINDOW.
+//   enableAutoCompactFilterFetch is called with the (never-advanced) deep
+//   cf_birth_height, which still cannot resolve, so its clamp arms start AND
+//   cursor at the saved tip A. THEN the ledger is restored, putting the scan
+//   frontier back at S — a full window BELOW everything the manager can resolve.
 //
-// The band [S .. A-1] is unservable for the whole session in BOTH directions: no
+// R2 IS ASSERTED HERE TOO, on the same manager, because it is the SAME structural
+// fact: what the resumed process can resolve. R2 moves the floor from A down to F,
+// which shrinks the surfaced band by 299 heights and — the point of R2 — makes the
+// 1–2 height case (an ordinary abrupt kill of a healthy wallet, where the 20-s
+// coalesced CF-ledger write trails the per-callback saved-blocks write) resolvable
+// instead of surfaced. It deliberately does NOT cure the deep-restore band below.
+//
+// The band [S .. F-1] is unservable for the whole session in BOTH directions: no
 // getcfilters can carry a resolvable stop hash for it, and a volunteered cfilter
 // would be dropped by _peerRelayedCFilter as an unknown block. Before the fix the
 // raise-only snap could not pull start/cursor back down, so the next forward fetch
@@ -3278,12 +3291,15 @@ static void test_resume_snaps_cursor(BRWallet *wallet)
 // scanned or being surfaced as abandoned.
 static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
 {
-    printf("\n=== test_resume_below_block_floor_surfaces (fix wave C-1) ===\n");
+    printf("\n=== test_resume_below_block_floor_surfaces (fix wave C-1 + R2) ===\n");
 
     const uint32_t SCAN      = 20000000u;                    // session 1's scan frontier S
     const uint32_t BIRTH     = SCAN - 3000u;                 // the deep cf_birth_height, never advanced
     const uint32_t SAVED_TIP = SCAN + CF_CONVOY_WINDOW;      // A: where the convoy pins the header tip
     const uint32_t CFH_NEXT  = SAVED_TIP + 1u;               // restored cfheader frontier == A
+    // F: the resolvable block floor of a resumed manager — DERIVED from
+    // SAVE_BLOCK_COUNT, never hardcoded, so it tracks the persisted window size.
+    const uint32_t RESUME_FLOOR = SAVED_TIP - (SAVE_BLOCK_COUNT - 1u);
 
     // ---- session 1: a real ledger descended from BIRTH to S, then persisted --
     BRCFScanLedger persisted;
@@ -3305,15 +3321,32 @@ static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
     check(m != NULL, "session 2: manager built by the REAL BRPeerManagerNewEx from saved_blocks");
     if (! m) { free(blob); return; }
 
-    // THE PRODUCTION SHAPE, asserted rather than assumed. BRPeerManagerNewEx put
-    // all SAVE_BLOCK_COUNT saved headers in `orphans` and chained FORWARD from the
-    // highest, so `blocks` holds the checkpoints plus exactly one saved block.
-    check(BRSetCount(m->orphans) == SAVE_BLOCK_COUNT - 1,
-          "PRODUCTION SHAPE: SAVE_BLOCK_COUNT-1 saved headers are stranded in `orphans`");
+    // THE PRODUCTION SHAPE, asserted rather than assumed. BRPeerManagerNewEx puts
+    // every saved header in `orphans`, then chains the run DOWNWARD from the highest
+    // (fix wave R2) -- so the WHOLE persisted run reaches `blocks` and `orphans` empties.
+    check(BRSetCount(m->orphans) == 0,
+          "R2 PRODUCTION SHAPE (RED on -DRESUME_FLOOR_UNFIXED): the whole saved run was chained "
+          "into `blocks` -- NO saved header is left stranded in `orphans`");
     check(m->lastBlock && m->lastBlock->height == SAVED_TIP, "PRODUCTION SHAPE: lastBlock is the saved tip");
-    check(_BRPeerManagerBlockFloor(m) == SAVED_TIP,
-          "PRODUCTION SHAPE: the resolvable block FLOOR is the saved tip -- nothing below it exists "
-          "this session (the value rhBuildChainManager can never produce)");
+    check(_BRPeerManagerBlockFloor(m) == RESUME_FLOOR,
+          "R2 PRODUCTION SHAPE (RED on -DRESUME_FLOOR_UNFIXED): the resolvable block FLOOR is "
+          "savedTip-(SAVE_BLOCK_COUNT-1), not the saved tip -- so the 1-2 heights an abrupt kill "
+          "of a HEALTHY wallet leaves the coalesced CF ledger trailing by are RESOLVABLE, and no "
+          "band is surfaced for them at all");
+    // Every height of the persisted run resolves, not merely the two endpoints:
+    // the floor walk proves the chain is CONNECTED, this proves it is COMPLETE.
+    {
+        int missing = 0;
+        for (uint32_t h = RESUME_FLOOR; h <= SAVED_TIP; h++) {
+            if (UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, h))) { missing = 1; break; }
+        }
+        check(! missing,
+              "R2: EVERY height of the persisted [savedTip-299 .. savedTip] run resolves to a "
+              "stop hash (the whole run is resident, not just a connected pair)");
+    }
+    check(_BRPeerManagerBlockFloor(m) > SCAN,
+          "GEOMETRY: R2 does NOT cure the deep-restore band -- SAVE_BLOCK_COUNT (300) is two "
+          "orders below CF_CONVOY_WINDOW (10000), so the floor still sits far above the frontier");
     check(SAVED_TIP - SCAN == CF_CONVOY_WINDOW,
           "GEOMETRY: the convoy pins the header tip exactly CF_CONVOY_WINDOW above the scan frontier");
 
@@ -3352,16 +3385,16 @@ static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
     int wlogBefore = g_wlogCount;
     BRPeerManagerSnapAutoFetchThroughToScanFrontier(m);
 
-    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == SAVED_TIP,
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == RESUME_FLOOR,
           "SURFACED (RED on -DCONVOY_C1_UNFIXED): abandonedBelow covers the whole unscannable band "
-          "[S .. A-1] -- the skip is now visible to CfAbandonmentStore, the banner and recovery");
+          "[S .. F-1] -- the skip is now visible to CfAbandonmentStore, the banner and recovery");
     check(g_wlogCount == wlogBefore + 1,
           "SURFACED: exactly ONE ABANDONED warn-log fired (count>0 <=> advance <=> WARN)");
     check(strstr(g_wlogLast, "ABANDONED") != NULL, "SURFACED: the captured warn-log names the ABANDONED event");
-    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == SAVED_TIP,
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == RESUME_FLOOR,
           "SURFACED: the frontier is now the block floor, so the convoy window re-opens and the "
           "descent can continue instead of wedging");
-    check(m->autoFetchCFiltersStart == SAVED_TIP && m->autoFetchCFiltersThrough == SAVED_TIP - 1u,
+    check(m->autoFetchCFiltersStart == RESUME_FLOOR && m->autoFetchCFiltersThrough == RESUME_FLOOR - 1u,
           "RECONCILED: start/cursor sit exactly at the frontier (reqStart == LowestNeededHeight)");
 
     // ---- one real KeepAlive tick, then THE INVARIANT -----------------------
@@ -3370,7 +3403,7 @@ static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
     g_capCount = 0; g_capStart = 0;
     BRPeerManagerKeepAlive(m);
 
-    check(g_capCount >= 1 && g_capStart == SAVED_TIP,
+    check(g_capCount >= 1 && g_capStart == RESUME_FLOOR,
           "DRIVE: the forward fetch starts at the surfaced frontier, not one height above or below");
 
     // Serve what the drive actually requested. THIS is what moves scannedThrough:
@@ -3445,6 +3478,17 @@ static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
           "variant: the restored hole at S pins the frontier");
     check(v->cfLedger.outstanding[0].attempts == 0, "variant: Parse resets attempts (a fresh cycle)");
     check(BRCFScanLedgerGaveUpCount(&v->cfLedger) == 0, "variant: nothing is in gaveUp -- the valve sees nothing");
+    // The variant deliberately does NOT call the resume snap: it isolates the
+    // KeepAlive backstop. So the forward-fetch cursor is wherever the
+    // EnableAutoCompactFilterFetch clamp left it -- the SAVED TIP - 1, which under
+    // R2's lower floor sits SAVE_BLOCK_COUNT-1 heights ABOVE the surfaced frontier.
+    check(v->autoFetchCFiltersThrough == SAVED_TIP - 1u,
+          "variant setup: the cursor is armed at the clamped saved tip, ABOVE the floor R2 produces "
+          "-- so the backstop's own cursor reconciliation is what has to close the gap");
+
+    blockRegReset(); everReqReset(); capLogReset();
+    blockRegAdd(v->lastBlock);
+    g_capCount = 0; g_capStart = 0;
 
     // Ten residual drive ticks with the clock advanced past every backoff step.
     // The hole is offered and offered and NEVER burns an attempt, because nothing
@@ -3454,15 +3498,136 @@ static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
         for (size_t i = 0; i < v->cfLedger.outstandingCount; i++) v->cfLedger.outstanding[i].requestedAt = 1;
         BRPeerManagerKeepAlive(v);
     }
-    check(BRCFScanLedgerLowestNeededHeight(&v->cfLedger) == SAVED_TIP,
+    check(BRCFScanLedgerLowestNeededHeight(&v->cfLedger) == RESUME_FLOOR,
           "VARIANT FIXED (RED on -DCONVOY_C1_UNFIXED): the un-servable hole was surfaced instead of "
           "pinning the frontier forever where no valve could ever see it");
-    check(BRCFScanLedgerAbandonedBelow(&v->cfLedger) == SAVED_TIP,
+    check(BRCFScanLedgerAbandonedBelow(&v->cfLedger) == RESUME_FLOOR,
           "VARIANT FIXED: the band is surfaced (recoverable), not silently dropped");
     check(findOutstanding(&v->cfLedger, SCAN) == NULL,
           "VARIANT FIXED: the unservable hole no longer sits in `outstanding` pinning _cfLedgerAdvance");
 
+    // THE SAME INVARIANT AS THE MAIN CASE, on the backstop path: every height the
+    // ledger now calls scanned must be either below the surfaced watermark or a
+    // height this session actually put on the wire. Without the backstop's cursor
+    // reconciliation the forward fetch starts at the clamped saved tip, RecordRequested
+    // raises requestedThrough NON-CONTIGUOUSLY over [floor .. savedTip-1] and
+    // _cfLedgerAdvance sails scannedThrough across all 299 of them -- above
+    // abandonedBelow, never requested, invisible. (This is a gap R2 OPENS: pre-R2 the
+    // floor and the clamped cursor coincided, so it was zero by coincidence.)
+    {
+        uint32_t vst = BRCFScanLedgerScannedThrough(&v->cfLedger);
+        uint32_t vab = BRCFScanLedgerAbandonedBelow(&v->cfLedger);
+        uint32_t vBad = 0;
+        for (uint32_t h = vab; h <= vst; h++) {
+            if (! everReqContains(h)) { vBad = h; break; }
+        }
+        if (vBad != 0) {
+            printf("C1-VARIANT-KAT: first height marked scanned but never requested = %u "
+                   "(scannedThrough=%u abandonedBelow=%u)\n", vBad, vst, vab);
+        }
+        check(vBad == 0,
+              "VARIANT: NO SILENT SKIP -- every height above the surfaced watermark that the ledger "
+              "calls scanned was actually requested on the wire (the backstop reconciles the cursor "
+              "to the frontier, so requestedThrough stays CONTIGUOUS)");
+    }
+
     BRPeerManagerFree(v);
+}
+
+// ============================================================================
+// FIX WAVE R2: an ordinary abrupt kill of a HEALTHY wallet must surface NOTHING
+// ============================================================================
+//
+// This is the OUTCOME R2 exists for, asserted as the outcome rather than as the
+// mechanism. Saved blocks are persisted on EVERY save callback; the CF scan ledger
+// is on a 20-s coalescing timer. So on an abrupt kill (~half of them land in the
+// unflushed window) the restored ledger trails the restored block tip by 1-2
+// heights. With the resume floor at the saved TIP those 1-2 heights sat BELOW
+// everything the session could resolve, so the C-1 surfacing -- correctly, given
+// that floor -- raised abandonedBelow over them: a non-dismissible "history gap"
+// banner with Synced WITHHELD, on a fully-synced healthy wallet, over heights that
+// WERE actually scanned and whose only loss was the record. A new high-frequency
+// FALSE ALARM on the ordinary user population, eroding the banner's signal value
+// exactly where the B2 valve's safety argument depends on users heeding it.
+//
+// With the floor at savedTip-(SAVE_BLOCK_COUNT-1) those heights are inside the
+// resident run, so they are simply RE-SCANNED and nothing is surfaced at all.
+//
+// Deliberately NOT asserted as "the floor is lower" (that is the mechanism, and
+// test_resume_below_block_floor_surfaces pins it): asserted as abandonedBelow == 0,
+// zero ABANDONED warn-logs, and the trailing heights actually going back on the wire.
+static void test_resume_healthy_kill_surfaces_no_band(BRWallet *wallet)
+{
+    printf("\n=== test_resume_healthy_kill_surfaces_no_band (fix wave R2) ===\n");
+
+    const uint32_t SAVED_TIP = 20010000u;                 // a healthy, fully-synced wallet
+    const uint32_t BIRTH     = SAVED_TIP - 3000u;         // the deep cf_birth_height, never advanced
+    const uint32_t LEDGER_AT = SAVED_TIP - 2u;            // the 20-s coalesced write trails the block tip by 2
+    const uint32_t CFH_NEXT  = SAVED_TIP + 1u;            // cfheaders are caught up (healthy wallet)
+
+    // ---- session 1: fully scanned through LEDGER_AT, then killed ------------
+    BRCFScanLedger persisted;
+    BRCFScanLedgerInit(&persisted, BIRTH);
+    BRCFScanLedgerRecordRequested(&persisted, BIRTH, LEDGER_AT, UINT128_ZERO, 0, 1700000000u);
+    for (uint32_t h = BIRTH; h <= LEDGER_AT; h++) BRCFScanLedgerMarkEvaluated(&persisted, h);
+    check(BRCFScanLedgerScannedThrough(&persisted) == LEDGER_AT &&
+          BRCFScanLedgerOutstandingCount(&persisted) == 0,
+          "session 1: healthy wallet, ledger drained to LEDGER_AT (2 heights behind the saved tip)");
+    size_t blobLen = BRCFScanLedgerSerialize(&persisted, NULL, 0);
+    uint8_t *blob  = (blobLen > 0) ? malloc(blobLen) : NULL;
+    check(blob != NULL && BRCFScanLedgerSerialize(&persisted, blob, blobLen) == blobLen,
+          "session 1: ledger serialized");
+    BRCFScanLedgerFree(&persisted);
+    if (! blob) return;
+
+    // ---- session 2, PRODUCTION SHAPE ---------------------------------------
+    BRPeerManager *m = rhBuildResumedManager(wallet, SAVED_TIP, SAVE_BLOCK_COUNT);
+    check(m != NULL, "session 2: manager built by the REAL BRPeerManagerNewEx from saved_blocks");
+    if (! m) { free(blob); return; }
+    BRCompactFilterChainFree(m->compactFilterChain);
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, CFH_NEXT, UINT256_ZERO);
+    BRPeerManagerEnableAutoCompactFilterFetch(m, BIRTH);
+    check(BRCFScanLedgerParse(&m->cfLedger, blob, blobLen) == 1, "RESTORE: the persisted ledger parsed back in");
+    free(blob);
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == LEDGER_AT + 1u,
+          "RESTORE: the scan frontier is 1 height below the saved tip -- the coalescing-window trail");
+
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x53; pa->port = 12053; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+
+    // ---- the resume reconciliation + one real KeepAlive tick ----------------
+    int wlogBefore = g_wlogCount;
+    BRPeerManagerSnapAutoFetchThroughToScanFrontier(m);
+
+    blockRegReset(); everReqReset(); capLogReset();
+    blockRegAdd(m->lastBlock);   // the batch stop hash caps at the cfheader frontier == the saved tip
+    g_capCount = 0; g_capStart = 0;
+    BRPeerManagerKeepAlive(m);
+
+    // THE OUTCOME. Both halves matter: nothing surfaced AND nothing warned. cnt>0
+    // <=> abandonedBelow advanced <=> exactly one WARN, so a zero WARN delta is an
+    // independent witness that no surfacing happened by any of the three paths
+    // (snap, KeepAlive backstop, floor re-anchor).
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "NO FALSE BAND (RED on -DRESUME_FLOOR_UNFIXED): an ordinary abrupt kill of a HEALTHY, "
+          "fully-synced wallet surfaces NOTHING -- the 2 heights the coalesced ledger trailed by "
+          "are inside the resident saved run, so they are simply re-scanned");
+    check(g_wlogCount == wlogBefore,
+          "NO FALSE BAND: zero ABANDONED warn-logs -- no banner, and Synced is not withheld");
+
+    // ... and they really do go back on the wire, so "not surfaced" is not "lost".
+    check(g_capCount >= 1 && g_capStart == LEDGER_AT + 1u,
+          "RE-SCANNED (RED on -DRESUME_FLOOR_UNFIXED): the forward fetch resumes at the trailing "
+          "height itself -- its stop hash resolves inside the resident run");
+
+    uint32_t served[8];
+    int nServed = serveSome(m, 8, served);
+    check(nServed >= 1, "RE-SCANNED: the trailing heights were served (a real _cfLedgerAdvance)");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) >= LEDGER_AT + 1u,
+          "RE-SCANNED: the scan actually advanced past the trailing height");
+
+    BRPeerManagerFree(m);
 }
 
 // ============================================================================
@@ -4531,6 +4696,23 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_RESUME_FLOOR_REDGREEN_ONLY
+    // run.sh builds this twice for the fix wave's R2 red-before-green gate: once
+    // with BRPeerManagerNewEx chaining FORWARD from the highest saved block
+    // (-DRESUME_FLOOR_UNFIXED -- the pre-fix shape, where the loop looks for a CHILD,
+    // finds none, exits after ONE iteration and strands SAVE_BLOCK_COUNT-1 headers in
+    // `orphans`, putting the resume block floor at the SAVED TIP -- must FAIL == RED)
+    // and once chaining DOWNWARD (must PASS == GREEN). BOTH resume cases run: the
+    // floor is the shared structural fact, so the C-1 case pins the mechanism (floor,
+    // orphan residency, band width) and the R2 case pins the OUTCOME (a healthy
+    // wallet's abrupt kill surfaces no band at all).
+    test_resume_below_block_floor_surfaces(wallet);
+    test_resume_healthy_kill_surfaces_no_band(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
 #ifdef KAT_RESUME_SNAP_REDGREEN_ONLY
     // run.sh builds this twice for the resume cursor reconciliation's
     // red-before-green gate: once with the snap compiled to a no-op
@@ -4593,6 +4775,7 @@ int main(void)
     test_b1_rekick_backoff_not_stale_across_gated_period(wallet); // paced-convoy-fetch Task 3 fix 2: GATED->open episode reset (red-before-green)
     test_resume_snaps_cursor(wallet);                      // paced-convoy-fetch Task 4: resume cursor reconciliation (red-before-green)
     test_resume_below_block_floor_surfaces(wallet);        // fix wave C-1: resumed mid-descent silent skip + the un-valved variant
+    test_resume_healthy_kill_surfaces_no_band(wallet);     // fix wave R2: an ordinary kill of a healthy wallet surfaces NOTHING (red-before-green)
     test_valve_matched_set(wallet);                        // paced-convoy-fetch Task 5: B2 valve MATCHED SET a/b/c/d (red-before-green x4)
     test_pending_abandonment_accessor(wallet);             // paced-convoy-fetch Task 6: the valve/watchdog ordering signal (boundable count)
     test_convoy_scale_bounded(wallet);                     // paced-convoy-fetch Task 6: THE memory bound, >100k descent (red-before-green)

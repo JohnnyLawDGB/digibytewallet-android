@@ -127,14 +127,122 @@ class CfAbandonmentStoreTest {
     // alone is not coverage (the re-anchor floor can sit ABOVE the band, in which
     // case those heights are still unscanned and a blanket clear would be exactly
     // the silent loss this whole mechanism exists to prevent).
+    //
+    // ...and (fix wave R1) "frontier > high" alone is not the other conjunct either:
+    // it is TWO-PHASE. See the long note on scanFrontierNeverSeenInsideTheBand below.
 
     @Test fun scanPassedTheBandAfterReInit_countsAsRecovery() {
         val ctx = fakeContext()
         CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
-        // watermark re-Init'd to 0 AND the scan frontier is now past the band top (999)
+        // The heal re-Init'd BELOW the band and the scan is climbing THROUGH it —
+        // Phase 1. This is the observation a legitimate auto-clear always produces
+        // and the reconnect-at-the-same-floor case never can.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 950L))
+        assertTrue(CfAbandonmentStore.sawFrontierInBand(ctx))
+        assertNotNull("still surfaced — the scan is only part-way through", CfAbandonmentStore.unrecoveredBand(ctx))
+
+        // Phase 2: the scan has now climbed past the band top (999). MUST recover —
+        // this is the legitimate auto-clear and R1 must not regress it.
         assertTrue(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_000L))
         assertNull(CfAbandonmentStore.unrecoveredBand(ctx))
         assertTrue(CfAbandonmentStore.isRecovered(ctx))
+    }
+
+    /**
+     * R1, THE REQUIRED FIX. A band surfaced by the RESUME path has `high == floor-1`,
+     * so ANY later re-`Init` at that SAME floor reads back as `scanFrontier > high` on
+     * the very next poll — the exact shape the "a re-anchor floor above the band must
+     * NOT clear it" guard was written to reject, arriving through the guard's own
+     * happy path. Concretely: a deep restore surfaces `[S..A-1]` and banners → a
+     * network blip → `onAvailable` → `forceReconnect()` + `startSync()` → fresh
+     * manager → sticky re-arm clamps to `A` and re-`Init`s there → `abandonedBelow=0`,
+     * frontier `= A` → banner gone, Synced allowed, ~10,000 heights never scanned.
+     *
+     * Without a prior in-band observation this MUST NOT recover. (Fails pre-fix.)
+     */
+    @Test fun scanFrontierNeverSeenInsideTheBand_isNotRecovery() {
+        val ctx = fakeContext()
+        // A resume-surfaced band: top == floor-1, i.e. floor == 1_000.
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        assertFalse("nothing observed yet", CfAbandonmentStore.sawFrontierInBand(ctx))
+
+        // The reconnect: fresh manager, re-Init at the SAME floor. abandonedBelow is
+        // back to 0 and the frontier reads as the floor — one height above the band.
+        repeat(5) {
+            assertFalse(
+                "a floor landing AT the top of the band is not coverage",
+                CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_000L),
+            )
+        }
+        assertNotNull("the band must still be surfaced", CfAbandonmentStore.unrecoveredBand(ctx))
+        assertFalse(CfAbandonmentStore.isRecovered(ctx))
+
+        // And it stays rejected however far the scan then climbs — those heights were
+        // never covered, so no amount of progress ABOVE them is evidence about them.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 500_000L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    /** A failed native read (`getLowestNeededHeight()` → 0 via `getOrDefault`) is not
+     *  an observation. Without this guard `0 <= high` would hand the reconnect case a
+     *  free Phase-1 witness and re-open R1 through the error path. */
+    @Test fun aZeroFrontier_isNotAnObservation() {
+        val ctx = fakeContext()
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 0L))
+        assertFalse("a 0 frontier must not witness anything", CfAbandonmentStore.sawFrontierInBand(ctx))
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_000L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    /** The witness must survive process death: Phase 1 in one session, Phase 2 in the
+     *  next. (The store is pure SharedPreferences, so a re-read through a fresh
+     *  accessor on the same backing map is the honest model of that.) */
+    @Test fun theInBandObservation_persistsAcrossPhases() {
+        val ctx = fakeContext()
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 900L)
+        assertTrue(CfAbandonmentStore.sawFrontierInBand(ctx))
+        // ...process dies, app relaunches, the scan finishes climbing.
+        assertTrue(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_000L))
+        assertNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    /** A NEW abandonment resets the witness: the observation was about the OLD
+     *  geometry, and the extended band's added heights were never observed at all. */
+    @Test fun aNewAbandonment_resetsTheInBandObservation() {
+        val ctx = fakeContext()
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_000L, lowHint = 900L)
+        CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 950L)
+        assertTrue(CfAbandonmentStore.sawFrontierInBand(ctx))
+
+        // The valve abandons more; the band now extends up to 1_499.
+        assertTrue(CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_500L, lowHint = 1_400L))
+        assertFalse(CfAbandonmentStore.sawFrontierInBand(ctx))
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_500L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+    }
+
+    /** R1 must behave the same for a 1-height band (the shape an abrupt kill used to
+     *  produce before R2 made it resolvable) as for a ~10,000-height one: the geometry
+     *  differs, the rule does not. */
+    @Test fun aOneHeightBand_stillNeedsTheInBandObservation() {
+        val ctx = fakeContext()
+        // band == [1_000 .. 1_000]
+        CfAbandonmentStore.noteAbandonment(ctx, abandonedBelow = 1_001L, lowHint = 1_000L)
+        val band = CfAbandonmentStore.unrecoveredBand(ctx)!!
+        assertEquals(1_000L, band.low)
+        assertEquals(1_000L, band.high)
+
+        // Re-Init at the same floor (1_001) — nothing observed, nothing cleared.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_001L))
+        assertNotNull(CfAbandonmentStore.unrecoveredBand(ctx))
+
+        // A real heal re-Inits below it; the single poll that lands on the one height
+        // in the band is the witness, and the next one clears.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_000L))
+        assertTrue(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 1_001L))
+        assertNull(CfAbandonmentStore.unrecoveredBand(ctx))
     }
 
     @Test fun watermarkClearedButScanNotYetPastTheBand_isNotRecovery() {
@@ -165,6 +273,10 @@ class CfAbandonmentStoreTest {
         CfAbandonmentStore.noteAbandonment(ctx, 1_000L, 900L)
         CfAbandonmentStore.markRecovered(ctx)
         assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 9_999L))
+        // ...and a poll landing "inside" an already-recovered band writes no witness
+        // either, so a LATER new abandonment cannot inherit one.
+        assertFalse(CfAbandonmentStore.noteScanCoverage(ctx, abandonedBelow = 0L, scanFrontier = 950L))
+        assertFalse(CfAbandonmentStore.sawFrontierInBand(ctx))
     }
 
     /** The full rescan re-`Init`s the native ledger at abandonedBelow = 0, so the

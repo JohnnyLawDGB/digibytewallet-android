@@ -477,6 +477,62 @@ else
     echo "RED confirmed: without the resume reconciliation a resumed descent silently skips the window (expected)."
 fi
 
+# ==== FIX WAVE R2: THE RESUME BLOCK FLOOR ===================================
+# BRPeerManagerNewEx added every saved block to `orphans` and then chained FORWARD
+# from the highest one -- the loop looked for that block's CHILD, found none (it IS
+# the tip) and exited after ONE iteration. Exactly one of the SAVE_BLOCK_COUNT
+# persisted headers reached manager->blocks; the other 299 were stranded and freed
+# at teardown. So the resume block FLOOR was the saved TIP, and since saved blocks
+# are persisted on every save callback while the CF scan ledger is on a 20-s
+# coalescing timer, an ordinary abrupt kill of a HEALTHY, fully-synced wallet left
+# the restored ledger 1-2 heights below the restored tip -- BELOW the floor, hence
+# surfaced as a non-dismissible "history gap" band with Synced withheld, over
+# heights that WERE scanned. Chaining the run DOWNWARD puts the floor at
+# savedTip-(SAVE_BLOCK_COUNT-1) and that whole class becomes resolvable again.
+#   * -DRESUME_FLOOR_UNFIXED: the forward-chaining loop is compiled back in (every
+#     other resume mechanism -- the snap, the C-1 surfacing, the KeepAlive backstop
+#     -- stays live, so what is proven red is the CHAINING DIRECTION, not the
+#     surrounding machinery) -> the floor reads as the saved tip, the healthy-kill
+#     case surfaces a false band, and both resume cases FAIL (== RED).
+# HARD-FAILS run.sh if it unexpectedly PASSES.
+build "$BUILD_DIR/kat_resume_floor_unfixed" -DRESUME_FLOOR_UNFIXED -DKAT_RESUME_FLOOR_REDGREEN_ONLY
+if "$BUILD_DIR/kat_resume_floor_unfixed"; then
+    echo "GATE FAILURE: the RESUME-FLOOR-UNFIXED build PASSED. The saved-run chaining's"
+    echo "red-before-green cannot go red -- 299 of every 300 persisted headers would stay"
+    echo "stranded in \`orphans\`, the resume block floor would sit at the saved tip, and an"
+    echo "ordinary abrupt kill of a HEALTHY wallet would raise a non-dismissible history-gap"
+    echo "banner (Synced withheld) over heights that were actually scanned. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: forward-chaining strands SAVE_BLOCK_COUNT-1 headers and floors the resume at the saved tip (expected)."
+fi
+
+# ---- RED: the KeepAlive backstop's CURSOR RECONCILIATION compiled OUT MUST fail ----
+# A gap R2 OPENS. Three of the four surfacing sites (the arming clamp, the cfheaders
+# floor snap, the floor re-anchor) set start/cursor to the new floor themselves; the
+# KeepAlive backstop did not, and pre-R2 that was safe purely by coincidence -- the
+# resume block floor WAS the clamped cursor + 1, so the gap was zero. With the floor
+# SAVE_BLOCK_COUNT-1 lower it is a real 299-height hole: the next forward fetch starts
+# at the clamped saved tip, RecordRequested raises requestedThrough NON-CONTIGUOUSLY
+# across the gap, and _cfLedgerAdvance sails scannedThrough over heights that were
+# never requested AND are not below abandonedBelow -- a silent skip, above the
+# watermark, invisible to the banner. Exactly the invariant the whole fix wave exists
+# to hold.
+#   * -DCONVOY_C1_NO_CURSOR_RECONCILE: the surfacing still runs in full (the band is
+#     still abandoned and warn-logged); ONLY the cursor reconciliation is compiled
+#     out, so what is proven red is the reconciliation and nothing else -> RED.
+# HARD-FAILS run.sh if it unexpectedly PASSES.
+build "$BUILD_DIR/kat_c1_no_cursor_reconcile" -DCONVOY_C1_NO_CURSOR_RECONCILE -DKAT_RESUME_C1_REDGREEN_ONLY
+if "$BUILD_DIR/kat_c1_no_cursor_reconcile"; then
+    echo "GATE FAILURE: the NO-CURSOR-RECONCILE build PASSED. The KeepAlive backstop's cursor"
+    echo "reconciliation cannot go red -- after surfacing a band the forward fetch would resume"
+    echo "ABOVE the frontier, raise requestedThrough non-contiguously, and mark SAVE_BLOCK_COUNT-1"
+    echo "heights scanned that were never requested and are NOT below abandonedBelow. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the cursor reconciliation the backstop leaves a silent skip above the watermark (expected)."
+fi
+
 # ---- GREEN: fixed full suite ------------------------------------------------
 build "$BUILD_DIR/kat_fixed"
 "$BUILD_DIR/kat_fixed"

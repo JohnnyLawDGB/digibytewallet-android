@@ -660,8 +660,11 @@ class WalletViewModel @Inject constructor(
                     // re-covers the band — no reconcile, no rescan, nothing on either
                     // of those paths called. Without this the wallet would nag
                     // "History gap" and refuse Synced forever over a gap that has
-                    // already closed. Gated on BOTH conjuncts inside noteScanCoverage:
-                    // a re-anchor floor above the band must NOT clear it.
+                    // already closed. TWO-PHASE inside noteScanCoverage (fix wave R1):
+                    // a floor that lands ABOVE the band must NOT clear it, and for a
+                    // resume-surfaced band (top == floor-1) that is exactly what an
+                    // ordinary reconnect produces — so clearing also requires having
+                    // OBSERVED the frontier inside the band first.
                     android.util.Log.i("WalletVM",
                         "abandoned CF band re-covered by the ordinary scan " +
                             "(abandonedBelow=0, scanFrontier=$scanFrontier) — banner cleared")

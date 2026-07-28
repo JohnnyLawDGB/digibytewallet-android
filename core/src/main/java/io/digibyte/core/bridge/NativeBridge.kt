@@ -591,8 +591,8 @@ object NativeBridge {
      *
      *  NOT raise-only any more (fix wave C-1): on a resume the native arming clamp
      *  lands on the SAVED-BLOCKS TIP (a resumed manager's in-memory chain is the
-     *  checkpoints plus exactly ONE saved block, so a deep birth height cannot
-     *  resolve), which put both the cursor and autoFetchCFiltersStart ~CF_CONVOY_WINDOW
+     *  checkpoints plus the persisted [savedTip-299 .. savedTip] run, so a deep birth
+     *  height cannot resolve), which put both the cursor and autoFetchCFiltersStart ~CF_CONVOY_WINDOW
      *  ABOVE the restored scan frontier and made the next forward fetch start there —
      *  marking ~10,000 never-requested heights scanned, silently. This call now also
      *  lowers them back to the frontier and SURFACES any still-needed history below

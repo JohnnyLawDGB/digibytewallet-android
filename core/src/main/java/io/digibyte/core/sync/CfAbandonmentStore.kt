@@ -80,9 +80,11 @@ internal fun nextAbandonedBand(
  * abandonment *skipped-and-surfaced-and-recoverable* instead.
  *
  * Set by: [noteAbandonment] (records/extends a band and CLEARS recovered — a new
- * abandonment is a new gap). Cleared by: [markRecovered], called on a successful
- * `ChainReconciliationService.reconcile()` whose address-history pass covered the
- * owned set. Wiped entirely by: [clear], called from
+ * abandonment is a new gap, so its Phase-1 witness resets too). Cleared by:
+ * [markRecovered], called on a successful `ChainReconciliationService.reconcile()`
+ * whose address-history pass covered the owned set, and by the two-phase
+ * [noteScanCoverage] when the ORDINARY scan is observed climbing THROUGH the band.
+ * Wiped entirely by: [clear], called from
  * `WalletManager.rebuildFromChainRescan()` alongside `CfScanLedgerStore.delete` —
  * the rescan re-`Init`s the native ledger at `abandonedBelow = 0`, so the band it
  * described no longer exists.
@@ -93,6 +95,14 @@ object CfAbandonmentStore {
     private const val KEY_HIGH = "band_high"
     private const val KEY_LOW_KNOWN = "band_low_known"
     private const val KEY_RECOVERED = "band_recovered"
+
+    /**
+     * Phase 1 of [noteScanCoverage]: the app has, at some point since this band was
+     * recorded, actually OBSERVED the CF scan frontier sitting INSIDE the band with
+     * the hard floor gone. Persisted, because the observation and the later
+     * pass-the-top can be separated by a process death.
+     */
+    private const val KEY_SAW_IN_BAND = "band_saw_frontier_in_band"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS_BASE + networkSuffix(ctx), Context.MODE_PRIVATE)
@@ -132,10 +142,18 @@ object CfAbandonmentStore {
             .putLong(KEY_LOW, next.low)
             .putLong(KEY_HIGH, next.high)
             .putBoolean(KEY_LOW_KNOWN, next.lowKnown)
-            .putBoolean(KEY_RECOVERED, false)   // a new gap is not recovered
+            .putBoolean(KEY_RECOVERED, false)     // a new gap is not recovered
+            .putBoolean(KEY_SAW_IN_BAND, false)   // ...and nothing has been observed about it yet
             .apply()
         return true
     }
+
+    /**
+     * Phase-1 witness for [noteScanCoverage] — see [KEY_SAW_IN_BAND]. Exposed for the
+     * store's own tests; production only ever reaches it through [noteScanCoverage].
+     */
+    internal fun sawFrontierInBand(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_SAW_IN_BAND, false)
 
     /**
      * Record that a recovery covered the abandoned band — the `abandonedBandRecovered`
@@ -171,6 +189,35 @@ object CfAbandonmentStore {
      * progress. So both must hold: the floor is gone AND the scan frontier has moved
      * PAST the top of the band.
      *
+     * **...and "frontier > high" ALONE IS NOT A PASS — it is TWO-PHASE (fix wave R1).**
+     * The two conjuncts above were sufficient only for VALVE-shaped bands, whose top
+     * sits at `frontier - 1` while every re-`Init` floor lands ~144 BELOW the frontier —
+     * so a floor landing above the band really was the exceptional case the second
+     * conjunct rejected. A band surfaced by the RESUME path INVERTS that geometry: its
+     * top is exactly `floor - 1`, so ANY later re-`Init` at that same floor makes
+     * `scanFrontier == floor > high` on the very next poll. Concretely: a deep restore
+     * surfaces `[S..A-1]` and banners → a network blip fires `onAvailable` →
+     * `forceReconnect()` + `startSync()` → fresh manager → the sticky re-arm clamps to
+     * `A` and re-`Init`s there → `abandonedBelow = 0`, frontier `= A` → the next 5-second
+     * poll would clear the banner, allow Synced, and leave ~CF_CONVOY_WINDOW heights
+     * never scanned. A routine reconnect silently un-surfacing the band breaks the
+     * GATE-1/GATE-3 coupling the whole abandonment valve rests on.
+     *
+     * So recovery additionally requires that the app has ACTUALLY OBSERVED the scan
+     * frontier INSIDE the band while the floor was gone ([KEY_SAW_IN_BAND], persisted
+     * across process death) BEFORE seeing it pass the top. That is precisely what
+     * distinguishes the two cases: a genuine heal re-`Init`s BELOW the band and the
+     * scan CLIMBS THROUGH it — so a poll lands on `frontier <= high` — whereas a floor
+     * landing ABOVE the band never produces such an observation, ever.
+     *
+     * This cannot be done natively: the recreate FREES the manager, so the pre-recreate
+     * frontier no longer exists in memory to compare against.
+     *
+     * A missed Phase-1 poll (a very narrow band healed faster than the 5s poll) fails
+     * SAFE — the banner stays up and the explicit recovery paths (`markRecovered` on a
+     * reconcile, [clear] on a rescan) still clear it. The opposite default would be a
+     * silent balance under-report.
+     *
      * `scanFrontier` is `getLowestNeededHeight()` — the lowest height still NEEDED —
      * so it must be strictly greater than [AbandonedBand.high] for `high` itself to
      * have been scanned.
@@ -180,7 +227,19 @@ object CfAbandonmentStore {
     fun noteScanCoverage(ctx: Context, abandonedBelow: Long, scanFrontier: Long): Boolean {
         val band = unrecoveredBand(ctx) ?: return false
         if (abandonedBelow != 0L) return false        // hard floor still clamping
-        if (scanFrontier <= band.high) return false   // scan hasn't passed the band
+        // A frontier of 0 is "not up yet" / a failed native read, NOT an observation.
+        // Without this guard a JNI failure would satisfy Phase 1 for free (0 <= high
+        // always) and hand the floor-lands-above-the-band case its witness.
+        if (scanFrontier <= 0L) return false
+        if (scanFrontier <= band.high) {
+            // PHASE 1 — the scan is genuinely inside the band with the floor gone.
+            if (!sawFrontierInBand(ctx)) {
+                prefs(ctx).edit().putBoolean(KEY_SAW_IN_BAND, true).apply()
+            }
+            return false                              // scan hasn't passed the band yet
+        }
+        // PHASE 2 — past the top. Only counts if Phase 1 ever happened for THIS band.
+        if (!sawFrontierInBand(ctx)) return false
         return markRecovered(ctx)
     }
 
