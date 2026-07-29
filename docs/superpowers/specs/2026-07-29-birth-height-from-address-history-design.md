@@ -64,13 +64,29 @@ This is what makes an index-derived floor acceptable in a sovereignty-first wall
 
 After sync reaches the tip, run the existing address-history reconcile and check for **any confirmed tx whose height is below `cf_birth_height`**. If one exists, the floor was too high: surface it through the **existing abandoned-band machinery** (banner + withheld "Synced" + recover action) rather than inventing a second surface, and offer a deeper rescan. That reuses the GATE-3 path already built and reviewed on the convoy branch, and it converts the taproot/gap-limit blind spots from *silent loss* into *visible, recoverable deferral* — the same trade the abandonment valve makes.
 
+### Does the detector share the estimator's blind spot? Checked — on coverage, no; on availability, yes.
+
+**Coverage: independent, and this is the load-bearing fact.** The estimator runs during restore, *before a wallet exists*, so it can only use the stateless `NativeBridge.deriveAddresses` — which emits no P2TR. The detector runs after sync with the wallet loaded, and `ChainReconciliationService` enumerates via `NativeBridge.dumpAllAddresses()` (`ChainReconciliationService.kt:105`) — which **does** include the taproot chains. That is asserted directly: `TaprootWatchSetTest.taprootReceiveAddress_isInWatchSet` gates on `dumpAllAddresses()` containing the KAT P2TR address, and was written red-before-green against exactly the `BRWalletAllAddrs` omission that would break this. So a taproot/DigiDollar receive below the floor — invisible to the estimator — **is** visible to the detector. The design's central blind spot is closed by the detector rather than by padding.
+
+**Availability: not independent, and it must be stated in the code.** Both paths resolve through the same `DgbNodeClient.endpoint()`. An index outage during restore is harmless (it yields `Unknown` → picker, so no bad height is ever written), but an outage *later* means the check simply does not run. Therefore:
+
+> **Requirement:** "detection could not run" is a **distinct state** from "detection found nothing", and must never be reported as all-clear. Model it on the existing `lastHistoryPassCovered` gate in `ChainReconciliationService` — which already refuses to clear the abandoned-band banner on a partial pass, for precisely this reason — and reuse that flag rather than adding a second notion of coverage.
+
 ## Relationship to the paced convoy — complementary, not a replacement
 
 The convoy stays and is still load-bearing. It is the **floor**: what makes any depth work at all when there is no index answer (`Unknown`), when the user distrusts the index, or when they choose "scan deeper". This design makes the deep path **rare**; it does not make it unnecessary. Notably, the on-device run showed the convoy pacing correctly (`holding header continuation`, window measured at 10,134 against `CF_CONVOY_WINDOW` 10,000) while the scan was blocked upstream — the two failures are independent.
 
-## Privacy note (stated, not hidden)
+## Privacy — same bytes, different frequency, different consent posture
 
-The restore **already** POSTs up to 1,800 derived addresses to `api.digiscope.me` for the UTXO query (`RecoveryScanService.kt:130`). Switching to `/rpc/address-history` sends *the same address set to the same host*, so this design adds no new disclosure — but it does not reduce the existing one, and the "address set never leaves the device" claim has never applied to this restore path. Using the answer **only** to derive a start height (rather than to enumerate funds) keeps the disclosure at its current size while removing the genesis scan.
+The restore **already** POSTs up to 1,800 derived addresses to `api.digiscope.me` for the UTXO query (`RecoveryScanService.kt:130`), so this design sends nothing new to anyone new. That framing is true and insufficient. The thing that actually changes is **frequency and consent**: today that disclosure rides an explicit user-initiated recovery action; if auto-birth-height becomes the default restore experience, it becomes routine and automatic. An exception that fires rarely reads very differently from one that fires on every restore. Three requirements follow, and none of them are large.
+
+**P1 — Consent at the point of disclosure, as a peer option.** The restore screen states plainly that the wallet can ask the index to estimate your wallet's start date, **which sends your addresses to that server**, with "pick a date myself" offered *right there* as an equal choice — not a settings toggle nobody finds, and not a default with an opt-out buried elsewhere. Since the picker survives permanently anyway (Decision 1), the alternative already exists; this only requires presenting it as a peer rather than as a fallback.
+
+**P2 — The README claim gets scoped to match reality.** `README.md:11` and `:175` assert the address set never leaves the device as an unqualified sovereignty property. That is already untrue of the recovery path *today*, before this feature exists. Amended in this same change to scope the claim to **sync** — which is the real achievement, bloom is gone and CF-only is the only wire path — and to name recovery as an explicit, user-initiated, overridable exception. When this feature ships, the README must be amended a second time to name birth-height estimation in that same exception. An honest scoped claim is stronger than an absolute one with a silent exception; the project has been rigorous about not letting code comments overclaim safety properties, and user-facing docs get the same treatment.
+
+**P3 — Prefer the user's own index, and be honest about what pairing does and does not give them.** The seam exists and is cheap: `DgbNodeClient.endpoint()` already returns a user-set override (`dgb_reconcile/custom_rpc_endpoint`, unpinned TLS, `DgbNodeClient.kt:62-73`) and both the estimator and the detector route through it — so a user pointed at their own index gets birth-height estimation with **zero third-party disclosure, for free**, provided the estimator calls `endpoint()` rather than hardcoding the default.
+
+**But `dgbnode://` pairing does not supply one, and the UI must not imply it does.** `OwnNodeUri` parses only `host[:port]` plus `net`/`label` (`OwnNodeUri.kt:10-42`) — a **P2P** reference used for the native peer pin and CF status. It carries no RPC endpoint and no credentials, and `/rpc/address-history` is an **ElectrumX-backed backend route**, not a call a bare DigiByte Core node answers. Today `setCustomEndpoint` is only ever written from the manual field in `ReconcileScreen.kt:196`. So the honest framing is *"prefers your index when you have one"*, and a paired Core node alone is not one. A user running the compatible index should not have to type it twice — wiring pairing to offer/prefill the reconcile endpoint is worth doing — but it must be presented as a separate capability, not as something pairing already conferred.
 
 ## Tasks
 
@@ -78,8 +94,14 @@ The restore **already** POSTs up to 1,800 derived addresses to `api.digiscope.me
 2. Add the tri-state earliest-height computation with the `height > 0` filter and the per-profile `reachableBackend` gate. Pure function, host-JVM testable.
 3. Carry the result on `ProfileResult`/`State.Done`; respect the existing classify-cache guard so a partial outage is never memoised (`RecoveryScanService.kt:144-152`).
 4. Consume it at `OnboardingViewModel.setRecoveryTimestamp` — supply timestamp **and** exact height; add the third `cf_birth_height` writer under the existing guard.
-5. UI: replace the picker on `Confident`/`NoHistory`, keep it on `Unknown`, always offer "scan deeper".
-6. Post-sync detection: reconcile-below-floor check wired into the existing abandoned-band surfacing.
+5. UI: replace the picker on `Confident`/`NoHistory`, keep it on `Unknown`, always offer "scan deeper". **P1** — present the estimate and "pick a date myself" as peer options, with the disclosure stated at that screen.
+6. Post-sync detection: reconcile-below-floor check wired into the existing abandoned-band surfacing, with **"could not run" distinct from "found nothing"**, reusing `lastHistoryPassCovered`.
+7. **P3** — estimator resolves its endpoint through `DgbNodeClient.endpoint()` (never the hardcoded default), so an own-index user gets zero disclosure automatically. Optionally offer to prefill the reconcile endpoint at `dgbnode://` pair time, labeled as a **separate** capability from the P2P pin.
+8. **P2** — second README amendment naming birth-height estimation in the scoped exception (the first, covering today's reconcile path, ships with this spec).
+
+## Sequencing
+
+**This is gated behind the paced-convoy acceptance run.** The convoy branch sits at the merge gate with the deep-restore acceptance unrun; if that run surfaces something, this design's assumptions about scan behaviour may need to change. Land the convoy, run the acceptance, then build this.
 
 ## Tests (red-before-green)
 
@@ -89,3 +111,6 @@ The restore **already** POSTs up to 1,800 derived addresses to `api.digiscope.me
 - Zero confirmed txs, complete answer ⇒ `NoHistory`, floor near tip, **not** genesis.
 - Confident path ⇒ `cf_birth_height == earliest − margin`, and the persisted timestamp and height agree.
 - Detection: a confirmed tx below the floor ⇒ band surfaced, Synced withheld, recover action offered.
+- Detection **unavailable** (index unreachable at check time) ⇒ reported as unknown, **not** as all-clear; no banner clear, no "Synced".
+- Detector coverage: a **P2TR** tx below the floor is found by the detector even though the estimator's `deriveAddresses` set could never have seen it (the asymmetry the design depends on).
+- **P3**: with a custom endpoint set, the estimator issues **zero** requests to the default host.

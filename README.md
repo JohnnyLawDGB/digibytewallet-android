@@ -8,7 +8,7 @@ A full Kotlin rewrite of the DigiByte Android wallet — a **sovereignty-first**
 
 Removing trusted third parties from the wallet's data path comes before feature breadth. Two consequences you can verify in the code:
 
-- **The address set never leaves the device.** Sync runs BIP157/158 compact block filters exclusively. The bloom wire path (`filterload`/`filteradd`/`merkleblock`) was excised from the C core in v4.0.0 — the code that could leak your addresses to a peer no longer exists.
+- **The address set never leaves the device during sync.** Sync runs BIP157/158 compact block filters exclusively. The bloom wire path (`filterload`/`filteradd`/`merkleblock`) was excised from the C core in v4.0.0 — the code that could leak your addresses to a peer no longer exists. **The one exception, stated plainly:** *recovery* is not sync. "Scan for missing funds" POSTs your derived addresses to an address index — `api.digiscope.me` by default, or your own endpoint if you set one in Settings → Reconcile. It is user-initiated, labeled where it happens, and never on the sync path. An honest scoped claim is worth more than an absolute one with a silent exception.
 - **Everything you see is computed on-device.** All transaction validity and balance computation happens locally from block headers and filters. Nothing in the UI is fetched from a block explorer. (Chain reconcile against a node remains an explicitly-labeled recovery path, never a balance-display path.)
 
 ## What's in v4
@@ -172,7 +172,7 @@ See [VERIFICATION.md](VERIFICATION.md) for multi-party attestation instructions.
 - Raw seed zeroed after use; never a long-lived JVM string; isolated to the JNI translation unit behind an accessor API
 - App-enforced PIN, hashed with Argon2id (PBKDF2 fallback), with rate-limiting
 - Database encrypted with SQLCipher (Keystore-derived passphrase)
-- The address set never leaves the device — bloom is gone, sync is compact-filters-only
+- The address set never leaves the device **during sync** — bloom is gone, sync is compact-filters-only. The recovery/reconcile path is an explicit, user-initiated exception that does query an address index (default `api.digiscope.me`, overridable to your own).
 - No analytics, no telemetry, no proprietary dependencies
 - `FLAG_SECURE` on seed display; `filterTouchesWhenObscured` on send confirmation
 
