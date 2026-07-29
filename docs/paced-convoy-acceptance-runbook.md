@@ -12,14 +12,23 @@ Block-header sync used to fast-forward to the chain tip unpaced, so restoring an
 
 ## Merge mechanics — ordering is load-bearing
 
-The outer repo's submodule gitlink is stale relative to the core branch, and the direction matters: the submodule deletes `#define CF_RETENTION_MAX_SPAN`, which earlier outer commits still reference.
+The outer repo's submodule gitlink is stale relative to the core branch, and the direction matters: the submodule deletes `#define CF_RETENTION_MAX_SPAN`, which earlier outer commits still reference. **Bumping the pin at too early an outer commit produces a tree that does not compile.**
 
-1. **Core PR first.** Push the submodule branch, open the PR against the core fork's `develop`, merge it.
-2. **Confirm reachability before the app PR:**
-   `git merge-base --is-ancestor <core-merge-commit> <core-develop>` must succeed.
-3. **Bump the pin at an outer commit ≥ the final outer HEAD** — never earlier, or the tree does not compile.
-4. **App PR second**, with the bumped pin. Human approval required for both merges.
-5. Local `develop` was stale (`e2052a84`) at branch time — `git switch develop && git pull && git submodule update` before merging.
+State at branch completion: outer records the pin at `e9246c85`; the core branch is far ahead of that. Verify with
+`git ls-tree HEAD native/src/main/jni/digibytewallet-core` before and after the bump.
+
+1. **Push the submodule branch first.** It has **no upstream set**, so the refspec must be explicit, and the fork remote is `johnnylaw`:
+   `GIT_DIR=.git/modules/native/src/main/jni/digibytewallet-core GIT_WORK_TREE=native/src/main/jni/digibytewallet-core git push johnnylaw seq/cf-retention-scan-floor`
+2. **Core PR** against the core fork's `develop`. Merge (human approval).
+3. **Confirm reachability before the app PR:** `git merge-base --is-ancestor <core-merge-commit> <core-develop>` must succeed. Never bump a pin to a commit that is not reachable from the core branch being merged.
+4. **Bump the pin at an outer commit ≥ the final outer HEAD**, never earlier.
+5. **App PR second**, with the bumped pin. Human approval.
+
+**Two traps in this working copy:**
+- The outer feature branch's upstream is set to **`origin/develop`**, not to itself. `push.default` is unset (so `simple` applies) and git therefore *refuses* a bare `git push` because the names differ — but do **not** "fix" that with `git push -u` or by setting `push.default=upstream`, either of which would push a feature branch straight onto `develop` and bypass the PR + human-merge gate. Always push with an explicit refspec: `git push origin HEAD:feat/cf-retention-scan-floor`.
+- `gh pr create` defaults to the fork **parent** (`DigiByte-Core/...`). Always pass `--repo JohnnyLawDGB/digibytewallet-android --head JohnnyLawDGB:<branch>`.
+
+Local `develop` was stale (`e2052a84`) at branch time — `git switch develop && git pull && git submodule update` before merging.
 
 ## Acceptance run — what must actually be exercised
 
