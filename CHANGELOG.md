@@ -1,5 +1,58 @@
 # Changelog
 
+## [4.0.24](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.10.45...v4.0.24) (2026-07-25)
+
+Consolidated entry for the 4.x line to date (v4.0.0 → v4.0.24, 2026-07-18 → 2026-07-25),
+written by hand so release-please resumes from a clean base rather than reconstructing
+months of tag-driven hand-bumps.
+
+### The 4.0.0 major
+
+* **Bloom (BIP37) fully excised — BIP157/158 compact filters are the only sync path.** The
+  wallet's address set can no longer leave the device under any condition; the sovereign
+  fallback is the user's own node, not bloom. Built for DGB Core 9.26.
+* Sovereign asset balance: DigiAsset holdings derived natively rather than from a backend.
+
+### Sync robustness
+
+* CF-only orphaned-tip self-heal, cfheaders wedge recoverability, and a poisoned-chain heal
+  for wallets stranded on an abandoned fork.
+* Proactive header-tip-stall watchdog — an idle tip with live-but-silent peers previously
+  froze indefinitely and survived restarts.
+* Network-regained reconnect: a connectivity blip dropped every peer with no callback to
+  recover, leaving a permanent 0-peer state.
+* Proactive 0-peer watchdog that revives a dead keepalive (foreground-idle wedge).
+* Demand-side peer load-spread: hold fewer peers once synced.
+* Off-main rescan and battery-optimization prompt (ANR and OS-freeze classes).
+
+### DigiDollar
+
+* Type-aware transaction amounts — DigiDollar rows show "$X", not the net DGB movement.
+* txid-driven confirmation reconcile for stuck-Pending DD.
+* DigiDollar send amount fix (sent value, not change) and receive watch-set pin.
+
+### DigiAssets
+
+* Sovereign asset display: RANGE quantity decoding, name and divisibility.
+* Asset-send fees funded from native DGB UTXOs; 0-held assets hidden.
+* Phantom owned-script prune fixing CHANG over-count.
+
+### Recovery
+
+* Address-history backstop recovering CF-skipped DigiDollar / taproot / asset transactions,
+  then batched to stop a 429 storm.
+* Durable recovery birth-height — a volatile creation time previously forced a genesis-floor
+  rescan (~19h) on every restart.
+
+### Crash fixes
+
+* Send-path use-after-free (register/publish double-ownership).
+* Asset-send QR scan.
+
+> **Note on older history:** releases v3.4.0 through v3.10.45 shipped without CHANGELOG
+> entries and are not reconstructed here. Their history lives in the git tags and GitHub
+> releases. This file resumes from 4.0.24 forward.
+
 ## [3.3.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.2.0...v3.3.0) (2026-04-08)
 
 

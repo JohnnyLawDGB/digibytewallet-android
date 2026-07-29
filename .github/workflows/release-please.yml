@@ -2,7 +2,7 @@ name: Release Please
 
 on:
   push:
-    branches: [phase1-modernization]
+    branches: [develop]
 
 permissions:
   contents: write
@@ -16,4 +16,4 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          target-branch: phase1-modernization
+          target-branch: develop
