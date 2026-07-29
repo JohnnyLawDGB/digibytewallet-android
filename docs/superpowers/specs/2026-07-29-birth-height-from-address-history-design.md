@@ -26,6 +26,17 @@ Restoring a wallet asks the user **what year they created it**, converts that to
 3. **The timestamp is not only the CF floor — it anchors the header chain.** `g_walletCreationTime` feeds `syncFromTime → BPPeerManagerMainNetNew` (`jni_peer.c:837-847`). Writing `cf_birth_height` without also supplying a timestamp leaves the header anchor at `time(NULL)` and the two disagree.
 4. **The persisted height is a *request*, not the effective floor.** `BRPeerManager.c:5196-5223` raises `startHeight` to `tip-1999` (or `tip`) if the requested height's block hash is unresolvable in the in-memory window. Whatever we compute can still be clamped upward natively — the same mechanism behind the C-1 finding on the convoy branch.
 
+## ⏱ A bounded deadline is mandatory (measured on hardware, 2026-07-29)
+
+Observed live during the convoy acceptance run, against a genuinely wedged production index: **the restore blocked for ~9 minutes on a static spinner** with no progress, no error, and no escape. The mechanism is exact and is not a retry loop — `DgbNodeClient` contains no retry code at all. `RecoveryScanService` **serializes six derivation profiles by design** (`RecoveryScanService.kt:113-141` — the backend serializes internally and 429s on concurrency), and each request rides a **90-second OkHttp `readTimeout`** (`DgbNodeClient.kt:44-47`). Six profiles × 90 s = 540 s, matching the observed hang to the second. Cutting the network instead produced a clean degrade in seconds — so the failure classifier handles *unreachable* correctly and *reachable-but-hung* not at all.
+
+Two requirements follow:
+
+1. **One overall deadline for the whole estimate, not per-request.** This design adds a *second* serialized pass over the same ~1,800 addresses, so the naive worst case is ~18 minutes of blocked first-run restore. The estimate must be bounded end-to-end (single-digit seconds), and expiry means `Unknown` → picker. **A restore must never be gated on an index answering.**
+2. **The progress label must track the actual stage.** Throughout the 9-minute reconcile the screen read "Deriving addresses…" — a stage that had already finished. A spinner that misreports its stage makes a hang indistinguishable from work.
+
+Both are pre-existing defects on the shipped recovery path, worth fixing independently of this feature; this design must not inherit them.
+
 ## Coverage limits — why the answer can be *too high*
 
 The dangerous direction is a birth height **above** the true first transaction: those blocks are never scanned and the receive is silently missed.
