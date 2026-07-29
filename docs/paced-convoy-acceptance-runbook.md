@@ -42,6 +42,16 @@ Birth ≫ 100k below tip. Must credit **every** DGB / DD / asset the keys contro
 
 **Diff the credited transaction set against a node-side address history for the whole `[birth..tip]` range — not just the balance.** A ~10,000-block skip is invisible in a balance check unless the wallet happened to be paid in that band.
 
+### B-RESUME — MANDATORY, and it is aimed at a specific unreviewed change
+**Kill the app mid-deep-descent and relaunch, at least once.** Then confirm the ledger resumes from where it stopped (not from birth, not skipping ahead) and that the wallet remains consistent through the resumed teardown.
+
+This is not a generic robustness check. The final two fixes (R1 durability, R2 downward header chaining) shipped with red-before-green gates and ASan coverage but **without independent review**. What is actually proven about them:
+
+- **Proven:** memory-safe under every teardown path the host KATs exercise — the drive KAT builds with `-fsanitize=address` and tears down a manager 39 times, including the resumed-manager tests R2 changed, green across 33/33.
+- **NOT proven:** *logical* set-membership correctness. R2 moves headers out of `orphans` and into `blocks`; ASan is blind to a block that is correctly allocated but in the **wrong set**. A wrong-set block is memory-safe and semantically broken.
+
+And the assumption to avoid: "hardware will surface it immediately" is true **only if the acceptance actually walks the resumed-manager path**. A single uninterrupted clean run birth→tip never executes R2's changed code, and the claim quietly becomes false. So the device must be pointed at it deliberately rather than trusted to wander there. A wipe/restore that goes through resume also covers it.
+
 ### Watch items (each from a specific review finding)
 
 1. **Resume mid-descent — background-kill + resume at least twice.** Grep for `BIP158: applied pending auto-fetch — requested X, clamped to Y` (expect `Y ≫ X`) followed by `cf-ledger: resume cursor snap N -> N`. Then assert `getLowestNeededHeight()` does **not** jump by ~`W` on the first KeepAlive tick after resume. This is the signature of the Critical the whole-branch review caught.
