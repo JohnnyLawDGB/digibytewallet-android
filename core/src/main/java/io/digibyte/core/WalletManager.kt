@@ -6,6 +6,7 @@ import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.asset.DeadSendPredicate
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.SyncState
+import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
@@ -480,6 +481,11 @@ class WalletManager(
             .remove("last_balance")
             .commit()
         FilterHeaderStore.delete(context) // also nuke the file-backed CF-header chain (synchronous)
+        // ...and the scan ledger. A rescan exists to re-scan the range from the birth
+        // floor; a surviving ledger says those heights were already evaluated, which is
+        // exactly the belief the rescan is meant to discard. Leaving it would make a
+        // rescan a no-op for every height the broken run had already marked.
+        CfScanLedgerStore.delete(context)
         OutgoingTxStore(context).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
@@ -563,7 +569,7 @@ class WalletManager(
         dataEraser.eraseBloomPeerCache()
         dataEraser.eraseWatchedAddresses()
         dataEraser.eraseOutgoingTx()
-        dataEraser.eraseFilterHeaders()
+        dataEraser.eraseCfSyncState()
         dataEraser.eraseDatabase()
         utxoManager.clearAll()
         keyStoreManager.deleteKey()

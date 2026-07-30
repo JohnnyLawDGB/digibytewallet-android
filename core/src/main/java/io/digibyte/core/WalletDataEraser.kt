@@ -1,6 +1,7 @@
 package io.digibyte.core
 
 import android.content.Context
+import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
 
 /**
@@ -25,8 +26,13 @@ interface WalletDataEraser {
     fun eraseWatchedAddresses()
     /** Forget every locally-recorded outgoing send (`dgb_outgoing_tx`). */
     fun eraseOutgoingTx()
-    /** Delete the file-backed BIP158 compact-filter-header chain. */
-    fun eraseFilterHeaders()
+    /**
+     * Delete every file-backed BIP158 sync artifact: the compact-filter-header chain
+     * AND the compact-filter scan ledger. Both are keyed to the wallet that built
+     * them, so a wipe that leaves either behind hands the next wallet another
+     * wallet's scan state.
+     */
+    fun eraseCfSyncState()
     /** Delete the encrypted Room DB (tx/utxo/header/asset cache) + its key material. */
     fun eraseDatabase()
 }
@@ -69,8 +75,13 @@ class AndroidWalletDataEraser(private val context: Context) : WalletDataEraser {
         OutgoingTxStore(context).clearAll()
     }
 
-    override fun eraseFilterHeaders() {
+    override fun eraseCfSyncState() {
         FilterHeaderStore.delete(context)
+        // The scan ledger records which heights this wallet has already had a cfilter
+        // evaluated for. Carried into a different wallet it is actively wrong: heights
+        // the old wallet scanned are treated as scanned for the new one, so the new
+        // wallet's transactions in those blocks are never looked for.
+        CfScanLedgerStore.delete(context)
     }
 
     override fun eraseDatabase() {
