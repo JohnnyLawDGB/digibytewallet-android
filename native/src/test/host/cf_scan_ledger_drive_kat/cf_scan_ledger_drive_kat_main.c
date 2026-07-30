@@ -77,6 +77,17 @@ static int  test_cf_retention_wlog(const char *fmt, ...)
 }
 #define CF_RETENTION_WLOG(...) test_cf_retention_wlog(__VA_ARGS__)
 
+// --- F1 block-floor DESCENT COUNTER seam ------------------------------------
+// The F1 getcfilters start clamp needs the resident block floor once per SEND,
+// and the residual driver sends up to CF_REREQ_BATCH_PER_TICK (64) ranges per
+// tick, so it goes through _BRPeerManagerBlockFloorCached rather than re-walking
+// the chain per send (the raised-floor ANR class the Pass A/B/C restructure
+// exists to keep closed). Walk COST is invisible at test scale unless it is
+// counted, so BRPeerManager.c #ifdef-guards a descent counter this KAT turns on:
+// test_getcfilters_never_below_block_floor asserts a MULTI-SEND tick costs AT
+// MOST ONE descent. Never defined in any production build.
+#define CF_KAT_COUNT_FLOOR_WALKS 1
+
 #include "BRPeerManager.c"
 
 #include "BRBIP32Sequence.h"
@@ -121,8 +132,15 @@ static UInt256 g_capStopHash;
 // the same test-side blockReg map the everRequested spine already uses; a send
 // whose stopHash the test never registered logs stop==REG_NOT_FOUND (the
 // pre-existing single-send cases don't read g_capLog, so they're unaffected).
+//
+// stopHashRaw (added for the frozen-frontier wedge repro): the RAW stop hash of
+// every logged send, in addition to the registry-resolved height. The wedge case
+// deliberately leaves the blockReg/everRequested spine EMPTY (it is REG_MAX-bounded
+// and O(n), and it is also the fiat "arrival == evaluation" model that case exists
+// to replace), so its `stop` always logs REG_NOT_FOUND; it inverts the raw hash
+// through rhHeightOfHash() instead. Purely additive — no existing reader touches it.
 #define CAPLOG_MAX 256
-static struct { uint32_t start; uint32_t stop; } g_capLog[CAPLOG_MAX];
+static struct { uint32_t start; uint32_t stop; UInt256 stopHashRaw; } g_capLog[CAPLOG_MAX];
 static int g_capLogCount = 0;
 static void capLogReset(void) { g_capLogCount = 0; }
 static int capLogHasStart(uint32_t start)
@@ -230,6 +248,7 @@ void __wrap_BRPeerSendGetCFilters(BRPeer *peer, uint8_t filterType, uint32_t sta
     if (g_capLogCount < CAPLOG_MAX) {
         g_capLog[g_capLogCount].start = startHeight;
         g_capLog[g_capLogCount].stop  = stopH;   // REG_NOT_FOUND if unregistered
+        g_capLog[g_capLogCount].stopHashRaw = stopHash;
         g_capLogCount++;
     }
 
@@ -1400,6 +1419,17 @@ static UInt256 rhForkHash(uint32_t height)
     UInt256 h = rhUniqueHash(height);
     h.u32[3] = 0xDEADBEEFu;
     return h;
+}
+
+// Inverse of rhUniqueHash: recover the height a main-chain stop hash encodes,
+// WITHOUT the REG_MAX(8192)-bounded, O(n) blockReg registry. rhUniqueHash writes
+// the height verbatim into u32[0], so the inversion is a read plus a full-hash
+// re-derivation (which rejects a fork hash, the ZERO sentinel and any garbage).
+// REG_NOT_FOUND when the hash is not a main-chain hash of this test chain.
+static uint32_t rhHeightOfHash(UInt256 h)
+{
+    uint32_t hgt = h.u32[0];
+    return UInt256Eq(h, rhUniqueHash(hgt)) ? hgt : REG_NOT_FOUND;
 }
 
 // Real prevBlock-linked main-chain header: unique hash at `height`, prevBlock =
@@ -4513,6 +4543,1430 @@ static void test_reorg_below_window_no_crash(void)
     BRWalletFree(w);
 }
 
+// ============================================================================
+// F1 — getcfilters MUST NOT ASK BELOW OUR OWN RESIDENT BLOCK FLOOR
+// ============================================================================
+//
+// THE DEFECT (shipped, pre-F1). _BRPeerManagerRequestCFiltersWithStopHashLocked
+// is the single choke point every getcfilters goes through. The STOP is a HASH, so
+// an unresolvable stop is already refused. But startHeight goes on the wire as a
+// BARE INTEGER, checked against NOTHING. A range that STRADDLES the resident block
+// floor — start below it, stop above it — therefore went out verbatim, and the
+// peer honestly answered with filters for heights whose HEADERS WE NO LONGER HOLD.
+// _peerRelayedCFilter's BRSetGet then misses, the arrival takes the "header-race
+// hole ... left outstanding" branch, and the bytes are BUFFERED against the
+// 256 KiB budget (evicting live buffered filters) where they can NEVER drain,
+// because the block they need is gone. We asked for what we had already made
+// ourselves unable to use.
+//
+// WHAT THIS CASE ASSERTS, AND ON WHAT EVIDENCE. Not "the clamp exists" — the
+// EMITTED WIRE ARGUMENT. __wrap_BRPeerSendGetCFilters intercepts the exact
+// (startHeight, stopHash) pair BRPeer.c would serialize, and every assertion below
+// reads g_capLog, never the manager. So the RED is a MEASURED below-floor start on
+// the wire, not an inferred one.
+//
+// THE CONSTANT-COLLISION TRAP, closed explicitly. `emitted >= floor` is worthless
+// if the floor happens to be 0, or the birth height, or the ledger start — the
+// assertion would be structurally true and could never go red. So the case:
+//   * derives the floor from SAVE_BLOCK_COUNT via the REAL BRPeerManagerNewEx
+//     resume path (rhBuildResumedManager) and ASSERTS its value;
+//   * asserts the floor is nonzero and differs from the ledger start, the ledger
+//     frontier and the requested start;
+//   * asserts the requested start is strictly BELOW the floor by a stated margin;
+//   * asserts the exact clamped value (== floor), not merely >= floor, and that a
+//     start ALREADY at/above the floor is left BYTE-IDENTICAL (so the clamp is not
+//     a blanket rewrite);
+//   * asserts a send still went out (the clamp must never suppress the servable
+//     part of a straddling range).
+//
+// WHICH PRODUCTION CALLERS CAN ACTUALLY GET HERE — stated honestly, because
+// over-claiming reachability is how a defence-in-depth fix gets sold as a wedge
+// cure. With the Task-4 CF retention floor live, ClearMemory retains down to
+// min(cfNext, LowestNeededHeight) - CLEAR_MEM_CF_RETENTION_MARGIN, so on the
+// healthy armed path the residual driver's lowest offered height sits ~144 ABOVE
+// the floor and this clamp never fires; and when the floor really is above the
+// frontier (a resume), the C-1 backstop in BRPeerManagerKeepAlive SURFACES that
+// band (abandonedBelow + WARN) before the residual driver runs. The two shapes
+// that DO reach the unclamped send are the two this case drives:
+//   (A) BRPeerManagerRequestCompactFilters — the public/JNI request API
+//       (Java_..._requestCompactFilters). Its start comes straight from the
+//       caller and is floor-checked NOWHERE.
+//   (B) a manager whose cfLedger holds sub-floor holes while
+//       autoFetchCFiltersEnabled == 0. The residual re-request driver is NOT
+//       arming-gated; the C-1 backstop and all of B1 ARE (_cfConvoyScanArmed), so
+//       in that state nothing surfaces the band and Pass C sends it raw.
+//       BRPeerManagerDisableAutoCompactFilterFetch leaves the ledger populated and
+//       clears exactly that flag.
+//
+// THIS CLAMP IS NOT AN ESCAPE VALVE, and the case asserts that too: it changes
+// what we ASK for and touches no cursor and no ledger field. scannedThrough,
+// abandonedBelow and the sub-floor outstanding entries are all re-asserted
+// unchanged after the tick.
+//
+// WALK COST (the reason for _BRPeerManagerBlockFloorCached). The clamp needs the
+// floor once per SEND and Pass C sends up to CF_REREQ_BATCH_PER_TICK (64) ranges
+// per tick; a raw _BRPeerManagerBlockFloor per send would re-introduce the
+// under-the-lock O(chainLen)-per-send cost the Pass A/B/C restructure exists to
+// keep out. Walk cost is invisible at test scale unless it is COUNTED, so this
+// case drives a tick with TWO sends and asserts AT MOST ONE descent
+// (_cfBlockFloorWalks, compiled in only under CF_KAT_COUNT_FLOOR_WALKS).
+// -DCF_REQ_FLOOR_NO_MEMO builds the un-memoized shape for that gate's red half.
+#define RQF_SAVED_TIP   23900000u
+#define RQF_FLOOR       (RQF_SAVED_TIP - (SAVE_BLOCK_COUNT - 1u))   // 23,899,701 — derived, never hardcoded
+
+static void test_getcfilters_never_below_block_floor(BRWallet *wallet)
+{
+    printf("\n=== test_getcfilters_never_below_block_floor (F1, red-before-green) ===\n");
+
+    // ---- (1) a production-shaped resumed manager: floor == savedTip-(SAVE_BLOCK_COUNT-1)
+    BRPeerManager *m = rhBuildResumedManager(wallet, RQF_SAVED_TIP, SAVE_BLOCK_COUNT);
+    check(m != NULL, "setup: manager built by the REAL BRPeerManagerNewEx from saved_blocks");
+    if (! m) return;
+
+    uint32_t floorH = _BRPeerManagerBlockFloor(m);
+    check(m->lastBlock && m->lastBlock->height == RQF_SAVED_TIP, "setup: lastBlock is the saved tip");
+    check(floorH == RQF_FLOOR,
+          "setup: the resident block FLOOR is savedTip-(SAVE_BLOCK_COUNT-1), DERIVED from the real "
+          "resume path (not hand-set) -- this is the value every assertion below is measured against");
+    // ANTI-CONSTANT-COLLISION. If the floor were 0 (no chain) or coincided with the
+    // start we ask from, `emitted >= floor` would be structurally true and this gate
+    // could never go red. Pin it explicitly.
+    check(floorH > 0, "ANTI-COLLISION: the floor is NONZERO -- `>= floor` is a real bound, not a tautology");
+    check(floorH == 23899701u,
+          "ANTI-COLLISION: the floor is a concrete mid-chain mainnet-scale height (23,899,701), so it is "
+          "neither the genesis/zero default nor a birth height any caller below passes");
+
+    // ---- (2) one CF-capable peer (heap-allocated: BRPeer.c reads past the public struct)
+    BRPeer *p = BRPeerNew(BRMainNetParams.magicNumber);
+    p->address.u8[15] = 0x71; p->port = 12071; p->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, p);
+    check(m->syncMode == BR_SYNC_MODE_COMPACT_FILTERS_ONLY,
+          "setup: CF-only syncMode -- the BLOOM_ONLY early-return is not what refuses these sends");
+
+    // =========================================================================
+    // (A) THE PUBLIC REQUEST API — a STRADDLING range
+    // =========================================================================
+    const uint32_t A_START = RQF_FLOOR - 250u;   // 250 BELOW the floor
+    const uint32_t A_STOP  = RQF_FLOOR + 250u;   // resident, so the stop hash resolves
+    check(A_START < floorH && floorH - A_START == 250u,
+          "(A) setup: the requested start is strictly BELOW the floor, by 250 heights -- so an unfixed "
+          "build has something below-floor to emit and the RED cannot be a rounding artifact");
+    check(! UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, A_STOP)),
+          "(A) setup: the STOP resolves -- the existing unresolvable-stop refusal is NOT what decides "
+          "this case, so a send is genuinely achievable");
+    check(UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, A_START)),
+          "(A) setup: the START does NOT resolve -- we are provably asking for a height whose header "
+          "this manager does not hold");
+
+    capLogReset(); g_capCount = 0;
+    size_t nA = BRPeerManagerRequestCompactFilters(m, A_START, A_STOP);
+    check(g_capLogCount == 1 && nA > 0,
+          "(A) THE CLAMP MUST NOT SUPPRESS THE SEND: exactly one getcfilters reached the wire and the "
+          "servable part of the straddling range was still requested");
+    if (g_capLogCount == 1) {
+        printf("   [F1-A] emitted getcfilters start=%u (floor %u, requested %u)\n",
+               g_capLog[0].start, floorH, A_START);
+        check(g_capLog[0].start >= floorH,
+              "(A) THE ASSERTION — EMITTED WIRE ARGUMENT: the getcfilters startHeight that went on the "
+              "wire is AT OR ABOVE the resident block floor (RED on -DCF_REQ_FLOOR_UNFIXED: the bare "
+              "caller-supplied start goes out 250 blocks below the floor)");
+        check(g_capLog[0].start == floorH,
+              "(A) it was clamped to EXACTLY the floor -- not to the birth height, not to the stop, not "
+              "to some other convenient constant");
+        check(UInt256Eq(g_capLog[0].stopHashRaw, rhUniqueHash(A_STOP)),
+              "(A) the STOP HASH is untouched by the clamp -- the range shrank from the bottom only, so "
+              "no send can silently cover a DIFFERENT window than the caller asked for");
+    }
+
+    // (A2) a range ENTIRELY below the floor: nothing is askable, nothing may be sent.
+    // Both builds agree here (the unresolvable stop already refuses it) -- asserted so
+    // the clamp's `return 0` branch can never start emitting a bogus zero-width send.
+    capLogReset(); g_capCount = 0;
+    size_t nA2 = BRPeerManagerRequestCompactFilters(m, RQF_FLOOR - 600u, RQF_FLOOR - 400u);
+    check(nA2 == 0 && g_capLogCount == 0,
+          "(A2) a range wholly BELOW the floor puts NOTHING on the wire (not a clamped zero-width send)");
+
+    // (A3) a range wholly AT/ABOVE the floor is passed through BYTE-IDENTICALLY.
+    capLogReset(); g_capCount = 0;
+    size_t nA3 = BRPeerManagerRequestCompactFilters(m, RQF_FLOOR + 10u, RQF_FLOOR + 110u);
+    check(nA3 == 101 && g_capLogCount == 1 && g_capLog[0].start == RQF_FLOOR + 10u,
+          "(A3) NOT A BLANKET REWRITE: a start already above the floor is emitted unchanged, and the "
+          "returned width is the full range");
+
+    // =========================================================================
+    // (B) THE RESIDUAL RE-REQUEST DRIVER — sub-floor holes with the scan UNARMED
+    // =========================================================================
+    // Two DUE runs separated by a gap so Pass A collects TWO ranges (which is what
+    // makes the descent-count assertion measurable at all):
+    //   R1 = [floor-400 .. floor+100]  STRADDLES the floor  -> its stop resolves, so it
+    //                                  reaches Pass C and, unfixed, emits floor-400
+    //   R2 = [floor+150 .. floor+250]  wholly above the floor -> must pass through unchanged
+    const uint32_t R1_LO = RQF_FLOOR - 400u, R1_HI = RQF_FLOOR + 100u;
+    const uint32_t R2_LO = RQF_FLOOR + 150u, R2_HI = RQF_FLOOR + 250u;
+    // The ledger is Init'd AT R1_LO so the scan frontier IS the lowest sub-floor
+    // hole (a lower start would leave an un-requested band below R1_LO pinning
+    // LowestNeededHeight there instead, which would muddy the invariant reads).
+    const uint32_t LEDGER_START = R1_LO;
+
+    uint32_t nowSec = (uint32_t)time(NULL);
+    BRCFScanLedgerInit(&m->cfLedger, LEDGER_START);
+    // requestedAt backdated an hour so both runs are DUE on the first tick (attempts==0
+    // means a 30 s first backoff; a fresh stamp would make tick 1 a guaranteed no-op).
+    BRCFScanLedgerRecordRequested(&m->cfLedger, R1_LO, R1_HI, p->address, p->port, nowSec - 3600u);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, R2_LO, R2_HI, p->address, p->port, nowSec - 3600u);
+
+    // WHY C-1 DOES NOT PRE-EMPT THIS (asserted, not assumed -- if a future edit arms
+    // the scan here, the KeepAlive C-1 backstop would surface the sub-floor band first
+    // and this case would stop measuring F1 at all).
+    check(_cfConvoyScanArmed(m) == 0,
+          "(B) setup: the scan is UNARMED (autoFetchCFiltersEnabled == 0), so the C-1 KeepAlive "
+          "backstop and every B1 leg are skipped -- the residual driver is NOT arming-gated and is "
+          "the only thing that runs");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0 &&
+          BRCFScanLedgerScannedThrough(&m->cfLedger) == LEDGER_START - 1u,
+          "(B) setup: nothing abandoned, scannedThrough at start-1");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == R1_LO,
+          "(B) setup: the scan frontier is the lowest sub-floor hole");
+    check(R1_LO != floorH && R1_LO < floorH && floorH - R1_LO == 400u,
+          "ANTI-COLLISION: the frontier / ledger start is 400 heights BELOW the floor, so a clamp to the "
+          "floor is distinguishable both from 'no clamp' and from a clamp to the ledger start or frontier");
+
+    // Force the floor memo COLD before the tick. Phase (A) above already warmed it
+    // on this unchanged chain view, so without this the tick would measure ZERO
+    // descents and the walk-cost gate would pass without the clamp ever having
+    // consulted the floor at all -- a count that measures nothing.
+    m->floorMemoValid = 0;
+    unsigned long walksBefore = _cfBlockFloorWalks;
+    capLogReset(); g_capCount = 0;
+    BRPeerManagerKeepAlive(m);
+    unsigned long walksDuring = _cfBlockFloorWalks - walksBefore;
+
+    for (int i = 0; i < g_capLogCount; i++) {
+        printf("   [F1-B] emitted getcfilters[%d] start=%u stop=%u (floor %u)\n",
+               i, g_capLog[i].start, rhHeightOfHash(g_capLog[i].stopHashRaw), floorH);
+    }
+    printf("   [F1-B] block-floor descents during the tick: %lu (sends: %d)\n", walksDuring, g_capLogCount);
+
+    check(g_capLogCount == 2,
+          "(B) setup: TWO ranges reached the wire this tick -- required for the descent-count assertion "
+          "below to be able to tell one walk from one-per-send");
+    {
+        int belowFloor = 0;
+        for (int i = 0; i < g_capLogCount; i++) if (g_capLog[i].start < floorH) belowFloor++;
+        check(belowFloor == 0,
+              "(B) THE ASSERTION — EMITTED WIRE ARGUMENTS: no getcfilters the residual driver put on the "
+              "wire starts below the resident block floor (RED on -DCF_REQ_FLOOR_UNFIXED: the straddling "
+              "range's start goes out 400 blocks below it)");
+    }
+    if (g_capLogCount == 2) {
+        check(g_capLog[0].start == floorH &&
+              UInt256Eq(g_capLog[0].stopHashRaw, rhUniqueHash(R1_HI)),
+              "(B) the straddling range was clamped to EXACTLY the floor with its stop hash untouched");
+        check(g_capLog[1].start == R2_LO &&
+              UInt256Eq(g_capLog[1].stopHashRaw, rhUniqueHash(R2_HI)),
+              "(B) the wholly-above-floor range passed through BYTE-IDENTICALLY -- the clamp touches only "
+              "the sends that were actually below the floor");
+    }
+
+    // ---- THE WALK-COST GATE (red on -DCF_REQ_FLOOR_NO_MEMO) ------------------
+    {
+        char lbl[320];
+#ifndef CF_REQ_FLOOR_UNFIXED
+        // BOTH DIRECTIONS of the count. Without this a "0 descents" reading -- the
+        // memo left warm, or a clamp that never consults the floor -- would satisfy
+        // the <= 1 bound while measuring nothing at all.
+        snprintf(lbl, sizeof lbl,
+                 "(B) WALK COST, lower bound: the clamp DID consult the block floor during this tick "
+                 "(measured %lu descents from a deliberately COLD memo), so the <= 1 bound below is a "
+                 "real measurement and not a vacuous zero", walksDuring);
+        check(walksDuring >= 1, lbl);
+#endif
+        snprintf(lbl, sizeof lbl,
+                 "(B) WALK COST: %d sends in one tick cost AT MOST ONE O(chainLen) block-floor descent "
+                 "(measured %lu) -- the clamp goes through _BRPeerManagerBlockFloorCached, so it cannot "
+                 "re-introduce the per-send under-the-lock walk the Pass A/B/C restructure removed "
+                 "(RED on -DCF_REQ_FLOOR_NO_MEMO: one descent PER SEND)",
+                 g_capLogCount, walksDuring);
+        check(walksDuring <= 1, lbl);
+    }
+
+    // ---- THE STANDING INVARIANT: this is a REQUEST clamp, not an escape valve --
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == LEDGER_START - 1u,
+          "STANDING INVARIANT: scannedThrough did NOT advance -- clamping what we ASK for never marks a "
+          "height scanned");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0,
+          "STANDING INVARIANT: abandonedBelow is untouched -- the clamp does not abandon coverage either; "
+          "the sub-floor band stays owned by the surfacing paths");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == R1_LO,
+          "STANDING INVARIANT: the scan frontier is STILL the lowest sub-floor hole -- nothing was "
+          "silently discarded to make the send legal");
+    {
+        int missing = 0;
+        for (uint32_t h = R1_LO; h < floorH; h++) if (! findOutstanding(&m->cfLedger, h)) missing++;
+        check(missing == 0,
+              "STANDING INVARIANT: every sub-floor height is STILL outstanding after the tick -- the clamp "
+              "narrowed the REQUEST, it did not drop the coverage obligation");
+    }
+
+    BRPeerManagerFree(m);
+}
+
+// ============================================================================
+// F4 PART A — CF_GAVEUP_MAX must absorb a MAXIMAL coalesced run
+// ============================================================================
+//
+// THE DEFECT. CF_GAVEUP_MAX was 512 while CF_REREQ_MAX_RANGE is 1000, and 1000 is
+// exactly what BRCFScanLedgerPeekRerequestRange emits as ONE coalesced getcfilters.
+// So a maximal dead run could never be fully retired: RetireCapped walks
+// `outstanding` from the front, _cfLedgerMoveToGaveUp returns 0 the moment gaveUp is
+// full, and RetireCapped then KEEPS that entry in `outstanding` — where it is capped,
+// so NO driver ever offers it again (NextRerequest's `attempts >= CF_REREQ_MAX_ATTEMPTS`
+// continue; PeekRerequestRange's `attempts < CF_REREQ_MAX_ATTEMPTS` candidate test).
+// 512 heights park, 488 sit in `outstanding` forever, and because _cfLedgerAdvance
+// caps scannedThrough at min(outstanding[0], gaveUp[0]) - 1 they pin the scan
+// frontier — and therefore the whole paced convoy — permanently.
+//
+// PURE LEDGER ON PURPOSE. Every step below is a direct BRCFScanLedger* call, so a RED
+// cannot be a driver/peer/harness artifact: it is the retirement arithmetic itself.
+// Phase 2 additionally reaches the TERMINAL FIELD STATE (outstanding[0] capped BELOW
+// gaveUp[0], which is what makes the pre-F4 B2 arm predicate read FALSE) using only
+// the pre-existing single-height BRCFScanLedgerReArmGaveUp — so Phase 2 does not
+// depend on the Part B run-wide change and stays a clean gate on the CEILING alone.
+#define F4A_BASE  23700000u
+
+static void test_gaveup_ceiling_absorbs_full_width_run(void)
+{
+    printf("\n=== test_gaveup_ceiling_absorbs_full_width_run (F4 Part A, red-before-green) ===\n");
+
+    const uint32_t LO = F4A_BASE;
+    const uint32_t HI = F4A_BASE + CF_REREQ_MAX_RANGE - 1u;
+    const uint32_t T0 = 1700000000u;
+
+    printf("   [F4-A] CF_GAVEUP_MAX=%d CF_REREQ_MAX_RANGE=%d CF_OUTSTANDING_MAX=%d\n",
+           CF_GAVEUP_MAX, CF_REREQ_MAX_RANGE, CF_OUTSTANDING_MAX);
+
+    BRCFScanLedger l;
+    BRCFScanLedgerInit(&l, LO);
+    UInt128 peer = UINT128_ZERO; peer.u8[15] = 0x7a;
+    BRCFScanLedgerRecordRequested(&l, LO, HI, peer, 12024, T0);
+
+    check(BRCFScanLedgerOutstandingCount(&l) == CF_REREQ_MAX_RANGE,
+          "(A) setup: a full-width run of CF_REREQ_MAX_RANGE contiguous heights is outstanding");
+    check(BRCFScanLedgerGaveUpCount(&l) == 0, "(A) setup: gaveUp starts empty");
+
+    // ANTI-VACUITY: the run really is what the driver offers as ONE getcfilters —
+    // i.e. "maximal run" is measured through the production coalescer, not asserted
+    // by construction. One shared (peer,port) and one shared clock, so nothing but
+    // CF_REREQ_MAX_RANGE itself can end the coalesced run.
+    {
+        uint32_t pkLo = 0, pkHi = 0;
+        check(BRCFScanLedgerPeekRerequestRange(&l, T0 + CF_REREQ_BASE_SECS, 0, &pkLo, &pkHi) == 1 &&
+              pkLo == LO && pkHi == HI,
+              "(A) setup: PeekRerequestRange coalesces the WHOLE run into one offer — it is MAXIMAL "
+              "by the production coalescer's own cap, not by fiat");
+    }
+
+    // Burn every attempt: the whole run is dead and has exhausted its retries. Direct
+    // field writes, the same mutOutstanding idiom the B2 cases use, so no 7.5 minutes
+    // of modeled clock is needed to reach the cap.
+    for (size_t i = 0; i < l.outstandingCount; i++) l.outstanding[i].attempts = CF_REREQ_MAX_ATTEMPTS;
+
+    // ---- PHASE 1: THE ASSERTION — one RetireCapped must park the whole run ------
+    BRCFScanLedgerRetireCapped(&l);
+    printf("   [F4-A] after RetireCapped: gaveUp=%zu outstanding=%zu (run width %d)\n",
+           BRCFScanLedgerGaveUpCount(&l), BRCFScanLedgerOutstandingCount(&l), CF_REREQ_MAX_RANGE);
+
+    check(BRCFScanLedgerGaveUpCount(&l) == (size_t)CF_REREQ_MAX_RANGE,
+          "(A) THE ASSERTION: every height of the maximal run is PARKED in gaveUp "
+          "(RED on the 512 ceiling: only 512 fit)");
+    check(BRCFScanLedgerOutstandingCount(&l) == 0,
+          "(A) THE ASSERTION: RetireCapped left NOTHING in outstanding "
+          "(RED on the 512 ceiling: 488 heights stay behind)");
+    {   // the operational consequence of Phase 1, stated as its own claim
+        size_t stuck = 0;
+        for (size_t i = 0; i < l.outstandingCount; i++) {
+            if (l.outstanding[i].attempts >= CF_REREQ_MAX_ATTEMPTS) stuck++;
+        }
+        check(stuck == 0,
+              "(A) no CAPPED entry is left in outstanding — a capped entry is one NO driver will ever "
+              "offer again (Peek/NextRerequest both skip it), i.e. a parked hole that pins the frontier "
+              "while masquerading as recoverable");
+    }
+
+    // ---- PHASE 2: THE TERMINAL FIELD STATE -------------------------------------
+    // The field trace ended at `outstanding[0]=F+1 (attempts 5), gaveUp[0]=F+2`. That
+    // is reached in three ledger-level steps, all pre-existing API:
+    //   1. the B2 valve re-arms the lowest parked hole (single-height ReArmGaveUp),
+    //      freeing one gaveUp slot;
+    //   2. RetireCapped takes that slot for the NEXT capped height (only possible
+    //      when capped heights were left behind — i.e. only on the small ceiling);
+    //   3. the re-armed hole re-exhausts and can no longer be parked.
+    // On the fixed ceiling step 2 has nothing to park, so step 3 re-parks the hole
+    // and gaveUp[0] is the pin again — the state the valve can see.
+    check(BRCFScanLedgerReArmGaveUp(&l, LO) == 1, "(A) step 1: the valve re-arms the lowest parked hole");
+    BRCFScanLedgerRetireCapped(&l);                                  // step 2
+    {   // step 3: the re-armed hole burns its fresh cycle and re-exhausts
+        BRCFOutstanding *e = mutOutstanding(&l, LO);
+        check(e != NULL, "(A) step 3: the re-armed hole is outstanding");
+        if (e) e->attempts = CF_REREQ_MAX_ATTEMPTS;
+        BRCFScanLedgerRetireCapped(&l);
+    }
+
+    {
+        uint32_t out0  = l.outstandingCount ? l.outstanding[0].height : 0;
+        uint32_t gave0 = l.gaveUpCount      ? l.gaveUp[0]             : 0;
+        printf("   [F4-A] terminal: outstanding[0]=%u (attempts %u) gaveUp[0]=%u -> pre-F4 B2 arm "
+               "predicate (gaveUp[0] < outstanding[0]) = %s\n",
+               out0, l.outstandingCount ? l.outstanding[0].attempts : 0, gave0,
+               (l.gaveUpCount && (l.outstandingCount == 0 || gave0 < out0)) ? "TRUE" : "FALSE");
+    }
+    check(gaveUpContains(&l, LO),
+          "(A) THE TERMINAL ASSERTION: the re-exhausted hole is PARKED again "
+          "(RED on the 512 ceiling: gaveUp is full, so it stays CAPPED in outstanding)");
+    check(l.gaveUpCount > 0 && l.gaveUp[0] == LO,
+          "(A) THE TERMINAL ASSERTION: gaveUp[0] IS the pinning hole, so the pre-F4 B2 arm predicate "
+          "(gaveUp[0] < outstanding[0]) can still see it — RED on the 512 ceiling, where gaveUp[0] "
+          "sits ABOVE a capped outstanding[0] and the predicate is FALSE");
+
+    // ---- STANDING INVARIANT: nothing here advanced coverage --------------------
+    check(BRCFScanLedgerScannedThrough(&l) == LO - 1u,
+          "(A) STANDING INVARIANT: scannedThrough is STILL LO-1 — retiring a hole never marks it scanned");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 0,
+          "(A) STANDING INVARIANT: abandonedBelow is untouched — retirement is not abandonment");
+    {   // every height of the run is still accounted for, in one list or the other
+        size_t accounted = 0;
+        for (uint32_t h = LO; h <= HI; h++) {
+            if (findOutstanding(&l, h) || gaveUpContains(&l, h)) accounted++;
+        }
+        check(accounted == (size_t)CF_REREQ_MAX_RANGE,
+              "(A) STANDING INVARIANT: every height of the run is STILL a reported hole — the ceiling "
+              "change moves heights between lists, it never drops one");
+    }
+
+    BRCFScanLedgerFree(&l);
+}
+
+// ============================================================================
+// F4 PART B — the B2 arm predicate must see a CAPPED OUTSTANDING pin,
+//             and the valve must act on the whole coalesced RUN
+// ============================================================================
+//
+// THE DEFECT (B-i). The valve's arm predicate was "gaveUp[0] < outstanding[0].height",
+// i.e. it treated EVERY outstanding entry as recoverable-and-being-retried. That is
+// false for a CAPPED one: no driver ever offers it again, so it is a parked hole that
+// merely failed to reach gaveUp. When such a hole is the pin, the predicate reads
+// FALSE and the valve is inert while the frontier stays frozen — exactly where the
+// field trace terminated (outstanding[0] = F+1 at attempts 5, gaveUp[0] = F+2, gaveUp
+// at its ceiling). Part A removes the easy route into that state; this removes the
+// last one, which survives ANY finite ceiling: the valve re-arms gaveUp[0], another
+// height retires into the freed slot, and the re-armed hole re-exhausts with gaveUp
+// full again.
+//
+// THE DEFECT (B-ii). The valve acted on ONE height per (1 + CF_CONVOY_REARM_MAX) x
+// 7.5-min sequence. A CF_REREQ_MAX_RANGE-wide dead band would take ~15 DAYS to clear
+// — an escape that exists on paper and not in the field. Both halves now act on the
+// contiguous parked RUN at the pin, bounded by CF_REREQ_MAX_RANGE, which is the same
+// unit PeekRerequestRange already re-requests as one message.
+//
+// HOW THE STATE IS REACHED HERE — stated plainly. It is CONSTRUCTED, not grown: a
+// full gaveUp is CF_GAVEUP_MAX retired heights, which no KAT-scale drive reaches. So
+// the ledger is placed in the terminal state directly and then UNMODIFIED PRODUCTION
+// CODE (BRPeerManagerKeepAlive) is driven from there. The setup block asserts every
+// property that makes the state the real one — gaveUp genuinely FULL, the pin
+// genuinely capped, RetireCapped genuinely unable to park it, no driver able to offer
+// it, and the pre-F4 predicate genuinely FALSE — so a RED cannot be a mis-built
+// fixture.
+#define F4B_TICKS   16u   // >= ceil((1 + CF_GAVEUP_MAX) / CF_REREQ_MAX_RANGE) == 5 abandon ticks,
+                          // with 3x headroom. A ONE-HEIGHT-PER-TICK valve needs 4097.
+
+static void test_valve_arms_on_capped_outstanding_pin(BRWallet *wallet)
+{
+    printf("\n=== test_valve_arms_on_capped_outstanding_pin (F4 Part B, red-before-green) ===\n");
+
+    uint32_t TIP; BRPeer *pa = NULL;
+    BRPeerManager *m = b2BuildHarness(wallet, &TIP, &pa);
+    check(m != NULL, "(B) setup: harness built");
+    if (! m) return;
+
+    const uint32_t H     = B2_CHAIN_BASE + 10u;              // THE PIN
+    const uint32_t BAND  = 1u + (uint32_t)CF_GAVEUP_MAX;     // H plus a FULL gaveUp above it
+    const uint32_t ABOVE = H + BAND;                          // first height above the band
+    int wlogBefore = g_wlogCount;
+
+    // ---- the terminal state, built directly on the ledger ----------------------
+    BRCFScanLedgerInit(&m->cfLedger, B2_CHAIN_BASE);
+    // Everything below the pin is genuinely SCANNED, so the pin is genuinely what
+    // pins the frontier (RecordRequested does not itself advance scannedThrough, so
+    // without this the frontier would sit at the birth floor and the case would be
+    // measuring a different hole).
+    BRCFScanLedgerRecordRequested(&m->cfLedger, B2_CHAIN_BASE, H, UINT128_ZERO, 0, 0);
+    for (uint32_t h = B2_CHAIN_BASE; h < H; h++) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+    {
+        BRCFOutstanding *e = mutOutstanding(&m->cfLedger, H);
+        check(e != NULL, "(B) setup: the pin is outstanding");
+        if (! e) { BRPeerManagerFree(m); return; }
+        // A hole that has been all the way round the valve: CF_CONVOY_REARM_MAX fresh
+        // cycles granted, every offer of the deciding cycle reached a live CF peer, and
+        // the cycle is burned. Same evidence a gaveUp hole at the abandon threshold has.
+        e->attempts              = CF_REREQ_MAX_ATTEMPTS;
+        e->rearmCycles           = CF_CONVOY_REARM_MAX;
+        e->offersReachedLivePeer = 1;
+        e->requestedAt           = 0;
+    }
+    // gaveUp FULL, every entry likewise at the abandon threshold, all ABOVE the pin.
+    for (size_t i = 0; i < (size_t)CF_GAVEUP_MAX; i++) {
+        m->cfLedger.gaveUp[i]            = H + 1u + (uint32_t)i;
+        m->cfLedger.gaveUpRearmCycles[i] = CF_CONVOY_REARM_MAX;
+        m->cfLedger.gaveUpOffersLive[i]  = 1;
+    }
+    m->cfLedger.gaveUpCount      = (size_t)CF_GAVEUP_MAX;
+    m->cfLedger.requestedThrough = ABOVE - 1u;   // the whole band really was requested
+
+    // ---- SETUP ASSERTIONS: the anti-artifact gate ------------------------------
+    check(BRCFScanLedgerGaveUpCount(&m->cfLedger) == (size_t)CF_GAVEUP_MAX,
+          "(B) setup: gaveUp is genuinely FULL — _cfLedgerMoveToGaveUp cannot park anything more");
+    check(m->cfLedger.outstandingCount == 1 && m->cfLedger.outstanding[0].height == H &&
+          m->cfLedger.outstanding[0].attempts >= CF_REREQ_MAX_ATTEMPTS,
+          "(B) setup: the pin is a CAPPED outstanding entry");
+    check(m->cfLedger.gaveUp[0] == H + 1u,
+          "(B) setup: gaveUp[0] sits ABOVE the pin");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == H - 1u &&
+          BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == H,
+          "(B) setup: the pin PINS the scan frontier (scannedThrough == H-1)");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0, "(B) setup: abandonedBelow starts at 0");
+    check(_BRPeerManagerPeerCanServeFilters(pa) == 1,
+          "(B) setup: a connected CF-capable peer exists — the valve's step-1 precondition is MET, so "
+          "a RED cannot be 'we withheld abandonment because there was nobody to offer to'");
+    // THE PRE-F4 ARM PREDICATE, evaluated exactly as the old code wrote it.
+    {
+        uint32_t gvH = 0; uint8_t gvC = 0, gvL = 0;
+        int haveGave = BRCFScanLedgerLowestGaveUp(&m->cfLedger, &gvH, &gvC, &gvL);
+        int preF4Arms = haveGave && (m->cfLedger.outstandingCount == 0 ||
+                                     gvH < m->cfLedger.outstanding[0].height);
+        printf("   [F4-B] pre-F4 predicate: gaveUp[0]=%u < outstanding[0]=%u ? %s   |   "
+               "F4 predicate: pin=%u offerable=%s\n",
+               gvH, m->cfLedger.outstanding[0].height, preF4Arms ? "TRUE" : "FALSE", H, "no");
+        check(preF4Arms == 0,
+              "(B) setup: the PRE-F4 arm predicate (gaveUp[0] < outstanding[0]) is FALSE in this state — "
+              "this is the blindness under test, measured, not assumed");
+    }
+    // RetireCapped cannot rescue it, and no driver will ever offer it.
+    BRCFScanLedgerRetireCapped(&m->cfLedger);
+    check(m->cfLedger.outstandingCount == 1 && m->cfLedger.outstanding[0].height == H,
+          "(B) setup: RetireCapped CANNOT park the pin (gaveUp full) — it stays capped in outstanding");
+    {
+        uint32_t pk1 = 0, pk2 = 0;
+        check(BRCFScanLedgerPeekRerequestRange(&m->cfLedger, (uint32_t)time(NULL) + 100000u, 0,
+                                              &pk1, &pk2) == 0,
+              "(B) setup: the residual driver offers NOTHING — a capped entry is never a Peek candidate, "
+              "so the pin can only ever be freed by the valve");
+    }
+    // The F4 accessor's own reading of the same state.
+    {
+        uint32_t pinH = 0; int offerable = 1; uint8_t c = 0, live = 0;
+        check(BRCFScanLedgerPinningHole(&m->cfLedger, &pinH, &offerable, &c, &live) == 1 &&
+              pinH == H && offerable == 0 && c == CF_CONVOY_REARM_MAX && live == 1,
+              "(B) setup: BRCFScanLedgerPinningHole reports the pin as H, NOT offerable, at the abandon "
+              "threshold — the state the F4 predicate reads");
+    }
+
+    // ---- THE DRIVE: unmodified production KeepAlive -----------------------------
+    uint32_t abandonedTrace[F4B_TICKS];
+    uint32_t frontierTrace[F4B_TICKS];
+    int      abandonMono = 0, scanMono = 0, sailFails = 0, warnlessAdvance = 0;
+    uint32_t prevAband = BRCFScanLedgerAbandonedBelow(&m->cfLedger);
+    uint32_t prevScan  = BRCFScanLedgerScannedThrough(&m->cfLedger);
+    unsigned ticksToClear = 0;
+
+    for (unsigned t = 0; t < F4B_TICKS; t++) {
+        int wlogTickBefore = g_wlogCount;
+        // Backoff elapsed on everything still outstanding, so a re-arm this tick is
+        // immediately offerable and the valve is never merely waiting on a clock.
+        for (size_t k = 0; k < m->cfLedger.outstandingCount; k++) m->cfLedger.outstanding[k].requestedAt = 0;
+
+        BRPeerManagerKeepAlive(m);
+
+        uint32_t aband = BRCFScanLedgerAbandonedBelow(&m->cfLedger);
+        uint32_t scan  = BRCFScanLedgerScannedThrough(&m->cfLedger);
+        abandonedTrace[t] = aband;
+        frontierTrace[t]  = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+
+        if (aband < prevAband) abandonMono++;
+        if (scan  < prevScan)  scanMono++;
+        // THE STANDING INVARIANT, checked EVERY tick: scannedThrough may only sit
+        // below the lowest surviving hole, and any height it passed that was never
+        // evaluated must be below the SURFACED watermark. Nothing in this case is ever
+        // served, so every advance must be covered by abandonedBelow.
+        if (m->cfLedger.outstandingCount > 0 && scan >= m->cfLedger.outstanding[0].height) sailFails++;
+        if (m->cfLedger.gaveUpCount > 0 && scan >= m->cfLedger.gaveUp[0]) sailFails++;
+        if (scan >= H && aband <= scan) sailFails++;      // passed H without surfacing it
+        if (aband > prevAband && g_wlogCount == wlogTickBefore) warnlessAdvance++;
+
+        if (ticksToClear == 0 && aband >= ABOVE) ticksToClear = t + 1;
+        prevAband = aband; prevScan = scan;
+
+        printf("   [F4-B t%02u] scanned=%u frontier=%u abandonedBelow=%u outstanding=%zu gaveUp=%zu "
+               "warns=%d\n", t + 1, scan, frontierTrace[t], aband,
+               m->cfLedger.outstandingCount, m->cfLedger.gaveUpCount, g_wlogCount - wlogBefore);
+    }
+
+    // ---- per-tick invariants ----------------------------------------------------
+    check(abandonMono == 0, "(B) abandonedBelow never regressed");
+    check(scanMono == 0,    "(B) scannedThrough never regressed");
+    check(sailFails == 0,
+          "(B) STANDING INVARIANT (outranks liveness): scannedThrough NEVER passed a height that was "
+          "neither evaluated nor surfaced below abandonedBelow — no escape here bought liveness by "
+          "discarding coverage");
+    check(warnlessAdvance == 0,
+          "(B) SURFACED, NEVER SILENT: every abandonedBelow advance came with a WARN in the same tick "
+          "(cnt>0 <=> WARN <=> advance)");
+
+    // ---- THE ACCEPTANCE ASSERTIONS ---------------------------------------------
+    {
+        char lbl[320];
+        uint32_t frontier = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+        snprintf(lbl, sizeof lbl,
+                 "(B-i) THE ASSERTION: the valve ARMED on the capped-outstanding pin and the scan "
+                 "frontier moved past it (frontier %u > %u) — RED on the pre-F4 predicate, which reads "
+                 "gaveUp[0] < outstanding[0] and is FALSE forever in this state", frontier, H);
+        check(frontier > H, lbl);
+
+        snprintf(lbl, sizeof lbl,
+                 "(B-ii) THE ASSERTION: the whole %u-height parked band cleared in %u tick(s) of %u "
+                 "(abandonedBelow %u, target %u) — RED on a one-height-per-cycle valve, which needs %u "
+                 "ticks and therefore is not an escape at field timescales",
+                 BAND, ticksToClear, (unsigned)F4B_TICKS,
+                 BRCFScanLedgerAbandonedBelow(&m->cfLedger), ABOVE, BAND);
+        check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) >= ABOVE && ticksToClear > 0, lbl);
+
+        // The escape was ABANDONMENT and it is fully surfaced: nothing was served in
+        // this case, so the frontier can only legitimately sit at the watermark.
+        check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == frontier,
+              "(B) the frontier sits EXACTLY at the surfaced watermark — the advance is entirely "
+              "accounted for by abandonedBelow, never by a silent scannedThrough climb");
+        check(g_wlogCount > wlogBefore, "(B) at least one ABANDONED warn-log fired");
+        check(strstr(g_wlogLast, "ABANDONED") != NULL, "(B) the captured warn-log names the ABANDONED event");
+    }
+    check(m->cfLedger.outstandingCount == 0 && m->cfLedger.gaveUpCount == 0,
+          "(B) the band is gone from BOTH lists — no hole was left behind to re-pin the frontier");
+
+    // ---- NO WEDGE: the convoy actually proceeds above the surfaced band ---------
+    BRCFScanLedgerRecordRequested(&m->cfLedger, B2_CHAIN_BASE + 12u, B2_CHAIN_BASE + 14u,
+                                  UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0,
+          "(B) NO RESURRECTION: heights below abandonedBelow are refused by RecordRequested — the "
+          "surfaced band is never silently re-scanned into 'covered'");
+    BRCFScanLedgerRecordRequested(&m->cfLedger, ABOVE, ABOVE + 2u, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 3,
+          "(B) NO WEDGE: heights ABOVE the surfaced band are requestable again — the convoy proceeds");
+
+    (void)abandonedTrace; (void)frontierTrace;
+    BRPeerManagerFree(m);
+}
+
+// ============================================================================
+// FROZEN-FRONTIER CONVOY WEDGE — red-before-green reproduction
+// ============================================================================
+//
+// THE FIELD SHAPE (measured on hardware, deep restore, 2026-07-29):
+//   cfLedger.scannedThrough FREEZES at a height F and never advances again;
+//   cfilters keep ARRIVING in volume throughout (6,346 during the freeze);
+//   outstandingCount does NOT drain (sawtooths ~3000-4000, static at 3974, and it
+//   even INCREASED 3069 -> 3974); the same hole range starting exactly one block
+//   above F is re-requested 3x; manager->blocks keeps GROWING; no crash, no OOM.
+//
+// WHY NO EXISTING CASE IN THIS FILE CAN EXPRESS IT. In both harnesses a filter
+// "response" IS a BRCFScanLedgerMarkEvaluated call (serveSome above, scaleServe in
+// the scale case). _peerRelayedCFilter -- the REAL cfilter arrival handler, and the
+// only thing that decides whether an arrival credits -- is never driven. So
+// "a filter demonstrably ARRIVED and the height nevertheless stayed outstanding"
+// is UNREPRESENTABLE in the existing model, and the wedge is invisible by
+// construction.
+//
+// THE ONE NEW CAPABILITY: relayFilterAt() below makes ARRIVAL a separate event
+// from EVALUATION by driving the production handler and letting IT decide. No
+// fake, no new production seam, no test-only accessor: _peerRelayedCFilter keys
+// its decision on the BLOCK HASH the filter is served under (BRPeerManager.c:3071),
+// so the modeled network simply chooses that hash. rhUniqueHash(h) is in
+// manager->blocks and credits (:3158); rhForkHash(h) -- documented at :1398 as a
+// different, still-unique, non-zero hash for the same height that can never equal
+// any main-chain hash -- misses BRSetGet, takes the :3072 "header-race hole ...
+// left outstanding" branch, and buffers at :3083. That branch is chosen over
+// verify-fail (:3090, which calls _BRPeerManagerPeerMisbehavin and would let a
+// reviewer say "you killed the peers") and parse-fail (:3106, which needs the
+// cfheader chain to commit SHA256_2(unparseable bytes) at every dead height for no
+// extra fidelity). It also exercises the filter buffer + the per-tick reverse-map
+// skip set (:4020-4034) instead of sidestepping them.
+//
+// The precedent for calling a file-static relay handler directly with a
+// hand-built BRPeerCallbackInfo is test_reorg_mid_descent above (:4197/:4210).
+//
+// WHAT THIS CASE DOES NOT PROVE -- state plainly, do not let it drift:
+//   1. It does NOT root-cause the ONSET. The frozen frontier is INSTALLED as a
+//      precondition (a band the peers serve under a hash we do not hold). Why the
+//      field wallet's frontier froze at F is entirely unmeasured. This reproduces
+//      the NON-RECOVERY, not the cause of the freeze.
+//   2. It does NOT prove the field's dead band had this shape: 6,346 arrivals with
+//      no scannedThrough movement is equally consistent with :3072, :3090 and :3106.
+//      A branch-specific fix would be validated here for the wrong branch. The
+//      mitigation is sibling variants driving :3090/:3106 through the same
+//      relayFilterAt helper and asserting the SAME liveness property (which is
+//      branch-independent by design).
+//   3. It does NOT prove any particular fix correct. It is a liveness
+//      reproduction; it says nothing about whether the right escape is
+//      abandonment, header re-fetch, floor re-anchor, or re-keying B1.1's
+//      back-pressure (:4203) off progress rather than raw count.
+//   4. It DELIBERATELY closes the peer-diversity escape: both peers serve the dead
+//      band identically, so nothing here licenses a claim about fleet behaviour.
+//   5. It says nothing about the other wedge classes (OS-freeze/0-peer dead loop,
+//      orphan tip).
+//   6. The cfheaders ARRIVAL path is not driven -- the chain is pre-loaded, so
+//      _peerRelayedCFHeaders's own forward-fetch trigger (:3005) is bypassed. Only
+//      the KeepAlive-driven legs are covered.
+//   7. The clock is modeled by BACKDATING requestedAt, not by advancing time(NULL).
+//      So the buffer age-out (CF_FILTER_BUF_MAX_AGE_SECS, :3867) never fires and
+//      B1.3's re-kick throttle never expires past its first fire. Neither affects
+//      the liveness verdict -- but A FIX THAT RELIES ON THE AGE-OUT WOULD READ
+//      FALSELY RED HERE, and that must be checked before blaming such a fix.
+//   8. _BRPeerManagerClearMemory is NOT called on this path (KeepAlive never calls
+//      it; only _peerRelayedBlock:1750 and the scale case's header supply do), and
+//      no headers are supplied per tick, so "D's headers were pruned" -- the
+//      competing explanation for a RED -- is off the table. The setup asserts
+//      every height in D and L is resident, and re-asserts it at the end.
+//
+// GEOMETRY: chosen to reproduce the measured numbers, not as a scaled-down proxy.
+//   F        = the frozen frontier
+//   D (dead) = [F+1 .. F+1000]      1000 == CF_REREQ_MAX_RANGE, so Peek coalesces it
+//                                   into EXACTLY the observed re-requested range
+//   L (live) = [F+1001 .. F+4000]   3000 servable heights
+//   |D|+|L|  = 4000                 > CF_OUTSTANDING_LOWWATER (3072) so B1.1's premise
+//                                   at :4203 starts negated (the "static at 3974"
+//                                   shape), and < CF_OUTSTANDING_MAX (4096) so
+//                                   overflow eviction never muddies the trace.
+#define WEDGE_BASE          23800000u                     // same family as SCALE_BIRTH: above every mainnet checkpoint
+#define WEDGE_F             (WEDGE_BASE + 999u)           // the frozen frontier
+#define WEDGE_DEAD_LO       (WEDGE_F + 1u)
+#define WEDGE_DEAD_HI       (WEDGE_F + 1000u)             // |D| == CF_REREQ_MAX_RANGE
+#define WEDGE_LIVE_LO       (WEDGE_F + 1001u)
+#define WEDGE_LIVE_HI       (WEDGE_F + 4000u)
+#define WEDGE_TIP           (WEDGE_F + 1u + CF_CONVOY_WINDOW + 2000u)   // W_hdr >= 10000
+#define WEDGE_CFH_FRONTIER  (WEDGE_F + CF_CONVOY_WINDOW + 500u)         // a full window above the scan frontier
+#define WEDGE_TICK_SECS     30u
+// ONE full retry cycle is 30+60+120+120+120 == 450 s == 15 x WEDGE_TICK_SECS.
+#define WEDGE_CYCLE_TICKS   15u
+// The BUDGET, DERIVED from the escape it must accommodate — do not hand-tune it.
+//
+// ⚠️ THE FIRST CUT OF THIS WAS 40 TICKS (20 modeled minutes) AND ITS JUSTIFYING
+// COMMENT MIS-DERIVED THE ESCAPE: it counted ONE 7.5-min retry cycle and concluded
+// "past the full retry schedule, so the DESIGNED B2 escape is given its full chance".
+// The designed escape is not one cycle. B2 abandons only on the cycle where
+// rearmCycles >= CF_CONVOY_REARM_MAX, and rearmCycles only advances when a cycle
+// EXHAUSTS — so the minimum is (1 + CF_CONVOY_REARM_MAX) == 3 FULL cycles == 22.5
+// modeled minutes, plus one tick per RetireCapped/valve decision. At 40 ticks a
+// working escape reads as RED for the one reason the comment promised it never
+// could: "was not given time". Measured on the F4 build, the escape completes at
+// ~t46. The formula below is what makes the promise true.
+#ifndef WEDGE_TICKS
+#define WEDGE_TICKS  (int)((1u + (unsigned)CF_CONVOY_REARM_MAX) * WEDGE_CYCLE_TICKS + 11u)   // 56
+#endif
+
+// ---------------------------------------------------------------------------
+// -DKAT_WEDGE_SIMULATE_RECOVERY -- THE PERMANENT GREEN DIRECTION OF THIS GATE
+// ---------------------------------------------------------------------------
+// An assertion set that CANNOT go green is worth no more than one that cannot go
+// red: it reports a fixed wedge as unfixed, forever, and the runner's "RED
+// confirmed ... (expected)" line makes that indistinguishable from success. The
+// first cut of this case had exactly that defect -- three MECHANISM assertions
+// encoded the wedge itself as the PASS condition, so a landed fix flipped
+// LIVENESS green and those three red, leaving the exit code stuck at 1.
+//
+// This flag is the standing proof that the demotion worked. It changes NOTHING in
+// production and nothing in the ledger: it flips ONE harness-side fact -- whether
+// the modeled network serves the dead band under a hash the wallet actually holds
+// -- from tick WEDGE_RECOVERY_TICK onward. That is precisely the observable a real
+// fix produces at this harness's boundary (however the fix gets there: re-fetching
+// the headers, re-anchoring the cfheader chain, rotating peers, or re-keying
+// back-pressure off progress). Whether the wallet then RECOVERS is decided by
+// UNMODIFIED production code, which is the whole point -- the harness does not
+// reach into the ledger and hand itself a pass.
+//
+// WHY THE FLIP IS PLACED WHERE IT IS -- BOTH BOUNDS ARE REAL; do not "tidy" this
+// number. The pinning height F+1 only re-credits if the residual driver still
+// OFFERS it, so the flip has to land while D is still being re-requested:
+//   * NOT LATER than ~t17, where D exhausts CF_REREQ_MAX_ATTEMPTS, RetireCapped
+//     parks it in gaveUp, and the B2 valve re-arms F+1 exactly once -- which puts
+//     F+1 back BELOW gaveUp[0] and makes the valve's own arm predicate
+//     (gaveUp[0] < outstanding[0], BRPeerManager.c:3919) permanently FALSE. That is
+//     the terminal wedge state, and a flip after it has nothing left to re-offer.
+//   * the lower bound is now SOFT. It used to be hard ("NOT EARLIER than ~t4") for a
+//     bad reason: the "the dead range was re-requested 3x-5x" check was a check(), so
+//     an early flip made a WORKING recovery fail for not reproducing enough of the
+//     bug's signature -- the harness's own timing was being bent to keep a
+//     bug-property assertion satisfiable. That assertion is now a print (see the
+//     DEAD-RANGE RE-REQUESTS line in the acceptance section), so an early flip is
+//     merely less legible in the trace, not a failure. t8 is kept for that legibility
+//     (4 dead-range re-requests visible before the flip) and because it is the
+//     measured-good midpoint of the band.
+// The recovery build additionally ASSERTS that the dead band was re-offered on the
+// wire AND actually served after the flip, so a green can never be the vacuous
+// "the flip did nothing and the case passed anyway".
+//
+// Overridable so the demotion above can be DEMONSTRATED rather than asserted: an
+// immediate-escape build (-DWEDGE_RECOVERY_TICK=1) is exactly the "a fix that works
+// fast" case the old `cumSendsDead >= 3` form would have reported as a failure. No
+// production code and no default behaviour depends on this being overridable.
+#ifndef WEDGE_RECOVERY_TICK
+#define WEDGE_RECOVERY_TICK 8
+#endif
+
+// The single wallet filter element every synthesized filter is built around
+// (captured once from the real BRWalletGetFilterElements, so a servable arrival
+// takes the production HIT path -- verify, parse, match, getdata, MarkEvaluated).
+static uint8_t g_wedgeElem[64];
+static size_t  g_wedgeElemLen = 0;
+static int     g_relayCount   = 0;
+
+// POSITIVE CONTROL instrumentation (defect 2). relayFilterAt has TWO halves and
+// the first cut only ever exercised the non-crediting one -- 0 of 5005 arrivals
+// took the crediting branch, because a single per-tick delivery budget consumed in
+// captured-send order was eaten whole by the lowest (dead) range every tick. These
+// counters make that failure mode ASSERTABLE instead of invisible.
+static int     g_relayServable    = 0;   // arrivals served under rhUniqueHash -> the CREDITING branch (:3158)
+static int     g_relayDead        = 0;   // arrivals served under rhForkHash   -> the :3072 left-outstanding branch
+static int     g_relayServableDead = 0;  // servable arrivals INSIDE D (only nonzero after a recovery flip)
+// 0 == the shipped-code shape (D is permanently unservable). Flipped to 1 at
+// WEDGE_RECOVERY_TICK by the -DKAT_WEDGE_SIMULATE_RECOVERY build ONLY.
+static int     g_wedgeDeadServable = 0;
+
+static void wedgeCaptureWalletElement(BRWallet *w)
+{
+    BRWalletFilterElements *fe = BRWalletGetFilterElements(w);
+    if (fe && fe->count > 0 && fe->elementLens[0] > 0 && fe->elementLens[0] <= sizeof g_wedgeElem) {
+        memcpy(g_wedgeElem, fe->elements[0], fe->elementLens[0]);
+        g_wedgeElemLen = fe->elementLens[0];
+    }
+    BRWalletFilterElementsFree(fe);
+}
+
+// The encoded single-element filter this test serves at `height` on the MAIN chain.
+// The cfheader chain must commit SHA256_2 of exactly these bytes for the servable
+// band, or BRCompactFilterChainVerifyFilter (:3090) rejects it.
+static size_t wedgeFilterBytes(uint32_t height, uint8_t *out, size_t outCap)
+{
+    return buildSingleElementFilter(rhUniqueHash(height), g_wedgeElem, g_wedgeElemLen, out, outCap);
+}
+
+// THE NEW CAPABILITY. Drive the REAL arrival handler once, for one height.
+//   servable=1 -> served under rhUniqueHash(height): the block IS in manager->blocks,
+//                 the filter verifies against the committed cfheader, parses, and the
+//                 tail at :3158 MarkEvaluates -> the height CREDITS.
+//   servable=0 -> served under rhForkHash(height): BRSetGet at :3071 misses, the
+//                 :3072 branch logs "header-race hole ... left outstanding" and buffers
+//                 the bytes at :3083 -> A FILTER DEMONSTRABLY ARRIVED AND THE HEIGHT
+//                 LEGITIMATELY REMAINS OUTSTANDING.
+// Called ONLY from the test body between KeepAlive calls -- never from a __wrap_
+// shim: the shims fire from Pass C while BRPeerManagerKeepAlive holds the
+// NON-recursive manager->lock, and _peerRelayedCFilter takes that same lock at
+// :3062, so delivering from inside a shim self-deadlocks.
+static void relayFilterAt(BRPeerManager *m, BRPeer *p, uint32_t height, int servable)
+{
+    UInt256 bh = servable ? rhUniqueHash(height) : rhForkHash(height);
+    uint8_t enc[64];
+    size_t len = servable ? wedgeFilterBytes(height, enc, sizeof enc)
+                          : buildSingleElementFilter(bh, g_wedgeElem, g_wedgeElemLen, enc, sizeof enc);
+    BRPeerCallbackInfo info = { p, m, UINT256_ZERO };
+    _peerRelayedCFilter(&info, FILTER_TYPE_BASIC, bh, enc, len);
+    g_relayCount++;
+    if (servable) {
+        g_relayServable++;
+        if (height >= WEDGE_DEAD_LO && height <= WEDGE_DEAD_HI) g_relayServableDead++;
+    }
+    else g_relayDead++;
+}
+
+// Append the cfheader chain over [WEDGE_BASE .. WEDGE_CFH_FRONTIER], committing at
+// every height the SHA256_2 of the filter THIS TEST WILL ACTUALLY SERVE there --
+// not scaleAppendCfHeaders's arbitrary rhUniqueHash(next+i), which would make every
+// servable arrival fail verification at :3090 and disconnect the peers (trap #8).
+// Same BRCompactFilterChainAppend primitive, different content. Dead-band heights
+// keep the same real content and simply never reach :3090 (they arrive under a fork
+// hash and exit at :3072). Returns 1 on success.
+static int wedgeAppendCfHeaders(BRPeerManager *m)
+{
+    static UInt256 batch[MAX_CFHEADERS_RESULTS];
+    uint32_t h = WEDGE_BASE;
+    while (h <= WEDGE_CFH_FRONTIER) {
+        size_t n = 0;
+        while (n < MAX_CFHEADERS_RESULTS && h <= WEDGE_CFH_FRONTIER) {
+            uint8_t enc[64];
+            size_t len = wedgeFilterBytes(h, enc, sizeof enc);
+            BRSHA256_2(&batch[n], enc, len);
+            n++; h++;
+        }
+        if (! BRCompactFilterChainAppend(m->compactFilterChain,
+                                         BRCompactFilterChainTipHeader(m->compactFilterChain),
+                                         batch, n)) return 0;
+    }
+    return 1;
+}
+
+// Model one tick of wall clock WITHOUT advancing time(NULL): backdate every
+// still-outstanding entry's requestedAt. Same direct-field idiom mutOutstanding
+// (:349) already establishes. Underflow-clamped.
+static void wedgeAdvanceClock(BRCFScanLedger *l, uint32_t secs)
+{
+    for (size_t i = 0; i < l->outstandingCount; i++) {
+        uint32_t r = l->outstanding[i].requestedAt;
+        l->outstanding[i].requestedAt = (r > secs) ? (r - secs) : 0;
+    }
+}
+
+// --- wedge per-tick snapshot + invariant checker -----------------------------
+//
+// TRAP #1, THE BIGGEST ONE: checkTick (:422) MUST NOT be reused here. Its
+// invariant (a) at :433/:436 asserts outstandingCount is NON-INCREASING and falls
+// by EXACTLY nServed. That invariant is CORRECT FOR ITS OWN CASE
+// (test_cluster_drains_to_zero_with_stale_buffer :1166, where serveSome is the only
+// mutator and B1.1 cannot fire) but it is SCENARIO-LOCAL and reads as general: the
+// wedge's defining behaviour is that outstanding INCREASES (3069 -> 3974, via
+// B1.1's RecordRequestedDropped at :4234) and that a filter arrives without
+// decrementing anything. Reusing it would forbid the phenomenon by construction.
+// Its (c) gaveUp-byte-identity and (d) fixed-expBuffered clauses are equally
+// inapplicable here: RetireCapped (:3869) is SUPPOSED to grow gaveUp in this
+// regime, and the :3072 branch buffers on every dead-band arrival against a byte
+// budget that evicts, so buffered count is legitimately dynamic.
+//
+// What IS genuinely invariant here is kept, plus an ACCOUNTING CLOSURE that
+// replaces "fell by exactly nServed": every height that LEFT outstanding this tick
+// was either MarkEvaluated by a filter we actually delivered, or moved to gaveUp,
+// or dropped below the abandonment watermark. Nothing leaves silently.
+typedef struct {
+    uint32_t scannedThrough;
+    uint32_t abandonedBelow;
+    size_t   nOut;
+    uint32_t out[CF_OUTSTANDING_MAX];
+    size_t   nGave;
+    uint32_t gave[CF_GAVEUP_MAX];
+} WedgeSnap;
+// LedgerSnap-class stack cost (trap #13): file-static, and only ever TWO live.
+static WedgeSnap g_wsPrev, g_wsCur;
+
+static void wedgeSnap(const BRCFScanLedger *l, WedgeSnap *s)
+{
+    s->scannedThrough = l->scannedThrough;
+    s->abandonedBelow = l->abandonedBelow;
+    s->nOut = l->outstandingCount;
+    for (size_t i = 0; i < l->outstandingCount; i++) s->out[i] = l->outstanding[i].height;
+    s->nGave = l->gaveUpCount;
+    for (size_t i = 0; i < l->gaveUpCount; i++) s->gave[i] = l->gaveUp[i];
+}
+
+// outstanding[] and gaveUp[] are both maintained sorted ascending, and the
+// delivered set is qsort'd before use, so every membership test is a binary search
+// (an O(n^2) scan over 4096 heights x 40 ticks would dominate the run under ASan).
+static int sortedHas(const uint32_t *a, size_t n, uint32_t v)
+{
+    size_t lo = 0, hi = n;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (a[mid] == v) return 1;
+        if (a[mid] < v) lo = mid + 1; else hi = mid;
+    }
+    return 0;
+}
+
+static int wedgeCmpU32(const void *a, const void *b)
+{
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return (x < y) ? -1 : (x > y) ? 1 : 0;
+}
+
+static void test_frozen_frontier_convoy_does_not_recover(BRWallet *wallet)
+{
+    printf("\n=== test_frozen_frontier_convoy_does_not_recover (FROZEN-FRONTIER WEDGE, red-before-green) ===\n");
+
+    wedgeCaptureWalletElement(wallet);
+    check(g_wedgeElemLen > 0, "setup: captured a real wallet filter element to build filters around");
+
+    // ---- (1) manager + a real prevBlock-linked, DISTINCT-per-height chain -----
+    // rhChainBlock/rhUniqueHash, never dummyBlock (its uint8_t hash seed collides
+    // after 256 blocks -- the false-green trap documented at :1379-1383).
+    uint32_t tip = 0; size_t baseCount = 0;
+    BRPeerManager *m = rhBuildChainManager(wallet, WEDGE_BASE - 1u,
+                                           WEDGE_TIP - (WEDGE_BASE - 1u) + 1u, &tip, &baseCount);
+    check(m != NULL, "setup: manager + chain built");
+    if (! m) return;
+    check(tip == WEDGE_TIP, "setup: header frontier is at the modeled tip");
+    m->estimatedHeight = WEDGE_TIP;
+
+    // ---- (2) the cfheader chain, anchored at the birth floor -------------------
+    // rhBuildChainManager creates a tip-anchored chain for its own callers; this
+    // case needs one anchored at WEDGE_BASE whose content is what we will serve.
+    BRCompactFilterChainFree(m->compactFilterChain);
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, WEDGE_BASE, UINT256_ZERO);
+    check(m->compactFilterChain != NULL, "setup: cfheader chain created at the birth floor");
+    check(wedgeAppendCfHeaders(m) == 1,
+          "setup: cfheader chain committed the filters this test actually serves, a full window above the frontier");
+
+    // ---- (3) arm through the PRODUCTION entry points only ----------------------
+    // Never hand-set autoFetchCFilters* (see the C-1 fix-wave note at :2688-2694).
+    BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+    BRPeerManagerEnableAutoCompactFilterFetch(m, WEDGE_BASE);
+    // Trap #10: the arming clamp is SILENT. If it moved the floor, the whole
+    // geometry shifts underneath the case.
+    check(m->autoFetchCFiltersStart == WEDGE_BASE && m->autoFetchCFiltersThrough == WEDGE_BASE - 1u,
+          "setup: EnableAutoCompactFilterFetch armed at the requested floor (no silent clamp)");
+
+    // ---- (4) two CF-capable peers (heap-allocated, never a stack literal) ------
+    // Both serve the dead band the SAME way: this deliberately closes the "just
+    // rotate to a healthy peer" escape, matching the field shape.
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    BRPeer *pb = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x61; pa->port = 12061; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    pb->address.u8[15] = 0x62; pb->port = 12062; pb->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
+    array_add(m->connectedPeers, pb);
+
+    // ---- (5) the ledger: scanned through F, then D+L outstanding ---------------
+    // ONE (peer,port) for the whole span, or Peek's `nx->port != s->port` break
+    // (BRCFScanLedger.c:630) fragments the runs artificially.
+    uint32_t t0 = (uint32_t)time(NULL);
+    BRCFScanLedgerInit(&m->cfLedger, WEDGE_BASE);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, WEDGE_BASE, WEDGE_F, pa->address, pa->port, t0);
+    for (uint32_t h = WEDGE_BASE; h <= WEDGE_F; h++) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, WEDGE_DEAD_LO, WEDGE_LIVE_HI, pa->address, pa->port, t0);
+    BRPeerManagerSnapAutoFetchThroughToScanFrontier(m);
+
+    // The spine is deliberately left EMPTY -- see trap #4 in the header comment:
+    // serveSome/blockRegAdd/everReq ARE the fiat "arrival == evaluation" model this
+    // case exists to replace, and they are REG_MAX-bounded with O(n) lookups.
+    // Consequence: every g_capLog `stop` reads REG_NOT_FOUND and the loop inverts
+    // the raw stop hash through rhHeightOfHash instead.
+    blockRegReset(); everReqReset(); capLogReset();
+    g_capCount = 0; g_cfhCount = 0; g_hdrCount = 0; g_getdataCount = 0;
+    g_relayCount = 0; g_wlogCount = 0;
+    g_relayServable = 0; g_relayDead = 0; g_relayServableDead = 0;
+    g_wedgeDeadServable = 0;   // every build starts on the shipped-code shape (D unservable)
+    g_drainHookMgr = NULL;   // trap #7: left armed it MarkEvaluates a height mid-send and masks the wedge
+
+    // ---- SETUP ASSERTIONS: the anti-artifact gate ------------------------------
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == WEDGE_F,
+          "setup: scannedThrough is FROZEN at F (everything below is genuinely scanned)");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == WEDGE_F + 1u,
+          "setup: the scan frontier is the height one above F");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 4000,
+          "setup: 4000 outstanding heights (D 1000 + L 3000)");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) >= CF_OUTSTANDING_LOWWATER,
+          "setup: outstanding starts AT/ABOVE CF_OUTSTANDING_LOWWATER -- B1.1's premise (:4203) starts NEGATED");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) < CF_OUTSTANDING_MAX,
+          "setup: outstanding starts BELOW CF_OUTSTANDING_MAX -- overflow eviction cannot muddy the trace");
+    check(_cfConvoyScanArmed(m) == 1, "setup: the convoy is ARMED");
+    check(_cfConvoyHdrGated(m) == 1, "setup: the block-header window is GATED on the frozen frontier");
+    check(_cfConvoyCfhGated(m) == 1, "setup: the cfheader window is GATED on the frozen frontier");
+    check(BRCFScanLedgerGaveUpCount(&m->cfLedger) == 0, "setup: gaveUp starts empty");
+    check(BRCFScanLedgerAbandonedBelow(&m->cfLedger) == 0, "setup: abandonedBelow starts at 0");
+
+    // LOAD-BEARING (trap #9 + the ":4137 nothing went on the wire" false RED): the
+    // wallet is NOT missing anything it could fetch, and Pass B CAN resolve the stop
+    // hash, so `sent > 0` is achievable. Without these a RED could be the trivial
+    // "no header, nothing sent" case rather than the convoy failing to recover.
+    {
+        int missing = 0;
+        for (uint32_t h = WEDGE_DEAD_LO; h <= WEDGE_LIVE_HI; h++) if (! rhBlockPresent(m, h)) missing++;
+        check(missing == 0, "setup: EVERY header in D and L is resident in manager->blocks (nothing is prunable-missing)");
+    }
+    check(! UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, WEDGE_DEAD_HI)),
+          "setup: the dead range's stop hash RESOLVES -- Pass B can send it, so sent>0 is achievable");
+
+    // ---- THE DRIVE -------------------------------------------------------------
+    wedgeSnap(&m->cfLedger, &g_wsPrev);
+
+    int      cumSendsDead = 0;          // getcfilters whose start == F+1 (the 3x/5x signature)
+    int      frozenTicks  = 0;          // ticks on which scannedThrough was still exactly F
+    int      closureFails = 0, monoFails = 0, sailFails = 0, capFails = 0, abandonMonoFails = 0;
+    int      tick1HadDeadRange = 0;
+    int      ticksBelowLowwater = 0;    // ticks entered with outstanding < LOWWATER (B1.1's premise TRUE)
+    int      b11Ticks = 0;              // ticks on which a FORWARD (above requestedThrough) getcfilters went out
+    int      ticksOutstandingGrew = 0;  // ticks where outstanding INCREASED (the field's 3069 -> 3974 leg)
+    int      creditedDepartures = 0;    // heights that left `outstanding` BECAUSE a delivered filter credited
+    int      deadSendsAfterFlip = 0;    // dead-range getcfilters issued at/after WEDGE_RECOVERY_TICK
+    size_t   minOutstanding = BRCFScanLedgerOutstandingCount(&m->cfLedger);
+    size_t   maxOutstanding = minOutstanding;
+    uint32_t delivered[MAX_CFILTERS_RESULTS + 8];
+    uint32_t departed[CF_OUTSTANDING_MAX];
+    char     lbl[384];   // the LIVENESS label is long on purpose -- do not let snprintf clip its verdict
+
+    for (int tick = 1; tick <= WEDGE_TICKS; tick++) {
+#ifdef KAT_WEDGE_SIMULATE_RECOVERY
+        // THE SIMULATED LANDED FIX (harness-only; production is untouched). From this
+        // tick on the modeled network serves D under the hash the wallet actually holds,
+        // so a dead-band arrival takes the CREDITING branch. Everything that happens
+        // next -- whether the ledger re-offers F+1, whether the B2 valve unparks it,
+        // whether scannedThrough moves -- is decided entirely by UNMODIFIED production
+        // code. See the WEDGE_RECOVERY_TICK note above for why this cannot come late.
+        if (tick == WEDGE_RECOVERY_TICK) {
+            g_wedgeDeadServable = 1;
+            printf("   [wedge t%02d] *** SIMULATED RECOVERY: the dead band [%u..%u] becomes SERVABLE "
+                   "(harness-side only; production unchanged) ***\n", tick, WEDGE_DEAD_LO, WEDGE_DEAD_HI);
+        }
+#endif
+        // (a) ONE modeled tick of wall clock, applied BEFORE the driver runs -- the
+        // driver's whole dueness model reads requestedAt, so a tick that advanced the
+        // clock only afterwards would make tick 1 a guaranteed no-op.
+        wedgeAdvanceClock(&m->cfLedger, WEDGE_TICK_SECS);
+
+        if (BRCFScanLedgerOutstandingCount(&m->cfLedger) < CF_OUTSTANDING_LOWWATER) ticksBelowLowwater++;
+        // B1.1 (the forward auto-fetch) is the ONLY thing that requests heights ABOVE
+        // requestedThrough -- the residual driver can only re-offer heights that are
+        // already outstanding, hence already <= requestedThrough. So a captured range
+        // whose start exceeds the PRE-tick requestedThrough is a B1.1 firing. Read
+        // through the lock-free struct field, not the public accessor (which would
+        // take manager->lock; harmless here but the file's convention).
+        uint32_t reqThroughBefore = m->cfLedger.requestedThrough;
+
+        // (b) the REAL production tick: buffer drain (:3858), EvictAgedFilters (:3867),
+        // RetireCapped (:3869), the B2 valve (:3915+), the residual Pass A/B/C
+        // (:4047-4148) and B1.1/1.2/1.3 (:4180+).
+        capLogReset();
+        BRPeerManagerKeepAlive(m);
+
+        if (tick == 1 && capLogHasStart(WEDGE_DEAD_LO)) tick1HadDeadRange = 1;
+
+        // (c) the modeled peer answers what actually reached the wire. Ranges are read
+        // from g_capLog; each stop is resolved by INVERTING rhUniqueHash (the registry
+        // is deliberately empty -- trap #4), never from the ledger.
+        //
+        // PER-RANGE DELIVERY BUDGET (fix for the budget-shadowing tautology). The first
+        // cut spent ONE per-tick budget of MAX_CFILTERS_RESULTS across the captured
+        // ranges IN SEND ORDER. But MAX_CFILTERS_RESULTS (1000) == |D| ==
+        // CF_REREQ_MAX_RANGE, and D is always the LOWEST captured range, so D ate the
+        // entire budget on every single tick and the LIVE band was never served ONCE:
+        // 0 of 5005 arrivals took the crediting branch. That made the "outstanding
+        // stayed >= LOWWATER" claim an artifact of the HARNESS's own delivery model
+        // rather than a measurement of the convoy, and it left the crediting half of
+        // relayFilterAt entirely unexercised -- so the case could not have detected a
+        // fix, and could not have detected a regression in the crediting path either.
+        //
+        // Each captured getcfilters now gets its OWN slice of the tick's capacity, so a
+        // low range that cannot credit can no longer starve every higher one. The slice
+        // is computed over the RESOLVABLE ranges only (an unresolvable stop hash
+        // delivers nothing, so reserving capacity for it would re-introduce a milder
+        // version of the same starvation). The TOTAL stays bounded by one cfilters
+        // batch, which is what keeps `delivered[]` in range.
+        int nResolvable = 0;
+        for (int i = 0; i < g_capLogCount; i++) {
+            uint32_t rs = g_capLog[i].start;
+            uint32_t re = rhHeightOfHash(g_capLog[i].stopHashRaw);
+            if (re != REG_NOT_FOUND && re >= rs) nResolvable++;
+        }
+        int perRange = nResolvable > 0 ? (int)MAX_CFILTERS_RESULTS / nResolvable : (int)MAX_CFILTERS_RESULTS;
+        if (perRange < 1) perRange = 1;   // CF_REREQ_BATCH_PER_TICK(64) << 1000, so this is defensive only
+
+        // did B1.1's forward auto-fetch fire this tick? (see reqThroughBefore above)
+        int b11ThisTick = 0;
+        for (int i = 0; i < g_capLogCount; i++) if (g_capLog[i].start > reqThroughBefore) b11ThisTick = 1;
+        b11Ticks += b11ThisTick;
+
+        int nDelivered = 0;
+        for (int i = 0; i < g_capLogCount; i++) {
+            uint32_t rs = g_capLog[i].start;
+            uint32_t re = rhHeightOfHash(g_capLog[i].stopHashRaw);
+            if (rs == WEDGE_DEAD_LO) {
+                cumSendsDead++;
+                if (tick >= WEDGE_RECOVERY_TICK) deadSendsAfterFlip++;
+            }
+            if (re == REG_NOT_FOUND || re < rs) continue;
+            BRPeer *serving = ((i & 1) == 0) ? pa : pb;   // both peers serve D identically
+            int budget = perRange;
+            for (uint32_t h = rs; h <= re && budget > 0; h++) {
+                if (nDelivered >= (int)MAX_CFILTERS_RESULTS) break;   // total: one cfilters batch per tick
+                relayFilterAt(m, serving, h,
+                              /*servable=*/ (h > WEDGE_DEAD_HI) || g_wedgeDeadServable);
+                delivered[nDelivered++] = h;
+                budget--;
+            }
+            if (nDelivered >= (int)MAX_CFILTERS_RESULTS) break;
+        }
+        qsort(delivered, (size_t)nDelivered, sizeof delivered[0], wedgeCmpU32);
+
+        // (d) the per-tick invariants that ARE genuinely invariant here (trap #1)
+        wedgeSnap(&m->cfLedger, &g_wsCur);
+        if (g_wsCur.scannedThrough < g_wsPrev.scannedThrough) monoFails++;
+        if (g_wsCur.abandonedBelow < g_wsPrev.abandonedBelow) abandonMonoFails++;
+        if (g_wsCur.nOut > CF_OUTSTANDING_MAX) capFails++;
+        if (g_wsCur.nOut > 0 && g_wsCur.scannedThrough >= g_wsCur.out[0]) sailFails++;
+        {   // accounting closure: nothing left `outstanding` silently
+            size_t nDep = 0, i = 0, j = 0;
+            while (i < g_wsPrev.nOut) {                       // both sorted ascending
+                if (j >= g_wsCur.nOut || g_wsPrev.out[i] < g_wsCur.out[j]) departed[nDep++] = g_wsPrev.out[i++];
+                else if (g_wsPrev.out[i] == g_wsCur.out[j]) { i++; j++; }
+                else j++;
+            }
+            for (size_t k = 0; k < nDep; k++) {
+                uint32_t h = departed[k];
+                // POSITIVE CONTROL: a height that left `outstanding` and was in the
+                // delivered set is one the production handler actually CREDITED
+                // (MarkEvaluated at :3158). Counting them is what turns "the crediting
+                // branch was exercised" from a hope into an assertion below.
+                if (sortedHas(delivered, (size_t)nDelivered, h)) { creditedDepartures++; continue; }
+                if (sortedHas(g_wsCur.gave, g_wsCur.nGave, h)) continue;     // retired to gaveUp
+                if (h < g_wsCur.abandonedBelow) continue;                    // loudly abandoned
+                closureFails++;
+            }
+        }
+        if (g_wsCur.nOut < minOutstanding) minOutstanding = g_wsCur.nOut;
+        if (g_wsCur.nOut > maxOutstanding) maxOutstanding = g_wsCur.nOut;
+        if (g_wsCur.nOut > g_wsPrev.nOut) ticksOutstandingGrew++;
+        if (BRCFScanLedgerScannedThrough(&m->cfLedger) == WEDGE_F) frozenTicks++;
+
+        printf("   [wedge t%02d] scanned=%u frontier=%u outstanding=%zu gaveUp=%zu abandonedBelow=%u "
+               "buffered=%zu sends=%d perRange=%d relays=%d (servable %d / dead %d) credited=%d "
+               "B1.1=%s wlog=%d\n",
+               tick, g_wsCur.scannedThrough, BRCFScanLedgerLowestNeededHeight(&m->cfLedger),
+               g_wsCur.nOut, g_wsCur.nGave, g_wsCur.abandonedBelow,
+               BRCFScanLedgerBufferedCount(&m->cfLedger), g_capLogCount, perRange, nDelivered,
+               g_relayServable, g_relayDead, creditedDepartures,
+               b11ThisTick ? "FIRED" : "-",
+               g_wlogCount);
+
+        memcpy(&g_wsPrev, &g_wsCur, sizeof g_wsPrev);
+    }
+
+    // ---- NOT-VACUOUS: this test measured something ------------------------------
+    snprintf(lbl, sizeof lbl,
+             "NOT VACUOUS: cfilters kept ARRIVING throughout the freeze (%d delivered, the analogue of the "
+             "field's 6,346)", g_relayCount);
+    check(g_relayCount > 1000, lbl);
+    // DEMOTED to a print (was `check(cumSendsDead >= 3)`) -- SAME CLASS as the three
+    // MECHANISM assertions demoted below and as the WEDGE_TICKS budget defect: it is a
+    // claim about the BUG, not about a wallet. "The dead range was re-requested at least
+    // three times" is the FIELD SIGNATURE (3x/5x). A fix that escapes on its first or
+    // second dead re-request -- which is what a GOOD escape looks like; faster is better
+    // -- produces cumSendsDead of 1 or 2 and would have been reported as a FAILURE for
+    // succeeding quickly. Measured, not argued: see the -DWEDGE_RECOVERY_TICK=1 run in
+    // this task's report, where the old form goes RED on a recovery that works.
+    //
+    // The anti-vacuity job it was doing is already done, BUG-INDEPENDENTLY, by
+    // tick1HadDeadRange immediately below: the dead range demonstrably reached the WIRE,
+    // so a RED can never mean "nothing was ever requested". That claim is true of a
+    // wedged wallet and of a fixed one alike, which is the property an assertion here
+    // must have. The count stays PRINTED because "how many times did we re-ask for the
+    // dead band" is exactly what you want to read off a trace.
+    printf("   [wedge] DEAD-RANGE RE-REQUESTS (reported, NOT asserted -- the 3x/5x count is a "
+           "property of the BUG): %d getcfilters starting at F+1, range [%u..%u]\n",
+           cumSendsDead, WEDGE_DEAD_LO, WEDGE_DEAD_HI);
+    check(tick1HadDeadRange == 1,
+          "NOT VACUOUS: the dead range really reached the WIRE on tick 1 -- the per-tick reverse-map "
+          "suppressor (:4020-4034) did NOT eat it, so a RED cannot mean 'nothing was ever requested'");
+
+    // ---- POSITIVE CONTROL: the CREDITING half of relayFilterAt really ran -------
+    // relayFilterAt has two halves and the first cut only ever exercised the
+    // NON-crediting one (0 of 5005 arrivals credited -- see the per-range budget note
+    // in the drive loop). A harness that models "a filter arrived and the height
+    // stayed outstanding" while never once modelling "a filter arrived and the height
+    // was CREDITED" cannot distinguish a wedge from a harness that simply never
+    // delivers anything usable. These two assertions make that regression impossible
+    // to reintroduce silently: the first proves the crediting BRANCH was taken, the
+    // second proves it had the production EFFECT (MarkEvaluated removed the height
+    // from `outstanding`), end to end through _peerRelayedCFilter.
+    snprintf(lbl, sizeof lbl,
+             "POSITIVE CONTROL: the CREDITING branch of relayFilterAt was exercised -- %d of %d arrivals were "
+             "served under a hash the wallet holds (dead-band arrivals: %d)",
+             g_relayServable, g_relayCount, g_relayDead);
+    check(g_relayServable > 0, lbl);
+    snprintf(lbl, sizeof lbl,
+             "POSITIVE CONTROL: delivered filters actually CREDITED -- %d height(s) left `outstanding` via "
+             "MarkEvaluated (:3158), so the live band was served alongside the dead one and not starved by it",
+             creditedDepartures);
+    check(creditedDepartures > 0, lbl);
+
+#ifdef KAT_WEDGE_SIMULATE_RECOVERY
+    // Recovery-build-only: prove the FLIP itself did work, so a green in this build
+    // can never be the vacuous "the simulated fix changed nothing and the case passed
+    // for some unrelated reason". Both are about the DEAD band specifically.
+    snprintf(lbl, sizeof lbl,
+             "SIMULATED RECOVERY: the dead range was re-offered on the wire after the flip (%d getcfilters at F+1 "
+             "from tick %d onward)", deadSendsAfterFlip, WEDGE_RECOVERY_TICK);
+    check(deadSendsAfterFlip > 0, lbl);
+    snprintf(lbl, sizeof lbl,
+             "SIMULATED RECOVERY: dead-band heights were actually SERVED after the flip (%d servable arrivals "
+             "inside [%u..%u]) -- the recovery ran through production code, not harness fiat",
+             g_relayServableDead, WEDGE_DEAD_LO, WEDGE_DEAD_HI);
+    check(g_relayServableDead > 0, lbl);
+#else
+    (void)deadSendsAfterFlip;
+#endif
+
+    // ---- MECHANISM TRACE (REPORTED, NEVER ASSERTED) -----------------------------
+    // ⚠️ THESE THREE WERE ASSERTIONS IN THE FIRST CUT AND THAT WAS A FATAL DEFECT.
+    // They state the WEDGE ITSELF (outstanding never drained below LOWWATER, both
+    // convoy windows still shut, scannedThrough still exactly F on every tick). As
+    // assertions they made the wedge the PASS condition, so the moment a real fix
+    // landed, LIVENESS went green, these three went RED, the exit code stayed 1, and
+    // run.sh printed "RED confirmed ... (expected)" forever -- a FIXED wedge reported
+    // as unfixed, permanently, with no way for the runner to tell.
+    //
+    // The numbers are still genuinely useful signal -- "how long did the frontier
+    // stall" is exactly what you want to read off a trace -- so they are PRINTED. What
+    // may be asserted is the property that is true both before and after a fix: the
+    // invariants below, the anti-vacuity checks above, and LIVENESS. Do NOT promote
+    // any of these three back into a check(): a claim that can only hold while the bug
+    // exists cannot be a pass condition.
+    printf("   [wedge] MECHANISM TRACE (reported, not asserted): outstanding at final tick %zu "
+           "(CF_OUTSTANDING_LOWWATER %d, B1.1 premise at :4203 %s) | convoy windows at final tick: "
+           "hdrGated=%d cfhGated=%d | scannedThrough was still exactly F on %d/%d tick(s)\n",
+           g_wsCur.nOut, CF_OUTSTANDING_LOWWATER,
+           g_wsCur.nOut >= (size_t)CF_OUTSTANDING_LOWWATER ? "NEGATED" : "TRUE",
+           _cfConvoyHdrGated(m), _cfConvoyCfhGated(m), frozenTicks, WEDGE_TICKS);
+
+    // ---- MECHANISM: the verdict is the convoy, not a setup slip ------------------
+    // These two ARE kept as assertions: unlike the three above they are true of a
+    // fixed wallet as well (nothing on this path prunes headers -- trap #8 -- and
+    // nothing here is supposed to disconnect a peer), so they close a competing
+    // explanation for the verdict WITHOUT encoding the bug.
+    {   // trap #9's competing explanation, closed at the END as well as the start
+        int missing = 0;
+        for (uint32_t h = WEDGE_DEAD_LO; h <= WEDGE_LIVE_HI; h++) if (! rhBlockPresent(m, h)) missing++;
+        check(missing == 0,
+              "MECHANISM: every header in D and L is STILL resident at the end -- the RED is not a pruned-header "
+              "(Task-4 retention) bug wearing this case's clothes");
+    }
+#ifdef KAT_WEDGE_ESCAPE_ROTATES_PEER
+    // GATE-BUILD ONLY (never the default suite). Models the OTHER shape a real escape
+    // can take: DISCONNECTING the peer that keeps serving the dead band. Production
+    // does that in three places -- the cfheaders stall-recovery drop (floored at
+    // CF_MIN_FILTER_PEERS), _BRPeerManagerPeerMisbehavin, and rotate-away target
+    // selection -- and a real disconnect REMOVES the peer from connectedPeers
+    // (_BRPeerManagerPeerDisconnected, BRPeerManager.c: `array_rm(manager->connectedPeers,
+    // i - 1)`). That array count is precisely what the old `== 2` assertion measured, so
+    // this build is the red-before-green witness: with it, the OLD form fails and the
+    // reformulated one passes. Freed here so LSan stays clean -- BRPeerManagerFree frees
+    // only what is still in the array.
+    {
+        size_t nBefore = array_count(m->connectedPeers);
+        if (nBefore > 1) {
+            BRPeer *dropped = m->connectedPeers[nBefore - 1];
+            array_rm(m->connectedPeers, nBefore - 1);
+            BRPeerFree(dropped);
+            printf("   [wedge] *** SIMULATED ESCAPE-BY-ROTATION: one CF peer disconnected "
+                   "(%zu -> %zu connected) ***\n", nBefore, array_count(m->connectedPeers));
+        }
+    }
+#endif
+    // REFORMULATED (was `check(array_count(m->connectedPeers) == 2)`) -- same class as the
+    // cumSendsDead demotion above. The COMPETING EXPLANATION this closes is legitimate and
+    // worth keeping: a RED must not be readable as "the frontier never moved because we hung
+    // up on everybody". But `== 2` closed it by asserting that NEITHER peer was ever
+    // dropped, and that is a property of the wedged peer set, not of a fixed wallet. Several
+    // real escape routes drop or rotate a peer as part of recovering -- the cfheaders
+    // stall-recovery disconnect (floored at CF_MIN_FILTER_PEERS), _BRPeerManagerPeerMisbehavin
+    // on a peer that keeps serving a dead band, the residual driver's rotate-away target
+    // selection -- and every one of them would have false-RED'd this case for doing exactly
+    // the right thing.
+    //
+    // What must be true either way is that the wallet still had SOMEWHERE TO SEND at the
+    // end. So the assertion is on the count of peers the residual driver would actually
+    // accept as a target (_BRPeerManagerPeerCanServeFilters -- connected, socket open,
+    // COMPACT_FILTERS advertised: the very predicate Pass A selects with), floored at one.
+    // The raw counts are PRINTED so a rotation stays fully visible in the trace.
+    {
+        size_t nConn = array_count(m->connectedPeers);
+        int    nCF   = 0;
+        for (size_t i = 0; i < nConn; i++) {
+            if (_BRPeerManagerPeerCanServeFilters(m->connectedPeers[i])) nCF++;
+        }
+        printf("   [wedge] PEER SET at end (reported): %zu connected of 2 dialed, %d of them "
+               "offerable to the residual driver\n", nConn, nCF);
+        snprintf(lbl, sizeof lbl,
+                 "MECHANISM: the wallet still had somewhere to send at the end -- %d of %zu connected "
+                 "peer(s) offerable (CF-capable, socket open) -- so the RED is not 'we disconnected "
+                 "everyone'. Deliberately NOT '== 2': an escape that rotates away from the peer serving "
+                 "the dead band must not false-RED here.", nCF, nConn);
+        check(nCF >= 1, lbl);
+    }
+
+    // ---- per-tick invariants ----------------------------------------------------
+    check(monoFails == 0, "scannedThrough never regressed");
+    check(abandonMonoFails == 0, "abandonedBelow never regressed");
+    check(capFails == 0, "outstandingCount never exceeded CF_OUTSTANDING_MAX");
+    check(sailFails == 0, "scannedThrough never sailed past the lowest still-outstanding hole");
+    check(closureFails == 0,
+          "ACCOUNTING CLOSURE: every height that left `outstanding` was evaluated by a delivered filter, "
+          "retired to gaveUp, or abandoned -- nothing left silently");
+
+    // ---- THE ACCEPTANCE ASSERTION (this is what must FAIL on unfixed code) ------
+    // Stated as the DISJUNCTION the production design itself promises (B2's contract,
+    // :3880-3906), so it is falsifiable in both directions and prejudges no fix. A
+    // legitimate fix may recover EITHER by scanning the hole OR by loudly abandoning
+    // it -- which is exactly why gaveUpCount/abandonedBelow are REPORTED below and
+    // deliberately NOT asserted to be zero.
+    // The label is built per-VERDICT. A single label ending "the convoy is WEDGED"
+    // printed on a PASS line is the same category of mistake as asserting the wedge:
+    // it makes a recovered run read like an unrecovered one.
+    {
+        uint32_t frontier = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+        if (frontier > WEDGE_F + 1u) {
+            snprintf(lbl, sizeof lbl,
+                     "LIVENESS: the scan frontier advanced past the pinning hole inside the budget "
+                     "(frontier %u > %u) -- the convoy RECOVERED (scanned it, or loudly abandoned it: "
+                     "abandonedBelow=%u, ABANDONED WARNs=%d)",
+                     frontier, WEDGE_F + 1u, BRCFScanLedgerAbandonedBelow(&m->cfLedger), g_wlogCount);
+        }
+        else {
+            snprintf(lbl, sizeof lbl,
+                     "LIVENESS: the scan frontier advanced past the pinning hole inside the budget "
+                     "(frontier %u > %u) -- either by scanning it (scannedThrough) or by loudly abandoning it "
+                     "(abandonedBelow + WARN). Neither happened: the convoy is WEDGED.",
+                     frontier, WEDGE_F + 1u);
+        }
+        check(frontier > WEDGE_F + 1u, lbl);
+    }
+
+    printf("   [wedge] F=%u dead=[%u..%u] live=[%u..%u] tip=%u | %d ticks x %us modeled "
+           "(= %u modeled minutes) | frontier %u (started %u) | gaveUp %zu | abandonedBelow %u | "
+           "ABANDONED WARNs %d | relays %d (servable %d / dead %d, of which servable-in-D %d) | "
+           "credited departures %d | dead-range sends %d\n",
+           WEDGE_F, WEDGE_DEAD_LO, WEDGE_DEAD_HI, WEDGE_LIVE_LO, WEDGE_LIVE_HI, WEDGE_TIP,
+           WEDGE_TICKS, WEDGE_TICK_SECS, (WEDGE_TICKS * WEDGE_TICK_SECS) / 60u,
+           BRCFScanLedgerLowestNeededHeight(&m->cfLedger), WEDGE_F + 1u,
+           BRCFScanLedgerGaveUpCount(&m->cfLedger), BRCFScanLedgerAbandonedBelow(&m->cfLedger),
+           g_wlogCount, g_relayCount, g_relayServable, g_relayDead, g_relayServableDead,
+           creditedDepartures, cumSendsDead);
+    // ---- THE OUTSTANDING TRAJECTORY (the field's ~3000-4000 sawtooth) ------------
+    // The field measurement this case models had outstandingCount sawtoothing between
+    // ~3000 and ~4000 and INCREASING 3069 -> 3974 before going static at 3974, with
+    // CF_OUTSTANDING_LOWWATER == 3072 and CF_OUTSTANDING_MAX == 4096. Whether that
+    // sawtooth reproduces is decided by (i) the live band actually being served, so the
+    // set can DRAIN below the low-water mark at all, and (ii) B1.1's forward auto-fetch
+    // then re-filling it. Both legs are reported here so the shape can be JUDGED
+    // instead of assumed -- with a single lowest-range-first delivery budget all four
+    // numbers were degenerate (ticksBelowLOWWATER 0, B1.1 never fired).
+    printf("   [wedge] OUTSTANDING TRAJECTORY: min %zu max %zu final %zu | ticks entered below "
+           "CF_OUTSTANDING_LOWWATER(%d): %d/%d | ticks on which outstanding GREW: %d | B1.1 forward "
+           "auto-fetch fired on %d/%d tick(s)\n",
+           minOutstanding, maxOutstanding, g_wsCur.nOut, CF_OUTSTANDING_LOWWATER,
+           ticksBelowLowwater, WEDGE_TICKS, ticksOutstandingGrew, b11Ticks, WEDGE_TICKS);
+    // REPORTED, NOT ASSERTED -- the terminal state of the two pinning candidates.
+    // _cfLedgerAdvance caps scannedThrough at min(outstanding[0], gaveUp[0]) - 1, and
+    // the B2 valve only arms when gaveUp[0] < outstanding[0] (BRPeerManager.c:3919).
+    // Print both so the trace shows WHICH of them is pinning and whether the valve
+    // could even see it. A fix should change these numbers; do not turn them into an
+    // assertion, which would prejudge the escape.
+    printf("   [wedge] terminal pin: outstanding[0]=%u gaveUp[0]=%u -> B2 arm predicate "
+           "(gaveUp[0] < outstanding[0]) = %s | attempts@outstanding[0]=%u\n",
+           m->cfLedger.outstandingCount ? m->cfLedger.outstanding[0].height : 0,
+           m->cfLedger.gaveUpCount ? m->cfLedger.gaveUp[0] : 0,
+           (m->cfLedger.gaveUpCount && m->cfLedger.outstandingCount &&
+            m->cfLedger.gaveUp[0] < m->cfLedger.outstanding[0].height) ? "TRUE" : "FALSE",
+           m->cfLedger.outstandingCount ? (unsigned)m->cfLedger.outstanding[0].attempts : 0u);
+
+    // LSan stays LIVE for this KAT (header note :46-52): every dead-band arrival
+    // allocates through BRCFScanLedgerBufferFilter (:3083) against the 256 KiB
+    // budget, so a leak here is a real finding -- triage it BEFORE reading the
+    // liveness verdict.
+    BRPeerManagerFree(m);
+}
+
 int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
@@ -4713,6 +6167,108 @@ int main(void)
     return g_fail == 0 ? 0 : 1;
 #endif
 
+#ifdef KAT_REQ_FLOOR_REDGREEN_ONLY
+    // run.sh builds this TWICE for F1's red-before-green gates, running ONLY the F1
+    // case so each RED is unambiguous:
+    //   -DCF_REQ_FLOOR_UNFIXED  : the start clamp is compiled out (the pre-F1 shape:
+    //                             a straddling range's caller-supplied startHeight
+    //                             goes on the wire hundreds of blocks below the
+    //                             resident block floor, so the peer answers with
+    //                             filters for headers we no longer hold and every
+    //                             one of them is buffered where it can never drain)
+    //                             -> must FAIL == RED.
+    //   -DCF_REQ_FLOOR_NO_MEMO  : the clamp stays, but reads the floor through the
+    //                             raw O(chainLen) descent instead of the memo, so a
+    //                             multi-send tick pays one full walk PER SEND under
+    //                             manager->lock -- the cost class the Pass A/B/C
+    //                             restructure exists to keep out -> must FAIL == RED.
+    test_getcfilters_never_below_block_floor(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_GAVEUP_CEILING_REDGREEN_ONLY
+    // run.sh builds this twice for F4 Part A's red-before-green gate, running ONLY
+    // the ceiling case so the RED is unambiguous:
+    //   -DCF_GAVEUP_CEILING_UNFIXED : CF_GAVEUP_MAX goes back to 512 while
+    //                                 CF_REREQ_MAX_RANGE stays 1000, so one
+    //                                 RetireCapped over a MAXIMAL coalesced run
+    //                                 parks 512 heights and leaves 488 CAPPED in
+    //                                 outstanding, where no driver ever offers them
+    //                                 and they pin the scan frontier forever
+    //                                 -> must FAIL == RED.
+    test_gaveup_ceiling_absorbs_full_width_run();
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_B2_PIN_REDGREEN_ONLY
+    // run.sh builds this TWICE for F4 Part B's red-before-green gates, running ONLY
+    // the pin case so each RED is unambiguous. NOTE both builds keep the Part A
+    // ceiling FIXED — these gates are about the VALVE, not the ceiling:
+    //   -DCONVOY_B2_ARM_PREDICATE_UNFIXED : the pre-F4 arm predicate
+    //                                 (gaveUp[0] < outstanding[0]) is compiled back
+    //                                 in. A CAPPED outstanding pin below gaveUp[0]
+    //                                 reads as "being retried", the valve stays
+    //                                 inert and the frontier never moves
+    //                                 -> must FAIL == RED.
+    //   -DCONVOY_B2_SINGLE_HEIGHT_STEP  : the valve's run cap goes back to ONE
+    //                                 height per decision. Per height it is still
+    //                                 correct, but a CF_REREQ_MAX_RANGE-wide band
+    //                                 needs one full (1 + CF_CONVOY_REARM_MAX) x
+    //                                 7.5-min sequence PER HEIGHT (~15 days), so the
+    //                                 band does not clear inside the budget
+    //                                 -> must FAIL == RED.
+    test_valve_arms_on_capped_outstanding_pin(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_WEDGE_REPRO_ONLY
+    // THE FROZEN-FRONTIER WEDGE REPRODUCTION -- WIRED THE OPPOSITE WAY ROUND FROM
+    // EVERY OTHER GATE IN THIS FILE, DELIBERATELY (trap #14).
+    //
+    // Every other red-before-green gate here compiles the FIX out with a -D and
+    // expects that build to fail. This case has no fix to compile out: it must be
+    // RED on SHIPPED code, which is exactly why it cannot sit in the default suite
+    // under run.sh's `set -euo pipefail`. run.sh runs it behind this flag and
+    // HARD-FAILS if it PASSES -- the mirror of the existing gates.
+    //
+    // BOTH DIRECTIONS ARE CHECKED MECHANICALLY. run.sh builds this SAME flag twice:
+    //   * ordinary                          -> must exit NONZERO (the wedge reproduces)
+    //   * plus -DKAT_WEDGE_SIMULATE_RECOVERY -> must exit ZERO (the assertion set can
+    //     still recognise a recovery, so it is not a gate that can only ever be red)
+    // The second build flips ONE harness-side fact (the dead band becomes servable
+    // partway through the tick loop) and changes NOTHING in production. Keep it
+    // forever: it is the standing proof that no future edit re-encodes the wedge as
+    // the pass condition.
+    //
+    // ⚠️ THAT FIX LANDED (F4) AND BOTH STEPS ARE DONE: the ordinary run.sh stanza now
+    // expects exit 0, and this call is ALSO in the default suite below. The case is
+    // now the REGRESSION TEST for the escape F4 installed (CF_GAVEUP_MAX absorbs a
+    // maximal run; the B2 arm predicate sees a capped-outstanding pin; the valve acts
+    // on the whole coalesced run), and the -DKAT_WEDGE_SIMULATE_RECOVERY stanza keeps
+    // expecting exit 0, unchanged.
+    //
+    // HONEST SCOPE OF THE GREEN — its LIVENESS assertion is the design's DISJUNCTION
+    // ("scanned OR loudly abandoned"), so it is satisfied by ANY ONE of F4's three
+    // sub-fixes alone (measured: -DCF_GAVEUP_CEILING_UNFIXED, and
+    // -DCONVOY_B2_ARM_PREDICATE_UNFIXED, and -DCONVOY_B2_SINGLE_HEIGHT_STEP all still
+    // exit 0 here — the last one surfacing only ONE height of the 1000-height band in
+    // the whole budget). This is the ESCAPE-AT-ALL gate. The per-mechanism gates are
+    // test_gaveup_ceiling_absorbs_full_width_run and
+    // test_valve_arms_on_capped_outstanding_pin. Do NOT sharpen this case's assertion
+    // into a per-mechanism claim: the disjunction is exactly what keeps it from
+    // prejudging the escape.
+    test_frozen_frontier_convoy_does_not_recover(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
 #ifdef KAT_RESUME_SNAP_REDGREEN_ONLY
     // run.sh builds this twice for the resume cursor reconciliation's
     // red-before-green gate: once with the snap compiled to a no-op
@@ -4781,6 +6337,10 @@ int main(void)
     test_convoy_scale_bounded(wallet);                     // paced-convoy-fetch Task 6: THE memory bound, >100k descent (red-before-green)
     test_reorg_mid_descent();                              // paced-convoy-fetch Task 6: reorg at the retained-window boundary
     test_reorg_below_window_no_crash();                    // paced-convoy-fetch Task 7: fork-join below the window (red-before-green CRASH gate)
+    test_getcfilters_never_below_block_floor(wallet);      // F1: never ask for a cfilter below the resident block floor (red-before-green x2)
+    test_gaveup_ceiling_absorbs_full_width_run();          // F4 Part A: CF_GAVEUP_MAX absorbs a MAXIMAL run (red-before-green)
+    test_valve_arms_on_capped_outstanding_pin(wallet);     // F4 Part B: the valve sees a CAPPED pin + acts run-wide (red-before-green x2)
+    test_frozen_frontier_convoy_does_not_recover(wallet);  // F4: the frozen-frontier ESCAPE, folded in now that it GREENS (was the inverted repro gate)
 
     BRWalletFree(wallet);
 

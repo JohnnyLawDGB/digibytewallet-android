@@ -112,7 +112,56 @@
 #     B1.3 exists to serve -> RED.
 # All three HARD-FAIL run.sh if they unexpectedly PASS.
 #
-# Exit code 0 = every red-before-green gate satisfied AND the fixed full suite passed.
+# ==== F4: CF_GAVEUP_MAX / B2 ARM PREDICATE / RUN-WIDE VALVE ==================
+# Three more builds, all wired the ordinary way (compile a fix out, expect RED):
+#   * -DCF_GAVEUP_CEILING_UNFIXED       : CF_GAVEUP_MAX back to 512 while
+#     CF_REREQ_MAX_RANGE is 1000, so one RetireCapped over a MAXIMAL coalesced run
+#     parks 512 heights and leaves 488 CAPPED in `outstanding` -- offered by no
+#     driver, pinning the scan frontier forever -> RED (pure-ledger case).
+#   * -DCONVOY_B2_ARM_PREDICATE_UNFIXED : the pre-F4 arm predicate
+#     (gaveUp[0] < outstanding[0]) reads a CAPPED outstanding pin as "being retried",
+#     so the valve stays inert while that hole pins the frontier -> RED.
+#   * -DCONVOY_B2_SINGLE_HEIGHT_STEP    : the valve acts on ONE height per decision.
+#     Correct per height, but ~15 days to clear one CF_REREQ_MAX_RANGE dead band, so
+#     the band does not clear inside the budget -> RED.
+# All three HARD-FAIL run.sh if they unexpectedly PASS.
+#
+# ==== FROZEN-FRONTIER CONVOY WEDGE — ESCAPE ACCEPTANCE (BOTH WAYS) ===========
+# Two more builds. The first USED TO BE wired the opposite way round from every gate
+# above (it reproduced a wedge unfixed in shipped code, so the ORDINARY build had to
+# exit NONZERO). F4 LANDED THE ESCAPE, so it is now an ordinary GREEN acceptance
+# gate; the second build exists because a gate with only one direction checked is how
+# you ship a permanently-wrong verdict:
+#   * -DKAT_WEDGE_REPRO_ONLY on an ORDINARY (no fix-removal -D) build runs only
+#     test_frozen_frontier_convoy_does_not_recover, which used to reproduce a wedge that
+#     was UNFIXED in shipped code. Post-F4 it MUST exit ZERO (the frontier moves past
+#     the pinning hole, by loudly abandoning the dead band), and run.sh HARD-FAILS if
+#     it FAILS. It is ALSO in the default suite now. NOTE its LIVENESS assertion is the
+#     design's DISJUNCTION, so it greens on any ONE of F4's three sub-fixes: it is the
+#     ESCAPE-AT-ALL gate, and the two F4 stanzas above are the per-mechanism gates.
+#   * the same flag PLUS -DKAT_WEDGE_SIMULATE_RECOVERY makes the dead band become
+#     servable partway through the tick loop -- a HARNESS-ONLY simulation of a landed
+#     fix (production is untouched) -> it MUST exit ZERO, and run.sh HARD-FAILS if it
+#     FAILS. This is what proves the case can still RECOGNISE a fix; without it, an
+#     assertion that encodes the wedge keeps the exit code at 1 after the wedge is
+#     fixed and the ordinary stanza reports "RED confirmed ... (expected)" forever.
+#   * a THIRD build (added with the constant-relation sweep) adds
+#     -DWEDGE_RECOVERY_TICK=1 -DKAT_WEDGE_ESCAPE_ROTATES_PEER: the simulated fix lands
+#     on the FIRST tick and one CF peer is disconnected as part of recovering. It MUST
+#     exit ZERO. It exists because "can it recognise A fix" is weaker than it looks --
+#     two assertions in the case still required the escape to be SLOW (>= 3 dead
+#     re-requests, the field's 3x/5x signature) and to leave the peer set INTACT
+#     (connectedPeers == 2). Both are properties of the BUG, so a better fix -- faster,
+#     or one that rotates away from the misbehaving peer, which production does in three
+#     places -- read as a FAILURE. They are now a print and a floored "at least one peer
+#     is still offerable"; this build is what keeps them from being promoted back.
+# F4 landed that production fix: the ordinary stanza now expects 0 and the recovery
+# stanza is unchanged, exactly as written above. See the full stanzas near the bottom.
+#
+# Exit code 0 = every red-before-green gate satisfied, the frozen-frontier wedge
+# RECOVERS on production code AND is still detectable-as-recovered under BOTH
+# simulated-fix builds (a slow escape and a fast, peer-rotating one), AND the fixed
+# full suite passed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -531,6 +580,271 @@ if "$BUILD_DIR/kat_c1_no_cursor_reconcile"; then
     exit 1
 else
     echo "RED confirmed: without the cursor reconciliation the backstop leaves a silent skip above the watermark (expected)."
+fi
+
+# ==== F1: getcfilters MUST NOT ASK BELOW THE RESIDENT BLOCK FLOOR ============
+# _BRPeerManagerRequestCFiltersWithStopHashLocked refuses an unresolvable STOP
+# (it is a hash) but put startHeight on the wire as a BARE INTEGER, checked
+# against nothing -- so a range STRADDLING the resident block floor was sent
+# verbatim and the peer answered with filters for headers we no longer hold, every
+# one of which is then buffered against the 256 KiB budget where it can never
+# drain. Two twice-built shapes, both of which MUST fail:
+#   * -DCF_REQ_FLOOR_UNFIXED: the clamp is compiled out (everything else -- the
+#     unresolvable-stop refusal, the residual driver, the ledger -- stays live, so
+#     what is proven red is the CLAMP). The case asserts on the EMITTED WIRE
+#     ARGUMENT captured by __wrap_BRPeerSendGetCFilters, so the RED is a measured
+#     below-floor start, not an inferred one -> RED.
+#   * -DCF_REQ_FLOOR_NO_MEMO: the clamp stays but reads the floor through the raw
+#     O(chainLen) prevBlock descent instead of _BRPeerManagerBlockFloorCached, so a
+#     2-send tick pays 2 full walks under manager->lock -- and Pass C sends up to
+#     CF_REREQ_BATCH_PER_TICK(64) ranges per tick, which is exactly the per-send
+#     under-the-lock walk cost the Pass A/B/C restructure was built to remove.
+#     Walk cost is invisible at test scale unless it is COUNTED, so the case counts
+#     descents (CF_KAT_COUNT_FLOOR_WALKS) and asserts <= 1 -> RED.
+# Both HARD-FAIL run.sh if they unexpectedly PASS.
+build "$BUILD_DIR/kat_reqfloor_unfixed" -DCF_REQ_FLOOR_UNFIXED -DKAT_REQ_FLOOR_REDGREEN_ONLY
+if "$BUILD_DIR/kat_reqfloor_unfixed"; then
+    echo "GATE FAILURE: the CF_REQ_FLOOR_UNFIXED build PASSED. F1's red-before-green cannot go red --"
+    echo "a getcfilters whose startHeight sits hundreds of blocks below the resident block floor would"
+    echo "go on the wire undetected, and every honest answer to it would be buffered against the"
+    echo "256 KiB filter-byte budget where it can never drain. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the clamp a straddling range's start goes on the wire below the block floor (expected)."
+fi
+
+build "$BUILD_DIR/kat_reqfloor_nomemo" -DCF_REQ_FLOOR_NO_MEMO -DKAT_REQ_FLOOR_REDGREEN_ONLY
+if "$BUILD_DIR/kat_reqfloor_nomemo"; then
+    echo "GATE FAILURE: the CF_REQ_FLOOR_NO_MEMO build PASSED. The floor memo's red-before-green cannot"
+    echo "go red -- the clamp could re-introduce one full O(chainLen) prevBlock descent PER getcfilters"
+    echo "send under the non-recursive manager->lock (up to CF_REREQ_BATCH_PER_TICK per tick), the exact"
+    echo "cost class the Pass A/B/C single-descent restructure removed, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: without the memo a 2-send tick pays one block-floor descent PER SEND (expected)."
+fi
+
+# ==== F4 PART A: CF_GAVEUP_MAX MUST ABSORB A MAXIMAL COALESCED RUN ===========
+# CF_GAVEUP_MAX was 512 while CF_REREQ_MAX_RANGE is 1000 -- and 1000 is exactly
+# what BRCFScanLedgerPeekRerequestRange emits as ONE coalesced getcfilters. So a
+# maximal dead run could never be fully retired: RetireCapped parks 512 heights,
+# _cfLedgerMoveToGaveUp then returns 0, and the remaining 488 stay in `outstanding`
+# CAPPED -- where no driver ever offers them again (Peek/NextRerequest both skip a
+# capped entry) and, via _cfLedgerAdvance's min(outstanding[0], gaveUp[0]) - 1 cap,
+# they pin the scan frontier and the whole paced convoy forever.
+#   * -DCF_GAVEUP_CEILING_UNFIXED: CF_GAVEUP_MAX goes back to 512 (everything else
+#     -- RetireCapped, the valve, the drivers -- stays live, so what is proven red is
+#     the CEILING). The case is PURE LEDGER, so a RED cannot be a driver/peer/harness
+#     artifact -> RED.
+# HARD-FAILS run.sh if it unexpectedly PASSES.
+build "$BUILD_DIR/kat_gaveup_ceiling_unfixed" -DCF_GAVEUP_CEILING_UNFIXED -DKAT_GAVEUP_CEILING_REDGREEN_ONLY
+if "$BUILD_DIR/kat_gaveup_ceiling_unfixed"; then
+    echo "GATE FAILURE: the CF_GAVEUP_CEILING_UNFIXED build PASSED. F4 Part A's red-before-green"
+    echo "cannot go red -- a maximal coalesced dead run would leave CF_REREQ_MAX_RANGE-CF_GAVEUP_MAX"
+    echo "heights CAPPED in \`outstanding\`, offered by no driver and pinning the scan frontier"
+    echo "permanently, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: with CF_GAVEUP_MAX=512 a maximal 1000-height run cannot be fully retired (expected)."
+fi
+
+# ==== F4 PART B: THE B2 ARM PREDICATE + RUN-WIDE ACTION ======================
+# Raising the ceiling alone does NOT fix the valve. Its arm predicate was
+# "gaveUp[0] < outstanding[0].height", which treats EVERY outstanding entry as
+# recoverable-and-being-retried -- false for a CAPPED one, which no driver will ever
+# offer again. When such a hole is the pin the predicate reads FALSE and the valve is
+# inert while the frontier stays frozen: exactly where the field trace terminated
+# (outstanding[0] = F+1 at attempts 5, gaveUp[0] = F+2, gaveUp at its ceiling). That
+# state survives ANY finite ceiling -- the valve re-arms gaveUp[0], another height
+# retires into the freed slot, and the re-armed hole re-exhausts with gaveUp full
+# again. Two twice-built shapes, BOTH with the Part A ceiling FIXED so each gate is
+# about the VALVE alone, and both of which MUST fail:
+#   * -DCONVOY_B2_ARM_PREDICATE_UNFIXED : the pre-F4 predicate is compiled back in
+#     (the valve, its peer/latch/REARM_MAX rules and both abandonment primitives stay
+#     live, so what is proven red is the PREDICATE) -> the valve never arms, the
+#     frontier never moves -> RED.
+#   * -DCONVOY_B2_SINGLE_HEIGHT_STEP    : the valve's run cap goes back to ONE height
+#     per decision. Per height it stays correct -- so this gate is not about
+#     correctness but about whether the escape exists at FIELD TIMESCALES: one height
+#     per (1 + CF_CONVOY_REARM_MAX) x 7.5-min sequence is ~15 days for a
+#     CF_REREQ_MAX_RANGE-wide band, so the band does not clear inside the budget -> RED.
+# Both HARD-FAIL run.sh if they unexpectedly PASS.
+build "$BUILD_DIR/kat_b2_pin_unfixed" -DCONVOY_B2_ARM_PREDICATE_UNFIXED -DKAT_B2_PIN_REDGREEN_ONLY
+if "$BUILD_DIR/kat_b2_pin_unfixed"; then
+    echo "GATE FAILURE: the CONVOY_B2_ARM_PREDICATE_UNFIXED build PASSED. F4 Part B's red-before-green"
+    echo "cannot go red -- a capped outstanding hole below gaveUp[0] would read as 'still being retried',"
+    echo "the valve would stay inert, and that one hole would pin the scan frontier (and the whole paced"
+    echo "convoy) forever, undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: the pre-F4 arm predicate is FALSE forever on a capped outstanding pin (expected)."
+fi
+
+build "$BUILD_DIR/kat_b2_pin_singlestep" -DCONVOY_B2_SINGLE_HEIGHT_STEP -DKAT_B2_PIN_REDGREEN_ONLY
+if "$BUILD_DIR/kat_b2_pin_singlestep"; then
+    echo "GATE FAILURE: the CONVOY_B2_SINGLE_HEIGHT_STEP build PASSED. The run-wide half of F4 Part B"
+    echo "cannot go red -- a one-height-per-cycle valve needs ~15 days to clear a single"
+    echo "CF_REREQ_MAX_RANGE-wide dead band, i.e. an escape that exists on paper and not in the field,"
+    echo "undetected. Refusing to green."
+    exit 1
+else
+    echo "RED confirmed: a one-height-per-cycle valve does not clear a full-width band in the budget (expected)."
+fi
+
+# ==== FROZEN-FRONTIER CONVOY WEDGE — REPRODUCTION (RED ON SHIPPED CODE) ======
+# ⚠️ THIS GATE IS WIRED THE OPPOSITE WAY ROUND FROM EVERY OTHER GATE ABOVE, AND
+# THAT IS DELIBERATE. Every stanza above compiles a FIX out with a -D and expects
+# THAT build to fail. This one has no fix to compile out: it reproduces a wedge
+# that is UNFIXED IN SHIPPED CODE, so the build under test is the ORDINARY one and
+# it must exit NONZERO. It therefore cannot sit in the default suite below (this
+# script runs under `set -euo pipefail`), and it gets its own KAT_WEDGE_REPRO_ONLY
+# build that runs ONLY that case.
+#
+# WHAT IT REPRODUCES (measured on hardware, deep restore, 2026-07-29):
+# cfLedger.scannedThrough freezes at a height F and never advances again while
+# cfilters keep arriving in volume (6,346 during the freeze), outstandingCount
+# stays high and does not drain, the hole range starting exactly one block above F
+# is re-requested repeatedly, and gaveUp/abandonedBelow never produce an escape.
+# The case installs that shape with the REAL arrival handler (_peerRelayedCFilter)
+# — the first case in this file to drive it — by serving the dead band under a
+# fork hash the wallet does not hold, so an arrival legitimately fails to credit.
+#
+# ⚠️ AN INVERTED GATE NEEDS **BOTH** DIRECTIONS CHECKED MECHANICALLY, AND THE FIRST
+# CUT OF THIS STANZA DID NOT HAVE THEM. It had only the "must exit nonzero" half, and
+# the case encoded the wedge itself in three MECHANISM assertions — so a landed fix
+# flipped LIVENESS green and those three red, the exit code stayed 1, and this stanza
+# happily printed "RED confirmed … (expected)" forever. A fixed wedge, reported as
+# unfixed, permanently, with nothing in the runner able to notice. The three
+# assertions are now trace OUTPUT (see the MECHANISM TRACE block in the case), and
+# the green direction is checked by a SECOND build below rather than by hand once.
+#
+# WHEN A REAL PRODUCTION FIX LANDS: flip THIS (ordinary) stanza to expect exit 0,
+# fold the case into the default suite in main(), and delete the "expected nonzero"
+# wording. The SIMULATED-RECOVERY stanza below keeps expecting exit 0, unchanged —
+# it is not about any particular fix, it is the standing proof that this case's
+# assertion set can still recognise a recovery at all. Do NOT delete either build:
+# the case becomes the regression test for whatever escape the fix installs. The
+# acceptance assertion is stated as the DISJUNCTION the production design already
+# promises (scan the hole OR loudly abandon it), so it greens for either fix and
+# prejudges neither.
+# ⚠️ FLIPPED BY F4 — THIS STANZA NOW EXPECTS EXIT 0, AS THE CASE'S OWN INSTRUCTIONS
+# DIRECT ("WHEN A REAL PRODUCTION FIX LANDS: flip THIS (ordinary) stanza to expect
+# exit 0, fold the case into the default suite in main()"). F4 landed the escape:
+# CF_GAVEUP_MAX now absorbs a maximal run (Part A), the B2 arm predicate sees a
+# capped-outstanding pin, and the valve acts on the whole coalesced run (Part B). The
+# dead band is now ABANDONED in one surfaced WARN and the frontier moves past the
+# pinning hole. The case is folded into the default suite as well and this stanza is
+# retained as the NAMED acceptance gate (it runs ONLY that case, so a regression here
+# is unambiguous).
+#
+# WHAT THIS GATE DOES **NOT** DISCRIMINATE — state it, do not let it drift. Its
+# LIVENESS assertion is the design's own DISJUNCTION ("scanned OR loudly abandoned"),
+# deliberately so, and it is satisfied by ANY ONE of F4's three sub-fixes on its own:
+#   * -DCF_GAVEUP_CEILING_UNFIXED           -> still exits 0 (2 WARNs)
+#   * -DCONVOY_B2_ARM_PREDICATE_UNFIXED     -> still exits 0 (1 WARN)
+#   * -DCONVOY_B2_SINGLE_HEIGHT_STEP        -> still exits 0, but only ONE height of
+#                                              the 1000-height band is surfaced in the
+#                                              whole budget
+# So this is the ESCAPE-AT-ALL gate, NOT a per-mechanism gate. The per-mechanism
+# red-before-green gates are the two F4 stanzas above
+# (KAT_GAVEUP_CEILING_REDGREEN_ONLY / KAT_B2_PIN_REDGREEN_ONLY), and those DO isolate
+# one mechanism each. Do not "strengthen" this case's acceptance assertion into a
+# per-mechanism claim: the disjunction is what keeps it from prejudging the escape.
+build "$BUILD_DIR/kat_wedge_repro" -DKAT_WEDGE_REPRO_ONLY
+wedge_log="$BUILD_DIR/wedge.log"
+if "$BUILD_DIR/kat_wedge_repro" >"$wedge_log" 2>&1; then
+    echo "GREEN confirmed: the frozen-frontier convoy wedge now RECOVERS on production code (expected)."
+    { grep -m1 "^PASS: LIVENESS" "$wedge_log" || true; } | sed 's/^/    /'
+    { grep -m1 "^   \[wedge\] F=" "$wedge_log" || true; } | sed 's/^/    /'
+    { grep -m1 "^   \[wedge\] OUTSTANDING TRAJECTORY" "$wedge_log" || true; } | sed 's/^/    /'
+    { grep -m1 "^   \[wedge\] MECHANISM TRACE" "$wedge_log" || true; } | sed 's/^/    /'
+else
+    echo "GATE FAILURE: the FROZEN-FRONTIER WEDGE acceptance case FAILED. The F4 escape has"
+    echo "REGRESSED: a wallet whose scan frontier freezes at a dead band no longer recovers —"
+    echo "neither by scanning the band nor by loudly abandoning it — so it wedges permanently"
+    echo "while reporting itself as progressing. Refusing to green."
+    sed 's/^/    | /' "$wedge_log"
+    exit 1
+fi
+
+# ---- GREEN: the SAME case, with a SIMULATED landed fix, MUST pass -------------
+# -DKAT_WEDGE_SIMULATE_RECOVERY changes NOTHING in production. It flips one
+# harness-side fact partway through the tick loop — the modeled network starts
+# serving the dead band under a hash the wallet actually holds — which is exactly
+# what a real fix looks like at this harness's boundary, however the fix gets there
+# (header re-fetch, cfheader re-anchor, peer rotation, re-keying back-pressure off
+# progress). Whether the wallet then RECOVERS is decided entirely by unmodified
+# production code; the harness never writes to the ledger.
+#
+# This build is the ONLY thing standing between this file and the defect described
+# above: it fails loudly the moment anyone re-encodes the wedge as a pass condition,
+# because a gate that can only ever go red is worth exactly as little as one that
+# can only ever go green.
+build "$BUILD_DIR/kat_wedge_recovered" -DKAT_WEDGE_REPRO_ONLY -DKAT_WEDGE_SIMULATE_RECOVERY
+wedge_rec_log="$BUILD_DIR/wedge_recovered.log"
+if "$BUILD_DIR/kat_wedge_recovered" >"$wedge_rec_log" 2>&1; then
+    echo "GREEN confirmed: with the dead band made servable mid-run, the SAME case PASSES (expected) —"
+    echo "so the wedge assertions can recognise a recovery and this gate is not red-only."
+    { grep -m1 "^PASS: LIVENESS" "$wedge_rec_log" || true; } | sed 's/^/    /'
+    { grep -m1 "^   \[wedge\] OUTSTANDING TRAJECTORY" "$wedge_rec_log" || true; } | sed 's/^/    /'
+else
+    echo "GATE FAILURE: the SIMULATED-RECOVERY build FAILED. This case can therefore go RED but not"
+    echo "GREEN, which means it CANNOT DETECT A FIX: when the wedge is finally fixed, LIVENESS will"
+    echo "pass, some other assertion will fail, the exit code will stay nonzero, and the ordinary"
+    echo "stanza above will keep reporting 'RED confirmed … (expected)' forever — a fixed wedge"
+    echo "reported as unfixed, permanently. Most likely cause: an assertion that encodes the WEDGE"
+    echo "(outstanding staying >= LOWWATER, the convoy windows staying shut, scannedThrough staying"
+    echo "at F on every tick) has been promoted back out of the MECHANISM TRACE block into a"
+    echo "check(). Those are trace OUTPUT by design. Refusing to green."
+    sed 's/^/    | /' "$wedge_rec_log"
+    exit 1
+fi
+
+# ---- GREEN: a FAST escape must also pass (the bug-property demotion, pinned) ---
+# The stanza above proves the case can recognise a recovery that happens at t8. This
+# one proves it can recognise a recovery that happens IMMEDIATELY, and it exists
+# because the case still carried two assertions of the same class as the three already
+# demoted — claims that hold only WHILE THE WEDGE IS BROKEN:
+#
+#   * `cumSendsDead >= 3` — the field's 3x/5x re-request signature. A fix that escapes
+#     on its FIRST or SECOND dead re-request (i.e. a better fix) produces 1 or 2 and
+#     was reported as a FAILURE for succeeding quickly. Now a print; the
+#     bug-independent `tick1HadDeadRange == 1` carries the anti-vacuity load.
+#   * `array_count(connectedPeers) == 2` — that neither CF peer was ever dropped. Real
+#     escape routes (cfheaders stall-recovery disconnect, PeerMisbehavin, the residual
+#     driver's rotate-away) drop or rotate a peer AS PART of recovering. Now asserts
+#     the property that survives a fix: at least one peer is still offerable, so the
+#     RED can never be read as "we hung up on everybody".
+#
+# This build installs BOTH shapes at once, because both were false-RED'd by the pair:
+#   -DWEDGE_RECOVERY_TICK=1         the simulated fix lands on the FIRST tick (2 dead
+#                                   re-requests instead of 4) -> `cumSendsDead >= 3` fails
+#   -DKAT_WEDGE_ESCAPE_ROTATES_PEER one CF peer is disconnected and removed from
+#                                   connectedPeers, exactly as _BRPeerManagerPeerDisconnected
+#                                   does -> `array_count(connectedPeers) == 2` fails
+# Keep this stanza: it is what makes re-promoting either assertion fail LOUDLY instead of
+# silently narrowing this gate to "only escapes that are slow, and that keep every peer,
+# count as escapes".
+build "$BUILD_DIR/kat_wedge_fast" -DKAT_WEDGE_REPRO_ONLY -DKAT_WEDGE_SIMULATE_RECOVERY \
+      -DWEDGE_RECOVERY_TICK=1 -DKAT_WEDGE_ESCAPE_ROTATES_PEER
+wedge_fast_log="$BUILD_DIR/wedge_fast.log"
+if "$BUILD_DIR/kat_wedge_fast" >"$wedge_fast_log" 2>&1; then
+    echo "GREEN confirmed: an IMMEDIATE escape (recovery at t1) that also ROTATES A PEER AWAY passes"
+    echo "(expected) — no assertion in this case requires the bug to persist long enough to leave its"
+    echo "field signature, or requires the peer set to survive the fix untouched."
+    { grep -m1 "^PASS: LIVENESS" "$wedge_fast_log" || true; } | sed 's/^/    /'
+    { grep -m1 "^   \[wedge\] DEAD-RANGE RE-REQUESTS" "$wedge_fast_log" || true; } | sed 's/^/    /'
+    { grep -m1 "SIMULATED ESCAPE-BY-ROTATION" "$wedge_fast_log" || true; } | sed 's/^/    /'
+    { grep -m1 "^   \[wedge\] PEER SET at end" "$wedge_fast_log" || true; } | sed 's/^/    /'
+else
+    echo "GATE FAILURE: a recovery that works FAST, or that rotates away from the misbehaving peer, is"
+    echo "being reported as a failure. Some assertion in the frozen-frontier case is a property of the"
+    echo "BUG rather than of a wallet — most likely the"
+    echo "dead-range re-request COUNT (the 3x/5x field signature) or the connected-peer count has been"
+    echo "promoted back out of the reported traces into a check(). Both are trace OUTPUT by design:"
+    echo "a faster escape and an escape that rotates a peer are BETTER fixes, not failures."
+    sed 's/^/    | /' "$wedge_fast_log"
+    exit 1
 fi
 
 # ---- GREEN: fixed full suite ------------------------------------------------
