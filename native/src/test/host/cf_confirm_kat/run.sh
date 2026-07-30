@@ -124,6 +124,46 @@ if grep -q "test4: unprovable main chain is a no-op" "$BUILD_DIR/red.log"; then
 fi
 echo "RED gate OK: pre-fix shape died on signal $((RED_STATUS - 128)) at test4's call."
 
+# ── RED 2: the naive element cache must fail test6 BY ASSERTION ───────────────
+# CF_ELEMS_CACHE_NOINVALIDATE caches the wallet's BIP 158 element set once and never
+# invalidates it. An address derived after the first filter is then never matched — a
+# silent missed receive. This arm must FAIL (exit 1 with a FAIL line), and must NOT die on
+# a signal: the production defect is silence, so a crash here would be proving something
+# else.
+build "$BUILD_DIR/cf_confirm_kat_stalecache" -DCF_ELEMS_CACHE_NOINVALIDATE
+
+set +e
+"$BUILD_DIR/cf_confirm_kat_stalecache" > "$BUILD_DIR/red2.log" 2>&1
+RED2_STATUS=$?
+set -e
+
+if [ "$RED2_STATUS" -ge 129 ]; then
+    echo "GATE FAILED: the CF_ELEMS_CACHE_NOINVALIDATE build died on signal $((RED2_STATUS - 128))."
+    echo "             It must fail by ASSERTION, not by crashing."
+    sed 's/^/             | /' "$BUILD_DIR/red2.log"
+    exit 1
+fi
+if [ "$RED2_STATUS" -eq 0 ]; then
+    echo "GATE FAILED: the CF_ELEMS_CACHE_NOINVALIDATE build PASSED. A cache that never"
+    echo "             invalidates would ship undetected, so test6 is not a real gate."
+    exit 1
+fi
+if ! grep -q "FAIL: test6: an address added AFTER the cache was built IS matched" "$BUILD_DIR/red2.log"; then
+    echo "GATE FAILED: the stale-cache build failed, but NOT on test6's staleness assertion,"
+    echo "             so the failure is not the defect under test."
+    sed 's/^/             | /' "$BUILD_DIR/red2.log"
+    exit 1
+fi
+# The stale cache must still pass the controls — otherwise test6 would go red for a
+# trivial reason (e.g. an empty element set) rather than for staleness specifically.
+if ! grep -q "PASS: test6: positive control -- the pre-existing address is still matched" "$BUILD_DIR/red2.log"; then
+    echo "GATE FAILED: the stale-cache build also lost the pre-existing address, so test6's"
+    echo "             red is not isolated to staleness."
+    sed 's/^/             | /' "$BUILD_DIR/red2.log"
+    exit 1
+fi
+echo "RED gate OK: stale element cache fails test6 by assertion, controls still pass."
+
 # ── GREEN: the production shape must pass every check ─────────────────────────
 build "$BUILD_DIR/cf_confirm_kat"
 

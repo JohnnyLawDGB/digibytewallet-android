@@ -239,6 +239,95 @@ int main(void)
           "test5: positive control -- a main-chain tip block still confirms after the guard");
     check(txStatusFired == 1, "test5: positive control -- txStatusUpdate still fires");
 
+    // --- Test 6: FUND-SAFETY GATE for the cached BIP 158 element set.
+    //
+    // _peerRelayedCFilter used to rebuild the wallet's element set for EVERY arriving
+    // cfilter, which measured as 98.8% of the per-filter cost. It is now cached on the
+    // manager and invalidated when the wallet's address COUNT changes.
+    //
+    // The failure mode that matters is not slowness, it is silence: if the cache goes
+    // stale after the wallet derives a new address, a filter for a block paying that
+    // address does not match, the block is never fetched, and the payment is NEVER SEEN.
+    // So this asserts the cache observes an address added AFTER it was first built.
+    //
+    // It tests the element SET rather than a GCS match because the core has no filter
+    // BUILDER (BRGCSFilter only parses and matches), so a filter containing a chosen
+    // scriptPubKey cannot be synthesised here. The element set is exactly the input
+    // BRGCSFilterMatchAny consumes, and staleness is what can break. ---
+    BRWalletFilterElements *fe1 = _BRPeerManagerFilterElementsLocked(manager);
+    check(fe1 != NULL && fe1->count > 0, "test6: element set builds");
+    if (! fe1) { printf("\nFATAL: no element set\n"); return 1; }
+    size_t count1 = fe1->count;
+
+    // Cached, not rebuilt: with no mutation the SAME pointer must come back. This is what
+    // stops a future refactor from quietly restoring the per-filter rebuild.
+    check(_BRPeerManagerFilterElementsLocked(manager) == fe1,
+          "test6: unchanged address set returns the cached list (no per-filter rebuild)");
+
+    // Pin a brand-new address, the way the JNI watch-set path does. This mutates the
+    // wallet WITHOUT going through the peer manager at all — the case that defeats
+    // invalidating only at manager-visible sites.
+    //
+    // The address must be REAL. A hand-written string does not encode, so
+    // BRAddressScriptPubKey returns 0, the element is legitimately `dropped`, and the
+    // staleness assertion below would pass/fail for the wrong reason (measured: it did).
+    // So derive genuine addresses from a SECOND wallet on a different seed — which is also
+    // exactly what watching an external address means.
+    uint8_t seed2[64];
+    memcpy(seed2, seed, sizeof(seed2));
+    seed2[0] ^= 0xFF;   // a different seed => different, valid, non-wallet-1 addresses
+    BRWallet *other = BRWalletNew(NULL, 0, BRBIP32MasterPubKeyBIP84(seed2, sizeof(seed2)));
+    check(other != NULL, "test6: second wallet built (source of real external addresses)");
+    if (! other) { printf("\nFATAL\n"); return 1; }
+
+    BRAddress freshAddr = BRWalletReceiveAddress(other, 1);
+    uint8_t freshSpk[64];
+    size_t freshSpkLen = BRAddressScriptPubKey(freshSpk, sizeof(freshSpk), freshAddr.s);
+    check(freshSpkLen > 0, "test6: the new watched address has an encodable scriptPubKey");
+    // It must not already be in wallet 1, or the assertion would be vacuous.
+    int preExisting = 0;
+    for (size_t i = 0; i < fe1->count; i++) {
+        if (fe1->elementLens[i] == freshSpkLen && memcmp(fe1->elements[i], freshSpk, freshSpkLen) == 0)
+            preExisting = 1;
+    }
+    check(preExisting == 0, "test6: the new address was NOT already in the cached set");
+
+    BRWalletAddWatchedAddress(wallet, freshAddr.s);
+
+    BRWalletFilterElements *fe2 = _BRPeerManagerFilterElementsLocked(manager);
+    check(fe2 != NULL, "test6: element set still builds after the wallet changed");
+
+    int foundFresh = 0, foundOriginal = 0;
+    for (size_t i = 0; fe2 && i < fe2->count; i++) {
+        if (fe2->elementLens[i] == freshSpkLen && memcmp(fe2->elements[i], freshSpk, freshSpkLen) == 0)
+            foundFresh = 1;
+        if (fe2->elementLens[i] == spkLen && memcmp(fe2->elements[i], spk, spkLen) == 0)
+            foundOriginal = 1;
+    }
+
+    // RED here on the naive-cache shape (-DCF_ELEMS_CACHE_NOINVALIDATE): fe2 == fe1, so
+    // the new element is absent and this fails by ASSERTION, not by crashing — the
+    // production bug is a silent miss, and a gate that crashed instead would be proving
+    // something else.
+    check(foundFresh == 1, "test6: an address added AFTER the cache was built IS matched");
+    // Positive control: a cache that rebuilt into an empty/garbage set would pass the
+    // check above only if it also lost this one.
+    check(foundOriginal == 1, "test6: positive control -- the pre-existing address is still matched");
+    check(fe2 && fe2->count > count1, "test6: the element set grew by the new address");
+
+    // Negative control: an address the wallet does not hold must NOT be present, so the
+    // test cannot pass by matching indiscriminately.
+    BRAddress foreignAddr = BRWalletReceiveAddress(other, 0); // legacy-form addr from wallet 2, never pinned
+    uint8_t foreignSpk[64];
+    size_t foreignSpkLen = BRAddressScriptPubKey(foreignSpk, sizeof(foreignSpk), foreignAddr.s);
+    check(foreignSpkLen > 0, "test6: the foreign control address encodes");
+    int foundForeign = 0;
+    for (size_t i = 0; fe2 && i < fe2->count; i++) {
+        if (fe2->elementLens[i] == foreignSpkLen &&
+            memcmp(fe2->elements[i], foreignSpk, foreignSpkLen) == 0) foundForeign = 1;
+    }
+    check(foundForeign == 0, "test6: negative control -- a foreign address is NOT in the set");
+
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }
