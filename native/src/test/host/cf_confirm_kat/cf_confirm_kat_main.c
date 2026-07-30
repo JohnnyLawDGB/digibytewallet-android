@@ -328,6 +328,45 @@ int main(void)
     }
     check(foundForeign == 0, "test6: negative control -- a foreign address is NOT in the set");
 
+    // --- Test 7: the cache key must include the NETWORK.
+    //
+    // The emitted element BYTES are a function of (address strings, network), not of the
+    // address set alone: BRAddressScriptPubKey encodes per BRNetworkIsTestnet(). So a
+    // network switch changes the elements while the address generation AND count both stay
+    // identical. An adversarial probe measured exactly this: count 645 -> 645 unchanged,
+    // elements 645 -> 0.
+    //
+    // This is what refuted a count-only key, and the dangerous variant is a PARTIAL drop:
+    // some addresses stop encoding while others still do, so the set stays non-empty and
+    // the build-failure retry never fires — a permanently wrong element set, silently.
+    //
+    // RED on -DCF_ELEMS_CACHE_COUNT_ONLY (and on -DCF_ELEMS_CACHE_NOINVALIDATE). ---
+    BRWalletFilterElements *feMain = _BRPeerManagerFilterElementsLocked(manager);
+    size_t mainCount = (feMain ? feMain->count : 0);
+    check(mainCount > 0, "test7: mainnet element set is non-empty");
+
+    uint64_t genBefore = 0; size_t cntBefore = 0;
+    BRWalletAddrSetKey(wallet, &genBefore, &cntBefore);
+
+    BRSetNetwork(1);   // switch to testnet: same addresses, different encoding rules
+
+    uint64_t genAfter = 0; size_t cntAfter = 0;
+    BRWalletAddrSetKey(wallet, &genAfter, &cntAfter);
+    // The premise of the whole test: neither field moves, so a key without the network
+    // cannot possibly notice. If this ever fails the test has stopped proving anything.
+    check(genAfter == genBefore && cntAfter == cntBefore,
+          "test7: the network switch leaves addrGen AND addrCount unchanged");
+
+    BRWalletFilterElements *feTest = _BRPeerManagerFilterElementsLocked(manager);
+    size_t testCount = (feTest ? feTest->count : 0);
+    check(testCount != mainCount,
+          "test7: the element set was rebuilt for the new network");
+
+    BRSetNetwork(0);   // restore, so nothing after this observes testnet encoding
+    BRWalletFilterElements *feBack = _BRPeerManagerFilterElementsLocked(manager);
+    check(feBack != NULL && feBack->count == mainCount,
+          "test7: switching back restores the mainnet element set");
+
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

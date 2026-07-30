@@ -164,6 +164,49 @@ if ! grep -q "PASS: test6: positive control -- the pre-existing address is still
 fi
 echo "RED gate OK: stale element cache fails test6 by assertion, controls still pass."
 
+# ── RED 3: a COUNT-ONLY cache key must fail test7 ─────────────────────────────
+# This is the rule an adversarial review refuted. Keying only on the address count misses a
+# network switch: the elements re-encode while addrGen and addrCount both stay identical, so
+# the cache serves a permanently wrong element set. Must fail by ASSERTION on test7 while
+# test6 (the append case, which a count DOES catch) still passes — that pairing is what
+# proves test7 is isolated to the network term.
+build "$BUILD_DIR/cf_confirm_kat_countonly" -DCF_ELEMS_CACHE_COUNT_ONLY
+
+set +e
+"$BUILD_DIR/cf_confirm_kat_countonly" > "$BUILD_DIR/red3.log" 2>&1
+RED3_STATUS=$?
+set -e
+
+if [ "$RED3_STATUS" -ge 129 ]; then
+    echo "GATE FAILED: the CF_ELEMS_CACHE_COUNT_ONLY build died on signal $((RED3_STATUS - 128));"
+    echo "             it must fail by ASSERTION."
+    sed 's/^/             | /' "$BUILD_DIR/red3.log"
+    exit 1
+fi
+if [ "$RED3_STATUS" -eq 0 ]; then
+    echo "GATE FAILED: the CF_ELEMS_CACHE_COUNT_ONLY build PASSED, so test7 does not actually"
+    echo "             gate the network term of the cache key."
+    exit 1
+fi
+if ! grep -q "FAIL: test7: the element set was rebuilt for the new network" "$BUILD_DIR/red3.log"; then
+    echo "GATE FAILED: the count-only build failed, but NOT on test7's network assertion."
+    sed 's/^/             | /' "$BUILD_DIR/red3.log"
+    exit 1
+fi
+if ! grep -q "PASS: test6: an address added AFTER the cache was built IS matched" "$BUILD_DIR/red3.log"; then
+    echo "GATE FAILED: the count-only build also failed test6, so test7's red is not isolated"
+    echo "             to the network term."
+    sed 's/^/             | /' "$BUILD_DIR/red3.log"
+    exit 1
+fi
+if ! grep -q "PASS: test7: the network switch leaves addrGen AND addrCount unchanged" "$BUILD_DIR/red3.log"; then
+    echo "GATE FAILED: the network switch DID move addrGen/addrCount, so test7 no longer"
+    echo "             proves a count-based key is insufficient."
+    sed 's/^/             | /' "$BUILD_DIR/red3.log"
+    exit 1
+fi
+echo "RED gate OK: count-only key fails test7 (network term) while test6 still passes."
+
 # ── GREEN: the production shape must pass every check ─────────────────────────
 build "$BUILD_DIR/cf_confirm_kat"
 
