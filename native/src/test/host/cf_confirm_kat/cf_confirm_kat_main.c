@@ -106,6 +106,12 @@ static void txStatusUpdateCb(void *info)
 
 int main(void)
 {
+    // Line-buffered: test4's RED build is EXPECTED to die on SIGSEGV, and a crash
+    // discards block-buffered stdout. run.sh's gate greps this output to prove the
+    // crash happens at test4's call and not somewhere earlier, so the checks printed
+    // before it must survive the crash.
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     uint8_t seed[64];
     BRBIP39DeriveKey(seed, kMnemonic, NULL);
     BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
@@ -178,6 +184,60 @@ int main(void)
     BRTransaction *tx2Again = BRWalletTransactionForHash(wallet, tx2->txHash);
     check(tx2Again != NULL && tx2Again->blockHeight == TX_UNCONFIRMED,
           "test3: unrelated wallet tx unaffected by a call naming only a non-wallet hash");
+
+    // --- Test 4: REMOTE-DoS REGRESSION GATE. A `block` message naming a
+    // resident block that sits BELOW everything the main-chain walk can reach
+    // must not crash.
+    //
+    // BRPeerManagerNew seeds every hardcoded checkpoint as a stub into
+    // manager->blocks (the checkpoints loop in BRPeerManagerNewEx) and never
+    // sets their prevBlock, so each stub's prevBlock is the zero hash.
+    // _peerRelayedBlockTxns resolves `b` from the named hash, then walks b2 back
+    // from manager->lastBlock to b's height to decide "is this the main chain".
+    // That walk hops via prevBlock, so it yields b2 == NULL long before reaching
+    // a deep stub. BRMerkleBlockEq (BRMerkleBlock.h) dereferences BOTH arguments
+    // and blockHash is at struct offset 0, so the pre-fix shape reads 0x0.
+    //
+    // Any peer the wallet dials can drive this: the handler is not
+    // request-gated, so one unsolicited well-formed `block` message replaying a
+    // public historic block at a checkpoint height is enough. ---
+    UInt256 zeroHash = UINT256_ZERO;
+    UInt256 stubHash = UInt256Reverse(BRMainNetParams.checkpoints[0].hash);
+    BRMerkleBlock *stub = BRSetGet(manager->blocks, &stubHash);
+    check(stub != NULL, "test4: checkpoint stub is resident in manager->blocks");
+    if (!stub) { printf("\nFATAL: no resident stub -- test4 would not reach the walk\n"); return 1; }
+    check(stub->height == BRMainNetParams.checkpoints[0].height,
+          "test4: resident stub is the height-0 checkpoint");
+    check(UInt256IsZero(stub->prevBlock),
+          "test4: stub prevBlock is zero -- the walk's next hop cannot resolve");
+    check(BRSetGet(manager->blocks, &zeroHash) == NULL,
+          "test4: nothing is keyed at the zero hash -- the walk really does miss");
+    check(manager->lastBlock != NULL && manager->lastBlock->height > stub->height,
+          "test4: lastBlock is above the stub, so the walk loop body runs");
+
+    BRTransaction *tx4 = payTx(spk, spkLen, 100000, 0x44);
+    BRWalletRegisterTransaction(wallet, tx4);
+    txStatusFired = 0;
+    UInt256 txHashes4[1] = { tx4->txHash };
+    _peerRelayedBlockTxns(&info1, stubHash, txHashes4, 1); // RED: SIGSEGV at 0x0 here
+
+    BRTransaction *after4 = BRWalletTransactionForHash(wallet, tx4->txHash);
+    check(after4 != NULL && after4->blockHeight == TX_UNCONFIRMED,
+          "test4: unprovable main chain is a no-op, tx stays TX_UNCONFIRMED");
+    check(txStatusFired == 0, "test4: txStatusUpdate NOT fired for an unprovable main chain");
+
+    // --- Test 5: positive control, re-asserted AFTER the guard. A guard that
+    // bailed out on everything would still pass test4; this must still confirm. ---
+    BRTransaction *tx5 = payTx(spk, spkLen, 100000, 0x55);
+    BRWalletRegisterTransaction(wallet, tx5);
+    txStatusFired = 0;
+    UInt256 txHashes5[1] = { tx5->txHash };
+    _peerRelayedBlockTxns(&info1, block1->blockHash, txHashes5, 1); // block1 is still the tip
+
+    BRTransaction *after5 = BRWalletTransactionForHash(wallet, tx5->txHash);
+    check(after5 != NULL && after5->blockHeight == block1->height,
+          "test5: positive control -- a main-chain tip block still confirms after the guard");
+    check(txStatusFired == 1, "test5: positive control -- txStatusUpdate still fires");
 
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
