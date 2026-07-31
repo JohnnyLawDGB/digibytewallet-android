@@ -45,6 +45,20 @@ const val SYNC_BEHIND_THRESHOLD = 100L
 const val CF_BEHIND_THRESHOLD = 100L
 
 /**
+ * How far the compact-filter SCAN may trail the tip before we stop claiming "Synced".
+ *
+ * cfheaders arriving is not the same as blocks being scanned: the filter-header chain can sit at
+ * the tip while a band below it was never evaluated against the wallet, which is precisely how a
+ * permanently unscanned band once hid behind a "Synced" indicator while the wallet reported
+ * "Block 23,943,959" — the scan had frozen 25,928 blocks short and nothing said so.
+ *
+ * Matched to the other two thresholds. The scan legitimately trails by an in-flight window during
+ * catch-up, but at the tip it settles within a few blocks, and 100 DigiByte blocks is ~25 minutes,
+ * so this cannot flap on ordinary block arrival.
+ */
+const val SCAN_BEHIND_THRESHOLD = 100L
+
+/**
  * Derive the CF-gated sync frontier from raw inputs. Pure and deterministic —
  * the single place this logic lives.
  *
@@ -59,6 +73,11 @@ const val CF_BEHIND_THRESHOLD = 100L
  *                      (this fn maxes them), so a spiked estimate self-heals.
  * @param cfTip         compact-filter chain tip (getCFChainTipHeight), or 0 if
  *                      CF hasn't started this session
+ * @param scanFrontier  compact-filter SCAN frontier — the height through which filters
+ *                      have actually been evaluated against the wallet
+ *                      (getCfScanLedgerCounts()[0]), or 0 if unknown. Distinct from
+ *                      [cfTip], which only says the filter HEADERS arrived. 0 keeps the
+ *                      pre-existing behaviour, same convention as cfTip.
  */
 fun deriveSyncFrontier(
     state: SyncState,
@@ -67,6 +86,7 @@ fun deriveSyncFrontier(
     targetHeight: Long,
     externalTip: Long,
     cfTip: Long,
+    scanFrontier: Long = 0L,
 ): SyncFrontier {
     // Prefer the authoritative external tip when available; fall back to the
     // peer-quorum target only when the fetch has never succeeded. Never let the
@@ -83,7 +103,14 @@ fun deriveSyncFrontier(
     // cfTip == 0 means CF hasn't started yet → fall back to header logic.
     val cfBehind = cfTip > 0 && effectiveTarget > 0 &&
         (effectiveTarget - cfTip) > CF_BEHIND_THRESHOLD
-    val behind = materiallyBehind || cfBehind
+    // Scan honesty: cfheaders reaching the tip says the filter HEADERS arrived, not that any
+    // block was looked at. Without this term "Synced" is satisfiable with an arbitrarily large
+    // band never evaluated against the wallet — money in it is simply never seen, and the UI is
+    // the only thing that could have said so. scanFrontier == 0 means the ledger has not
+    // reported yet → fall back to the header/cfheader logic, same convention as cfTip.
+    val scanBehind = scanFrontier > 0 && effectiveTarget > 0 &&
+        (effectiveTarget - scanFrontier) > SCAN_BEHIND_THRESHOLD
+    val behind = materiallyBehind || cfBehind || scanBehind
 
     val stage = when {
         state is SyncState.Failed -> SyncStage.Failed
@@ -95,7 +122,13 @@ fun deriveSyncFrontier(
 
     // The bottleneck frontier: the CF tip when cfheaders lags (so the bar moves
     // with filter catch-up instead of freezing at ~100% on headers), else headers.
-    val frontier = if (cfBehind && cfTip > 0) cfTip else currentHeight
+    // Show the true bottleneck. The scan is the last stage, so when it lags it is what the bar
+    // should track — otherwise the bar sits at ~100% on headers while the actual work continues.
+    val frontier = when {
+        scanBehind && scanFrontier > 0 -> scanFrontier
+        cfBehind && cfTip > 0 -> cfTip
+        else -> currentHeight
+    }
 
     val progress = when {
         behind && effectiveTarget > 0 ->

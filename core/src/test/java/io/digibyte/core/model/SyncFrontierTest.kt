@@ -128,4 +128,86 @@ class SyncFrontierTest {
         assertEquals(SyncStage.Syncing, overThreshold.stage)
         assertTrue(overThreshold.progressFraction < 1.0f)
     }
+
+    // ---- scan-frontier honesty -------------------------------------------------
+    //
+    // The defect these cover, in one line: filter HEADERS reaching the tip is not the same as
+    // blocks having been SCANNED. On device the scan froze 25,928 blocks short while the UI
+    // reported "Block 23,943,959" and Synced, so a payment in that band could never be seen.
+
+    @Test
+    fun scanFrontierBehind_isSyncing_evenWithHeadersAndCfTipAtTip() {
+        val f = deriveSyncFrontier(
+            state = SyncState.Complete,
+            peerCount = 8,
+            currentHeight = TIP, targetHeight = TIP,
+            externalTip = TIP, cfTip = TIP,
+            scanFrontier = TIP - 25_928L,   // the measured freeze
+        )
+        assertEquals(SyncStage.Syncing, f.stage)
+    }
+
+    @Test
+    fun scanFrontierBehind_barTracksTheScan_notTheHeaders() {
+        val f = deriveSyncFrontier(
+            state = SyncState.Complete,
+            peerCount = 8,
+            currentHeight = TIP, targetHeight = TIP,
+            externalTip = TIP, cfTip = TIP,
+            scanFrontier = TIP - 25_928L,
+        )
+        // The bar must show the bottleneck, not sit at ~100% on headers.
+        assertEquals(TIP - 25_928L, f.currentBlock)
+        assertTrue("progress should be < 1 while a band is unscanned", f.progressFraction < 1.0f)
+    }
+
+    @Test
+    fun scanFrontierAtTip_isSynced() {
+        val f = deriveSyncFrontier(
+            state = SyncState.Complete,
+            peerCount = 8,
+            currentHeight = TIP, targetHeight = TIP,
+            externalTip = TIP, cfTip = TIP,
+            scanFrontier = TIP,
+        )
+        assertEquals(SyncStage.Synced, f.stage)
+    }
+
+    @Test
+    fun scanFrontierWithinThreshold_isSynced_soItCannotFlapOnBlockArrival() {
+        // A scan trailing by a few blocks is normal at the tip; 100 DGB blocks is ~25 min.
+        val f = deriveSyncFrontier(
+            state = SyncState.Complete,
+            peerCount = 8,
+            currentHeight = TIP, targetHeight = TIP,
+            externalTip = TIP, cfTip = TIP,
+            scanFrontier = TIP - SCAN_BEHIND_THRESHOLD,
+        )
+        assertEquals(SyncStage.Synced, f.stage)
+    }
+
+    @Test
+    fun scanFrontierUnknown_fallsBackToPreExistingBehaviour() {
+        // 0 == the ledger has not reported (pre-startSync, or an older core). Must NOT trap the
+        // wallet in Syncing forever — same convention as cfTip.
+        val f = deriveSyncFrontier(
+            state = SyncState.Complete,
+            peerCount = 8,
+            currentHeight = TIP, targetHeight = TIP,
+            externalTip = TIP, cfTip = TIP,
+            scanFrontier = 0L,
+        )
+        assertEquals(SyncStage.Synced, f.stage)
+    }
+
+    @Test
+    fun scanFrontierDefaultsToUnknown_soExistingCallersAreUnchanged() {
+        val f = deriveSyncFrontier(
+            state = SyncState.Complete,
+            peerCount = 8,
+            currentHeight = TIP, targetHeight = TIP,
+            externalTip = TIP, cfTip = TIP,
+        )
+        assertEquals(SyncStage.Synced, f.stage)
+    }
 }

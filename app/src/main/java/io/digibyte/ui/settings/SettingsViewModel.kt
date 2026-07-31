@@ -61,6 +61,8 @@ class SettingsViewModel @Inject constructor(
     /** Compact-filter chain tip — the FUNCTIONAL sync frontier in CF-only mode.
      *  Polled alongside the other network stats in [refreshNetworkStats]. */
     private val _cfTip = MutableStateFlow(0L)
+    // CF SCAN frontier — see WalletViewModel: filter HEADERS arriving is not blocks scanned.
+    private val _scanFrontier = MutableStateFlow(0L)
 
     /** CF scan-ledger counters (Phase-1 observe-only): scanned-through height,
      *  outstanding, gave-up, and pending. Polled in [refreshNetworkStats]. */
@@ -82,7 +84,8 @@ class SettingsViewModel @Inject constructor(
      *  lags). Inputs are polled per-VM, so the exact block number can differ by
      *  a poll interval during active sync; it converges in steady state. */
     val syncFrontier: StateFlow<SyncFrontier> = combine(
-        syncState, _peerCount, _lastBlockHeight, _estimatedHeight, _externalTip, _cfTip
+        syncState, _peerCount, _lastBlockHeight, _estimatedHeight, _externalTip, _cfTip,
+        _scanFrontier
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         deriveSyncFrontier(
@@ -92,6 +95,7 @@ class SettingsViewModel @Inject constructor(
             targetHeight = values[3] as Long,
             externalTip = values[4] as Long,
             cfTip = values[5] as Long,
+            scanFrontier = values[6] as Long,
         )
     }.stateIn(
         viewModelScope, SharingStarted.Eagerly,
@@ -294,7 +298,10 @@ class SettingsViewModel @Inject constructor(
             // reads — native returns empty/short arrays before startSync.
             runCatching {
                 val c = NativeBridge.getCfScanLedgerCounts()
-                if (c.size >= 4) _cfLedgerCounts.value = CfLedgerCounts(c[0], c[1], c[2], c[3])
+                if (c.size >= 4) {
+                    _cfLedgerCounts.value = CfLedgerCounts(c[0], c[1], c[2], c[3])
+                    _scanFrontier.value = c[0]
+                }
             }
             runCatching {
                 val flat = NativeBridge.getCfScanLedgerHoleRanges()

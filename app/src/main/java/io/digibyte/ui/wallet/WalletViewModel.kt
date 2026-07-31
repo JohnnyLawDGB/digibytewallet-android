@@ -123,6 +123,10 @@ class WalletViewModel @Inject constructor(
      *  pollNativeBalance; 0 until the first cfheaders response. Gates the sync state so the
      *  wallet never shows "Synced" while cfheaders lags the (fast) header chain. */
     private val _cfTip = MutableStateFlow(0L)
+    // CF SCAN frontier: the height through which filters have actually been evaluated
+    // against the wallet. Distinct from _cfTip, which only says the filter HEADERS arrived —
+    // the two diverged by 25,928 blocks in the freeze this gate exists to surface.
+    private val _scanFrontier = MutableStateFlow(0L)
 
     /** Stable sync-target tip, used as the progress denominator so the UI
      *  percent anchors to a stable value rather than peer-quorum
@@ -190,7 +194,8 @@ class WalletViewModel @Inject constructor(
         _targetBlock,
         _recoveryFromTimestamp,
         _externalTip,
-        _cfTip
+        _cfTip,
+        _scanFrontier
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val state = values[0] as SyncState
@@ -202,6 +207,7 @@ class WalletViewModel @Inject constructor(
         val recoveryTs = values[6] as Long?
         val externalTip = values[7] as Long
         val cfTip = values[8] as Long
+        val scanFrontier = values[9] as Long
 
         // CF-gated sync frontier — the single source of truth shared with the
         // Network Info screen and the DigiRunner overlay (see deriveSyncFrontier
@@ -214,6 +220,7 @@ class WalletViewModel @Inject constructor(
             targetHeight = target,
             externalTip = externalTip,
             cfTip = cfTip,
+            scanFrontier = scanFrontier,
         )
 
         // Latch hasReachedSyncedOnce — gates the anti-flash balance guard in
@@ -563,6 +570,11 @@ class WalletViewModel @Inject constructor(
                 // CF frontier (functional sync height in CF-only). Poll every cycle so the
                 // honesty gate un-latches when cfheaders catches up (must keep polling post-Complete).
                 _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)
+                // Same cadence and same background context as the CF tip. Poll every cycle,
+                // post-Complete included, so the gate un-latches once the scan catches up.
+                _scanFrontier.value = runCatching {
+                    NativeBridge.getCfScanLedgerCounts().let { if (it.isNotEmpty()) it[0] else 0L }
+                }.getOrDefault(0L)
                 if (currentHeight > 0) {
                     scanSamples.addLast(System.currentTimeMillis() to currentHeight)
                     while (scanSamples.size > 24) scanSamples.removeFirst()
