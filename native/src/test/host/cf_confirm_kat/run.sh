@@ -61,7 +61,13 @@ shopt -u nullglob
 #   GREEN  the production shape must run every check and exit 0.
 build() {
     local out="$1"; shift
-    clang -w -include stdint.h "$@" \
+    # -DDEBUG makes _peer_log/_wallet_log real printf calls. Without it they expand to
+    # NOTHING on a host build, so peer_log's arguments -- including BRPeerHost(peer) and
+    # (peer)->port -- are never evaluated and a NULL-peer log CANNOT crash here. That is not
+    # hypothetical: test8's guard was reverted and the suite still passed, i.e. the gate was
+    # vacuous. On Android _peer_log maps to __android_log_print, so the args ARE evaluated
+    # and it segfaults. This flag makes the host build match Android on that point.
+    clang -w -include stdint.h -DDEBUG "$@" \
     -I "$CORE_DIR" \
     -I "$CORE_DIR/secp256k1/include" \
     "$SCRIPT_DIR/cf_confirm_kat_main.c" \

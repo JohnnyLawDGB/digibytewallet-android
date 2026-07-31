@@ -367,6 +367,45 @@ int main(void)
     check(feBack != NULL && feBack->count == mainCount,
           "test7: switching back restores the mainnet element set");
 
+    // --- Test 8: the cfilter drive must survive a NULL peer.
+    //
+    // The KeepAlive backstop calls _BRPeerManagerDriveCFiltersLocked(manager, NULL) — the
+    // whole point of that path is to restart the pipeline when no peer has spoken recently,
+    // so it has no peer to name. peer_log dereferences its argument (BRPeerHost(peer) and
+    // (peer)->port), so any log on that path with a NULL peer is a segfault.
+    //
+    // This is not hypothetical: it crashed on device in Java_..._keepAlivePeers, SIGSEGV
+    // fault addr 0x34, within seconds of the first tick that issued a request. Cheap to
+    // assert, and it fixes the whole class rather than the one line that happened to fire.
+    //
+    // The drive is a no-op with no armed auto-fetch and no filter chain, so this exercises
+    // the guard rather than the request path; the arm below makes it take the real path.
+    // Production always runs COMPACT_FILTERS_ONLY; the manager defaults to BLOOM_ONLY, in
+    // which the CF drive correctly does nothing at all. Without this the test would return
+    // at the very first guard and prove nothing.
+    BRPeerManagerSetSyncMode(manager, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    _BRPeerManagerDriveCFiltersLocked(manager, NULL);
+    check(1, "test8: drive with a NULL peer (unarmed) did not crash");
+
+    BRPeerManagerEnableAutoCompactFilterFetch(manager, block1->height - 10);
+    _BRPeerManagerDriveCFiltersLocked(manager, NULL);
+    check(1, "test8: drive with a NULL peer (armed) did not crash");
+
+    // Force the RETIRE branch, which logs unconditionally. Without this the test is
+    // VACUOUS for the defect: with no connected peers no send succeeds, so the drive never
+    // reaches any log line and a missing NULL guard would sail through. Verified by
+    // reverting the guard — this is the assertion that turns red.
+    manager->cfFiltersInFlight = 1;
+    manager->cfFiltersWindowStart = time(NULL) - (CF_FILTERS_WINDOW_TIMEOUT_SECS + 5);
+    _BRPeerManagerDriveCFiltersLocked(manager, NULL);
+    check(manager->cfFiltersInFlight == 0,
+          "test8: a timed-out in-flight window retires, and logging it with no peer is safe");
+
+    // And the public entry point, which also passes NULL down to the request path.
+    BRPeerManagerRequestCompactFilters(manager, block1->height - 10, block1->height);
+    check(1, "test8: public RequestCompactFilters with no peer did not crash");
+
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }
