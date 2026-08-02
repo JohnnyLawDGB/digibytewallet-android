@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
+import kotlinx.coroutines.runInterruptible
 
 /**
  * Foreground service that drives SPV sync via the C core's BRPeerManager.
@@ -506,38 +507,113 @@ class SyncService : Service() {
     }
 
     /**
+     * Run a recovery block without letting it wedge the caller.
+     *
+     * THE BUG THIS EXISTS FOR (Note 8, 2026-08-02). Both recovery paths used
+     * `withTimeout { injectPeers(); injectCustomNode(); NativeBridge.startSync() }`,
+     * and the KDoc claimed that stopped "a hung native call wedging the recovery
+     * thread". It does not. Coroutine cancellation is COOPERATIVE: withTimeout can only
+     * cancel at a suspension point, and none of those three calls has one — two are
+     * plain blocking functions and the third is a blocking JNI call. When one blocked,
+     * the timeout never fired, .onFailure never ran, and nothing was logged:
+     *
+     *   10:58:42  zero-peer watchdog: keepalive unhealthy + 0 peers — reviving recovery
+     *             <- 47 minutes of total silence; process alive, 0 sockets, network fine
+     *
+     * The mechanism meant to CURE a 0-peer wedge became the permanent wedge, which is
+     * why force-stopping the app was the only known recovery.
+     *
+     * Two defences, because either alone is insufficient:
+     *  1. the block wraps its blocking segments in `runInterruptible(Dispatchers.IO)`, so
+     *     cancelling the worker Thread.interrupt()s it, which does unblock interruptible
+     *     syscalls (sockets, park/sleep). It does NOT reliably interrupt a blocking JNI
+     *     call, hence:
+     *  2. **nothing ever awaits the worker.** The timeout lives in a SEPARATE coroutine that
+     *     cancels the worker and releases the latch without joining it, so a call that
+     *     ignores interruption can only leak one thread — it can no longer stop the watchdog
+     *     from running, retrying, or escalating. **This is the load-bearing one.**
+     *
+     * Defence 2 is why this is not simply `withTimeoutOrNull { block() }`. withTimeout*
+     * cancels the child and then SUSPENDS UNTIL IT COMPLETES — against a JNI call that
+     * ignores interruption it never returns, the abandon log never prints, and the
+     * in-flight latch never clears. That would rebuild the same permanent wedge one layer up.
+     *
+     * The block is `suspend` because one leg of recovery — [injectCustomNode] — resolves DNS
+     * and so is itself suspending; it cannot be shoved inside runInterruptible. Callers wrap
+     * each genuinely blocking leg individually rather than the whole block, which keeps the
+     * ordering (injectPeers → own node → startSync) intact.
+     *
+     * At most one attempt is in flight; overlapping triggers are dropped, not stacked. If a
+     * worker is abandoned, the latch opens anyway and a later trigger may run alongside the
+     * stuck one — deliberate. Extra concurrency is the safe failure direction here; refusing
+     * to ever retry is the failure mode that cost 47 minutes.
+     */
+    private val recoveryInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun launchBoundedRecovery(tag: String, block: suspend () -> Unit) {
+        if (!recoveryInFlight.compareAndSet(false, true)) {
+            android.util.Log.i("SyncService", "$tag: recovery already in flight — not stacking")
+            return
+        }
+        val worker = recoveryScope.launch {
+            try {
+                block()
+            } catch (t: Throwable) {
+                // CancellationException lands here too — that's the abandon path, already logged.
+                android.util.Log.w("SyncService", "$tag: recovery ended: ${t.javaClass.simpleName}")
+            } finally {
+                recoveryInFlight.set(false)
+            }
+        }
+        recoveryScope.launch {
+            delay(NETWORK_RECOVERY_TIMEOUT_MS)
+            if (worker.isActive) {
+                worker.cancel()               // interrupts the runInterruptible legs
+                recoveryInFlight.set(false)   // a stuck worker must never latch recovery shut
+                android.util.Log.w("SyncService",
+                    "$tag: recovery exceeded ${NETWORK_RECOVERY_TIMEOUT_MS}ms and was abandoned " +
+                    "(watchdog continues; a blocking native call cannot be force-cancelled)")
+            }
+        }
+    }
+
+    /**
      * The network just became available. If we're at 0 peers, force a clean reconnect —
      * recreate the manager, re-inject the canon peers, restart sync. Runs on [recoveryScope]
      * (Dispatchers.IO, large pool) so it can't be starved by a frozen serviceScope, and under
-     * [withTimeout] so a hung native call can't wedge the recovery thread. Throttled so rapid
+     * [launchBoundedRecovery] so a hung native call can't wedge the recovery thread — a plain
+     * withTimeout CANNOT do that, since cancellation is cooperative and these calls block
+     * without a suspension point (see the 2026-08-02 wedge). Throttled so rapid
      * network flaps don't stack reconnects. Tor-guarded (never dial direct while SOCKS wires up).
      */
     private fun onNetworkRegained() {
         val now = System.currentTimeMillis()
         if (now - lastNetworkRecoveryMs < NETWORK_RECOVERY_THROTTLE_MS) return
         lastNetworkRecoveryMs = now
-        recoveryScope.launch {
-            runCatching {
-                withTimeout(NETWORK_RECOVERY_TIMEOUT_MS) {
-                    if (!syncSetupComplete) return@withTimeout
-                    val torComingUp = torManager.isEnabled &&
-                        (torManager.state.value is TorState.Connecting || torManager.state.value is TorState.Starting)
-                    if (torComingUp) return@withTimeout
-                    val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(-1)
-                    val loaded = runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false)
-                    if (peers <= 0 && loaded) {
-                        android.util.Log.w("SyncService",
-                            "network regained + $peers peers — forcing clean reconnect to canon peers")
-                        runCatching { NativeBridge.forceReconnect() }
-                        injectPeers()
-                        injectCustomNode()
-                        runCatching { NativeBridge.startSync() }
-                        // The polling keepalive/watchdog may have frozen with the pool; re-arm it
-                        // now that the reconnect has freed the wedged native state.
-                        runCatching { resurrectKeepaliveIfNeeded() }
-                    }
-                }
-            }.onFailure { android.util.Log.w("SyncService", "network-regained recovery threw/timed out", it) }
+        if (!syncSetupComplete) return
+        val torComingUp = torManager.isEnabled &&
+            (torManager.state.value is TorState.Connecting || torManager.state.value is TorState.Starting)
+        if (torComingUp) return
+        val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(-1)
+        val loaded = runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false)
+        if (peers > 0 || !loaded) return
+
+        android.util.Log.w("SyncService",
+            "network regained + $peers peers — forcing clean reconnect to canon peers")
+        // Same hazard as the zero-peer watchdog: every call below is BLOCKING, so the old
+        // withTimeout here could not cancel any of them. Detached + interruptible instead.
+        launchBoundedRecovery("network-regained") {
+            runInterruptible(Dispatchers.IO) {
+                runCatching { NativeBridge.forceReconnect() }
+                injectPeers()
+            }
+            injectCustomNode()   // suspend (DNS); has its own IO hop
+            runInterruptible(Dispatchers.IO) {
+                runCatching { NativeBridge.startSync() }
+                // The polling keepalive/watchdog may have frozen with the pool; re-arm it
+                // now that the reconnect has freed the wedged native state.
+                runCatching { resurrectKeepaliveIfNeeded() }
+            }
         }
     }
 
@@ -656,16 +732,13 @@ class SyncService : Service() {
                 if (!torComingUp) {
                     // LIGHT reconnect on THIS IO scope: injectPeers()+startSync() → BRPeerManagerConnect
                     // resets the native give-up latch and re-dials WITHOUT the expensive manager recreate.
-                    // Runs here (Dispatchers.IO) so it works even if the Default pool is starved.
-                    // withTimeout bounds a hung native call.
-                    runCatching {
-                        withTimeout(NETWORK_RECOVERY_TIMEOUT_MS) {
-                            injectPeers()
-                            injectCustomNode()
-                            NativeBridge.startSync()
-                        }
-                    }.onFailure {
-                        android.util.Log.w("SyncService", "zero-peer watchdog reconnect threw/timed out", it)
+                    // Runs on recoveryScope (Dispatchers.IO) so it works even if the Default
+                    // pool is starved. Detached + interruptible: see launchBoundedRecovery.
+                    // Awaiting this block is what wedged the watchdog for 47 minutes.
+                    launchBoundedRecovery("zero-peer watchdog") {
+                        runInterruptible(Dispatchers.IO) { injectPeers() }
+                        injectCustomNode()   // suspend (DNS); has its own IO hop
+                        runInterruptible(Dispatchers.IO) { NativeBridge.startSync() }
                     }
                 }
                 // Respawn the dead/frozen keepalive so its graduated recovery resumes.

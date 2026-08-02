@@ -65,6 +65,13 @@ object NetworkModule {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            // WHOLE-CALL bound. connect/read/write are PER-PHASE and per-attempt: with
+            // retries, redirects and a slow-but-not-dead peer a single call can exceed all
+            // three and run effectively unbounded. That is load-bearing here because the
+            // seeder fetch runs inside the 0-peer recovery path, and a hang there used to
+            // wedge the recovery watchdog outright (Note 8, 2026-08-02: 47 minutes of
+            // silence after "reviving recovery").
+            .callTimeout(45, TimeUnit.SECONDS)
             .build()
     }
 }
