@@ -170,7 +170,12 @@ class MainActivity : FragmentActivity() {
                     val currentVersion = try {
                         packageManager.getPackageInfo(packageName, 0).versionName ?: "0"
                     } catch (e: Exception) { "0" }
-                    val update = UpdateChecker(okHttpClient).checkForUpdate(currentVersion)
+                    // Opt-in beta channel (Settings). Default false: /releases/latest
+                    // excludes prereleases, so nobody is pushed an unverified build.
+                    val wantsBeta = getSharedPreferences("dgb_settings", MODE_PRIVATE)
+                        .getBoolean("beta_updates", false)
+                    val update = UpdateChecker(okHttpClient)
+                        .checkForUpdate(currentVersion, includePrereleases = wantsBeta)
                     if (update != null) pendingUpdate = update
                 }
                 if (pendingUpdate != null) {

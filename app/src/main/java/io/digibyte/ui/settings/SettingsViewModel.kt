@@ -151,6 +151,25 @@ class SettingsViewModel @Inject constructor(
             .edit().putBoolean("enabled", enabled).apply()
     }
 
+    // ── Beta update channel ──────────────────────────────────────────────────
+    /** Whether the update check may offer PRERELEASES (default OFF / opt-in).
+     *
+     *  GitHub's /releases/latest excludes prereleases, so a `-beta` tag notifies nobody.
+     *  That is deliberate — a build with unverified surface must not be pushed to every
+     *  user — but it leaves testers with no way to be told a beta exists. This opt-in
+     *  switches UpdateChecker to the full /releases list for people who asked for it. */
+    private val _betaUpdatesEnabled = MutableStateFlow(
+        context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
+            .getBoolean("beta_updates", false)
+    )
+    val betaUpdatesEnabled: StateFlow<Boolean> = _betaUpdatesEnabled.asStateFlow()
+
+    fun setBetaUpdatesEnabled(enabled: Boolean) {
+        _betaUpdatesEnabled.value = enabled
+        context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
+            .edit().putBoolean("beta_updates", enabled).apply()
+    }
+
     // ── Network selection (dev-gated Advanced section; Task 6) ───────────────
     /**
      * Whether the persisted network selection is testnet. Read from the SAME

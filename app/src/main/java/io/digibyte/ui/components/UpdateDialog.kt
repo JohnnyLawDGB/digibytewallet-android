@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.digibyte.core.AppUpdate
 import io.digibyte.ui.theme.DigiByteAccent
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun UpdateDialog(
@@ -43,6 +44,18 @@ fun UpdateDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                if (update.isPrerelease) {
+                    // Say so plainly. A prerelease is only offered to someone who opted
+                    // into the beta channel, and they should be reminded what that means
+                    // at the moment they are asked to install it.
+                    Text(
+                        text = "BETA — for testing. Not fully verified; keep your recovery phrase.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFF6D00),
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
                 Text(
                     text = "v${update.versionName}",
                     style = MaterialTheme.typography.titleMedium,

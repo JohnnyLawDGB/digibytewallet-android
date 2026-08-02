@@ -40,6 +40,7 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
     // "mainnet" / "digiTestnet" per the `network` flavor dimension.
     val isDevBuild = BuildConfig.DEBUG || BuildConfig.FLAVOR == "digiTestnet"
     val networkTestnetEnabled by viewModel.networkTestnetEnabled.collectAsStateWithLifecycle()
+    val betaUpdatesEnabled by viewModel.betaUpdatesEnabled.collectAsStateWithLifecycle()
     // CF-gated sync stage — attached to the bug-report deep link so intake knows
     // whether the user's issue was mid-sync or fully synced.
     val syncFrontier by viewModel.syncFrontier.collectAsStateWithLifecycle()
@@ -130,6 +131,27 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
 
         item {
             SettingsCategory(title = "Info") {
+                SettingsRow(
+                    icon = Icons.Default.BugReport,
+                    iconTint = Color(0xFFFF6D00),
+                    title = "Beta updates",
+                    subtitle = if (betaUpdatesEnabled)
+                        "On — you'll be offered pre-release builds for testing"
+                    else
+                        "Off — only stable releases are offered",
+                    onClick = { viewModel.setBetaUpdatesEnabled(!betaUpdatesEnabled) },
+                    trailing = {
+                        Switch(
+                            checked = betaUpdatesEnabled,
+                            onCheckedChange = { viewModel.setBetaUpdatesEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFFFF6D00)
+                            )
+                        )
+                    }
+                )
+                SettingsRowDivider()
                 SettingsRow(
                     icon = Icons.Default.Info,
                     iconTint = DigiByteBlue,
