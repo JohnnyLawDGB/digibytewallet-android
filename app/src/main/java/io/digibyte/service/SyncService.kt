@@ -99,6 +99,7 @@ class SyncService : Service() {
      *  doesn't falsely declare "synced" while merkleblocks for recent blocks
      *  are still in flight. See TIP_GRACE_POLLS. */
     private var atTipConsecutivePolls = 0
+    private var lastUnscannedLogged = 0L   // rate-limits the CF-behind log; see UNSCANNED_LOG_DELTA
 
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var utxoManager: UtxoManager
@@ -935,9 +936,47 @@ class SyncService : Service() {
                     //
                     // Bump LATEST_CHECKPOINT_HEIGHT when the submodule adds
                     // a newer BRMainNetCheckpoints entry.
+                    // CF-FIRST GATE (fund visibility). `height` is the BLOCK-HEADER
+                    // tip, and in COMPACT_FILTERS_ONLY that is NOT what determines
+                    // whether the wallet has actually looked at a block for payments.
+                    // The convoy deliberately runs the header frontier AHEAD of the
+                    // compact-filter scan, so header-tip alone reports "synced" while
+                    // the scan is still far below.
+                    //
+                    // Measured on a Note 8, 2026-08-02, and the reason this exists:
+                    //   At chain tip (height=23961817 est=23961817) — marking complete
+                    //   cf-ledger: scannedThrough=23901000
+                    // i.e. Complete was declared with 60,817 blocks NEVER SCANNED. A
+                    // payment anywhere in that window would have been invisible while
+                    // the UI said the balance was final.
+                    //
+                    // getLowestNeededHeight() is the lowest height the scan still needs,
+                    // so (it - 1) is the highest fully-scanned height. Require that to be
+                    // at the tip too. Fail CLOSED: a 0/failed read means "unknown", which
+                    // must never be treated as caught up.
+                    val scanFrontier = try { NativeBridge.getLowestNeededHeight() }
+                                       catch (_: Throwable) { 0L }
+                    val scanAtTip = scanFrontier > 0L && (scanFrontier - 1L) >= estHeight - CF_TIP_SLACK
                     val atRealTip = height >= LATEST_CHECKPOINT_HEIGHT &&
-                                    height >= estHeight - 5
+                                    height >= estHeight - 5 &&
+                                    scanAtTip
                     if (!atRealTip) atTipConsecutivePolls = 0
+                    if (height >= LATEST_CHECKPOINT_HEIGHT && height >= estHeight - 5 && !scanAtTip) {
+                        // RATE-LIMITED: this condition holds for the WHOLE remaining scan —
+                        // potentially hours — and the poll loop runs every 10s. Logging it
+                        // per poll is the same flood this file already learned to avoid for
+                        // per-block cfilter lines (it starved logd and plausibly the binder
+                        // buffer on the acceptance rig). Log only when the unscanned count
+                        // moves materially, so progress stays visible without the spam.
+                        val unscanned = estHeight - scanFrontier + 1
+                        if (lastUnscannedLogged == 0L ||
+                            kotlin.math.abs(unscanned - lastUnscannedLogged) >= UNSCANNED_LOG_DELTA) {
+                            lastUnscannedLogged = unscanned
+                            android.util.Log.i("SyncService",
+                                "headers at tip ($height) but CF scan frontier is $scanFrontier " +
+                                "($unscanned blocks unscanned) — NOT marking complete")
+                        }
+                    }
                     if (height > 0 && estHeight > 0 && atRealTip) {
                         // Require TIP_GRACE_POLLS consecutive at-tip observations
                         // before declaring complete. Header height can reach the
@@ -1792,8 +1831,17 @@ class SyncService : Service() {
             // BRPeerManagerEnableAutoCompactFilterFetch will snap the value
             // up further if the in-memory window can't resolve it.
             val savedTip = NativeBridge.getSavedBlocksTip()
-            val tip = if (savedTip > 0) savedTip else NativeBridge.getWalletBirthCheckpointHeight()
-            val birthHeight = settings.getLong("cf_birth_height", maxOf(0L, tip - 100L))
+            // The 100-block margin exists to re-cover a shallow reorg around a SAVED tip.
+            // It must NOT be applied to the birth checkpoint: on a fresh wallet that
+            // checkpoint IS the lowest resident block, so `checkpoint - 100` asks for 100
+            // heights that can never be resolved locally. They were duly surfaced as an
+            // abandoned band — greeting every brand-new wallet with a non-dismissible
+            // "scan for missing transactions" banner for blocks that predate the wallet
+            // and cannot contain its funds. Measured on a Note 8 2026-08-02:
+            //   [CF-SCAN] ABANDONED 100 height(s) [23899900..23899999] — unscannable
+            val birthDefault = if (savedTip > 0) maxOf(0L, savedTip - 100L)
+                               else NativeBridge.getWalletBirthCheckpointHeight()
+            val birthHeight = settings.getLong("cf_birth_height", birthDefault)
 
             // Auto-fetch is armed UNCONDITIONALLY, at every depth. The old
             // defense-in-depth branch here refused to arm for a birth floor deeper
@@ -1830,7 +1878,7 @@ class SyncService : Service() {
             }
             android.util.Log.i("SyncService",
                 "BIP158: mode=$syncMode, auto-fetch from height $birthHeight " +
-                "(savedTip=$savedTip, anchor=$tip)")
+                "(savedTip=$savedTip, anchor=$birthDefault)")
         }
         // ─────────────────────────────────────────────────────────────────────────
 
@@ -2094,6 +2142,21 @@ class SyncService : Service() {
                 android.util.Log.w("SyncService",
                     "onSyncComplete fired at height=$height, below checkpoint " +
                     "floor $LATEST_CHECKPOINT_HEIGHT — ignoring (stale peers)")
+                return
+            }
+            // SECOND CF-FIRST GATE. The C core fires syncStopped off the BLOCK-HEADER
+            // chain, which in COMPACT_FILTERS_ONLY reaches the tip long before the
+            // filter scan does. Gating only the poll loop would leave this path free to
+            // latch Complete with a large unscanned window — the fix would LOOK applied
+            // and still strand transactions. Same bound and same fail-closed rule as the
+            // poll loop: an unknown (0) frontier is never "caught up".
+            val scanFrontier = try { NativeBridge.getLowestNeededHeight() }
+                               catch (_: Throwable) { 0L }
+            if (height > 0 && (scanFrontier <= 0L || (scanFrontier - 1L) < height - CF_TIP_SLACK)) {
+                android.util.Log.w("SyncService",
+                    "onSyncComplete fired at header height=$height but CF scan frontier " +
+                    "is $scanFrontier (${height - scanFrontier + 1} blocks unscanned) — " +
+                    "ignoring; filters still have work")
                 return
             }
             hasReachedSynced = true
@@ -3017,6 +3080,18 @@ class SyncService : Service() {
          * to the submodule.
          */
         private const val LATEST_CHECKPOINT_HEIGHT = 23_900_000L
+
+        /** How far the compact-filter SCAN may trail the network tip and still count as
+         *  caught up. The scan legitimately lags the header tip by a few blocks while the
+         *  newest filters are in flight, so demanding exact equality would never latch
+         *  Complete on a live chain. Kept deliberately TIGHT — this is a fund-visibility
+         *  bound, not a UX smoother: every block of slack is a block the wallet claims to
+         *  have checked for payments and has not. */
+        private const val CF_TIP_SLACK = 10L
+
+        /** Only re-log the "not marking complete" line when the unscanned count moves by
+         *  at least this much. The condition can hold for hours; the poll loop is 10s. */
+        private const val UNSCANNED_LOG_DELTA = 500L
 
         /** How many consecutive 10s polls we must observe `atRealTip` before
          *  we flip to SyncState.Complete. Headers can reach tip while per-block

@@ -4,6 +4,21 @@ project("core-lib")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DANDROID_STL=gnustl_static -DANDROID_TOOLCHAIN=clang -fstack-protector-strong -fvisibility=hidden")
 
+# TEMPORARY DIAGNOSTIC — remove before any release build. Logs, once per KeepAlive tick,
+# why the height PINNING the compact-filter scan frontier was not re-requested. The B2
+# abandonment valve only arms on a PARKED pin, parked means attempts >= CF_REREQ_MAX_ATTEMPTS,
+# and attempts only advance on a send that reaches the wire — so a pin that can never be sent
+# can never park and the valve is permanently inert. This names which of the six Pass A/B/C
+# skip reasons applies.
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCF_PIN_DIAG")
+
+# TEMPORARY DIAGNOSTIC — remove before any release build. Accounts for EVERY cfilter
+# that reaches _peerRelayedCFilter against the six ways it can exit. Stage 0 proved the
+# network is healthy (a bare socket pulls 1000/1000 filters from these peers in 0.2-1.3s)
+# while the wallet credits ~30%, so the loss is on our side of recv(). One exit was
+# previously wholly silent (NULL filter chain / type mismatch).
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCF_RECV_DIAG")
+
 add_library(
         core-lib
         SHARED
