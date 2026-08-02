@@ -3016,7 +3016,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 23_660_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 23_900_000L
 
         /** How many consecutive 10s polls we must observe `atRealTip` before
          *  we flip to SyncState.Complete. Headers can reach tip while per-block
