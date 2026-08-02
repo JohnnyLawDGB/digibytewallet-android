@@ -3794,7 +3794,23 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
 #define SCALE_BIRTH      23800000u   // deep birth floor; above the highest mainnet checkpoint
 #define SCALE_CHAIN_LEN  105000u     // > 100k: a genuinely deep restore, not a scaled-down proxy
 #define SCALE_TIP        (SCALE_BIRTH + SCALE_CHAIN_LEN - 1u)
-#define SCALE_HDR_BATCH  2000u       // wire max headers per `headers` message (BRPeer.c's continuation quantum)
+// ⚠ THIS MODELS BITCOIN'S QUANTUM, NOT DIGIBYTE'S — and that is why this KAT has never
+// reproduced the field's convoy overshoot. MEASURED on a Note 8, 2026-08-02, during a real
+// deep restore: EVERY `headers` message carried 20,000 headers (17 of 17: "got 20000
+// header(s)"), not 2,000. Against CF_CONVOY_WINDOW = 10,000 that means ONE message is TWICE
+// the entire convoy budget, so the gate — which holds the NEXT request after the batch has
+// already landed and been relayed — is structurally incapable of holding the header frontier
+// inside the window. Field consequence: header frontier ran 151,810 ahead of the scan
+// frontier, the CF_RETENTION_SPAN_MAX clamp bound continuously, heights fell below the
+// resident block floor, and 8,249+ were ABANDONED in 36 seconds (silent fund-visibility loss).
+//
+// DO NOT simply raise this to 20000 to "be accurate" without the convoy fix: the BOUND
+// derived below becomes CF_CONVOY_WINDOW + 2*20000 + ... ~= 52,700, and the
+// "the bound is a REAL bound: < 1/4 of the chain length" self-check then FAILS against
+// SCALE_CHAIN_LEN — which is precisely the KAT telling you the convoy cannot bound memory at
+// the real quantum. That failure IS the red-before-green gate for the convoy header-gate fix.
+// Raise it to 20000 as the RED arm when that fix lands, not before.
+#define SCALE_HDR_BATCH  2000u       // Bitcoin's wire max; DigiByte delivers 20000 — see above
 #define SCALE_MAX_TICKS  400         // >> the ~105 ticks the descent needs at MAX_CFILTERS_RESULTS/tick
 
 // Append `count` filter headers to the manager's chain -- the cfheaders RESPONSE.
@@ -3978,10 +3994,19 @@ static void test_convoy_scale_bounded(BRWallet *wallet)
     //   blockHeaderFrontier <= scanFrontier + (CF_CONVOY_WINDOW - 1) + 2*SCALE_HDR_BATCH
     //         (the gate is only ever evaluated OPEN at W_hdr <= W-1, and the peer reads
     //          the pushed verdict one batch stale, so at most two more batches land)
+    //   + CLEAR_MEM_PRUNE_STRIDE: _BRPeerManagerClearMemory now DEFERS its descent until the
+    //         floor has risen a full stride (2026-08-02). That is the fix for the clamped-regime
+    //         wedge, where cfFloor rises by 1 per block-add, defeats the O(1) no-op memo, and
+    //         costs a full O(resident) walk PER BLOCK -- measured 77 ms/header with one core
+    //         pegged, holding manager->lock and starving KeepAlive into a self-sustaining wedge.
+    //         The price of that fix is exactly this: the resident floor may lag its ideal
+    //         position by up to one stride, so the resident set is up to STRIDE larger.
+    //         Observed here before this term was added: peak 16,510 against a 14,653 bound,
+    //         i.e. 1,857 over -- inside one stride, as predicted.
     //   => count <= CF_CONVOY_WINDOW + 2*SCALE_HDR_BATCH + CLEAR_MEM_CF_RETENTION_MARGIN
-    //               + the never-pruned checkpoint headers.
+    //               + CLEAR_MEM_PRUNE_STRIDE + the never-pruned checkpoint headers.
     const size_t BOUND = (size_t)CF_CONVOY_WINDOW + 2u * SCALE_HDR_BATCH
-                       + CLEAR_MEM_CF_RETENTION_MARGIN + baseCount;
+                       + CLEAR_MEM_CF_RETENTION_MARGIN + CLEAR_MEM_PRUNE_STRIDE + baseCount;
     check(BOUND * 4u < (size_t)SCALE_CHAIN_LEN,
           "the bound is a REAL bound: < 1/4 of the chain length, so an unbounded build cannot slip under it");
 
