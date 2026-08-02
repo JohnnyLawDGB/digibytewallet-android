@@ -189,11 +189,49 @@ jobs:
             TAG="$1"; FILENAME="$2"; HASH="$3"
             cd /var/www/digiscope-downloads
 
+            # A PRERELEASE MUST NOT TOUCH THE STABLE CHANNEL.
+            #
+            # Until 2026-08-02 this whole block ran for every tag, so tagging
+            # v4.0.31-beta / v4.0.32-beta rewrote the public download page and
+            # repointed digibyte-wallet-latest.apk at a prerelease. Three ways it
+            # broke, all observed live:
+            #   1. VER_RE below is not suffix-aware, so in "v4.0.31-beta" it matched
+            #      only "v4.0.31" and substituted the FULL tag -> "v4.0.32-beta-beta",
+            #      compounding another "-beta" on every beta release. The resulting
+            #      /releases/tag/ link 404s.
+            #   2. The anchored patterns ("digibyte-wallet-${VER_RE}\.apk",
+            #      "Download APK (${VER_RE})") then FAILED to match a suffixed
+            #      filename at all, so the download button silently froze on an
+            #      older beta...
+            #   3. ...while the SHA-256 line (unanchored, matches any 64 hex chars)
+            #      DID update. Page served v4.0.31-beta.apk beside v4.0.32-beta's
+            #      checksum: anyone verifying the download would see a mismatch and
+            #      reasonably conclude the APK had been tampered with. For a wallet
+            #      that is the worst failure of the three.
+            case "$TAG" in
+              *-*) IS_PRERELEASE=1 ;;   # any suffix (-beta, -rc, ...) is not stable
+              *)   IS_PRERELEASE=0 ;;
+            esac
+
+            if [ "$IS_PRERELEASE" = "1" ]; then
+              # Beta channel only. index.html, the stable "latest" symlink and the
+              # published SHA-256 all continue to describe the newest STABLE release.
+              # Betas are reached through the in-app opt-in beta channel
+              # (UpdateChecker ALL_URL) and this symlink, never the front page.
+              ln -sf "/var/www/digiscope-downloads/${FILENAME}" digibyte-wallet-latest-beta.apk
+              echo "prerelease ${TAG}: beta symlink updated; stable channel untouched"
+            else
+
             # Scoped mechanical updates. Each regex is anchored to a specific UI
             # element so free-body-text version mentions (e.g. "upgrade from
             # v3.4.0" inside release notes) are never accidentally rewritten.
             # Release notes content itself stays as-committed in the tagged revision.
-            VER_RE='v[0-9]\+\.[0-9]\+\.[0-9]\+'
+            # VER_RE tolerates -suffixes so that a stable release can always CLEAN UP
+            # a page left mangled by an older workflow, rather than failing to match it.
+            # The group REPEATS (*, not \?) on purpose: the live page was left reading
+            # "v4.0.32-beta-beta", and a single optional suffix matches only
+            # "v4.0.32-beta", rewriting it to "v4.0.33-beta" and keeping the 404.
+            VER_RE='v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[A-Za-z0-9.]\+\)*'
             sed -i "s|digibyte-wallet-${VER_RE}\.apk|${FILENAME}|g"              index.html
             sed -i "s|<div class=\"ver\">${VER_RE}|<div class=\"ver\">${TAG}|"   index.html
             sed -i "s|Download APK (${VER_RE})|Download APK (${TAG})|"           index.html
@@ -203,8 +241,9 @@ jobs:
 
             # Point "latest" symlink at the new APK so
             # /downloads/digibyte-wallet-latest.apk always resolves to the most
-            # recent release.
+            # recent STABLE release.
             ln -sf "/var/www/digiscope-downloads/${FILENAME}" digibyte-wallet-latest.apk
+            fi
 
             # Re-expose everything via the public downloads dir
             # (frontend deploys wipe symlinks).
