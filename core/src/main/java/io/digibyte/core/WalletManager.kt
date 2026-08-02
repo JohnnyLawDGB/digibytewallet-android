@@ -581,7 +581,7 @@ class WalletManager(
         dataEraser.eraseBloomPeerCache()
         dataEraser.eraseWatchedAddresses()
         dataEraser.eraseOutgoingTx()
-        dataEraser.eraseFilterHeaders()
+        dataEraser.eraseCfSyncState()
         dataEraser.eraseDatabase()
         utxoManager.clearAll()
         keyStoreManager.deleteKey()

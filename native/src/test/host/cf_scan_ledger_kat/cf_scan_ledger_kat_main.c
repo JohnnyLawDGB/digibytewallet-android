@@ -969,6 +969,26 @@ int main(void) {
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
 #else
+    // TRIPWIRE — this KAT deliberately does NOT pass -DCF_LEDGER_DRIVE_REREQUEST, so it
+    // sees the PRODUCTION default. It must be 0 (Phase 1, observe-only).
+    //
+    // Phase 2's back-pressure gate pauses forward cfilter fetch while outstanding >=
+    // CF_OUTSTANDING_LOWWATER, on the premise that the residual driver drains the
+    // backlog. Against this core's cfheader-anchored ClearMemory retention floor that
+    // premise is false: a pruned height can never be evaluated (MarkEvaluated needs a
+    // resident header) and can never even be re-SENT (the stop-hash walk dies in the
+    // pruned gap), so the count only grows and forward fetch eventually stops forever.
+    // A lab run reproduced it at 2,856 outstanding — 93% of the threshold — on a
+    // 26k-block scan.
+    //
+    // Do NOT flip this to 1 to make this line pass. Re-arm only together with the
+    // paced convoy + scan-frontier-anchored retention, which remove the pruning race,
+    // and only after a deep-restore acceptance run passes. Then update this tripwire
+    // in the same commit, so re-arming is always a deliberate, reviewed act.
+    // See the rationale block on the #define in BRCFScanLedger.h.
+    check(CF_LEDGER_DRIVE_REREQUEST == 0,
+          "tripwire: production default is Phase 1 (CF_LEDGER_DRIVE_REREQUEST == 0)");
+
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
     BRCFScanLedger *l2 = calloc(1, sizeof(*l2));

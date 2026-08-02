@@ -50,7 +50,18 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
-clang -w -include stdint.h \
+# Two builds, so test4's remote-DoS guard is a real red-before-green gate rather than
+# a test that would pass either way:
+#
+#   RED    -DRELAYEDBLOCKTXNS_MAINCHAIN_NULLGUARD_UNFIXED restores the pre-fix
+#          `if (! BRMerkleBlockEq(b2, b))` shape in _peerRelayedBlockTxns. That build
+#          MUST die on a SIGNAL (SIGSEGV reading 0x0). A merely non-zero exit is NOT
+#          accepted -- that is also what a build/link failure looks like, and a gate
+#          that can go red on a compile error proves nothing.
+#   GREEN  the production shape must run every check and exit 0.
+build() {
+    local out="$1"; shift
+    clang -w -include stdint.h "$@" \
     -I "$CORE_DIR" \
     -I "$CORE_DIR/secp256k1/include" \
     "$SCRIPT_DIR/cf_confirm_kat_main.c" \
@@ -79,6 +90,41 @@ clang -w -include stdint.h \
     "$CORE_DIR/crypto/odocrypt.c" \
     "${SHA3_SRCS[@]}" \
     -lm -lpthread \
-    -o "$BUILD_DIR/cf_confirm_kat"
+    -o "$out"
+}
+
+# ── RED: the pre-fix shape must crash on a signal ─────────────────────────────
+build "$BUILD_DIR/cf_confirm_kat_unfixed" -g -DRELAYEDBLOCKTXNS_MAINCHAIN_NULLGUARD_UNFIXED
+
+set +e
+"$BUILD_DIR/cf_confirm_kat_unfixed" > "$BUILD_DIR/red.log" 2>&1
+RED_STATUS=$?
+set -e
+
+# 128+N == died on signal N. 139 == SIGSEGV.
+if [ "$RED_STATUS" -lt 129 ]; then
+    echo "GATE FAILED: the RELAYEDBLOCKTXNS_MAINCHAIN_NULLGUARD_UNFIXED build exited $RED_STATUS"
+    echo "             without dying on a signal. The gate cannot prove the guard is"
+    echo "             load-bearing, so test4 is not a regression test. Output was:"
+    sed 's/^/             | /' "$BUILD_DIR/red.log"
+    exit 1
+fi
+# The crash must happen at test4, i.e. AFTER tests 1-3 have printed their PASS lines.
+# Crashing earlier would mean the harness broke, not that the guard is load-bearing.
+if ! grep -q "test4: lastBlock is above the stub" "$BUILD_DIR/red.log"; then
+    echo "GATE FAILED: the UNFIXED build died on signal $((RED_STATUS - 128)) but before"
+    echo "             reaching test4's call -- so the crash is not the defect under test."
+    sed 's/^/             | /' "$BUILD_DIR/red.log"
+    exit 1
+fi
+if grep -q "test4: unprovable main chain is a no-op" "$BUILD_DIR/red.log"; then
+    echo "GATE FAILED: the UNFIXED build survived test4's call. The -D flag is not"
+    echo "             reaching the guard, so RED is not actually the pre-fix shape."
+    exit 1
+fi
+echo "RED gate OK: pre-fix shape died on signal $((RED_STATUS - 128)) at test4's call."
+
+# ── GREEN: the production shape must pass every check ─────────────────────────
+build "$BUILD_DIR/cf_confirm_kat"
 
 "$BUILD_DIR/cf_confirm_kat"

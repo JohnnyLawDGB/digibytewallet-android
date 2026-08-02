@@ -5971,9 +5971,10 @@ int main(void)
 {
     // --- Smoke test: the compile-time gate the whole Phase 2 driver is
     // built behind is actually flipped ON for this KAT build (run.sh passes
-    // -DCF_LEDGER_DRIVE_REREQUEST=1). As of this branch the production default
-    // in BRCFScanLedger.h is ALSO 1 (Task 6 flipped it); -D just makes the KAT
-    // independent of that default. ---
+    // -DCF_LEDGER_DRIVE_REREQUEST=1). The production default in
+    // BRCFScanLedger.h is 0 (Phase 1, observe-only — see the long rationale on
+    // that #define), so this -D is what keeps the Phase-2 driver covered by the
+    // host suite while production ships unarmed. ---
     check(CF_LEDGER_DRIVE_REREQUEST == 1, "smoke: CF_LEDGER_DRIVE_REREQUEST compiled in as 1 for this KAT");
 
     // --- Smoke test: the harness can build and tear down a real
