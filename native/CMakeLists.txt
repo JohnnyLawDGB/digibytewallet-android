@@ -4,20 +4,16 @@ project("core-lib")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DANDROID_STL=gnustl_static -DANDROID_TOOLCHAIN=clang -fstack-protector-strong -fvisibility=hidden")
 
-# TEMPORARY DIAGNOSTIC — remove before any release build. Logs, once per KeepAlive tick,
-# why the height PINNING the compact-filter scan frontier was not re-requested. The B2
-# abandonment valve only arms on a PARKED pin, parked means attempts >= CF_REREQ_MAX_ATTEMPTS,
-# and attempts only advance on a send that reaches the wire — so a pin that can never be sent
-# can never park and the valve is permanently inert. This names which of the six Pass A/B/C
-# skip reasons applies.
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCF_PIN_DIAG")
-
-# TEMPORARY DIAGNOSTIC — remove before any release build. Accounts for EVERY cfilter
-# that reaches _peerRelayedCFilter against the six ways it can exit. Stage 0 proved the
-# network is healthy (a bare socket pulls 1000/1000 filters from these peers in 0.2-1.3s)
-# while the wallet credits ~30%, so the loss is on our side of recv(). One exit was
-# previously wholly silent (NULL filter chain / type mismatch).
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCF_RECV_DIAG")
+# Compact-filter diagnostics are COMPILED OUT by default and must stay that way in any
+# shipped build — they log per KeepAlive tick and per cfilter arrival. The instrumentation
+# itself is retained in the source (it is what located the 2026-08-02 sync defects); to
+# re-enable, add the flag here:
+#   -DCF_RECV_DIAG  [CF-RECV] every cfilter accounted against all six exits of
+#                   _peerRelayedCFilter, plus `unaccounted` so an unknown drop path shows
+#                   as a non-zero rather than as silence; and [CF-TIME] splitting the
+#                   per-filter wall clock into lock wait / eval / idle.
+#   -DCF_PIN_DIAG   [CF-PIN] why the height pinning the scan frontier was not re-requested,
+#                   and [CF-ARR] arrival tagging within the pin's window.
 
 add_library(
         core-lib
