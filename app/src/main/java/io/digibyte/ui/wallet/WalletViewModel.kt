@@ -160,7 +160,25 @@ class WalletViewModel @Inject constructor(
     private val _externalTip = MutableStateFlow(0L)
 
     /** Rolling samples of (timestamp_ms, blockHeight) for ETA computation.
-     *  Capped at 24 entries (~2 minutes at 5s cadence), oldest evicted. */
+     *  Capped at 24 entries (~2 minutes at 5s cadence), oldest evicted.
+     *
+     *  CROSSES THREADS — every access must hold [scanSamplesLock]. The writer runs on
+     *  Dispatchers.IO (the height poll loop); the reader, [computeEta], runs from the
+     *  `combine` flow on Dispatchers.Main.immediate. ArrayDeque is NOT thread-safe, and
+     *  `toList()` allocates an array of the CURRENT size then copies into it — so a
+     *  concurrent `removeFirst()` can null a slot mid-copy and return a list whose `size`
+     *  is >= 2 while `first()` is null.
+     *
+     *  MEASURED (Note 8, 2026-08-03, mid deep-restore) — it killed the wallet on the UI thread:
+     *    FATAL EXCEPTION: main
+     *    java.lang.NullPointerException: Attempt to invoke virtual method
+     *    'java.lang.Object kotlin.Pair.getFirst()' on a null object reference
+     *      at WalletViewModel.computeEta(WalletViewModel.kt:301)
+     *  ...with the `samples.size < 2` guard on the preceding line having just passed.
+     *
+     *  Do NOT "fix" a recurrence with firstOrNull(): that hides the race instead of removing
+     *  it, and the same torn read can silently corrupt the ETA arithmetic without crashing. */
+    private val scanSamplesLock = Any()
     private val scanSamples = ArrayDeque<Pair<Long, Long>>()
 
     /** The wall-clock time we last observed the wallet's block height
@@ -295,7 +313,7 @@ class WalletViewModel @Inject constructor(
     private fun computeEta(current: Long, target: Long): Long? {
         if (target <= 0 || current <= 0 || current >= target) return null
         val now = System.currentTimeMillis()
-        val samples = scanSamples.toList()
+        val samples = synchronized(scanSamplesLock) { scanSamples.toList() }
         if (samples.size < 2) return null
         val first = samples.first()
         val elapsedMs = now - first.first
@@ -682,8 +700,10 @@ class WalletViewModel @Inject constructor(
                     else -> currentHeight
                 }
                 if (etaSample > 0) {
-                    scanSamples.addLast(System.currentTimeMillis() to etaSample)
-                    while (scanSamples.size > 24) scanSamples.removeFirst()
+                    synchronized(scanSamplesLock) {
+                        scanSamples.addLast(System.currentTimeMillis() to etaSample)
+                        while (scanSamples.size > 24) scanSamples.removeFirst()
+                    }
                 }
                 val txDetails = NativeBridge.getTransactionDetails()
                 // Log every ~60s for debugging
