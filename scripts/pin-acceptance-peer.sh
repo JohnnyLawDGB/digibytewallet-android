@@ -46,22 +46,67 @@ case "$ACTION" in
     ;;
 
   on)
-    # The app must have been launched at least once so shared_prefs exists.
-    if ! adb_shell run-as $PKG ls $PREFS >/dev/null 2>&1; then
-        echo "ERROR: $PREFS not present — launch the app once, then re-run." >&2
+    # The app MUST be stopped first: SharedPreferences are cached in memory and flushed on
+    # edit, so a running app would either not see our file or clobber it on its next write.
+    if adb -s "$SERIAL" shell pidof $PKG >/dev/null 2>&1; then
+        echo "app running — force-stopping so the prefs write is not clobbered"
+        adb_shell am force-stop $PKG >/dev/null 2>&1
+        sleep 2
+    fi
+
+    # Build the file HOST-SIDE and push it, rather than composing shell quoting through
+    # `adb shell run-as sh -c`. An earlier version did the latter and the quoting mangled
+    # silently: sed reported "No such file or directory" and the script still printed
+    # "pinned EXCLUSIVELY" over a pin that never happened. Never hand-quote through that chain.
+    #
+    # Android creates a prefs file on first WRITE, not on first launch, so dgb_settings.xml is
+    # legitimately absent on a fresh install. The pin must exist BEFORE the wallet is created,
+    # because injectCustomNode() reads it when sync starts — so we create the file if needed.
+    HOST_TMP="$(mktemp)"
+    HP_HOST="${HOSTPORT%%:*}"; HP_PORT="${HOSTPORT##*:}"
+    cat > "$HOST_TMP" <<XML
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <boolean name="custom_node_enabled" value="true" />
+    <string name="custom_node_hostport">${HP_HOST}:${HP_PORT}</string>
+    <boolean name="custom_node_exclusive" value="true" />
+</map>
+XML
+    # Merge with any pre-existing settings rather than discarding them.
+    if adb_shell run-as $PKG cat $PREFS >/dev/null 2>&1; then
+        adb_shell run-as $PKG cat $PREFS 2>/dev/null | tr -d '\r' > "$HOST_TMP.old"
+        if grep -q "</map>" "$HOST_TMP.old"; then
+            adb_shell run-as $PKG cp $PREFS $PREFS.bak-acceptance 2>/dev/null
+            grep -v -E "custom_node_(enabled|hostport|exclusive)|</map>" "$HOST_TMP.old" > "$HOST_TMP"
+            {
+              echo '    <boolean name="custom_node_enabled" value="true" />'
+              echo "    <string name=\"custom_node_hostport\">${HP_HOST}:${HP_PORT}</string>"
+              echo '    <boolean name="custom_node_exclusive" value="true" />'
+              echo '</map>'
+            } >> "$HOST_TMP"
+        fi
+    fi
+
+    adb -s "$SERIAL" push "$HOST_TMP" /data/local/tmp/dgb_pin.xml >/dev/null 2>&1
+    adb_shell run-as $PKG sh -c "mkdir -p shared_prefs" >/dev/null 2>&1
+    adb_shell "run-as $PKG cp /data/local/tmp/dgb_pin.xml $PREFS" >/dev/null 2>&1
+    adb -s "$SERIAL" shell rm -f /data/local/tmp/dgb_pin.xml >/dev/null 2>&1
+    rm -f "$HOST_TMP" "$HOST_TMP.old"
+
+    # VERIFY, and FAIL LOUDLY. The whole value of a control is that it is actually applied;
+    # a harness that reports a pin it did not make is worse than no harness, because every
+    # measurement taken afterwards is silently uncontrolled.
+    got="$(adb_shell run-as $PKG cat $PREFS 2>/dev/null | tr -d '\r')"
+    if ! echo "$got" | grep -q 'custom_node_exclusive" value="true"' \
+       || ! echo "$got" | grep -q "custom_node_hostport" \
+       || ! echo "$got" | grep -q 'custom_node_enabled" value="true"'; then
+        echo "ERROR: pin NOT applied — prefs read back as:" >&2
+        echo "$got" >&2
         exit 1
     fi
-    # Written via the app's own prefs file. Deliberately NOT a code path change: the point is
-    # to exercise the SHIPPING dial logic with one peer, not a special test build.
-    adb_shell run-as $PKG sh -c "
-        f=$PREFS
-        cp \$f \$f.bak-acceptance 2>/dev/null
-        # strip any existing keys, then re-add before </map>
-        sed -i '/custom_node_enabled/d;/custom_node_hostport/d;/custom_node_exclusive/d' \$f
-        sed -i 's#</map>#    <boolean name=\"custom_node_enabled\" value=\"true\" />\n    <string name=\"custom_node_hostport\">$HOSTPORT</string>\n    <boolean name=\"custom_node_exclusive\" value=\"true\" />\n</map>#' \$f
-    "
-    echo "pinned EXCLUSIVELY to $HOSTPORT (backup at $PREFS.bak-acceptance)"
-    echo "force-stop and relaunch the app for it to take effect."
+    echo "VERIFIED: pinned EXCLUSIVELY to $HOSTPORT"
+    echo "$got" | grep -E "custom_node_" | sed 's/^/  /'
+    echo "relaunch the app for it to take effect."
     ;;
 
   off)
