@@ -32,6 +32,29 @@ class SyncWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
+            // NEVER run against a live foreground sync. This worker ends by calling
+            // NativeBridge.stopSync(), which is BRPeerManagerDisconnect() on the ONE global
+            // peer manager — the same one a foreground restore is using. WorkManager periodic
+            // work is not gated on process state (the only constraint here is
+            // NetworkType.CONNECTED), so without this check a background catch-up can drop
+            // every peer out from under a multi-hour compact-filter scan. SyncService is
+            // already doing strictly more than this worker would.
+            if (SyncService.foregroundSyncLive.get()) {
+                return Result.success()
+            }
+
+            // A wallet must exist before any of this means anything. Native startSync()
+            // returns silently when g_wallet is NULL ("startSync: wallet not initialized"),
+            // which is exactly the state after Android restarts this process for the SERVICE
+            // alone following a native crash — no MainActivity, no unlock, no wallet. The old
+            // code ignored that, slept 30s, persisted a null transaction blob and reported
+            // success, so a dead wallet left no trace it was dead. Retry instead: the next
+            // attempt succeeds once the wallet is loaded.
+            if (!NativeBridge.isWalletLoaded()) {
+                android.util.Log.w("SyncWorker", "background catch-up skipped: no wallet loaded")
+                return Result.retry()
+            }
+
             // Refresh filter-capable peers from the seeder API (cached hourly)
             fetchBloomPeers()
             NativeBridge.startSync()
@@ -44,7 +67,12 @@ class SyncWorker @AssistedInject constructor(
                 applicationContext.getSharedPreferences("dgb_sync_data" + networkSuffix(applicationContext), 0)
                     .edit().putString("saved_transactions", hex).apply()
             }
-            NativeBridge.stopSync()
+            // Re-check before tearing down: SyncService can have started during our 30s
+            // window — the user opening the app is exactly the event this worker is filling
+            // in for — and disconnecting then would kill a sync that had just come up.
+            if (!SyncService.foregroundSyncLive.get()) {
+                NativeBridge.stopSync()
+            }
             Result.success()
         } catch (e: Exception) {
             Result.retry()

@@ -231,6 +231,7 @@ class SyncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        foregroundSyncLive.set(true)
         createNotificationChannel()
         startFilterHeaderWriter()
         registerNetworkRegainedCallback()
@@ -2033,6 +2034,7 @@ class SyncService : Service() {
     }
 
     override fun onDestroy() {
+        foregroundSyncLive.set(false)
         // Flush the latest block window synchronously before teardown so a
         // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
         // guard ensures this never regresses a higher persisted tip.
@@ -3023,6 +3025,23 @@ class SyncService : Service() {
     companion object {
         const val CHANNEL_ID       = "dgb_sync_channel"
         const val NOTIFICATION_ID  = 1
+
+        /**
+         * True while this service is alive, i.e. while a foreground sync owns the single
+         * global native peer manager.
+         *
+         * Exists for SyncWorker. That worker is a PERIODIC WorkManager job scheduled
+         * unconditionally in DigiByteApp.onCreate with only a network constraint — nothing
+         * gates it on whether a foreground sync is running — and it ends by calling
+         * NativeBridge.stopSync(), which is BRPeerManagerDisconnect() on the SAME global
+         * manager. Firing during a long restore, it drops every peer out from under the
+         * scan. The worker reads this flag and skips its own teardown when we own the
+         * manager.
+         *
+         * @Volatile-equivalent via AtomicBoolean: written on the main thread (service
+         * lifecycle callbacks) and read from the worker's coroutine.
+         */
+        val foregroundSyncLive = java.util.concurrent.atomic.AtomicBoolean(false)
         const val ERR_NO_PEERS     = 1001
         /** Sent by the Settings own-node UI to apply a host/port/exclusive change
          *  immediately (forceReconnect → re-inject bloom + custom node → startSync)
