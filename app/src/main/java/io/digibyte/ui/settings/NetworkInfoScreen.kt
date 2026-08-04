@@ -29,8 +29,19 @@ import io.digibyte.service.SyncService.Companion.OwnNodeHealth
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
+import io.digibyte.ui.util.openExternalUrl
 import java.text.NumberFormat
 import java.util.Locale
+
+/**
+ * Setup guide for running a DigiByte node that can serve this wallet.
+ *
+ * Points at the repo doc rather than a digiscope.me page on purpose: this is the one piece of
+ * guidance that should survive the author's infrastructure, since its whole point is helping
+ * people stop depending on it. Kept on `develop` so the link is stable across releases.
+ */
+private const val OWN_NODE_GUIDE_URL =
+    "https://github.com/JohnnyLawDGB/digibytewallet-android/blob/develop/docs/run-your-own-node.md"
 
 @Composable
 fun NetworkInfoScreen(
@@ -54,6 +65,7 @@ fun NetworkInfoScreen(
     val ownNodeHealth by SyncService.ownNodeHealth.collectAsStateWithLifecycle()
     val cfLedgerCounts by viewModel.cfLedgerCounts.collectAsStateWithLifecycle()
     val cfLedgerHoles by viewModel.cfLedgerHoles.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     // Refresh network stats when this screen is opened
     // Poll live stats while the screen is visible so the display self-corrects a
@@ -388,6 +400,25 @@ fun NetworkInfoScreen(
                         trailing = {
                             Switch(checked = customNodeEnabled,
                                    onCheckedChange = { viewModel.setCustomNodeEnabled(it) })
+                        }
+                    )
+                    // Deliberately OUTSIDE the `customNodeEnabled` block: the person who most
+                    // needs this is the one who does not have a node set up yet, and hiding the
+                    // guide behind the toggle would show it only to people who are already done.
+                    SettingsRowDivider()
+                    SettingsRow(
+                        icon = Icons.Filled.MenuBook,
+                        iconTint = DigiByteAccent,
+                        title = "How to set up your own node",
+                        subtitle = "Two lines in digibyte.conf let a node you already run serve " +
+                                   "this wallet. No node yet? Start here.",
+                        onClick = { openExternalUrl(context, OWN_NODE_GUIDE_URL) },
+                        trailing = {
+                            Icon(
+                                Icons.Filled.OpenInNew,
+                                contentDescription = null,
+                                tint = DigiByteAccent.copy(alpha = 0.7f)
+                            )
                         }
                     )
                     if (customNodeEnabled) {
