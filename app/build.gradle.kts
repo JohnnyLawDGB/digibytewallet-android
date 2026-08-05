@@ -7,6 +7,15 @@ plugins {
     id("io.gitlab.arturbosch.detekt")
 }
 
+// AddressSanitizer packaging. OPT-IN ONLY, via the same property the :native module reads:
+//
+//     ./gradlew :app:assembleMainnetDebug -PasanNative=true
+//
+// When off, nothing under app/asan/ is packaged at all — no runtime .so, no wrap.sh — so a normal
+// build is byte-for-byte unaffected and there is no way to ship this by forgetting to revert an
+// edit. (That failure mode cost a day on 2026-08-04.)
+val asanNative = (project.findProperty("asanNative") as String?)?.toBoolean() ?: false
+
 android {
     namespace = "io.digibyte"
     compileSdk = 35
@@ -58,14 +67,31 @@ android {
     }
 
     packaging {
-        // Store native libs UNCOMPRESSED and page-aligned so the dynamic linker
-        // can mmap them directly from the APK. Required for 16 KB page-size
+        // NORMAL BUILDS (asanNative off): store native libs UNCOMPRESSED and page-aligned so the
+        // dynamic linker can mmap them directly from the APK. Required for 16 KB page-size
         // devices (Android 15+/newer flagships): with legacy (compressed)
         // packaging the libs aren't 16 KB-aligned in the APK and the app trips
         // the "isn't 16 KB compatible" check — on a real 16 KB device the native
         // SPV engine fails to load and the wallet hangs at "Connecting". Paired
         // with the -Wl,-z,max-page-size=16384 ELF alignment in native/CMakeLists.
-        jniLibs.useLegacyPackaging = false
+        // ASan builds MUST use legacy (extracted) packaging. wrap.sh is exec'd by the dynamic
+        // linker from lib/<abi>/, which requires it to exist as a real file — with
+        // extractNativeLibs=false nothing is unpacked and the install itself fails with
+        // INSTALL_FAILED_INVALID_APK "Failed to extract native libraries, res=-2".
+        // The 16 KB-page alignment this trades away only matters on 16 KB devices (S25 Ultra),
+        // and this build is a debug-only diagnostic that never ships.
+        jniLibs.useLegacyPackaging = asanNative
+    }
+
+    if (asanNative) {
+        // The ASan runtime is COPIED FROM THE NDK at build time rather than committed. It is
+        // ~2.6 MB of prebuilt binary that must match the NDK doing the instrumenting, so vendoring
+        // it would add a blob to git that silently skews the moment ndkVersion changes.
+        sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("asanRuntime"))
+        // wrap.sh must land at lib/<abi>/wrap.sh in the APK; the resources source set is the
+        // documented way to put a non-.so file there. The dynamic linker runs it INSTEAD of
+        // starting the app directly, and it LD_PRELOADs the ASan runtime.
+        sourceSets["main"].resources.srcDir("asan/resources")
     }
 
     lint {
@@ -145,4 +171,32 @@ dependencies {
     // Unit test deps (:app)
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
+}
+
+// ── AddressSanitizer runtime staging (opt-in: -PasanNative=true) ─────────────────────────────
+//
+// Copies libclang_rt.asan-<abi>-android.so out of the NDK into a build dir that the asan source
+// set picks up as jniLibs. Located by GLOB, not a hardcoded path: the runtime sits under
+// .../lib/clang/<major>/lib/linux/, and that <major> moves with every NDK bump — a pinned path
+// would break silently and produce an APK that installs, runs, and reports nothing.
+if (asanNative) {
+    val stageAsanRuntime = tasks.register<Copy>("stageAsanRuntime") {
+        val ndkDir = android.ndkDirectory
+        val found = fileTree(ndkDir) {
+            include("toolchains/llvm/prebuilt/*/lib/clang/*/lib/linux/libclang_rt.asan-aarch64-android.so")
+        }.files
+        doFirst {
+            require(found.isNotEmpty()) {
+                "ASan runtime not found under $ndkDir. Expected " +
+                    "toolchains/llvm/prebuilt/*/lib/clang/*/lib/linux/" +
+                    "libclang_rt.asan-aarch64-android.so — check ndkVersion."
+            }
+        }
+        from(found)
+        into(layout.buildDirectory.dir("asanRuntime/arm64-v8a"))
+    }
+    tasks.matching { it.name.startsWith("merge") && it.name.contains("JniLibFolders") }
+        .configureEach { dependsOn(stageAsanRuntime) }
+    tasks.matching { it.name.startsWith("package") }
+        .configureEach { dependsOn(stageAsanRuntime) }
 }

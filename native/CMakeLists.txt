@@ -153,3 +153,12 @@ target_link_libraries(
 # peers. Force max-page-size=16384 so segments are aligned for both 4 KB and
 # 16 KB devices. (NDK r28 defaults to this; we set it explicitly for older NDKs.)
 target_link_options(core-lib PRIVATE "-Wl,-z,max-page-size=16384")
+
+# AddressSanitizer must be passed at LINK time as well as compile time, or the runtime's
+# interceptors are never pulled in and the resulting .so reports nothing while looking
+# instrumented. Driven off the compile flags the gradle `-PasanNative=true` property injects,
+# so there is one switch rather than two that can disagree.
+if(CMAKE_C_FLAGS MATCHES "-fsanitize=address")
+    message(STATUS "core-lib: AddressSanitizer ENABLED (opt-in build)")
+    target_link_options(core-lib PRIVATE "-fsanitize=address")
+endif()
