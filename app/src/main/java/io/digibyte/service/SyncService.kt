@@ -19,6 +19,8 @@ import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.KeepaliveAction
+import io.digibyte.core.sync.keepaliveAction
 import io.digibyte.core.db.dao.PeerDao
 import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.entity.PeerEntity
@@ -94,6 +96,45 @@ class SyncService : Service() {
      *  never triggers respawn because Job.isActive stays true throughout
      *  Doze suspension. */
     @Volatile private var lastKeepaliveTickMs: Long = 0L
+
+    /**
+     * Dedicated thread for the one BLOCKING native call the keepalive makes.
+     *
+     * NativeBridge.keepAlivePeers() takes PEER_GUARD (the native peer-manager lock) and can
+     * therefore block for as long as whatever else holds it. Calling it inline on
+     * Dispatchers.Default made the keepalive loop's own liveness depend on it, with two
+     * consequences seen on a Note 8 on 2026-08-04:
+     *
+     *  1. The loop stamped its tick ONCE and never again — on the first iteration tickCount is 1,
+     *     so every %3 and %30 branch is skipped and keepAlivePeers() is the ONLY work after the
+     *     stamp. The watchdog then read "coroutine frozen" when the truth was "native call has
+     *     not returned". Four respawns, exactly 90s apart (10s to the first stamp + the 80s stale
+     *     window), each reporting "no tick in 80s".
+     *  2. Job.cancel() CANNOT interrupt a thread inside a JNI call. So every respawn left the old
+     *     coroutine parked on a Dispatchers.Default thread forever and started another that
+     *     wedged identically — leaking one of a handful of shared threads every 90 seconds, which
+     *     starves every other serviceScope coroutine including the ones driving the CF scan.
+     *
+     * Same lesson as launchBoundedRecovery: you cannot bound blocking code by cancelling the
+     * coroutine that called it. Hand it to a detached worker and let the loop carry on.
+     */
+    private val nativeKeepaliveExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "dgb-keepalive-native").apply { isDaemon = true }
+        }
+
+    /** True while a keepAlivePeers() sweep is still inside JNI. Guards against queueing a second
+     *  one behind a stuck first — they would serialize on the same lock and the backlog would
+     *  only grow. */
+    private val nativeKeepaliveInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Wall-clock of the last keepAlivePeers() that actually RETURNED. Deliberately separate from
+     *  lastKeepaliveTickMs: one says "the loop is alive", the other says "the native layer is
+     *  answering". Conflating them is what disguised a hung native call as a dead coroutine. */
+    @Volatile private var lastNativeKeepaliveOkMs: Long = 0L
+
+    /** Consecutive respawns where the previous keepalive job never actually completed. */
+    private var wedgedRespawnStreak = 0
 
     /** Consecutive poll ticks observing `height at chain tip`. We only flip
      *  to SyncState.Complete after a grace window of stability so the UI
@@ -750,29 +791,105 @@ class SyncService : Service() {
     }
 
     @Synchronized
-    private fun resurrectKeepaliveIfNeeded() {
-        val now = System.currentTimeMillis()
-        val stale = lastKeepaliveTickMs > 0L &&
-            (now - lastKeepaliveTickMs) > KEEPALIVE_STALE_THRESHOLD_MS
-        if (keepaliveJob?.isActive != true) {
-            android.util.Log.w("SyncService", "keepalive coroutine not active — respawning")
-            // Reset the tick watermark (like the stale branch) so a respawned
-            // keepalive that parks on walletState.first{Unlocked} (wallet locked)
-            // isn't immediately re-flagged stale off the pre-death timestamp.
-            lastKeepaliveTickMs = 0L
-            keepaliveJob = serviceScope.launch { runPeerKeepalive() }
-        } else if (stale) {
-            // Coroutine reports active but hasn't ticked in a long time —
-            // Doze froze it without cancelling. Cancel the old job so we
-            // don't end up with two loops fighting, then respawn.
-            val gap = (now - lastKeepaliveTickMs) / 1000L
+    /**
+     * Hand the blocking native keepalive sweep to [nativeKeepaliveExecutor] and return
+     * immediately, so the caller's loop keeps ticking whether or not the sweep comes back.
+     *
+     * If a previous sweep is still inside JNI we do NOT queue another. A second call would just
+     * block on the same PEER_GUARD behind the first, and the queue would grow one entry per tick
+     * for as long as the stall lasts. Instead we say so out loud — a native lock held for minutes
+     * is the actual defect, and it deserves a log line naming it rather than being smoothed over.
+     */
+    private fun dispatchNativeKeepalive() {
+        if (!nativeKeepaliveInFlight.compareAndSet(false, true)) {
+            val stuckSec = if (lastNativeKeepaliveOkMs > 0L) {
+                (System.currentTimeMillis() - lastNativeKeepaliveOkMs) / 1000L
+            } else -1L
             android.util.Log.w(
                 "SyncService",
-                "keepalive stale: no tick in ${gap}s — cancelling + respawning"
+                "keepAlivePeers still in JNI after ${stuckSec}s — skipping this tick " +
+                    "(native peer lock held elsewhere; not queueing behind it)"
             )
-            keepaliveJob?.cancel()
-            lastKeepaliveTickMs = 0L
-            keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+            return
+        }
+        runCatching {
+            nativeKeepaliveExecutor.execute {
+                try {
+                    NativeBridge.keepAlivePeers()
+                    lastNativeKeepaliveOkMs = System.currentTimeMillis()
+                } catch (t: Throwable) {
+                    android.util.Log.w("SyncService", "keepAlivePeers threw", t)
+                } finally {
+                    nativeKeepaliveInFlight.set(false)
+                }
+            }
+        }.onFailure {
+            // Executor rejected (shutting down) — release the flag so we don't latch.
+            nativeKeepaliveInFlight.set(false)
+        }
+    }
+
+    /**
+     * The policy lives in [keepaliveAction] (core/sync/KeepaliveHealth.kt) so it can be tested
+     * without an Android Service — this method only reads the state and carries out the verdict.
+     * Keeping the decision here as a second copy of the same `if` chain would mean the test
+     * exercised a parallel implementation rather than the shipped one.
+     */
+    private fun resurrectKeepaliveIfNeeded() {
+        val now = System.currentTimeMillis()
+        val prev = keepaliveJob
+        // -1 means "never stamped": a freshly respawned loop that has not reached its first tick.
+        val sinceTick = if (lastKeepaliveTickMs > 0L) now - lastKeepaliveTickMs else -1L
+
+        val action = keepaliveAction(
+            jobExists = prev != null,
+            jobActive = prev?.isActive == true,
+            jobCompleted = prev?.isCompleted == true,
+            msSinceLastTick = sinceTick,
+            staleThresholdMs = KEEPALIVE_STALE_THRESHOLD_MS,
+            wedgedStreak = wedgedRespawnStreak,
+            wedgedLimit = WEDGED_RESPAWN_LIMIT,
+        )
+
+        when (action) {
+            KeepaliveAction.NONE -> return
+
+            KeepaliveAction.RESPAWN_DEAD -> {
+                android.util.Log.w("SyncService", "keepalive coroutine not active — respawning")
+                wedgedRespawnStreak = 0
+                // Reset the tick watermark so a respawned keepalive that parks on
+                // walletState.first{Unlocked} (wallet locked) isn't immediately re-flagged stale
+                // off the pre-death timestamp.
+                lastKeepaliveTickMs = 0L
+                keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+            }
+
+            KeepaliveAction.RESPAWN_STALE -> {
+                val gap = sinceTick / 1000L
+                prev?.cancel()
+                if (prev != null && !prev.isCompleted) wedgedRespawnStreak++ else wedgedRespawnStreak = 0
+                android.util.Log.w(
+                    "SyncService",
+                    "keepalive stale: no tick in ${gap}s — cancelling + respawning " +
+                        "(nativeInFlight=${nativeKeepaliveInFlight.get()})"
+                )
+                lastKeepaliveTickMs = 0L
+                keepaliveJob = serviceScope.launch { runPeerKeepalive() }
+            }
+
+            KeepaliveAction.GIVE_UP_WEDGED -> {
+                // Deliberately NOT respawning. cancel() cannot reach a thread inside JNI, so the
+                // old coroutine still holds its Dispatchers.Default thread; another copy would
+                // wedge in the same place and take another one. Leaking the shared pool turns a
+                // stall into an outage — the CF scan runs on those same threads.
+                android.util.Log.e(
+                    "SyncService",
+                    "keepalive stale ${sinceTick / 1000L}s and the previous job has not completed " +
+                        "after $wedgedRespawnStreak attempts — NOT respawning " +
+                        "(nativeInFlight=${nativeKeepaliveInFlight.get()}). It is stuck somewhere " +
+                        "cancellation cannot reach."
+                )
+            }
         }
     }
 
@@ -832,7 +949,7 @@ class SyncService : Service() {
             // the remote node / NAT inactivity timeout and become dead-socket zombies. Bloom got
             // this "for free" via its always-active single download peer; CF's multi-peer model
             // needs it explicit. This is the hypothesized root of CF sync being flakier than bloom.
-            runCatching { NativeBridge.keepAlivePeers() }
+            dispatchNativeKeepalive()
             // CF-first: re-inject the validated filter peers every ~30s so they stay dialable in
             // the native pool after the fleet churns them out (a peer is removed from the pool on
             // connect failure). injectPeerByIp dedups, so this only re-adds ones that dropped —
@@ -2057,6 +2174,10 @@ class SyncService : Service() {
         networkCallback = null
         recoveryScope.cancel()
         serviceScope.cancel()
+        // shutdown(), NOT shutdownNow(): the worker may be inside keepAlivePeers holding the
+        // native peer lock, and interrupting a thread in JNI does nothing useful anyway. The
+        // thread is a daemon, so a stuck sweep cannot keep the process alive.
+        runCatching { nativeKeepaliveExecutor.shutdown() }
         super.onDestroy()
     }
 
@@ -3204,6 +3325,14 @@ class SyncService : Service() {
          *  it churns. Independent of onStartCommand (which foreground-idle apps
          *  never re-fire) and far faster than the 15-min WorkManager catch-up. */
         private const val KEEPALIVE_WATCHDOG_INTERVAL_MS = 30_000L
+
+        /** Respawn attempts tolerated while the previous keepalive job refuses to complete,
+         *  before we stop replacing it. Each un-completed job holds a Dispatchers.Default thread
+         *  that cancellation cannot reclaim, so an unbounded respawn loop starves every other
+         *  coroutine in the service — including the ones driving the CF scan. Two is enough to
+         *  ride out a genuinely slow-but-finishing cycle without turning a stall into a
+         *  thread-pool exhaustion. */
+        private const val WEDGED_RESPAWN_LIMIT = 2
 
         /** Debounce for the network-regained reconnect: onAvailable can fire several times
          *  in a burst during a WiFi/cellular handoff. One reconnect per 15s is plenty. */
