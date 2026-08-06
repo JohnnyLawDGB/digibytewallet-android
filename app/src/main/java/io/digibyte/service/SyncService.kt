@@ -805,10 +805,16 @@ class SyncService : Service() {
             val stuckSec = if (lastNativeKeepaliveOkMs > 0L) {
                 (System.currentTimeMillis() - lastNativeKeepaliveOkMs) / 1000L
             } else -1L
+            // Name the holder. lockHolderInfo takes NO native lock and never touches the peer
+            // manager pointer — it reads file-static atomics — so it answers even though we are
+            // standing behind the very lock in question. Without this the log could only say
+            // "something is holding it", which is exactly where three device runs stalled: the
+            // [CF-SLOW] profiler logs on RELEASE, so a lock held forever produced no line at all.
+            val holder = runCatching { NativeBridge.lockHolderInfo() }.getOrNull()
             android.util.Log.w(
                 "SyncService",
                 "keepAlivePeers still in JNI after ${stuckSec}s — skipping this tick " +
-                    "(native peer lock held elsewhere; not queueing behind it)"
+                    "(native peer lock held by ${holder ?: "unknown"}; not queueing behind it)"
             )
             return
         }
@@ -882,12 +888,19 @@ class SyncService : Service() {
                 // old coroutine still holds its Dispatchers.Default thread; another copy would
                 // wedge in the same place and take another one. Leaking the shared pool turns a
                 // stall into an outage — the CF scan runs on those same threads.
+                // Name the holder HERE too, not only in dispatchNativeKeepalive's skip branch.
+                // Once this branch latches, the keepalive is never respawned, so
+                // dispatchNativeKeepalive is never called again and that readout goes silent —
+                // which is exactly why a 31-minute wedge produced only two holder samples while
+                // this line fired 68 times. The diagnostic has to live on the branch that keeps
+                // running, not the one that stops.
+                val holder = runCatching { NativeBridge.lockHolderInfo() }.getOrNull()
                 android.util.Log.e(
                     "SyncService",
                     "keepalive stale ${sinceTick / 1000L}s and the previous job has not completed " +
                         "after $wedgedRespawnStreak attempts — NOT respawning " +
-                        "(nativeInFlight=${nativeKeepaliveInFlight.get()}). It is stuck somewhere " +
-                        "cancellation cannot reach."
+                        "(nativeInFlight=${nativeKeepaliveInFlight.get()}, held by " +
+                        "${holder ?: "nothing"}). It is stuck somewhere cancellation cannot reach."
                 )
             }
         }

@@ -15,6 +15,8 @@
 #include <stdint.h>
 #include <time.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <sys/time.h>
 
 /* C core headers */
 #include "BRWallet.h"
@@ -68,9 +70,48 @@ extern BRPeerManager *g_peerManager;
  * Initialized recursive in JNI_OnLoad (jni_wallet.c). */
 extern pthread_mutex_t g_peerManagerMutex;
 
+/* Who holds g_peerManagerMutex, and since when. Globals (defined in jni_wallet.c beside the
+ * mutex) so a thread BLOCKED on the guard can still report the holder: answering must take no
+ * lock and dereference no manager pointer.
+ *
+ * THIS IS A DIFFERENT LOCK FROM manager->lock, and conflating the two cost real time on
+ * 2026-08-06. The [CF-SLOW] profiler and BRPeerManagerLockHeldMs instrument manager->lock, which
+ * was cycling normally the whole time (readout: "_peerRelayedBlock:2235 held 0.0s") while
+ * keepAlivePeers sat wedged for THIRTY-ONE MINUTES on THIS mutex. Instrumenting the healthy lock
+ * produced confident and completely useless data.
+ *
+ * Recursive mutex, so depth is tracked: only the OUTERMOST acquire stamps the holder and only the
+ * outermost release clears it. Without that, a nested PEER_GUARD would overwrite the identity of
+ * the frame that actually entered, and an inner release would falsely report the lock as free. */
+extern _Atomic double       g_peerGuardSinceMs;
+extern const char * _Atomic g_peerGuardFn;
+extern _Atomic int          g_peerGuardLine;
+extern _Atomic int          g_peerGuardDepth;
+
+double bridge_now_ms(void);
+
+/* Milliseconds g_peerManagerMutex has been held right now, 0 if free. Takes NO lock. */
+static inline double peer_guard_held_ms(const char **outFn, int *outLine) {
+    double since = atomic_load_explicit(&g_peerGuardSinceMs, memory_order_relaxed);
+    if (outFn)   *outFn   = atomic_load_explicit(&g_peerGuardFn, memory_order_relaxed);
+    if (outLine) *outLine = atomic_load_explicit(&g_peerGuardLine, memory_order_relaxed);
+    if (since <= 0.0) return 0.0;
+    return bridge_now_ms() - since;
+}
+
 static inline void _peerManagerUnlock(int *guard) {
     (void)guard;
+    if (atomic_fetch_sub_explicit(&g_peerGuardDepth, 1, memory_order_relaxed) == 1) {
+        atomic_store_explicit(&g_peerGuardSinceMs, 0.0, memory_order_relaxed);
+    }
     pthread_mutex_unlock(&g_peerManagerMutex);
+}
+
+static inline int _peerGuardStamp(void) {
+    if (atomic_fetch_add_explicit(&g_peerGuardDepth, 1, memory_order_relaxed) == 0) {
+        atomic_store_explicit(&g_peerGuardSinceMs, bridge_now_ms(), memory_order_relaxed);
+    }
+    return 0;
 }
 
 /* Acquire g_peerManagerMutex for the rest of the enclosing scope. The cleanup
@@ -78,7 +119,10 @@ static inline void _peerManagerUnlock(int *guard) {
  * `return`s in the guarded functions can't leak the lock. */
 #define PEER_GUARD() \
     int _peerGuard __attribute__((cleanup(_peerManagerUnlock), unused)) = \
-        (pthread_mutex_lock(&g_peerManagerMutex), 0)
+        (pthread_mutex_lock(&g_peerManagerMutex), \
+         atomic_store_explicit(&g_peerGuardFn, __func__, memory_order_relaxed), \
+         atomic_store_explicit(&g_peerGuardLine, __LINE__, memory_order_relaxed), \
+         _peerGuardStamp())
 
 /* Session seed — managed by jni_wallet.c, accessed via functions below.
  * g_seed is static to jni_wallet.c — no direct extern access. */

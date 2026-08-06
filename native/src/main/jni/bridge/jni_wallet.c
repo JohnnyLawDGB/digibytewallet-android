@@ -18,6 +18,19 @@ JavaVM       *g_jvm          = NULL;
 BRWallet     *g_wallet       = NULL;
 BRPeerManager *g_peerManager = NULL;
 pthread_mutex_t g_peerManagerMutex;  /* recursive; initialized in JNI_OnLoad. Guards all g_peerManager access — see PEER_GUARD in jni_bridge.h */
+
+/* PEER_GUARD holder tracking — see jni_bridge.h. Answers "who holds g_peerManagerMutex and for
+ * how long" WITHOUT taking any lock, so a thread already blocked on the guard can report it. */
+_Atomic double       g_peerGuardSinceMs = 0.0;
+const char * _Atomic g_peerGuardFn      = NULL;
+_Atomic int          g_peerGuardLine    = 0;
+_Atomic int          g_peerGuardDepth   = 0;
+
+double bridge_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+}
 static uint8_t  g_seed[64];
 static int      g_seedValid = 0;
 BRMasterPubKey g_mpk;

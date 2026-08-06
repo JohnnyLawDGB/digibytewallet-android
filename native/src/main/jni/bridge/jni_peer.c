@@ -339,8 +339,15 @@ static void bridge_threadCleanup(void *info) {
 
 /* ── Saved blocks/peers globals (populated by loadSavedBlocks/loadSavedPeers) ── */
 
+/* Blocks deserialized from persistent storage, owned by the BRIDGE only until startSync hands
+ * them to BRPeerManagerNewEx — which adopts them and frees them as it prunes. After that handover
+ * this pointer is NULLed (see startSync) so nothing here can dereference core-owned memory. */
 static BRMerkleBlock **g_savedBlocks = NULL;
 static size_t g_savedBlocksCount = 0;
+
+/* Highest height among the loaded blocks, captured while the bridge still owns them. A VALUE, so
+ * it stays readable after ownership transfers — unlike the pointer walk it replaced. */
+static uint32_t g_savedBlocksTipHeight = 0;
 /* Gate for the peer-manager creation in startSync. Multiple callers race
  * startSync on app open (onResume, the active-screen wake, the keepalive); the
  * first to win used to create the manager BEFORE SyncService finished
@@ -852,6 +859,39 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             return;
         }
 
+        /* OWNERSHIP TRANSFER. BRPeerManagerNewEx adopts the BRMerkleBlock pointers — it inserts
+         * them into manager->blocks / manager->orphans and frees them individually as it prunes
+         * (BRPeerManager.c: _BRPeerManagerClearMemory and the reorg paths). The bridge must
+         * therefore stop treating them as its own.
+         *
+         * It previously did NOT, and both layers freed the same blocks:
+         *   - loadSavedBlocks' "free any previously loaded blocks" loop ran BRMerkleBlockFree over
+         *     entries the core had already pruned and freed  -> double free
+         *   - getSavedBlocksTip walked ->height over the same dangling pointers  -> UAF
+         *   - a manager recreate re-handed the partially-freed array to the constructor, which
+         *     hashed and compared freed blocks into a fresh BRSet  -> UAF in BRMerkleBlockEq /
+         *     _BRPrevBlockEq
+         * ASan on-device 2026-08-05 reported all three: 21 heap-buffer-overflows and 4
+         * heap-use-after-frees, every one on a 192-byte region — exactly sizeof(BRMerkleBlock).
+         * This is also the likeliest source of the wild BRMerkleBlock* that produced a height of
+         * 4,294,967,040 and the false "scan complete — history unverified".
+         *
+         * Free only the ARRAY, never the elements: the array itself was malloc'd by
+         * deserialize_saved_blocks_guarded and is not adopted. Nulling the pointer makes any
+         * later use fail loudly as NULL rather than silently as freed memory, and the tip height
+         * survives as a cached scalar (see getSavedBlocksTip).
+         *
+         * KNOWN RESIDUAL, deliberately not widened here: BRPeerManagerFree does BRSetFree without
+         * freeing the blocks still resident, so blocks never pruned leak at teardown. That is
+         * pre-existing, bounded by the retained set, and strictly preferable to a use-after-free.
+         * Fixing it belongs with the core's teardown path, not the bridge's. */
+        if (g_savedBlocks) {
+            free(g_savedBlocks);           /* array only — elements now belong to the manager */
+            g_savedBlocks = NULL;
+            g_savedBlocksCount = 0;
+            LOGI("startSync: saved-block ownership transferred to peer manager");
+        }
+
         /* Clear the flag — peer manager is now built with current wallet.
          * Without this, the poll loop's next startSync call would see the
          * stale flag and destroy what we just created. */
@@ -938,6 +978,43 @@ Java_io_digibyte_core_bridge_NativeBridge_isStatusStale(JNIEnv *env, jobject thi
     return bridge_status_is_stale(last, _nowMonotonicMs(), STATUS_STALE_MS) ? JNI_TRUE : JNI_FALSE;
 }
 
+/* ---------- lockHolderInfo ----------
+ *
+ * Who is holding the native peer-manager lock, and for how long. Returns a human-readable
+ * "<seconds>s <func>:<line>", or NULL when the lock is free.
+ *
+ * DELIBERATELY NO PEER_GUARD, and no g_peerManager dereference. That is the entire point: this is
+ * called from the keepalive path precisely WHEN keepAlivePeers is wedged inside JNI waiting on
+ * that lock, so anything that tries to acquire it would wedge identically and report nothing.
+ * BRPeerManagerLockHeldMs reads file-static atomics only.
+ *
+ * The release-time [CF-SLOW] profiler cannot cover this case: it logs on unlock, so a lock that is
+ * never released produces no output at all. Three separate device runs showed 40+ minute holds
+ * with zero [CF-SLOW] lines for exactly that reason. */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_lockHolderInfo(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    /* BOTH locks, because they are different and confusing them wasted an afternoon:
+     *   PEER_GUARD (g_peerManagerMutex) — the JNI-level recursive guard every bridge entry point
+     *                                     holds for its whole body. This is what keepAlivePeers
+     *                                     was wedged on for 31 minutes.
+     *   manager->lock                   — the core's own mutex, which was cycling normally
+     *                                     throughout ("_peerRelayedBlock:2235 held 0.0s").
+     * Reporting only the latter produced confident, useless data. */
+    const char *gfn = NULL, *mfn = NULL;
+    int gline = 0, mline = 0;
+    double guardMs = peer_guard_held_ms(&gfn, &gline);
+    double mgrMs   = BRPeerManagerLockHeldMs(&mfn, &mline);
+
+    if (guardMs <= 0.0 && mgrMs <= 0.0) return NULL;
+
+    char buf[320];
+    snprintf(buf, sizeof(buf), "PEER_GUARD=%.1fs %s:%d | manager->lock=%.1fs %s:%d",
+             guardMs / 1000.0, gfn ? gfn : "-", gline,
+             mgrMs / 1000.0,   mfn ? mfn : "-", mline);
+    return (*env)->NewStringUTF(env, buf);
+}
+
 /* ---------- getPeerCount ---------- */
 
 /* Lock-free mirror read — NO PEER_GUARD, NO g_peerManager deref. The mirror is
@@ -996,14 +1073,12 @@ Java_io_digibyte_core_bridge_NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject
     (void)env;
     (void)thiz;
 
-    if (!g_savedBlocks || g_savedBlocksCount == 0) return 0;
-    uint32_t maxHeight = 0;
-    for (size_t i = 0; i < g_savedBlocksCount; i++) {
-        if (g_savedBlocks[i] && g_savedBlocks[i]->height > maxHeight) {
-            maxHeight = g_savedBlocks[i]->height;
-        }
-    }
-    return (jlong)maxHeight;
+    /* Cached scalar, NOT a walk of g_savedBlocks. Those pointers are owned by the peer manager
+     * from startSync onward and it frees them as it prunes, so dereferencing them here was a
+     * use-after-free — confirmed by ASan on 2026-08-05. The height is captured in
+     * loadSavedBlocks while the bridge still owns the array, and stays valid afterwards because
+     * it is a value, not a pointer. */
+    return (jlong)g_savedBlocksTipHeight;
 }
 
 /* ---------- getWalletBirthCheckpointHeight ----------
@@ -1101,7 +1176,15 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject t
     jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
     if (!buf) return 0;
 
-    /* Free any previously loaded blocks */
+    /* Free any previously loaded blocks.
+     *
+     * SAFE ONLY BECAUSE startSync NULLs g_savedBlocks when it transfers ownership to the peer
+     * manager. So reaching here with a non-NULL pointer means these blocks were deserialized but
+     * never handed over, and the bridge is still their sole owner. Before that transfer existed,
+     * this loop ran BRMerkleBlockFree over entries the core had already pruned and freed — a
+     * double free, and one of the three paths ASan flagged on 2026-08-05.
+     *
+     * If you ever stop NULLing at handover, this becomes a double free again. */
     if (g_savedBlocks) {
         for (size_t i = 0; i < g_savedBlocksCount; i++) {
             if (g_savedBlocks[i]) BRMerkleBlockFree(g_savedBlocks[i]);
@@ -1120,7 +1203,22 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject t
                                                            &g_savedBlocks);
 
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
-    LOGI("loadSavedBlocks: loaded %zu blocks from persistent storage", g_savedBlocksCount);
+
+    /* Cache the tip height NOW, while the bridge still definitively owns these blocks.
+     * getSavedBlocksTip used to walk g_savedBlocks[i]->height on demand, but ownership passes to
+     * the peer manager at startSync and the core frees individual blocks as it prunes — so that
+     * walk was reading freed memory on every call after the first sync began. ASan on-device,
+     * 2026-08-05: heap-use-after-free on 192-byte regions (= sizeof(BRMerkleBlock)). A scalar
+     * captured here cannot dangle. */
+    g_savedBlocksTipHeight = 0;
+    for (size_t i = 0; i < g_savedBlocksCount; i++) {
+        if (g_savedBlocks[i] && g_savedBlocks[i]->height > g_savedBlocksTipHeight) {
+            g_savedBlocksTipHeight = g_savedBlocks[i]->height;
+        }
+    }
+
+    LOGI("loadSavedBlocks: loaded %zu blocks from persistent storage (tip=%u)",
+         g_savedBlocksCount, g_savedBlocksTipHeight);
     return (jint)g_savedBlocksCount;
 }
 

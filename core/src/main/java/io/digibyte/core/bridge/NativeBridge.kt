@@ -506,6 +506,20 @@ object NativeBridge {
      *  (atomic-only), decoupled from PEER_GUARD/teardown. */
     external fun isStatusStale(): Boolean
 
+    /**
+     * Who holds the native peer-manager lock and for how long — `"<seconds>s <func>:<line>"`, or
+     * null when it is free.
+     *
+     * Safe to call from a thread already blocked behind that lock: the native side takes NO lock
+     * and never dereferences the peer manager, it reads file-static atomics. That is essential,
+     * because the intended caller is the keepalive path at the exact moment `keepAlivePeers` is
+     * wedged inside JNI — anything that tried to acquire the lock would wedge identically.
+     *
+     * The release-time `[CF-SLOW]` profiler cannot cover this: it logs on unlock, so a lock that is
+     * never released prints nothing. Three device runs showed 40+ minute holds and zero [CF-SLOW].
+     */
+    external fun lockHolderInfo(): String?
+
     /** Re-anchor the compact-filter chain at the block floor when cfTip is stuck
      *  below the downloaded chain (legacy deficit). Returns true if re-anchored. */
     external fun reanchorCompactFilterChainAtFloor(): Boolean
