@@ -3,6 +3,12 @@ name: Release Build & Deploy
 on:
   push:
     tags: ['v*']
+  # Manual fallback. Without this the release is UNRECOVERABLE if a tag event is
+  # missed: the workflow cannot be dispatched, so the only remedy is deleting and
+  # re-pushing the tag and hoping. That happened on v4.0.33-beta — tag present on
+  # the remote, workflow active, correct trigger at the tagged commit, and no run
+  # was ever created. Pass the tag as `ref` to build it.
+  workflow_dispatch:
 
 jobs:
   build-sign-deploy:
