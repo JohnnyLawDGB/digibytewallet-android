@@ -646,6 +646,11 @@ class WalletManager(
     private fun clearSyncData() {
         context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
             .edit().clear().apply()
+        // Drop ChainTipStore's in-memory mirror too — see the note in
+        // AndroidWalletDataEraser.eraseSyncData. This helper backs createWallet and recoverWallet,
+        // so without it a restored seed would inherit the previous wallet's confirmation counts
+        // until the process happened to restart.
+        io.digibyte.core.sync.ChainTipStore.invalidateCache()
     }
 
     /**

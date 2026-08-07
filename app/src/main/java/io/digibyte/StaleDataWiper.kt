@@ -2,6 +2,7 @@ package io.digibyte
 
 import android.content.Context
 import io.digibyte.core.networkSuffix
+import io.digibyte.core.sync.ChainTipStore
 import io.digibyte.core.sync.FilterHeaderStore
 
 /**
@@ -35,6 +36,11 @@ object StaleDataWiper {
         // doc comment) so clearing the prefs blob above never touched it. A corrupt
         // .bin left behind here could re-crash the very next restore/re-anchor.
         FilterHeaderStore.delete(context)
+        // ChainTipStore's persisted value went out with the dgb_sync_data .clear() above, but its
+        // in-memory mirror did not — and this runs from BootGuard on a crash-loop recovery, in a
+        // process that keeps running afterwards. Left stale, the mirror would be re-persisted on
+        // the next UI poll and quietly undo the wipe.
+        ChainTipStore.invalidateCache()
     }
 
     /** Heavier recovery: delete the encrypted Room DB and its key material so a

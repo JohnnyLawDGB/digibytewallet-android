@@ -22,6 +22,8 @@ import io.digibyte.core.model.deriveSyncFrontier
 import io.digibyte.core.networkSuffix
 import io.digibyte.core.sync.AbandonedBand
 import io.digibyte.core.sync.CfAbandonmentStore
+import io.digibyte.core.sync.ChainTipPolicy
+import io.digibyte.core.sync.ChainTipStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.digibyte.core.tor.TorManager
@@ -712,9 +714,6 @@ class WalletViewModel @Inject constructor(
                     txDetails.trim().lines().take(5).forEach { android.util.Log.d("WalletVM", "tx: $it") }
                 }
                 if (txDetails.isNotEmpty()) {
-                    // First pass: find the highest tx block height as a floor.
-                    // This ensures confirmations are computed correctly even before
-                    // the peer manager loads saved blocks and reports a chain tip.
                     // Exclude unconfirmed txs: their blockHeight is TX_UNCONFIRMED
                     // (native INT32_MAX = 2_147_483_647). A pending send would
                     // otherwise poison this floor and the height/progress readout
@@ -723,7 +722,26 @@ class WalletViewModel @Inject constructor(
                         line.split("|").getOrNull(3)?.toLongOrNull()
                     }.filter { it > 0 && it < Int.MAX_VALUE.toLong() }
                     val maxTxHeight = txHeights.maxOrNull() ?: 0L
-                    if (maxTxHeight > currentHeight) currentHeight = maxTxHeight
+
+                    // Confirmations are measured against their OWN tip, deliberately kept separate
+                    // from `currentHeight`. `currentHeight` is the PoW-validated native height that
+                    // drives the progress bar, the ETA samples and the monotonic _externalTip that
+                    // deriveSyncFrontier uses as its denominator; a remembered value must never
+                    // reach any of those, because a tip read back from prefs is not something this
+                    // session verified against the chain.
+                    //
+                    // This used to floor `currentHeight` itself to maxTxHeight, which is where the
+                    // "newest transaction always shows 1 confirmation on open" bug came from: for
+                    // the newest tx, maxTxHeight IS its own height, so the count collapsed to
+                    // maxTxHeight - maxTxHeight + 1 = 1 until the real tip loaded. Users read that
+                    // as the wallet re-verifying their transaction on every launch; nothing was
+                    // re-verified, the tip it was measured against was simply wrong.
+                    if (currentHeight > 0) ChainTipStore.record(application, currentHeight)
+                    val confTip = ChainTipPolicy.effectiveChainTip(
+                        nativeTip = currentHeight,
+                        persistedTip = ChainTipStore.read(application),
+                        maxTxHeight = maxTxHeight,
+                    )
 
                     val txList = txDetails.trim().lines().mapNotNull { line ->
                         val parts = line.split("|")
@@ -734,8 +752,7 @@ class WalletViewModel @Inject constructor(
                             // shows "Pending" rather than "2147483647".
                             val rawHeight = parts[3].toLongOrNull() ?: 0L
                             val txHeight = if (rawHeight in 1 until Int.MAX_VALUE.toLong()) rawHeight else 0L
-                            val confs = if (txHeight > 0 && currentHeight >= txHeight)
-                                (currentHeight - txHeight + 1).toInt() else 0
+                            val confs = ChainTipPolicy.confirmationsFor(txHeight, confTip)
                             val txid = parts[0]
                             val nativeAmount = parts[1].toLongOrNull() ?: 0L
                             val nativeFee = parts[2].toLongOrNull() ?: 0L

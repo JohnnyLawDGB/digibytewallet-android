@@ -59,6 +59,11 @@ class AndroidWalletDataEraser(private val context: Context) : WalletDataEraser {
     override fun eraseSyncData() {
         context.getSharedPreferences("dgb_sync_data${suffix()}", Context.MODE_PRIVATE)
             .edit().clear().commit()
+        // The .clear() above removes the persisted display tip, but ChainTipStore mirrors it in a
+        // process-lifetime field so the 5s UI poll doesn't hit disk. Without this the mirror would
+        // outlive the wipe and be written straight back on the next poll — a tip from the WIPED
+        // wallet reappearing under the newly restored one.
+        io.digibyte.core.sync.ChainTipStore.invalidateCache()
     }
 
     override fun eraseBloomPeerCache() {
