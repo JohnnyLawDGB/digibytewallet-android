@@ -672,10 +672,29 @@ private fun SyncIndicator(info: SyncProgressInfo) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
+                // DETERMINATE (`progress = {...}`), deliberately. The indeterminate overload —
+                // CircularProgressIndicator with no `progress` — resolves to a Material3
+                // implementation built on rememberInfiniteTransition, whose InfiniteTransition
+                // calls withInfiniteAnimationFrameNanos: an unbounded frame-clock loop that asks
+                // for a Choreographer frame EVERY vsync, with no terminating condition.
+                //
+                // This sits in the wallet hero card (LazyColumn item #0 — always composed, never
+                // scrolled off) and the Syncing stage lasts the ENTIRE deep restore. Measured on
+                // a Note 8 mid-restore: 132,757 frames in ~35 minutes (~63fps on a 60Hz panel),
+                // 31.96% janky, RenderThread pegged near 41% of a core, and one GC pass freeing
+                // 689,111 objects — the infinite transition also rewrites four animated State
+                // values per frame, one of them a boxed Int.
+                //
+                // A 12dp spinner is not worth a third of a core on every device for a whole sync,
+                // least of all while the SPV threads are competing for the same CPU. The
+                // determinate form draws the same ring and only invalidates when progressFraction
+                // actually changes — the 5s poll, so ~0.2 redraws/sec instead of ~63.
                 CircularProgressIndicator(
+                    progress = { info.progressFraction.coerceIn(0f, 1f) },
                     modifier = Modifier.size(12.dp),
                     strokeWidth = 2.dp,
-                    color = DigiByteAccent
+                    color = DigiByteAccent,
+                    trackColor = DigiByteAccent.copy(alpha = 0.25f),
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
@@ -715,12 +734,18 @@ private fun SyncIndicator(info: SyncProgressInfo) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 2.dp,
-                    color = DigiByteAccent
-                )
-                Spacer(modifier = Modifier.width(6.dp))
+                // No spinner here either, and this one is a judgement call worth stating.
+                //
+                // Connecting is genuinely indeterminate, which is exactly what an indeterminate
+                // spinner is for — but the indeterminate overload runs the same unbounded
+                // withInfiniteAnimationFrameNanos loop as the Syncing branch above, and THIS app
+                // has a documented failure mode where Connecting persists for hours (the 0-peer
+                // wedge). Burning ~41% of a core to animate a 12dp ring is worst precisely when
+                // the wallet is already failing to connect and every cycle matters.
+                //
+                // The trailing "…" carries the in-progress cue at zero cost. If the spinner is
+                // wanted back, it needs a FINITE animation (a bounded repeat that stops after a
+                // few seconds), not the infinite transition.
                 Text(
                     text = text,
                     style = MaterialTheme.typography.labelSmall,
