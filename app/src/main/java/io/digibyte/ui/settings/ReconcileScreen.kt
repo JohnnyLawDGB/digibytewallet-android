@@ -51,7 +51,7 @@ interface ReconcileScreenEntryPoint {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReconcileScreen(navController: NavController) {
+fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val client = remember { DgbNodeClient(context) }
     // Pull the app-scoped AssetManager via a Hilt entry point so reconcile
@@ -219,20 +219,47 @@ fun ReconcileScreen(navController: NavController) {
             // Action + state
             val busy = state is ChainReconciliationService.State.Scanning
 
-            Button(
-                onClick = {
-                    scope.launch {
-                        val result = service.reconcile()
-                        // Clear the post-upgrade banner flag if this manual
-                        // run got us a successful reconcile — same pref the
-                        // auto-trigger writes to, so a Done here also
-                        // dismisses the WalletScreen banner.
-                        if (result is ChainReconciliationService.State.Done) {
-                            io.digibyte.core.reconcile.PostUpgradeReconciler
-                                .clearFailedFlag(context)
-                        }
+            // ONE definition of "run the scan", shared by the button and by the
+            // auto-start below, so the two can never drift apart.
+            val runScan: () -> Unit = {
+                scope.launch {
+                    val result = service.reconcile()
+                    // Clear the post-upgrade banner flag if this manual
+                    // run got us a successful reconcile — same pref the
+                    // auto-trigger writes to, so a Done here also
+                    // dismisses the WalletScreen banner.
+                    if (result is ChainReconciliationService.State.Done) {
+                        io.digibyte.core.reconcile.PostUpgradeReconciler
+                            .clearFailedFlag(context)
                     }
-                },
+                }
+                Unit
+            }
+
+            // Arrived from the history-gap banner, whose button reads "Scan for missing
+            // transactions". That button used to only NAVIGATE here, so a user who tapped it
+            // landed on this screen believing a scan had started — nothing had, and nothing
+            // said so. Observed 2026-08-07: a first tap produced no network call at all (the
+            // DgbNodeClient logs every failure and was silent because it was never reached),
+            // and the wallet sat at 0.00 DGB with its history written off until the button on
+            // THIS screen was pressed. A control must do what its label says.
+            //
+            // Guarded by a remember so it fires once per arrival, not on every recomposition.
+            var autoStarted by remember { mutableStateOf(false) }
+            LaunchedEffect(autoStart, state) {
+                if (shouldAutoStartReconcile(
+                        requested = autoStart,
+                        alreadyStarted = autoStarted,
+                        scanInProgress = state is ChainReconciliationService.State.Scanning,
+                    )
+                ) {
+                    autoStarted = true
+                    runScan()
+                }
+            }
+
+            Button(
+                onClick = runScan,
                 enabled = !busy,
                 modifier = Modifier
                     .fillMaxWidth()

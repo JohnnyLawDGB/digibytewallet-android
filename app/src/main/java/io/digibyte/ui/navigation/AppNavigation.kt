@@ -329,7 +329,10 @@ fun AppNavigation(
                     // Abandoned-band banner action — the reconcile screen hosts BOTH
                     // recovery paths ("Scan for missing transactions" and "Full
                     // rebuild from chain").
-                    onNavigateReconcile = { navController.navigate("settings_reconcile") }
+                    // autostart=true: the banner's button is labelled "Scan for missing
+                    // transactions", so tapping it must START the scan, not just open the
+                    // screen that has another button on it.
+                    onNavigateReconcile = { navController.navigate("settings_reconcile?autostart=true") }
                 )
             }
 
@@ -450,8 +453,16 @@ fun AppNavigation(
                 AboutScreen(navController = navController)
             }
 
-            composable("settings_reconcile") {
-                io.digibyte.ui.settings.ReconcileScreen(navController = navController)
+            composable(
+                "settings_reconcile?autostart={autostart}",
+                arguments = listOf(navArgument("autostart") {
+                    type = NavType.BoolType; defaultValue = false
+                }),
+            ) { backStackEntry ->
+                io.digibyte.ui.settings.ReconcileScreen(
+                    navController = navController,
+                    autoStart = backStackEntry.arguments?.getBoolean("autostart") ?: false,
+                )
             }
 
             composable("recover_funds") {
