@@ -1615,6 +1615,19 @@ Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject
     return (jlong)BRPeerManagerAbandonedCount(g_peerManager);
 }
 
+/* The measurable counterpart to getAbandonedCount. That one derives from
+ * (abandonedBelow - start), and the three ledger re-Init paths reset `start` to the new
+ * floor, so it reads ZERO right after the largest abandonment event in the system; this
+ * one sums the heights the ledger actually reports as dropped and survives the re-Init.
+ * Use it — and only it — when judging whether a change reduced abandonment. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getAbandonedHeightsTotal(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerAbandonedHeightsTotal(g_peerManager);
+}
+
 /* B2 valve / watchdog ORDERING (paced-convoy fetch, spec Part C/D). Returns the
  * valve's RE-ARM CYCLE COUNT for the hole that pins the CF scan frontier — 0 when
  * the valve owns nothing there. A COUNT, not a boolean, deliberately: the Kotlin

@@ -575,9 +575,20 @@ object NativeBridge {
      *  Monotonic. 0 if the peer manager doesn't exist yet. */
     external fun getAbandonedBelow(): Long
 
-    /** Cumulative count of heights abandoned so far (max(abandonedBelow -
-     *  start, 0)). 0 if the peer manager doesn't exist yet. */
+    /** SPAN below the watermark (max(abandonedBelow - start, 0)) — **not** the number of
+     *  heights abandoned, and not sound as a measurement. It over-reports (the span includes
+     *  heights that were scanned normally, which is why the banner renders a RANGE and never
+     *  a count), and it reads ZERO right after the biggest abandonment event, because the
+     *  cfheaders floor snap re-Inits the ledger and moves `start` up to the same floor.
+     *  Use [getAbandonedHeightsTotal]. 0 if the peer manager doesn't exist yet. */
     external fun getAbandonedCount(): Long
+
+    /** TOTAL heights this session has actually written off, summed from what the native
+     *  ledger reports as dropped on each surfacing event. Survives the three mid-session
+     *  ledger re-Inits that zero [getAbandonedCount]; resets only for a genuinely new
+     *  wallet (fresh / wipe / rescan). This is the number to trust when judging whether a
+     *  retention change reduced abandonment. 0 if the peer manager doesn't exist yet. */
+    external fun getAbandonedHeightsTotal(): Long
 
     /** Is the B2 abandonment valve mid-decision on the hole that PINS the CF scan
      *  frontier (`BRPeerManagerHasPendingAbandonment`)? Returns the valve's RE-ARM
