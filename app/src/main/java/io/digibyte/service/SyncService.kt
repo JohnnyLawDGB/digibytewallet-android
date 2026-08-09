@@ -2232,8 +2232,8 @@ class SyncService : Service() {
         // Flush the latest block window synchronously before teardown so a
         // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
         // guard ensures this never regresses a higher persisted tip.
-        lastSavedBlocksData?.let {
-            runCatching { persistBlocks(it, SavedBlockStore.currentEpoch(), synchronous = true) }
+        lastSavedBlocksData?.let { (bytes, epoch) ->
+            runCatching { persistBlocks(bytes, epoch, synchronous = true) }
         }
         flushFilterHeaders()
         // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
@@ -2541,12 +2541,15 @@ class SyncService : Service() {
             // Persist off the C core callback thread to avoid blocking peer manager.
             // Cache the latest window so onDestroy can flush it synchronously, and
             // route through persistBlocks() for the monotonic anti-regression guard.
-            // The epoch is snapshotted HERE (on receipt) so a concurrent
-            // SavedBlockStore.delete() (rescan/wipe/CF-reset) racing with the queued
-            // IO write reliably drops it rather than resurrecting a wiped file.
+            // The epoch is snapshotted HERE (on receipt), alongside the data, so a
+            // concurrent SavedBlockStore.delete() (rescan/wipe/CF-reset) racing with
+            // the queued IO write OR the eventual onDestroy flush reliably drops it
+            // rather than resurrecting a wiped file. onDestroy MUST reuse this same
+            // stored epoch, not re-read SavedBlockStore.currentEpoch() fresh at
+            // flush time — see the lastSavedBlocksData doc comment.
             val copy = data.copyOf()
-            lastSavedBlocksData = copy
             val epoch = SavedBlockStore.currentEpoch()
+            lastSavedBlocksData = copy to epoch
             serviceScope.launch(Dispatchers.IO) { persistBlocks(copy, epoch, synchronous = false) }
         }
 
@@ -3072,11 +3075,22 @@ class SyncService : Service() {
     }
 
     /** Most recent serialized block window from [NativeCallback.onSaveBlocks],
-     *  cached so [onDestroy] can flush it synchronously before teardown. The C
-     *  core only emits saves on 4000-block boundaries / at the tip, so this is
-     *  the last boundary window — sub-boundary catch-up isn't captured here, but
-     *  the recent bundled checkpoint makes re-syncing that gap near-instant. */
-    @Volatile private var lastSavedBlocksData: ByteArray? = null
+     *  paired with the [SavedBlockStore] epoch captured AT RECEIPT — mirrors
+     *  [pendingFilterHeaders]'s `Pair<ByteArray, Long>` shape exactly, and for the
+     *  same reason: [onDestroy] MUST reuse this snapshotted epoch, not re-read
+     *  [SavedBlockStore.currentEpoch] fresh at flush time. A fresh read at flush
+     *  time is always equal to itself, so it silently defeats the epoch guard —
+     *  e.g. [io.digibyte.core.WalletManager.wipeWallet] calls
+     *  [SavedBlockStore.delete] (bumping the epoch) WITHOUT stopping this service;
+     *  if [onDestroy] then re-reads the (now-bumped) current epoch instead of the
+     *  pre-wipe one it captured, the guard never rejects the stale write and the
+     *  just-deleted file is resurrected with a wiped wallet's block window
+     *  (I2 review finding). Cached so [onDestroy] can flush it synchronously
+     *  before teardown. The C core only emits saves on 4000-block boundaries / at
+     *  the tip, so this is the last boundary window — sub-boundary catch-up isn't
+     *  captured here, but the recent bundled checkpoint makes re-syncing that gap
+     *  near-instant. */
+    @Volatile private var lastSavedBlocksData: Pair<ByteArray, Long>? = null
 
     /**
      * Write the serialized saved-blocks window to disk behind a monotonic guard:

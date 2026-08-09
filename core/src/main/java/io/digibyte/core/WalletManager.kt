@@ -646,7 +646,9 @@ class WalletManager(
 
     // ── Sync data management ────────────────────────────────────
 
-    private fun clearSyncData() {
+    /** `internal` (not `private`) so [WalletManagerClearSyncDataTest] can call it
+     *  directly without instantiating createWallet/recoverWallet's native path. */
+    internal fun clearSyncData() {
         context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
             .edit().clear().apply()
         // Drop ChainTipStore's in-memory mirror too — see the note in
@@ -654,6 +656,12 @@ class WalletManager(
         // so without it a restored seed would inherit the previous wallet's confirmation counts
         // until the process happened to restart.
         io.digibyte.core.sync.ChainTipStore.invalidateCache()
+        // I2 review (MINOR): the saved-blocks window moved out of dgb_sync_data
+        // into a file (SavedBlockStore) — the .clear() above no longer reaches it.
+        // Without this, a fresh wallet (createWallet/recoverWallet) or a
+        // seed-fingerprint-mismatch restore (restoreFromDisk) would inherit the
+        // PREVIOUS wallet's saved-blocks window from disk.
+        SavedBlockStore.delete(context)
     }
 
     /**
