@@ -293,7 +293,7 @@ void __wrap_BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t st
 }
 
 // The SUPPRESSION half of the getheaders gate cannot be driven from this TU:
-// _BRPeerAcceptHeadersMessage (BRPeer.c:648, where the CF-only 2000-header
+// _BRPeerAcceptHeadersMessage (BRPeer.c, where the CF-only 20,000-header
 // continuation is held) is file-static to BRPeer.c, which is a SEPARATE
 // compilation unit here (only BRPeerManager.c is #include-d). What IS testable
 // -- and is the part that lives in BRPeerManager.c -- is the PUSH: the manager
@@ -323,10 +323,12 @@ void __wrap_BRPeerSetConvoyHdrGated(BRPeer *peer, int gated)
 //   void BRPeerSendGetheaders(BRPeer *peer, const UInt256 locators[], size_t locatorsCount, UInt256 hashStop);
 static int    g_hdrCount     = 0;
 static size_t g_hdrLocators  = 0;
+static BRPeer *g_hdrPeer     = NULL;
 
 void __wrap_BRPeerSendGetheaders(BRPeer *peer, const UInt256 locators[], size_t locatorsCount, UInt256 hashStop)
 {
-    (void)peer; (void)locators; (void)hashStop;
+    (void)locators; (void)hashStop;
+    g_hdrPeer = peer;
     g_hdrLocators = locatorsCount;
     g_hdrCount++;
 }
@@ -602,12 +604,13 @@ static size_t buildSingleElementFilter(UInt256 blockHash, const uint8_t *elem, s
 
 // ---------------------------------------------------------------------------
 // Test 1 (THE CRUX): a header-race-buffered, wallet-MATCHING filter drains
-// the moment its block header + cfheader both connect, and the block is
-// FETCHED via getdata (not merely MarkEvaluated) -- proving the receive
-// actually credits instead of being marked scanned and silently lost.
-static void test_buffered_drains_and_CREDITS_at_connect(BRWallet *wallet)
+// the moment its block header + cfheader both connect and dispatches getdata,
+// but the scan height stays outstanding until the requested full block is
+// delivered. Advancing here creates a crash window that can silently lose a
+// payment between the request and transaction persistence.
+static void test_buffered_drains_and_waits_for_block_at_connect(BRWallet *wallet)
 {
-    printf("\n=== test_buffered_drains_and_CREDITS_at_connect (THE CRUX) ===\n");
+    printf("\n=== test_buffered_drains_and_waits_for_block_at_connect (THE CRUX) ===\n");
 
     BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
     BRPeerManagerSetSyncMode(m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
@@ -659,11 +662,14 @@ static void test_buffered_drains_and_CREDITS_at_connect(BRWallet *wallet)
 
     BRPeerManagerKeepAlive(m);
 
-    check(g_getdataCount == 1, "CRUX: getdata dispatched exactly once (block FETCHED -> receive credits)");
-    check(UInt256Eq(g_getdataHash, bH1->blockHash), "CRUX: getdata targeted the buffered block's own hash");
-    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 0, "MarkEvaluated fired: H+1 no longer outstanding");
-    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 0, "buffer drained (entry removed after credit)");
-    check(g_capCount == 0, "no getcfilters sent -- this is the buffer-drain path, not the re-request path");
+    check(g_getdataCount == 1, "CRUX: getdata dispatched exactly once (full block requested)");
+    check(UInt256Eq(g_getdataHash, bH1->blockHash), "CRUX: getdata targeted the buffered block hash");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 1,
+          "CRUX: buffered matched height remains outstanding until full block delivery");
+    check(findOutstanding(&m->cfLedger, H + 1) != NULL,
+          "CRUX: H+1 specifically remains the delivery checkpoint");
+    check(BRCFScanLedgerBufferedCount(&m->cfLedger) == 0,
+          "buffer drained after getdata dispatch while the ledger hole remains");
 
     BRPeerManagerFree(m);
 }
@@ -1893,6 +1899,45 @@ static BRPeerManager *rhBuildResumedManager(BRWallet *wallet, uint32_t savedTip,
     return m;
 }
 
+
+static void test_resume_crosses_checkpoint_with_real_header(BRWallet *wallet)
+{
+    printf("\n=== test_resume_crosses_checkpoint_with_real_header ===\n");
+    const BRCheckPoint *checkpoint = NULL;
+    for (size_t i = 0; i < BRMainNetParams.checkpointsCount; i++) {
+        if (BRMainNetParams.checkpoints[i].height == 22800000u) {
+            checkpoint = &BRMainNetParams.checkpoints[i];
+            break;
+        }
+    }
+    check(checkpoint != NULL, "fixture found the real mainnet height-22800000 checkpoint");
+    if (!checkpoint) return;
+
+    enum { SAVED_COUNT = 5 };
+    const uint32_t base = checkpoint->height - 2u;
+    BRMerkleBlock *saved[SAVED_COUNT];
+    for (uint32_t i = 0; i < SAVED_COUNT; i++) saved[i] = rhChainBlock(base + i);
+    saved[2]->blockHash = UInt256Reverse(checkpoint->hash);
+    for (uint32_t i = 1; i < SAVED_COUNT; i++) saved[i]->prevBlock = saved[i - 1]->blockHash;
+
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0,
+                                         saved, SAVED_COUNT, NULL, 0);
+    check(m != NULL, "manager restored a saved run crossing a hardcoded checkpoint");
+    if (!m) return;
+
+    BRMerkleBlock heightKey = { .height = checkpoint->height };
+    BRMerkleBlock *checkpointEntry = BRSetGet(m->checkpoints, &heightKey);
+    BRMerkleBlock *blockEntry = BRSetGet(m->blocks, &saved[2]->blockHash);
+    check(checkpointEntry == saved[2] && blockEntry == saved[2],
+          "checkpoint stub is replaced in both indexes by the real persisted header");
+    check(_BRPeerManagerBlockFloor(m) == base,
+          "RED CRUX: restored chain walks through the checkpoint to the true saved floor");
+    check(BRSetCount(m->orphans) == 0,
+          "every persisted header crossing the checkpoint joins the main chain");
+
+    BRPeerManagerFree(m);
+}
+
 // THE red-before-green case. Unfixed (-DRETENTION_UNFIXED) floors at the
 // cfHEADER frontier (cfNext-144), which is ABOVE the lagging scan floor, so the
 // scan-floor header is pruned -> RED. Fixed floors at min(cfNext,lowestNeeded)-144
@@ -2386,6 +2431,46 @@ static void test_valve_matched_set(BRWallet *wallet)
     test_valve_case_d_peer_flap(wallet);
 }
 
+static void test_retry_cycles_never_abandon(BRWallet *wallet)
+{
+    printf("\n=== test_retry_cycles_never_abandon (compact-filter scan completeness) ===\n");
+
+    uint32_t tip;
+    BRPeer *peer = NULL;
+    BRPeerManager *manager = b2BuildHarness(wallet, &tip, &peer);
+    check(manager != NULL, "setup: manager, chain, and compact-filter peer created");
+    if (!manager) return;
+
+    const uint32_t height = B2_CHAIN_BASE + 10u;
+    BRCFScanLedgerInit(&manager->cfLedger, B2_CHAIN_BASE);
+    BRCFScanLedgerRecordRequested(&manager->cfLedger, height, height, UINT128_ZERO, 0, 0);
+    const int warnBefore = g_wlogCount;
+
+    for (int cycle = 0; cycle < 8; cycle++) b2RunRound(manager, height);
+
+    check(BRCFScanLedgerAbandonedBelow(&manager->cfLedger) == 0,
+          "eight exhausted peer retry cycles never advance abandonedBelow");
+    check(g_wlogCount == warnBefore, "retry exhaustion emits no ABANDONED warning");
+    check(findOutstanding(&manager->cfLedger, height) != NULL,
+          "the unresolved canonical height remains tracked and offerable");
+    check(b2OutstandingCycles(&manager->cfLedger, height) >= 8,
+          "retry cycles continue beyond the historical abandonment threshold");
+    check(BRCFScanLedgerLowestNeededHeight(&manager->cfLedger) <= height,
+          "the scan frontier never crosses the unresolved height");
+    check(everReqContains(height), "the unresolved height was repeatedly offered on the wire");
+
+    uint32_t served[1];
+    int servedCount = serveSome(manager, 1, served);
+    check(servedCount == 1 && served[0] == height,
+          "a later peer response still evaluates the retained height");
+    check(BRCFScanLedgerAbandonedBelow(&manager->cfLedger) == 0,
+          "successful recovery requires no abandonment watermark");
+    check(findOutstanding(&manager->cfLedger, height) == NULL,
+          "the evaluated height leaves the retry ledger normally");
+
+    BRPeerManagerFree(manager);
+}
+
 // ---- Paced-convoy fetch, Task 1: scan-frontier + abandonment accessors -----
 // Semantics anchor for the frontier the convoy gate/driver polls: it is
 // BRCFScanLedgerLowestNeededHeight (== max(scannedThrough+1, abandonedBelow)),
@@ -2450,15 +2535,56 @@ static void test_lowest_needed_accessor(BRWallet *wallet)
 //
 // Block-header sync fast-forwards to the chain tip UNPACED, so on a deep restore
 // manager->blocks fills with [birth..tip] before the cfilter SCAN has processed
-// anything (the OOM). The gate suppresses ONLY the two tip-racing continuations,
+// anything (the OOM). The gate suppresses every tip-racing block-header trigger,
 // keeping the header/cfheader frontiers within CF_CONVOY_WINDOW of the SCAN
-// frontier. Suppressing a RECOVERY or SYNC-START send instead would deadlock the
-// convoy from the other side -- hence the per-call-site isConvoyAdvance flag,
-// and hence the EXEMPT half of this case, which is as load-bearing as the
-// suppressed half.
+// frontier. CFHEADER recovery/re-anchor remains exempt because it repairs the
+// chain required by the scan. A block-header sync-start caused by reconnect or
+// download-peer election is only another tip-racing continuation, so it must be
+// held by the same header window and restarted by KeepAlive after the scan moves.
 //
 // RED-before-green: run.sh builds this case with -DCONVOY_UNGATED (the
 // suppression compiled out, the pre-fix shape) and HARD-FAILS if it passes.
+
+static void test_cf_block_inv_uses_single_header_peer(BRWallet *wallet)
+{
+    BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeer *syncPeer = BRPeerNew(BRMainNetParams.magicNumber);
+    BRPeer *otherPeer = BRPeerNew(BRMainNetParams.magicNumber);
+    BRPeerCallbackInfo syncInfo = { .manager = manager, .peer = syncPeer };
+    BRPeerCallbackInfo otherInfo = { .manager = manager, .peer = otherPeer };
+    UInt256 announced = UINT256_ZERO;
+    memset(announced.u8, 0xa5, sizeof(announced.u8));
+
+    manager->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+    array_add(manager->connectedPeers, syncPeer);
+    array_add(manager->connectedPeers, otherPeer);
+    manager->downloadPeer = syncPeer;
+    g_hdrCount = 0;
+    g_hdrPeer = NULL;
+
+    _peerRelayedBlockInv(&otherInfo, announced);
+    check(g_hdrCount == 0, "a non-sync peer's duplicate block inv does not request headers");
+    _peerRelayedBlockInv(&syncInfo, announced);
+    check(g_hdrCount == 1 && g_hdrPeer == syncPeer,
+          "the elected sync peer requests exactly one header stream for the announced block");
+
+    BRPeerManagerFree(manager);
+}
+
+static void test_cf_callbacks_follow_handshake_peer(BRWallet *wallet)
+{
+    BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeer *connectedPeer = BRPeerNew(BRMainNetParams.magicNumber);
+    BRPeer *electedPeer = BRPeerNew(BRMainNetParams.magicNumber);
+    BRPeerCallbackInfo info = { .manager = manager, .peer = connectedPeer };
+
+    check(_BRPeerManagerCompactFilterCallbackPeer(&info, electedPeer) == connectedPeer,
+          "filter callbacks stay with the peer whose handshake fired, not a reassigned download-election peer");
+
+    BRPeerFree(connectedPeer);
+    BRPeerFree(electedPeer);
+    BRPeerManagerFree(manager);
+}
 
 static void test_convoy_gate_suppresses_continuations(BRWallet *wallet)
 {
@@ -2525,11 +2651,18 @@ static void test_convoy_gate_suppresses_continuations(BRWallet *wallet)
     check(m->cfHeadersRequestedThrough == 0,
           "GATE: the suppressed advance left cfHeadersRequestedThrough at 0 (no phantom in-flight batch)");
 
-    // --- ...while a RECOVERY / SYNC-START send is EXEMPT. Suppressing THIS is
-    // what would deadlock the convoy, so it is asserted, not assumed. ---
+    // --- ...while a CFHEADER RECOVERY / RE-ANCHOR send is EXEMPT. Suppressing
+    // this would deadlock the scan, so it is asserted, not assumed. ---
     _BRPeerManagerRequestNextCFHeaders(m, pa, /*isConvoyAdvance=*/0);
-    check(g_cfhCount == 1, "EXEMPT: isConvoyAdvance=0 (sync-start / re-anchor / recovery) STILL sends at a full window");
+    check(g_cfhCount == 1, "EXEMPT: isConvoyAdvance=0 (CFHEADER re-anchor / recovery) STILL sends at a full window");
     check(g_cfhStart == CFH_NEXT, "EXEMPT: the recovery send asked for the real next batch start (CFH_NEXT)");
+
+    // A block-header sync-start is not recovery: reconnect churn used to issue
+    // one fresh full-locator getheaders per download-peer election, bypassing
+    // the continuation gate and racing the retained header floor past the scan.
+    m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+    check(_cfConvoyCanStartHeaderRequest(m) == 0,
+          "GATE: reconnect/download-peer sync-start getheaders is HELD at a full window (RED on -DCONVOY_UNGATED)");
 
     // --- the getheaders half: KeepAlive recomputes the window and PUSHES the
     // verdict onto every connected peer (BRPeer.c's :622 continuation reads it
@@ -2549,6 +2682,8 @@ static void test_convoy_gate_suppresses_continuations(BRWallet *wallet)
     check((CFH_NEXT - 1u) - SCAN_NEAR < CF_CONVOY_WINDOW, "control setup: W_cfh < CF_CONVOY_WINDOW");
     check(_cfConvoyHdrGated(m) == 0, "CONTROL: hdr window predicate OPEN below W");
     check(_cfConvoyCfhGated(m) == 0, "CONTROL: cfh window predicate OPEN below W");
+    check(_cfConvoyCanStartHeaderRequest(m) == 1,
+          "CONTROL: reconnect/download-peer sync-start getheaders re-opens after the scan advances");
 
     m->cfHeadersRequestedThrough = 0;   // clear the exempt send's in-flight marker
     g_cfhCount = 0; g_cfhStart = 0;
@@ -2846,7 +2981,7 @@ static void test_b1_rekicks_cfheaders_on_window_reopen(BRWallet *wallet)
 
 // B1.3 -- the getheaders advance re-kick, asserted on the MANAGER side.
 //
-// SCOPE (stated, not faked): BRPeer.c:648 -- where the CF-only 2000-header
+// SCOPE (stated, not faked): BRPeer.c -- where the CF-only 20,000-header
 // continuation is actually suppressed -- is file-static to a SEPARATE
 // compilation unit here, so it cannot be driven from this TU. What this case
 // covers end-to-end is the code Task 3 adds: KeepAlive re-issuing the
@@ -2857,7 +2992,7 @@ static void test_b1_rekicks_cfheaders_on_window_reopen(BRWallet *wallet)
 // frontier not advancing across a whole tick) rather than firing every tick:
 // during ordinary open-window header sync BRPeer.c's own continuation is already
 // running, and an unconditional per-tick full-locator getheaders would duplicate
-// every 2000-header batch -- ~0.44 MB of redundant traffic per tick on exactly
+// every 20,000-header batch -- ~1.62 MB of redundant traffic per tick on exactly
 // the deep restore this feature exists to make cheap. Both directions are
 // asserted below.
 static void test_b1_rekicks_getheaders_when_tip_frozen(BRWallet *wallet)
@@ -3661,19 +3796,12 @@ static void test_resume_healthy_kill_surfaces_no_band(BRWallet *wallet)
 }
 
 // ============================================================================
-// Paced-convoy fetch, Task 6: BRPeerManagerHasPendingAbandonment (spec Part C)
+// Retry-recovery/watchdog ordering signal
 // ============================================================================
 //
-// The ordering signal between the B2 valve and the Kotlin tip-stall watchdog. The
-// two scan-stall watchers must not race: while the valve is mid-decision on the
-// hole that PINS the scan frontier, its re-arm IS productive work and the
-// watchdog's escalation (ungated getheaders, then a manager recreate) is churn.
-//
-// It returns a COUNT (rearmCycles + 1), not a boolean, and that is the whole point:
-// on a churny fleet every deciding cycle can be tainted, so the valve can re-arm
-// INDEFINITELY -- a consumer suppressing on a bare boolean would stand down forever,
-// exactly when the backstop is needed. The count lets the consumer BOUND its
-// suppression. Both properties are pinned below.
+// The accessor is an ownership signal: it remains 1 across every re-arm cycle so
+// no watchdog can delete a still-recoverable scan hole merely because a finite
+// retry budget elapsed. It returns 0 when recovery does not own the pinning hole.
 static void test_pending_abandonment_accessor(BRWallet *wallet)
 {
     printf("\n=== test_pending_abandonment_accessor (paced-convoy Task 6: the watchdog ordering signal) ===\n");
@@ -3688,11 +3816,11 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
     check(BRPeerManagerHasPendingAbandonment(m) == 0,
           "no gaveUp hole at all -> 0 (nothing pending; the watchdog is NOT suppressed)");
 
-    // A hole that is merely OUTSTANDING (still being retried on its original cycle)
-    // is not the valve's business either -- the residual driver owns it.
+    // First-cycle requests are protected too: the 120-second watchdog can otherwise
+    // delete the ledger before the native retry schedule reaches its later attempts.
     BRCFScanLedgerRecordRequested(&m->cfLedger, BASE, BASE + 9u, UINT128_ZERO, 0, 1700000000u);
-    check(BRPeerManagerHasPendingAbandonment(m) == 0,
-          "an OUTSTANDING (not yet retry-exhausted) hole -> 0: the valve is not deciding anything yet");
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "an OUTSTANDING first-cycle hole -> 1: retry recovery protects it before the watchdog timeout");
 
     // Retire it to gaveUp the production way: attempts at the cap, then RetireCapped.
     BRCFOutstanding *e = mutOutstanding(&m->cfLedger, BASE);
@@ -3709,47 +3837,38 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
     // the valve's window, and still the valve's work, so it must still read pending.
     check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: the valve re-armed the hole once");
     check(gaveUpContains(&m->cfLedger, BASE) == 0, "setup: a re-armed hole has exactly one home (out of gaveUp)");
-    check(BRPeerManagerHasPendingAbandonment(m) == 2,
-          "RE-ARM CYCLE IN FLIGHT: an OUTSTANDING hole with rearmCycles>0 still reads pending (2) -- spec "
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "RE-ARM CYCLE IN FLIGHT: an OUTSTANDING hole with rearmCycles>0 keeps recovery active -- spec "
           "Part C defers the watchdog while a re-arm is pending, not only at the decision instant");
 
     // ...and back to gaveUp with the cycle count carried across the round trip.
     e = mutOutstanding(&m->cfLedger, BASE);
     if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
     BRCFScanLedgerRetireCapped(&m->cfLedger);
-    check(BRPeerManagerHasPendingAbandonment(m) == 2,
-          "BOUNDABLE: after one re-arm the signal reads 2 (rearmCycles 1 + 1) -- a CONSUMER CAN BOUND ITS "
-          "SUPPRESSION ON THIS, which a bare boolean could not (an indefinitely re-arming hole on a churny "
-          "fleet would otherwise suppress the watchdog forever)");
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "ACTIVE: after one re-arm the recovery signal remains 1 so destructive watchdogs stay suppressed");
 
-    // The count keeps CLIMBING past CF_CONVOY_REARM_MAX+1 when the valve cannot
-    // converge (every deciding cycle tainted by peer churn) -- which is precisely
-    // the signal Task 8 must bound its suppression on. If this saturated at the
-    // valve's own threshold there would be nothing to bound against.
+    // Recovery ownership stays active after every legacy cycle threshold.
     check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: a second re-arm cycle granted");
     e = mutOutstanding(&m->cfLedger, BASE);
     if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
     BRCFScanLedgerRetireCapped(&m->cfLedger);
-    check(BRPeerManagerHasPendingAbandonment(m) == CF_CONVOY_REARM_MAX + 1,
-          "the signal reaches CF_CONVOY_REARM_MAX+1 == the cycle at which the valve becomes ABANDON-ELIGIBLE "
-          "(the exact ceiling a consumer bounds its suppression at)");
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "recovery remains active after the former finite abandonment threshold");
     check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: a THIRD re-arm (the non-converging fleet)");
     e = mutOutstanding(&m->cfLedger, BASE);
     if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
     BRCFScanLedgerRetireCapped(&m->cfLedger);
-    check(BRPeerManagerHasPendingAbandonment(m) > (uint32_t)(CF_CONVOY_REARM_MAX + 1),
-          "NON-CONVERGING VALVE IS VISIBLE: the count climbs PAST the abandon-eligible cycle, so a consumer "
-          "can tell 'the valve is working' from 'the valve is looping' and stop suppressing (the Task-5 "
-          "review's permanent-stand-down failure)");
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "recovery remains active across further peer-rotation cycles instead of exposing the ledger to deletion");
 
-    // A gaveUp height ABOVE a still-outstanding hole does NOT pin the frontier and is
-    // not the valve's business -- same predicate the valve itself uses.
+    // A gaveUp height above a lower outstanding hole is not itself the pin, but the
+    // lower unresolved request still is; recovery ownership therefore remains active.
     BRCFScanLedgerRecordRequested(&m->cfLedger, BASE - 5u, BASE - 5u, UINT128_ZERO, 0, 1700000000u);
     check(m->cfLedger.outstandingCount > 0 && m->cfLedger.outstanding[0].height < BASE,
           "setup: a LOWER still-outstanding hole now sits below the gaveUp one");
-    check(BRPeerManagerHasPendingAbandonment(m) == 0,
-          "NOT PINNING: a gaveUp height above a still-outstanding hole -> 0 (byte-identical to the valve's "
-          "own pinning predicate, so the watchdog can never defer to a decision that is not happening)");
+    check(BRPeerManagerHasPendingAbandonment(m) == 1,
+          "LOWER OUTSTANDING PIN: recovery stays active for the actual frontier-pinning request");
 
     BRPeerManagerFree(m);
 }
@@ -3776,12 +3895,11 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
 //   * BRCompactFilterChainAppend -- real filter-header chaining.
 //
 // WHAT IS MODELED (the network, i.e. everything outside the manager):
-//   * the PEER's CF-only 2000-header continuation. BRPeer.c:648 is file-static to a
+//   * the PEER's CF-only 20,000-header continuation. BRPeer.c is file-static to a
 //     separate compilation unit, so the header supply is issued here instead --
-//     but it is issued THROUGH the production gate verdict, and in 2-batch groups,
-//     because the peer reads a pushed volatile flag that is one batch stale
-//     (spec Part A, "bounded overshoot"). That makes the modeled supply the
-//     PESSIMISTIC shape, not a convenient one.
+//     through the production gate verdict and one real DigiByte wire batch at a
+//     time, matching the post-relay continuation ordering pinned by
+//     cf_header_pacing_kat.
 //   * the cfheaders RESPONSE: appended only for a getcfheaders the manager
 //     actually put on the wire, for exactly the [start..batchEnd] it asked for.
 //     A suppressed request advances nothing -- the causality spine.
@@ -3794,23 +3912,13 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
 #define SCALE_BIRTH      23800000u   // deep birth floor; above the highest mainnet checkpoint
 #define SCALE_CHAIN_LEN  105000u     // > 100k: a genuinely deep restore, not a scaled-down proxy
 #define SCALE_TIP        (SCALE_BIRTH + SCALE_CHAIN_LEN - 1u)
-// ⚠ THIS MODELS BITCOIN'S QUANTUM, NOT DIGIBYTE'S — and that is why this KAT has never
-// reproduced the field's convoy overshoot. MEASURED on a Note 8, 2026-08-02, during a real
-// deep restore: EVERY `headers` message carried 20,000 headers (17 of 17: "got 20000
-// header(s)"), not 2,000. Against CF_CONVOY_WINDOW = 10,000 that means ONE message is TWICE
-// the entire convoy budget, so the gate — which holds the NEXT request after the batch has
-// already landed and been relayed — is structurally incapable of holding the header frontier
-// inside the window. Field consequence: header frontier ran 151,810 ahead of the scan
-// frontier, the CF_RETENTION_SPAN_MAX clamp bound continuously, heights fell below the
-// resident block floor, and 8,249+ were ABANDONED in 36 seconds (silent fund-visibility loss).
-//
-// DO NOT simply raise this to 20000 to "be accurate" without the convoy fix: the BOUND
-// derived below becomes CF_CONVOY_WINDOW + 2*20000 + ... ~= 52,700, and the
-// "the bound is a REAL bound: < 1/4 of the chain length" self-check then FAILS against
-// SCALE_CHAIN_LEN — which is precisely the KAT telling you the convoy cannot bound memory at
-// the real quantum. That failure IS the red-before-green gate for the convoy header-gate fix.
-// Raise it to 20000 as the RED arm when that fix lands, not before.
-#define SCALE_HDR_BATCH  2000u       // Bitcoin's wire max; DigiByte delivers 20000 — see above
+// Field and emulator observation agree: DigiByte peers return 20,000 headers per
+// response, not Bitcoin's 2,000. The peer used to queue its next request before
+// relaying the current response, so the manager's pushed gate was one response
+// stale and two 20,000-header batches landed per open verdict. The parser-ordering
+// KAT now locks the decision after relayedBlock; this scale model therefore uses
+// the real wire maximum and exactly one batch of bounded overshoot.
+#define SCALE_HDR_BATCH  MAX_HEADERS_RESULTS
 #define SCALE_MAX_TICKS  400         // >> the ~105 ticks the descent needs at MAX_CFILTERS_RESULTS/tick
 
 // Append `count` filter headers to the manager's chain -- the cfheaders RESPONSE.
@@ -3991,9 +4099,9 @@ static void test_convoy_scale_bounded(BRWallet *wallet)
     // ---- THE BOUND, derived from the requirement (spec Part C), not measured ----
     //   resident heights  = [cfFloor .. blockHeaderFrontier]
     //   cfFloor           = scanFrontier - CLEAR_MEM_CF_RETENTION_MARGIN   (Tasks 1-4 floor)
-    //   blockHeaderFrontier <= scanFrontier + (CF_CONVOY_WINDOW - 1) + 2*SCALE_HDR_BATCH
-    //         (the gate is only ever evaluated OPEN at W_hdr <= W-1, and the peer reads
-    //          the pushed verdict one batch stale, so at most two more batches land)
+    //   blockHeaderFrontier <= scanFrontier + (CF_CONVOY_WINDOW - 1) + SCALE_HDR_BATCH
+    //         (the gate is evaluated after each response is relayed, so only one
+    //          20,000-header DigiByte wire batch can overshoot an open verdict)
     //   + CLEAR_MEM_PRUNE_STRIDE: _BRPeerManagerClearMemory now DEFERS its descent until the
     //         floor has risen a full stride (2026-08-02). That is the fix for the clamped-regime
     //         wedge, where cfFloor rises by 1 per block-add, defeats the O(1) no-op memo, and
@@ -4003,12 +4111,18 @@ static void test_convoy_scale_bounded(BRWallet *wallet)
     //         position by up to one stride, so the resident set is up to STRIDE larger.
     //         Observed here before this term was added: peak 16,510 against a 14,653 bound,
     //         i.e. 1,857 over -- inside one stride, as predicted.
-    //   => count <= CF_CONVOY_WINDOW + 2*SCALE_HDR_BATCH + CLEAR_MEM_CF_RETENTION_MARGIN
-    //               + CLEAR_MEM_PRUNE_STRIDE + the never-pruned checkpoint headers.
-    const size_t BOUND = (size_t)CF_CONVOY_WINDOW + 2u * SCALE_HDR_BATCH
-                       + CLEAR_MEM_CF_RETENTION_MARGIN + CLEAR_MEM_PRUNE_STRIDE + baseCount;
-    check(BOUND * 4u < (size_t)SCALE_CHAIN_LEN,
-          "the bound is a REAL bound: < 1/4 of the chain length, so an unbounded build cannot slip under it");
+    //   The cleanup trigger can impose a larger floor. Its `i++ <=` descent advances
+    //   SAVE_BLOCK_COUNT + CLEAR_MEM_BLOCKS_RESERVE_COUNT + 1 links, and the free loop
+    //   begins at the next predecessor, retaining two inclusive-edge headers beyond N.
+    //   => count <= max(convoy geometry, cleanup floor) + never-pruned checkpoints.
+    const size_t convoyResident = (size_t)CF_CONVOY_WINDOW + SCALE_HDR_BATCH
+                                + CLEAR_MEM_CF_RETENTION_MARGIN + CLEAR_MEM_PRUNE_STRIDE;
+    const size_t cleanupResident = (size_t)SAVE_BLOCK_COUNT
+                                 + CLEAR_MEM_BLOCKS_RESERVE_COUNT + 2u;
+    const size_t BOUND = (convoyResident > cleanupResident ? convoyResident : cleanupResident)
+                       + baseCount;
+    check(BOUND * 2u < (size_t)SCALE_CHAIN_LEN,
+          "the bound is a REAL bound: < 1/2 of the chain length, so an unbounded build cannot slip under it");
 
     size_t   peak = 0;
     int      boundViolations = 0, resolverFails = 0, stopHashFails = 0;
@@ -4022,11 +4136,11 @@ static void test_convoy_scale_bounded(BRWallet *wallet)
     for (tick = 0; tick < SCALE_MAX_TICKS &&
                    BRCFScanLedgerScannedThrough(&m->cfLedger) < SCALE_TIP; tick++) {
 
-        // ---- (1) HEADER SUPPLY: the peer keeps its 2000-header continuation
-        // running until the manager's pushed verdict says the window is full.
-        // Two batches per verdict == the documented bounded overshoot.
+        // ---- (1) HEADER SUPPLY: DigiByte can return 20,000 headers, but the
+        // peer now re-reads the manager's pushed gate only AFTER relaying that
+        // response. Therefore at most one real wire batch lands per open verdict.
         while (! CF_CONVOY_HDR_GATED(m) && m->lastBlock->height < SCALE_TIP) {
-            for (int b = 0; b < 2; b++) if (scaleSupplyHeaderBatch(m, SCALE_TIP) == 0) break;
+            if (scaleSupplyHeaderBatch(m, SCALE_TIP) == 0) break;
             size_t c = BRSetCount(m->blocks);
             if (c > peak) peak = c;
             if (c > BOUND) boundViolations++;
@@ -4101,7 +4215,7 @@ static void test_convoy_scale_bounded(BRWallet *wallet)
     // ---- the acceptance property ----
     check(boundViolations == 0,
           "MEMORY BOUND HELD AT EVERY TICK: BRSetCount(manager->blocks) never exceeded "
-          "CF_CONVOY_WINDOW + overshoot + margin across the WHOLE >100k descent "
+          "the larger of convoy geometry and cleanup retention across the WHOLE >100k descent "
           "(RED on -DCONVOY_UNGATED: the headers fast-forward to the tip and it grows to chain length)");
     snprintf(lbl, sizeof lbl, "peak BRSetCount %zu <= bound %zu (chain is %u blocks -- %.1f%% resident)",
              peak, BOUND, SCALE_CHAIN_LEN, 100.0 * (double)peak / (double)SCALE_CHAIN_LEN);
@@ -5998,8 +6112,8 @@ int main(void)
     // built behind is actually flipped ON for this KAT build (run.sh passes
     // -DCF_LEDGER_DRIVE_REREQUEST=1). The production default in
     // BRCFScanLedger.h is 0 (Phase 1, observe-only — see the long rationale on
-    // that #define), so this -D is what keeps the Phase-2 driver covered by the
-    // host suite while production ships unarmed. ---
+    // that #define), so this assertion prevents a build that silently compiles
+    // the residual retry driver out. ---
     check(CF_LEDGER_DRIVE_REREQUEST == 1, "smoke: CF_LEDGER_DRIVE_REREQUEST compiled in as 1 for this KAT");
 
     // --- Smoke test: the harness can build and tear down a real
@@ -6013,6 +6127,24 @@ int main(void)
     BRWallet *wallet = BRWalletNew(NULL, 0, mpk);
     check(wallet != NULL, "smoke: wallet created");
     if (!wallet) { printf("\nFATAL\n"); return 1; }
+
+#ifdef KAT_NO_SKIP_ONLY
+    test_retry_cycles_never_abandon(wallet);
+    test_pending_abandonment_accessor(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_BUFFERED_MATCH_REDGREEN_ONLY
+    // The pre-fix seam marks a buffered match evaluated immediately after
+    // getdata. The fixed path must retain the ledger hole until the full-block
+    // callback processes all transactions.
+    test_buffered_drains_and_waits_for_block_at_connect(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
 
 #ifdef KAT_REDGREEN_ONLY
     // run.sh builds this twice for the retention floor's red-before-green gate:
@@ -6061,6 +6193,20 @@ int main(void)
     //   -DCONVOY_B2_REARM_ONCE         : the valve abandons after ONE re-arm cycle
     //                                    -> one unlucky rotation cycle false-positives.
     test_valve_matched_set(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_CF_INV_REDGREEN_ONLY
+    test_cf_block_inv_uses_single_header_peer(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_CF_CALLBACK_REDGREEN_ONLY
+    test_cf_callbacks_follow_handshake_peer(wallet);
     BRWalletFree(wallet);
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
@@ -6171,6 +6317,13 @@ int main(void)
     // must FAIL == RED) and once with the fix (must PASS == GREEN), running ONLY
     // this case so the RED is unambiguously the missing reconciliation.
     test_resume_below_block_floor_surfaces(wallet);
+    BRWalletFree(wallet);
+    printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
+    return g_fail == 0 ? 0 : 1;
+#endif
+
+#ifdef KAT_RESUME_CHECKPOINT_REDGREEN_ONLY
+    test_resume_crosses_checkpoint_with_real_header(wallet);
     BRWalletFree(wallet);
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
@@ -6330,7 +6483,7 @@ int main(void)
     // / VERIFY-FAIL additions). All reuse this same wallet (it is never
     // mutated by BRPeerManagerNew/Free -- only referenced), each building its
     // own fresh BRPeerManager so state never leaks test-to-test. ---
-    test_buffered_drains_and_CREDITS_at_connect(wallet);
+    test_buffered_drains_and_waits_for_block_at_connect(wallet);
     test_buffered_hit_no_peer_stays(wallet);
     test_buffered_waits_for_cfheader(wallet);
     test_buffered_clean_miss_marks_no_getdata(wallet);
@@ -6348,6 +6501,8 @@ int main(void)
     test_clearmemory_descent_frees(wallet);                // Task 4: full descent frees below the floor (no leak)
     test_abandon_guard_no_preemptive_advance(wallet);      // Task 4b guard, re-homed onto the B2 valve's primitive (red-before-green)
     test_lowest_needed_accessor(wallet);                // paced-convoy-fetch Task 1: frontier semantics anchor + BRPeerManager accessors
+    test_cf_callbacks_follow_handshake_peer(wallet);       // callback ownership survives download-peer election (red-before-green)
+    test_cf_block_inv_uses_single_header_peer(wallet);     // one inv-driven header stream across the peer fleet (red-before-green)
     test_convoy_gate_suppresses_continuations(wallet);     // paced-convoy-fetch Task 2: gate the tip-racers, exempt recovery (red-before-green)
     test_convoy_gate_null_chain_open(wallet);              // paced-convoy-fetch Task 2: NULL-chain carve-out (red-before-green)
     test_b1_resumes_drain_trough(wallet);                  // paced-convoy-fetch Task 3: B1.1 forward drive out of the drain trough (red-before-green)
@@ -6359,7 +6514,7 @@ int main(void)
     test_resume_below_block_floor_surfaces(wallet);        // fix wave C-1: resumed mid-descent silent skip + the un-valved variant
     test_resume_healthy_kill_surfaces_no_band(wallet);     // fix wave R2: an ordinary kill of a healthy wallet surfaces NOTHING (red-before-green)
     test_valve_matched_set(wallet);                        // paced-convoy-fetch Task 5: B2 valve MATCHED SET a/b/c/d (red-before-green x4)
-    test_pending_abandonment_accessor(wallet);             // paced-convoy-fetch Task 6: the valve/watchdog ordering signal (boundable count)
+    test_pending_abandonment_accessor(wallet);             // retry ownership keeps unresolved heights safe from watchdog deletion
     test_convoy_scale_bounded(wallet);                     // paced-convoy-fetch Task 6: THE memory bound, >100k descent (red-before-green)
     test_reorg_mid_descent();                              // paced-convoy-fetch Task 6: reorg at the retained-window boundary
     test_reorg_below_window_no_crash();                    // paced-convoy-fetch Task 7: fork-join below the window (red-before-green CRASH gate)

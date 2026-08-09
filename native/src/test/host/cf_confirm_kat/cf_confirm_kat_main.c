@@ -145,6 +145,11 @@ int main(void)
     BRMerkleBlock *block1 = dummyBlock(500000, 0xAA, 1700000000);
     BRSetAdd(manager->blocks, block1);
     manager->lastBlock = block1; // block1 IS the tip -> trivially the main chain
+    BRCFScanLedgerInit(&manager->cfLedger, block1->height);
+    BRCFScanLedgerRecordRequested(&manager->cfLedger, block1->height, block1->height,
+                                  UINT128_ZERO, 0, 1);
+    check(BRCFScanLedgerOutstandingCount(&manager->cfLedger) == 1,
+          "test1: matched height stays outstanding before full block delivery");
 
     BRPeerCallbackInfo info1 = { .peer = NULL, .manager = manager, .hash = UINT256_ZERO };
     UInt256 txHashes1[1] = { tx1->txHash };
@@ -154,6 +159,10 @@ int main(void)
     check(after1 != NULL && after1->blockHeight == block1->height,
           "test1: tx confirmed at block height after _peerRelayedBlockTxns");
     check(txStatusFired == 1, "test1: txStatusUpdate callback fired on confirmation");
+    check(BRCFScanLedgerOutstandingCount(&manager->cfLedger) == 0,
+          "test1: full block delivery completes the matched filter height");
+    check(BRCFScanLedgerScannedThrough(&manager->cfLedger) == block1->height,
+          "test1: scan frontier advances only after full block delivery");
 
     // --- Test 2: blockHash NOT present in manager->blocks -> no-op, the
     // named tx stays TX_UNCONFIRMED (header hasn't synced yet; production

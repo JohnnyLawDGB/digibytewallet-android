@@ -962,6 +962,25 @@ static int test_v3_stride_survives_a_future_version_bump(void) {
     return 1;
 }
 
+static void test_forward_fetch_waits_for_every_hole(void) {
+    BRCFScanLedger l;
+    BRCFScanLedgerInit(&l, 100);
+    check(BRCFScanLedgerCanRequestForward(&l) == 1,
+          "forward fetch is ready when the ledger has no unresolved height");
+
+    UInt128 peer = UINT128_ZERO;
+    BRCFScanLedgerRecordRequested(&l, 100, 102, peer, 12024, 1);
+    check(BRCFScanLedgerCanRequestForward(&l) == 0,
+          "forward fetch waits while any requested height is outstanding");
+    BRCFScanLedgerMarkEvaluated(&l, 100);
+    BRCFScanLedgerMarkEvaluated(&l, 102);
+    check(BRCFScanLedgerCanRequestForward(&l) == 0,
+          "out-of-order evaluations do not open the next forward batch");
+    BRCFScanLedgerMarkEvaluated(&l, 101);
+    check(BRCFScanLedgerCanRequestForward(&l) == 1,
+          "forward fetch opens only after the whole batch is evaluated");
+}
+
 int main(void) {
 #ifdef KAT_LEDGER_STRIDE_REDGREEN_ONLY
     // Gate build: run ONLY the stride case so the RED is unambiguous.
@@ -969,25 +988,8 @@ int main(void) {
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
 #else
-    // TRIPWIRE — this KAT deliberately does NOT pass -DCF_LEDGER_DRIVE_REREQUEST, so it
-    // sees the PRODUCTION default. It must be 0 (Phase 1, observe-only).
-    //
-    // Phase 2's back-pressure gate pauses forward cfilter fetch while outstanding >=
-    // CF_OUTSTANDING_LOWWATER, on the premise that the residual driver drains the
-    // backlog. Against this core's cfheader-anchored ClearMemory retention floor that
-    // premise is false: a pruned height can never be evaluated (MarkEvaluated needs a
-    // resident header) and can never even be re-SENT (the stop-hash walk dies in the
-    // pruned gap), so the count only grows and forward fetch eventually stops forever.
-    // A lab run reproduced it at 2,856 outstanding — 93% of the threshold — on a
-    // 26k-block scan.
-    //
-    // Do NOT flip this to 1 to make this line pass. Re-arm only together with the
-    // paced convoy + scan-frontier-anchored retention, which remove the pruning race,
-    // and only after a deep-restore acceptance run passes. Then update this tripwire
-    // in the same commit, so re-arming is always a deliberate, reviewed act.
-    // See the rationale block on the #define in BRCFScanLedger.h.
-    check(CF_LEDGER_DRIVE_REREQUEST == 0,
-          "tripwire: production default is Phase 1 (CF_LEDGER_DRIVE_REREQUEST == 0)");
+    check(CF_LEDGER_DRIVE_REREQUEST == 1,
+          "tripwire: production retries partial compact-filter responses");
 
     // Heap-allocate (the struct is large: outstanding[] + pending[]).
     BRCFScanLedger *l  = calloc(1, sizeof(*l));
@@ -1005,6 +1007,7 @@ int main(void) {
 
     test_overflow_reports_drop();
     test_record_advances_requestedThrough();
+    test_forward_fetch_waits_for_every_hole();
 
     test_buffer_store_take_drain();
     test_buffer_drain_keeps_on_eval_zero();

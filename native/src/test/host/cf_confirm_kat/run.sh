@@ -93,7 +93,21 @@ build() {
     -o "$out"
 }
 
-# ── RED: the pre-fix shape must crash on a signal ─────────────────────────────
+# ── RED 1: matched request must not complete before full block delivery ────────
+build "$BUILD_DIR/cf_confirm_kat_match_unfixed" -DCF_MATCH_MARK_ON_REQUEST_UNFIXED
+set +e
+"$BUILD_DIR/cf_confirm_kat_match_unfixed" > "$BUILD_DIR/match-red.log" 2>&1
+MATCH_RED_STATUS=$?
+set -e
+if [ "$MATCH_RED_STATUS" -eq 0 ] ||
+   ! grep -q "FAIL: test1: full block delivery completes the matched filter height" "$BUILD_DIR/match-red.log"; then
+    echo "GATE FAILED: matched-height pre-fix shape did not fail at the delivery checkpoint"
+    sed 's/^/             | /' "$BUILD_DIR/match-red.log"
+    exit 1
+fi
+echo "RED gate OK: pre-fix matched height was not completed by full block delivery."
+
+# ── RED 2: the pre-fix null-guard shape must crash on a signal ─────────────────
 build "$BUILD_DIR/cf_confirm_kat_unfixed" -g -DRELAYEDBLOCKTXNS_MAINCHAIN_NULLGUARD_UNFIXED
 
 set +e

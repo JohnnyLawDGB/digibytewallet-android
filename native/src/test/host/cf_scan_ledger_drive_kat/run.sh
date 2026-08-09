@@ -219,6 +219,56 @@ build() {
         -o "$out"
 }
 
+if [[ "${CF_RESUME_CHECKPOINT_ONLY:-0}" == "1" ]]; then
+    build "$BUILD_DIR/kat_resume_checkpoint_unfixed" \
+          -DRESUME_CHECKPOINT_STUB_UNFIXED -DKAT_RESUME_CHECKPOINT_REDGREEN_ONLY
+    checkpoint_log="$BUILD_DIR/resume-checkpoint-red.log"
+    if "$BUILD_DIR/kat_resume_checkpoint_unfixed" >"$checkpoint_log" 2>&1; then
+        echo "GATE FAILURE: checkpoint-stub resume unexpectedly passed" >&2
+        exit 1
+    fi
+    if ! grep -q "FAIL: RED CRUX: restored chain walks through the checkpoint" "$checkpoint_log"; then
+        echo "GATE FAILURE: checkpoint-stub resume failed for an unexpected reason" >&2
+        sed 's/^/    | /' "$checkpoint_log"
+        exit 1
+    fi
+    echo "RED confirmed: hardcoded checkpoint stub severs the persisted resume chain"
+
+    build "$BUILD_DIR/kat_resume_checkpoint_fixed" -DKAT_RESUME_CHECKPOINT_REDGREEN_ONLY
+    "$BUILD_DIR/kat_resume_checkpoint_fixed"
+    exit $?
+fi
+
+if [[ "${CF_NO_SKIP_ONLY:-0}" == "1" ]]; then
+    build "$BUILD_DIR/kat_no_skip" -DKAT_NO_SKIP_ONLY
+    "$BUILD_DIR/kat_no_skip"
+    exit $?
+fi
+
+# ---- RED: buffered match marked complete before full block delivery ---------
+build "$BUILD_DIR/kat_buffered_match_unfixed" \
+      -DCF_MATCH_MARK_ON_REQUEST_UNFIXED -DKAT_BUFFERED_MATCH_REDGREEN_ONLY
+buffered_match_log="$BUILD_DIR/buffered-match-red.log"
+if "$BUILD_DIR/kat_buffered_match_unfixed" >"$buffered_match_log" 2>&1; then
+    echo "GATE FAILURE: the buffered-match pre-fix build PASSED. A header-race match can"
+    echo "advance the scan ledger immediately after getdata, before its full block and wallet"
+    echo "transactions are delivered. Refusing to green."
+    exit 1
+fi
+if ! grep -q "FAIL: CRUX: buffered matched height remains outstanding until full block delivery" \
+        "$buffered_match_log"; then
+    echo "GATE FAILURE: buffered-match pre-fix build failed for an unexpected reason."
+    sed "s/^/    | /" "$buffered_match_log"
+    exit 1
+fi
+echo "RED confirmed: buffered match advanced before full block delivery (expected)."
+
+if [[ "${CF_BUFFERED_MATCH_ONLY:-0}" == "1" ]]; then
+    build "$BUILD_DIR/kat_buffered_match_fixed" -DKAT_BUFFERED_MATCH_REDGREEN_ONLY
+    "$BUILD_DIR/kat_buffered_match_fixed"
+    exit $?
+fi
+
 # ---- RED: unfixed retention prunes the scan floor (MUST fail) ----------------
 build "$BUILD_DIR/kat_unfixed" -DRETENTION_UNFIXED -DKAT_REDGREEN_ONLY
 if "$BUILD_DIR/kat_unfixed"; then
@@ -238,6 +288,26 @@ if "$BUILD_DIR/kat_determinism_guard_unguarded"; then
     exit 1
 else
     echo "RED confirmed: pre-guard AbandonGaveUpBelow raises abandonedBelow with nothing dropped (expected)."
+fi
+
+# ---- RED: callback registration follows elected peer, not handshake peer ---
+build "$BUILD_DIR/kat_cf_callback_elected" -DCF_CALLBACK_ELECTION_UNFIXED -DKAT_CF_CALLBACK_REDGREEN_ONLY
+if "$BUILD_DIR/kat_cf_callback_elected"; then
+    echo "GATE FAILURE: the CALLBACK-ELECTION-UNFIXED build PASSED. A filter peer can"
+    echo "receive cfheaders while its parser callback remains unset, dropping every reply."
+    exit 1
+else
+    echo "RED confirmed: download-peer reassignment steals callback registration from the responder (expected)."
+fi
+
+# ---- RED: every peer reacts to the same block inv with getheaders -----------
+build "$BUILD_DIR/kat_cf_inv_any_peer" -DCF_INV_ANY_PEER_UNFIXED -DKAT_CF_INV_REDGREEN_ONLY
+if "$BUILD_DIR/kat_cf_inv_any_peer"; then
+    echo "GATE FAILURE: the CF-INV-ANY-PEER build PASSED. One block announcement can"
+    echo "queue a full 20,000-header response on every connected peer."
+    exit 1
+else
+    echo "RED confirmed: per-peer block-inv pulls create duplicate 20,000-header streams (expected)."
 fi
 
 # ---- RED: convoy gate compiled OUT (the pre-fix shape) MUST fail ------------
@@ -385,7 +455,7 @@ fi
 # — they all run on 300..6000-block chains, where an unpaced fast-forward and a
 # paced convoy are indistinguishable. test_convoy_scale_bounded drives a >100k-block
 # descent from a deep birth floor to the tip and asserts BRSetCount(manager->blocks)
-# never exceeds CF_CONVOY_WINDOW + the 2-batch stale-flag overshoot + the retention
+# never exceeds CF_CONVOY_WINDOW + the one-batch DigiByte wire overshoot + the retention
 # margin, at EVERY tick.
 #   * -DCONVOY_UNGATED (reusing the Task-2 gate shape): with the suppression compiled
 #     out the modeled peer's header continuation fast-forwards straight to the tip,

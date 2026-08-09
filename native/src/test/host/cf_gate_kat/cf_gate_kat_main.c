@@ -45,6 +45,15 @@ int main(void) {
     check(BRPeerServicesAllowedForSyncMode(SERVICES_NODE_NETWORK, BR_SYNC_MODE_BOTH) == 0, "network-only NOT usable");
     check(BRPeerServicesAllowedForSyncMode(0, BR_SYNC_MODE_COMPACT_FILTERS_ONLY) == 0, "no services NOT usable");
 
+    check(BRPeerShouldRequestMempool(CFONLY, 1) == 0,
+          "CF-only sync never requests the full mempool");
+    check(BRPeerShouldRequestMempool(CFONLY, 0) == 0,
+          "a peer without NODE_BLOOM must not receive mempool");
+    check(BRPeerShouldRequestMempool(BOTHSVC, 1) == 0,
+          "CF-only sync does not request mempool even from a dual-capable peer");
+    check(BRPeerShouldRequestMempool(BOTHSVC, 0) == 1,
+          "legacy filtered sync may request mempool only from a NODE_BLOOM peer");
+
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
 }
