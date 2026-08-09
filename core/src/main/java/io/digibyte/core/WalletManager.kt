@@ -9,6 +9,7 @@ import io.digibyte.core.model.SyncState
 import io.digibyte.core.sync.CfAbandonmentStore
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.SavedBlockStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
 import kotlinx.coroutines.CoroutineScope
@@ -477,11 +478,13 @@ class WalletManager(
         context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
             .remove("saved_transactions")   // corrupt/phantom tx graph — re-derived from chain
             .remove("saved_filter_headers") // CF chain re-anchors at the birth floor
-            .remove("saved_blocks")         // header chain re-syncs to span the rescan range
+            .remove("saved_blocks")         // legacy key belt-and-suspenders — file store is authoritative now
+            .remove("saved_blocks_tip")
             .remove("has_synced")
             .remove("last_balance")
             .commit()
         FilterHeaderStore.delete(context) // also nuke the file-backed CF-header chain (synchronous)
+        SavedBlockStore.delete(context)   // and the file-backed saved-blocks window (I2 fix)
         // …and the file-backed CF SCAN LEDGER. This is load-bearing, not tidiness
         // (paced-convoy fetch, spec Part E / GATE 3(iii)): on the forced restart
         // startSync() Inits the native ledger fresh at `abandonedBelow = 0`, and

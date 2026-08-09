@@ -3,6 +3,7 @@ package io.digibyte.core
 import android.content.Context
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.SavedBlockStore
 
 /**
  * The persistent, non-native side of a complete wallet wipe, factored behind an
@@ -27,10 +28,11 @@ interface WalletDataEraser {
     /** Forget every locally-recorded outgoing send (`dgb_outgoing_tx`). */
     fun eraseOutgoingTx()
     /**
-     * Delete every file-backed BIP158 sync artifact: the compact-filter-header chain
-     * AND the compact-filter scan ledger. Both are keyed to the wallet that built
-     * them, so a wipe that leaves either behind hands the next wallet another
-     * wallet's scan state.
+     * Delete every file-backed BIP158 sync artifact: the compact-filter-header chain,
+     * the compact-filter scan ledger, AND the saved-blocks window (I2 fix — moved out
+     * of `dgb_sync_data` into a file, so [eraseSyncData]'s prefs `.clear()` no longer
+     * reaches it). All three are keyed to the wallet that built them, so a wipe that
+     * leaves any behind hands the next wallet another wallet's scan/header state.
      */
     fun eraseCfSyncState()
     /** Delete the encrypted Room DB (tx/utxo/header/asset cache) + its key material. */
@@ -87,6 +89,11 @@ class AndroidWalletDataEraser(private val context: Context) : WalletDataEraser {
         // the old wallet scanned are treated as scanned for the new one, so the new
         // wallet's transactions in those blocks are never looked for.
         CfScanLedgerStore.delete(context)
+        // The saved-blocks window (I2 fix) is now file-backed too — eraseSyncData()'s
+        // dgb_sync_data .clear() no longer reaches it, so it must be deleted here.
+        // Left behind, the next wallet would restore against a header window built
+        // from a DIFFERENT wallet's chain position.
+        SavedBlockStore.delete(context)
     }
 
     override fun eraseDatabase() {

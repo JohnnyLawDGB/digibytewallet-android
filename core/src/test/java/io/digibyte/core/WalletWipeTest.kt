@@ -3,6 +3,7 @@ package io.digibyte.core
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.SavedBlockStore
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -75,24 +76,30 @@ class WalletWipeTest {
      * The scan ledger matters specifically: it records which heights already had a
      * cfilter evaluated. Surviving a wipe, it tells the NEXT wallet that this wallet's
      * scanned heights are done, so the new wallet's transactions in those blocks are
-     * never looked for — a silent, permanent fund-visibility hole. Both files are
-     * asserted so neither can regress alone.
+     * never looked for — a silent, permanent fund-visibility hole. The saved-blocks
+     * window (I2 fix — moved to a file alongside the other two) matters the same way:
+     * left behind, the next wallet would restore its header chain from a DIFFERENT
+     * wallet's chain position. All three files are asserted so none can regress alone.
      */
-    @Test fun eraseCfSyncStateDeletesBothTheHeaderChainAndTheScanLedger() {
+    @Test fun eraseCfSyncStateDeletesTheHeaderChainScanLedgerAndSavedBlocks() {
         val filesDir = java.nio.file.Files.createTempDirectory("wipe-cfsync").toFile()
         val ctx = mockk<android.content.Context>(relaxed = true)
         every { ctx.filesDir } returns filesDir
 
         val headerChain = FilterHeaderStore.file(ctx)
         val scanLedger = CfScanLedgerStore.file(ctx)
+        val savedBlocks = SavedBlockStore.file(ctx)
         headerChain.writeBytes(byteArrayOf(1, 2, 3))
         scanLedger.writeBytes(byteArrayOf(4, 5, 6))
+        savedBlocks.writeBytes(byteArrayOf(7, 8, 9))
         assertTrue("precondition: header chain exists", headerChain.exists())
         assertTrue("precondition: scan ledger exists", scanLedger.exists())
+        assertTrue("precondition: saved blocks exists", savedBlocks.exists())
 
         AndroidWalletDataEraser(ctx).eraseCfSyncState()
 
         assertTrue("filter-header chain survived the wipe", !headerChain.exists())
         assertTrue("CF scan ledger survived the wipe", !scanLedger.exists())
+        assertTrue("saved-blocks window survived the wipe", !savedBlocks.exists())
     }
 }

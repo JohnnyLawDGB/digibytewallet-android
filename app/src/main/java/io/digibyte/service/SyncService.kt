@@ -20,6 +20,7 @@ import io.digibyte.core.bridge.NativeCallback
 import io.digibyte.core.sync.CfAbandonmentStore
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.SavedBlockStore
 import io.digibyte.core.sync.KeepaliveAction
 import io.digibyte.core.sync.keepaliveAction
 import io.digibyte.core.db.dao.PeerDao
@@ -1958,7 +1959,11 @@ class SyncService : Service() {
         // Structurally corrupt-but-valid-hex blobs are caught by the BootGuard
         // crash-loop breaker (wipes sync state and re-syncs; seed preserved).
         var savedLedger = CfScanLedgerStore.load(this@SyncService)
-        var blockBytes = decodeSavedBlobOrDrop(prefs, "saved_blocks")
+        // File-backed (I2 fix): saved_blocks moved out of dgb_sync_data (hex String
+        // pinned in the SharedPreferencesImpl in-memory map) into a plain file,
+        // mirroring FilterHeaderStore. SavedBlockStore.load() also performs the
+        // one-time legacy-hex migration and drops the malformed/oversized case.
+        var blockBytes = SavedBlockStore.load(this@SyncService)
         val hasTransactionCheckpoint =
             prefs.getBoolean("transactions_checkpointed", false) || prefs.contains("saved_transactions")
         val cfResetReason = cfRestoreResetReason(
@@ -1979,6 +1984,7 @@ class SyncService : Service() {
                 .remove("saved_filter_headers")
                 .remove("has_synced")
                 .commit()
+            SavedBlockStore.delete(this@SyncService)
             FilterHeaderStore.delete(this@SyncService)
             CfScanLedgerStore.delete(this@SyncService)
             CfAbandonmentStore.clear(this@SyncService)
@@ -2226,7 +2232,9 @@ class SyncService : Service() {
         // Flush the latest block window synchronously before teardown so a
         // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
         // guard ensures this never regresses a higher persisted tip.
-        lastSavedBlocksData?.let { runCatching { persistBlocks(it, synchronous = true) } }
+        lastSavedBlocksData?.let {
+            runCatching { persistBlocks(it, SavedBlockStore.currentEpoch(), synchronous = true) }
+        }
         flushFilterHeaders()
         // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
         // keepalive sweep can hold for up to ~K×10s pinging half-dead sockets —
@@ -2533,9 +2541,13 @@ class SyncService : Service() {
             // Persist off the C core callback thread to avoid blocking peer manager.
             // Cache the latest window so onDestroy can flush it synchronously, and
             // route through persistBlocks() for the monotonic anti-regression guard.
+            // The epoch is snapshotted HERE (on receipt) so a concurrent
+            // SavedBlockStore.delete() (rescan/wipe/CF-reset) racing with the queued
+            // IO write reliably drops it rather than resurrecting a wiped file.
             val copy = data.copyOf()
             lastSavedBlocksData = copy
-            serviceScope.launch(Dispatchers.IO) { persistBlocks(copy, synchronous = false) }
+            val epoch = SavedBlockStore.currentEpoch()
+            serviceScope.launch(Dispatchers.IO) { persistBlocks(copy, epoch, synchronous = false) }
         }
 
         override fun onSavePeers(data: ByteArray, replace: Int) {
@@ -3130,7 +3142,14 @@ class SyncService : Service() {
         return true
     }
 
-    private fun persistBlocks(data: ByteArray, synchronous: Boolean) {
+    /** Write the serialized saved-blocks window to the file store ([SavedBlockStore])
+     *  behind a monotonic guard: never replace a higher persisted tip with a lower
+     *  one (the bug that forced ~480k-block re-syncs). The tip itself is still a
+     *  cheap Long in `dgb_sync_data` (I2 fix moved only the multi-MB blob to a
+     *  file). [synchronous] uses commit() for the onDestroy flush so the tip
+     *  survives serviceScope cancellation; the file write itself is always a
+     *  synchronous tmp-write+rename regardless of [synchronous]. */
+    private fun persistBlocks(data: ByteArray, snapshotEpoch: Long, synchronous: Boolean) {
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
         val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
@@ -3139,9 +3158,11 @@ class SyncService : Service() {
                 "saved_blocks: skipping regressive write (new tip $newTop < persisted $persistedTop)")
             return
         }
-        val editor = prefs.edit().putString("saved_blocks", bytesToHex(data))
-        if (newTop >= 0L) editor.putLong("saved_blocks_tip", newTop)
-        if (synchronous) editor.commit() else editor.apply()
+        SavedBlockStore.write(this@SyncService, data, snapshotEpoch)
+        if (newTop >= 0L) {
+            val editor = prefs.edit().putLong("saved_blocks_tip", newTop)
+            if (synchronous) editor.commit() else editor.apply()
+        }
     }
 
     private val hexChars = "0123456789abcdef".toCharArray()

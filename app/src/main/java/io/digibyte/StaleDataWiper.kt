@@ -4,6 +4,7 @@ import android.content.Context
 import io.digibyte.core.networkSuffix
 import io.digibyte.core.sync.ChainTipStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.SavedBlockStore
 
 /**
  * Wipes regenerable app data to recover from corruption — WITHOUT ever touching
@@ -36,6 +37,10 @@ object StaleDataWiper {
         // doc comment) so clearing the prefs blob above never touched it. A corrupt
         // .bin left behind here could re-crash the very next restore/re-anchor.
         FilterHeaderStore.delete(context)
+        // ...and the FILE-BACKED saved-blocks window (`saved_blocks<net>.bin`,
+        // I2 fix) — same reasoning: it moved out of dgb_sync_data too, so the
+        // .clear() above never touches it.
+        SavedBlockStore.delete(context)
         // ChainTipStore's persisted value went out with the dgb_sync_data .clear() above, but its
         // in-memory mirror did not — and this runs from BootGuard on a crash-loop recovery, in a
         // process that keeps running afterwards. Left stale, the mirror would be re-persisted on
