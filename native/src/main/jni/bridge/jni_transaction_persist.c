@@ -24,39 +24,31 @@ Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactions(JNIEnv *env,
 
     if (!g_wallet) return NULL;
 
-    size_t txCount = BRWalletTransactions(g_wallet, NULL, 0);
-    if (txCount == 0) return NULL;
+    /* I1 fix: serialize UNDER the wallet lock. The old shape here copied raw
+     * BRTransaction* pointers out via BRWalletTransactions (which unlocks after the
+     * copy) and then ran the size+write passes with NO lock held — so a peer-thread
+     * or reconcile-driven BRWalletRemoveTransaction could free a snapshotted tx
+     * mid-serialize (use-after-free; torn bytes into the durable checkpoint). The new
+     * BRWalletSerializeTransactions holds wallet->lock across the whole size+write
+     * pass, so no tx can be freed between sizing and writing. Byte layout is unchanged,
+     * so persisted blobs stay compatible with loadSerializedTransactions. */
+    size_t need = BRWalletSerializeTransactions(g_wallet, NULL, 0);
+    if (need <= 4) return NULL; /* only the tx-count header -> no transactions to persist */
 
-    BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
-    if (!txs) return NULL;
-    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+    uint8_t *buf = malloc(need);
+    if (!buf) return NULL;
 
-    /* Calculate total size */
-    size_t totalSize = 4; /* tx count */
-    size_t *txSizes = malloc(txCount * sizeof(size_t));
-    if (!txSizes) { free(txs); return NULL; }
-
-    for (size_t i = 0; i < txCount; i++) {
-        txSizes[i] = BRTransactionSerialize(txs[i], NULL, 0);
-        totalSize += 4 + 4 + 4 + txSizes[i]; /* length + height + timestamp + data */
+    size_t totalSize = BRWalletSerializeTransactions(g_wallet, buf, need);
+    if (totalSize > need) {
+        /* The tx set grew between the two locked calls; retry once at the larger size. */
+        free(buf);
+        need = totalSize;
+        buf = malloc(need);
+        if (!buf) return NULL;
+        totalSize = BRWalletSerializeTransactions(g_wallet, buf, need);
+        if (totalSize > need) { free(buf); return NULL; } /* still racing — bail cleanly */
     }
-
-    uint8_t *buf = malloc(totalSize);
-    if (!buf) { free(txSizes); free(txs); return NULL; }
-
-    size_t pos = 0;
-    UInt32SetLE(&buf[pos], (uint32_t)txCount); pos += 4;
-
-    for (size_t i = 0; i < txCount; i++) {
-        UInt32SetLE(&buf[pos], (uint32_t)txSizes[i]); pos += 4;
-        UInt32SetLE(&buf[pos], txs[i]->blockHeight); pos += 4;
-        UInt32SetLE(&buf[pos], txs[i]->timestamp); pos += 4;
-        BRTransactionSerialize(txs[i], &buf[pos], txSizes[i]);
-        pos += txSizes[i];
-    }
-
-    free(txSizes);
-    free(txs);
+    if (totalSize <= 4) { free(buf); return NULL; } /* all txs removed in the window */
 
     jbyteArray result = (*env)->NewByteArray(env, (jsize)totalSize);
     if (result) {
@@ -64,7 +56,7 @@ Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactions(JNIEnv *env,
     }
     free(buf);
 
-    LOGI("getSerializedTransactions: serialized %zu txs (%zu bytes)", txCount, totalSize);
+    LOGI("getSerializedTransactions: serialized %zu bytes (locked)", totalSize);
     return result;
 }
 
