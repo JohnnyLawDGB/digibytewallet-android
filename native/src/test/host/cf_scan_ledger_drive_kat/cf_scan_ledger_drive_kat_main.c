@@ -1545,9 +1545,21 @@ static void test_batch_resolve_equals_naive(BRWallet *wallet)
     // ---- randomized property engine: batch byte-identical to naive ----
     // Range spans BELOW base, the whole chain, and ABOVE tip so every draw
     // exercises present / off-the-bottom / above-tip. Deterministic (rhRand).
+    // ITERATION COUNT (efficiency, Task 5.1): batch==naive is a DETERMINISTIC
+    // per-height property, not a flaky statistical one -- a resolver defect at any
+    // height is reproduced on the first draw that hits it, so coverage saturates in
+    // a handful of iterations rather than needing hundreds. The naive comparison is
+    // O(distance-from-tip) PER height, so an exhaustive 400x(n<=200) sweep over the
+    // 4000-block chain is ~290s under ASan (pure test-side cost). 40 iterations still
+    // resolves ~4,000 random heights spanning present / off-bottom / above-tip while
+    // preserving the full per-iteration batch-size range (n up to RH_MAXN, so the
+    // resolver's sort/dedup/one-descent path is still exercised at scale); the seven
+    // deterministic (a)-(g) cases below carry the exact boundary / fork / duplicate /
+    // above-tip / below-window / single / empty coverage regardless of the count.
+    enum { FUZZ_ITERS = 40 };
     uint32_t heights[RH_MAXN];
     int mismatches = 0, coveredAboveTip = 0, coveredBelow = 0, coveredPresent = 0;
-    for (int iter = 0; iter < 400; iter++) {
+    for (int iter = 0; iter < FUZZ_ITERS; iter++) {
         size_t n = 1 + (rhRand() % RH_MAXN);        // 1..RH_MAXN (empty tested separately)
         for (size_t i = 0; i < n; i++) {
             heights[i] = (BASE - 200) + (rhRand() % (COUNT + 400));   // [800 .. 5199]
@@ -1561,7 +1573,7 @@ static void test_batch_resolve_equals_naive(BRWallet *wallet)
         _BRPeerManagerResolveHashesAtHeightsLocked(m, heights, n, bt);
         for (size_t i = 0; i < n; i++) if (! UInt256Eq(bt[i], nv[i])) mismatches++;
     }
-    check(mismatches == 0, "randomized sets (400 iters, n up to 200): batch byte-identical to naive");
+    check(mismatches == 0, "randomized sets (40 iters, n up to 200): batch byte-identical to naive");
     check(coveredAboveTip && coveredBelow && coveredPresent,
           "randomized coverage spanned present + off-bottom + above-tip heights");
 
@@ -3579,16 +3591,37 @@ static void test_resume_below_block_floor_surfaces(BRWallet *wallet)
           "savedTip-(SAVE_BLOCK_COUNT-1), not the saved tip -- so the 1-2 heights an abrupt kill "
           "of a HEALTHY wallet leaves the coalesced CF ledger trailing by are RESOLVABLE, and no "
           "band is surfaced for them at all");
-    // Every height of the persisted run resolves, not merely the two endpoints:
-    // the floor walk proves the chain is CONNECTED, this proves it is COMPLETE.
+    // Every height of the persisted run resolves, not merely the two endpoints.
+    // COMPLETENESS is already proven above in O(resident) by _BRPeerManagerBlockFloor(m)
+    // == RESUME_FLOOR: that descent from lastBlock halts at the FIRST missing parent, so
+    // arriving at exactly RESUME_FLOOR proves the run is one contiguous connected chain
+    // from savedTip down to the floor with NO interior gap (a gap at height G would stop
+    // the descent at G+1 and yield a floor > RESUME_FLOOR, failing that check). Here we
+    // additionally exercise the PRODUCTION accessor a getcfilters resolves its stop hash
+    // through -- _BRPeerManagerBlockHashAtHeight -- across the run, but at a REPRESENTATIVE
+    // SAMPLE (both exact endpoints + a fixed interior stride, ~256 probes) rather than at
+    // all SAVE_BLOCK_COUNT heights. The exhaustive per-height form is O(SAVE_BLOCK_COUNT^2)
+    // (each call walks lastBlock backward O(distance)) -- ~536M set lookups at
+    // SAVE_BLOCK_COUNT==32768, pure test-side cost the O(n) floor descent already subsumes
+    // for completeness. Both endpoints are always probed, so the -DRESUME_FLOOR_UNFIXED red
+    // arm (only the saved tip resident) still reads RESUME_FLOOR as absent here.
     {
         int missing = 0;
-        for (uint32_t h = RESUME_FLOOR; h <= SAVED_TIP; h++) {
+        const uint32_t span   = SAVED_TIP - RESUME_FLOOR;                  // == SAVE_BLOCK_COUNT-1
+        const uint32_t stride = (span / 256u) ? (span / 256u) : 1u;        // ~256 interior probes
+        for (uint32_t h = RESUME_FLOOR; h <= SAVED_TIP; h += stride) {
             if (UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, h))) { missing = 1; break; }
         }
+        // Probe both exact endpoints regardless of where the stride lands (RESUME_FLOOR is
+        // the height the red arm strands, so it must always be in the sample).
+        if (UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, RESUME_FLOOR)))      missing = 1;
+        if (UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, RESUME_FLOOR + 1u))) missing = 1;
+        if (UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, SAVED_TIP - 1u)))    missing = 1;
+        if (UInt256IsZero(_BRPeerManagerBlockHashAtHeight(m, SAVED_TIP)))         missing = 1;
         check(! missing,
-              "R2: EVERY height of the persisted [savedTip-299 .. savedTip] run resolves to a "
-              "stop hash (the whole run is resident, not just a connected pair)");
+              "R2: a representative sample across the persisted [savedTip-(SAVE_BLOCK_COUNT-1) .. "
+              "savedTip] run resolves to a stop hash (COMPLETENESS proven in O(n) above by the "
+              "_BRPeerManagerBlockFloor == RESUME_FLOOR contiguity check)");
     }
     check(_BRPeerManagerBlockFloor(m) > SCAN,
           "GEOMETRY: R2 does NOT cure the deep-restore band -- SAVE_BLOCK_COUNT (300) is two "
