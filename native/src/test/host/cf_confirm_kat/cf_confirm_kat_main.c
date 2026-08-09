@@ -153,7 +153,21 @@ int main(void)
 
     BRPeerCallbackInfo info1 = { .peer = NULL, .manager = manager, .hash = UINT256_ZERO };
     UInt256 txHashes1[1] = { tx1->txHash };
-    _peerRelayedBlockTxns(&info1, block1->blockHash, txHashes1, 1);
+
+    // C1 completion gate (see BRCFSolicitedBlock / _peerRelayedBlockTxns in
+    // BRPeerManager.c): retiring a CF scan height now requires (a) a getdata this wallet
+    // itself dispatched after a verified cfilter match, and (b) a delivered tx list that
+    // hashes to the header's committed merkle root. This block is delivered straight into
+    // the handler, so both have to be staged here — the gate itself has its own
+    // red-before-green KAT (cf_block_completion_gate_kat). The tx-CONFIRMATION half below
+    // is deliberately unchanged by that gate, which is what tests 2-5 keep honest.
+    check(BRMerkleRootFromTxHashes(&block1->merkleRoot, txHashes1, 1) == 1,
+          "test1: header commits to the tx list that will be delivered");
+    MGR_LOCK(manager);
+    _BRPeerManagerRecordSolicitedBlockLocked(manager, block1->blockHash, block1->height);
+    MGR_UNLOCK(manager);
+
+    _peerRelayedBlockTxns(&info1, block1->blockHash, block1->merkleRoot, txHashes1, 1);
 
     BRTransaction *after1 = BRWalletTransactionForHash(wallet, tx1->txHash);
     check(after1 != NULL && after1->blockHeight == block1->height,
@@ -173,7 +187,7 @@ int main(void)
     memset(unknownBlockHash.u8, 0xFF, sizeof(unknownBlockHash.u8));
     txStatusFired = 0;
     UInt256 txHashes2[1] = { tx2->txHash };
-    _peerRelayedBlockTxns(&info1, unknownBlockHash, txHashes2, 1);
+    _peerRelayedBlockTxns(&info1, unknownBlockHash, UINT256_ZERO, txHashes2, 1);
     BRTransaction *after2 = BRWalletTransactionForHash(wallet, tx2->txHash);
     check(after2 != NULL && after2->blockHeight == TX_UNCONFIRMED,
           "test2: unknown blockHash is a no-op, tx stays TX_UNCONFIRMED");
@@ -188,7 +202,7 @@ int main(void)
     check(BRWalletTransactionForHash(wallet, nonWalletHash) == NULL, "test3: sanity -- hash truly not in wallet");
     txStatusFired = 0;
     UInt256 txHashes3[1] = { nonWalletHash };
-    _peerRelayedBlockTxns(&info1, block1->blockHash, txHashes3, 1); // block1 IS in the set/main chain this time
+    _peerRelayedBlockTxns(&info1, block1->blockHash, UINT256_ZERO, txHashes3, 1); // block1 IS in the set/main chain this time
     check(txStatusFired == 0, "test3: non-wallet tx hash filtered out -- no confirmation fired");
     BRTransaction *tx2Again = BRWalletTransactionForHash(wallet, tx2->txHash);
     check(tx2Again != NULL && tx2Again->blockHeight == TX_UNCONFIRMED,
@@ -228,7 +242,7 @@ int main(void)
     BRWalletRegisterTransaction(wallet, tx4);
     txStatusFired = 0;
     UInt256 txHashes4[1] = { tx4->txHash };
-    _peerRelayedBlockTxns(&info1, stubHash, txHashes4, 1); // RED: SIGSEGV at 0x0 here
+    _peerRelayedBlockTxns(&info1, stubHash, UINT256_ZERO, txHashes4, 1); // RED: SIGSEGV at 0x0 here
 
     BRTransaction *after4 = BRWalletTransactionForHash(wallet, tx4->txHash);
     check(after4 != NULL && after4->blockHeight == TX_UNCONFIRMED,
@@ -241,7 +255,7 @@ int main(void)
     BRWalletRegisterTransaction(wallet, tx5);
     txStatusFired = 0;
     UInt256 txHashes5[1] = { tx5->txHash };
-    _peerRelayedBlockTxns(&info1, block1->blockHash, txHashes5, 1); // block1 is still the tip
+    _peerRelayedBlockTxns(&info1, block1->blockHash, UINT256_ZERO, txHashes5, 1); // block1 is still the tip
 
     BRTransaction *after5 = BRWalletTransactionForHash(wallet, tx5->txHash);
     check(after5 != NULL && after5->blockHeight == block1->height,
