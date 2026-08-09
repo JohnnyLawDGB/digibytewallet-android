@@ -1296,8 +1296,13 @@ class SyncService : Service() {
      * top: (a) a RESIDUAL dead-branch conjunct — while the window is FULL the header
      * frontier is pinned by the gate, so escalation additionally requires the raw block
      * tip to be frozen too (if it is still re-kicking, the header layer is alive and a
-     * scan stall belongs to the filter layer / the B2 valve); (b) a BOUNDED suppression
-     * while the B2 abandonment valve owns the stall — see [isConvoySuppressed].
+     * scan stall belongs to the filter layer / the B2 valve); (b) for TIER 2 ONLY, the
+     * LIVENESS gate — it frees and recreates the manager, which re-Inits the CF scan
+     * ledger at the remembered floor, so it stands down while the B2 valve is inside its
+     * budget and re-arms once the frontier has been pinned right through it. Tier 1 and
+     * the FAST canon pin are NOT suppressible: they destroy nothing, and gating them on
+     * "a height is unresolved" disabled them permanently in the roaming/dead-branch
+     * wedges they exist to cure (fix wave C2). See [isConvoySuppressed].
      *
      * Resets on any CF scan advance; DGB's ~15s blocks are scanned as they arrive so a
      * healthy at-tip wallet resets it constantly and never arms it (20 min ≈ 80 blocks).
@@ -1329,7 +1334,7 @@ class SyncService : Service() {
             // Read ONCE from native — both are compile-time constants over there, so a
             // per-poll JNI round trip would buy nothing. See [nativeConvoyWindow].
             val convoyWindow = nativeConvoyWindow()
-            val suppressionMax = nativeConvoySuppressionMaxCycles()
+            val suppressionMaxMs = nativeConvoySuppressionMaxMs()
             var lastTier2Ms = 0L
             var lastFastMs = 0L          // fast-tier (orphan / can't-hold-filter-peer) throttle
             var pinRotation = 0          // rotate through the validated filter pool when pinning
@@ -1365,7 +1370,7 @@ class SyncService : Service() {
                         convoyWindowFull = windowFull,
                         tier1Fired = tier1Fired,
                         abandonmentPendingCycles = pendingCycles,
-                        suppressionMaxCycles = suppressionMax,
+                        suppressionMaxMs = suppressionMaxMs,
                     ) && nowMs - lastTier2Ms >= TIP_STALL_TIER2_THROTTLE_MS
                 ) {
                     android.util.Log.w(
@@ -1385,8 +1390,6 @@ class SyncService : Service() {
                         scanStalledMs = scanStalledMs,
                         blockTipStalledMs = blockTipStalledMs,
                         convoyWindowFull = windowFull,
-                        abandonmentPendingCycles = pendingCycles,
-                        suppressionMaxCycles = suppressionMax,
                     ) && !tier1Fired
                 ) {
                     android.util.Log.w(
@@ -1402,9 +1405,7 @@ class SyncService : Service() {
                         scanStalledMs = scanStalledMs,
                         blockTipStalledMs = blockTipStalledMs,
                         convoyWindowFull = windowFull,
-                        abandonmentPendingCycles = pendingCycles,
                         thresholdMs = TIP_STALL_FAST_MS,
-                        suppressionMaxCycles = suppressionMax,
                     ) && nowMs - lastFastMs >= TIP_STALL_FAST_MS
                 ) {
                     // FAST tier — connected but the CF scan frontier hasn't advanced for a
@@ -1463,30 +1464,34 @@ class SyncService : Service() {
     }
 
     /**
-     * Live suppression bound, DERIVED from the native `CF_CONVOY_REARM_MAX` (fix-wave
-     * I-3). The spec's own tuning signal tells the operator to RAISE that constant in
-     * `BRPeerManager.h`; without this read, the Kotlin bound would keep releasing at
-     * the old value while the valve was still legitimately working later cycles, and
-     * the tip-stall watchdog would escalate into a productive valve (tier 2 recreates
-     * the manager).
+     * Live suppression CEILING in wall clock, DERIVED from the native
+     * `CF_CONVOY_REARM_MAX` (fix-wave I-3, re-based on a clock by fix wave C2).
+     *
+     * The ceiling has to track the native re-arm budget in BOTH directions. Too SMALL
+     * and the tip-stall watchdog escalates into a still-productive B2 valve (tier 2
+     * recreates the manager mid-descent); too LARGE — the unbounded form this replaces
+     * — and every destructive tier is stood down forever in exactly the wedge states it
+     * exists to cure. Reading the budget from the `.so` and sizing the clock off it
+     * (see [convoySuppressionMaxMs]) keeps both ends honest without a hand-mirrored
+     * constant that can drift.
      */
-    private fun nativeConvoySuppressionMaxCycles(): Int {
+    private fun nativeConvoySuppressionMaxMs(): Long {
         val n = try {
             NativeBridge.getConvoyRearmMax()
         } catch (t: Throwable) {
             android.util.Log.w("SyncService",
-                "convoy: getConvoyRearmMax() unavailable — falling back to a suppression bound of " +
-                "$CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK; if the native re-arm budget was raised, " +
-                "the watchdogs will escalate into a still-productive B2 valve", t)
-            return CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK
+                "convoy: getConvoyRearmMax() unavailable — falling back to a suppression ceiling of " +
+                "${CONVOY_SUPPRESSION_MAX_MS_FALLBACK}ms; if the native re-arm budget was raised, " +
+                "the watchdogs may escalate into a still-productive B2 valve", t)
+            return CONVOY_SUPPRESSION_MAX_MS_FALLBACK
         }
         if (n <= 0) {
             android.util.Log.w("SyncService",
                 "convoy: getConvoyRearmMax() returned $n — falling back to " +
-                "$CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK")
-            return CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK
+                "${CONVOY_SUPPRESSION_MAX_MS_FALLBACK}ms")
+            return CONVOY_SUPPRESSION_MAX_MS_FALLBACK
         }
-        return convoySuppressionMaxCycles(n)
+        return convoySuppressionMaxMs(n)
     }
 
     /**
@@ -1565,11 +1570,11 @@ class SyncService : Service() {
             var corruptHeals = 0
             var lastCorruptHealMs = 0L
             var corruptHealRotation = 0
-            // Live native suppression bound, read ONCE (compile-time constant natively).
-            // See [nativeConvoySuppressionMaxCycles] — every destructive branch below is
-            // gated on it, so a stale hand-mirrored copy would escalate into a valve that
-            // is still legitimately working.
-            val suppressionMax = nativeConvoySuppressionMaxCycles()
+            // Live native suppression ceiling, read ONCE (compile-time constant natively).
+            // See [nativeConvoySuppressionMaxMs] — every DESTRUCTIVE branch below is gated
+            // on it, so a stale hand-mirrored copy would either escalate into a valve that
+            // is still legitimately working or (the C2 regression) never escalate at all.
+            val suppressionMaxMs = nativeConvoySuppressionMaxMs()
             // PACED-CONVOY RE-KEY (spec Part D). Every DESTRUCTIVE branch below
             // (frozen-CF recovery, corrupt-chain heal, post-timeout re-anchor) deletes
             // persisted filter/ledger state, so each is now additionally gated on the CF
@@ -1652,7 +1657,7 @@ class SyncService : Service() {
                 if (shouldRecoverFrozenCf(
                         blockClimbing, nowMs - cfNetProgressMs, cfNetMax, cfFrozenRecoveredThisSession,
                         scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles,
-                        suppressionMaxCycles = suppressionMax)) {
+                        suppressionMaxMs = suppressionMaxMs)) {
                     cfFrozenRecoveredThisSession = true
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: cfTip WEDGED at net-max $cfNetMax for " +
@@ -1722,7 +1727,7 @@ class SyncService : Service() {
                         healsSoFar = corruptHeals,
                         scanStalledMs = scanStalledMs,
                         abandonmentPendingCycles = pendingCycles,
-                        suppressionMaxCycles = suppressionMax,
+                        suppressionMaxMs = suppressionMaxMs,
                     ) && nowMs - lastCorruptHealMs >= CF_CORRUPT_HEAL_COOLDOWN_MS
                 ) {
                     corruptHeals++
@@ -1777,7 +1782,7 @@ class SyncService : Service() {
                     when (decidePostTimeoutAction(
                         hasReachedSynced, reanchoredThisSession, nowMs - reanchorAtMs,
                         scanStalledMs = scanStalledMs, abandonmentPendingCycles = pendingCycles,
-                        suppressionMaxCycles = suppressionMax,
+                        suppressionMaxMs = suppressionMaxMs,
                     )) {
                         PostTimeoutAction.REANCHOR -> {
                             val reanchored = try {

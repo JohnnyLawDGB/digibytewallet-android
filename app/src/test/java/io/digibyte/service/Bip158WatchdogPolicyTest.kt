@@ -139,7 +139,8 @@ class Bip158WatchdogPolicyTest {
     fun `post-timeout re-anchor is suppressed while the abandonment valve owns the stall`() {
         // The valve's re-arm cycle IS productive work and it PINS the scan frontier
         // by construction (a gaveUp hole caps scannedThrough). Re-anchoring on top of
-        // it destroys the ledger the valve is deciding on.
+        // it destroys the ledger the valve is deciding on. SCAN_FROZEN (10 min) is
+        // inside the 30-min suppression ceiling, so the liveness gate still holds.
         assertEquals(
             PostTimeoutAction.STAY_ON_FILTERS,
             decidePostTimeoutAction(
@@ -147,21 +148,7 @@ class Bip158WatchdogPolicyTest {
                 reanchoredThisSession = false,
                 msSinceReanchor = 0L,
                 scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-            ),
-        )
-    }
-
-    @Test
-    fun `post-timeout re-anchor stays disabled beyond legacy cycle budgets`() {
-        assertEquals(
-            PostTimeoutAction.STAY_ON_FILTERS,
-            decidePostTimeoutAction(
-                hasReachedSynced = true,
-                reanchoredThisSession = false,
-                msSinceReanchor = 0L,
-                scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1,
+                abandonmentPendingCycles = 1,
             ),
         )
     }
@@ -237,6 +224,24 @@ class Bip158WatchdogPolicyTest {
 
     // ── shouldRecoverFrozenCf — the CF-wedge (cfheaders-frozen) recovery gate ──
 
+    /** Named-argument wrapper mirroring [tier1]/[tier2]/[fast]/[heal], so the
+     *  liveness-gate cases can vary one input at a time. */
+    private fun frozenCf(
+        blockClimbing: Boolean = true,
+        cfFrozenMs: Long = CF_FROZEN_RECOVERY_MS * 5,
+        cfNetMax: Int = 23_779_855,
+        alreadyRecovered: Boolean = false,
+        scanStalledMs: Long = SCAN_FROZEN,
+        abandonmentPendingCycles: Int = 0,
+    ) = shouldRecoverFrozenCf(
+        blockClimbing = blockClimbing,
+        cfFrozenMs = cfFrozenMs,
+        cfNetMax = cfNetMax,
+        alreadyRecovered = alreadyRecovered,
+        scanStalledMs = scanStalledMs,
+        abandonmentPendingCycles = abandonmentPendingCycles,
+    )
+
     @Test
     fun `cfTip frozen past the window while headers climb triggers recovery`() {
         // THE WEDGE: cfheaders made progress (netMax > 0) then stuck in a continuity
@@ -284,7 +289,8 @@ class Bip158WatchdogPolicyTest {
         // A gaveUp hole PINS the scan frontier by construction, so scan-frozen alone
         // would hand the valve's own stall straight to the most destructive branch —
         // deleting the very ledger whose rearmCycles/latch state the valve is deciding
-        // on. Stand down while the valve is inside its budget.
+        // on. Stand down while the valve is inside its budget (SCAN_FROZEN = 10 min is
+        // inside the 30-min ceiling).
         assertEquals(
             false,
             shouldRecoverFrozenCf(
@@ -293,23 +299,7 @@ class Bip158WatchdogPolicyTest {
                 cfNetMax = 23_779_855,
                 alreadyRecovered = false,
                 scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-            ),
-        )
-    }
-
-    @Test
-    fun `frozen-cf recovery stays disabled beyond legacy cycle budgets`() {
-        // Elapsed retry cycles never justify deleting an unresolved height.
-        assertEquals(
-            false,
-            shouldRecoverFrozenCf(
-                blockClimbing = true,
-                cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
-                cfNetMax = 23_779_855,
-                alreadyRecovered = false,
-                scanStalledMs = SCAN_FROZEN,
-                abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1,
+                abandonmentPendingCycles = 1,
             ),
         )
     }
@@ -402,51 +392,46 @@ class Bip158WatchdogPolicyTest {
         assertEquals(false, isConvoyWindowFull(1_000_000L, 1_000_050L))
     }
 
-    // ── unresolved-height recovery suppression ──
+    // ── unresolved-height recovery suppression (fix wave C2: BOUNDED on the frontier clock) ──
 
     @Test fun `nothing pending means no suppression`() {
-        assertEquals(false, isConvoySuppressed(0))
+        // pending == 0 is never suppressed, regardless of the frontier clock.
+        assertEquals(false, isConvoySuppressed(abandonmentPendingCycles = 0, frontierPinnedMs = 0L))
+        assertEquals(false, isConvoySuppressed(abandonmentPendingCycles = 0, frontierPinnedMs = SCAN_FROZEN))
     }
 
-    @Test fun `suppressed whenever retry recovery owns the frontier`() {
-        // The legacy integer API may expose any positive value; every one means native
-        // recovery still owns an unresolved frontier-pinning height.
-        assertEquals(true, isConvoySuppressed(1))
-        assertEquals(true, isConvoySuppressed(2))
-        assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
+    @Test fun `suppressed while a hole is pending AND the frontier moved within the ceiling`() {
+        // The bounded liveness predicate: pending>0 ALONE is not enough — the frontier
+        // must also have advanced within CONVOY_SUPPRESSION_MAX_MS. Inside the ceiling
+        // with a hole outstanding the native valve still owns it, so a destructive tier
+        // stands down. The cycle count itself does not change the answer inside the
+        // ceiling — the clock does.
+        assertEquals(true, isConvoySuppressed(1, frontierPinnedMs = 0L))
+        assertEquals(true, isConvoySuppressed(1, frontierPinnedMs = CONVOY_SUPPRESSION_MAX_MS_FALLBACK - 1))
+        assertEquals(true, isConvoySuppressed(9, frontierPinnedMs = SCAN_FROZEN))
     }
 
-    // ── fix-wave I-3: the bound is DERIVED from the native re-arm budget ──
-
-    @Test fun `the suppression bound is derived from the re-arm budget, not pinned`() {
-        // The OLD test here asserted `assertEquals(3, CONVOY_SUPPRESSION_MAX_CYCLES)`.
-        // That pinned the KOTLIN mirror and detected NOTHING about native — the actual
-        // risk — and it would have spuriously FAILED on anyone who correctly raised the
-        // Kotlin copy to track a retuned header. Pin the DERIVATION instead.
-        assertEquals(3, convoySuppressionMaxCycles(2))
-        assertEquals(5, convoySuppressionMaxCycles(4))
-        assertEquals(9, convoySuppressionMaxCycles(8))
-        assertEquals(convoySuppressionMaxCycles(CF_CONVOY_REARM_MAX_FALLBACK),
-            CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK)
+    @Test fun `released once the frontier is pinned past the ceiling — the unbounded form was the C2 bug`() {
+        // THE CORE OF C2. The lab form was `pending > 0` (unbounded), so a permanently
+        // pinned frontier stood every destructive tier down FOREVER — in exactly the
+        // wedge states they exist to cure. The bound releases at the ceiling no matter
+        // how high the cycle count climbs.
+        assertEquals(false, isConvoySuppressed(1, frontierPinnedMs = CONVOY_SUPPRESSION_MAX_MS_FALLBACK))
+        assertEquals(false, isConvoySuppressed(255, frontierPinnedMs = CONVOY_SUPPRESSION_MAX_MS_FALLBACK))
+        assertEquals(false, isConvoySuppressed(255, frontierPinnedMs = 60 * 60 * 1000L))
     }
 
-    @Test fun `retry recovery remains protected beyond any legacy cycle bound`() {
-        // A former build released watchdog suppression above a finite native retry budget.
-        // Correctness cannot use elapsed time as proof that a height is irrelevant.
-        val retuned = convoySuppressionMaxCycles(4)   // operator raised CF_CONVOY_REARM_MAX to 4
-        assertEquals(true, isConvoySuppressed(3, retuned))
-        assertEquals(true, isConvoySuppressed(4, retuned))
-        assertEquals(true, isConvoySuppressed(5, retuned))
-        assertEquals(true, isConvoySuppressed(6, retuned))
-        // Every watchdog branch remains suppressed while recovery is active.
-        assertEquals(false, tier1(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(false, tier1(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
-        assertEquals(false, tier2(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(false, tier2(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
-        assertEquals(false, fast(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(false, fast(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
-        assertEquals(false, heal(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(false, heal(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+    // ── the ceiling is DERIVED from the native re-arm budget, in wall clock ──
+
+    @Test fun `the suppression ceiling is derived from the re-arm budget, not pinned`() {
+        // (rearmMax + 2) full valve retry cycles. Deriving it from the LIVE native
+        // rearmMax closes the drift trap: raising CF_CONVOY_REARM_MAX lengthens the valve
+        // budget and this ceiling grows with it, instead of releasing into a still-
+        // productive valve.
+        assertEquals(CF_VALVE_RETRY_CYCLE_MS * 4, convoySuppressionMaxMs(2))
+        assertEquals(CF_VALVE_RETRY_CYCLE_MS * 6, convoySuppressionMaxMs(4))
+        assertEquals(CF_VALVE_RETRY_CYCLE_MS * 10, convoySuppressionMaxMs(8))
+        assertEquals(convoySuppressionMaxMs(CF_CONVOY_REARM_MAX_FALLBACK), CONVOY_SUPPRESSION_MAX_MS_FALLBACK)
     }
 
     @Test fun `the convoy window comes from the caller, not a Kotlin constant`() {
@@ -462,26 +447,24 @@ class Bip158WatchdogPolicyTest {
         assertEquals(false, isConvoyWindowFull(scan + 4_000L, scan))
     }
 
-    @Test fun `suppression remains active beyond legacy retry budgets`() {
-        // Peer churn can require arbitrarily many cycles. Destructive recovery stays out
-        // of the way; native retry rotation remains the liveness mechanism.
-        assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
-        assertEquals(true, isConvoySuppressed(9))
-        assertEquals(true, isConvoySuppressed(255))
-    }
+    // (removed: `suppression remains active beyond legacy retry budgets` — it asserted
+    //  the unbounded `pending > 0` form that IS the C2 bug. The bounded ms behavior is
+    //  covered by `released once the frontier is pinned past the ceiling` above.)
 
     // ── tip-stall recovery, re-keyed on the CF SCAN frontier ──
 
+    // Tier 1 and FAST are NOT suppressible (fix wave C2) — they delete/free/re-init
+    // nothing. The `abandonmentPendingCycles` parameter is retained on their wrappers
+    // ONLY so the C2-c call sites can pass it and prove it changes nothing; the
+    // predicates themselves never receive it.
     private fun tier1(
         peerCount: Int = 5,
         scanStalledMs: Long = TIP_STALL_TIMEOUT_MS,
         blockTipStalledMs: Long = TIP_STALL_TIMEOUT_MS,
         convoyWindowFull: Boolean = false,
-        abandonmentPendingCycles: Int = 0,
-        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+        @Suppress("UNUSED_PARAMETER") abandonmentPendingCycles: Int = 0,
     ) = shouldRerequestHeadersOnStall(
-        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, abandonmentPendingCycles,
-        suppressionMaxCycles = suppressionMaxCycles,
+        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull,
     )
 
     private fun tier2(
@@ -491,10 +474,8 @@ class Bip158WatchdogPolicyTest {
         convoyWindowFull: Boolean = false,
         tier1Fired: Boolean = true,
         abandonmentPendingCycles: Int = 0,
-        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
     ) = shouldForceReconnectOnStall(
         peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, tier1Fired, abandonmentPendingCycles,
-        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     private fun fast(
@@ -502,12 +483,10 @@ class Bip158WatchdogPolicyTest {
         scanStalledMs: Long = 3 * 60 * 1000L,
         blockTipStalledMs: Long = 3 * 60 * 1000L,
         convoyWindowFull: Boolean = false,
-        abandonmentPendingCycles: Int = 0,
-        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+        @Suppress("UNUSED_PARAMETER") abandonmentPendingCycles: Int = 0,
     ) = shouldFastRecoverOnStall(
-        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull, abandonmentPendingCycles,
+        peerCount, scanStalledMs, blockTipStalledMs, convoyWindowFull,
         thresholdMs = 3 * 60 * 1000L,
-        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     @Test fun `re-requests headers when the SCAN frontier is frozen past the window with peers`() {
@@ -578,15 +557,9 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
-    @Test fun `tier1 suppressed while retry recovery owns the frontier`() {
-        assertEquals(false, tier1(abandonmentPendingCycles = 1))
-        assertEquals(false, tier1(abandonmentPendingCycles = 2))
-        assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-    }
-
-    @Test fun `tier1 remains suppressed beyond legacy cycle bounds`() {
-        assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
-    }
+    // (removed: `tier1 suppressed while retry recovery owns the frontier` +
+    //  `tier1 remains suppressed beyond legacy cycle bounds` — tier 1 is NOT suppressible
+    //  (fix wave C2). See `C2-c tier1 header re-request is NEVER suppressed` below.)
 
     @Test fun `tier2 forceReconnect only after tier1 fired and a full extra window`() {
         assertEquals(false, tier2(tier1Fired = false))
@@ -612,11 +585,9 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
-    @Test fun `tier2 suppressed across all retry cycles`() {
-        assertEquals(false, tier2(abandonmentPendingCycles = 1))
-        assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-        assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
-    }
+    // (removed: `tier2 suppressed across all retry cycles` — the cycle-based bound is
+    //  replaced by the ms-bounded gate; the tier-2 arming-floor-vs-ceiling relationship
+    //  is covered by the C2 tier-2 tests below.)
 
     @Test fun `FAST tier fires on a frozen scan and needs peers`() {
         assertEquals(true, fast())
@@ -631,11 +602,8 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
-    @Test fun `FAST tier suppressed across all retry cycles`() {
-        assertEquals(false, fast(abandonmentPendingCycles = 1))
-        assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-        assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
-    }
+    // (removed: `FAST tier suppressed across all retry cycles` — FAST is NOT suppressible
+    //  (fix wave C2). See `C2-c FAST canon-peer pin is NEVER suppressed` below.)
 
     // ── shouldHealCorruptFilterChain — the poisoned-persisted-chain clean-slate heal ──
 
@@ -648,11 +616,9 @@ class Bip158WatchdogPolicyTest {
         healsSoFar: Int = 0,
         scanStalledMs: Long = SCAN_FROZEN,
         abandonmentPendingCycles: Int = 0,
-        suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
     ) = shouldHealCorruptFilterChain(
         blocksCaughtUp, peerCount, cfFrozenMs, reanchored, msSinceReanchor, healsSoFar,
         scanStalledMs, abandonmentPendingCycles,
-        suppressionMaxCycles = suppressionMaxCycles,
     )
 
     @Test fun `heals when re-anchor already fired and grace elapsed but cfTip still frozen at tip`() {
@@ -710,11 +676,8 @@ class Bip158WatchdogPolicyTest {
         assertEquals(false, heal(scanStalledMs = SCAN_ADVANCING))
     }
 
-    @Test fun `heal suppressed across all retry cycles`() {
-        assertEquals(false, heal(abandonmentPendingCycles = 1))
-        assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-        assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
-    }
+    // (removed: `heal suppressed across all retry cycles` — replaced by the ms-bounded
+    //  C2-a (below ceiling -> suppressed) and C2-b (past ceiling -> heals) tests.)
 
     // ── CF scan-frontier tracking: a frontier RE-INIT is not a stall ──
     //
@@ -805,7 +768,6 @@ class Bip158WatchdogPolicyTest {
                 scanStalledMs = s.scanStalledMs(t),
                 blockTipStalledMs = s.blockTipStalledMs(t),
                 convoyWindowFull = false,
-                abandonmentPendingCycles = 0,
             ),
         )
         assertEquals(
@@ -835,7 +797,6 @@ class Bip158WatchdogPolicyTest {
                 scanStalledMs = s.scanStalledMs(TIP_STALL_TIMEOUT_MS),
                 blockTipStalledMs = s.blockTipStalledMs(TIP_STALL_TIMEOUT_MS),
                 convoyWindowFull = false,
-                abandonmentPendingCycles = 0,
             ),
         )
     }
@@ -874,6 +835,218 @@ class Bip158WatchdogPolicyTest {
         assertEquals(true, s.scanArmed)
         assertEquals(true, s.progressed)
         assertEquals(0L, s.scanStalledMs(30_000L))
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // FIX-B / finding C2 — "preserve intent, gate on LIVENESS"
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    // The lab made watchdog suppression UNBOUNDED (`pending > 0`) and keyed it on a
+    // native signal that is 1 whenever ANY height is in flight. Every recovery tier
+    // was therefore disabled in exactly the wedge states it exists to cure. The
+    // intent behind the change is kept — a destructive tier must not delete the
+    // ledger out from under a retry that is actually working — but it is now gated
+    // on LIVENESS instead of on the mere existence of a hole:
+    //
+    //   * a tier that only re-requests headers / pins a canon peer is NEVER
+    //     suppressed (it cannot lose anything, and it is the cure for the roaming
+    //     and dead-branch wedges);
+    //   * a tier that frees/recreates the manager or deletes persisted CF state is
+    //     suppressed ONLY while the convoy is demonstrably progressing — i.e. the CF
+    //     scan frontier has moved within [CONVOY_SUPPRESSION_MAX_MS]. Once the
+    //     frontier has been pinned for that whole window with a hole outstanding,
+    //     the native retry/abandon machinery has provably failed to release it and
+    //     the destructive tier is re-enabled.
+
+    /** The CF scan frontier has been pinned by the SAME hole for longer than any
+     *  suppression ceiling — native retry has provably failed to release it. */
+    private val SCAN_PINNED_PAST_CEILING = 60 * 60 * 1000L
+
+    // ── C2-c: the NON-DESTRUCTIVE tiers are never suppressed ──
+
+    @Test fun `C2-c tier1 header re-request is NEVER suppressed by an unresolved height`() {
+        // Tier 1 issues a full-locator getheaders. It deletes nothing, frees nothing
+        // and re-inits nothing — a benign 0-header no-op on a healthy wallet. Gating
+        // it on "a height is outstanding" disabled it permanently in the roaming and
+        // dead-branch wedges (C2 scenario B) for no correctness benefit at all.
+        assertEquals(true, tier1(abandonmentPendingCycles = 1))
+        assertEquals(true, tier1(abandonmentPendingCycles = 7))
+        assertEquals(true, tier1(abandonmentPendingCycles = 255))
+    }
+
+    @Test fun `C2-c FAST canon-peer pin is NEVER suppressed by an unresolved height`() {
+        // THE branch of C2 scenario B: the FAST tier is the ONLY code path that pins a
+        // validated canon CF peer, i.e. the only cure for "the wallet holds peers but
+        // not a filter-capable one". A CF peer serving one batch and dropping leaves
+        // the ledger permanently non-empty, so an existence-keyed suppression disabled
+        // the cure forever in exactly the state that creates it.
+        assertEquals(true, fast(abandonmentPendingCycles = 1))
+        assertEquals(true, fast(abandonmentPendingCycles = 255))
+    }
+
+    @Test fun `C2-c the non-destructive tiers stay armed mid-progress, not just at the ceiling`() {
+        // Not a "wait long enough" release: they are not gated on the frontier clock at
+        // all. Even a frontier that moved seconds ago (well inside the ceiling) does not
+        // stand tier 1 / FAST down, because they cost nothing.
+        assertEquals(true, tier1(abandonmentPendingCycles = 1, scanStalledMs = TIP_STALL_TIMEOUT_MS))
+        assertEquals(true, fast(abandonmentPendingCycles = 1, scanStalledMs = 3 * 60 * 1000L))
+    }
+
+    // ── C2-a: a PROGRESSING convoy still stands the destructive tiers down ──
+
+    @Test fun `C2-a destructive tiers stay suppressed while the convoy is progressing`() {
+        // The lab's intent, preserved. Inside the ceiling the native retry/abandon
+        // machinery owns the hole and is still working it; recreating the manager or
+        // deleting FilterHeaderStore/CfScanLedgerStore on top of that is the F2 wedge
+        // (a mid-descent wipe back to the birth floor). heal / frozen-cf / the
+        // post-timeout re-anchor all ARM at thresholds (90s / 2 min) far below the 30-min
+        // ceiling, so there is a real window in which they are armed AND suppressed.
+        // (tier 2 is different — its own 40-min arming floor already exceeds the DEFAULT
+        //  ceiling; see the two tier-2 tests immediately below.)
+        assertEquals(false, heal(abandonmentPendingCycles = 1, scanStalledMs = SCAN_FROZEN))
+        assertEquals(false, frozenCf(abandonmentPendingCycles = 1, scanStalledMs = SCAN_FROZEN))
+        assertEquals(
+            PostTimeoutAction.STAY_ON_FILTERS,
+            decidePostTimeoutAction(
+                hasReachedSynced = true,
+                reanchoredThisSession = false,
+                msSinceReanchor = 0L,
+                scanStalledMs = SCAN_FROZEN,
+                abandonmentPendingCycles = 1,
+            ),
+        )
+    }
+
+    @Test fun `C2-a tier2 is never both armed and suppressed at the default ceiling — its arming floor is higher`() {
+        // THE CORRECTED ASSERTION (was `false` at 40 min, which is unreachable and simply
+        // wrong). The INTENDED semantics for a destructive tier: FIRE once the stall
+        // exceeds its ceiling, be SUPPRESSED only below it. For tier 2 the ceiling that
+        // gates FIRING is its own arming floor, 2 x TIP_STALL_TIMEOUT_MS = 40 min — which
+        // is already ABOVE the default 30-min CONVOY_SUPPRESSION_MAX_MS. So by the time
+        // tier 2 is eligible at all the liveness gate has ALWAYS released: an armed tier 2
+        // FIRES; a sub-40-min stall is not-armed (not suppressed). At the default ceiling
+        // there is no input where tier 2 is both armed and suppressed.
+        assertEquals(true, TIP_STALL_TIMEOUT_MS * 2 > CONVOY_SUPPRESSION_MAX_MS_FALLBACK)   // floor > ceiling
+        // minimum arming stall (40 min), already past the ceiling -> FIRES.
+        assertEquals(true, tier2(abandonmentPendingCycles = 1,
+            scanStalledMs = TIP_STALL_TIMEOUT_MS * 2, blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 2))
+        // one below the arming floor -> NOT armed (false for a non-suppression reason).
+        assertEquals(false, tier2(abandonmentPendingCycles = 1,
+            scanStalledMs = TIP_STALL_TIMEOUT_MS * 2 - 1, blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 2 - 1))
+    }
+
+    @Test fun `C2 tier2 suppression gate is LIVE not dead — a raised re-arm budget lifts the ceiling above the arming floor`() {
+        // The tier-2 `!isConvoySuppressed` gate is inert at the DEFAULT re-arm budget
+        // (30-min ceiling < 40-min arming floor) but it is NOT dead code: raising the
+        // native CF_CONVOY_REARM_MAX lifts the derived ceiling above the arming floor, and
+        // then a still-productive valve correctly stands tier 2 down in the window between
+        // them. This is the forward-compatibility the derived ceiling buys (and why the
+        // gate belongs on tier 2 at all). It also shows the FIRE-above / SUPPRESS-below
+        // semantics directly for tier 2, once both states are reachable.
+        val raisedCeiling = convoySuppressionMaxMs(4)   // 45 min > the 40-min arming floor
+        // armed (40 min) AND now inside the 45-min ceiling -> SUPPRESSED, does not fire.
+        assertEquals(
+            false,
+            shouldForceReconnectOnStall(
+                peerCount = 5,
+                scanStalledMs = TIP_STALL_TIMEOUT_MS * 2,
+                blockTipStalledMs = TIP_STALL_TIMEOUT_MS * 2,
+                convoyWindowFull = false,
+                tier1Fired = true,
+                abandonmentPendingCycles = 1,
+                suppressionMaxMs = raisedCeiling,
+            ),
+        )
+        // past the raised ceiling -> released, FIRES.
+        assertEquals(
+            true,
+            shouldForceReconnectOnStall(
+                peerCount = 5,
+                scanStalledMs = raisedCeiling + 1,
+                blockTipStalledMs = raisedCeiling + 1,
+                convoyWindowFull = false,
+                tier1Fired = true,
+                abandonmentPendingCycles = 1,
+                suppressionMaxMs = raisedCeiling,
+            ),
+        )
+    }
+
+    // ── C2-b: a STALLED convoy RE-ENABLES the destructive tiers ──
+
+    @Test fun `C2-b corrupt-chain heal RE-ARMS once the frontier is pinned past the ceiling`() {
+        assertEquals(
+            true,
+            heal(abandonmentPendingCycles = 1, scanStalledMs = SCAN_PINNED_PAST_CEILING),
+        )
+    }
+
+    @Test fun `C2-b frozen-cf recovery RE-ARMS once the frontier is pinned past the ceiling`() {
+        assertEquals(
+            true,
+            frozenCf(abandonmentPendingCycles = 1, scanStalledMs = SCAN_PINNED_PAST_CEILING),
+        )
+    }
+
+    @Test fun `C2-b tier2 manager recreate RE-ARMS once the frontier is pinned past the ceiling`() {
+        // Tier 2 frees and recreates the peer manager, and the fresh manager re-Inits
+        // the CF scan ledger at the remembered auto-fetch floor — so it IS destructive
+        // in-session and belongs on the liveness gate, not on the always-on list.
+        assertEquals(
+            true,
+            tier2(abandonmentPendingCycles = 1, scanStalledMs = SCAN_PINNED_PAST_CEILING,
+                  blockTipStalledMs = SCAN_PINNED_PAST_CEILING),
+        )
+    }
+
+    @Test fun `C2-b post-timeout re-anchor RE-ARMS once the frontier is pinned past the ceiling`() {
+        assertEquals(
+            PostTimeoutAction.REANCHOR,
+            decidePostTimeoutAction(
+                hasReachedSynced = true,
+                reanchoredThisSession = false,
+                msSinceReanchor = 0L,
+                scanStalledMs = SCAN_PINNED_PAST_CEILING,
+                abandonmentPendingCycles = 1,
+            ),
+        )
+    }
+
+    // ── C2-d: the corrupt-cfheader / dead-socket wedge eventually recovers ──
+
+    @Test fun `C2-d a corrupt cfheader chain that leaves EVERY filter outstanding still heals`() {
+        // C2 scenario A, end to end. A diverged/corrupt persisted cfheader chain fails
+        // BRCompactFilterChainVerifyFilter for every honest cfilter, so every height is
+        // left OUTSTANDING by design and the pending signal reads 1 forever. Headers are
+        // at the tip, filter peers are connected, the one-time re-anchor already fired
+        // and got its grace — the exact signature shouldHealCorruptFilterChain was built
+        // for. Under the unbounded suppression it could never fire; under the liveness
+        // gate the pinned frontier releases it.
+        assertEquals(
+            true,
+            heal(
+                blocksCaughtUp = true,
+                peerCount = 4,
+                cfFrozenMs = SCAN_PINNED_PAST_CEILING,
+                reanchored = true,
+                msSinceReanchor = SCAN_PINNED_PAST_CEILING,
+                healsSoFar = 0,
+                scanStalledMs = SCAN_PINNED_PAST_CEILING,
+                abandonmentPendingCycles = 1,
+            ),
+        )
+        // ...and it stays BOUNDED: the heal budget is still the backstop against a
+        // wallet that simply cannot reach a healthy filter peer.
+        assertEquals(
+            false,
+            heal(
+                cfFrozenMs = SCAN_PINNED_PAST_CEILING,
+                msSinceReanchor = SCAN_PINNED_PAST_CEILING,
+                healsSoFar = MAX_CF_CORRUPT_HEALS,
+                scanStalledMs = SCAN_PINNED_PAST_CEILING,
+                abandonmentPendingCycles = 1,
+            ),
+        )
     }
 
     @Test fun `heal cooldown is wider than the freeze threshold to survive reconnect latency`() {

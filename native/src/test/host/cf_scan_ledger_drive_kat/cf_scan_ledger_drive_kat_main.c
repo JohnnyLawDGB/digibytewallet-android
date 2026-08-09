@@ -2431,44 +2431,125 @@ static void test_valve_matched_set(BRWallet *wallet)
     test_valve_case_d_peer_flap(wallet);
 }
 
-static void test_retry_cycles_never_abandon(BRWallet *wallet)
+// ============================================================================
+// FIX WAVE I3: ONE UNSERVABLE HEIGHT MUST NOT CLOSE THE FORWARD FRONTIER
+// ============================================================================
+//
+// REPLACES test_retry_cycles_never_abandon, which asserted the exact regression
+// this fix wave reverses ("eight exhausted retry cycles never advance
+// abandonedBelow") and directly contradicted valve case (b) in the same file.
+//
+// THE DEFECT. The forward cfilter drive was gated on
+// BRCFScanLedgerCanRequestForward == (outstanding == 0 && gaveUp == 0). A single
+// height the currently-connected CF subset refuses therefore closed the WHOLE
+// forward fetch: the paced convoy then froze the block-header and cfheader
+// frontiers at scanFrontier + CF_CONVOY_WINDOW, the wallet never reached the tip,
+// and the UI read "Syncing" indefinitely with no banner and no affordance.
+//
+// THE FIX. Back to the self-releasing back-pressure it replaced
+// (outstanding < CF_OUTSTANDING_LOWWATER). Safe for the "never silently skip"
+// property the strict gate was written for, because _cfLedgerAdvance caps
+// scannedThrough at min(outstanding[0], gaveUp[0]) - 1 — asserted below in BOTH
+// arms, so the red arm is provably not just "the safety check got weaker".
+//
+// RED ARM: -DCF_FORWARD_GATE_ALL_OR_NOTHING_UNFIXED restores the lab gate.
+static void test_forward_fetch_survives_one_unservable_height(BRWallet *wallet)
 {
-    printf("\n=== test_retry_cycles_never_abandon (compact-filter scan completeness) ===\n");
+    printf("\n=== test_forward_fetch_survives_one_unservable_height (fix wave I3: the forward gate) ===\n");
 
-    uint32_t tip;
-    BRPeer *peer = NULL;
-    BRPeerManager *manager = b2BuildHarness(wallet, &tip, &peer);
-    check(manager != NULL, "setup: manager, chain, and compact-filter peer created");
-    if (!manager) return;
+    const uint32_t BASE  = 20000000u;
+    const uint32_t COUNT = 3000u;
 
-    const uint32_t height = B2_CHAIN_BASE + 10u;
-    BRCFScanLedgerInit(&manager->cfLedger, B2_CHAIN_BASE);
-    BRCFScanLedgerRecordRequested(&manager->cfLedger, height, height, UINT128_ZERO, 0, 0);
-    const int warnBefore = g_wlogCount;
+    uint32_t TIP; size_t baseCount;
+    BRPeerManager *m = rhBuildChainManager(wallet, BASE, COUNT, &TIP, &baseCount);
+    check(m != NULL, "setup: manager+chain built");
+    if (! m) return;
+    (void)baseCount;
 
-    for (int cycle = 0; cycle < 8; cycle++) b2RunRound(manager, height);
+    // A cfheader chain well ahead of the scan, below the block tip — the ordinary
+    // mid-descent shape (same geometry as test_b1_resumes_drain_trough).
+    BRCompactFilterChainFree(m->compactFilterChain);
+    const uint32_t CFH_NEXT     = BASE + 2500u;
+    const uint32_t CFH_FRONTIER = CFH_NEXT - 1u;
+    m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, CFH_NEXT, UINT256_ZERO);
 
-    check(BRCFScanLedgerAbandonedBelow(&manager->cfLedger) == 0,
-          "eight exhausted peer retry cycles never advance abandonedBelow");
-    check(g_wlogCount == warnBefore, "retry exhaustion emits no ABANDONED warning");
-    check(findOutstanding(&manager->cfLedger, height) != NULL,
-          "the unresolved canonical height remains tracked and offerable");
-    check(b2OutstandingCycles(&manager->cfLedger, height) >= 8,
-          "retry cycles continue beyond the historical abandonment threshold");
-    check(BRCFScanLedgerLowestNeededHeight(&manager->cfLedger) <= height,
-          "the scan frontier never crosses the unresolved height");
-    check(everReqContains(height), "the unresolved height was repeatedly offered on the wire");
+    BRPeerManagerEnableAutoCompactFilterFetch(m, BASE);
+    const uint32_t SCAN0 = BRCFScanLedgerLowestNeededHeight(&m->cfLedger);
+    check(SCAN0 == BASE, "setup: the scan frontier is armed at the floor");
 
-    uint32_t served[1];
-    int servedCount = serveSome(manager, 1, served);
-    check(servedCount == 1 && served[0] == height,
-          "a later peer response still evaluates the retained height");
-    check(BRCFScanLedgerAbandonedBelow(&manager->cfLedger) == 0,
-          "successful recovery requires no abandonment watermark");
-    check(findOutstanding(&manager->cfLedger, height) == NULL,
-          "the evaluated height leaves the retry ledger normally");
+    BRPeer *pa = BRPeerNew(BRMainNetParams.magicNumber);
+    pa->address.u8[15] = 0x41; pa->port = 12041; pa->services |= SERVICES_NODE_COMPACT_FILTERS;
+    array_add(m->connectedPeers, pa);
 
-    BRPeerManagerFree(manager);
+    blockRegReset(); everReqReset(); capLogReset();
+    rhRegisterChain(BASE, TIP);
+    g_capCount = 0; g_capStart = 0;
+
+    // ---- Tick 1: the forward drive requests its first full batch. ----
+    BRPeerManagerKeepAlive(m);
+    const uint32_t BATCH1_STOP = SCAN0 + (MAX_CFILTERS_RESULTS - 1u);
+    check(m->autoFetchCFiltersThrough == BATCH1_STOP,
+          "tick 1: the forward drive requested batch 1 and advanced the cursor to its stop");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == MAX_CFILTERS_RESULTS,
+          "tick 1: the whole batch is recorded outstanding");
+
+    // ---- Every height in the batch is served EXCEPT one, which no connected peer
+    // will ever answer (the fleet-saturation shape: the canon oracle holding it is
+    // at maxconnections, so we never connect to it). ----
+    const uint32_t HOLE = SCAN0 + 7u;
+    for (uint32_t h = SCAN0; h <= BATCH1_STOP; h++) {
+        if (h != HOLE) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+    }
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 1 &&
+          findOutstanding(&m->cfLedger, HOLE) != NULL,
+          "setup: exactly ONE height is left outstanding — the unservable hole");
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == HOLE - 1u,
+          "INVARIANT: scannedThrough is capped just below the hole (no sail-past)");
+
+    // THE PREDICATE, asserted directly. Back-pressure says "keep going" with one
+    // height in flight; the lab gate says "stop everything".
+    check(_cfForwardFetchAllowed(m) == 1,
+          "THE GATE: forward fetch is ALLOWED with one unresolved height "
+          "(RED on -DCF_FORWARD_GATE_ALL_OR_NOTHING_UNFIXED)");
+    check(BRCFScanLedgerCanRequestForward(&m->cfLedger) == 0,
+          "control: the all-or-nothing predicate does say 'stop' here — the two really differ");
+
+    // ---- Tick 2: the frontier is pinned, but throughput above it must continue. ----
+    const uint32_t cursorBefore = m->autoFetchCFiltersThrough;
+    BRPeerManagerKeepAlive(m);
+
+    check(m->autoFetchCFiltersThrough > cursorBefore,
+          "FORWARD PROGRESS: the drive issued the NEXT batch even though a height is pinned "
+          "(RED on -DCF_FORWARD_GATE_ALL_OR_NOTHING_UNFIXED)");
+    const uint32_t BATCH2_STOP = BATCH1_STOP + MAX_CFILTERS_RESULTS;
+    check(BATCH2_STOP <= CFH_FRONTIER, "setup: batch 2 is MAX_CFILTERS_RESULTS-capped, not frontier-capped");
+    check(m->autoFetchCFiltersThrough == BATCH2_STOP,
+          "FORWARD PROGRESS: batch 2 is a full MAX_CFILTERS_RESULTS batch above the pinned hole");
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) == 1u + MAX_CFILTERS_RESULTS,
+          "FORWARD PROGRESS: the new batch's heights were recorded in the ledger alongside the hole");
+    check(findOutstanding(&m->cfLedger, BATCH2_STOP) != NULL,
+          "FORWARD PROGRESS: the far end of batch 2 is in flight");
+
+    // ---- ...and the safety property still holds, in BOTH arms. ----
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) == HOLE - 1u,
+          "SAFETY (both arms): scannedThrough STILL has not crossed the hole — throughput above "
+          "a hole is not the same as skipping it");
+    check(BRCFScanLedgerLowestNeededHeight(&m->cfLedger) == HOLE,
+          "SAFETY (both arms): the scan frontier is still the hole itself");
+    check(findOutstanding(&m->cfLedger, HOLE) != NULL,
+          "SAFETY (both arms): the hole is still tracked and still being retried");
+
+    // ---- The back-pressure ceiling is real: it still closes at LOWWATER. ----
+    const uint32_t FILLER_LO = CFH_FRONTIER + 1u;   // above everything requested so far
+    const uint32_t FILLER_HI = FILLER_LO + (uint32_t)CF_OUTSTANDING_LOWWATER;
+    BRCFScanLedgerRecordRequested(&m->cfLedger, FILLER_LO, FILLER_HI, UINT128_ZERO, 0, 0);
+    check(BRCFScanLedgerOutstandingCount(&m->cfLedger) >= CF_OUTSTANDING_LOWWATER,
+          "back-pressure setup: outstanding pushed to the low-water ceiling");
+    check(_cfForwardFetchAllowed(m) == 0,
+          "BACK-PRESSURE: the gate DOES close at CF_OUTSTANDING_LOWWATER — the revert restored "
+          "back-pressure, it did not delete it");
+
+    BRPeerManagerFree(m);
 }
 
 // ---- Paced-convoy fetch, Task 1: scan-frontier + abandonment accessors -----
@@ -3804,7 +3885,7 @@ static void test_resume_healthy_kill_surfaces_no_band(BRWallet *wallet)
 // retry budget elapsed. It returns 0 when recovery does not own the pinning hole.
 static void test_pending_abandonment_accessor(BRWallet *wallet)
 {
-    printf("\n=== test_pending_abandonment_accessor (paced-convoy Task 6: the watchdog ordering signal) ===\n");
+    printf("\n=== test_pending_abandonment_accessor (fix wave C2: RETRY OWNERSHIP, not hole existence) ===\n");
 
     const uint32_t BASE = 700000u;
     BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
@@ -3814,13 +3895,19 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
 
     BRCFScanLedgerInit(&m->cfLedger, BASE);
     check(BRPeerManagerHasPendingAbandonment(m) == 0,
-          "no gaveUp hole at all -> 0 (nothing pending; the watchdog is NOT suppressed)");
+          "no hole at all -> 0 (nothing pending; the watchdog is NOT suppressed)");
 
-    // First-cycle requests are protected too: the 120-second watchdog can otherwise
-    // delete the ledger before the native retry schedule reaches its later attempts.
+    // ---- THE C2 CRUX -------------------------------------------------------
+    // An ORDINARY first-cycle outstanding hole is the RESIDUAL DRIVER's, not the
+    // valve's. Every forward cfilter batch inserts its whole requested range as
+    // outstanding, so if this read 1 the signal would be 1 through a healthy
+    // descent — and Kotlin conjoins it into every recovery branch, including the
+    // corrupt-cfheader heal whose own trigger state (every filter left outstanding
+    // on verify failure) is exactly this shape. That is the permanent wedge.
     BRCFScanLedgerRecordRequested(&m->cfLedger, BASE, BASE + 9u, UINT128_ZERO, 0, 1700000000u);
-    check(BRPeerManagerHasPendingAbandonment(m) == 1,
-          "an OUTSTANDING first-cycle hole -> 1: retry recovery protects it before the watchdog timeout");
+    check(BRPeerManagerHasPendingAbandonment(m) == 0,
+          "C2 CRUX: an ORDINARY first-cycle OUTSTANDING hole -> 0 — the residual driver owns it and "
+          "the watchdog keeps watching (RED on -DCF_PENDING_ANY_HOLE_UNFIXED)");
 
     // Retire it to gaveUp the production way: attempts at the cap, then RetireCapped.
     BRCFOutstanding *e = mutOutstanding(&m->cfLedger, BASE);
@@ -3837,38 +3924,35 @@ static void test_pending_abandonment_accessor(BRWallet *wallet)
     // the valve's window, and still the valve's work, so it must still read pending.
     check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: the valve re-armed the hole once");
     check(gaveUpContains(&m->cfLedger, BASE) == 0, "setup: a re-armed hole has exactly one home (out of gaveUp)");
-    check(BRPeerManagerHasPendingAbandonment(m) == 1,
-          "RE-ARM CYCLE IN FLIGHT: an OUTSTANDING hole with rearmCycles>0 keeps recovery active -- spec "
-          "Part C defers the watchdog while a re-arm is pending, not only at the decision instant");
+    check(BRPeerManagerHasPendingAbandonment(m) == 2,
+          "RE-ARM CYCLE IN FLIGHT: an OUTSTANDING hole with rearmCycles>0 keeps the valve's ownership "
+          "active (== rearmCycles 1 + 1), so a destructive tier stands down while it works");
 
     // ...and back to gaveUp with the cycle count carried across the round trip.
     e = mutOutstanding(&m->cfLedger, BASE);
     if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
     BRCFScanLedgerRetireCapped(&m->cfLedger);
-    check(BRPeerManagerHasPendingAbandonment(m) == 1,
-          "ACTIVE: after one re-arm the recovery signal remains 1 so destructive watchdogs stay suppressed");
+    check(BRPeerManagerHasPendingAbandonment(m) == 2,
+          "PARKED AFTER ONE RE-ARM: the cycle count survives the outstanding->gaveUp round trip");
 
-    // Recovery ownership stays active after every legacy cycle threshold.
+    // The count is a COUNT, and it keeps climbing while the valve keeps working —
+    // which is what lets the app-side liveness gate bound the suppression in wall
+    // clock instead of trusting the bare boolean forever.
     check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: a second re-arm cycle granted");
     e = mutOutstanding(&m->cfLedger, BASE);
     if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
     BRCFScanLedgerRetireCapped(&m->cfLedger);
-    check(BRPeerManagerHasPendingAbandonment(m) == 1,
-          "recovery remains active after the former finite abandonment threshold");
-    check(BRCFScanLedgerReArmGaveUp(&m->cfLedger, BASE) == 1, "setup: a THIRD re-arm (the non-converging fleet)");
-    e = mutOutstanding(&m->cfLedger, BASE);
-    if (e) { e->attempts = CF_REREQ_MAX_ATTEMPTS; }
-    BRCFScanLedgerRetireCapped(&m->cfLedger);
-    check(BRPeerManagerHasPendingAbandonment(m) == 1,
-          "recovery remains active across further peer-rotation cycles instead of exposing the ledger to deletion");
+    check(BRPeerManagerHasPendingAbandonment(m) == 3,
+          "CYCLES ARE COUNTED: after the second re-arm the signal reads 3, not a flat 1");
 
-    // A gaveUp height above a lower outstanding hole is not itself the pin, but the
-    // lower unresolved request still is; recovery ownership therefore remains active.
+    // A gaveUp height above a lower ORDINARY outstanding hole is not the pin, and the
+    // lower hole is the residual driver's -> the valve owns nothing.
     BRCFScanLedgerRecordRequested(&m->cfLedger, BASE - 5u, BASE - 5u, UINT128_ZERO, 0, 1700000000u);
     check(m->cfLedger.outstandingCount > 0 && m->cfLedger.outstanding[0].height < BASE,
-          "setup: a LOWER still-outstanding hole now sits below the gaveUp one");
-    check(BRPeerManagerHasPendingAbandonment(m) == 1,
-          "LOWER OUTSTANDING PIN: recovery stays active for the actual frontier-pinning request");
+          "setup: a LOWER still-outstanding first-cycle hole now sits below the gaveUp one");
+    check(BRPeerManagerHasPendingAbandonment(m) == 0,
+          "OWNERSHIP FOLLOWS THE PIN: the pinning hole is an ordinary outstanding request, so the "
+          "valve owns nothing and the watchdog is free to act");
 
     BRPeerManagerFree(m);
 }
@@ -6129,7 +6213,7 @@ int main(void)
     if (!wallet) { printf("\nFATAL\n"); return 1; }
 
 #ifdef KAT_NO_SKIP_ONLY
-    test_retry_cycles_never_abandon(wallet);
+    test_forward_fetch_survives_one_unservable_height(wallet);
     test_pending_abandonment_accessor(wallet);
     BRWalletFree(wallet);
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
@@ -6514,6 +6598,7 @@ int main(void)
     test_resume_below_block_floor_surfaces(wallet);        // fix wave C-1: resumed mid-descent silent skip + the un-valved variant
     test_resume_healthy_kill_surfaces_no_band(wallet);     // fix wave R2: an ordinary kill of a healthy wallet surfaces NOTHING (red-before-green)
     test_valve_matched_set(wallet);                        // paced-convoy-fetch Task 5: B2 valve MATCHED SET a/b/c/d (red-before-green x4)
+    test_forward_fetch_survives_one_unservable_height(wallet); // fix wave I3: one unservable height must not close the forward frontier (red-before-green)
     test_pending_abandonment_accessor(wallet);             // retry ownership keeps unresolved heights safe from watchdog deletion
     test_convoy_scale_bounded(wallet);                     // paced-convoy-fetch Task 6: THE memory bound, >100k descent (red-before-green)
     test_reorg_mid_descent();                              // paced-convoy-fetch Task 6: reorg at the retained-window boundary

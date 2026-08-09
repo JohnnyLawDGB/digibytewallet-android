@@ -239,6 +239,43 @@ if [[ "${CF_RESUME_CHECKPOINT_ONLY:-0}" == "1" ]]; then
     exit $?
 fi
 
+# ==== FIX WAVE C2/I3: THE FORWARD GATE + THE RETRY-OWNERSHIP SIGNAL ==========
+#
+#   * -DCF_FORWARD_GATE_ALL_OR_NOTHING_UNFIXED: the forward cfilter drive goes back
+#     to BRCFScanLedgerCanRequestForward == (outstanding == 0 && gaveUp == 0), so ONE
+#     height the connected CF subset refuses closes the whole forward frontier and the
+#     paced convoy freezes behind it. MUST FAIL.
+#   * -DCF_PENDING_ANY_HOLE_UNFIXED: BRPeerManagerHasPendingAbandonment goes back to
+#     "1 whenever ANY height is in flight", which is 1 through a healthy descent — so
+#     every app-side recovery tier that conjoins it is permanently stood down, including
+#     the corrupt-cfheader heal whose own trigger state IS heights-left-outstanding.
+#     MUST FAIL.
+#
+# Both arms must fail on their NAMED assertion, and the safety controls in the same
+# case (scannedThrough never crosses the hole; the low-water ceiling still closes the
+# gate) must still PASS in the red arm — otherwise the arm is a broken fixture rather
+# than a demonstration of the defect.
+for _arm in CF_FORWARD_GATE_ALL_OR_NOTHING_UNFIXED CF_PENDING_ANY_HOLE_UNFIXED; do
+    build "$BUILD_DIR/kat_${_arm}" -D"${_arm}" -DKAT_NO_SKIP_ONLY
+    _log="$BUILD_DIR/${_arm}.log"
+    if "$BUILD_DIR/kat_${_arm}" >"$_log" 2>&1; then
+        echo "GATE FAILURE: the -D${_arm} build PASSED — the gate is not exercising its defect."
+        sed "s/^/    | /" "$_log"
+        exit 1
+    fi
+    if ! grep -q "RED on -D${_arm}" "$_log"; then
+        echo "GATE FAILURE: -D${_arm} failed, but not on its named assertion."
+        sed "s/^/    | /" "$_log"
+        exit 1
+    fi
+    if ! grep -q "^PASS: SAFETY (both arms): scannedThrough STILL has not crossed the hole" "$_log"; then
+        echo "GATE FAILURE: -D${_arm} lost the safety control — broken fixture, not a red arm."
+        sed "s/^/    | /" "$_log"
+        exit 1
+    fi
+    echo "RED confirmed: -D${_arm} regressed its named property (expected)."
+done
+
 if [[ "${CF_NO_SKIP_ONLY:-0}" == "1" ]]; then
     build "$BUILD_DIR/kat_no_skip" -DKAT_NO_SKIP_ONLY
     "$BUILD_DIR/kat_no_skip"

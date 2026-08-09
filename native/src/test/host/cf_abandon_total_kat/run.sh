@@ -104,6 +104,39 @@ echo "RED confirmed: without the accumulation the total is wiped by the ledger r
 grep -m1 "^FAIL: event 2 FIX" "$RED_OUT" | sed 's/^/    /'
 
 echo
+echo "---- RED ARM 2 (fix wave I3): the SURFACING funnel is log-only ----"
+# The lab reduced _BRPeerManagerSurfaceUnscannableLocked to a bare "RECOVERY REQUIRED" log line
+# and left the ledger untouched, so abandonedBelow had NO writer anywhere in production: the
+# CfAbandonmentStore / "Scan for missing transactions" affordance became unreachable and the
+# pinning hole held the scan frontier forever. -DCF_SURFACE_LOG_ONLY_UNFIXED restores that shape,
+# which MUST fail the watermark assertion — the one that proves the band was actually written off.
+RED2_OUT="$BUILD_DIR/red2.out"
+if ! build "$BUILD_DIR/kat_logonly" -DCF_SURFACE_LOG_ONLY_UNFIXED; then
+    echo "BUILD FAILURE (log-only arm) — gate cannot run"; exit 1
+fi
+if "$BUILD_DIR/kat_logonly" > "$RED2_OUT" 2>&1; then
+    cat "$RED2_OUT"
+    echo
+    echo "GATE FAILURE: the LOG-ONLY build PASSED. Surfacing that abandons nothing cannot raise"
+    echo "abandonedBelow, so this gate is not exercising the defect it exists for."
+    exit 1
+fi
+if ! grep -q "^FAIL: event 1: watermark advanced to the new floor" "$RED2_OUT"; then
+    cat "$RED2_OUT"
+    echo
+    echo "GATE FAILURE: the LOG-ONLY build failed, but NOT on the watermark assertion."
+    exit 1
+fi
+if ! grep -q "RECOVERY REQUIRED" "$RED2_OUT"; then
+    cat "$RED2_OUT"
+    echo
+    echo "GATE FAILURE: the LOG-ONLY build did not even emit its log line — wrong fixture, not a red arm."
+    exit 1
+fi
+echo "RED 2 confirmed: a log-only surfacing announces the band but never writes it off (expected)."
+grep -m1 "^FAIL: event 1: watermark" "$RED2_OUT" | sed 's/^/    /'
+
+echo
 echo "---- GREEN ARM: must PASS ----"
 GREEN_OUT="$BUILD_DIR/green.out"
 if ! "$BUILD_DIR/kat_fixed" > "$GREEN_OUT" 2>&1; then

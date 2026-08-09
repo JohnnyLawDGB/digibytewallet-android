@@ -65,16 +65,19 @@ internal fun decidePostTimeoutAction(
     scanStalledMs: Long,
     abandonmentPendingCycles: Int,
     scanFrozenThresholdMs: Long = CF_FROZEN_RECOVERY_MS,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+    suppressionMaxMs: Long = CONVOY_SUPPRESSION_MAX_MS_FALLBACK,
 ): PostTimeoutAction = when {
     // PACED-CONVOY GATE (spec Part D). The re-anchor is destructive — its caller
     // deletes FilterHeaderStore AND CfScanLedgerStore — and under the convoy its
     // trigger condition ("headers caught up, cfheaders not advancing") is the DESIGNED
     // steady state at the window top, not a legacy filter-header deficit. Only a frozen
-    // SCAN frontier warrants it, and never while the B2 valve owns the stall (bounded).
+    // SCAN frontier warrants it, and never while the B2 valve is demonstrably still
+    // working the stall — see [isConvoySuppressed], which releases once the frontier
+    // has been pinned for a full valve budget with nothing to show for it.
     hasReachedSynced && !reanchoredThisSession &&
         scanStalledMs >= scanFrozenThresholdMs &&
-        !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) -> PostTimeoutAction.REANCHOR
+        !isConvoySuppressed(abandonmentPendingCycles, scanStalledMs, suppressionMaxMs) ->
+        PostTimeoutAction.REANCHOR
     reanchoredThisSession && msSinceReanchor < REANCHOR_GRACE_MS -> PostTimeoutAction.AWAIT_REANCHOR
     else -> PostTimeoutAction.STAY_ON_FILTERS
 }
@@ -141,7 +144,7 @@ internal fun shouldRecoverFrozenCf(
     scanStalledMs: Long,
     abandonmentPendingCycles: Int,
     thresholdMs: Long = CF_FROZEN_RECOVERY_MS,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+    suppressionMaxMs: Long = CONVOY_SUPPRESSION_MAX_MS_FALLBACK,
 ): Boolean =
     !alreadyRecovered && blockClimbing && cfNetMax > 0 && cfFrozenMs >= thresholdMs &&
         // PACED-CONVOY GATE (spec Part D fix I-2) — THE dangerous branch. During a
@@ -156,8 +159,10 @@ internal fun shouldRecoverFrozenCf(
         scanStalledMs >= thresholdMs &&
         // ...and never on the valve's own stall: a gaveUp hole PINS the scan frontier
         // by construction, so scan-frozen alone would hand the valve's decision window
-        // straight to the branch that deletes the ledger it is deciding on. Bounded.
-        !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles)
+        // straight to the branch that deletes the ledger it is deciding on. BOUNDED by
+        // the same frontier clock — once the valve has had its whole budget and the
+        // frontier has still not moved, the stall is no longer "work in progress".
+        !isConvoySuppressed(abandonmentPendingCycles, scanStalledMs, suppressionMaxMs)
 
 /**
  * How long the compact-filter tip may stay frozen AFTER the ordinary one-time
@@ -225,7 +230,7 @@ internal fun shouldHealCorruptFilterChain(
     abandonmentPendingCycles: Int,
     thresholdMs: Long = CF_CORRUPT_HEAL_MS,
     maxHeals: Int = MAX_CF_CORRUPT_HEALS,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
+    suppressionMaxMs: Long = CONVOY_SUPPRESSION_MAX_MS_FALLBACK,
 ): Boolean =
     blocksCaughtUp && peerCount > 0 && reanchored &&
         msSinceReanchor >= REANCHOR_GRACE_MS &&
@@ -235,7 +240,12 @@ internal fun shouldHealCorruptFilterChain(
         // filter state AND force-reconnects). A cfTip frozen at the convoy window top
         // while the scan drains is the designed steady state, not a poisoned chain.
         scanStalledMs >= thresholdMs &&
-        !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles)
+        // The wedge this branch EXISTS for (a corrupt persisted cfheader chain fails
+        // BRCompactFilterChainVerifyFilter on every honest cfilter, which leaves every
+        // height OUTSTANDING by design) is also a state where native reports an
+        // unresolved hole — so the suppression has to be bounded or the heal can never
+        // reach its own trigger. See [isConvoySuppressed].
+        !isConvoySuppressed(abandonmentPendingCycles, scanStalledMs, suppressionMaxMs)
 
 /**
  * How long the BLOCK-header tip may make no forward progress — while peers are
@@ -252,22 +262,25 @@ internal const val TIP_STALL_TIMEOUT_MS = 20 * 60 * 1000L
  * Tier 1 — should the watchdog proactively re-request headers this poll? True when
  * the wallet is armed per [isTipStallArmed] (the CF SCAN frontier frozen for
  * [scanStalledMs] >= [thresholdMs], plus the residual dead-branch conjunct) while
- * peers are connected and the B2 valve is not mid-decision. Deliberately INDEPENDENT
- * of hasReachedSynced / gap / blocksCaughtUp / blockClimbing — those are exactly the
- * flags that misclassify a frozen wallet as "healthy" and blind every existing
- * recovery path. The recovery it drives is a full-locator getheaders — benign as a
- * 0-header no-op on a healthy at-tip wallet, but UNGATED with respect to the convoy
- * window, which is why it must not fire on the convoy's designed pacing.
+ * peers are connected. Deliberately INDEPENDENT of hasReachedSynced / gap /
+ * blocksCaughtUp / blockClimbing — those are exactly the flags that misclassify a
+ * frozen wallet as "healthy" and blind every existing recovery path.
+ *
+ * NOT SUPPRESSIBLE (fix wave C2). The recovery it drives is a full-locator
+ * getheaders: it deletes nothing, frees nothing, re-inits nothing, and is a benign
+ * 0-header no-op on a healthy at-tip wallet. There is therefore no ledger state for
+ * it to destroy and no reason to stand it down while a height is unresolved — and
+ * gating it on that disabled it permanently in the roaming / dead-branch wedges it
+ * exists to cure, since an unresolved height is exactly what those wedges produce.
+ * The convoy pacing is still respected through [isTipStallArmed]'s tip conjunct.
  */
 internal fun shouldRerequestHeadersOnStall(
     peerCount: Int,
     scanStalledMs: Long,
     blockTipStalledMs: Long,
     convoyWindowFull: Boolean,
-    abandonmentPendingCycles: Int,
     thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) &&
+): Boolean = peerCount > 0 &&
     isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs)
 
 /**
@@ -275,9 +288,16 @@ internal fun shouldRerequestHeadersOnStall(
  * already fired this stall ([tier1Fired]) and the wallet is STILL armed a full window
  * later ([scanStalledMs] >= 2×[thresholdMs]). Covers the dead-branch case where the
  * connected peers can't (or won't) serve the real chain and only a fresh handshake
- * cohort will. The caller throttles the actual recreate. The most expensive action in
- * the whole watchdog — a manager recreate mid-descent throws away in-flight convoy
- * state — so it carries the same convoy arming + bounded suppression as Tier 1.
+ * cohort will. The caller throttles the actual recreate.
+ *
+ * DESTRUCTIVE, so it carries the liveness gate (fix wave C2). `forceReconnect()` flags
+ * the manager for a clean recreate and `startSync()` frees and rebuilds it; the fresh
+ * manager's `_applyPendingBip158State` re-arms auto-fetch at the REMEMBERED start, and
+ * `BRPeerManagerEnableAutoCompactFilterFetch` re-Inits the CF scan ledger there — so an
+ * in-session tier 2 discards the descent's in-flight scan progress even though it
+ * deletes no persisted store. That is the F2 wedge if it fires mid-descent, and a
+ * necessary escape if the descent is genuinely dead, which is exactly the distinction
+ * [isConvoySuppressed]'s frontier clock draws.
  */
 internal fun shouldForceReconnectOnStall(
     peerCount: Int,
@@ -287,24 +307,31 @@ internal fun shouldForceReconnectOnStall(
     tier1Fired: Boolean,
     abandonmentPendingCycles: Int,
     thresholdMs: Long = TIP_STALL_TIMEOUT_MS,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-): Boolean = peerCount > 0 && tier1Fired && !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) &&
+    suppressionMaxMs: Long = CONVOY_SUPPRESSION_MAX_MS_FALLBACK,
+): Boolean = peerCount > 0 && tier1Fired &&
+    !isConvoySuppressed(abandonmentPendingCycles, scanStalledMs, suppressionMaxMs) &&
     isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs * 2)
 
 /**
  * FAST tier — the sub-window nudge (re-request headers + pin a canon filter peer).
- * Extracted from [SyncService.startTipStallWatchdog] so the convoy re-key and the
- * abandonment suppression are unit-testable.
+ * Extracted from [SyncService.startTipStallWatchdog] so the convoy re-key is
+ * unit-testable.
+ *
+ * NOT SUPPRESSIBLE (fix wave C2), and this is the load-bearing half of that decision.
+ * This is the ONLY code path that pins a validated canon CF peer, i.e. the only cure
+ * for wedge class (a): the wallet holds peers but not a filter-capable one, so it
+ * roams the junk pool. That wedge is *created* by a CF peer serving one batch and
+ * dropping — which leaves the served range's holes unresolved — so suppressing this
+ * tier on "a height is unresolved" disabled the cure in precisely the state that
+ * produces it. Like tier 1 it deletes nothing and re-inits nothing.
  */
 internal fun shouldFastRecoverOnStall(
     peerCount: Int,
     scanStalledMs: Long,
     blockTipStalledMs: Long,
     convoyWindowFull: Boolean,
-    abandonmentPendingCycles: Int,
     thresholdMs: Long,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-): Boolean = peerCount > 0 && !isConvoySuppressed(abandonmentPendingCycles, suppressionMaxCycles) &&
+): Boolean = peerCount > 0 &&
     isTipStallArmed(scanStalledMs, blockTipStalledMs, convoyWindowFull, thresholdMs)
 
 // ── paced-convoy fetch (spec Part C/D) — window + abandonment-suppression ──
@@ -334,15 +361,39 @@ internal const val CF_CONVOY_WINDOW_FALLBACK = 10_000L
 internal const val CF_CONVOY_REARM_MAX_FALLBACK = 2
 
 /**
- * Legacy compatibility value retained for the existing JNI/API shape. Current native
- * code reports retry-recovery ownership as 0 or 1, and [isConvoySuppressed] treats any
- * positive value as active so elapsed retry cycles can never authorize ledger deletion.
+ * One full native retry cycle for a single CF scan hole, in wall clock:
+ * `CF_REREQ_MAX_ATTEMPTS` (5) attempts on the `CF_REREQ_BACKOFF` schedule
+ * 30 + 60 + 120 + 120 + 120 s = 450 s (`BRCFScanLedger.h`). Mirrored here only to SIZE
+ * the suppression ceiling below — nothing about correctness depends on it matching to
+ * the second, and the ceiling carries a full extra cycle of slack.
  */
-internal fun convoySuppressionMaxCycles(rearmMax: Int): Int = rearmMax + 1
+internal const val CF_VALVE_RETRY_CYCLE_MS = 450_000L
 
-/** Fallback bound, used only when the native `getConvoyRearmMax()` read fails. */
-internal val CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK =
-    convoySuppressionMaxCycles(CF_CONVOY_REARM_MAX_FALLBACK)
+/**
+ * How long a pinned CF scan frontier may keep destructive recovery stood down.
+ *
+ * DERIVED, not picked: the native B2 valve's whole budget for one hole is the initial
+ * attempt cycle plus [rearmMax] re-arm cycles — `(rearmMax + 1) × CF_VALVE_RETRY_CYCLE_MS`
+ * (22.5 min at the shipped `CF_CONVOY_REARM_MAX = 2`) — after which it either abandons
+ * the hole (raising `abandonedBelow`, releasing the frontier and surfacing the band) or
+ * proves it cannot decide (no CF peer connected, or a peer flap tainted the deciding
+ * cycle). One EXTRA cycle of slack absorbs KeepAlive tick latency and exactly one such
+ * tainted cycle. Past that, the frontier has not moved for the valve's entire budget
+ * plus a spare cycle with a hole outstanding the whole time: native retry has provably
+ * failed to release it, and standing the app-side recovery down any longer is the
+ * permanent wedge, not caution.
+ *
+ * Deriving it from the live native `rearmMax` also closes the drift trap the spec walks
+ * into: its own tuning signal tells the operator to RAISE `CF_CONVOY_REARM_MAX`, which
+ * lengthens the valve's budget — and this ceiling grows with it automatically instead of
+ * releasing into a still-productive valve.
+ */
+internal fun convoySuppressionMaxMs(rearmMax: Int): Long =
+    CF_VALVE_RETRY_CYCLE_MS * (rearmMax + 2L)
+
+/** Fallback ceiling (30 min), used only when the native `getConvoyRearmMax()` read fails. */
+internal val CONVOY_SUPPRESSION_MAX_MS_FALLBACK =
+    convoySuppressionMaxMs(CF_CONVOY_REARM_MAX_FALLBACK)
 
 /** The CF scan ledger reports `LowestNeededHeight == 0` when the peer manager doesn't
  *  exist and `1` on a freshly calloc'd (unarmed) ledger. Neither is a real scan
@@ -368,19 +419,38 @@ internal fun isConvoyWindowFull(
     blockHeaderFrontier - scanFrontier >= window
 
 /**
- * True while native retry recovery owns an unresolved hole that pins the scan frontier.
- * Suppression is intentionally unbounded: retries rotate peers indefinitely, and a time
- * budget is not evidence that a block was irrelevant. Destructive watchdog recovery must
- * never delete the only record of an unresolved height.
+ * Should DESTRUCTIVE watchdog recovery stand down this poll?
  *
- * [suppressionMaxCycles] remains in the signature only for source compatibility with the
- * earlier cycle-count policy; it no longer limits correctness protection.
+ * Two conditions, and BOTH must hold:
+ *  1. native reports that its retry/abandon machinery OWNS the frontier-pinning hole
+ *     ([abandonmentPendingCycles] > 0 — `BRPeerManagerHasPendingAbandonment`, which
+ *     counts valve-granted re-arm cycles and deliberately reads 0 for an ordinary
+ *     first-cycle outstanding request); and
+ *  2. the convoy is still demonstrably ALIVE: the CF scan frontier has moved within
+ *     the last [suppressionMaxMs] ([frontierPinnedMs] is the caller's `scanStalledMs`,
+ *     i.e. time since the last frontier CHANGE — and a re-init counts as a change, see
+ *     [stepScanFrontier], so a legitimate post-recovery re-climb re-arms the protection
+ *     instead of being read as more of the same stall).
+ *
+ * WHY IT MUST BE BOUNDED (fix wave C2). The unbounded form (`pending > 0`) was keyed on
+ * a signal that is 1 whenever a hole exists, and every recovery tier conjoined it — so
+ * every tier was disabled in exactly the states it exists to cure. Worst case, the
+ * corrupt-cfheader wedge: a diverged persisted chain fails verification for every honest
+ * cfilter, each is left outstanding BY DESIGN, native reports "pending" forever, and the
+ * clean-slate heal built for that precise signature can never fire.
+ *
+ * WHY IT IS STILL SUPPRESSED AT ALL. The intent behind the unbounded form is real: a
+ * destructive tier firing on top of a working retry deletes the ledger the retry is
+ * deciding on and re-inits the descent at the birth floor. So while the frontier is
+ * moving — or while native is inside its budget for the hole that is pinning it — the
+ * destructive tiers stay out of the way. The bound converts "never" into "not while it
+ * is working". Non-destructive tiers do not consult this at all.
  */
-@Suppress("UNUSED_PARAMETER")
 internal fun isConvoySuppressed(
     abandonmentPendingCycles: Int,
-    suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-): Boolean = abandonmentPendingCycles > 0
+    frontierPinnedMs: Long,
+    suppressionMaxMs: Long = CONVOY_SUPPRESSION_MAX_MS_FALLBACK,
+): Boolean = abandonmentPendingCycles > 0 && frontierPinnedMs < suppressionMaxMs
 
 /**
  * Is the tip-stall watchdog armed this poll?
