@@ -4521,11 +4521,16 @@ static void test_reorg_mid_descent(void)
 // only when BOTH of these hold, and either one missed leaves the join resident, the
 // walk never reaching NULL, and this case GREEN WITHOUT EVER EXERCISING THE GUARD:
 //
-//   (1) BRSetCount(manager->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER (5000). Below
-//       that the pruner returns having freed nothing at all. The chain here is 6000
-//       blocks and the count is ASSERTED at the trigger, not assumed. (This is also
-//       why the prune happens EXACTLY ONCE: pruning earlier would drop the count
-//       under 5000 and silently no-op the pass that matters.)
+//   (1) BRSetCount(manager->blocks) >= CLEAR_MEM_BLOCKS_COUNT_TRIGGER. Below that
+//       the pruner returns having freed nothing at all. The chain length (COUNT,
+//       below) is DERIVED from the live constant and the count is ASSERTED at the
+//       trigger, not assumed. (This is also why the prune happens EXACTLY ONCE:
+//       pruning earlier would drop the count under the trigger and silently no-op
+//       the pass that matters. Task-5 repair, 2026-08-09: this used to be a
+//       hardcoded 6000-block chain sized for CLEAR_MEM_BLOCKS_COUNT_TRIGGER==5000;
+//       when the resident window grew to 32768 the trigger followed it to 36000
+//       and the fixed chain could no longer reach it, so the pruner never ran and
+//       this case went red for the wrong reason -- see the setup below.)
 //
 //   (2) The pruner only walks the prevBlock descent FROM manager->lastBlock, and it
 //       skips everything at/above the retention floor. So it reaches the join point
@@ -4587,26 +4592,47 @@ static void test_reorg_below_window_no_crash(void)
     // Same BASE as the sibling case and for the same reason: ABOVE the highest
     // mainnet checkpoint (23,660,000), or _peerRelayedBlock discards the fork
     // outright at :1797 and this case would silently test nothing.
-    const uint32_t BASE     = 24000000u;
-    const uint32_t COUNT    = 6000u;                  // > CLEAR_MEM_BLOCKS_COUNT_TRIGGER (trap 1)
-    const uint32_t MAIN_TIP = BASE + COUNT - 1u;      // 24,005,999
+    const uint32_t BASE = 24000000u;
+
+    // The pruner's tail-descent skips the first UNTOUCHABLE_HEAD blocks below
+    // lastBlock before it frees anything (BRPeerManager.c's ClearMemory head-skip,
+    // `i++ <= (CLEAR_MEM_BLOCKS_COUNT_TRIGGER - CLEAR_MEM_BLOCKS_COUNT_TAIL_LEN)`) --
+    // a join shallower than that is structurally unprunable. An earlier version of
+    // this fixture hardcoded that as "800" (COUNT=6000, H_JOIN 3000 below a
+    // ~6000-tall chain), which matched CLEAR_MEM_BLOCKS_COUNT_TRIGGER==5000 at the
+    // time. When the resident window grew to SAVE_BLOCK_COUNT==32768, TRIGGER
+    // followed it to 36000 and UNTOUCHABLE_HEAD grew to 33268 -- the fixed
+    // 6000-block chain could never reach that deep, `count >= TRIGGER` was never
+    // even true, the pruner never ran, and the case went RED FOR THE WRONG REASON
+    // (an ordinary failed assertion, not the intended SIGSEGV). DERIVE the chain
+    // length from the live constants instead of a fresh snapshot number, so this
+    // cannot silently go stale again the next time SAVE_BLOCK_COUNT moves.
+    const uint32_t UNTOUCHABLE_HEAD = (uint32_t)CLEAR_MEM_BLOCKS_COUNT_TRIGGER -
+                                       (uint32_t)CLEAR_MEM_BLOCKS_COUNT_TAIL_LEN;
+    const uint32_t JOIN_DEPTH_FROM_BASE  = 3000u;  // H_JOIN sits this far above BASE (unchanged)
+    const uint32_t JOIN_MARGIN_BELOW_TIP = 8000u;  // headroom past UNTOUCHABLE_HEAD, so a modest
+                                                    // future constant shift doesn't reopen this trap
+    // > CLEAR_MEM_BLOCKS_COUNT_TRIGGER (trap 1), AND leaves H_JOIN
+    // (UNTOUCHABLE_HEAD + JOIN_MARGIN_BELOW_TIP) below the tip -- comfortably past
+    // the pruner's untouchable head, so the tail descent actually reaches the join.
+    const uint32_t COUNT    = CLEAR_MEM_BLOCKS_COUNT_TRIGGER + JOIN_DEPTH_FROM_BASE + JOIN_MARGIN_BELOW_TIP;
+    const uint32_t MAIN_TIP = BASE + COUNT - 1u;
 
     uint32_t TIP; size_t baseCount;
     BRPeerManager *m = rhBuildChainManager(w, BASE, COUNT, &TIP, &baseCount);
-    check(m != NULL && TIP == MAIN_TIP, "main chain built [BASE .. BASE+5999]");
+    check(m != NULL && TIP == MAIN_TIP, "main chain built [BASE .. BASE+COUNT-1]");
     if (! m) { BRWalletFree(w); return; }
 
-    // The fork joins ~3000 below the tip. The pruner never touches the first
-    // (CLEAR_MEM_BLOCKS_COUNT_TRIGGER - CLEAR_MEM_BLOCKS_COUNT_TAIL_LEN) == 800
-    // blocks below lastBlock, so a shallower join would be structurally unprunable.
-    // The eventual retention floor is pinned ONE ABOVE it (see the header comment):
-    // the join is the topmost pruned main-chain block, which is the only height at
-    // which the fork-side walk goes NULL before the main-side walk does.
-    const uint32_t H_JOIN  = BASE + 3000u;                                   // 24,003,000
+    // The join is pinned JOIN_DEPTH_FROM_BASE above BASE (unchanged from the
+    // original fixture). The eventual retention floor is pinned ONE ABOVE it (see
+    // the header comment): the join is the topmost pruned main-chain block, which
+    // is the only height at which the fork-side walk goes NULL before the
+    // main-side walk does.
+    const uint32_t H_JOIN  = BASE + JOIN_DEPTH_FROM_BASE;
     const uint32_t FLOOR_B = H_JOIN + 1u;                                    // the post-climb retention floor
     const uint32_t SCAN_B  = FLOOR_B + CLEAR_MEM_CF_RETENTION_MARGIN;        // the scan frontier that produces it
     check(H_JOIN + (CLEAR_MEM_BLOCKS_COUNT_TRIGGER - CLEAR_MEM_BLOCKS_COUNT_TAIL_LEN) < MAIN_TIP,
-          "setup: the join sits below the pruner's untouchable 800-block head, so the tail descent reaches it");
+          "setup: the join sits below the pruner's untouchable head, so the tail descent reaches it");
 
     // ---- phase A: frontier still BELOW the join, so the join is resident --------
     const uint32_t SCAN_A = H_JOIN;
