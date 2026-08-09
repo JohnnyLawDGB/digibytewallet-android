@@ -2,7 +2,7 @@
 
 A full Kotlin rewrite of the DigiByte Android wallet — a **sovereignty-first** SPV wallet built on Jetpack Compose over a patched native C core. Compact-filters-only sync (BIP157/158), hardware-backed key custody, DigiDollar + Taproot, DigiAssets v2, Digi-ID authentication, and a Community Hub.
 
-> **Status:** Active development — **v4.0.23**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. **[Download APK](https://digiscope.me/downloads/)**
+> **Status:** Active development — **v4.0.35**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.35 hardens deep-restore/resync reliability and closes a compact-filter receive-verification gap. **[Download APK](https://digiscope.me/downloads/)**
 
 ## Design principle: sovereignty first
 
@@ -28,6 +28,7 @@ Removing trusted third parties from the wallet's data path comes before feature 
 - **Own-node pairing** — pair your own DigiByte 9.26 node by QR (`dgbnode://`) for first-class, self-hosted compact-filter service — the sovereign endgame for sync.
 - **Dynamic peer-cap (v4.0.23)** — hold the full peer set while catching up, then drop to a lean count once genuinely at the tip, so idle wallets stop pinning slots on the shared filter fleet.
 - **Resilient loop** — watchdogs recover from header-tip stalls, orphan-tip landings, network blips, and background-freeze on aggressive OEM battery managers; the foreground service revives the sync loop on resume.
+- **Restore that converges (v4.0.35)** — a deep restore resumes its scan across restarts instead of resetting to the birth floor; the recovery watchdog is liveness-gated so it never stands down its own recovery during a stall; and a delivered block must verify against the header's committed merkle root before a height counts as scanned — closing a path where a peer could have hidden an incoming payment.
 
 ### DigiDollar & Taproot
 - **Taproot** — P2TR (`dgb1p…`) receive and BIP341 key-path signing, proven on mainnet; sighash paths are KAT-tested in the native host test suite.
