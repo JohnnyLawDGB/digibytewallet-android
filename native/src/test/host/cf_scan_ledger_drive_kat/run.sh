@@ -170,6 +170,21 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
+# ==== PER-GATE TIMEOUTS (Task-5.2) ==========================================
+# A gate whose RUN hangs used to eat the whole budget silently (the reorg gate once
+# spent >4.7 min in a single O(untouchable-head) reorg walk under manager->lock). Bound
+# every slow gate's RUN so a hang fails LOUD instead. These wrap only the RUNS that can
+# be slow -- the reorg CRASH gate, the three frozen-frontier wedge gates, and the final
+# full suite -- and they are set FAR above the observed wall time (single-digit seconds
+# for reorg, ~1 min for a wedge build, a few minutes for the full suite), so a timeout
+# means a genuine hang, never a slow-but-healthy run. The red-before-green gates that run
+# a single fast case are NOT wrapped: a `timeout` exit (124) is nonzero and a RED gate
+# reads nonzero as "red confirmed", so wrapping a red gate could MASK a hang as success --
+# the wrapped gates are all GREEN-expecting (or the reorg gate, which demands a real SEGV
+# and so treats a no-SEGV timeout as a hard failure).
+GATE_TIMEOUT="${CF_KAT_GATE_TIMEOUT:-300}"    # per slow gate (reorg / each wedge build)
+SUITE_TIMEOUT="${CF_KAT_SUITE_TIMEOUT:-900}"  # the final full kat_fixed suite
+
 shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
@@ -544,7 +559,10 @@ fi
 build "$BUILD_DIR/kat_reorg_unguarded" -DREORG_NULLGUARD_UNFIXED -DKAT_REORG_NULLGUARD_REDGREEN_ONLY
 reorg_log="$BUILD_DIR/reorg_unguarded.log"
 set +e
-ASAN_OPTIONS=symbolize=0 "$BUILD_DIR/kat_reorg_unguarded" > "$reorg_log" 2>&1
+# Bounded (Task-5.2): the short-fork construction crashes in <1 s, so a run that reaches
+# the timeout is a hang, not a slow reorg. A timeout yields rc=124 with NO SEGV report, so
+# the gate below takes its "exited WITHOUT crashing" branch and HARD-FAILS -- never a silent green.
+ASAN_OPTIONS=symbolize=0 timeout "$GATE_TIMEOUT" "$BUILD_DIR/kat_reorg_unguarded" > "$reorg_log" 2>&1
 reorg_rc=$?
 set -e
 
@@ -663,31 +681,18 @@ else
     echo "RED confirmed: forward-chaining strands SAVE_BLOCK_COUNT-1 headers and floors the resume at the saved tip (expected)."
 fi
 
-# ---- RED: the KeepAlive backstop's CURSOR RECONCILIATION compiled OUT MUST fail ----
-# A gap R2 OPENS. Three of the four surfacing sites (the arming clamp, the cfheaders
-# floor snap, the floor re-anchor) set start/cursor to the new floor themselves; the
-# KeepAlive backstop did not, and pre-R2 that was safe purely by coincidence -- the
-# resume block floor WAS the clamped cursor + 1, so the gap was zero. With the floor
-# SAVE_BLOCK_COUNT-1 lower it is a real 299-height hole: the next forward fetch starts
-# at the clamped saved tip, RecordRequested raises requestedThrough NON-CONTIGUOUSLY
-# across the gap, and _cfLedgerAdvance sails scannedThrough over heights that were
-# never requested AND are not below abandonedBelow -- a silent skip, above the
-# watermark, invisible to the banner. Exactly the invariant the whole fix wave exists
-# to hold.
-#   * -DCONVOY_C1_NO_CURSOR_RECONCILE: the surfacing still runs in full (the band is
-#     still abandoned and warn-logged); ONLY the cursor reconciliation is compiled
-#     out, so what is proven red is the reconciliation and nothing else -> RED.
-# HARD-FAILS run.sh if it unexpectedly PASSES.
-build "$BUILD_DIR/kat_c1_no_cursor_reconcile" -DCONVOY_C1_NO_CURSOR_RECONCILE -DKAT_RESUME_C1_REDGREEN_ONLY
-if "$BUILD_DIR/kat_c1_no_cursor_reconcile"; then
-    echo "GATE FAILURE: the NO-CURSOR-RECONCILE build PASSED. The KeepAlive backstop's cursor"
-    echo "reconciliation cannot go red -- after surfacing a band the forward fetch would resume"
-    echo "ABOVE the frontier, raise requestedThrough non-contiguously, and mark SAVE_BLOCK_COUNT-1"
-    echo "heights scanned that were never requested and are NOT below abandonedBelow. Refusing to green."
-    exit 1
-else
-    echo "RED confirmed: without the cursor reconciliation the backstop leaves a silent skip above the watermark (expected)."
-fi
+# ---- RETIRED (Task-5.2): the KeepAlive backstop's CURSOR RECONCILIATION gate ----
+# This gate built test_resume_below_block_floor_surfaces with -DCONVOY_C1_NO_CURSOR_RECONCILE.
+# That flag compiles out the cursor reconciliation of the KeepAlive C-1 BACKSTOP, whose trigger
+# (BRPeerManager.c: `if (pinH < c1Floor)`) requires a pending hole BELOW the resident block floor.
+# On a resume that state is now PRECLUDED by the invariant SAVE_BLOCK_COUNT >= CF_CONVOY_WINDOW +
+# MAX_HEADERS_RESULTS (the resume floor is at/below the frontier, so no hole can sit below the
+# floor) -- so the backstop path is UNREACHABLE from this case and the gate can no longer be made
+# to go red by its intended mechanism. Rather than leave a gate that proves nothing (it would have
+# gone red on the same stale geometry the other C-1 assertions did, i.e. for the wrong reason), it
+# is REMOVED. The LIVE half of C-1 -- the snap's STEP-2 cursor reconciliation -- is retargeted onto
+# a servable-band silent-skip and is still red-gated by kat_resume_c1_unfixed (-DCONVOY_C1_UNFIXED).
+# The invariant itself is now guarded (a real regression guard) inside that same case.
 
 # ==== F1: getcfilters MUST NOT ASK BELOW THE RESIDENT BLOCK FLOOR ============
 # _BRPeerManagerRequestCFiltersWithStopHashLocked refuses an unresolvable STOP
@@ -859,7 +864,7 @@ fi
 # per-mechanism claim: the disjunction is what keeps it from prejudging the escape.
 build "$BUILD_DIR/kat_wedge_repro" -DKAT_WEDGE_REPRO_ONLY
 wedge_log="$BUILD_DIR/wedge.log"
-if "$BUILD_DIR/kat_wedge_repro" >"$wedge_log" 2>&1; then
+if timeout "$GATE_TIMEOUT" "$BUILD_DIR/kat_wedge_repro" >"$wedge_log" 2>&1; then
     echo "GREEN confirmed: the frozen-frontier convoy wedge now RECOVERS on production code (expected)."
     { grep -m1 "^PASS: LIVENESS" "$wedge_log" || true; } | sed 's/^/    /'
     { grep -m1 "^   \[wedge\] F=" "$wedge_log" || true; } | sed 's/^/    /'
@@ -889,7 +894,7 @@ fi
 # can only ever go green.
 build "$BUILD_DIR/kat_wedge_recovered" -DKAT_WEDGE_REPRO_ONLY -DKAT_WEDGE_SIMULATE_RECOVERY
 wedge_rec_log="$BUILD_DIR/wedge_recovered.log"
-if "$BUILD_DIR/kat_wedge_recovered" >"$wedge_rec_log" 2>&1; then
+if timeout "$GATE_TIMEOUT" "$BUILD_DIR/kat_wedge_recovered" >"$wedge_rec_log" 2>&1; then
     echo "GREEN confirmed: with the dead band made servable mid-run, the SAME case PASSES (expected) —"
     echo "so the wedge assertions can recognise a recovery and this gate is not red-only."
     { grep -m1 "^PASS: LIVENESS" "$wedge_rec_log" || true; } | sed 's/^/    /'
@@ -935,7 +940,7 @@ fi
 build "$BUILD_DIR/kat_wedge_fast" -DKAT_WEDGE_REPRO_ONLY -DKAT_WEDGE_SIMULATE_RECOVERY \
       -DWEDGE_RECOVERY_TICK=1 -DKAT_WEDGE_ESCAPE_ROTATES_PEER
 wedge_fast_log="$BUILD_DIR/wedge_fast.log"
-if "$BUILD_DIR/kat_wedge_fast" >"$wedge_fast_log" 2>&1; then
+if timeout "$GATE_TIMEOUT" "$BUILD_DIR/kat_wedge_fast" >"$wedge_fast_log" 2>&1; then
     echo "GREEN confirmed: an IMMEDIATE escape (recovery at t1) that also ROTATES A PEER AWAY passes"
     echo "(expected) — no assertion in this case requires the bug to persist long enough to leave its"
     echo "field signature, or requires the peer set to survive the fix untouched."
@@ -955,5 +960,8 @@ else
 fi
 
 # ---- GREEN: fixed full suite ------------------------------------------------
+# Bounded (Task-5.2): a GREEN suite that hangs would eat the whole budget silently; a
+# timeout yields nonzero and `set -e` aborts run.sh loudly. Set well above the observed
+# wall time (a few minutes) so only a genuine hang trips it.
 build "$BUILD_DIR/kat_fixed"
-"$BUILD_DIR/kat_fixed"
+timeout "$SUITE_TIMEOUT" "$BUILD_DIR/kat_fixed"
