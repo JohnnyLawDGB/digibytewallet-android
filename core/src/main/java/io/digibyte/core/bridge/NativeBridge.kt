@@ -590,17 +590,9 @@ object NativeBridge {
      *  retention change reduced abandonment. 0 if the peer manager doesn't exist yet. */
     external fun getAbandonedHeightsTotal(): Long
 
-    /** Is the B2 abandonment valve mid-decision on the hole that PINS the CF scan
-     *  frontier (`BRPeerManagerHasPendingAbandonment`)? Returns the valve's RE-ARM
-     *  CYCLE COUNT, **not** a boolean: 0 = nothing pending, N > 0 = the valve is on
-     *  cycle N (N == rearmCycles + 1; it may abandon once N == CF_CONVOY_REARM_MAX + 1).
-     *
-     *  Consumers MUST bound any suppression they key on this. The valve's per-cycle
-     *  "every offer reached a live peer" latch is cleared by ANY disconnect of the peer
-     *  stamped on the hole, so on a churny fleet every cycle can be tainted and the
-     *  valve re-arms indefinitely — a bare `> 0` check would stand a watchdog down
-     *  forever, in exactly the case the backstop exists for. Saturating, never wraps
-     *  to 0. 0 if the peer manager doesn't exist yet. */
+    /** Returns 1 while native retry recovery owns the hole that pins the compact-filter
+     *  scan frontier, and 0 otherwise. Recovery retries indefinitely rather than writing
+     *  off history, so destructive watchdog actions must remain suppressed while active. */
     external fun getConvoyAbandonmentPending(): Int
 
     /** Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume).

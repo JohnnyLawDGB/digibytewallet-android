@@ -153,9 +153,9 @@ class Bip158WatchdogPolicyTest {
     }
 
     @Test
-    fun `post-timeout re-anchor is re-enabled once the valve exceeds its cycle budget`() {
+    fun `post-timeout re-anchor stays disabled beyond legacy cycle budgets`() {
         assertEquals(
-            PostTimeoutAction.REANCHOR,
+            PostTimeoutAction.STAY_ON_FILTERS,
             decidePostTimeoutAction(
                 hasReachedSynced = true,
                 reanchoredThisSession = false,
@@ -299,10 +299,10 @@ class Bip158WatchdogPolicyTest {
     }
 
     @Test
-    fun `frozen-cf recovery is re-enabled once the valve exceeds its cycle budget`() {
-        // BOUNDED SUPPRESSION: an indefinitely re-arming hole must re-expose itself.
+    fun `frozen-cf recovery stays disabled beyond legacy cycle budgets`() {
+        // Elapsed retry cycles never justify deleting an unresolved height.
         assertEquals(
-            true,
+            false,
             shouldRecoverFrozenCf(
                 blockClimbing = true,
                 cfFrozenMs = CF_FROZEN_RECOVERY_MS * 5,
@@ -402,16 +402,15 @@ class Bip158WatchdogPolicyTest {
         assertEquals(false, isConvoyWindowFull(1_000_000L, 1_000_050L))
     }
 
-    // ── BOUNDED abandonment suppression (spec Part C, "BOUND THE SUPPRESSION") ──
+    // ── unresolved-height recovery suppression ──
 
     @Test fun `nothing pending means no suppression`() {
         assertEquals(false, isConvoySuppressed(0))
     }
 
-    @Test fun `suppressed through the cycles the valve is entitled to`() {
-        // N == rearmCycles + 1: N=1 original cycle, N=2 first re-arm, N=3 the deciding
-        // cycle (CF_CONVOY_REARM_MAX + 1). The valve may abandon at N=3, so it owns the
-        // stall right through there.
+    @Test fun `suppressed whenever retry recovery owns the frontier`() {
+        // The legacy integer API may expose any positive value; every one means native
+        // recovery still owns an unresolved frontier-pinning height.
         assertEquals(true, isConvoySuppressed(1))
         assertEquals(true, isConvoySuppressed(2))
         assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
@@ -431,27 +430,23 @@ class Bip158WatchdogPolicyTest {
             CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK)
     }
 
-    @Test fun `raising the native re-arm budget widens the suppression window`() {
-        // THE DRIFT THE SPEC ACTIVELY INVITES: its own tuning signal tells the operator
-        // to RAISE CF_CONVOY_REARM_MAX in BRPeerManager.h when an abandoned height later
-        // reconciles. With the value hand-mirrored, Kotlin kept releasing at 3 while the
-        // valve was legitimately working cycles 3..N, so the tip-stall watchdog escalated
-        // INTO a productive valve and tier 2 recreated the manager. Derived from the
-        // native budget, the bound moves with it.
+    @Test fun `retry recovery remains protected beyond any legacy cycle bound`() {
+        // A former build released watchdog suppression above a finite native retry budget.
+        // Correctness cannot use elapsed time as proof that a height is irrelevant.
         val retuned = convoySuppressionMaxCycles(4)   // operator raised CF_CONVOY_REARM_MAX to 4
         assertEquals(true, isConvoySuppressed(3, retuned))
         assertEquals(true, isConvoySuppressed(4, retuned))
         assertEquals(true, isConvoySuppressed(5, retuned))
-        assertEquals(false, isConvoySuppressed(6, retuned))
-        // ...and every branch that keys on it moves with it too, not just the predicate.
+        assertEquals(true, isConvoySuppressed(6, retuned))
+        // Every watchdog branch remains suppressed while recovery is active.
         assertEquals(false, tier1(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(true, tier1(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, tier1(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
         assertEquals(false, tier2(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(true, tier2(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, tier2(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
         assertEquals(false, fast(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(true, fast(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, fast(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
         assertEquals(false, heal(abandonmentPendingCycles = 5, suppressionMaxCycles = retuned))
-        assertEquals(true, heal(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
+        assertEquals(false, heal(abandonmentPendingCycles = 6, suppressionMaxCycles = retuned))
     }
 
     @Test fun `the convoy window comes from the caller, not a Kotlin constant`() {
@@ -467,16 +462,12 @@ class Bip158WatchdogPolicyTest {
         assertEquals(false, isConvoyWindowFull(scan + 4_000L, scan))
     }
 
-    @Test fun `suppression LIFTS once the valve re-arms past its budget`() {
-        // THE TASK-5 REVIEW FINDING: the per-cycle offersReachedLivePeer latch is
-        // cleared by ANY disconnect of the peer stamped on the hole, and a deciding
-        // cycle is 5 offers over ~7.5 min — so on a churny fleet EVERY cycle can be
-        // tainted and the valve re-arms INDEFINITELY. A bare `pending > 0` suppression
-        // would then be permanently active and the backstop would stand down forever,
-        // in exactly the case that needs it. Above the bound the watchdog escalates.
-        assertEquals(false, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
-        assertEquals(false, isConvoySuppressed(9))
-        assertEquals(false, isConvoySuppressed(255))
+    @Test fun `suppression remains active beyond legacy retry budgets`() {
+        // Peer churn can require arbitrarily many cycles. Destructive recovery stays out
+        // of the way; native retry rotation remains the liveness mechanism.
+        assertEquals(true, isConvoySuppressed(CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
+        assertEquals(true, isConvoySuppressed(9))
+        assertEquals(true, isConvoySuppressed(255))
     }
 
     // ── tip-stall recovery, re-keyed on the CF SCAN frontier ──
@@ -587,14 +578,14 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
-    @Test fun `tier1 SUPPRESSED while an abandonment is pending below the cycle bound`() {
+    @Test fun `tier1 suppressed while retry recovery owns the frontier`() {
         assertEquals(false, tier1(abandonmentPendingCycles = 1))
         assertEquals(false, tier1(abandonmentPendingCycles = 2))
         assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
     }
 
-    @Test fun `tier1 NOT suppressed once the pending cycle count exceeds the bound`() {
-        assertEquals(true, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
+    @Test fun `tier1 remains suppressed beyond legacy cycle bounds`() {
+        assertEquals(false, tier1(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     @Test fun `tier2 forceReconnect only after tier1 fired and a full extra window`() {
@@ -621,10 +612,10 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
-    @Test fun `tier2 SUPPRESSED while an abandonment is pending below the cycle bound, released above it`() {
+    @Test fun `tier2 suppressed across all retry cycles`() {
         assertEquals(false, tier2(abandonmentPendingCycles = 1))
         assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-        assertEquals(true, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
+        assertEquals(false, tier2(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     @Test fun `FAST tier fires on a frozen scan and needs peers`() {
@@ -640,10 +631,10 @@ class Bip158WatchdogPolicyTest {
         )
     }
 
-    @Test fun `FAST tier SUPPRESSED while an abandonment is pending below the cycle bound, released above it`() {
+    @Test fun `FAST tier suppressed across all retry cycles`() {
         assertEquals(false, fast(abandonmentPendingCycles = 1))
         assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-        assertEquals(true, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
+        assertEquals(false, fast(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     // ── shouldHealCorruptFilterChain — the poisoned-persisted-chain clean-slate heal ──
@@ -719,10 +710,10 @@ class Bip158WatchdogPolicyTest {
         assertEquals(false, heal(scanStalledMs = SCAN_ADVANCING))
     }
 
-    @Test fun `heal is SUPPRESSED while an abandonment is pending below the bound, released above it`() {
+    @Test fun `heal suppressed across all retry cycles`() {
         assertEquals(false, heal(abandonmentPendingCycles = 1))
         assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK))
-        assertEquals(true, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
+        assertEquals(false, heal(abandonmentPendingCycles = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK + 1))
     }
 
     // ── CF scan-frontier tracking: a frontier RE-INIT is not a stall ──

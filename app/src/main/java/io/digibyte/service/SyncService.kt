@@ -17,6 +17,7 @@ import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.core.asset.assetPruneGateOpen
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
+import io.digibyte.core.sync.CfAbandonmentStore
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.sync.KeepaliveAction
@@ -257,6 +258,7 @@ class SyncService : Service() {
     @Volatile private var filterHeadersDirty = false
     private var filterHeaderWriterJob: Job? = null
     private val filterHeaderSaveIntervalMs = 20_000L
+    private val syncCompletionInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val binder = SyncBinder()
 
@@ -1194,22 +1196,32 @@ class SyncService : Service() {
                         // ~2 DGB higher than actual on-chain state.
                         atTipConsecutivePolls++
                         if (atTipConsecutivePolls >= TIP_GRACE_POLLS) {
-                            hasReachedSynced = true
-                            // Co-located with hasReachedSynced: this poll-loop
-                            // fallback is a REAL this-session completion site
-                            // (native onSyncComplete is unreliable on flaky
-                            // devices). The asset prune gate must open here too,
-                            // or it never runs on exactly the Note 8-class
-                            // devices most likely to hold phantom rows.
-                            syncedThisSession = true
-                            walletManager.updateSyncState(io.digibyte.core.model.SyncState.Complete)
-                            getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                                .edit().putBoolean("has_synced", true).apply()
-                            android.util.Log.i(
-                                "SyncService",
-                                "At chain tip (height=$height est=$estHeight) for " +
-                                    "${atTipConsecutivePolls * 10}s — marking complete"
-                            )
+                            if (syncCompletionInFlight.compareAndSet(false, true)) {
+                                try {
+                                    if (persistSyncCompletionState()) {
+                                        hasReachedSynced = true
+                                        // Co-located with hasReachedSynced: this poll-loop
+                                        // fallback is a REAL this-session completion site.
+                                        syncedThisSession = true
+                                        walletManager.updateSyncState(
+                                            io.digibyte.core.model.SyncState.Complete,
+                                        )
+                                        android.util.Log.i(
+                                            "SyncService",
+                                            "At chain tip (height=$height est=$estHeight) for " +
+                                                "${atTipConsecutivePolls * 10}s — marking complete",
+                                        )
+                                    } else {
+                                        atTipConsecutivePolls = 0
+                                        android.util.Log.w(
+                                            "SyncService",
+                                            "At tip but transaction checkpoint failed — keeping sync incomplete",
+                                        )
+                                    }
+                                } finally {
+                                    syncCompletionInFlight.set(false)
+                                }
+                            }
                         }
                     } else if (height > 0 && estHeight > 0 &&
                                height >= estHeight - 5 &&
@@ -1940,7 +1952,42 @@ class SyncService : Service() {
         // corrupt bytes can SIGSEGV — a native crash no try/catch can catch.
         // Structurally corrupt-but-valid-hex blobs are caught by the BootGuard
         // crash-loop breaker (wipes sync state and re-syncs; seed preserved).
-        val blockBytes = decodeSavedBlobOrDrop(prefs, "saved_blocks")
+        var savedLedger = CfScanLedgerStore.load(this@SyncService)
+        var blockBytes = decodeSavedBlobOrDrop(prefs, "saved_blocks")
+        val hasTransactionCheckpoint =
+            prefs.getBoolean("transactions_checkpointed", false) || prefs.contains("saved_transactions")
+        val cfResetReason = cfRestoreResetReason(
+            savedLedger,
+            blockBytes,
+            hasReachedSynced,
+            hasTransactionCheckpoint,
+        )
+        if (cfResetReason != null) {
+            android.util.Log.w(
+                "SyncService",
+                "CF restore preflight requires a header/filter rebuild ($cfResetReason); " +
+                    "wallet keys and known transactions are preserved",
+            )
+            prefs.edit()
+                .remove("saved_blocks")
+                .remove("saved_blocks_tip")
+                .remove("saved_filter_headers")
+                .remove("has_synced")
+                .commit()
+            FilterHeaderStore.delete(this@SyncService)
+            CfScanLedgerStore.delete(this@SyncService)
+            CfAbandonmentStore.clear(this@SyncService)
+            pendingFilterHeaders = null
+            filterHeadersDirty = false
+            pendingCfLedger = null
+            val birth = NativeBridge.getWalletBirthCheckpointHeight()
+            getSharedPreferences("dgb_settings", MODE_PRIVATE).edit().apply {
+                if (birth > 0L) putLong("cf_birth_height", birth) else remove("cf_birth_height")
+            }.commit()
+            hasReachedSynced = false
+            savedLedger = null
+            blockBytes = null
+        }
         if (blockBytes != null) {
             val loaded = NativeBridge.loadSavedBlocks(blockBytes)
             android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
@@ -2043,9 +2090,14 @@ class SyncService : Service() {
             // "scan for missing transactions" banner for blocks that predate the wallet
             // and cannot contain its funds. Measured on a Note 8 2026-08-02:
             //   [CF-SCAN] ABANDONED 100 height(s) [23899900..23899999] — unscannable
-            val birthDefault = if (savedTip > 0) maxOf(0L, savedTip - 100L)
-                               else NativeBridge.getWalletBirthCheckpointHeight()
-            val birthHeight = settings.getLong("cf_birth_height", birthDefault)
+            val birthHeight = compactFilterBirthHeight(
+                wasSynced = hasReachedSynced,
+                savedTip = savedTip,
+                walletBirth = NativeBridge.getWalletBirthCheckpointHeight(),
+                persistedBirth = if (settings.contains("cf_birth_height")) {
+                    settings.getLong("cf_birth_height", 0L)
+                } else null,
+            )
 
             // Auto-fetch is armed UNCONDITIONALLY, at every depth. The old
             // defense-in-depth branch here refused to arm for a birth floor deeper
@@ -2082,7 +2134,7 @@ class SyncService : Service() {
             }
             android.util.Log.i("SyncService",
                 "BIP158: mode=$syncMode, auto-fetch from height $birthHeight " +
-                "(savedTip=$savedTip, anchor=$birthDefault)")
+                "(savedTip=$savedTip, syncedResume=$hasReachedSynced)")
         }
         // ─────────────────────────────────────────────────────────────────────────
 
@@ -2104,7 +2156,6 @@ class SyncService : Service() {
         // native peer manager exists (restoreCfScanLedger is guarded and returns
         // false otherwise). The native ledger is Init'd during startSync, so an
         // earlier restore (e.g. at the filter-chain restore site) would be wiped.
-        val savedLedger = CfScanLedgerStore.load(this@SyncService)
         if (savedLedger != null) {
             val ok = NativeBridge.restoreCfScanLedger(savedLedger)
             android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
@@ -2152,11 +2203,13 @@ class SyncService : Service() {
         )
         if (syncModeNow != NativeBridge.SyncMode.BLOOM_ONLY) {
             val savedTipForWatchdog = NativeBridge.getSavedBlocksTip()
-            val anchorForWatchdog = if (savedTipForWatchdog > 0) savedTipForWatchdog
-                                    else NativeBridge.getWalletBirthCheckpointHeight()
-            val birthHeightForWatchdog = settings.getLong(
-                "cf_birth_height",
-                maxOf(0L, anchorForWatchdog - 100L)
+            val birthHeightForWatchdog = compactFilterBirthHeight(
+                wasSynced = hasReachedSynced,
+                savedTip = savedTipForWatchdog,
+                walletBirth = NativeBridge.getWalletBirthCheckpointHeight(),
+                persistedBirth = if (settings.contains("cf_birth_height")) {
+                    settings.getLong("cf_birth_height", 0L)
+                } else null,
             )
             startBip158Watchdog(birthHeightForWatchdog)
             startTipStallWatchdog()
@@ -2245,7 +2298,7 @@ class SyncService : Service() {
 
     // Initialized in onStartCommand from persisted flag so progress callbacks
     // don't revert "Connected" back to "Syncing 0%" on restart near the chain tip.
-    private var hasReachedSynced = false
+    @Volatile private var hasReachedSynced = false
 
     private val syncCallback = object : NativeCallback {
 
@@ -2368,25 +2421,27 @@ class SyncService : Service() {
                     "ignoring; filters still have work")
                 return
             }
-            hasReachedSynced = true
-            syncedThisSession = true
-            walletManager.updateSyncState(SyncState.Complete)
-            // Persist sync-complete so restarts don't flash "Syncing 0%"
-            getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                .edit().putBoolean("has_synced", true).apply()
-            // Persist transactions and drop the foreground notification.
+            if (!syncCompletionInFlight.compareAndSet(false, true)) return
+            // Persist transactions before the synced marker, then run post-sync work.
             // Peers stay connected so the user can send/receive while the app
             // is open. The service dies naturally when the activity is destroyed.
             // WorkManager handles background catch-ups after that.
             serviceScope.launch(Dispatchers.IO) {
-                val txData = NativeBridge.getSerializedTransactions()
-                if (txData != null) {
-                    val hex = bytesToHex(txData)
-                    getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                        .edit().putString("saved_transactions", hex).apply()
-                    android.util.Log.i("SyncService", "Saved ${txData.size} bytes of transactions")
-                }
-                android.util.Log.i("SyncService", "Sync complete — keeping foreground service for peer connections")
+                try {
+                    if (!persistSyncCompletionState()) {
+                        android.util.Log.w(
+                            "SyncService",
+                            "onSyncComplete transaction checkpoint failed — keeping sync incomplete",
+                        )
+                        return@launch
+                    }
+                    hasReachedSynced = true
+                    syncedThisSession = true
+                    walletManager.updateSyncState(SyncState.Complete)
+                    android.util.Log.i(
+                        "SyncService",
+                        "Sync complete — durable transaction checkpoint committed",
+                    )
                 // Do NOT call stopForeground — Android kills the service without
                 // the notification, which triggers onDestroy → stopSync → peers drop.
                 // Update the notification to show connected status instead.
@@ -2412,7 +2467,10 @@ class SyncService : Service() {
                 // withheld DD/asset credit. Gated on pending>0 AND debounced so
                 // the node is only queried when something is actually stuck;
                 // self-limiting (a promoted tx is no longer pending).
-                maybeRunConfirmationReconcile("sync complete")
+                    maybeRunConfirmationReconcile("sync complete")
+                } finally {
+                    syncCompletionInFlight.set(false)
+                }
             }
         }
 
@@ -3019,7 +3077,13 @@ class SyncService : Service() {
                 if (filterHeadersDirty) {
                     filterHeadersDirty = false // cleared first; a concurrent callback re-sets it
                     pendingFilterHeaders?.let { (bytes, ep) -> FilterHeaderStore.write(this@SyncService, bytes, ep) }
-                    pendingCfLedger?.let { (bytes, ep) -> CfScanLedgerStore.write(this@SyncService, bytes, ep) }
+                    pendingCfLedger?.let { (bytes, ep) ->
+                        if (persistWalletTransactionsCheckpoint()) {
+                            CfScanLedgerStore.write(this@SyncService, bytes, ep)
+                        } else {
+                            filterHeadersDirty = true
+                        }
+                    }
                 }
             }
         }
@@ -3030,8 +3094,35 @@ class SyncService : Service() {
         if (filterHeadersDirty) {
             filterHeadersDirty = false
             pendingFilterHeaders?.let { (bytes, ep) -> runCatching { FilterHeaderStore.write(this, bytes, ep) } }
-            pendingCfLedger?.let { (bytes, ep) -> runCatching { CfScanLedgerStore.write(this, bytes, ep) } }
+            pendingCfLedger?.let { (bytes, ep) ->
+                if (persistWalletTransactionsCheckpoint()) {
+                    runCatching { CfScanLedgerStore.write(this, bytes, ep) }
+                }
+            }
         }
+    }
+
+    private fun persistWalletTransactionsCheckpoint(): Boolean = runCatching {
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
+        val transactionCount = NativeBridge.getTransactionCount()
+        val editor = prefs.edit().putBoolean("transactions_checkpointed", true)
+        if (transactionCount > 0) {
+            val txData = NativeBridge.getSerializedTransactions() ?: return@runCatching false
+            editor.putString("saved_transactions", bytesToHex(txData))
+        }
+        editor.commit()
+    }.getOrDefault(false)
+
+    private fun persistSyncCompletionState(): Boolean {
+        if (!persistWalletTransactionsCheckpoint()) return false
+        val synced = getSharedPreferences(
+            "dgb_sync_data" + networkSuffix(this),
+            MODE_PRIVATE,
+        ).edit().putBoolean("has_synced", true).commit()
+        if (!synced) return false
+        getSharedPreferences("dgb_settings", MODE_PRIVATE)
+            .edit().remove("cf_birth_height").commit()
+        return true
     }
 
     private fun persistBlocks(data: ByteArray, synchronous: Boolean) {

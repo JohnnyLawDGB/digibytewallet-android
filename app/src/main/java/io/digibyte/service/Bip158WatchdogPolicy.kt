@@ -334,12 +334,9 @@ internal const val CF_CONVOY_WINDOW_FALLBACK = 10_000L
 internal const val CF_CONVOY_REARM_MAX_FALLBACK = 2
 
 /**
- * Upper bound on the abandonment cycle count for which the tip-stall watchdog stands
- * down, DERIVED from the valve's re-arm budget. `BRPeerManagerHasPendingAbandonment`
- * returns a CYCLE COUNT, not a boolean: `N == rearmCycles + 1`, and the valve is
- * entitled to decide at `N == rearmMax + 1` (the deciding cycle). Pass the NATIVE
- * `getConvoyRearmMax()` so this tracks the header automatically.
- * See [isConvoySuppressed] for why the bound is mandatory.
+ * Legacy compatibility value retained for the existing JNI/API shape. Current native
+ * code reports retry-recovery ownership as 0 or 1, and [isConvoySuppressed] treats any
+ * positive value as active so elapsed retry cycles can never authorize ledger deletion.
  */
 internal fun convoySuppressionMaxCycles(rearmMax: Int): Int = rearmMax + 1
 
@@ -371,30 +368,19 @@ internal fun isConvoyWindowFull(
     blockHeaderFrontier - scanFrontier >= window
 
 /**
- * Should the tip-stall watchdog stand down because the B2 abandonment valve owns the
- * scan-frontier stall? [abandonmentPendingCycles] is the count from
- * `BRPeerManagerHasPendingAbandonment` (0 = nothing pending).
+ * True while native retry recovery owns an unresolved hole that pins the scan frontier.
+ * Suppression is intentionally unbounded: retries rotate peers indefinitely, and a time
+ * budget is not evidence that a block was irrelevant. Destructive watchdog recovery must
+ * never delete the only record of an unresolved height.
  *
- * **THE BOUND IS LOAD-BEARING — do NOT reduce this to `cycles > 0`.** The valve's
- * per-cycle `offersReachedLivePeer` latch is cleared by ANY disconnect of the peer
- * stamped on the hole, and a deciding cycle is 5 offers over ~7.5 min. On this
- * wallet's documented fleet — canon oracles at `maxconnections`, errno-101 blips,
- * ~8 peers rotating — EVERY cycle can be tainted, so the valve re-arms INDEFINITELY
- * and the accessor returns non-zero forever. A bare-boolean suppression would then be
- * PERMANENTLY active and the watchdog would stand down forever, in exactly the case
- * the backstop exists for. So suppress only while the valve is inside the cycles it
- * is actually entitled to (`N <= rearmMax + 1`, i.e. through the deciding cycle);
- * above that the hole is re-arming without converging and MUST be re-exposed to the
- * watchdog's escalation.
- *
- * [suppressionMaxCycles] MUST come from the NATIVE re-arm budget
- * (`convoySuppressionMaxCycles(NativeBridge.getConvoyRearmMax())`) — the default is a
- * fail-open fallback for an unreadable `.so` only. See [CF_CONVOY_WINDOW_FALLBACK].
+ * [suppressionMaxCycles] remains in the signature only for source compatibility with the
+ * earlier cycle-count policy; it no longer limits correctness protection.
  */
+@Suppress("UNUSED_PARAMETER")
 internal fun isConvoySuppressed(
     abandonmentPendingCycles: Int,
     suppressionMaxCycles: Int = CONVOY_SUPPRESSION_MAX_CYCLES_FALLBACK,
-): Boolean = abandonmentPendingCycles in 1..suppressionMaxCycles
+): Boolean = abandonmentPendingCycles > 0
 
 /**
  * Is the tip-stall watchdog armed this poll?
