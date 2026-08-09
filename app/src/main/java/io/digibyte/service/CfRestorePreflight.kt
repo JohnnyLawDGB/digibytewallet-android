@@ -5,7 +5,6 @@ internal enum class CfRestoreResetReason {
     MISSING_TRANSACTION_CHECKPOINT,
     INVALID_LEDGER,
     INVALID_SAVED_BLOCKS,
-    ABANDONED_HISTORY,
     HEADER_WINDOW_MISSING,
 }
 
@@ -23,7 +22,6 @@ internal fun cfRestoreResetReason(
     }
 
     val state = parseCfLedgerState(ledger) ?: return CfRestoreResetReason.INVALID_LEDGER
-    if (state.abandonedBelow > 0L) return CfRestoreResetReason.ABANDONED_HISTORY
     if (savedBlocks == null) return CfRestoreResetReason.HEADER_WINDOW_MISSING
 
     val blockFloor = parseSavedBlocksFloorHeight(savedBlocks)

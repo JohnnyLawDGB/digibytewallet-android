@@ -17,13 +17,37 @@ class CfRestorePreflightTest {
         )
     }
 
+    // Fix-G (convergence): an abandoned band that the saved header window still
+    // covers (lowestNeeded >= blockFloor) must RESUME, not force a rebuild-to-floor.
+    // Before the fix, `state.abandonedBelow > 0L` short-circuited to
+    // ABANDONED_HISTORY unconditionally, ahead of this exact coverage check — so a
+    // device that abandoned even one band would rebuild from the birth floor on
+    // EVERY restart, scan, abandon again, and never converge. The abandoned band
+    // itself stays surfaced via the persisted ledger/CfAbandonmentStore — this
+    // reason only controls whether headers/filters get rebuilt from scratch.
     @Test
-    fun `abandoned history forces a correctness rebuild`() {
+    fun `abandoned history still covered by saved headers resumes without a rebuild`() {
         assertEquals(
-            CfRestoreResetReason.ABANDONED_HISTORY,
+            null,
             cfRestoreResetReason(
                 ledger(scannedThrough = 1_000, requestedThrough = 1_200, abandonedBelow = 1_100),
                 savedBlocks(1_200, 1_100),
+                wasSynced = false,
+                hasTransactionCheckpoint = false,
+            ),
+        )
+    }
+
+    // Fix-G (precision preserved): abandonment does NOT blanket-exempt the coverage
+    // guard — if the saved header window genuinely doesn't reach down to what's
+    // still needed (lowestNeeded < blockFloor), it's still HEADER_WINDOW_MISSING.
+    @Test
+    fun `abandoned history not yet covered by saved headers still forces a rebuild`() {
+        assertEquals(
+            CfRestoreResetReason.HEADER_WINDOW_MISSING,
+            cfRestoreResetReason(
+                ledger(scannedThrough = 1_000, requestedThrough = 1_200, abandonedBelow = 1_100),
+                savedBlocks(1_200, 1_150),
                 wasSynced = false,
                 hasTransactionCheckpoint = false,
             ),
