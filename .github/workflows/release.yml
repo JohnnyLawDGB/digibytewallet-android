@@ -10,6 +10,10 @@ on:
   # was ever created. Pass the tag as `ref` to build it.
   workflow_dispatch:
 
+permissions:
+  contents: write
+  packages: read
+
 jobs:
   build-sign-deploy:
     runs-on: ubuntu-latest
