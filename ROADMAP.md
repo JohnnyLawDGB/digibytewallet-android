@@ -1,6 +1,43 @@
 # DigiByte Wallet — Roadmap
 
-Current version: **v3.10.26** (July 2026). This revision supersedes the
+> ## Update — 2026-08-10 (true-up to v4.0.35)
+>
+> This roadmap's body was written at v3.10.26 and had gone stale across the
+> entire 4.0.x line — a legibility bug by Principle #2. Current version is
+> **v4.0.35** (August 2026). The body below remains the authoritative
+> *sequencing*; this banner records what actually shipped and re-points
+> "what's next." Deltas:
+>
+> - **v4.0.0 was cut on the bloom-excision trigger alone** — *ahead* of the
+>   Phase 1.5 plan, which said to cut it only once the "never stranded"
+>   remainder (own-node + oracle-bootstrap + `cfcheckpt`) also landed. So the
+>   major version already carries the headline claim while its second half is
+>   still unfinished. Own-node pairing **did** ship (Seq 1.1/1.2); oracle-
+>   bootstrap and active `cfcheckpt` rejection are **still open** — now the
+>   top of the queue.
+> - **The 4.0.x line (through v4.0.35) is a large sovereign-sync HARDENING
+>   pass, not new scope.** Correctness + reliability of the CF client: honest
+>   at-tip gating, liveness-gated recovery watchdogs, restore that resumes
+>   across restarts instead of resetting, memory-safety fixes, and a
+>   compact-filter **receive-verification security fix** (a delivered block
+>   must verify against the header's merkle commitment before a height counts
+>   as scanned — closed a peer-can-hide-a-receive path). Measured, not
+>   asserted: the long-standing deep-restore "lock-starvation" was re-measured
+>   on v4.0.35 and found to be ~95% the bugs since fixed (max 4.5s residual, no
+>   wedge) — investigated and CLOSED, not a locking rewrite. See
+>   `docs/superpowers/specs/2026-08-09-lock-starvation-residual-measurement.md`.
+> - **DigiDollar is now LIVE on mainnet** (softfork activated 2026-07-18), so
+>   oracle CF-enablement — a stated DigiDollar-mainnet *prerequisite* — is now
+>   overdue, which promotes the Phase 1 fleet-reliability remainder onto
+>   DigiDollar's critical path.
+> - **Phase 2 status:** PIN rate-limit **shipped** (v3.10.35). Duress PIN
+>   (designed), Keystore auth-binding, Digi-ID key isolation, and loud Tor
+>   fallback remain.
+> - **NEXT (decided 2026-08-10):** finish Phase 1's client half —
+>   `cfcheckpt` graduates from observe-and-log to active rejection — while the
+>   oracle-operator CF checklist runs in parallel (ops-paced). Then Phase 2.
+
+Current version: **v4.0.35** (August 2026). The revision below supersedes the
 June 2026 roadmap, which had fallen behind the code in the good
 direction: BIP 157/158 is no longer the goal of Phase 1 — it is the
 *only* sync path, bloom having been excised from the wire entirely in
@@ -59,7 +96,9 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   address/send paths are KAT-tested in `native/src/test/host/`.
 - **DigiDollar, testnet-complete.** Send/receive/balance wired end to
   end (`core/…/WalletManager.kt:325`, `NativeBridge.kt`, Send/Receive
-  screens), live on testnet, inert on mainnet until softfork activation.
+  screens), live on testnet and — since the softfork activated
+  2026-07-18 — on **mainnet** too (send/receive/balance only; the vault
+  lifecycle is still Phase 3).
 
 **What is not sovereign today, and this roadmap is built around:**
 
@@ -151,9 +190,9 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | Phase | Theme | Rough size | Status / ships with |
 |-------|-------|-----------|---------------------|
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
-| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39), bloom **removed** (v3.10.x), own-node pairing flow shipped (Seq 1.1/1.2). 🚧 Remainder: oracle CF enablement + seeder demotion + `cfcheckpt` |
-| 1.5 | **v4.0.0** | S | Declared when Phase 1 remainder lands — see Versioning |
-| 2 | Key & trust hardening | M | 🚧 Resequenced: PIN rate-limit → duress PIN A → Keystore binding → Digi-ID isolation → loud Tor fallback |
+| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & **hardened through v4.0.35**, bloom **removed** (v3.10.x), own-node pairing shipped (Seq 1.1/1.2). 🚧 Remainder: **`cfcheckpt` active rejection (NEXT)** + oracle-bootstrap (seeder demotion) |
+| 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
+| 2 | Key & trust hardening | M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); next: duress PIN A → Keystore binding → Digi-ID isolation → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
 | 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet and duress-PIN promotion; F-Droid before Play |
 
@@ -418,7 +457,7 @@ latency (external).
 ## Appendix — Feature inventory
 
 Baseline against a modern self-custodial wallet. Status reflects
-**v3.10.26**.
+**v4.0.35** (rows dated v3.10.x still describe when a feature landed).
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -427,7 +466,7 @@ Baseline against a modern self-custodial wallet. Status reflects
 | Fee selection | Partial | Fixed tiers + custom; RBF in Phase 3 |
 | BIP 21 payment URIs | Shipped | |
 | QR scanning | Shipped | |
-| PIN lock | Shipped | Argon2id; **no rate-limit — Phase 2 item 1** |
+| PIN lock | Shipped | Argon2id; **rate-limit shipped v3.10.35** (exponential backoff) |
 | Duress / decoy PIN | Designed | Spec approved 2026-07-12; Phase 2 item 2 |
 | Biometric unlock | Shipped | UI-gate only; Keystore binding — Phase 2 |
 | Seed backup / verify | Shipped | |
@@ -437,7 +476,7 @@ Baseline against a modern self-custodial wallet. Status reflects
 | Multi-network | Shipped | mainnet / testnet26 flavors, network toggle |
 | Digi-ID | Shipped | One-tap DigiScope login; **key isolation pending — Phase 2 item 4** |
 | DigiAsset send/receive | **Shipped** | v3.5.21–3.5.28 (June appendix was stale) |
-| DigiDollar send/receive | Testnet | Mainnet at softfork activation, **audit-gated** |
+| DigiDollar send/receive | **Shipped** | Live on **mainnet** since the softfork activated 2026-07-18 (send/receive/balance); vault lifecycle is Phase 3 |
 | DigiDollar vault lifecycle | Not started | Phase 3 item 3 — the flagship |
 | PSBT (BIP 174 + Taproot fields) | Not started | Phase 3 item 1 |
 | Watch-only (xpub/descriptor) | Not started | Phase 3 item 2 |
@@ -462,8 +501,9 @@ Baseline against a modern self-custodial wallet. Status reflects
 
 ## Versioning
 
-- **3.X.Y** — current line (at v3.10.26). `Y` = patch; `X` = minor
-  feature batches.
+- **4.0.X** — current line (at **v4.0.35**). `Y` = patch; `X` = minor
+  feature batches. (The 3.X.Y line closed at v3.10.x; v4.0.0 = the bloom
+  wire-path removal, the major it earned.)
 - **4.0.0 — trigger resolved.** The June revision left the major
   trigger as an open decision after "4.0.0 = BIP157/158 lands" died
   (it shipped inside 3.5.x). Its own fallback candidate — removal of
