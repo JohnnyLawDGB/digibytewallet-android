@@ -79,6 +79,20 @@
 # reverted header (see task-5-report.md for that manual cross-check, kept only as
 # corroborating evidence now that this red arm makes the same point automatically
 # on every run).
+#
+# A THIRD, independent red arm covers the FINAL whole-branch-review must-fix: the
+# checkpoint veto over-extending into the tip region. -DCF_VETO_TIP_UNFIXED compiles
+# OUT (via its own #ifndef guard in BRPeerManager.c) the
+# `if (contested > BRCFTopCheckpointHeight()) return 0;` early-out
+# _BRPeerManagerCheckpointConfirmsOurChainLocked now does right after the
+# mainnet-port gate. Without it, BRCFHighestCheckpointAtOrBelow(contested) clamps to
+# the TOP table entry for ANY contested height at or above it, so a chain whose
+# StartHeight sits at or below the top checkpoint (essentially every real wallet)
+# reaches the header comparison and, on a match, reports "checkpoint-confirmed" even
+# though `contested` is deep in the untrusted tip region a checkpoint never covers.
+# test_veto_does_not_extend_to_tip_region's checks -- an honest 3-of-3 majority
+# disagreeing ABOVE the top checkpoint must re-anchor, not be vetoed -- FAIL under
+# this flag (the majority is vetoed and the triggering peer is banned instead).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -191,6 +205,44 @@ echo "RED (CAP) gate OK: shrinking CF_DISAGREED_CAP back to 3 made a genuine"
 echo "                   4-of-6 majority undetectable (bestAgree capped at 3"
 echo "                   can never exceed 6/2==3) -- the healthy-fleet"
 echo "                   re-anchor assertion failed as expected."
+
+# ── RED (TIP): the checkpoint veto over-extending above the top checkpoint
+# must FAIL the tip-region majority check (FINAL whole-branch-review must-fix) ──
+build "$BUILD_DIR/cf_checkpoint_quorum_kat_tipunfixed" -DCF_VETO_TIP_UNFIXED
+
+set +e
+"$BUILD_DIR/cf_checkpoint_quorum_kat_tipunfixed" > "$BUILD_DIR/red_tip.log" 2>&1
+RED_TIP_STATUS=$?
+set -e
+
+if [ "$RED_TIP_STATUS" -eq 0 ]; then
+    echo "GATE FAILED: -DCF_VETO_TIP_UNFIXED build exited 0 -- the tip-region"
+    echo "             early-out in _BRPeerManagerCheckpointConfirmsOurChainLocked"
+    echo "             must be load-bearing (its absence must let a historical"
+    echo "             checkpoint match veto a tip-region majority). Output was:"
+    sed 's/^/             | /' "$BUILD_DIR/red_tip.log"
+    exit 1
+fi
+if ! grep -q "FAIL: tip-region: 3 agreeing disagreers + majority of 3 -- re-anchor FIRES in the tip region (no veto)" "$BUILD_DIR/red_tip.log"; then
+    echo "GATE FAILED: the CF_VETO_TIP_UNFIXED build did not fail at the"
+    echo "             expected re-anchor assertion -- the -D flag is not"
+    echo "             reaching the tip-region guard, so RED is not actually"
+    echo "             the pre-fix over-extending shape."
+    sed 's/^/             | /' "$BUILD_DIR/red_tip.log"
+    exit 1
+fi
+if ! grep -q "FAIL: tip-region: no peer was banned -- the disagreeing majority is honest, not vetoed liars" "$BUILD_DIR/red_tip.log"; then
+    echo "GATE FAILED: the CF_VETO_TIP_UNFIXED build did not fail the"
+    echo "             misbehavin' check -- the over-extending veto must ban"
+    echo "             the honest triggering peer instead of letting the"
+    echo "             majority re-anchor, and this build didn't reproduce that."
+    sed 's/^/             | /' "$BUILD_DIR/red_tip.log"
+    exit 1
+fi
+echo "RED (TIP) gate OK: the pre-must-fix shape let a historical top-checkpoint"
+echo "                   match veto an honest majority's tip-region re-anchor"
+echo "                   and ban the triggering peer instead; the tip-region"
+echo "                   checks failed as expected."
 
 # ── GREEN: the production shape must pass every check ──────────────────────
 build "$BUILD_DIR/cf_checkpoint_quorum_kat"

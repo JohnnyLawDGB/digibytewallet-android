@@ -621,19 +621,156 @@ static void test_quorum_veto_checkpoint_confirmed(void)
     printf("test_quorum_veto_checkpoint_confirmed: done\n");
 }
 
+// ---- FINAL-review must-fix KAT: proves the checkpoint veto does NOT
+// over-extend into the tip region above the TOP pinned checkpoint. Same
+// premise/shape as test_quorum_veto_checkpoint_confirmed (chain anchored
+// just below a checkpoint, primed with 30 real, honestly-folded headers past
+// it, 3 connected filter peers forming a majority), except this time the
+// checkpoint being matched is the TOP entry in the table
+// (BRMainNetCFCheckpoints[count-1], read from the real table, not
+// hand-typed) and the contested batch's height range sits ABOVE it --
+// squarely in the "recent/tip region" the design (2026-08-10-cfcheckpt-
+// active-rejection-design.md:90-91,131) says checkpoints do NOT cover and
+// must fall through to the quorum path.
+//
+// _BRPeerManagerCheckpointConfirmsOurChainLocked(contested) computes
+// cp = BRCFHighestCheckpointAtOrBelow(contested). For contested ABOVE the
+// top checkpoint, that lookup still clamps to the top entry (there is
+// nothing higher in the table) -- so a chain whose StartHeight sits at or
+// below the top checkpoint (essentially every real wallet, born long before
+// the chain tip) passes the `StartHeight > cp->height` bail-out and reaches
+// the header comparison. If OUR chain's header at the top checkpoint MATCHES
+// the pin (proven true here below, historically), the pre-fix helper
+// declares the chain "checkpoint-confirmed" and vetoes the re-anchor even
+// though `contested` is nowhere near a checkpoint -- it is deep in
+// unconfirmed tip territory. That over-extension is exactly what this test
+// catches: an honest MAJORITY (3 of 3 connected filter peers, same
+// prevFilterHeader -- a coherent, genuine tip-region disagreement) must WIN
+// the re-anchor here, not be vetoed and banned.
+//
+// Same SHA256d-preimage-break reasoning as test_quorum_veto_checkpoint_confirmed
+// applies to the top-checkpoint match: the --wrap=BRCompactFilterChainHeader
+// escape hatch forces the ONE read _BRPeerManagerCheckpointConfirmsOurChainLocked
+// makes at the top checkpoint height to return the REAL pinned value (read
+// from the real table), simulating a genuine committed match. Armed for
+// exactly the 3rd (quorum-triggering) call, disarmed immediately after.
+//
+// ==== must-fix RED-BEFORE-GREEN GATE ====
+// No #ifdef branching here either -- this test asserts the FIXED (tip-region
+// NOT vetoed) outcome unconditionally. run.sh builds this file a THIRD time
+// with -DCF_VETO_TIP_UNFIXED, which compiles OUT (via its own #ifndef guard
+// in BRPeerManager.c) the `if (contested > BRCFTopCheckpointHeight()) return 0;`
+// early-out this must-fix adds to _BRPeerManagerCheckpointConfirmsOurChainLocked
+// -- restoring the over-extension: the helper falls straight through to the
+// top-checkpoint comparison, the forced-match wrap makes it report
+// "confirmed", and the veto fires -- cfReanchorCount stays 0 and the 3rd
+// (triggering) peer is misbehavin'd instead of the majority winning. This
+// test's checks therefore FAIL under -DCF_VETO_TIP_UNFIXED, proving the new
+// guard is load-bearing, not merely inert code.
+static void test_veto_does_not_extend_to_tip_region(void)
+{
+    BRWallet *wallet = makeWallet();
+    BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(manager, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t floorHeight = 24000000;
+    BRMerkleBlock *floorBlock = dummyBlock(floorHeight, 0xC8);
+    BRSetAdd(manager->blocks, floorBlock);
+    manager->lastBlock = floorBlock;
+
+    // Anchor 10 below the TOP pinned checkpoint (read from the real table,
+    // not hand-typed) and prime 30 real, honestly-folded headers past it --
+    // genuinely resident chain data, same idiom as
+    // test_quorum_veto_checkpoint_confirmed, just anchored at the LAST table
+    // entry instead of the first.
+    uint32_t topCpHeight = BRMainNetCFCheckpoints[BRMainNetCFCheckpointsCount - 1].height;
+    UInt256 anchor = u256_fill(0xC9);
+    manager->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, topCpHeight - 10, anchor);
+    UInt256 prime[30];
+    for (int i = 0; i < 30; i++) prime[i] = u256_fill((uint8_t)(0x20 + i));
+    check(BRCompactFilterChainAppend(manager->compactFilterChain, anchor, prime, 30) == 1,
+          "tip-region: priming append succeeds (chain resident past the top checkpoint)");
+
+    uint32_t contested = BRCompactFilterChainNextHeight(manager->compactFilterChain);
+    check(contested == topCpHeight + 20,
+          "tip-region: sanity -- contested height sits 20 above the top checkpoint (tip region)");
+    check(contested > topCpHeight,
+          "tip-region: sanity -- contested is ABOVE the top pinned checkpoint (not covered by any pin)");
+
+    const BRCFCheckpoint *cp = BRCFHighestCheckpointAtOrBelow(contested);
+    check(cp != NULL && cp->height == topCpHeight,
+          "tip-region: sanity -- BRCFHighestCheckpointAtOrBelow clamps to the TOP entry for a tip-region height");
+    check(BRCompactFilterChainStartHeight(manager->compactFilterChain) <= cp->height,
+          "tip-region: sanity -- our chain's StartHeight does NOT exceed cp->height, so the "
+          "StartHeight>cp->height bail-out does NOT apply here -- this is the OTHER hole "
+          "(distinct from test_no_veto_above_top_checkpoint's StartHeight-based safety case)");
+
+    BRPeer *p1 = addConnectedFilterPeer(manager, 0x61, 10061);
+    BRPeer *p2 = addConnectedFilterPeer(manager, 0x62, 10062);
+    BRPeer *p3 = addConnectedFilterPeer(manager, 0x63, 10063);
+    check(_BRPeerManagerConnectedFilterPeerCount(manager) == 3,
+          "tip-region: sanity -- exactly 3 connected filter peers (an honest majority)");
+
+    // Heights [topCpHeight+20 .. topCpHeight+24] cross NO pinned checkpoint
+    // (nothing exists above the top entry) -- Task 3's pre-commit check
+    // legitimately sees nc==0 and never rejects this batch; it fails purely
+    // on the wrong (but mutually agreeing) prevFilterHeader.
+    UInt256 divergentBatch[5];
+    for (int i = 0; i < 5; i++) divergentBatch[i] = u256_fill((uint8_t)(0xB8 + i));
+    UInt256 sharedWrongPrev = u256_fill(0xDF);
+    BRPeerCallbackInfo info1 = { .peer = p1, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info2 = { .peer = p2, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info3 = { .peer = p3, .manager = manager, .hash = UINT256_ZERO };
+
+    _peerRelayedCFHeaders(&info1, FILTER_TYPE_BASIC, u256_fill(0x11), sharedWrongPrev, divergentBatch, 5);
+    check(manager->cfReanchorCount == 0, "tip-region: no re-anchor after 1 agreeing disagreer");
+    _peerRelayedCFHeaders(&info2, FILTER_TYPE_BASIC, u256_fill(0x12), sharedWrongPrev, divergentBatch, 5);
+    check(manager->cfReanchorCount == 0, "tip-region: no re-anchor after 2 agreeing disagreers (below floor)");
+    check(manager->misbehavinCount == 0, "tip-region: sanity -- nobody banned yet");
+
+    // 3rd call reaches the quorum decision (floor + majority both clear) --
+    // this is the exact moment _BRPeerManagerCheckpointConfirmsOurChainLocked
+    // would read our chain's header at the top checkpoint height, IF the
+    // must-fix guard didn't already short-circuit before that read for a
+    // tip-region `contested`. Arm the wrap regardless (it is a no-op under
+    // the fix, since the guarded read is never reached; it is what makes the
+    // RED build reproduce a genuine confirmed-chain match).
+    g_forceHeaderChain = manager->compactFilterChain;
+    g_forceHeaderHeight = cp->height;
+    g_forceHeaderValue = cp->filterHeader;  // the REAL pinned value, read from the real table
+    g_forceHeaderArmed = 1;
+    _peerRelayedCFHeaders(&info3, FILTER_TYPE_BASIC, u256_fill(0x13), sharedWrongPrev, divergentBatch, 5);
+    g_forceHeaderArmed = 0;
+
+    check(manager->cfReanchorCount == 1,
+          "tip-region: 3 agreeing disagreers + majority of 3 -- re-anchor FIRES in the tip region (no veto)");
+    check(manager->compactFilterChain == NULL,
+          "tip-region: chain WAS torn down (real re-anchor -- the top-checkpoint match does not veto a tip divergence)");
+    check(manager->autoFetchCFiltersStart == floorHeight,
+          "tip-region: autoFetchCFiltersStart snapped to the block floor");
+    check(manager->misbehavinCount == 0,
+          "tip-region: no peer was banned -- the disagreeing majority is honest, not vetoed liars");
+    assertLockNotHeld(manager, "tip-region: manager->lock released after the real re-anchor return");
+
+    BRPeerManagerFree(manager);
+    BRWalletFree(wallet);
+    printf("test_veto_does_not_extend_to_tip_region: done\n");
+}
+
 int main(void)
 {
     // Deliberately NO #ifdef branching here: every test asserts the FIXED
     // outcome unconditionally, in source identical between the RED and
-    // GREEN builds. run.sh builds this exact file twice -- see file header
-    // for exactly what the RED arm (-DCF_QUORUM_UNFIXED) is expected to
-    // falsify.
+    // GREEN builds. run.sh builds this exact file multiple times -- see file
+    // header for exactly what each RED arm (-DCF_QUORUM_UNFIXED,
+    // -DCF_DISAGREED_CAP=3, -DCF_VETO_TIP_UNFIXED) is expected to falsify.
     test_independent_disagreers_below_floor_no_reanchor();
     test_quorum_majority_reanchors();
     test_floor_met_but_not_majority_no_reanchor();
     test_healthy_fleet_majority_reanchors();
     test_healthy_fleet_exact_half_not_majority_no_reanchor();
     test_quorum_veto_checkpoint_confirmed();
+    test_veto_does_not_extend_to_tip_region();
 
     printf(g_fail == 0 ? "\ncf_checkpoint_quorum_kat: ALL PASS\n" : "\n%d FAIL\n", g_fail);
     return g_fail == 0 ? 0 : 1;
