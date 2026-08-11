@@ -64,7 +64,7 @@
 // real pin value (read directly out of the real BRMainNetCFCheckpoints
 // table, never a hand-typed literal). Armed for exactly the one call that
 // needs it, disarmed immediately after; every other call in this file
-// (including every call the other three tests make) passes through to the
+// (including every call the other five tests make) passes through to the
 // real, unwrapped accessor.
 //
 // ==== RED-BEFORE-GREEN GATE ====
@@ -382,6 +382,159 @@ static void test_floor_met_but_not_majority_no_reanchor(void)
     printf("test_floor_met_but_not_majority_no_reanchor: done\n");
 }
 
+// ---- GREEN-only (fix-round addition, whole-branch-review finding): proves
+// the quorum majority is DETECTABLE at HEALTHY CF FLEET SIZE, not just the
+// toy 3-of-3 case above. Since bestAgree <= cfDisagreedCount <=
+// CF_DISAGREED_CAP, sizing CF_DISAGREED_CAP at CF_CONTINUITY_REANCHOR_FLOOR
+// (3, the pre-fix-round value) made "bestAgree > connected/2" structurally
+// UNSATISFIABLE the moment >=6 filter peers were connected (3 can never
+// exceed 6/2==3) -- the NORMAL healthy state at PEER_MAX_CONNECTIONS==8 --
+// even when a real majority of honest peers coherently disagreed. This
+// exact scenario (4-of-6 agreeing) is the counterexample, and it is now an
+// AUTOMATED red-before-green gate, not merely eyeballed: run.sh builds this
+// same file a second time with -DCF_DISAGREED_CAP=3 (BRPeerManager.h guards
+// the #define with #ifndef specifically so this command-line override can
+// win) and asserts THIS test's re-anchor check FAILS there -- only the
+// first 3 of the 4 agreeing calls can ever be stored at that cap, capping
+// bestAgree at 3, and 3 > 6/2==3 is false, so no re-anchor fires despite a
+// genuine 4-peer majority. With CF_DISAGREED_CAP==PEER_MAX_CONNECTIONS (the
+// production default), all 4 are stored and it re-anchors correctly, as
+// asserted below. (A one-off manual cross-check against a temporarily
+// reverted header preceded this automated gate and is kept as corroborating
+// evidence in task-5-report.md's fix-round section, but the automated
+// -DCF_DISAGREED_CAP=3 red arm is what actually guards against a future
+// regression back to the floor-sized cap.) ------------------------------
+static void test_healthy_fleet_majority_reanchors(void)
+{
+    BRWallet *wallet = makeWallet();
+    BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(manager, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t floorHeight = 24000000;
+    BRMerkleBlock *floorBlock = dummyBlock(floorHeight, 0xC6);
+    BRSetAdd(manager->blocks, floorBlock);
+    manager->lastBlock = floorBlock;
+
+    primeAboveTopCheckpoint(manager, 0xA6, 0x60);
+
+    // 6 connected filter peers total (a healthy, sub-PEER_MAX_CONNECTIONS
+    // fleet size) -- 4 agree with each other (a genuine majority), 2 stay
+    // silent (present in the pool, never disagree).
+    BRPeer *p1 = addConnectedFilterPeer(manager, 0x41, 10041);
+    BRPeer *p2 = addConnectedFilterPeer(manager, 0x42, 10042);
+    BRPeer *p3 = addConnectedFilterPeer(manager, 0x43, 10043);
+    BRPeer *p4 = addConnectedFilterPeer(manager, 0x44, 10044);
+    addConnectedFilterPeer(manager, 0x45, 10045);  // silent
+    addConnectedFilterPeer(manager, 0x46, 10046);  // silent
+    check(_BRPeerManagerConnectedFilterPeerCount(manager) == 6,
+          "healthy-fleet: sanity -- 6 connected filter peers total");
+
+    UInt256 batch[3];
+    for (int i = 0; i < 3; i++) batch[i] = u256_fill((uint8_t)(0xA0 + i));
+    UInt256 sharedPrev = u256_fill(0xDD);
+    BRPeerCallbackInfo info1 = { .peer = p1, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info2 = { .peer = p2, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info3 = { .peer = p3, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info4 = { .peer = p4, .manager = manager, .hash = UINT256_ZERO };
+
+    _peerRelayedCFHeaders(&info1, FILTER_TYPE_BASIC, u256_fill(0xFA), sharedPrev, batch, 3);
+    _peerRelayedCFHeaders(&info2, FILTER_TYPE_BASIC, u256_fill(0xFB), sharedPrev, batch, 3);
+    _peerRelayedCFHeaders(&info3, FILTER_TYPE_BASIC, u256_fill(0xFC), sharedPrev, batch, 3);
+    check(manager->cfDisagreedCount == 3,
+          "healthy-fleet: sanity -- all 3 agreeing disagreers were STORED so far (this is the pre-fix-round CAP==3, "
+          "asserted here BEFORE the 4th call so a future CAP shrink can't hide behind the reanchor's own reset)");
+    check(manager->cfReanchorCount == 0,
+          "healthy-fleet: no re-anchor after 3 agreeing disagreers (meets the floor but not yet a majority of 6)");
+
+    // NOTE: do NOT assert cfDisagreedCount==4 AFTER this call. If it re-anchors
+    // (the GREEN/fixed expectation), _BRPeerManagerReanchorAtFloorLocked resets
+    // cfDisagreedCount to 0 as part of tearing the chain down -- a post-call
+    // read would see the RESET value, not the pre-reset 4, and would falsely
+    // FAIL even though the fix worked correctly (this was caught by actually
+    // running the assertion, not by inspection -- see task-5-report.md). The
+    // re-anchor firing at all (cfReanchorCount below) IS the proof that a 4th
+    // agreeing disagreer was stored and credited: with the pre-fix-round
+    // CAP==3, this exact 4th call could not increase bestAgree past 3, and
+    // 3 > 6/2==3 is false, so no re-anchor would have fired -- verified by
+    // hand against a temporarily reverted header (task-5-report.md).
+    _peerRelayedCFHeaders(&info4, FILTER_TYPE_BASIC, u256_fill(0xFD), sharedPrev, batch, 3);
+
+    check(manager->cfReanchorCount == 1,
+          "healthy-fleet: 4 agreeing disagreers ARE a majority of 6 connected filter peers -- re-anchor fires");
+    check(manager->compactFilterChain == NULL, "healthy-fleet: chain WAS torn down (real re-anchor, no veto)");
+    check(manager->autoFetchCFiltersStart == floorHeight,
+          "healthy-fleet: autoFetchCFiltersStart snapped to the block floor");
+    check(manager->misbehavinCount == 0,
+          "healthy-fleet: no peer was banned -- this is a legitimate re-anchor, not a vetoed liar");
+    assertLockNotHeld(manager, "healthy-fleet: manager->lock released after the real re-anchor return");
+
+    BRPeerManagerFree(manager);
+    BRWalletFree(wallet);
+    printf("test_healthy_fleet_majority_reanchors: done\n");
+}
+
+// ---- GREEN-only (fix-round addition): the exact majority BOUNDARY at
+// PEER_MAX_CONNECTIONS (8) connected filter peers -- exactly half (4 of 8)
+// agreeing is NOT a strict majority (integer 8/2==4, and the decision
+// requires bestAgree > connected/2, strictly greater). Proves the fix
+// doesn't overshoot into "half is enough" once the cap is raised to cover
+// the full pool. ----------------------------------------------------------
+static void test_healthy_fleet_exact_half_not_majority_no_reanchor(void)
+{
+    BRWallet *wallet = makeWallet();
+    BRPeerManager *manager = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    BRPeerManagerSetSyncMode(manager, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
+
+    uint32_t floorHeight = 24000000;
+    BRMerkleBlock *floorBlock = dummyBlock(floorHeight, 0xC7);
+    BRSetAdd(manager->blocks, floorBlock);
+    manager->lastBlock = floorBlock;
+
+    primeAboveTopCheckpoint(manager, 0xA7, 0x68);
+    uint32_t primedStart = BRCompactFilterChainStartHeight(manager->compactFilterChain);
+    size_t primedCount = BRCompactFilterChainCount(manager->compactFilterChain);
+
+    // 8 connected filter peers total (PEER_MAX_CONNECTIONS, the max healthy
+    // fleet size) -- exactly 4 agree with each other, 4 stay silent.
+    BRPeer *p1 = addConnectedFilterPeer(manager, 0x51, 10051);
+    BRPeer *p2 = addConnectedFilterPeer(manager, 0x52, 10052);
+    BRPeer *p3 = addConnectedFilterPeer(manager, 0x53, 10053);
+    BRPeer *p4 = addConnectedFilterPeer(manager, 0x54, 10054);
+    addConnectedFilterPeer(manager, 0x55, 10055);  // silent
+    addConnectedFilterPeer(manager, 0x56, 10056);  // silent
+    addConnectedFilterPeer(manager, 0x57, 10057);  // silent
+    addConnectedFilterPeer(manager, 0x58, 10058);  // silent
+    check(_BRPeerManagerConnectedFilterPeerCount(manager) == 8,
+          "exact-half: sanity -- 8 connected filter peers total (PEER_MAX_CONNECTIONS)");
+
+    UInt256 batch[3];
+    for (int i = 0; i < 3; i++) batch[i] = u256_fill((uint8_t)(0xB0 + i));
+    UInt256 sharedPrev = u256_fill(0xDE);
+    BRPeerCallbackInfo info1 = { .peer = p1, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info2 = { .peer = p2, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info3 = { .peer = p3, .manager = manager, .hash = UINT256_ZERO };
+    BRPeerCallbackInfo info4 = { .peer = p4, .manager = manager, .hash = UINT256_ZERO };
+
+    _peerRelayedCFHeaders(&info1, FILTER_TYPE_BASIC, u256_fill(0xFE), sharedPrev, batch, 3);
+    _peerRelayedCFHeaders(&info2, FILTER_TYPE_BASIC, u256_fill(0xFF), sharedPrev, batch, 3);
+    _peerRelayedCFHeaders(&info3, FILTER_TYPE_BASIC, u256_fill(0x02), sharedPrev, batch, 3);
+    _peerRelayedCFHeaders(&info4, FILTER_TYPE_BASIC, u256_fill(0x03), sharedPrev, batch, 3);
+
+    check(manager->cfDisagreedCount == 4, "exact-half: sanity -- all 4 agreeing disagreers were stored");
+    check(manager->cfReanchorCount == 0,
+          "exact-half: 4-of-8 is EXACTLY half, not a strict majority (4 > 8/2==4 is false) -- no re-anchor");
+    check(manager->compactFilterChain != NULL, "exact-half: compactFilterChain was NOT torn down");
+    check(BRCompactFilterChainStartHeight(manager->compactFilterChain) == primedStart,
+          "exact-half: chain start height unchanged");
+    check(BRCompactFilterChainCount(manager->compactFilterChain) == primedCount,
+          "exact-half: chain header count unchanged");
+    assertLockNotHeld(manager, "exact-half: manager->lock released after the 4th call");
+
+    BRPeerManagerFree(manager);
+    BRWalletFree(wallet);
+    printf("test_healthy_fleet_exact_half_not_majority_no_reanchor: done\n");
+}
+
 // ---- GREEN-only fold-in (Task 4 deferred m1): proves Task 4's checkpoint
 // veto still applies when reached via the QUORUM path (>1 disagreer), not
 // only the single-peer escape hatch cf_checkpoint_veto_kat already covers.
@@ -478,6 +631,8 @@ int main(void)
     test_independent_disagreers_below_floor_no_reanchor();
     test_quorum_majority_reanchors();
     test_floor_met_but_not_majority_no_reanchor();
+    test_healthy_fleet_majority_reanchors();
+    test_healthy_fleet_exact_half_not_majority_no_reanchor();
     test_quorum_veto_checkpoint_confirmed();
 
     printf(g_fail == 0 ? "\ncf_checkpoint_quorum_kat: ALL PASS\n" : "\n%d FAIL\n", g_fail);

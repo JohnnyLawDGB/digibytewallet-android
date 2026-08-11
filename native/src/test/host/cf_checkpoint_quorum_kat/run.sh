@@ -55,7 +55,7 @@
 #         prevFilterHeader to NOT re-anchor -- therefore FAIL, and the whole
 #         binary exits nonzero. This is the ONE red-arm requirement the
 #         plan brief specifies; run.sh does not assert anything about the
-#         other three (GREEN-only) tests' outcome in the red log -- see
+#         other five (GREEN-only) tests' outcome in the red log -- see
 #         main.c's file header for why a same-final-state comparison isn't
 #         meaningful for them (RED's weaker K=2 threshold is a strict
 #         subset of GREEN's stricter floor=3+majority requirement, so RED
@@ -63,6 +63,22 @@
 #         satisfies GREEN's requirement).
 #   GREEN the production shape (no flag) must pass every check in every
 #         test and exit 0.
+#
+# A SECOND, independent red arm covers the fix-round finding (CF_DISAGREED_CAP
+# widened from 3 to PEER_MAX_CONNECTIONS -- see BRPeerManager.h's CF_DISAGREED_CAP
+# comment): -DCF_DISAGREED_CAP=3 reconstitutes the pre-fix-round storage size
+# (BRPeerManager.h guards the #define with #ifndef specifically so a command-line
+# -D can win here -- a plain #define cannot be overridden this way, and -w would
+# silently hide the redefinition warning if it tried). At CAP=3, the multi-peer
+# quorum can never store more than 3 disagreers, so bestAgree is capped at 3 no
+# matter how many peers actually agree -- test_healthy_fleet_majority_reanchors
+# (4 of 6 connected filter peers genuinely agree, a real majority) then FAILS its
+# re-anchor assertion, because 3 (the capped bestAgree) is never > 6/2==3. This is
+# the automated proof that sizing CF_DISAGREED_CAP to the full peer pool, not just
+# the floor, is load-bearing -- not merely "verified by hand" against a temporarily
+# reverted header (see task-5-report.md for that manual cross-check, kept only as
+# corroborating evidence now that this red arm makes the same point automatically
+# on every run).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -143,6 +159,38 @@ fi
 echo "RED gate OK: pre-fix K=2/any-disagree shape let 2 peers with UNRELATED"
 echo "             complaints (different claimed prevFilterHeader) force a"
 echo "             re-anchor; the floor+agreement checks failed as expected."
+
+# ── RED (CAP): the pre-fix-round CF_DISAGREED_CAP==3 must FAIL the healthy-
+# fleet majority check ──────────────────────────────────────────────────────
+build "$BUILD_DIR/cf_checkpoint_quorum_kat_smallcap" -DCF_DISAGREED_CAP=3
+
+set +e
+"$BUILD_DIR/cf_checkpoint_quorum_kat_smallcap" > "$BUILD_DIR/red_cap.log" 2>&1
+RED_CAP_STATUS=$?
+set -e
+
+if [ "$RED_CAP_STATUS" -eq 0 ]; then
+    echo "GATE FAILED: -DCF_DISAGREED_CAP=3 build exited 0 -- sizing the"
+    echo "             disagreer-storage arrays to the full connected-peer"
+    echo "             pool must be load-bearing (shrinking it back to the"
+    echo "             floor must fail the healthy-fleet majority check)."
+    echo "             Output was:"
+    sed 's/^/             | /' "$BUILD_DIR/red_cap.log"
+    exit 1
+fi
+if ! grep -q "FAIL: healthy-fleet: 4 agreeing disagreers ARE a majority of 6 connected filter peers -- re-anchor fires" "$BUILD_DIR/red_cap.log"; then
+    echo "GATE FAILED: the CF_DISAGREED_CAP=3 build did not fail at the"
+    echo "             expected healthy-fleet re-anchor assertion -- the -D"
+    echo "             flag is not reaching CF_DISAGREED_CAP (check the"
+    echo "             #ifndef guard in BRPeerManager.h), so this is not"
+    echo "             actually the pre-fix-round storage size."
+    sed 's/^/             | /' "$BUILD_DIR/red_cap.log"
+    exit 1
+fi
+echo "RED (CAP) gate OK: shrinking CF_DISAGREED_CAP back to 3 made a genuine"
+echo "                   4-of-6 majority undetectable (bestAgree capped at 3"
+echo "                   can never exceed 6/2==3) -- the healthy-fleet"
+echo "                   re-anchor assertion failed as expected."
 
 # ── GREEN: the production shape must pass every check ──────────────────────
 build "$BUILD_DIR/cf_checkpoint_quorum_kat"
