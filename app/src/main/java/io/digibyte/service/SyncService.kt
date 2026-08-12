@@ -2027,17 +2027,10 @@ class SyncService : Service() {
             savedLedger = null
             blockBytes = null
         }
-        if (blockBytes != null) {
-            val loaded = NativeBridge.loadSavedBlocks(blockBytes)
-            android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
-            // Seed the monotonic persistence guard with the on-disk tip so the
-            // first save this session can't overwrite a higher persisted window
-            // with a lower one — the regression this guard exists to prevent.
-            val onDiskTip = parseSavedBlocksTopHeight(blockBytes)
-            if (onDiskTip > prefs.getLong("saved_blocks_tip", 0L)) {
-                prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
-            }
-        }
+        // Pass the POST-preflight window explicitly (see reloadSavedBlocksNearTip):
+        // a preflight that set blockBytes = null must not be undone by the helper
+        // re-reading the file the preflight just deleted.
+        reloadSavedBlocksNearTip(blockBytes)
         val peerBytes = decodeSavedBlobOrDrop(prefs, "saved_peers")
         if (peerBytes != null) {
             val loaded = NativeBridge.loadSavedPeers(peerBytes)
@@ -2204,28 +2197,11 @@ class SyncService : Service() {
         // queryable immediately after this returns.
         NativeBridge.startSync()
 
-        // CF scan ledger (Phase-1 observe-only): restore AFTER startSync so the
-        // native peer manager exists (restoreCfScanLedger is guarded and returns
-        // false otherwise). The native ledger is Init'd during startSync, so an
-        // earlier restore (e.g. at the filter-chain restore site) would be wiped.
-        if (savedLedger != null) {
-            val ok = NativeBridge.restoreCfScanLedger(savedLedger)
-            android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
-        }
-
-        // Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume):
-        // enableAutoCompactFilterFetch above armed the forward-fetch cursor at
-        // birthHeight-1 BEFORE the restore just above could set scannedThrough far
-        // higher. Snap the cursor up to the restored scan frontier now — MUST run
-        // after the restore (there is nothing to snap to before it), or the next
-        // forward fetch re-requests already-scanned history from birthHeight and
-        // drags scannedThrough back down, silently throwing away persisted scan
-        // progress (and under the paced convoy's ~10s KeepAlive drive, it would
-        // re-do that every tick).
-        val cursorBefore = NativeBridge.getAutoFetchCFiltersThrough()
-        val cursorAfter = NativeBridge.snapAutoFetchThroughToScanFrontier()
-        android.util.Log.i("SyncService",
-            "cf-ledger: resume cursor snap $cursorBefore -> $cursorAfter")
+        // Ledger restore + resume-cursor snap. MUST stay here, immediately after
+        // startSync — see restoreCfLedgerAndSnap for the full ordering rationale.
+        // Pass the POST-preflight ledger explicitly so a preflight reset is not
+        // undone by the helper re-loading from disk.
+        restoreCfLedgerAndSnap(savedLedger)
 
         // Dandelion durability recovery: re-broadcast any recorded send the
         // wallet still sees as unconfirmed. A stem killed mid-embargo (process
@@ -2302,6 +2278,87 @@ class SyncService : Service() {
                 }
             }
         }.onFailure { android.util.Log.w("SyncService", "peer-penalty persist failed", it) }
+
+     * Hand the persisted near-tip block window to the C core and seed the
+     * monotonic persistence guard with its tip. Extracted verbatim from
+     * [startSyncWithTor] so the mid-session peer-manager recreate paths can re-run
+     * the SAME restore instead of rebuilding the manager from the stale cold-start
+     * snapshot (which floors the chain at the wallet birth height — the
+     * "my wallet resynced from scratch" report). Call BEFORE a recreate.
+     *
+     * [blockBytes] defaults to a fresh [SavedBlockStore.load] for callers that hold
+     * no window of their own (the recreate paths). Cold start MUST pass its own
+     * post-preflight value — INCLUDING `null` when the CF restore preflight decided
+     * to discard it — so that reset decision is never undone by re-reading a file
+     * the preflight just deleted.
+     *
+     * Re-entrant by design: `loadSavedBlocks` frees a previously loaded window only
+     * while the bridge still owns it — `startSync` NULLs `g_savedBlocks` when it
+     * transfers ownership to the peer manager (jni_peer.c; regression-guarded by
+     * `saved_blocks_reentrant_kat`), so a mid-session call cannot double-free.
+     *
+     * Deliberately does NOT call `markSavedBlocksLoadComplete()`: releasing the
+     * peer-manager creation gate stays on the cold-start path, AFTER the saved
+     * PEERS load, exactly where it is today (moving it here would open the gate one
+     * step early). The native flag is a set-once latch that is already released
+     * before any recreate path can run, so recreate callers never need it.
+     *
+     * @return true if a window was actually loaded into the core; false when the
+     *   window is missing or the blob deserialized to nothing.
+     */
+    private fun reloadSavedBlocksNearTip(
+        blockBytes: ByteArray? = SavedBlockStore.load(this@SyncService),
+    ): Boolean {
+        if (blockBytes == null) return false
+        val loaded = NativeBridge.loadSavedBlocks(blockBytes)
+        android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
+        // Seed the monotonic persistence guard with the on-disk tip so the
+        // first save this session can't overwrite a higher persisted window
+        // with a lower one — the regression this guard exists to prevent.
+        val onDiskTip = parseSavedBlocksTopHeight(blockBytes)
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        if (onDiskTip > prefs.getLong("saved_blocks_tip", 0L)) {
+            prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
+        }
+        return loaded > 0
+    }
+
+    /**
+     * Restore the CF scan ledger and snap the resume cursor to the restored scan
+     * frontier. Extracted verbatim from [startSyncWithTor]; call AFTER a recreate
+     * (and, on cold start, after [NativeBridge.startSync]).
+     *
+     * [savedLedger] defaults to a fresh [CfScanLedgerStore.load] for callers that
+     * hold no ledger of their own (the recreate paths). Cold start MUST pass its
+     * own post-preflight value — INCLUDING `null` when the CF restore preflight
+     * decided to discard it — so that reset decision is never undone by re-reading
+     * a file the preflight just deleted.
+     */
+    private fun restoreCfLedgerAndSnap(
+        savedLedger: ByteArray? = CfScanLedgerStore.load(this@SyncService),
+    ) {
+        // CF scan ledger (Phase-1 observe-only): restore AFTER startSync so the
+        // native peer manager exists (restoreCfScanLedger is guarded and returns
+        // false otherwise). The native ledger is Init'd during startSync, so an
+        // earlier restore (e.g. at the filter-chain restore site) would be wiped.
+        if (savedLedger != null) {
+            val ok = NativeBridge.restoreCfScanLedger(savedLedger)
+            android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
+        }
+
+        // Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume):
+        // enableAutoCompactFilterFetch above armed the forward-fetch cursor at
+        // birthHeight-1 BEFORE the restore just above could set scannedThrough far
+        // higher. Snap the cursor up to the restored scan frontier now — MUST run
+        // after the restore (there is nothing to snap to before it), or the next
+        // forward fetch re-requests already-scanned history from birthHeight and
+        // drags scannedThrough back down, silently throwing away persisted scan
+        // progress (and under the paced convoy's ~10s KeepAlive drive, it would
+        // re-do that every tick).
+        val cursorBefore = NativeBridge.getAutoFetchCFiltersThrough()
+        val cursorAfter = NativeBridge.snapAutoFetchThroughToScanFrontier()
+        android.util.Log.i("SyncService",
+            "cf-ledger: resume cursor snap $cursorBefore -> $cursorAfter")
     }
 
     override fun onDestroy() {
