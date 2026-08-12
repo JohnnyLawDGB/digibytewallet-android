@@ -2292,6 +2292,16 @@ class SyncService : Service() {
      * to discard it — so that reset decision is never undone by re-reading a file
      * the preflight just deleted.
      *
+     * NOTE — the default reads the LAST PERSISTED SNAPSHOT, not the freshest state
+     * this process knows. [SavedBlockStore] only ever holds a window the C core
+     * actually EMITTED via `onSaveBlocks` (4000-block boundaries during descent,
+     * ~20s cadence at the tip) and that then survived [persistBlocks]' monotonic
+     * guard; the freshest window the process has seen is the in-memory
+     * [lastSavedBlocksData]. So a mid-session caller taking the default hands the
+     * core a window up to one save boundary BEHIND where the chain actually is.
+     * Whether to flush [lastSavedBlocksData] (or force a save) before a recreate is
+     * a deliberate decision for the recreate call sites — it is NOT made here.
+     *
      * Re-entrant by design: `loadSavedBlocks` frees a previously loaded window only
      * while the bridge still owns it — `startSync` NULLs `g_savedBlocks` when it
      * transfers ownership to the peer manager (jni_peer.c; regression-guarded by
@@ -2333,6 +2343,19 @@ class SyncService : Service() {
      * own post-preflight value — INCLUDING `null` when the CF restore preflight
      * decided to discard it — so that reset decision is never undone by re-reading
      * a file the preflight just deleted.
+     *
+     * NOTE — the default reads the LAST PERSISTED SNAPSHOT, not the freshest state
+     * this process knows. `onSaveCfLedger` only records the newest ledger into the
+     * in-memory [pendingCfLedger]; the coalesced writer ([startFilterHeaderWriter])
+     * flushes it to [CfScanLedgerStore] at most once per [filterHeaderSaveIntervalMs]
+     * (20s), and defers even that when `persistWalletTransactionsCheckpoint()` fails
+     * (re-marking dirty for the next tick). A mid-session caller taking the default
+     * can therefore restore a frontier ~20s or more BEHIND the live native scan —
+     * and because the cursor snap below then snaps to that LOWER frontier, the next
+     * `onSaveCfLedger` persists the regressed value: silent scan-progress loss,
+     * which is the exact failure class this work exists to eliminate. Whether to
+     * flush [pendingCfLedger] before a recreate is a deliberate decision for the
+     * recreate call sites — it is NOT made here.
      */
     private fun restoreCfLedgerAndSnap(
         savedLedger: ByteArray? = CfScanLedgerStore.load(this@SyncService),
