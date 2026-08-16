@@ -1949,6 +1949,15 @@ class SyncService : Service() {
         }
         android.util.Log.i("SyncService", "Wallet ready, starting sync (waited ${waitCount * 500}ms)")
 
+        // Re-exclude asset-bearing outputs from the spendable DGB set. The native
+        // exclusion list does not survive process restart, and the wallet is spendable the
+        // moment it loads — well before the first 30s asset sweep would rebuild it. An
+        // output carrying implicit change looks like ordinary DGB until this runs, so a
+        // send inside that window could destroy an asset. Needs no peers: it runs off the
+        // asset rows we already hold locally.
+        runCatching { assetManager.replayAssetOutpointExclusions() }
+            .onFailure { android.util.Log.w("SyncService", "asset exclusion replay failed", it) }
+
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
 

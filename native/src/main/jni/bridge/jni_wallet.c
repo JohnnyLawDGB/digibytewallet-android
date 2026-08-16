@@ -944,6 +944,39 @@ Java_io_digibyte_core_bridge_NativeBridge_walletContainsAddress(JNIEnv *env, job
     return contained ? JNI_TRUE : JNI_FALSE;
 }
 
+/* ---------- registerAssetOutpoint ---------- */
+/* Tell the native wallet that (txHashHex, vout) carries DigiAsset units, so it is held
+ * out of the spendable DGB UTXO set and plain-DGB coin selection can never destroy it.
+ *
+ * BRTxOutputIsAsset only recognises outputs an explicit transfer instruction targets.
+ * DigiAssets also credits every unassigned input unit to the transaction's LAST output,
+ * and deciding whether such a remainder exists needs the INPUT quantities — a chain walk
+ * plus a per-outpoint store, both of which live in the Kotlin asset layer. It resolves
+ * the answer and registers it here, fail-closed (registered when the remainder is
+ * positive OR unknown).
+ *
+ * Idempotent; survives balance rebuilds but not process restart, so the caller replays
+ * its registrations after wallet load. Returns JNI_TRUE if this call newly excluded the
+ * outpoint. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_registerAssetOutpoint(JNIEnv *env, jobject thiz,
+                                                                jstring txHashHex, jint vout)
+{
+    (void)thiz;
+    if (!g_wallet || !txHashHex || vout < 0) return JNI_FALSE;
+
+    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
+    if (!hashStr) return JNI_FALSE;
+
+    jboolean added = JNI_FALSE;
+    if (strlen(hashStr) == 64) {
+        UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
+        added = BRWalletRegisterAssetOutpoint(g_wallet, hash, (uint32_t)vout) ? JNI_TRUE : JNI_FALSE;
+    }
+    (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
+    return added;
+}
+
 /* ---------- outpointSpentState ---------- */
 /* Sovereign, chain-derived spent-state for an asset outpoint, as a tri-state:
  *    0 = SPENT       (the outpoint is in the wallet's spentOutputs set)

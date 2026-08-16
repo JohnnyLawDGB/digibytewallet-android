@@ -111,6 +111,43 @@ internal fun buildOutgoingUnconfirmedMap(detailRows: List<String>): Map<String, 
 }
 
 /**
+ * How many DigiAsset units a transaction's inputs carried, or null for "unknown".
+ *
+ * The implicit-change rule ([AssetTxQuantity.implicitChange]) can only be applied once we
+ * know the input total, and that answer has to be exact or explicitly absent: a guessed
+ * total propagates into [AssetManager.sendAsset]'s OP_RETURN, where over-stating it makes
+ * digiasset-core throw `exceptionInvalidTransfer` and clear every asset output — burning
+ * the whole input.
+ *
+ * Per input outpoint:
+ *  - we hold a row for it → its resolved quantity;
+ *  - no row, and the funding tx carries no DigiAsset payload → 0 units (a plain DGB input);
+ *  - no row, but the funding tx IS an asset tx → UNKNOWN (it could hold any amount);
+ *  - funding tx unretrievable → UNKNOWN.
+ *
+ * Top-level and dependency-free (both probes are lambdas) so it is unit-testable without a
+ * NativeBridge — whose static initializer does `System.loadLibrary` and cannot run on the
+ * host JVM, the same constraint the other seams in this file are shaped around.
+ */
+internal suspend fun resolveInputAssetUnits(
+    inputs: List<Pair<String, Int>>,
+    rowQuantity: suspend (String, Int) -> Long?,
+    isAssetTx: suspend (String) -> Boolean?,
+): Long? {
+    var total = 0L
+    for ((txid, vout) in inputs) {
+        val known = rowQuantity(txid, vout)
+        if (known != null) {
+            total += known
+            continue
+        }
+        // No row. Only a funding tx we can prove carries no DigiAsset payload is safely 0.
+        if (isAssetTx(txid) != false) return null
+    }
+    return total
+}
+
+/**
  * Orchestration layer for DigiAsset operations.
  *
  * Responsibilities:
@@ -435,9 +472,31 @@ class AssetManager(
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout
 
-        // Per-output quantity is the sovereign [AssetTxQuantity.forOutput] rule
-        // (ISSUANCE / FIXED + RANGE transfer / BURN; percent skipped). Shared with
-        // the activity-row token-count display so detection and display never diverge.
+        // Per-output quantity is the sovereign [AssetTxQuantity.forOutputTotal] rule
+        // (ISSUANCE / FIXED + RANGE transfer / BURN; percent skipped) PLUS the implicit
+        // change — the units the explicit instructions leave unassigned, which the
+        // protocol credits to the transaction's LAST output. Resolving that needs the
+        // input quantities, which we take from the rows we already hold.
+        val inputUnits = resolveInputAssetUnits(
+            inputs = (NativeBridge.getTransactionInputsForHash(txHashHex) ?: emptyArray())
+                .mapNotNull { line ->
+                    val p = line.split("|", limit = 2)
+                    val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+                    if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
+                },
+            rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
+            isAssetTx = { txid -> txHasAssetPayload(txid) },
+        )
+        val outputCount = outputLines.size
+        val implicitVout = AssetTxQuantity.implicitChangeVout(outputCount)
+        val implicit = AssetTxQuantity.implicitChange(header, inputUnits, outputCount)
+
+        // FAIL CLOSED, independent of whether we can display the amount: if a remainder
+        // exists — or we simply cannot tell — the last output is held out of the
+        // spendable DGB set so a plain DGB send can never consume it. An unswept output
+        // is recoverable; a destroyed asset is not. Only for outputs we own; native
+        // tracks nothing else.
+        val excludeImplicitChange = implicit == null || implicit > 0L
 
         // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
         // which returns ALL of the tx's outputs unfiltered — NOT just the ones
@@ -465,6 +524,10 @@ class AssetManager(
             // enforce when we actually have an owned set — an empty set means
             // the lookup failed, in which case we defer to the prune.
             if (owned.isNotEmpty() && out.script.toHex() !in owned) continue
+            if (out.vout == implicitVout && excludeImplicitChange) {
+                runCatching { NativeBridge.registerAssetOutpoint(txHashHex, out.vout) }
+                    .onFailure { android.util.Log.d("AssetManager", "registerAssetOutpoint threw", it) }
+            }
             val stillUnresolved = persistDetectedAssetOutput(
                 txHashHex = txHashHex,
                 vout = out.vout,
@@ -472,7 +535,9 @@ class AssetManager(
                 sats = out.sats,
                 blockHeight = blockHeight,
                 placeholderAssetId = placeholderAssetId,
-                computedQty = AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn),
+                computedQty = AssetTxQuantity.forOutputTotal(
+                    header, out.vout, firstNonOpReturn, inputUnits, outputCount,
+                ),
                 isOutgoingUnconfirmed = isOutgoingUnconfirmed,
             )
             if (stillUnresolved) anyStillUnresolved = true
@@ -1114,6 +1179,51 @@ class AssetManager(
             ) ?: continue
             if (row.spent != newSpent) utxoDao.setSpent(row.txid, row.vout, newSpent)
         }
+    }
+
+    /**
+     * Does this transaction carry a DigiAsset payload? Null when we cannot tell — the tx
+     * isn't retrievable — which [resolveInputAssetUnits] treats as unknown rather than as
+     * "no units".
+     */
+    private fun txHasAssetPayload(txHashHex: String): Boolean? {
+        val lines = runCatching { NativeBridge.getTransactionOutputsForHash(txHashHex) }
+            .getOrNull() ?: return null
+        if (lines.isEmpty()) return null
+        val opReturn = lines.asSequence()
+            .mapNotNull { line -> line.split("|", limit = 3).getOrNull(2)?.hexToByteArray() }
+            .firstOrNull { it.isNotEmpty() && it[0] == 0x6A.toByte() }
+            ?: return false
+        return decoder.decode(opReturn) != null
+    }
+
+    /**
+     * Re-register every asset outpoint we hold units for, so plain-DGB coin selection
+     * cannot reach it. Native's exclusion list is rebuilt from the transaction set on
+     * every load and knows nothing about implicit change, so without this replay the
+     * wallet spends the first minutes after each restart with asset-bearing outputs
+     * looking like ordinary DGB.
+     *
+     * Covers rows whose quantity we resolved. Rows excluded fail-closed on an UNKNOWN
+     * remainder carry no quantity to key on and are re-registered by the next
+     * [sweepKnownTransactionsForAssets] pass instead (~30s), which recomputes the same
+     * decision from the transaction itself.
+     *
+     * Returns the number of outpoints newly excluded.
+     */
+    suspend fun replayAssetOutpointExclusions(): Int {
+        var registered = 0
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            if (row.spent || row.assetQuantity <= 0L) continue
+            val added = runCatching { NativeBridge.registerAssetOutpoint(row.txid, row.vout) }
+                .getOrDefault(false)
+            if (added) registered++
+        }
+        if (registered > 0) {
+            android.util.Log.i("AssetManager",
+                "replayAssetOutpointExclusions: $registered outpoint(s) held out of the spendable set")
+        }
+        return registered
     }
 
     /** Distinct txids the wallet tracks an asset output for (spent + unspent) —

@@ -353,6 +353,15 @@ object NativeBridge {
      *  authoritative spentOutputs set, not the asset-UTXO array. */
     external fun outpointSpentState(txHashHex: String, vout: Int): Int
 
+    /** Hold an outpoint OUT of the spendable DGB UTXO set because it carries DigiAsset
+     *  units the native tx-local classifier cannot see — chiefly implicit change, the
+     *  units a transfer's instructions leave unassigned, which the protocol credits to
+     *  the transaction's LAST output. Without this a plain DGB send can select the
+     *  output and destroy the asset silently. Idempotent; NOT persistent across process
+     *  restart, so registrations are replayed from the local asset rows after the wallet
+     *  loads. Returns true if this call newly excluded the outpoint. */
+    external fun registerAssetOutpoint(txHashHex: String, vout: Int): Boolean
+
     /** Injects a node-verified transaction into the wallet. Used by the
      *  chain reconciliation service to repair state when the SPV bloom
      *  scan misses a tx but we see it on-chain. Caller must merkle-proof
