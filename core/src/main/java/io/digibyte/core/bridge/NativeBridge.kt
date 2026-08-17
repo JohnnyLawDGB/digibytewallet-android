@@ -186,6 +186,16 @@ object NativeBridge {
 
     /** Send a keepalive ping to every connected peer so idle CF filter-peer connections aren't
      *  dropped by the remote node / NAT inactivity timeout. Call periodically (~every 10-20s). */
+    /** Serialize the peer re-dial penalty set (address, port, absolute deadline) so it
+     *  survives a process restart. Without it every cold start re-dials peers the last
+     *  session already learned were behind. Null when there is nothing live to save. */
+    external fun serializePeerPenalties(): ByteArray?
+
+    /** Restore penalties saved by [serializePeerPenalties]. Entries whose window has
+     *  lapsed are dropped on read, so a blob from a wallet that sat closed for an hour
+     *  restores nothing. Returns how many were restored. */
+    external fun loadPeerPenalties(blob: ByteArray): Int
+
     external fun keepAlivePeers()
 
     /** Get estimated network block height. */

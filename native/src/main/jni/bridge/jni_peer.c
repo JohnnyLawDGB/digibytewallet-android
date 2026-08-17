@@ -357,6 +357,12 @@ static uint32_t g_savedBlocksTipHeight = 0;
  * fresh wallets with no saved blocks), after which creation anchors at the
  * saved tip. */
 static int g_savedBlocksLoadComplete = 0;
+/* Penalty set restored from the previous session (see serializePeerPenalties). Kept at
+ * bridge level, like the own-node pin and the BIP158 state, so EVERY (re)created manager
+ * inherits it — a forceReconnect builds a fresh manager with an empty table otherwise. */
+static uint8_t *g_savedPenalties = NULL;
+static size_t   g_savedPenaltiesLen = 0;
+
 static BRPeer *g_savedPeers = NULL;
 static size_t g_savedPeersCount = 0;
 
@@ -911,6 +917,16 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * (setSyncMode, setCompactFilterChain, enableAutoCompactFilterFetch). */
         _applyPendingBip158State();
 
+        /* Re-apply the persisted re-dial penalties so a fresh manager doesn't start by
+         * dialling peers the last session already learned were behind. Entries whose
+         * window has lapsed are dropped on read. */
+        if (g_savedPenalties && g_savedPenaltiesLen > 0) {
+            size_t restored = BRPeerManagerLoadPenalties(g_peerManager, g_savedPenalties,
+                                                         g_savedPenaltiesLen);
+            if (restored > 0) LOGI("startSync: restored %zu peer penalt%s", restored,
+                                   restored == 1 ? "y" : "ies");
+        }
+
         /* Re-apply the own-node pin (remembered at bridge level by setPinnedPeer)
          * so a fresh manager inherits it — the pin's lifecycle mirrors the BIP158
          * state above: injectCustomNode()->setPinnedPeer runs BEFORE this
@@ -1027,6 +1043,68 @@ Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz
     (void)env;
     (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorPeerCount, memory_order_relaxed);
+}
+
+/* ---------- serializePeerPenalties / loadPeerPenalties ---------- */
+/* The re-dial penalty set was session-scoped, so every cold start re-dialled peers the
+ * previous session had already learned were behind — the churn the penalty exists to
+ * stop, reintroduced once per launch. Kotlin persists the blob alongside the saved
+ * peers and hands it back on the next start. Deadlines are absolute, so a blob whose
+ * windows have all lapsed restores nothing. */
+
+JNIEXPORT jbyteArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    PEER_GUARD();
+
+    if (! g_peerManager) return NULL;
+
+    /* 32 entries max (PEER_PENALTY_MAX) — under a kilobyte, so a stack buffer is fine. */
+    uint8_t buf[4 + 32 * 26];
+    size_t written = BRPeerManagerSerializePenalties(g_peerManager, buf, sizeof(buf));
+    if (written == 0) return NULL;
+
+    jbyteArray out = (*env)->NewByteArray(env, (jsize)written);
+    if (! out) return NULL;
+    (*env)->SetByteArrayRegion(env, out, 0, (jsize)written, (const jbyte *)buf);
+    return out;
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_loadPeerPenalties(JNIEnv *env, jobject thiz,
+                                                            jbyteArray blob) {
+    (void)thiz;
+    if (! blob) return 0;
+
+    jsize len = (*env)->GetArrayLength(env, blob);
+    if (len <= 0) return 0;
+
+    jbyte *bytes = (*env)->GetByteArrayElements(env, blob, NULL);
+    if (! bytes) return 0;
+
+    /* Remember it at bridge level FIRST: startSync may not have built the manager yet
+     * (cold start loads saved state before creating it), and a later recreate needs it
+     * too. */
+    uint8_t *copy = malloc((size_t)len);
+    if (copy) {
+        memcpy(copy, bytes, (size_t)len);
+        PEER_GUARD();
+        free(g_savedPenalties);
+        g_savedPenalties = copy;
+        g_savedPenaltiesLen = (size_t)len;
+
+        size_t restored = 0;
+        if (g_peerManager) {
+            restored = BRPeerManagerLoadPenalties(g_peerManager, g_savedPenalties, g_savedPenaltiesLen);
+        }
+        (*env)->ReleaseByteArrayElements(env, blob, bytes, JNI_ABORT);
+        LOGI("loadPeerPenalties: %zu byte(s) held for the peer manager, %zu applied now",
+             g_savedPenaltiesLen, restored);
+        return (jint)restored;
+    }
+
+    (*env)->ReleaseByteArrayElements(env, blob, bytes, JNI_ABORT);
+    return 0;
 }
 
 /* ---------- keepAlivePeers ---------- */

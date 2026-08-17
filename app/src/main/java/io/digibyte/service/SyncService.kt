@@ -987,6 +987,11 @@ class SyncService : Service() {
             // wallet never reaches again — so a DigiDollar receive that arrived live could sit
             // at $0 indefinitely until the user manually ran "Scan for missing transactions".
             // Internally gated on pending>0 and debounced, so a healthy wallet does nothing.
+            // Snapshot the re-dial penalties periodically too: a process killed by the
+            // OS (Doze, low memory, force-stop) never reaches onDestroy, and that is
+            // exactly the wallet that most needs to not re-dial known-bad peers on the
+            // way back up.
+            if (tickCount % 30L == 0L) persistPeerPenalties()
             if (tickCount % 30L == 0L && NativeBridge.getPeerCount() > 0) {
                 launch(kotlinx.coroutines.Dispatchers.IO) {
                     maybeRunConfirmationReconcile("keepalive tick")
@@ -2032,6 +2037,17 @@ class SyncService : Service() {
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
         }
 
+        // Re-dial penalties from the previous session. Without these a cold start
+        // re-dials peers the last session already learned were behind — the churn the
+        // penalty set exists to stop, reintroduced once per launch. Held at bridge level
+        // so a later manager recreate inherits them; entries whose window has lapsed are
+        // dropped on read, so a wallet that sat closed for an hour starts clean.
+        decodeSavedBlobOrDrop(prefs, "saved_peer_penalties")?.let { blob ->
+            runCatching { NativeBridge.loadPeerPenalties(blob) }
+                .onSuccess { android.util.Log.i("SyncService", "Restored $it peer penalty/ies from disk") }
+                .onFailure { android.util.Log.w("SyncService", "peer-penalty restore failed", it) }
+        }
+
         // Release the peer-manager creation gate now that saved blocks/peers are
         // in the C core. Until this, any racing early startSync (onResume, the
         // active-screen wake, the keepalive) is deferred — otherwise it would
@@ -2243,6 +2259,29 @@ class SyncService : Service() {
         }
     }
 
+    /**
+     * Persist the native re-dial penalty set so the next launch doesn't start by dialling
+     * peers this session already learned were behind. Tiny (32 entries max, 26 bytes each)
+     * so the hex-in-prefs shape is fine here — unlike the filter-header chain, which grew
+     * without bound in prefs and had to move to a file.
+     *
+     * Null means nothing live to save (no manager, or every window lapsed); the previous
+     * blob is then cleared rather than left to be restored stale.
+     */
+    private fun persistPeerPenalties() {
+        runCatching {
+            val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
+            val blob = NativeBridge.serializePeerPenalties()
+            if (blob == null || blob.isEmpty()) {
+                prefs.edit().remove("saved_peer_penalties").apply()
+            } else {
+                prefs.edit()
+                    .putString("saved_peer_penalties", blob.joinToString("") { "%02x".format(it) })
+                    .apply()
+            }
+        }.onFailure { android.util.Log.w("SyncService", "peer-penalty persist failed", it) }
+    }
+
     override fun onDestroy() {
         foregroundSyncLive.set(false)
         // Flush the latest block window synchronously before teardown so a
@@ -2252,6 +2291,8 @@ class SyncService : Service() {
             runCatching { persistBlocks(bytes, epoch, synchronous = true) }
         }
         flushFilterHeaders()
+        // Before stopSync frees the peer manager: keep what we learned about bad peers.
+        persistPeerPenalties()
         // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
         // keepalive sweep can hold for up to ~K×10s pinging half-dead sockets —
         // calling it synchronously here runs on the main thread (Service lifecycle
