@@ -110,14 +110,14 @@ class ChainReconciliationService(
                 return@withContext failed
             }
 
-            // Refresh the asset-utxo layer FIRST, independently of the main
-            // reconcile. This is the listunspent-backed fast path that fills
-            // the `utxos` table with is_asset=1 rows so the Assets tab renders
-            // even if the main ElectrumX-backed reconcile endpoint is slow or
-            // unreachable. Non-fatal if it fails.
+            // Tidy the asset rows FIRST, independently of the main reconcile: drop
+            // phantoms at addresses we don't own, and re-derive spent-state from the
+            // native wallet. Local only — the listunspent-backed variant this replaced
+            // POSTed the whole address set to an indexer (and had been 404ing besides).
+            // Non-fatal if it fails.
             if (assetManager != null) {
-                _state.value = State.Scanning("Refreshing asset holdings…", progress = 0.05f)
-                runCatching { assetManager.refreshAssetUtxosFromNetwork() }
+                _state.value = State.Scanning("Tidying asset holdings…", progress = 0.05f)
+                runCatching { assetManager.reconcileAssetRowsLocally() }
                     .onFailure { /* non-fatal */ }
             }
 

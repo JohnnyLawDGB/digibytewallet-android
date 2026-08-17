@@ -50,9 +50,6 @@ class MultiEndpointAssetClient(
     override suspend fun getSyncState(): SyncStateResponse? =
         tryEach("getSyncState") { it.getSyncState() }
 
-    override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? =
-        tryEach("getAssetUtxos") { it.getAssetUtxos(addresses) }
-
     override suspend fun getRawTransaction(txHashHex: String): ByteArray? =
         tryEach("getRawTransaction") { it.getRawTransaction(txHashHex) }
 

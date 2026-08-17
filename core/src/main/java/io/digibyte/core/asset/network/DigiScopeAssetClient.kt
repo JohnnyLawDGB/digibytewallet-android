@@ -78,45 +78,6 @@ class DigiScopeAssetClient(
         )
     }
 
-    override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? {
-        if (addresses.isEmpty()) return emptyList()
-        val body = JSONObject().apply {
-            put("addresses", JSONArray(addresses))
-        }.toString()
-        val json = postJson("$baseUrl/assets/unspent", body) as? JSONObject ?: return null
-        if (json.has("error")) return null
-        val utxosArr = json.optJSONArray("utxos") ?: return emptyList()
-        val out = mutableListOf<AssetUtxoResponse>()
-        for (i in 0 until utxosArr.length()) {
-            val u = utxosArr.optJSONObject(i) ?: continue
-            val assetsArr = u.optJSONArray("assets") ?: continue
-            val assets = mutableListOf<AssetUtxoResponse.AssetCarried>()
-            for (j in 0 until assetsArr.length()) {
-                val a = assetsArr.optJSONObject(j) ?: continue
-                assets += AssetUtxoResponse.AssetCarried(
-                    assetId = a.optString("assetId"),
-                    assetIndex = a.optLong("assetIndex", 0L),
-                    count = a.optLong("count", 0L),
-                    decimals = a.optInt("decimals", 0),
-                    issuerAddress = a.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() },
-                    metadataCid = a.optString("cid").takeIf { it.isNotEmpty() },
-                )
-            }
-            if (assets.isEmpty()) continue
-            out += AssetUtxoResponse(
-                address = u.optString("address"),
-                txid = u.optString("txid"),
-                vout = u.optInt("vout", 0),
-                satoshis = u.optLong("digibyte", 0L),
-                confirmedHeight = assets.firstOrNull()?.let { a ->
-                    u.optJSONArray("assets")?.optJSONObject(0)?.optLong("height", 0L) ?: 0L
-                } ?: 0L,
-                assets = assets,
-            )
-        }
-        return out
-    }
-
     override suspend fun getRawTransaction(txHashHex: String): ByteArray? {
         // Backend exposes `GET /tx/raw/:txid` which proxies `getrawtransaction`
         // on the underlying digibyted RPC. Returns either hex in a JSON field

@@ -514,7 +514,7 @@ class AssetManager(
         //
         // Both error directions self-heal: a false-positive (phantom slips in,
         // e.g. owned-set empty) is pruned by the sovereign ownership reconcile
-        // in refreshAssetUtxosFromNetwork; a false-negative (we drop one of our
+        // in reconcileAssetRowsLocally; a false-negative (we drop one of our
         // own change markers) is re-derived by native detection / the backend
         // refresh over the same sovereign address set. If the owned set can't
         // be built we fall back to insert-everything and let the prune clean up
@@ -969,155 +969,63 @@ class AssetManager(
     }
 
     /**
-     * Resync the local `utxos` table's asset rows against the authoritative
-     * on-chain state. Walks every derived wallet address, queries the
-     * [assetNetworkClient]'s `listunspent`-equivalent endpoint, upserts a
-     * UtxoEntity with is_asset=1 for each returned asset UTXO, and also
-     * primes the AssetMetadata cache with the server-side-resolved
-     * name/decimals/issuer for any asset we don't have metadata for yet.
+     * Reconcile the local `utxos` asset rows against what WE can see, with no third party
+     * involved: delete rows at addresses the native wallet doesn't own, and make every
+     * remaining row's spent flag track the native wallet's authoritative view.
      *
-     * This closes a long-standing gap: before this method existed,
-     * processAssetUtxo had zero callers, so the Assets tab showed "No
-     * DigiAssets found" even for wallets that genuinely held assets.
-     * SPV's onAssetDetected callback and ChainReconciliationService's
-     * registerRawTransaction both populate transactions but not utxos;
-     * this pass fills the utxos side by trusting the node's indexed view.
+     * Replaces `refreshAssetUtxosFromNetwork`, which POSTed the wallet's ENTIRE address set
+     * to an indexer in 500-address chunks. That is the same disclosure the restore spec
+     * exists to eliminate, and it sat on the ordinary path rather than only in restore. It
+     * had also been dead for some time — the routes it called (`/api/assets/unspent` and
+     * friends) return 404 because the backend serves `/api/digiassets/…` — and since it
+     * bailed at the first failed chunk, the two genuinely useful things it did afterwards
+     * never ran at all. They are what survives here.
      *
-     * Safe to call repeatedly. Additively upserts the backend's view of our
-     * asset UTXOs, then runs a SOVEREIGN phantom prune: rows at addresses the
-     * native wallet does not own are deleted (this heals the "30 shown for 10"
-     * inflation from recipient-marker rows a prior bug inserted). The backend is
-     * never allowed to DELETE — only the native address set is trusted for
-     * removal — so a partial/stale indexer response can't wipe real holdings.
-     *
-     * Returns the count of asset UTXOs upserted from the backend, or null if no
-     * network client is configured or all endpoints failed.
+     * Ownership is judged against the native address set, never a backend, so a phantom
+     * (chiefly the recipient marker of a send WE made) is removed while an unknowable row
+     * is left alone. Returns the number of phantom rows deleted.
      */
-    suspend fun refreshAssetUtxosFromNetwork(): Int? {
-        val client = assetNetworkClient ?: return null
-        val addresses = NativeBridge.dumpAllAddresses()
-            .trim().lines().filter { it.isNotBlank() }
-        if (addresses.isEmpty()) return null
-
-        // The SOVEREIGN owned-script set (our own addresses, never the backend).
-        // Used below to prune phantom asset rows. Built from the addresses we
-        // already fetched — no second native round-trip.
-        val ownedScriptHexes: Set<String> =
-            addresses.mapNotNull { NativeBridge.addressToScriptPubKey(it)?.toHex() }.toSet()
-
-        // Batch to respect the 500-addresses-per-request server cap.
-        val utxos = mutableListOf<io.digibyte.core.asset.network.AssetUtxoResponse>()
-        for (chunk in addresses.chunked(500)) {
-            val resp = client.getAssetUtxos(chunk) ?: return null
-            utxos += resp
-        }
-        // NOTE: do NOT early-return on an empty backend response — the sovereign
-        // phantom prune below must still run to clean stale rows even when the
-        // backend currently reports no assets at our addresses.
-
-        // Build the backend's current view, to be upserted ADDITIVELY below
-        // (never a backend-authoritative delete). NOTE: a single (txid,vout)
-        // carrying multiple assets collapses under the (txid,vout) primary key
-        // to the LAST asset — a pre-existing single-asset-per-outpoint
-        // limitation of the schema, unchanged here.
-        val fresh = mutableListOf<UtxoEntity>()
-        for (u in utxos) {
-            for (asset in u.assets) {
-                // Resolve scriptPubKey from the address so the UTXO is
-                // fully spendable by the send flow without a second lookup.
-                // If derivation fails (invalid address format), fall back
-                // to empty bytes — the row still displays correctly; send
-                // would fail gracefully with a typed error at that layer.
-                val scriptPubKey = NativeBridge.addressToScriptPubKey(u.address) ?: ByteArray(0)
-                fresh += UtxoEntity(
-                    txid = u.txid,
-                    vout = u.vout,
-                    scriptPubKey = scriptPubKey,
-                    satoshis = u.satoshis,
-                    blockHeight = u.confirmedHeight,
-                    isAsset = true,
-                    assetId = asset.assetId,
-                    assetQuantity = asset.count,
-                    assetSource = io.digibyte.core.asset.AssetSource.BACKEND,
-                )
-
-                // Metadata cache handling — there's a subtle ordering
-                // requirement here: AssetMetadataService.getMetadata returns
-                // the cached entity if one exists (correct for immutable
-                // content-addressed data), which means if we insert a
-                // *bare* placeholder first, the IPFS fetch gets short-
-                // circuited and the user never sees the real name/image.
-                //
-                // So: only insert a bare placeholder when we have NO CID
-                // to fetch (node didn't supply one). If we do have a CID,
-                // hand off to metadataService — it'll fetch + parse + insert
-                // the richer entity via its own code path. We also do NOT
-                // overwrite a rich cache entry that already exists from a
-                // prior successful fetch.
-                val existing = metadataDao.getMetadata(asset.assetId)
-                val hasRichCache = existing?.name != null
-                val cid = asset.metadataCid
-                when {
-                    hasRichCache -> Unit  // keep the real metadata
-
-                    cid != null -> {
-                        // Non-blocking fetch; writes richer entity on success.
-                        metadataService.getMetadata(asset.assetId, cid)
-                    }
-
-                    existing == null -> {
-                        // No CID to fetch and no cache entry yet — insert a
-                        // minimal row so the UI at least shows assetId +
-                        // decimals + issuer.
-                        metadataDao.insert(
-                            io.digibyte.core.db.entity.AssetMetadataEntity(
-                                assetId = asset.assetId,
-                                name = null,
-                                symbol = null,
-                                description = null,
-                                decimals = asset.decimals,
-                                totalSupply = 0L,
-                                issuerAddress = asset.issuerAddress,
-                                metadataCid = null,
-                                imageUrl = null,
-                                cachedAt = System.currentTimeMillis(),
-                            )
-                        )
-                    }
-                }
-            }
+    suspend fun reconcileAssetRowsLocally(): Int =
+        reconcileAssetRowsLocallyImpl(buildOwnedScriptHexes()) { txid, vout ->
+            runCatching { NativeBridge.outpointSpentState(txid, vout) }
+                .getOrDefault(AssetSpentState.PROBE_ERROR)
         }
 
-        // Additive upsert of the backend's view. NEVER a backend-authoritative
-        // delete: a trusted third-party indexer must not be able to erase asset
-        // UTXOs the sovereign native path detected, and a partial/stale backend
-        // response would otherwise wipe real holdings.
-        if (fresh.isNotEmpty()) utxoDao.insertAll(fresh)
-
-        // SOVEREIGN phantom prune: delete asset rows sitting at addresses the
-        // wallet does NOT own (chiefly the recipient marker of a send we made,
-        // which older builds inserted without an ownership check — the source
-        // of the "30 shown for 10" inflation). Ownership is judged against the
-        // native address set, never the backend. Guards:
-        //   - skip entirely if the owned set couldn't be built (treat "unknown"
-        //     as "don't delete" — a lookup failure must not lose data);
-        //   - never prune an empty-script row (a real-but-not-yet-derivable
-        //     holding the backend returned) — only rows with a concrete,
-        //     not-ours scriptPubKey, which is exactly what a phantom marker is.
-        // Deleted one row at a time (their count is tiny) to avoid any bulk-IN
-        // variable limit and keep the blast radius minimal.
+    /**
+     * Testable core of [reconcileAssetRowsLocally]; same host-JVM constraint as the other
+     * seams in this file (the public entry point calls NativeBridge, whose static
+     * initializer loads `core-lib`).
+     *
+     * Guards, both deliberately conservative because this is the one asset path that
+     * DELETES: an empty [ownedScriptHexes] means the lookup failed rather than that we own
+     * nothing, so nothing is pruned; and a row with no scriptPubKey is a real holding we
+     * cannot judge, never a phantom.
+     */
+    internal suspend fun reconcileAssetRowsLocallyImpl(
+        ownedScriptHexes: Set<String>,
+        spentState: suspend (String, Int) -> Int,
+    ): Int {
+        var pruned = 0
         if (ownedScriptHexes.isNotEmpty()) {
             val phantoms = utxoDao.getAllAssetUtxosNow().filter {
                 it.scriptPubKey.isNotEmpty() && it.scriptPubKey.toHex() !in ownedScriptHexes
             }
-            for (row in phantoms) utxoDao.deleteAssetUtxo(row.txid, row.vout)
+            // One at a time: their count is tiny, it sidesteps the SQLite bound-variable
+            // limit an `IN (:keys)` delete would hit, and it keeps the blast radius minimal.
+            for (row in phantoms) pruned += utxoDao.deleteAssetUtxo(row.txid, row.vout)
         }
 
-        // Reconcile spent-state from the SOVEREIGN native UTXO set: mark spent
-        // the inputs of confirmed/broadcast sends, and un-spend a dropped
-        // send's input if it has returned to the wallet's UTXO set.
-        runCatching { reconcileAssetSpentFromNative() }
-        return fresh.size
+        // Spent-state from the sovereign native view. This is the ONLY thing that can
+        // un-set a stale spent flag, and a stale `spent = true` hides a real holding.
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            val newSpent = decideAssetSpent(spentState(row.txid, row.vout)) ?: continue
+            if (row.spent != newSpent) utxoDao.setSpent(row.txid, row.vout, newSpent)
+        }
+
+        if (pruned > 0) {
+            android.util.Log.i("AssetManager", "reconcileAssetRowsLocally: pruned $pruned phantom row(s)")
+        }
+        return pruned
     }
 
     /**

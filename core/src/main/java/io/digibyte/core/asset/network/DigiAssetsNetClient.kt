@@ -80,14 +80,6 @@ class DigiAssetsNetClient(
         return out
     }
 
-    override suspend fun getAssetUtxos(addresses: List<String>): List<AssetUtxoResponse>? {
-        // api.digiassets.net/v3 doesn't currently expose an equivalent of
-        // listunspent; DigiScopeAssetClient is the authoritative source.
-        // Returning null lets MultiEndpointAssetClient's rotation try the
-        // next endpoint rather than counting this as a hard failure.
-        return null
-    }
-
     override suspend fun getRawTransaction(txHashHex: String): ByteArray? {
         // api.digiassets.net doesn't expose a raw-tx endpoint either; same
         // fall-through semantics — return null so MultiEndpointAssetClient

@@ -1001,6 +1001,13 @@ class SyncService : Service() {
                     try {
                         runCatching { assetManager.sweepKnownTransactionsForAssets() }
                             .onFailure { android.util.Log.w("SyncService", "native sweep threw", it) }
+                        // Re-derive each asset row's spent flag from the native wallet.
+                        // Nothing else on the standing path does: it used to ride along
+                        // with the backend asset refresh, which bailed before reaching it.
+                        // A stale `spent = true` HIDES a real holding, and only this
+                        // clears it. Local only — no address disclosure.
+                        runCatching { assetManager.reconcileAssetRowsLocally() }
+                            .onFailure { android.util.Log.w("SyncService", "asset row reconcile threw", it) }
                         if (assetPruneGateOpen(
                                 syncedThisSession = syncedThisSession,
                                 peerCount = NativeBridge.getPeerCount(),
