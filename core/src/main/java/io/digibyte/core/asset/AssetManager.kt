@@ -324,8 +324,13 @@ class AssetManager(
     ): Boolean {
         if (scriptHexLower.isEmpty() || scriptHexLower !in ownedLower) return false
         return when (nativeSpentState) {
-            0 -> false
-            1 -> true
+            AssetSpentState.SPENT -> false
+            AssetSpentState.HELD -> true
+            // The funding tx is known but conflicted — a stuck send that was re-sent, whose
+            // outputs will never exist on-chain. Provenance must NOT rescue it the way it
+            // rescues an outpoint native has merely never seen: here native has looked and
+            // answered. Counting it is how one send's change gets counted twice.
+            AssetSpentState.CONFLICTED -> false
             else -> assetSource == AssetSource.BACKEND
         }
     }

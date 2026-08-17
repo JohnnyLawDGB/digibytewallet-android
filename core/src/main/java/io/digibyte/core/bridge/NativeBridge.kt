@@ -346,11 +346,12 @@ object NativeBridge {
      */
     external fun getFilterElementStats(): String
 
-    /** Sovereign, chain-derived spent-state for an asset outpoint (tri-state):
-     *  0 = SPENT (in the wallet's spentOutputs set), 1 = HELD (funding tx known
-     *  and unspent), -1 = UNDETECTED (funding tx unknown — a backend-sourced
-     *  row the SPV sync hasn't reached; leave it unchanged). Reads the
-     *  authoritative spentOutputs set, not the asset-UTXO array. */
+    /** Sovereign, chain-derived state for an asset outpoint — see
+     *  [io.digibyte.core.asset.AssetSpentState]: 0 = SPENT, 1 = HELD, -1 = UNDETECTED
+     *  (funding tx unknown — leave the persisted flag unchanged), -2 = CONFLICTED (the
+     *  funding tx is known but invalid, i.e. a stuck send that was re-sent; its outputs
+     *  will never exist on-chain). Reads the authoritative spentOutputs set plus
+     *  transaction validity, not the asset-UTXO array. */
     external fun outpointSpentState(txHashHex: String, vout: Int): Int
 
     /** Hold an outpoint OUT of the spendable DGB UTXO set because it carries DigiAsset
