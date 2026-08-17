@@ -2042,7 +2042,9 @@ class SyncService : Service() {
         // penalty set exists to stop, reintroduced once per launch. Held at bridge level
         // so a later manager recreate inherits them; entries whose window has lapsed are
         // dropped on read, so a wallet that sat closed for an hour starts clean.
-        decodeSavedBlobOrDrop(prefs, "saved_peer_penalties")?.let { blob ->
+        prefs.getString("saved_peer_penalties", null)
+            ?.let { io.digibyte.core.sync.PeerPenaltyPersist.decodeHex(it) }
+            ?.let { blob ->
             runCatching { NativeBridge.loadPeerPenalties(blob) }
                 .onSuccess { android.util.Log.i("SyncService", "Restored $it peer penalty/ies from disk") }
                 .onFailure { android.util.Log.w("SyncService", "peer-penalty restore failed", it) }
@@ -2272,12 +2274,25 @@ class SyncService : Service() {
         runCatching {
             val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
             val blob = NativeBridge.serializePeerPenalties()
-            if (blob == null || blob.isEmpty()) {
-                prefs.edit().remove("saved_peer_penalties").apply()
-            } else {
-                prefs.edit()
-                    .putString("saved_peer_penalties", blob.joinToString("") { "%02x".format(it) })
-                    .apply()
+            when (val action = io.digibyte.core.sync.PeerPenaltyPersist.decide(blob)) {
+                // Null means the native side couldn't answer (no live peer manager, or the
+                // probe threw) — NOT that nothing is penalized: an empty set still carries a
+                // 4-byte count header. Clearing on null would throw away penalties we had
+                // already banked because of a momentary hiccup.
+                is io.digibyte.core.sync.PeerPenaltyPersist.Action.Keep ->
+                    android.util.Log.i("SyncService",
+                        "peer penalties unavailable this tick (${blob?.size ?: -1} bytes) — keeping stored set")
+
+                is io.digibyte.core.sync.PeerPenaltyPersist.Action.Clear -> {
+                    prefs.edit().remove("saved_peer_penalties").apply()
+                    android.util.Log.i("SyncService", "peer penalties: none live, stored set cleared")
+                }
+
+                is io.digibyte.core.sync.PeerPenaltyPersist.Action.Store -> {
+                    prefs.edit().putString("saved_peer_penalties", action.hex).apply()
+                    android.util.Log.i("SyncService",
+                        "peer penalties persisted (${blob?.size ?: 0} bytes)")
+                }
             }
         }.onFailure { android.util.Log.w("SyncService", "peer-penalty persist failed", it) }
     }

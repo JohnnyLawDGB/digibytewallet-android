@@ -1057,12 +1057,18 @@ Java_io_digibyte_core_bridge_NativeBridge_serializePeerPenalties(JNIEnv *env, jo
     (void)thiz;
     PEER_GUARD();
 
-    if (! g_peerManager) return NULL;
+    if (! g_peerManager) {
+        LOGI("serializePeerPenalties: no live peer manager — caller keeps its stored set");
+        return NULL;
+    }
 
     /* 32 entries max (PEER_PENALTY_MAX) — under a kilobyte, so a stack buffer is fine. */
     uint8_t buf[4 + 32 * 26];
     size_t written = BRPeerManagerSerializePenalties(g_peerManager, buf, sizeof(buf));
-    if (written == 0) return NULL;
+    if (written == 0) {
+        LOGW("serializePeerPenalties: serialization reported 0 bytes (buffer %zu)", sizeof(buf));
+        return NULL;
+    }
 
     jbyteArray out = (*env)->NewByteArray(env, (jsize)written);
     if (! out) return NULL;
