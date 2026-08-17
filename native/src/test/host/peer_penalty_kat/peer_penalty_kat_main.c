@@ -159,6 +159,42 @@ int main(void)
               "an empty blob restores nothing");
     }
 
+    // ---- the canon fleet must never be skipped on a cold start -------------------
+    // Only the pinned own-node is exempt from being penalized, so the 16 hardcoded CF
+    // oracle peers CAN land in the set — and a wallet whose fleet is refusing it (44% of
+    // canon closes are refused at the door) will penalize most of them. That was harmless
+    // while the set died with the process: every launch got a clean slate. Persisting it
+    // changes that, and a wallet that comes back up skipping its whole usable fleet is on
+    // the on-ramp to 0 peers -> watchdog -> recreate -> floor-to-birth.
+    //
+    // So restoring DROPS entries for the priority set. In-session penalties still work,
+    // which is what stopped the "one peer dialled 122x" loop; what does not survive a
+    // restart is a penalty against the very peers we need to reach first.
+    {
+        UInt128 addrs[3] = { addrA, addrB, addrA };
+        uint16_t ports[3] = { portA, portB, (uint16_t)(portA + 7) };
+        time_t until[3] = { now + 10*60, now + 10*60, now + 10*60 };
+
+        UInt128 canon[1] = { addrB };   // pretend addrB is one of the oracle nodes
+        size_t kept = BRPeerPenaltyDropExempt(addrs, ports, until, 3, canon, 1);
+
+        check(kept == 2, "a penalty against a priority peer is dropped on restore");
+        check(BRPeerPenaltyContains(addrs, ports, until, kept, addrB, portB, now) == 0,
+              "the priority peer is dialable again after a restart");
+        check(BRPeerPenaltyContains(addrs, ports, until, kept, addrA, portA, now) == 1,
+              "a junk-pool penalty still survives the restart");
+        check(BRPeerPenaltyContains(addrs, ports, until, kept, addrA, (uint16_t)(portA + 7), now) == 1,
+              "compaction keeps every non-exempt entry, not just the first");
+    }
+
+    {   // An empty exempt list must not silently drop everything.
+        UInt128 addrs[1] = { addrA };
+        uint16_t ports[1] = { portA };
+        time_t until[1] = { now + 10*60 };
+        check(BRPeerPenaltyDropExempt(addrs, ports, until, 1, NULL, 0) == 1,
+              "no exempt list means nothing is dropped");
+    }
+
     if (g_failures == 0) {
         printf("\nALL PASSED (0 failure(s))\n");
         return 0;
