@@ -186,6 +186,12 @@ class ChainReconciliationService(
         }
     }
 
+    /** Run the local asset-row tidy-up if an AssetManager is wired in. Local only —
+     *  ownership from the native address set, spent-state from the native wallet. */
+    suspend fun reconcileAssetRowsLocallyIfPresent() {
+        assetManager?.let { runCatching { it.reconcileAssetRowsLocally() } }
+    }
+
     /**
      * Txid-driven confirmation-reconcile: for each wallet tx still at
      * TX_UNCONFIRMED, ask the node for its real confirming height ([DgbNodeClient.txConfirmation])

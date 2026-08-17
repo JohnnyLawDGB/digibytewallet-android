@@ -6,6 +6,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.util.Log
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -72,18 +73,53 @@ class PostUpgradeReconcilerTest {
     // ---------- Orchestration: runIfNeeded ----------
 
     @Test
-    fun `runIfNeeded writes pref on Done and schedules no retry`() = runTest {
-        // Real upgrade (last>0) so the reconcile actually runs — a fresh install
-        // (last==0) skips it (see the dedicated fresh-install test below).
+    fun `the automatic upgrade heal never POSTs the address set`() = runTest {
+        // The post-upgrade heal runs with no user present, so whatever it discloses is
+        // disclosed silently on every update. reconcile() enumerates the whole owned
+        // address set and POSTs it in 500-address chunks — a complete map of the wallet
+        // handed to whoever runs the node. The txid-driven promotion recovers the same
+        // stuck-"Pending" transactions while disclosing only txids we already broadcast.
+        val harness = MockHarness(storedVersion = 40034, currentVersion = 40035)
+        val service = mockk<ChainReconciliationService>(relaxed = true)
+        coEvery { service.confirmPendingTransactions() } returns 1
+
+        PostUpgradeReconciler.runIfNeeded(harness.context) { service }
+
+        coVerify(exactly = 0) { service.reconcile() }
+        coVerify(exactly = 0) { service.reconcileAddressHistory() }
+        coVerify(exactly = 1) { service.confirmPendingTransactions() }
+    }
+
+    @Test
+    fun `the automatic upgrade heal still stamps the version so it does not repeat`() = runTest {
+        val harness = MockHarness(storedVersion = 40034, currentVersion = 40035)
+        val service = mockk<ChainReconciliationService>(relaxed = true)
+        coEvery { service.confirmPendingTransactions() } returns 0
+
+        PostUpgradeReconciler.runIfNeeded(harness.context) { service }
+
+        verify { harness.editor.putInt(PostUpgradeReconciler.KEY_LAST_VERSION, 40035) }
+    }
+
+    @Test
+    fun `a heal that throws does not stamp the version, so the next launch retries`() = runTest {
+        val harness = MockHarness(storedVersion = 40034, currentVersion = 40035)
+        val service = mockk<ChainReconciliationService>(relaxed = true)
+        coEvery { service.confirmPendingTransactions() } throws RuntimeException("node down")
+
+        PostUpgradeReconciler.runIfNeeded(harness.context) { service }
+
+        verify(exactly = 0) { harness.editor.putInt(PostUpgradeReconciler.KEY_LAST_VERSION, 40035) }
+    }
+
+    @Test
+    fun `runIfNeeded writes pref on a successful heal and schedules no retry`() = runTest {
+        // Real upgrade (last>0) so the heal actually runs — a fresh install (last==0)
+        // skips it (see the dedicated fresh-install test below). The heal is txid-driven;
+        // it no longer enumerates or POSTs the address set.
         val harness = MockHarness(storedVersion = 30033, currentVersion = 30034)
-        val service = mockk<ChainReconciliationService>()
-        coEvery { service.reconcile() } returns ChainReconciliationService.State.Done(
-            scannedAddresses = 430,
-            utxosSeenOnChain = 1,
-            txsImported = 0,
-            alreadyKnown = 1,
-            totalChainBalanceSat = 200_000_000L,
-        )
+        val service = mockk<ChainReconciliationService>(relaxed = true)
+        coEvery { service.confirmPendingTransactions() } returns 1
 
         PostUpgradeReconciler.runIfNeeded(harness.context) { service }
 
@@ -97,8 +133,8 @@ class PostUpgradeReconcilerTest {
         // Real upgrade (last>0) so the reconcile runs and we can observe the
         // no-persist-on-failure behavior (a fresh install would skip entirely).
         val harness = MockHarness(storedVersion = 30033, currentVersion = 30034)
-        val service = mockk<ChainReconciliationService>()
-        coEvery { service.reconcile() } returns ChainReconciliationService.State.Failed("network down")
+        val service = mockk<ChainReconciliationService>(relaxed = true)
+        coEvery { service.confirmPendingTransactions() } throws RuntimeException("network down")
 
         PostUpgradeReconciler.runIfNeeded(harness.context) { service }
 

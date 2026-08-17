@@ -3295,10 +3295,21 @@ class SyncService : Service() {
                 lastConfirmReconcileMs = now
                 android.util.Log.i("SyncService",
                     "$reason with unconfirmed tx(s) — running confirmation-reconcile")
-                ChainReconciliationService(
+                // TXID-DRIVEN, as this call site has always claimed. `reconcile()` also
+                // enumerates the whole owned address set and POSTs it in 500-address
+                // chunks — a complete map of the wallet, disclosed automatically on a
+                // keepalive tick, with no user present. Promoting our own stuck-"Pending"
+                // transactions is what this path is for and discloses only txids we
+                // broadcast ourselves.
+                val service = ChainReconciliationService(
                     DgbNodeClient(this@SyncService), assetManager,
                     appContext = this@SyncService,
-                ).reconcile()
+                )
+                val promoted = service.confirmPendingTransactions()
+                service.reconcileAssetRowsLocallyIfPresent()
+                if (promoted > 0) {
+                    android.util.Log.i("SyncService", "confirmation-reconcile promoted $promoted tx(s)")
+                }
             }
         }.onFailure { android.util.Log.w("SyncService", "confirmation-reconcile failed", it) }
     }

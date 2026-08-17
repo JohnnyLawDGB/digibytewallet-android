@@ -95,6 +95,13 @@ object PostUpgradeReconciler {
         }
     }
 
+    /** Local asset-row tidy-up, non-fatal: phantom prune + spent-state reconcile, both
+     *  judged against the native wallet. Separate so a failure here can never fail the
+     *  heal (and so the injected test double doesn't have to model it). */
+    private suspend fun assetManagerReconcile(service: ChainReconciliationService) {
+        service.reconcileAssetRowsLocallyIfPresent()
+    }
+
     /**
      * Testable overload that lets callers inject a service factory so the
      * network-facing ChainReconciliationService can be stubbed in unit tests.
@@ -131,27 +138,23 @@ object PostUpgradeReconciler {
             Log.i(TAG, "auto-reconcile v$last -> v$current; waiting ${STARTUP_DELAY_MS}ms for peers")
             delay(STARTUP_DELAY_MS)
             val service = serviceFactory(context)
-            when (val result = service.reconcile()) {
-                is ChainReconciliationService.State.Done -> {
-                    Log.i(
-                        TAG,
-                        "reconcile done: imported=${result.txsImported} " +
-                            "already=${result.alreadyKnown} " +
-                            "utxos=${result.utxosSeenOnChain} " +
-                            "addresses=${result.scannedAddresses}"
-                    )
-                    persistVersion(prefs, current)
-                    setFailedFlag(prefs, false)
-                }
-                is ChainReconciliationService.State.Failed -> {
-                    Log.w(TAG, "reconcile failed: ${result.reason} — will retry next launch")
-                    setFailedFlag(prefs, true)
-                }
-                else -> {
-                    Log.w(TAG, "reconcile returned unexpected state: $result")
-                    setFailedFlag(prefs, true)
-                }
-            }
+            // TXID-DRIVEN ONLY. This runs with no user present, so anything it discloses is
+            // disclosed silently on every update. `reconcile()` enumerates the whole owned
+            // address set and POSTs it in 500-address chunks — a complete map of the wallet,
+            // handed to whoever runs the node, as a side effect of installing an update.
+            // Promoting the wallet's own stuck-"Pending" transactions recovers the case this
+            // heal exists for while disclosing only txids we already broadcast ourselves.
+            //
+            // TRADE-OFF, stated plainly: a tx the wallet is missing ENTIRELY (not merely
+            // pending) is no longer healed automatically. That case needs the address-history
+            // backstop, which is exactly the disclosure being removed; the sovereign
+            // replacement is a filter-based rescan, and until it exists the user-initiated
+            // Settings scan is the recovery path.
+            val promoted = service.confirmPendingTransactions()
+            runCatching { assetManagerReconcile(service) }
+            Log.i(TAG, "post-upgrade heal: promoted $promoted pending tx(s), no address disclosure")
+            persistVersion(prefs, current)
+            setFailedFlag(prefs, false)
         } catch (t: Throwable) {
             Log.w(TAG, "post-upgrade reconcile threw", t)
             val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
