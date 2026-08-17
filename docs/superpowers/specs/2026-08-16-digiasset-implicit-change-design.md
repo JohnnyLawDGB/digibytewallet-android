@@ -181,6 +181,32 @@ ahead of the replay.
 4. Balance survives a forced resync with no divergence.
 5. No plain-DGB coin selection can reach an asset-bearing output, implicit or explicit.
 
+## 4a. The second defect — a stuck send that was re-sent (added after live repro)
+
+The reported failure (supply 10, send 1, wallet shows 18) turned out NOT to be implicit
+change. Reproduced on an S25 Ultra as `heldBalances: La3t7Jdv=18(4u)` for
+`La3t7Jdvjhf5XGGRBqVdny36VWPJ4gJcWMpAxp` (supply 10). DigiAsset Core: 9 @ `dgb1qjxr7t…`
++ 1 @ `dgb1qcxjvnzt…`. Exactly one 9-unit output exists on-chain, so 18 across 4 rows is
+**9 + 9 + 0 + 0** — the live asset change, the asset change of an abandoned attempt, and
+both DGB-change rows. Confirmed with the user: the send stuck and was repeated.
+
+The abandoned attempt stays in the native transaction set, in `invalidTx`. Nothing ever
+spends *its own* change output, so `BRWalletOutpointSpent` answers unspent forever while
+`BRWalletTransactionForHash` answers known — the pair the probe used reads HELD.
+Spent-ness structurally cannot see this; `BRWalletTransactionIsValid` can.
+
+Fix: `BRWalletOutpointAssetState()` composes the three predicates into
+`0 SPENT / 1 HELD / -1 UNDETECTED / -2 CONFLICTED`, the JNI probe returns it, and:
+- `isHeldForDisplay` rejects CONFLICTED outright. BACKEND provenance does not rescue it —
+  provenance exists to save an outpoint native has never *seen*, not one it has judged.
+- `decideAssetSpent(CONFLICTED)` returns null, leaving the persisted flag alone: nothing
+  spent that output, and while the replacement is unconfirmed the abandoned attempt could
+  still win. The next reconcile flips it back if the conflict resolves the other way.
+
+Covered by `asset_conflicted_send_kat` and `AssetConflictedSendTest`. Note this is the
+same family as the earlier phantom-row heal, but `clearDeadAssetSend` / `DeadSendPredicate`
+never fire here: the transaction is conflicted, not *gone*.
+
 ## 5. Out of scope
 
 - Percent transfer instructions (still skipped; under-count, never over-count).
