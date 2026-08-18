@@ -1019,6 +1019,13 @@ class SyncService : Service() {
                                 progress = currentSyncProgress(),
                                 walletLoaded = NativeBridge.isWalletLoaded(),
                             )) {
+                            // Rows from a broadcast that never confirmed and has since
+                            // been dropped from the wallet. clearDeadAssetSend can't reach
+                            // these: it needs the tx present to enumerate its outputs, and
+                            // by now it is gone. Never-confirmed only, so a below-scan-floor
+                            // holding (which carries a real height) is never touched.
+                            runCatching { assetManager.pruneDeadBroadcastRows() }
+                                .onFailure { android.util.Log.w("SyncService", "dead-broadcast prune threw", it) }
                             runCatching { assetManager.pruneRemovedNativeAssetRows() }
                                 .onFailure { android.util.Log.w("SyncService", "asset prune threw", it) }
 

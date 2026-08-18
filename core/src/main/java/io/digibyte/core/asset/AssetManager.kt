@@ -295,7 +295,8 @@ class AssetManager(
             if (row.spent) continue   // reconciled-spent — matches getAssetBalances WHERE spent=0
             val assetId = row.assetId ?: continue   // unattributed row — can't group by asset
             val scriptHex = row.scriptPubKey.toHex().lowercase()
-            if (!isHeldForDisplay(scriptHex, owned, row.assetSource, spentState(row.txid, row.vout))) continue
+            if (!isHeldForDisplay(scriptHex, owned, row.assetSource, spentState(row.txid, row.vout),
+                                  everConfirmed = row.blockHeight > 0L)) continue
             qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
             cnt[assetId] = (cnt[assetId] ?: 0) + 1
         }
@@ -321,6 +322,7 @@ class AssetManager(
         ownedLower: Set<String>,
         assetSource: String,
         nativeSpentState: Int,
+        everConfirmed: Boolean = true,
     ): Boolean {
         if (scriptHexLower.isEmpty() || scriptHexLower !in ownedLower) return false
         return when (nativeSpentState) {
@@ -331,7 +333,19 @@ class AssetManager(
             // rescues an outpoint native has merely never seen: here native has looked and
             // answered. Counting it is how one send's change gets counted twice.
             AssetSpentState.CONFLICTED -> false
-            else -> assetSource == AssetSource.BACKEND
+            // Native has NO record of the funding tx. Two very different things look
+            // identical here, and CONFIRMATION is the only sovereign way to tell them
+            // apart:
+            //  - a holding that CONFIRMED below the scan floor, which native cannot see
+            //    and a backend once vouched for -> still held (killing this hides real
+            //    assets, which is worse than displaying a phantom);
+            //  - a send we broadcast that NEVER confirmed and has since been dropped from
+            //    the wallet -> dead. Measured live: `eacb2f6de366c653…`, absent from the
+            //    chain, which the wallet itself reports as "not in wallet tx set — can't
+            //    re-publish", kept a supply-10 asset reading 17 against a truth of 8.
+            // A never-confirmed row carries height 0; a below-floor holding carries a real
+            // confirming height. Provenance alone cannot separate them.
+            else -> everConfirmed && assetSource == AssetSource.BACKEND
         }
     }
 
@@ -1614,6 +1628,53 @@ class AssetManager(
      * can drive it deterministically instead of through the real JNI-backed
      * NativeBridge singleton.
      */
+    /**
+     * Delete asset rows left behind by a broadcast that never confirmed and has since been
+     * dropped from the wallet's transaction set — whatever their provenance.
+     *
+     * This is the gap `clearDeadAssetSend` structurally cannot cover: that path reads the
+     * dead tx's outputs BEFORE removing it ("once removed, NativeBridge can no longer look
+     * it up"), so a tx the wallet lost on its own leaves nothing to enumerate. The row then
+     * sits there permanently — counted by the display gate on BACKEND provenance, and
+     * skipped by [pruneRemovedNativeAssetRowsImpl], which only inspects NATIVE rows.
+     * Measured live: `eacb2f6de366c653…` held a supply-10 asset at 17 against a truth of 8.
+     *
+     * ONLY never-confirmed rows (`blockHeight == 0`) are eligible. A row with a real
+     * confirming height that native cannot see is a below-scan-floor holding, and deleting
+     * those would destroy the display of genuine assets. Same per-outpoint absence debounce
+     * as the NATIVE prune, so a transient lookup failure can't delete anything.
+     */
+    suspend fun pruneDeadBroadcastRows(): Int =
+        pruneDeadBroadcastRowsImpl { txid ->
+            runCatching { NativeBridge.getTransactionOutputsForHash(txid).isNullOrEmpty() }
+                .getOrDefault(false)
+        }
+
+    /** Testable core of [pruneDeadBroadcastRows]; same host-JVM constraint as the other
+     *  seams in this file. */
+    internal suspend fun pruneDeadBroadcastRowsImpl(isTxGone: suspend (String) -> Boolean): Int {
+        var deleted = 0
+        for (row in utxoDao.getAllAssetUtxosNow()) {
+            if (row.txid.length != 64) continue      // never pass a malformed txid to native
+            if (row.blockHeight > 0L) continue       // confirmed: a below-floor holding, not a corpse
+            val key = "dead:${row.txid}:${row.vout}"
+            if (!isTxGone(row.txid)) {
+                nativeAbsenceCounts.remove(key)
+                continue
+            }
+            val n = (nativeAbsenceCounts[key] ?: 0) + 1
+            nativeAbsenceCounts[key] = n
+            if (n >= ABSENCE_DEBOUNCE_THRESHOLD) {
+                deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
+                nativeAbsenceCounts.remove(key)
+                android.util.Log.i("AssetManager",
+                    "pruneDeadBroadcastRows: removed ${row.txid.take(12)}:${row.vout} " +
+                    "(never confirmed, tx absent from the wallet)")
+            }
+        }
+        return deleted
+    }
+
     internal suspend fun pruneRemovedNativeAssetRowsImpl(isTxGone: suspend (String) -> Boolean): Int {
         val rows = utxoDao.getAssetUtxosBySourceNow(AssetSource.NATIVE)
         val liveKeys = HashSet<String>(rows.size)

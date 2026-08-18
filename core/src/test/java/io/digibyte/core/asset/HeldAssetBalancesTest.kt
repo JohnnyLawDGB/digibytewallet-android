@@ -42,8 +42,13 @@ class HeldAssetBalancesTest {
     private fun row(
         txid: String, script: ByteArray, assetId: String, qty: Long,
         spent: Boolean = false, source: String = AssetSource.NATIVE,
+        // Rows carry the CONFIRMING height the backend reported (`blockHeight =
+        // u.confirmedHeight`). Height 0 means "never confirmed", which is now the signal
+        // that separates a below-floor holding from a dead broadcast — so the default
+        // fixture has to be a confirmed row, not a 0.
+        blockHeight: Long = 700_000L,
     ) = UtxoEntity(
-        txid = txid, vout = 0, scriptPubKey = script, satoshis = 6000, blockHeight = 0,
+        txid = txid, vout = 0, scriptPubKey = script, satoshis = 6000, blockHeight = blockHeight,
         isAsset = true, assetId = assetId, assetQuantity = qty, spent = spent, assetSource = source)
 
     @Before fun setup() {
