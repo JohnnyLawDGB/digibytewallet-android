@@ -343,25 +343,26 @@ class AssetManager(
             // rescues an outpoint native has merely never seen: here native has looked and
             // answered. Counting it is how one send's change gets counted twice.
             AssetSpentState.CONFLICTED -> false
-            // Native has NO record of the funding tx. Two very different things look
-            // identical here, and CONFIRMATION is the only sovereign way to tell them
-            // apart:
-            //  - a holding that CONFIRMED below the scan floor, which native cannot see
-            //    and a backend once vouched for -> still held (killing this hides real
-            //    assets, which is worse than displaying a phantom);
-            //  - a send we broadcast that NEVER confirmed and has since been dropped from
-            //    the wallet -> dead. Measured live: `eacb2f6de366c653…`, absent from the
-            //    chain, which the wallet itself reports as "not in wallet tx set — can't
-            //    re-publish", kept a supply-10 asset reading 17 against a truth of 8.
-            // A never-confirmed row carries height 0; a below-floor holding carries a real
-            // confirming height. Provenance alone cannot separate them.
-            // REVERTED in 4.0.38. Requiring everConfirmed here hid rows worth 8 units on a
-            // live wallet while leaving the phantom in place — hiding real holdings is a
-            // worse failure than displaying a phantom one, so this trusts BACKEND again
-            // until the per-row diagnostic below shows what these rows actually are.
-            // (everConfirmed is still threaded through for the diagnostic; the prune, which
-            // only deletes never-confirmed rows whose tx the wallet has lost, is unchanged.)
-            else -> assetSource == AssetSource.BACKEND
+            // Native has NO record of this outpoint's funding transaction. That is the
+            // ONLY answer left, and it does not distinguish a phantom from a holding
+            // confirmed below the scan floor — the two are identical from here.
+            //
+            // The old rule rescued the row when its provenance was BACKEND, on the grounds
+            // that an indexer once vouched for it. That is what let phantoms in: measured
+            // live, `79b27063eab3:2` (8 units, no record, BACKEND) held a supply-10 asset
+            // at 17 when the wallet's real holding was 9. Two attempts to separate the two
+            // cases by inference — conflicted status, then confirming height — were both
+            // wrong, because the distinguishing information simply is not present.
+            //
+            // So the balance is now exactly what the wallet can SEE it holds: an outpoint
+            // counts iff native holds it. No provenance heuristic, nothing to get wrong.
+            //
+            // The cost, stated plainly: a genuine below-floor holding stops displaying.
+            // Nothing can create or refresh a BACKEND row any more (the indexer call was
+            // removed in 4.0.36), and such a row is indistinguishable from a corpse, so for
+            // ACCOUNTING the defensible default is to trust only what the wallet can
+            // currently verify. The funds are unaffected either way — this is display.
+            else -> false
         }
     }
 

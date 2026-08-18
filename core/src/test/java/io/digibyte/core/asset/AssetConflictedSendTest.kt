@@ -100,7 +100,9 @@ class AssetConflictedSendTest {
     @Test fun the_other_states_are_unchanged() {
         assertEquals(true, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.NATIVE, AssetSpentState.HELD))
         assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.NATIVE, AssetSpentState.SPENT))
-        assertEquals(true, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.BACKEND, AssetSpentState.UNDETECTED))
+        // 4.0.39: no-record no longer counts, whatever the provenance — see
+        // AssetHeldMeansNativeHoldsItTest for why the rescue had to go.
+        assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.BACKEND, AssetSpentState.UNDETECTED))
         assertEquals(true, decideAssetSpent(AssetSpentState.SPENT))
         assertEquals(false, decideAssetSpent(AssetSpentState.HELD))
         assertNull(decideAssetSpent(AssetSpentState.UNDETECTED))

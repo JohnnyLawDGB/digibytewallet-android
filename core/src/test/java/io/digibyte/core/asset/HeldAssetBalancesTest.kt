@@ -81,16 +81,20 @@ class HeldAssetBalancesTest {
         assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.NATIVE, -1))
     }
 
-    @Test fun predicate_owned_native_unknown_backend_source_is_below_floor_holding() {
-        // A real holding restored via 'Scan for missing funds' that native's scan
-        // floor never reached — native has no record but it IS ours. Must show.
-        assertEquals(true, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.BACKEND, -1))
+    @Test fun predicate_owned_but_native_has_no_record_does_not_count() {
+        // Was `..._is_below_floor_holding`, asserting BACKEND provenance rescued a
+        // no-record outpoint. That rule is what let a phantom (79b27063eab3:2, 8 units)
+        // inflate a live wallet from 9 to 17 — a phantom and a below-floor holding are
+        // indistinguishable from here, so neither is counted now. See
+        // AssetHeldMeansNativeHoldsItTest.
+        assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.BACKEND, -1))
+        assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.NATIVE, -1))
     }
 
-    @Test fun predicate_probe_error_falls_back_to_provenance() {
-        // -99 = outpointSpentState threw. Same disposition as -1: trust a backend
-        // holding, drop a native dead-send.
-        assertEquals(true, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.BACKEND, -99))
+    @Test fun predicate_probe_error_does_not_count() {
+        // -99 = outpointSpentState threw. 4.0.39: a failed probe is not an answer, and
+        // provenance no longer rescues one — a BACKEND row is not evidence of holding.
+        assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.BACKEND, -99))
         assertEquals(false, mgr.isHeldForDisplay(ownedHex, owned, AssetSource.NATIVE, -99))
     }
 
@@ -120,7 +124,7 @@ class HeldAssetBalancesTest {
         assertEquals(2, held[a]!!.utxoCount)
     }
 
-    @Test fun below_floor_backend_holding_is_counted() = runTest {
+    @Test fun a_row_native_has_no_record_of_is_not_counted() = runTest {
         val a = "La6"
         coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(
             row("aa" + "a".repeat(62), ownedScript, a, 5, source = AssetSource.BACKEND),
@@ -129,8 +133,7 @@ class HeldAssetBalancesTest {
 
         val held = mgr.computeHeldAssetBalancesImpl(owned, state)!!
 
-        assertEquals(5L, held[a]!!.quantity)
-        assertEquals(1, held[a]!!.utxoCount)
+        assertEquals(null, held[a])
     }
 
     @Test fun empty_owned_set_returns_null_for_naive_fallback() = runTest {
