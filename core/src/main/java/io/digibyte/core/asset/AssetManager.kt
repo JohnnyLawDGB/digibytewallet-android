@@ -295,8 +295,18 @@ class AssetManager(
             if (row.spent) continue   // reconciled-spent — matches getAssetBalances WHERE spent=0
             val assetId = row.assetId ?: continue   // unattributed row — can't group by asset
             val scriptHex = row.scriptPubKey.toHex().lowercase()
-            if (!isHeldForDisplay(scriptHex, owned, row.assetSource, spentState(row.txid, row.vout),
-                                  everConfirmed = row.blockHeight > 0L)) continue
+            val state = spentState(row.txid, row.vout)
+            val keep = isHeldForDisplay(scriptHex, owned, row.assetSource, state,
+                                        everConfirmed = row.blockHeight > 0L)
+            // PER-ROW DIAGNOSTIC. Every asset-balance investigation so far has had totals
+            // and no rows, which is how two different wrong diagnoses both looked plausible.
+            // This is the row-level fact: which outpoint, how many units, what height, whose
+            // provenance, what native says, and the resulting decision.
+            android.util.Log.i("AssetManager",
+                "row ${row.txid.take(12)}:${row.vout} qty=${row.assetQuantity} " +
+                "h=${row.blockHeight} src=${row.assetSource} state=$state " +
+                "owned=${scriptHex in owned} -> ${if (keep) "COUNT" else "drop"}")
+            if (!keep) continue
             qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
             cnt[assetId] = (cnt[assetId] ?: 0) + 1
         }
@@ -345,7 +355,13 @@ class AssetManager(
             //    re-publish", kept a supply-10 asset reading 17 against a truth of 8.
             // A never-confirmed row carries height 0; a below-floor holding carries a real
             // confirming height. Provenance alone cannot separate them.
-            else -> everConfirmed && assetSource == AssetSource.BACKEND
+            // REVERTED in 4.0.38. Requiring everConfirmed here hid rows worth 8 units on a
+            // live wallet while leaving the phantom in place — hiding real holdings is a
+            // worse failure than displaying a phantom one, so this trusts BACKEND again
+            // until the per-row diagnostic below shows what these rows actually are.
+            // (everConfirmed is still threaded through for the diagnostic; the prune, which
+            // only deletes never-confirmed rows whose tx the wallet has lost, is unchanged.)
+            else -> assetSource == AssetSource.BACKEND
         }
     }
 

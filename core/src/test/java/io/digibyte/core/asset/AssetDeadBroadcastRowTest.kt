@@ -58,9 +58,17 @@ class AssetDeadBroadcastRowTest {
 
     @After fun tearDown() = unmockkStatic(Log::class)
 
-    /** The live failure: never confirmed, wallet has no record, BACKEND provenance. */
-    @Test fun a_never_confirmed_row_the_wallet_has_no_record_of_is_not_held() {
-        assertEquals(false, mgr.isHeldForDisplay(
+    /**
+     * CURRENT SHIPPED BEHAVIOUR, and deliberately not the behaviour I first wanted.
+     *
+     * v4.0.37 made this `false` on the theory that a never-confirmed BACKEND row is a dead
+     * broadcast. On the live wallet that hid rows worth 8 units while leaving the phantom
+     * in place, so it was reverted: hiding real holdings is a worse failure than displaying
+     * a phantom one. The per-row diagnostic added in 4.0.38 exists to establish what these
+     * rows actually are before the rule is changed again.
+     */
+    @Test fun an_undetected_backend_row_is_still_counted_pending_diagnosis() {
+        assertEquals(true, mgr.isHeldForDisplay(
             ownedHex, owned, AssetSource.BACKEND, AssetSpentState.UNDETECTED, everConfirmed = false,
         ))
     }
@@ -90,8 +98,13 @@ class AssetDeadBroadcastRowTest {
         ))
     }
 
-    /** End to end on the Ultra's shape: the dead 9 drops, today's real 8 stays. */
-    @Test fun the_dead_broadcasts_change_is_excluded_from_the_balance() = runTest {
+    /**
+     * End to end on the Ultra's shape. With the display rule reverted, the dead row is
+     * still counted — this pins the CURRENT total so a future change to the rule shows up
+     * here as an intentional diff rather than a silent one. The prune below is what
+     * actually removes such a row.
+     */
+    @Test fun the_dead_broadcasts_change_is_still_counted_until_it_is_pruned() = runTest {
         val dead = "eacb2f6de366c653869a46f93f7dd20daa69f8f9623f05b1e194da869bac570d"
         val live = "3afac554fe4c35b078b35e65acff74221ff7bb2022eaf66ed31bc81147caab06"
         coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(
@@ -103,8 +116,8 @@ class AssetDeadBroadcastRowTest {
             if (txid == dead) AssetSpentState.UNDETECTED else AssetSpentState.HELD
         }
 
-        assertEquals(8L, balances?.get("La3t7Jdv")?.quantity)
-        assertEquals(1, balances?.get("La3t7Jdv")?.utxoCount)
+        assertEquals(17L, balances?.get("La3t7Jdv")?.quantity)
+        assertEquals(2, balances?.get("La3t7Jdv")?.utxoCount)
     }
 
     /** Hiding it is not enough — the row must actually be deleted, whatever its provenance,
