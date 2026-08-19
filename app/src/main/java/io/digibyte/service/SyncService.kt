@@ -328,10 +328,7 @@ class SyncService : Service() {
             // user's explicit save.
             ownNodeAdditiveSessionOverride = false
             serviceScope.launch {
-                try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectPeers()
-                injectCustomNode()   // re-injects + pins (or clears) with the new prefs
-                NativeBridge.startSync()
+                recreatePeerManagerResumingNearTip("own-node settings change")
             }
             return START_STICKY
         }
@@ -348,10 +345,7 @@ class SyncService : Service() {
             // prefs, so the persisted exclusive choice is untouched.
             ownNodeAdditiveSessionOverride = true
             serviceScope.launch {
-                try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectPeers()
-                injectCustomNode()   // override above forces non-exclusive here
-                NativeBridge.startSync()
+                recreatePeerManagerResumingNearTip("own-node additive override")
             }
             return START_STICKY
         }
@@ -405,10 +399,7 @@ class SyncService : Service() {
                             "loop-revival: 0 peers with sync setup complete — full recovery " +
                                 "(recreate manager + re-inject canon + restart)"
                         )
-                        runCatching { NativeBridge.forceReconnect() }
-                        injectPeers()
-                        injectCustomNode()
-                        runCatching { NativeBridge.startSync() }
+                        recreatePeerManagerResumingNearTip("cf-frozen")
                     }
                 }
             }
@@ -649,12 +640,18 @@ class SyncService : Service() {
         // withTimeout here could not cancel any of them. Detached + interruptible instead.
         launchBoundedRecovery("network-regained") {
             runInterruptible(Dispatchers.IO) {
+                // Refresh the near-tip window BEFORE the rebuild consumes it, or the new
+                // manager floors to the birth checkpoint. Same ordering as
+                // recreatePeerManagerResumingNearTip; kept inline here because this path
+                // splits across IO hops for the DNS-bound own-node injection.
+                runCatching { reloadSavedBlocksNearTip() }
                 runCatching { NativeBridge.forceReconnect() }
                 injectPeers()
             }
             injectCustomNode()   // suspend (DNS); has its own IO hop
             runInterruptible(Dispatchers.IO) {
                 runCatching { NativeBridge.startSync() }
+                runCatching { restoreCfLedgerAndSnap() }
                 // The polling keepalive/watchdog may have frozen with the pool; re-arm it
                 // now that the reconnect has freed the wedged native state.
                 runCatching { resurrectKeepaliveIfNeeded() }
@@ -1110,18 +1107,26 @@ class SyncService : Service() {
                         android.util.Log.d("SyncService",
                             "Tor enabled but proxy not ready — deferring peer connect to avoid a direct-before-Tor leak")
                     } else {
+                        var recreatedThisPass = false
                         zeroPeerStreak++
                         if (zeroPeerStreak >= ZERO_PEER_RECREATE_THRESHOLD) {
                             android.util.Log.w("SyncService",
                                 "0 peers for $zeroPeerStreak cycles — light reconnect isn't recovering, " +
                                 "forcing a clean peer-manager recreate")
+                            // Refresh the window first: this is a genuine recreate, and
+                            // without it the rebuild floors the chain to birth.
+                            runCatching { reloadSavedBlocksNearTip() }
                             try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
+                            recreatedThisPass = true
                             zeroPeerStreak = 0
                         }
                         android.util.Log.i("SyncService", "No peers connected, re-injecting filter peers and reconnecting")
                         injectPeers()
                         injectCustomNode()
                         NativeBridge.startSync()
+                        // Only after an actual recreate: restoring the ledger snaps the
+                        // resume cursor, which is pointless when the manager was untouched.
+                        if (recreatedThisPass) runCatching { restoreCfLedgerAndSnap() }
                     }
                 } else {
                     zeroPeerStreak = 0
@@ -1400,10 +1405,7 @@ class SyncService : Service() {
                             "re-request ($peers peers) — recreating peer manager (tier 2)"
                     )
                     lastTier2Ms = nowMs
-                    runCatching { NativeBridge.forceReconnect() }
-                    injectPeers()
-                    injectCustomNode()
-                    runCatching { NativeBridge.startSync() }
+                    recreatePeerManagerResumingNearTip("recovery")
                     state = state.copy(tier1Fired = false) // re-arm tier 1 against the fresh manager
                 } else if (shouldRerequestHeadersOnStall(
                         peerCount = peers,
@@ -1688,10 +1690,7 @@ class SyncService : Service() {
                     filterHeadersDirty = false
                     CfScanLedgerStore.delete(this@SyncService)
                     pendingCfLedger = null
-                    runCatching { NativeBridge.forceReconnect() }
-                    injectPeers()
-                    injectCustomNode()
-                    runCatching { NativeBridge.startSync() }
+                    recreatePeerManagerResumingNearTip("recovery")
                     // The ledger was just deleted, so the scan frontier re-inits at the
                     // floor: reset the tracker or the stale running-max would keep the
                     // scan-frozen gate satisfied through the entire clean re-climb.
@@ -1768,10 +1767,7 @@ class SyncService : Service() {
                     // Reset the native CF chain to the floor, then force a clean manager
                     // recreate that re-fetches cfheaders from a fresh peer cohort.
                     runCatching { NativeBridge.reanchorCompactFilterChainAtFloor() }
-                    runCatching { NativeBridge.forceReconnect() }
-                    injectPeers()
-                    injectCustomNode()
-                    runCatching { NativeBridge.startSync() }
+                    recreatePeerManagerResumingNearTip("recovery")
                     // Prefer a fully-synced canon peer for the clean re-fetch (best-effort;
                     // injectPeers already re-seeds the 16 canon nodes into the pool).
                     if (fp != null) runCatching { NativeBridge.setPinnedPeer(fp.first, fp.second, false) }
@@ -2278,7 +2274,43 @@ class SyncService : Service() {
                 }
             }
         }.onFailure { android.util.Log.w("SyncService", "peer-penalty persist failed", it) }
+    }
 
+    /**
+     * Recreate the native peer manager so it resumes NEAR TIP instead of flooring to the
+     * wallet birth checkpoint.
+     *
+     * `forceReconnect()` + `startSync()` on their own rebuild the manager from the stale
+     * cold-start `g_savedBlocks` — loaded once at launch and never refreshed from the
+     * advancing chain — so `manager->lastBlock` drops to the birth checkpoint and auto-fetch
+     * re-arms at `cf_birth_height`. Measured on a Note 8: a scan at 24,052,509 fell to
+     * 22,650,000 and spent roughly six hours climbing back.
+     *
+     * Ordering is the whole fix, and it lives in [RecreateSequence] so it is covered by unit
+     * tests rather than only observable on a device mid-failure: refresh the window BEFORE
+     * the rebuild consumes it, restore the CF ledger AFTER the new manager exists. Peer
+     * injection stays between the reconnect and the restart, exactly where each call site
+     * had it.
+     */
+    private suspend fun recreatePeerManagerResumingNearTip(reason: String) {
+        val result = io.digibyte.core.sync.RecreateSequence.run(
+            reloadBlocksNearTip = { reloadSavedBlocksNearTip() },
+            forceReconnect = { NativeBridge.forceReconnect() },
+            startSync = {
+                injectPeers()
+                injectCustomNode()
+                NativeBridge.startSync()
+            },
+            restoreLedgerAndSnap = { restoreCfLedgerAndSnap() },
+        )
+        android.util.Log.i(
+            "SyncService",
+            "recreate ($reason): window=${if (result.windowReloaded) "near-tip" else "none"}" +
+                if (result.failures.isEmpty()) "" else " failures=${result.failures}"
+        )
+    }
+
+    /**
      * Hand the persisted near-tip block window to the C core and seed the
      * monotonic persistence guard with its tip. Extracted verbatim from
      * [startSyncWithTor] so the mid-session peer-manager recreate paths can re-run
