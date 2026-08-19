@@ -18,6 +18,9 @@ on:
     branches: [ "develop" ]
   schedule:
     - cron: '36 0 * * 3'
+  # Manual re-run. Without this the workflow can only be launched by a push or by
+  # re-running a previous run — `gh workflow run` returns HTTP 422.
+  workflow_dispatch:
 
 jobs:
   analyze:

@@ -2,13 +2,30 @@
 
 A full Kotlin rewrite of the DigiByte Android wallet — a **sovereignty-first** SPV wallet built on Jetpack Compose over a patched native C core. Compact-filters-only sync (BIP157/158), hardware-backed key custody, DigiDollar + Taproot, DigiAssets v2, Digi-ID authentication, and a Community Hub.
 
-> **Status:** Active development — **v4.0.35**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.35 hardens deep-restore/resync reliability and closes a compact-filter receive-verification gap. **[Download APK](https://digiscope.me/downloads/)**
+> **Status:** Active development — **v4.0.40**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.36–v4.0.40 stop the wallet re-syncing from its birth height after a network drop, correct DigiAsset balance accounting, and close the last path by which the address set left the device. **[Download APK](https://digiscope.me/downloads/)** · **[Latest GitHub release](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)**
+
+## Download
+
+| Source | Link |
+|---|---|
+| GitHub Releases (signed APK + SHA-256, every version) | **[github.com/JohnnyLawDGB/digibytewallet-android/releases/latest](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)** |
+| digiscope.me (latest APK + release notes) | [digiscope.me/downloads](https://digiscope.me/downloads/) · [release notes](https://digiscope.me/wallet/releases/) |
+
+Every release is built and signed in CI — release signing keys are never held locally. Verify
+what you downloaded before installing:
+
+```bash
+sha256sum digibyte-wallet-v4.0.40.apk
+```
+
+and compare against the SHA-256 published on the release page. The app is not on the Play Store
+yet (Play Store and F-Droid are Phase 4 on the roadmap), so a direct APK install is expected.
 
 ## Design principle: sovereignty first
 
 Removing trusted third parties from the wallet's data path comes before feature breadth. Two consequences you can verify in the code:
 
-- **The address set never leaves the device.** Sync runs BIP157/158 compact block filters exclusively. The bloom wire path (`filterload`/`filteradd`/`merkleblock`) was excised from the C core in v4.0.0 — the code that could leak your addresses to a peer no longer exists.
+- **The address set never leaves the device.** Sync runs BIP157/158 compact block filters exclusively. The bloom wire path (`filterload`/`filteradd`/`merkleblock`) was excised from the C core in v4.0.0 — the code that could leak your addresses to a peer no longer exists. One automatic disclosure outlived it: asset-holding lookups POSTed the whole address set to a backend. That was removed in v4.0.36, so no code path now discloses the address set without you explicitly asking for it.
 - **Everything you see is computed on-device.** All transaction validity and balance computation happens locally from block headers and filters. Nothing in the UI is fetched from a block explorer. (Chain reconcile against a node remains an explicitly-labeled recovery path, never a balance-display path.)
 
 ## What's in v4
@@ -29,6 +46,7 @@ Removing trusted third parties from the wallet's data path comes before feature 
 - **Dynamic peer-cap (v4.0.23)** — hold the full peer set while catching up, then drop to a lean count once genuinely at the tip, so idle wallets stop pinning slots on the shared filter fleet.
 - **Resilient loop** — watchdogs recover from header-tip stalls, orphan-tip landings, network blips, and background-freeze on aggressive OEM battery managers; the foreground service revives the sync loop on resume.
 - **Restore that converges (v4.0.35)** — a deep restore resumes its scan across restarts instead of resetting to the birth floor; the recovery watchdog is liveness-gated so it never stands down its own recovery during a stall; and a delivered block must verify against the header's committed merkle root before a height counts as scanned — closing a path where a peer could have hidden an incoming payment.
+- **Sync resumes where it left off (v4.0.40)** — a mid-session peer-manager rebuild (network drop, 0-peer recovery, a stalled filter chain) used to restart the chain from the wallet's birth height and re-scan more than a million blocks. The rebuild now reloads the near-tip window first, keeps the record of which ranges were already scanned, and flushes live progress to disk before tearing the manager down. Verified on-device: four rebuilds in under a minute, all resuming at the tip.
 
 ### DigiDollar & Taproot
 - **Taproot** — P2TR (`dgb1p…`) receive and BIP341 key-path signing, proven on mainnet; sighash paths are KAT-tested in the native host test suite.
@@ -36,7 +54,7 @@ Removing trusted third parties from the wallet's data path comes before feature 
 
 ### DigiAssets v2
 - **Detect, decode, display, send, receive** — native OP_RETURN parser (issuance / transfer / burn, SFFC amount codec, FIXED/RANGE/BURN algorithms) with parent-provenance walking for transfer asset IDs.
-- **Sovereign asset balances** — computed from the native watch-set, not a backend, with provenance tagging so backend-sourced rows can never delete your on-chain holdings.
+- **Sovereign asset balances (v4.0.39)** — computed from the native watch-set, not a backend. A row counts only when the native wallet still holds that exact output; a row the wallet cannot confirm it holds is not counted on the strength of where it came from. Implicit change (the DigiAssets rule that sends the leftover of a partial transfer to the last output) is credited, and an abandoned send that was re-sent no longer counts its change twice.
 - **UTXO protection** — asset-bearing UTXOs are segregated from DGB coin selection; you cannot accidentally spend an asset as a fee.
 - **Trustless IPFS metadata** — asset metadata fetched from gateways with CID hash verification. No gateway trust, no on-device daemon.
 
