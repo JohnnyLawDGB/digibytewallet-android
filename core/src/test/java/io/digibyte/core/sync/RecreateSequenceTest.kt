@@ -23,6 +23,7 @@ class RecreateSequenceTest {
         val calls = mutableListOf<String>()
 
         RecreateSequence.run(
+            flushPersistedState = {},
             reloadBlocksNearTip = { calls += "reload"; true },
             forceReconnect = { calls += "forceReconnect" },
             startSync = { calls += "startSync" },
@@ -41,6 +42,7 @@ class RecreateSequenceTest {
         val calls = mutableListOf<String>()
 
         RecreateSequence.run(
+            flushPersistedState = {},
             reloadBlocksNearTip = { calls += "reload"; true },
             forceReconnect = { calls += "forceReconnect" },
             startSync = { calls += "startSync" },
@@ -60,6 +62,7 @@ class RecreateSequenceTest {
         val calls = mutableListOf<String>()
 
         val result = RecreateSequence.run(
+            flushPersistedState = {},
             reloadBlocksNearTip = { calls += "reload"; false },
             forceReconnect = { calls += "forceReconnect" },
             startSync = { calls += "startSync" },
@@ -79,6 +82,7 @@ class RecreateSequenceTest {
         val calls = mutableListOf<String>()
 
         val result = RecreateSequence.run(
+            flushPersistedState = {},
             reloadBlocksNearTip = { calls += "reload"; throw IllegalStateException("no disk") },
             forceReconnect = { calls += "forceReconnect" },
             startSync = { calls += "startSync" },
@@ -92,6 +96,7 @@ class RecreateSequenceTest {
 
     @Test fun a_clean_run_reports_no_failures() = runTest {
         val result = RecreateSequence.run(
+            flushPersistedState = {},
             reloadBlocksNearTip = { true },
             forceReconnect = {},
             startSync = {},
@@ -100,5 +105,53 @@ class RecreateSequenceTest {
 
         assertTrue(result.failures.isEmpty())
         assertEquals(true, result.windowReloaded)
+    }
+
+    /**
+     * The reload and the ledger restore both read the LAST PERSISTED snapshot. The freshest
+     * state this process knows lives in memory — the saved-blocks window is held in
+     * `lastSavedBlocksData` until a save boundary, and the CF scan ledger sits in
+     * `pendingCfLedger` until the coalesced writer's 20s tick. A recreate destroys the native
+     * manager, so anything not on disk when it does is simply gone.
+     *
+     * Without this step the fix is only partial: it turns a 1.4M-block floor into a
+     * one-save-interval give-back, paid again on every recovery. Flushing first makes the
+     * disk copy the freshest copy, so the reload restores where the scan actually was.
+     */
+    @Test fun live_state_is_flushed_to_disk_before_the_reload_reads_it() = runTest {
+        val calls = mutableListOf<String>()
+
+        RecreateSequence.run(
+            flushPersistedState = { calls += "flush" },
+            reloadBlocksNearTip = { calls += "reload"; true },
+            forceReconnect = { calls += "forceReconnect" },
+            startSync = { calls += "startSync" },
+            restoreLedgerAndSnap = { calls += "restoreLedger" },
+        )
+
+        assertEquals(
+            listOf("flush", "reload", "forceReconnect", "startSync", "restoreLedger"),
+            calls,
+        )
+    }
+
+    /**
+     * A failed flush costs at most the un-flushed interval; refusing to rebuild would leave
+     * the wallet with a dead manager. So it is reported, not fatal — same rule as every other
+     * step here.
+     */
+    @Test fun a_failed_flush_still_rebuilds_and_is_reported() = runTest {
+        val calls = mutableListOf<String>()
+
+        val result = RecreateSequence.run(
+            flushPersistedState = { throw IllegalStateException("disk full") },
+            reloadBlocksNearTip = { calls += "reload"; true },
+            forceReconnect = { calls += "forceReconnect" },
+            startSync = { calls += "startSync" },
+            restoreLedgerAndSnap = { calls += "restoreLedger" },
+        )
+
+        assertEquals(listOf("reload", "forceReconnect", "startSync", "restoreLedger"), calls)
+        assertTrue(result.failures.any { it.startsWith("flush:") })
     }
 }

@@ -11,6 +11,8 @@ package io.digibyte.core.sync
  *
  * The fix is sequencing rather than new machinery:
  *
+ *   0. flush live state to disk — the steps below read the last PERSISTED snapshot, and
+ *      the rebuild destroys whatever was only in memory;
  *   1. refresh the near-tip window — BEFORE the rebuild, because the rebuild consumes it;
  *   2. mark the manager for recreate;
  *   3. rebuild it;
@@ -37,6 +39,7 @@ object RecreateSequence {
      * being recovered from.
      */
     suspend fun run(
+        flushPersistedState: suspend () -> Unit,
         reloadBlocksNearTip: suspend () -> Boolean,
         forceReconnect: suspend () -> Unit,
         startSync: suspend () -> Unit,
@@ -44,6 +47,19 @@ object RecreateSequence {
     ): Result {
         val failures = mutableListOf<String>()
         var reloaded = false
+
+        // Step 0. Both restore steps below read the last PERSISTED snapshot, while the
+        // freshest state this process has is still in memory (the saved-blocks window until
+        // its save boundary, the CF scan ledger until the coalesced writer's next tick).
+        // The rebuild destroys the native manager, so anything not on disk by then is gone
+        // — and without this the fix only shrinks the give-back to one save interval,
+        // charged again on every recovery. No default: skipping the flush must be a choice
+        // a call site writes down, not one it inherits.
+        try {
+            flushPersistedState()
+        } catch (t: Throwable) {
+            failures += "flush: ${t.message}"
+        }
 
         try {
             reloaded = reloadBlocksNearTip()

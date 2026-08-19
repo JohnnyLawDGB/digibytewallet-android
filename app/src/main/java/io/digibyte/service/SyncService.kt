@@ -644,6 +644,9 @@ class SyncService : Service() {
                 // manager floors to the birth checkpoint. Same ordering as
                 // recreatePeerManagerResumingNearTip; kept inline here because this path
                 // splits across IO hops for the DNS-bound own-node injection.
+                // Flush first: the reload below reads the last PERSISTED snapshot, and the
+                // rebuild discards anything still only in memory (flushLiveStateBeforeRecreate).
+                flushLiveStateBeforeRecreate()
                 runCatching { reloadSavedBlocksNearTip() }
                 runCatching { NativeBridge.forceReconnect() }
                 injectPeers()
@@ -1113,8 +1116,10 @@ class SyncService : Service() {
                             android.util.Log.w("SyncService",
                                 "0 peers for $zeroPeerStreak cycles — light reconnect isn't recovering, " +
                                 "forcing a clean peer-manager recreate")
-                            // Refresh the window first: this is a genuine recreate, and
-                            // without it the rebuild floors the chain to birth.
+                            // Flush, then refresh the window: this is a genuine recreate, and
+                            // without the refresh the rebuild floors the chain to birth — while
+                            // without the flush it resumes a save interval behind the live scan.
+                            flushLiveStateBeforeRecreate()
                             runCatching { reloadSavedBlocksNearTip() }
                             try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
                             recreatedThisPass = true
@@ -2314,8 +2319,36 @@ class SyncService : Service() {
      * injection stays between the reconnect and the restart, exactly where each call site
      * had it.
      */
+    /**
+     * Make the disk copy the freshest copy, immediately before a recreate destroys the
+     * native manager.
+     *
+     * [reloadSavedBlocksNearTip] and [restoreCfLedgerAndSnap] both read the last PERSISTED
+     * snapshot, but the freshest state this process holds is in memory: the saved-blocks
+     * window sits in [lastSavedBlocksData] until its next save boundary, and the CF scan
+     * ledger sits in [pendingCfLedger] until the coalesced writer's [filterHeaderSaveIntervalMs]
+     * tick. `forceReconnect()` frees the manager, so whatever is only in memory at that
+     * moment is gone — and the recreate would then restore a frontier up to a full save
+     * interval behind where the scan actually was, with the resume cursor snapped down to
+     * match. That give-back is small next to the birth-height floor this work removed, but
+     * it is charged on EVERY recovery, so it accumulates in exactly the same direction.
+     *
+     * Same two writes [onDestroy] performs, for the same reason, minus the teardown. Both
+     * are guarded: a failed flush costs at most the un-flushed interval, whereas refusing to
+     * rebuild would leave the wallet with a dead manager.
+     */
+    private fun flushLiveStateBeforeRecreate() {
+        lastSavedBlocksData?.let { (bytes, epoch) ->
+            runCatching { persistBlocks(bytes, epoch, synchronous = true) }
+                .onFailure { android.util.Log.w("SyncService", "pre-recreate block flush failed", it) }
+        }
+        runCatching { flushFilterHeaders() }
+            .onFailure { android.util.Log.w("SyncService", "pre-recreate ledger flush failed", it) }
+    }
+
     private suspend fun recreatePeerManagerResumingNearTip(reason: String) {
         val result = io.digibyte.core.sync.RecreateSequence.run(
+            flushPersistedState = { flushLiveStateBeforeRecreate() },
             reloadBlocksNearTip = { reloadSavedBlocksNearTip() },
             forceReconnect = { NativeBridge.forceReconnect() },
             startSync = {
@@ -3333,7 +3366,8 @@ class SyncService : Service() {
         }
     }
 
-    /** Synchronously flush the latest filter-header chain (final save on teardown). */
+    /** Synchronously flush the latest filter-header chain and CF scan ledger — the final
+     *  save on teardown, and the pre-recreate flush (see [flushLiveStateBeforeRecreate]). */
     private fun flushFilterHeaders() {
         if (filterHeadersDirty) {
             filterHeadersDirty = false
@@ -3341,6 +3375,13 @@ class SyncService : Service() {
             pendingCfLedger?.let { (bytes, ep) ->
                 if (persistWalletTransactionsCheckpoint()) {
                     runCatching { CfScanLedgerStore.write(this, bytes, ep) }
+                } else {
+                    // The checkpoint gate refused, so the ledger was NOT written. Re-mark
+                    // dirty so the coalesced writer retries — exactly what its own loop does
+                    // on the same failure. Without this, a flush that fails its gate drops
+                    // the ledger AND the flag that would have recovered it, which on a
+                    // mid-session recreate means resuming from an older scan frontier.
+                    filterHeadersDirty = true
                 }
             }
         }
