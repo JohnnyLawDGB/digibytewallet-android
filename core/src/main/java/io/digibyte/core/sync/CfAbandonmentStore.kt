@@ -133,6 +133,17 @@ object CfAbandonmentStore {
      * Fold a freshly-polled `abandonedBelow` into the record. `lowHint` is the CF
      * scan frontier last observed while the valve was mid-decision (0 if unknown).
      * Returns true iff the stored band changed — a NEW gap, so `recovered` resets.
+     *
+     * This funnel is cause-agnostic by design: the B2 abandonment valve and the
+     * checkpoint re-anchor-budget-exhaustion never-brick path (native
+     * `_BRPeerManagerSurfaceUnscannableLocked`, cfcheckpt-active-rejection task 6)
+     * both raise `abandonedBelow` the same way, so both surface through the same
+     * band/banner. Native carries a human-readable `why` for the latter, but it is
+     * log-only today — no JNI accessor exposes it, so the banner's cause-agnostic
+     * "couldn't be verified from the filter fleet" copy is what's shown either way,
+     * and it reads correctly for a filter-checkpoint-verification failure too.
+     * Surfacing the specific reason in the UI is an optional future follow-up that
+     * would need new native → Kotlin plumbing; none was added here (YAGNI).
      */
     fun noteAbandonment(ctx: Context, abandonedBelow: Long, lowHint: Long): Boolean {
         val existing = band(ctx)
