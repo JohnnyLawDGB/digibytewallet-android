@@ -13,6 +13,7 @@
 #include "BRNetwork.h"
 #include "saved_blocks_deserialize.h"
 #include "bridge_status_stale.h"
+#include "BRPeerPenalty.h"
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
@@ -357,6 +358,15 @@ static uint32_t g_savedBlocksTipHeight = 0;
  * fresh wallets with no saved blocks), after which creation anchors at the
  * saved tip. */
 static int g_savedBlocksLoadComplete = 0;
+/* Penalty set restored from the previous session (see serializePeerPenalties). Kept at
+ * bridge level, like the own-node pin and the BIP158 state, so EVERY (re)created manager
+ * inherits it — a forceReconnect builds a fresh manager with an empty table otherwise. */
+/* Mirrors PEER_PENALTY_MAX in BRPeerManager.c — the ring buffer's capacity. */
+#define PEER_PENALTY_RESTORE_MAX 32
+
+static uint8_t *g_savedPenalties = NULL;
+static size_t   g_savedPenaltiesLen = 0;
+
 static BRPeer *g_savedPeers = NULL;
 static size_t g_savedPeersCount = 0;
 
@@ -453,6 +463,53 @@ static const char *MAINNET_PRIORITY_PEER_IPS[] = {
 };
 #define MAINNET_PRIORITY_PEER_COUNT \
     (sizeof(MAINNET_PRIORITY_PEER_IPS) / sizeof(MAINNET_PRIORITY_PEER_IPS[0]))
+
+/* Restore persisted penalties, MINUS any against the hardcoded CF oracle peers.
+ *
+ * Only the pinned own-node is exempt from being penalized, so the canon fleet can land in
+ * the set — and a wallet the fleet is refusing (44% of canon closes are refused at the
+ * door) will penalize most of it. That was harmless while the set died with the process,
+ * because every launch got a clean slate. Persisting it means a wallet can come back up
+ * skipping the entire fleet it must reach FIRST, which is the on-ramp to 0 peers ->
+ * watchdog -> recreate -> floor-to-birth.
+ *
+ * In-session penalties against these peers still apply — that is what stopped the "one peer
+ * dialled 122x while the wallet held 0 peers" loop. Only their persistence is dropped. */
+static size_t _loadPenaltiesExceptPriority(BRPeerManager *manager, const uint8_t *blob, size_t blobLen)
+{
+    UInt128 addrs[PEER_PENALTY_RESTORE_MAX];
+    uint16_t ports[PEER_PENALTY_RESTORE_MAX];
+    time_t until[PEER_PENALTY_RESTORE_MAX];
+    UInt128 exempt[MAINNET_PRIORITY_PEER_COUNT];
+    size_t exemptCount = 0, count, kept;
+    uint8_t filtered[4 + PEER_PENALTY_RESTORE_MAX * BR_PEER_PENALTY_ENTRY_BYTES];
+    size_t written;
+
+    count = BRPeerPenaltyDeserialize(blob, blobLen, time(NULL), addrs, ports, until,
+                                     PEER_PENALTY_RESTORE_MAX);
+    if (count == 0) return 0;
+
+    for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
+        struct in_addr ip4;
+
+        if (inet_pton(AF_INET, MAINNET_PRIORITY_PEER_IPS[i], &ip4) != 1) continue;
+        exempt[exemptCount] = UINT128_ZERO;
+        exempt[exemptCount].u16[5] = 0xffff;
+        exempt[exemptCount].u32[3] = ip4.s_addr;
+        exemptCount++;
+    }
+
+    kept = BRPeerPenaltyDropExempt(addrs, ports, until, count, exempt, exemptCount);
+    if (kept < count) {
+        LOGI("peer penalties: dropped %zu against the priority fleet on restore", count - kept);
+    }
+    if (kept == 0) return 0;
+
+    written = BRPeerPenaltySerialize(addrs, ports, until, kept, time(NULL),
+                                     filtered, sizeof(filtered));
+    if (written == 0) return 0;
+    return BRPeerManagerLoadPenalties(manager, filtered, written);
+}
 
 /**
  * Resolve a hostname and prepend it to g_savedPeers so the peer manager
@@ -911,6 +968,16 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * (setSyncMode, setCompactFilterChain, enableAutoCompactFilterFetch). */
         _applyPendingBip158State();
 
+        /* Re-apply the persisted re-dial penalties so a fresh manager doesn't start by
+         * dialling peers the last session already learned were behind. Entries whose
+         * window has lapsed are dropped on read. */
+        if (g_savedPenalties && g_savedPenaltiesLen > 0) {
+            size_t restored = _loadPenaltiesExceptPriority(g_peerManager, g_savedPenalties,
+                                                           g_savedPenaltiesLen);
+            if (restored > 0) LOGI("startSync: restored %zu peer penalt%s", restored,
+                                   restored == 1 ? "y" : "ies");
+        }
+
         /* Re-apply the own-node pin (remembered at bridge level by setPinnedPeer)
          * so a fresh manager inherits it — the pin's lifecycle mirrors the BIP158
          * state above: injectCustomNode()->setPinnedPeer runs BEFORE this
@@ -1027,6 +1094,74 @@ Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz
     (void)env;
     (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorPeerCount, memory_order_relaxed);
+}
+
+/* ---------- serializePeerPenalties / loadPeerPenalties ---------- */
+/* The re-dial penalty set was session-scoped, so every cold start re-dialled peers the
+ * previous session had already learned were behind — the churn the penalty exists to
+ * stop, reintroduced once per launch. Kotlin persists the blob alongside the saved
+ * peers and hands it back on the next start. Deadlines are absolute, so a blob whose
+ * windows have all lapsed restores nothing. */
+
+JNIEXPORT jbyteArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    PEER_GUARD();
+
+    if (! g_peerManager) {
+        LOGI("serializePeerPenalties: no live peer manager — caller keeps its stored set");
+        return NULL;
+    }
+
+    /* 32 entries max (PEER_PENALTY_MAX) — under a kilobyte, so a stack buffer is fine. */
+    uint8_t buf[4 + 32 * 26];
+    size_t written = BRPeerManagerSerializePenalties(g_peerManager, buf, sizeof(buf));
+    if (written == 0) {
+        LOGW("serializePeerPenalties: serialization reported 0 bytes (buffer %zu)", sizeof(buf));
+        return NULL;
+    }
+
+    jbyteArray out = (*env)->NewByteArray(env, (jsize)written);
+    if (! out) return NULL;
+    (*env)->SetByteArrayRegion(env, out, 0, (jsize)written, (const jbyte *)buf);
+    return out;
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_loadPeerPenalties(JNIEnv *env, jobject thiz,
+                                                            jbyteArray blob) {
+    (void)thiz;
+    if (! blob) return 0;
+
+    jsize len = (*env)->GetArrayLength(env, blob);
+    if (len <= 0) return 0;
+
+    jbyte *bytes = (*env)->GetByteArrayElements(env, blob, NULL);
+    if (! bytes) return 0;
+
+    /* Remember it at bridge level FIRST: startSync may not have built the manager yet
+     * (cold start loads saved state before creating it), and a later recreate needs it
+     * too. */
+    uint8_t *copy = malloc((size_t)len);
+    if (copy) {
+        memcpy(copy, bytes, (size_t)len);
+        PEER_GUARD();
+        free(g_savedPenalties);
+        g_savedPenalties = copy;
+        g_savedPenaltiesLen = (size_t)len;
+
+        size_t restored = 0;
+        if (g_peerManager) {
+            restored = BRPeerManagerLoadPenalties(g_peerManager, g_savedPenalties, g_savedPenaltiesLen);
+        }
+        (*env)->ReleaseByteArrayElements(env, blob, bytes, JNI_ABORT);
+        LOGI("loadPeerPenalties: %zu byte(s) held for the peer manager, %zu applied now",
+             g_savedPenaltiesLen, restored);
+        return (jint)restored;
+    }
+
+    (*env)->ReleaseByteArrayElements(env, blob, bytes, JNI_ABORT);
+    return 0;
 }
 
 /* ---------- keepAlivePeers ---------- */

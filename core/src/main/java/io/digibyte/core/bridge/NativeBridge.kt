@@ -186,6 +186,16 @@ object NativeBridge {
 
     /** Send a keepalive ping to every connected peer so idle CF filter-peer connections aren't
      *  dropped by the remote node / NAT inactivity timeout. Call periodically (~every 10-20s). */
+    /** Serialize the peer re-dial penalty set (address, port, absolute deadline) so it
+     *  survives a process restart. Without it every cold start re-dials peers the last
+     *  session already learned were behind. Null when there is nothing live to save. */
+    external fun serializePeerPenalties(): ByteArray?
+
+    /** Restore penalties saved by [serializePeerPenalties]. Entries whose window has
+     *  lapsed are dropped on read, so a blob from a wallet that sat closed for an hour
+     *  restores nothing. Returns how many were restored. */
+    external fun loadPeerPenalties(blob: ByteArray): Int
+
     external fun keepAlivePeers()
 
     /** Get estimated network block height. */
@@ -346,12 +356,22 @@ object NativeBridge {
      */
     external fun getFilterElementStats(): String
 
-    /** Sovereign, chain-derived spent-state for an asset outpoint (tri-state):
-     *  0 = SPENT (in the wallet's spentOutputs set), 1 = HELD (funding tx known
-     *  and unspent), -1 = UNDETECTED (funding tx unknown — a backend-sourced
-     *  row the SPV sync hasn't reached; leave it unchanged). Reads the
-     *  authoritative spentOutputs set, not the asset-UTXO array. */
+    /** Sovereign, chain-derived state for an asset outpoint — see
+     *  [io.digibyte.core.asset.AssetSpentState]: 0 = SPENT, 1 = HELD, -1 = UNDETECTED
+     *  (funding tx unknown — leave the persisted flag unchanged), -2 = CONFLICTED (the
+     *  funding tx is known but invalid, i.e. a stuck send that was re-sent; its outputs
+     *  will never exist on-chain). Reads the authoritative spentOutputs set plus
+     *  transaction validity, not the asset-UTXO array. */
     external fun outpointSpentState(txHashHex: String, vout: Int): Int
+
+    /** Hold an outpoint OUT of the spendable DGB UTXO set because it carries DigiAsset
+     *  units the native tx-local classifier cannot see — chiefly implicit change, the
+     *  units a transfer's instructions leave unassigned, which the protocol credits to
+     *  the transaction's LAST output. Without this a plain DGB send can select the
+     *  output and destroy the asset silently. Idempotent; NOT persistent across process
+     *  restart, so registrations are replayed from the local asset rows after the wallet
+     *  loads. Returns true if this call newly excluded the outpoint. */
+    external fun registerAssetOutpoint(txHashHex: String, vout: Int): Boolean
 
     /** Injects a node-verified transaction into the wallet. Used by the
      *  chain reconciliation service to repair state when the SPV bloom

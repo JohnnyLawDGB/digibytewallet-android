@@ -328,10 +328,7 @@ class SyncService : Service() {
             // user's explicit save.
             ownNodeAdditiveSessionOverride = false
             serviceScope.launch {
-                try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectPeers()
-                injectCustomNode()   // re-injects + pins (or clears) with the new prefs
-                NativeBridge.startSync()
+                recreatePeerManagerResumingNearTip("own-node settings change")
             }
             return START_STICKY
         }
@@ -348,10 +345,7 @@ class SyncService : Service() {
             // prefs, so the persisted exclusive choice is untouched.
             ownNodeAdditiveSessionOverride = true
             serviceScope.launch {
-                try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
-                injectPeers()
-                injectCustomNode()   // override above forces non-exclusive here
-                NativeBridge.startSync()
+                recreatePeerManagerResumingNearTip("own-node additive override")
             }
             return START_STICKY
         }
@@ -405,10 +399,7 @@ class SyncService : Service() {
                             "loop-revival: 0 peers with sync setup complete — full recovery " +
                                 "(recreate manager + re-inject canon + restart)"
                         )
-                        runCatching { NativeBridge.forceReconnect() }
-                        injectPeers()
-                        injectCustomNode()
-                        runCatching { NativeBridge.startSync() }
+                        recreatePeerManagerResumingNearTip("cf-frozen")
                     }
                 }
             }
@@ -649,12 +640,21 @@ class SyncService : Service() {
         // withTimeout here could not cancel any of them. Detached + interruptible instead.
         launchBoundedRecovery("network-regained") {
             runInterruptible(Dispatchers.IO) {
+                // Refresh the near-tip window BEFORE the rebuild consumes it, or the new
+                // manager floors to the birth checkpoint. Same ordering as
+                // recreatePeerManagerResumingNearTip; kept inline here because this path
+                // splits across IO hops for the DNS-bound own-node injection.
+                // Flush first: the reload below reads the last PERSISTED snapshot, and the
+                // rebuild discards anything still only in memory (flushLiveStateBeforeRecreate).
+                flushLiveStateBeforeRecreate()
+                runCatching { reloadSavedBlocksNearTip() }
                 runCatching { NativeBridge.forceReconnect() }
                 injectPeers()
             }
             injectCustomNode()   // suspend (DNS); has its own IO hop
             runInterruptible(Dispatchers.IO) {
                 runCatching { NativeBridge.startSync() }
+                runCatching { restoreCfLedgerAndSnap() }
                 // The polling keepalive/watchdog may have frozen with the pool; re-arm it
                 // now that the reconnect has freed the wedged native state.
                 runCatching { resurrectKeepaliveIfNeeded() }
@@ -987,6 +987,11 @@ class SyncService : Service() {
             // wallet never reaches again — so a DigiDollar receive that arrived live could sit
             // at $0 indefinitely until the user manually ran "Scan for missing transactions".
             // Internally gated on pending>0 and debounced, so a healthy wallet does nothing.
+            // Snapshot the re-dial penalties periodically too: a process killed by the
+            // OS (Doze, low memory, force-stop) never reaches onDestroy, and that is
+            // exactly the wallet that most needs to not re-dial known-bad peers on the
+            // way back up.
+            if (tickCount % 30L == 0L) persistPeerPenalties()
             if (tickCount % 30L == 0L && NativeBridge.getPeerCount() > 0) {
                 launch(kotlinx.coroutines.Dispatchers.IO) {
                     maybeRunConfirmationReconcile("keepalive tick")
@@ -1001,12 +1006,26 @@ class SyncService : Service() {
                     try {
                         runCatching { assetManager.sweepKnownTransactionsForAssets() }
                             .onFailure { android.util.Log.w("SyncService", "native sweep threw", it) }
+                        // Re-derive each asset row's spent flag from the native wallet.
+                        // Nothing else on the standing path does: it used to ride along
+                        // with the backend asset refresh, which bailed before reaching it.
+                        // A stale `spent = true` HIDES a real holding, and only this
+                        // clears it. Local only — no address disclosure.
+                        runCatching { assetManager.reconcileAssetRowsLocally() }
+                            .onFailure { android.util.Log.w("SyncService", "asset row reconcile threw", it) }
                         if (assetPruneGateOpen(
                                 syncedThisSession = syncedThisSession,
                                 peerCount = NativeBridge.getPeerCount(),
                                 progress = currentSyncProgress(),
                                 walletLoaded = NativeBridge.isWalletLoaded(),
                             )) {
+                            // Rows from a broadcast that never confirmed and has since
+                            // been dropped from the wallet. clearDeadAssetSend can't reach
+                            // these: it needs the tx present to enumerate its outputs, and
+                            // by now it is gone. Never-confirmed only, so a below-scan-floor
+                            // holding (which carries a real height) is never touched.
+                            runCatching { assetManager.pruneDeadBroadcastRows() }
+                                .onFailure { android.util.Log.w("SyncService", "dead-broadcast prune threw", it) }
                             runCatching { assetManager.pruneRemovedNativeAssetRows() }
                                 .onFailure { android.util.Log.w("SyncService", "asset prune threw", it) }
 
@@ -1091,18 +1110,28 @@ class SyncService : Service() {
                         android.util.Log.d("SyncService",
                             "Tor enabled but proxy not ready — deferring peer connect to avoid a direct-before-Tor leak")
                     } else {
+                        var recreatedThisPass = false
                         zeroPeerStreak++
                         if (zeroPeerStreak >= ZERO_PEER_RECREATE_THRESHOLD) {
                             android.util.Log.w("SyncService",
                                 "0 peers for $zeroPeerStreak cycles — light reconnect isn't recovering, " +
                                 "forcing a clean peer-manager recreate")
+                            // Flush, then refresh the window: this is a genuine recreate, and
+                            // without the refresh the rebuild floors the chain to birth — while
+                            // without the flush it resumes a save interval behind the live scan.
+                            flushLiveStateBeforeRecreate()
+                            runCatching { reloadSavedBlocksNearTip() }
                             try { NativeBridge.forceReconnect() } catch (_: Throwable) {}
+                            recreatedThisPass = true
                             zeroPeerStreak = 0
                         }
                         android.util.Log.i("SyncService", "No peers connected, re-injecting filter peers and reconnecting")
                         injectPeers()
                         injectCustomNode()
                         NativeBridge.startSync()
+                        // Only after an actual recreate: restoring the ledger snaps the
+                        // resume cursor, which is pointless when the manager was untouched.
+                        if (recreatedThisPass) runCatching { restoreCfLedgerAndSnap() }
                     }
                 } else {
                     zeroPeerStreak = 0
@@ -1381,10 +1410,7 @@ class SyncService : Service() {
                             "re-request ($peers peers) — recreating peer manager (tier 2)"
                     )
                     lastTier2Ms = nowMs
-                    runCatching { NativeBridge.forceReconnect() }
-                    injectPeers()
-                    injectCustomNode()
-                    runCatching { NativeBridge.startSync() }
+                    recreatePeerManagerResumingNearTip("recovery")
                     state = state.copy(tier1Fired = false) // re-arm tier 1 against the fresh manager
                 } else if (shouldRerequestHeadersOnStall(
                         peerCount = peers,
@@ -1664,19 +1690,26 @@ class SyncService : Service() {
                         "BIP158 watchdog: cfTip WEDGED at net-max $cfNetMax for " +
                         "${(nowMs - cfNetProgressMs) / 1000}s while blockTip climbs ($blockTip) — " +
                         "dropping diverged filter chain + recreating manager to re-fetch cfheaders")
-                    FilterHeaderStore.delete(this@SyncService)
-                    pendingFilterHeaders = null
-                    filterHeadersDirty = false
-                    CfScanLedgerStore.delete(this@SyncService)
-                    pendingCfLedger = null
-                    runCatching { NativeBridge.forceReconnect() }
-                    injectPeers()
-                    injectCustomNode()
-                    runCatching { NativeBridge.startSync() }
-                    // The ledger was just deleted, so the scan frontier re-inits at the
-                    // floor: reset the tracker or the stale running-max would keep the
-                    // scan-frozen gate satisfied through the entire clean re-climb.
-                    scanNetMax = 0
+                    // A wedged filter chain is a FILTER-CHAIN problem. The scan ledger
+                    // records which ranges this wallet already scanned against its own
+                    // watch set, which is still true — and it is what lets the recreate
+                    // resume near tip instead of at the birth floor. See CfRecoveryPolicy.
+                    val policy = io.digibyte.core.sync.CfRecoveryPolicy.decide(
+                        io.digibyte.core.sync.CfRecoveryPolicy.Reason.FILTER_CHAIN_WEDGED)
+                    if (policy.dropFilterChain) {
+                        FilterHeaderStore.delete(this@SyncService)
+                        pendingFilterHeaders = null
+                        filterHeadersDirty = false
+                    }
+                    if (policy.dropScanLedger) {
+                        CfScanLedgerStore.delete(this@SyncService)
+                        pendingCfLedger = null
+                    }
+                    recreatePeerManagerResumingNearTip("cf-chain wedged")
+                    // Only meaningful when the ledger WAS dropped and the frontier re-inits
+                    // at the floor; harmless otherwise, and the running-max must not keep
+                    // the scan-frozen gate satisfied through a clean re-climb.
+                    if (policy.dropScanLedger) scanNetMax = 0
                     scanProgressMs = nowMs
                     continue
                 }
@@ -1739,6 +1772,10 @@ class SyncService : Service() {
                         "(heal $corruptHeals/$MAX_CF_CORRUPT_HEALS) — persisted chain looks corrupt; " +
                         "wiping ALL filter state + clean re-fetch" +
                         (if (fp != null) " via pinned canon ${fp.first}:${fp.second}" else " (no canon peer cached)"))
+                    // Still wedged THROUGH a re-anchor: the persisted chain is not merely
+                    // stale, and the scan record derived alongside it is no longer
+                    // trustworthy either — CfRecoveryPolicy.FILTER_CHAIN_CORRUPT is the one
+                    // reason that legitimately takes the ledger too.
                     // Clear EVERY persisted filter-chain source (the one-time re-anchor
                     // only deletes the file store): file, in-memory pending copy, dirty flag.
                     FilterHeaderStore.delete(this@SyncService)
@@ -1749,10 +1786,7 @@ class SyncService : Service() {
                     // Reset the native CF chain to the floor, then force a clean manager
                     // recreate that re-fetches cfheaders from a fresh peer cohort.
                     runCatching { NativeBridge.reanchorCompactFilterChainAtFloor() }
-                    runCatching { NativeBridge.forceReconnect() }
-                    injectPeers()
-                    injectCustomNode()
-                    runCatching { NativeBridge.startSync() }
+                    recreatePeerManagerResumingNearTip("recovery")
                     // Prefer a fully-synced canon peer for the clean re-fetch (best-effort;
                     // injectPeers already re-seeds the 16 canon nodes into the pool).
                     if (fp != null) runCatching { NativeBridge.setPinnedPeer(fp.first, fp.second, false) }
@@ -1798,13 +1832,21 @@ class SyncService : Service() {
                                 // Drop the persisted chain (file + legacy key) and the
                                 // pending in-memory copy so a kill before the first
                                 // re-anchored append can't restore the stuck cfTip.
-                                FilterHeaderStore.delete(this@SyncService)
-                                pendingFilterHeaders = null
-                                filterHeadersDirty = false
-                                CfScanLedgerStore.delete(this@SyncService)
-                                pendingCfLedger = null
-                                // Ledger deleted => the scan frontier re-inits at the floor.
-                                scanNetMax = 0
+                                val reanchorPolicy = io.digibyte.core.sync.CfRecoveryPolicy.decide(
+                                    io.digibyte.core.sync.CfRecoveryPolicy.Reason.REANCHORED)
+                                if (reanchorPolicy.dropFilterChain) {
+                                    FilterHeaderStore.delete(this@SyncService)
+                                    pendingFilterHeaders = null
+                                    filterHeadersDirty = false
+                                }
+                                // Re-anchoring rebuilds the CHAIN from a floor. It says
+                                // nothing about which ranges this wallet already scanned,
+                                // and that record is what keeps the resume point near tip.
+                                if (reanchorPolicy.dropScanLedger) {
+                                    CfScanLedgerStore.delete(this@SyncService)
+                                    pendingCfLedger = null
+                                    scanNetMax = 0
+                                }
                                 scanProgressMs = nowMs
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
@@ -1949,6 +1991,15 @@ class SyncService : Service() {
         }
         android.util.Log.i("SyncService", "Wallet ready, starting sync (waited ${waitCount * 500}ms)")
 
+        // Re-exclude asset-bearing outputs from the spendable DGB set. The native
+        // exclusion list does not survive process restart, and the wallet is spendable the
+        // moment it loads — well before the first 30s asset sweep would rebuild it. An
+        // output carrying implicit change looks like ordinary DGB until this runs, so a
+        // send inside that window could destroy an asset. Needs no peers: it runs off the
+        // asset rows we already hold locally.
+        runCatching { assetManager.replayAssetOutpointExclusions() }
+            .onFailure { android.util.Log.w("SyncService", "asset exclusion replay failed", it) }
+
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
 
@@ -1999,21 +2050,27 @@ class SyncService : Service() {
             savedLedger = null
             blockBytes = null
         }
-        if (blockBytes != null) {
-            val loaded = NativeBridge.loadSavedBlocks(blockBytes)
-            android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
-            // Seed the monotonic persistence guard with the on-disk tip so the
-            // first save this session can't overwrite a higher persisted window
-            // with a lower one — the regression this guard exists to prevent.
-            val onDiskTip = parseSavedBlocksTopHeight(blockBytes)
-            if (onDiskTip > prefs.getLong("saved_blocks_tip", 0L)) {
-                prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
-            }
-        }
+        // Pass the POST-preflight window explicitly (see reloadSavedBlocksNearTip):
+        // a preflight that set blockBytes = null must not be undone by the helper
+        // re-reading the file the preflight just deleted.
+        reloadSavedBlocksNearTip(blockBytes)
         val peerBytes = decodeSavedBlobOrDrop(prefs, "saved_peers")
         if (peerBytes != null) {
             val loaded = NativeBridge.loadSavedPeers(peerBytes)
             android.util.Log.i("SyncService", "Loaded $loaded saved peers from disk")
+        }
+
+        // Re-dial penalties from the previous session. Without these a cold start
+        // re-dials peers the last session already learned were behind — the churn the
+        // penalty set exists to stop, reintroduced once per launch. Held at bridge level
+        // so a later manager recreate inherits them; entries whose window has lapsed are
+        // dropped on read, so a wallet that sat closed for an hour starts clean.
+        prefs.getString("saved_peer_penalties", null)
+            ?.let { io.digibyte.core.sync.PeerPenaltyPersist.decodeHex(it) }
+            ?.let { blob ->
+            runCatching { NativeBridge.loadPeerPenalties(blob) }
+                .onSuccess { android.util.Log.i("SyncService", "Restored $it peer penalty/ies from disk") }
+                .onFailure { android.util.Log.w("SyncService", "peer-penalty restore failed", it) }
         }
 
         // Release the peer-manager creation gate now that saved blocks/peers are
@@ -2163,28 +2220,11 @@ class SyncService : Service() {
         // queryable immediately after this returns.
         NativeBridge.startSync()
 
-        // CF scan ledger (Phase-1 observe-only): restore AFTER startSync so the
-        // native peer manager exists (restoreCfScanLedger is guarded and returns
-        // false otherwise). The native ledger is Init'd during startSync, so an
-        // earlier restore (e.g. at the filter-chain restore site) would be wiped.
-        if (savedLedger != null) {
-            val ok = NativeBridge.restoreCfScanLedger(savedLedger)
-            android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
-        }
-
-        // Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume):
-        // enableAutoCompactFilterFetch above armed the forward-fetch cursor at
-        // birthHeight-1 BEFORE the restore just above could set scannedThrough far
-        // higher. Snap the cursor up to the restored scan frontier now — MUST run
-        // after the restore (there is nothing to snap to before it), or the next
-        // forward fetch re-requests already-scanned history from birthHeight and
-        // drags scannedThrough back down, silently throwing away persisted scan
-        // progress (and under the paced convoy's ~10s KeepAlive drive, it would
-        // re-do that every tick).
-        val cursorBefore = NativeBridge.getAutoFetchCFiltersThrough()
-        val cursorAfter = NativeBridge.snapAutoFetchThroughToScanFrontier()
-        android.util.Log.i("SyncService",
-            "cf-ledger: resume cursor snap $cursorBefore -> $cursorAfter")
+        // Ledger restore + resume-cursor snap. MUST stay here, immediately after
+        // startSync — see restoreCfLedgerAndSnap for the full ordering rationale.
+        // Pass the POST-preflight ledger explicitly so a preflight reset is not
+        // undone by the helper re-loading from disk.
+        restoreCfLedgerAndSnap(savedLedger)
 
         // Dandelion durability recovery: re-broadcast any recorded send the
         // wallet still sees as unconfirmed. A stem killed mid-embargo (process
@@ -2227,6 +2267,210 @@ class SyncService : Service() {
         }
     }
 
+    /**
+     * Persist the native re-dial penalty set so the next launch doesn't start by dialling
+     * peers this session already learned were behind. Tiny (32 entries max, 26 bytes each)
+     * so the hex-in-prefs shape is fine here — unlike the filter-header chain, which grew
+     * without bound in prefs and had to move to a file.
+     *
+     * Null means nothing live to save (no manager, or every window lapsed); the previous
+     * blob is then cleared rather than left to be restored stale.
+     */
+    private fun persistPeerPenalties() {
+        runCatching {
+            val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
+            val blob = NativeBridge.serializePeerPenalties()
+            when (val action = io.digibyte.core.sync.PeerPenaltyPersist.decide(blob)) {
+                // Null means the native side couldn't answer (no live peer manager, or the
+                // probe threw) — NOT that nothing is penalized: an empty set still carries a
+                // 4-byte count header. Clearing on null would throw away penalties we had
+                // already banked because of a momentary hiccup.
+                is io.digibyte.core.sync.PeerPenaltyPersist.Action.Keep ->
+                    android.util.Log.i("SyncService",
+                        "peer penalties unavailable this tick (${blob?.size ?: -1} bytes) — keeping stored set")
+
+                is io.digibyte.core.sync.PeerPenaltyPersist.Action.Clear -> {
+                    prefs.edit().remove("saved_peer_penalties").apply()
+                    android.util.Log.i("SyncService", "peer penalties: none live, stored set cleared")
+                }
+
+                is io.digibyte.core.sync.PeerPenaltyPersist.Action.Store -> {
+                    prefs.edit().putString("saved_peer_penalties", action.hex).apply()
+                    android.util.Log.i("SyncService",
+                        "peer penalties persisted (${blob?.size ?: 0} bytes)")
+                }
+            }
+        }.onFailure { android.util.Log.w("SyncService", "peer-penalty persist failed", it) }
+    }
+
+    /**
+     * Recreate the native peer manager so it resumes NEAR TIP instead of flooring to the
+     * wallet birth checkpoint.
+     *
+     * `forceReconnect()` + `startSync()` on their own rebuild the manager from the stale
+     * cold-start `g_savedBlocks` — loaded once at launch and never refreshed from the
+     * advancing chain — so `manager->lastBlock` drops to the birth checkpoint and auto-fetch
+     * re-arms at `cf_birth_height`. Measured on a Note 8: a scan at 24,052,509 fell to
+     * 22,650,000 and spent roughly six hours climbing back.
+     *
+     * Ordering is the whole fix, and it lives in [RecreateSequence] so it is covered by unit
+     * tests rather than only observable on a device mid-failure: refresh the window BEFORE
+     * the rebuild consumes it, restore the CF ledger AFTER the new manager exists. Peer
+     * injection stays between the reconnect and the restart, exactly where each call site
+     * had it.
+     */
+    /**
+     * Make the disk copy the freshest copy, immediately before a recreate destroys the
+     * native manager.
+     *
+     * [reloadSavedBlocksNearTip] and [restoreCfLedgerAndSnap] both read the last PERSISTED
+     * snapshot, but the freshest state this process holds is in memory: the saved-blocks
+     * window sits in [lastSavedBlocksData] until its next save boundary, and the CF scan
+     * ledger sits in [pendingCfLedger] until the coalesced writer's [filterHeaderSaveIntervalMs]
+     * tick. `forceReconnect()` frees the manager, so whatever is only in memory at that
+     * moment is gone — and the recreate would then restore a frontier up to a full save
+     * interval behind where the scan actually was, with the resume cursor snapped down to
+     * match. That give-back is small next to the birth-height floor this work removed, but
+     * it is charged on EVERY recovery, so it accumulates in exactly the same direction.
+     *
+     * Same two writes [onDestroy] performs, for the same reason, minus the teardown. Both
+     * are guarded: a failed flush costs at most the un-flushed interval, whereas refusing to
+     * rebuild would leave the wallet with a dead manager.
+     */
+    private fun flushLiveStateBeforeRecreate() {
+        lastSavedBlocksData?.let { (bytes, epoch) ->
+            runCatching { persistBlocks(bytes, epoch, synchronous = true) }
+                .onFailure { android.util.Log.w("SyncService", "pre-recreate block flush failed", it) }
+        }
+        runCatching { flushFilterHeaders() }
+            .onFailure { android.util.Log.w("SyncService", "pre-recreate ledger flush failed", it) }
+    }
+
+    private suspend fun recreatePeerManagerResumingNearTip(reason: String) {
+        val result = io.digibyte.core.sync.RecreateSequence.run(
+            flushPersistedState = { flushLiveStateBeforeRecreate() },
+            reloadBlocksNearTip = { reloadSavedBlocksNearTip() },
+            forceReconnect = { NativeBridge.forceReconnect() },
+            startSync = {
+                injectPeers()
+                injectCustomNode()
+                NativeBridge.startSync()
+            },
+            restoreLedgerAndSnap = { restoreCfLedgerAndSnap() },
+        )
+        android.util.Log.i(
+            "SyncService",
+            "recreate ($reason): window=${if (result.windowReloaded) "near-tip" else "none"}" +
+                if (result.failures.isEmpty()) "" else " failures=${result.failures}"
+        )
+    }
+
+    /**
+     * Hand the persisted near-tip block window to the C core and seed the
+     * monotonic persistence guard with its tip. Extracted verbatim from
+     * [startSyncWithTor] so the mid-session peer-manager recreate paths can re-run
+     * the SAME restore instead of rebuilding the manager from the stale cold-start
+     * snapshot (which floors the chain at the wallet birth height — the
+     * "my wallet resynced from scratch" report). Call BEFORE a recreate.
+     *
+     * [blockBytes] defaults to a fresh [SavedBlockStore.load] for callers that hold
+     * no window of their own (the recreate paths). Cold start MUST pass its own
+     * post-preflight value — INCLUDING `null` when the CF restore preflight decided
+     * to discard it — so that reset decision is never undone by re-reading a file
+     * the preflight just deleted.
+     *
+     * NOTE — the default reads the LAST PERSISTED SNAPSHOT, not the freshest state
+     * this process knows. [SavedBlockStore] only ever holds a window the C core
+     * actually EMITTED via `onSaveBlocks` (4000-block boundaries during descent,
+     * ~20s cadence at the tip) and that then survived [persistBlocks]' monotonic
+     * guard; the freshest window the process has seen is the in-memory
+     * [lastSavedBlocksData]. So a mid-session caller taking the default hands the
+     * core a window up to one save boundary BEHIND where the chain actually is.
+     * Whether to flush [lastSavedBlocksData] (or force a save) before a recreate is
+     * a deliberate decision for the recreate call sites — it is NOT made here.
+     *
+     * Re-entrant by design: `loadSavedBlocks` frees a previously loaded window only
+     * while the bridge still owns it — `startSync` NULLs `g_savedBlocks` when it
+     * transfers ownership to the peer manager (jni_peer.c; regression-guarded by
+     * `saved_blocks_reentrant_kat`), so a mid-session call cannot double-free.
+     *
+     * Deliberately does NOT call `markSavedBlocksLoadComplete()`: releasing the
+     * peer-manager creation gate stays on the cold-start path, AFTER the saved
+     * PEERS load, exactly where it is today (moving it here would open the gate one
+     * step early). The native flag is a set-once latch that is already released
+     * before any recreate path can run, so recreate callers never need it.
+     *
+     * @return true if a window was actually loaded into the core; false when the
+     *   window is missing or the blob deserialized to nothing.
+     */
+    private fun reloadSavedBlocksNearTip(
+        blockBytes: ByteArray? = SavedBlockStore.load(this@SyncService),
+    ): Boolean {
+        if (blockBytes == null) return false
+        val loaded = NativeBridge.loadSavedBlocks(blockBytes)
+        android.util.Log.i("SyncService", "Loaded $loaded saved blocks from disk")
+        // Seed the monotonic persistence guard with the on-disk tip so the
+        // first save this session can't overwrite a higher persisted window
+        // with a lower one — the regression this guard exists to prevent.
+        val onDiskTip = parseSavedBlocksTopHeight(blockBytes)
+        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        if (onDiskTip > prefs.getLong("saved_blocks_tip", 0L)) {
+            prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
+        }
+        return loaded > 0
+    }
+
+    /**
+     * Restore the CF scan ledger and snap the resume cursor to the restored scan
+     * frontier. Extracted verbatim from [startSyncWithTor]; call AFTER a recreate
+     * (and, on cold start, after [NativeBridge.startSync]).
+     *
+     * [savedLedger] defaults to a fresh [CfScanLedgerStore.load] for callers that
+     * hold no ledger of their own (the recreate paths). Cold start MUST pass its
+     * own post-preflight value — INCLUDING `null` when the CF restore preflight
+     * decided to discard it — so that reset decision is never undone by re-reading
+     * a file the preflight just deleted.
+     *
+     * NOTE — the default reads the LAST PERSISTED SNAPSHOT, not the freshest state
+     * this process knows. `onSaveCfLedger` only records the newest ledger into the
+     * in-memory [pendingCfLedger]; the coalesced writer ([startFilterHeaderWriter])
+     * flushes it to [CfScanLedgerStore] at most once per [filterHeaderSaveIntervalMs]
+     * (20s), and defers even that when `persistWalletTransactionsCheckpoint()` fails
+     * (re-marking dirty for the next tick). A mid-session caller taking the default
+     * can therefore restore a frontier ~20s or more BEHIND the live native scan —
+     * and because the cursor snap below then snaps to that LOWER frontier, the next
+     * `onSaveCfLedger` persists the regressed value: silent scan-progress loss,
+     * which is the exact failure class this work exists to eliminate. Whether to
+     * flush [pendingCfLedger] before a recreate is a deliberate decision for the
+     * recreate call sites — it is NOT made here.
+     */
+    private fun restoreCfLedgerAndSnap(
+        savedLedger: ByteArray? = CfScanLedgerStore.load(this@SyncService),
+    ) {
+        // CF scan ledger (Phase-1 observe-only): restore AFTER startSync so the
+        // native peer manager exists (restoreCfScanLedger is guarded and returns
+        // false otherwise). The native ledger is Init'd during startSync, so an
+        // earlier restore (e.g. at the filter-chain restore site) would be wiped.
+        if (savedLedger != null) {
+            val ok = NativeBridge.restoreCfScanLedger(savedLedger)
+            android.util.Log.i("SyncService", "cf-ledger: restored (${savedLedger.size} bytes, ok=$ok)")
+        }
+
+        // Resume cursor reconciliation (paced-convoy fetch, spec Part B1-resume):
+        // enableAutoCompactFilterFetch above armed the forward-fetch cursor at
+        // birthHeight-1 BEFORE the restore just above could set scannedThrough far
+        // higher. Snap the cursor up to the restored scan frontier now — MUST run
+        // after the restore (there is nothing to snap to before it), or the next
+        // forward fetch re-requests already-scanned history from birthHeight and
+        // drags scannedThrough back down, silently throwing away persisted scan
+        // progress (and under the paced convoy's ~10s KeepAlive drive, it would
+        // re-do that every tick).
+        val cursorBefore = NativeBridge.getAutoFetchCFiltersThrough()
+        val cursorAfter = NativeBridge.snapAutoFetchThroughToScanFrontier()
+        android.util.Log.i("SyncService",
+            "cf-ledger: resume cursor snap $cursorBefore -> $cursorAfter")
+    }
+
     override fun onDestroy() {
         foregroundSyncLive.set(false)
         // Flush the latest block window synchronously before teardown so a
@@ -2236,6 +2480,8 @@ class SyncService : Service() {
             runCatching { persistBlocks(bytes, epoch, synchronous = true) }
         }
         flushFilterHeaders()
+        // Before stopSync frees the peer manager: keep what we learned about bad peers.
+        persistPeerPenalties()
         // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
         // keepalive sweep can hold for up to ~K×10s pinging half-dead sockets —
         // calling it synchronously here runs on the main thread (Service lifecycle
@@ -3120,7 +3366,8 @@ class SyncService : Service() {
         }
     }
 
-    /** Synchronously flush the latest filter-header chain (final save on teardown). */
+    /** Synchronously flush the latest filter-header chain and CF scan ledger — the final
+     *  save on teardown, and the pre-recreate flush (see [flushLiveStateBeforeRecreate]). */
     private fun flushFilterHeaders() {
         if (filterHeadersDirty) {
             filterHeadersDirty = false
@@ -3128,6 +3375,13 @@ class SyncService : Service() {
             pendingCfLedger?.let { (bytes, ep) ->
                 if (persistWalletTransactionsCheckpoint()) {
                     runCatching { CfScanLedgerStore.write(this, bytes, ep) }
+                } else {
+                    // The checkpoint gate refused, so the ledger was NOT written. Re-mark
+                    // dirty so the coalesced writer retries — exactly what its own loop does
+                    // on the same failure. Without this, a flush that fails its gate drops
+                    // the ledger AND the flag that would have recovered it, which on a
+                    // mid-session recreate means resuming from an older scan frontier.
+                    filterHeadersDirty = true
                 }
             }
         }
@@ -3279,10 +3533,21 @@ class SyncService : Service() {
                 lastConfirmReconcileMs = now
                 android.util.Log.i("SyncService",
                     "$reason with unconfirmed tx(s) — running confirmation-reconcile")
-                ChainReconciliationService(
+                // TXID-DRIVEN, as this call site has always claimed. `reconcile()` also
+                // enumerates the whole owned address set and POSTs it in 500-address
+                // chunks — a complete map of the wallet, disclosed automatically on a
+                // keepalive tick, with no user present. Promoting our own stuck-"Pending"
+                // transactions is what this path is for and discloses only txids we
+                // broadcast ourselves.
+                val service = ChainReconciliationService(
                     DgbNodeClient(this@SyncService), assetManager,
                     appContext = this@SyncService,
-                ).reconcile()
+                )
+                val promoted = service.confirmPendingTransactions()
+                service.reconcileAssetRowsLocallyIfPresent()
+                if (promoted > 0) {
+                    android.util.Log.i("SyncService", "confirmation-reconcile promoted $promoted tx(s)")
+                }
             }
         }.onFailure { android.util.Log.w("SyncService", "confirmation-reconcile failed", it) }
     }
@@ -3436,7 +3701,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 23_900_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 24_000_000L
 
         /** How far the compact-filter SCAN may trail the network tip and still count as
          *  caught up. The scan legitimately lags the header tip by a few blocks while the

@@ -108,6 +108,93 @@ int main(void)
               "a refreshed entry is still contained at a time past the original window");
     }
 
+    // ---- persistence across process restarts -------------------------------------
+    // The penalty set was session-scoped, so every cold start re-dialled peers we had
+    // already learned were behind — exactly the "one peer dialled 122x" churn the
+    // penalty exists to stop, reintroduced once per launch. These two pure helpers
+    // round-trip it through a blob the Kotlin layer can persist.
+    {
+        UInt128 addrs[3] = { addrA, addrB, addrA };
+        uint16_t ports[3] = { portA, portB, (uint16_t)(portA + 1) };
+        time_t until[3] = { now + 10*60, now + 5*60, now - 60 }; // third is already expired
+
+        uint8_t buf[512];
+        size_t written = BRPeerPenaltySerialize(addrs, ports, until, 3, now, buf, sizeof(buf));
+        check(written > 0, "the penalty set serializes");
+
+        UInt128 outAddrs[8]; uint16_t outPorts[8]; time_t outUntil[8];
+        size_t loaded = BRPeerPenaltyDeserialize(buf, written, now, outAddrs, outPorts, outUntil, 8);
+        check(loaded == 2, "an entry whose window already lapsed is not carried across the restart");
+        check(BRPeerPenaltyContains(outAddrs, outPorts, outUntil, loaded, addrA, portA, now) == 1,
+              "a live penalty survives the round trip");
+        check(BRPeerPenaltyContains(outAddrs, outPorts, outUntil, loaded, addrB, portB, now) == 1,
+              "a second live penalty survives too");
+        check(BRPeerPenaltyContains(outAddrs, outPorts, outUntil, loaded, addrA, (uint16_t)(portA + 1), now) == 0,
+              "the expired entry is absent after the round trip");
+
+        // Deadlines are absolute, so a blob written long ago must not re-penalize
+        // anyone: reading it later drops everything whose window has since lapsed.
+        size_t stale = BRPeerPenaltyDeserialize(buf, written, now + 30*60, outAddrs, outPorts, outUntil, 8);
+        check(stale == 0, "a blob read after every window lapsed restores nothing");
+    }
+
+    // A short buffer must report failure rather than write a truncated blob that would
+    // deserialize into garbage penalties on the next launch.
+    {
+        UInt128 addrs[1] = { addrA };
+        uint16_t ports[1] = { portA };
+        time_t until[1] = { now + 10*60 };
+        uint8_t tiny[8];
+        check(BRPeerPenaltySerialize(addrs, ports, until, 1, now, tiny, sizeof(tiny)) == 0,
+              "serialization into an undersized buffer writes nothing and reports 0");
+    }
+
+    // Garbage in must not become penalties out — the blob comes off disk.
+    {
+        UInt128 outAddrs[8]; uint16_t outPorts[8]; time_t outUntil[8];
+        uint8_t truncated[10] = { 9, 0, 0, 0, 1, 2, 3, 4, 5, 6 }; // claims 9 entries, holds none
+        check(BRPeerPenaltyDeserialize(truncated, sizeof(truncated), now, outAddrs, outPorts, outUntil, 8) == 0,
+              "a truncated blob restores nothing");
+        check(BRPeerPenaltyDeserialize(NULL, 0, now, outAddrs, outPorts, outUntil, 8) == 0,
+              "an empty blob restores nothing");
+    }
+
+    // ---- the canon fleet must never be skipped on a cold start -------------------
+    // Only the pinned own-node is exempt from being penalized, so the 16 hardcoded CF
+    // oracle peers CAN land in the set — and a wallet whose fleet is refusing it (44% of
+    // canon closes are refused at the door) will penalize most of them. That was harmless
+    // while the set died with the process: every launch got a clean slate. Persisting it
+    // changes that, and a wallet that comes back up skipping its whole usable fleet is on
+    // the on-ramp to 0 peers -> watchdog -> recreate -> floor-to-birth.
+    //
+    // So restoring DROPS entries for the priority set. In-session penalties still work,
+    // which is what stopped the "one peer dialled 122x" loop; what does not survive a
+    // restart is a penalty against the very peers we need to reach first.
+    {
+        UInt128 addrs[3] = { addrA, addrB, addrA };
+        uint16_t ports[3] = { portA, portB, (uint16_t)(portA + 7) };
+        time_t until[3] = { now + 10*60, now + 10*60, now + 10*60 };
+
+        UInt128 canon[1] = { addrB };   // pretend addrB is one of the oracle nodes
+        size_t kept = BRPeerPenaltyDropExempt(addrs, ports, until, 3, canon, 1);
+
+        check(kept == 2, "a penalty against a priority peer is dropped on restore");
+        check(BRPeerPenaltyContains(addrs, ports, until, kept, addrB, portB, now) == 0,
+              "the priority peer is dialable again after a restart");
+        check(BRPeerPenaltyContains(addrs, ports, until, kept, addrA, portA, now) == 1,
+              "a junk-pool penalty still survives the restart");
+        check(BRPeerPenaltyContains(addrs, ports, until, kept, addrA, (uint16_t)(portA + 7), now) == 1,
+              "compaction keeps every non-exempt entry, not just the first");
+    }
+
+    {   // An empty exempt list must not silently drop everything.
+        UInt128 addrs[1] = { addrA };
+        uint16_t ports[1] = { portA };
+        time_t until[1] = { now + 10*60 };
+        check(BRPeerPenaltyDropExempt(addrs, ports, until, 1, NULL, 0) == 1,
+              "no exempt list means nothing is dropped");
+    }
+
     if (g_failures == 0) {
         printf("\nALL PASSED (0 failure(s))\n");
         return 0;

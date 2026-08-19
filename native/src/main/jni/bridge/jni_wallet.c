@@ -944,12 +944,49 @@ Java_io_digibyte_core_bridge_NativeBridge_walletContainsAddress(JNIEnv *env, job
     return contained ? JNI_TRUE : JNI_FALSE;
 }
 
+/* ---------- registerAssetOutpoint ---------- */
+/* Tell the native wallet that (txHashHex, vout) carries DigiAsset units, so it is held
+ * out of the spendable DGB UTXO set and plain-DGB coin selection can never destroy it.
+ *
+ * BRTxOutputIsAsset only recognises outputs an explicit transfer instruction targets.
+ * DigiAssets also credits every unassigned input unit to the transaction's LAST output,
+ * and deciding whether such a remainder exists needs the INPUT quantities — a chain walk
+ * plus a per-outpoint store, both of which live in the Kotlin asset layer. It resolves
+ * the answer and registers it here, fail-closed (registered when the remainder is
+ * positive OR unknown).
+ *
+ * Idempotent; survives balance rebuilds but not process restart, so the caller replays
+ * its registrations after wallet load. Returns JNI_TRUE if this call newly excluded the
+ * outpoint. */
+JNIEXPORT jboolean JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_registerAssetOutpoint(JNIEnv *env, jobject thiz,
+                                                                jstring txHashHex, jint vout)
+{
+    (void)thiz;
+    if (!g_wallet || !txHashHex || vout < 0) return JNI_FALSE;
+
+    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
+    if (!hashStr) return JNI_FALSE;
+
+    jboolean added = JNI_FALSE;
+    if (strlen(hashStr) == 64) {
+        UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
+        added = BRWalletRegisterAssetOutpoint(g_wallet, hash, (uint32_t)vout) ? JNI_TRUE : JNI_FALSE;
+    }
+    (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
+    return added;
+}
+
 /* ---------- outpointSpentState ---------- */
-/* Sovereign, chain-derived spent-state for an asset outpoint, as a tri-state:
+/* Sovereign, chain-derived state for an asset outpoint:
  *    0 = SPENT       (the outpoint is in the wallet's spentOutputs set)
- *    1 = HELD        (the wallet knows the funding tx and the outpoint is unspent)
+ *    1 = HELD        (the wallet knows the funding tx, it is valid, outpoint unspent)
  *   -1 = UNDETECTED  (the wallet doesn't know the funding tx yet — e.g. a
  *                     backend-sourced row the SPV sync hasn't reached)
+ *   -2 = CONFLICTED  (the funding tx is known but INVALID — another transaction spent
+ *                     its inputs; i.e. a stuck send the user re-sent. Nothing ever
+ *                     spends the abandoned attempt's own change, so spent-ness alone
+ *                     reads HELD and the asset layer counts that change twice.)
  * The reconcile marks a Room asset row spent on 0, unspent on 1, and leaves it
  * unchanged on -1 (so a mid-sync wallet never hides a real holding). Uses
  * BRWalletOutpointSpent (the authoritative spentOutputs set), NOT the asset-UTXO
@@ -967,13 +1004,7 @@ Java_io_digibyte_core_bridge_NativeBridge_outpointSpentState(JNIEnv *env, jobjec
     jint state = -1;
     if (strlen(hashStr) == 64) {
         UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
-        if (BRWalletOutpointSpent(g_wallet, hash, (uint32_t)vout)) {
-            state = 0;                                   /* spent */
-        } else if (BRWalletTransactionForHash(g_wallet, hash)) {
-            state = 1;                                   /* known + unspent = held */
-        } else {
-            state = -1;                                  /* undetected */
-        }
+        state = BRWalletOutpointAssetState(g_wallet, hash, (uint32_t)vout);
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
     return state;
