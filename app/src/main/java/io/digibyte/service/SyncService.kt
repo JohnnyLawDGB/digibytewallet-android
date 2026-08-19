@@ -1685,16 +1685,26 @@ class SyncService : Service() {
                         "BIP158 watchdog: cfTip WEDGED at net-max $cfNetMax for " +
                         "${(nowMs - cfNetProgressMs) / 1000}s while blockTip climbs ($blockTip) — " +
                         "dropping diverged filter chain + recreating manager to re-fetch cfheaders")
-                    FilterHeaderStore.delete(this@SyncService)
-                    pendingFilterHeaders = null
-                    filterHeadersDirty = false
-                    CfScanLedgerStore.delete(this@SyncService)
-                    pendingCfLedger = null
-                    recreatePeerManagerResumingNearTip("recovery")
-                    // The ledger was just deleted, so the scan frontier re-inits at the
-                    // floor: reset the tracker or the stale running-max would keep the
-                    // scan-frozen gate satisfied through the entire clean re-climb.
-                    scanNetMax = 0
+                    // A wedged filter chain is a FILTER-CHAIN problem. The scan ledger
+                    // records which ranges this wallet already scanned against its own
+                    // watch set, which is still true — and it is what lets the recreate
+                    // resume near tip instead of at the birth floor. See CfRecoveryPolicy.
+                    val policy = io.digibyte.core.sync.CfRecoveryPolicy.decide(
+                        io.digibyte.core.sync.CfRecoveryPolicy.Reason.FILTER_CHAIN_WEDGED)
+                    if (policy.dropFilterChain) {
+                        FilterHeaderStore.delete(this@SyncService)
+                        pendingFilterHeaders = null
+                        filterHeadersDirty = false
+                    }
+                    if (policy.dropScanLedger) {
+                        CfScanLedgerStore.delete(this@SyncService)
+                        pendingCfLedger = null
+                    }
+                    recreatePeerManagerResumingNearTip("cf-chain wedged")
+                    // Only meaningful when the ledger WAS dropped and the frontier re-inits
+                    // at the floor; harmless otherwise, and the running-max must not keep
+                    // the scan-frozen gate satisfied through a clean re-climb.
+                    if (policy.dropScanLedger) scanNetMax = 0
                     scanProgressMs = nowMs
                     continue
                 }
@@ -1757,6 +1767,10 @@ class SyncService : Service() {
                         "(heal $corruptHeals/$MAX_CF_CORRUPT_HEALS) — persisted chain looks corrupt; " +
                         "wiping ALL filter state + clean re-fetch" +
                         (if (fp != null) " via pinned canon ${fp.first}:${fp.second}" else " (no canon peer cached)"))
+                    // Still wedged THROUGH a re-anchor: the persisted chain is not merely
+                    // stale, and the scan record derived alongside it is no longer
+                    // trustworthy either — CfRecoveryPolicy.FILTER_CHAIN_CORRUPT is the one
+                    // reason that legitimately takes the ledger too.
                     // Clear EVERY persisted filter-chain source (the one-time re-anchor
                     // only deletes the file store): file, in-memory pending copy, dirty flag.
                     FilterHeaderStore.delete(this@SyncService)
@@ -1813,13 +1827,21 @@ class SyncService : Service() {
                                 // Drop the persisted chain (file + legacy key) and the
                                 // pending in-memory copy so a kill before the first
                                 // re-anchored append can't restore the stuck cfTip.
-                                FilterHeaderStore.delete(this@SyncService)
-                                pendingFilterHeaders = null
-                                filterHeadersDirty = false
-                                CfScanLedgerStore.delete(this@SyncService)
-                                pendingCfLedger = null
-                                // Ledger deleted => the scan frontier re-inits at the floor.
-                                scanNetMax = 0
+                                val reanchorPolicy = io.digibyte.core.sync.CfRecoveryPolicy.decide(
+                                    io.digibyte.core.sync.CfRecoveryPolicy.Reason.REANCHORED)
+                                if (reanchorPolicy.dropFilterChain) {
+                                    FilterHeaderStore.delete(this@SyncService)
+                                    pendingFilterHeaders = null
+                                    filterHeadersDirty = false
+                                }
+                                // Re-anchoring rebuilds the CHAIN from a floor. It says
+                                // nothing about which ranges this wallet already scanned,
+                                // and that record is what keeps the resume point near tip.
+                                if (reanchorPolicy.dropScanLedger) {
+                                    CfScanLedgerStore.delete(this@SyncService)
+                                    pendingCfLedger = null
+                                    scanNetMax = 0
+                                }
                                 scanProgressMs = nowMs
                                 android.util.Log.i("SyncService",
                                     "BIP158 watchdog: re-anchored filter chain at block floor " +
