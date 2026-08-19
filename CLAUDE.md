@@ -70,6 +70,8 @@ The wallet keeps re-hitting the same "won't sync / no confirms for days" class. 
 - **Sync-loop lifecycle:** the SPV loop runs in `SyncService` `serviceScope`. It MUST survive OS background-freeze (**Doze / Samsung One UI / Pixel aggressive battery mgmt**) and **REVIVE on foreground/screen-on**. A foreground `SyncService` whose loop DIED (`dumpsys` shows `isForeground=true` but `lastActivity` minutes stale, 0 peers, `bread` silent) = the **0-peer dead wedge**. Device-specific by design: aggressive-OS devices (Ultra One UI, Pixel 7 Android 17) freeze hardest; "stable on other devices" just means those don't freeze.
 - **Three wedge classes**, all presenting as "stuck sync": **(a) peer-quality roaming** — no filter peer held because the canon isn't pinned; **(b) dead-branch/orphan tip** — a multi-algo (~15s) reorg lands the tip on an abandoned fork; the wallet then rejects canonical peers as `node isn't synced` (its dead-tip height ≥ theirs). Recovery is REACTIVE (v4.0.5 orphan re-anchor + v4.0.14 tip-stall watchdog); **(c) 0-peer dead loop** — OS freeze kills the loop, the foreground service doesn't revive it. **Rescan cures (a)+(b)** (pins the canon + rebuilds canonical from a floor); **force-stop cures (c)**. The durable fixes: pin-the-canon peer selection (a), resume-time loop revival (c).
 
+- **Recreate must resume near tip (FIXED v4.0.40 — do NOT reintroduce).** Every recovery path used to call `forceReconnect()` + `startSync()`, which rebuilds the manager from the **stale cold-start `g_savedBlocks`** — loaded once at launch, never refreshed — flooring `manager->lastBlock` to the birth checkpoint and re-arming auto-fetch at `cf_birth_height`. Measured: 24,052,509 → 22,650,000 and ~6h to climb back. The fix is ordering plus retention, and all three parts are load-bearing: **(1)** refresh the near-tip window BEFORE the rebuild consumes it and restore the CF ledger AFTER the new manager exists (`core/sync/RecreateSequence`); **(2)** routine recovery keeps the scan ledger — only `FILTER_CHAIN_CORRUPT` / `SCAN_LEDGER_CORRUPT` / `WALLET_RESET` may drop it (`core/sync/CfRecoveryPolicy`); **(3)** flush the live block window and ledger to disk BEFORE the teardown, since both restore steps read the last *persisted* snapshot (`flushLiveStateBeforeRecreate`). Parts 1+2 alone leave a one-save-interval give-back charged on every recovery. Any new recovery path must go through `recreatePeerManagerResumingNearTip()`.
+
 ### Fee Structure
 - Single default fee: `DEFAULT_FEE_PER_KB` (100 sat/byte) — DigiByte min relay fee
 - Confirms in ~15 seconds (no fee market on DGB)
@@ -97,6 +99,32 @@ The wallet keeps re-hitting the same "won't sync / no confirms for days" class. 
 - 4 files: GameState.kt, GamePhysics.kt, GameRenderer.kt, DigiRunnerGame.kt
 - Game module has ZERO dependency on `:core` or `:native`
 - Launches from the Hub → Games tab (v3.10.28+). Removed from the sync overlay: rendering it during a fresh full sync could exhaust process memory on long-history wallets.
+
+### DigiAsset balance accounting (settled v4.0.39 — do NOT re-derive)
+The counting rule is one line: **a row counts if and only if the native wallet still holds
+that exact output.** Nothing counts because of where its record came from — the earlier
+"provenance rescue" is what let phantom rows survive, and removing it is the fix.
+
+Two accounting rules the parser must apply, both fund-safety-critical:
+- **Implicit change.** DigiAssets returns the leftover of a partial transfer to the **LAST
+  output**. Missing this under-counts in Kotlin and, in native, lets a plain-DGB spend
+  destroy an asset. `AssetTxQuantity.implicitChange()`.
+- **CONFLICTED state.** An abandoned broadcast that was re-sent still reads as HELD —
+  nothing spends the change of an attempt that never confirmed — so it double-counts.
+  `AssetSpentState.CONFLICTED`.
+
+**Process rule earned the hard way:** four releases were spent inferring the bug from
+balance *totals*. It was found in minutes once the per-row COUNT/drop decision was logged.
+When an asset count is wrong, **log the rows first** — do not reason from the total.
+
+### The handoff specs (`docs/specs/`)
+The 2026-08-16 handoff and its three specs live here, each with a **disposition banner**
+recording what shipped and which premises the code refuted. All three were
+investigation-first, and in each case investigation overturned something load-bearing — so
+treat them as history plus decisions, not as instructions:
+- `digiasset-balance-accounting.md` — ✅ shipped; the "history-replay drift" mechanism was wrong
+- `compact-filter-peer-retention.md` — 🟡 premises refuted; "sticky 2 + standby" deliberately NOT built
+- `restore-flow-asset-aware.md` — 🟡 privacy hole closed; the filter-rescan mechanism cannot work (`credit iff derived`)
 
 ## Important Patterns
 
@@ -159,7 +187,10 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - Emulator AVDs: `dgb-test-api28`, `dgb-test-api33`, `dgb-test-api34`, `dgb-test-api35`
 
 ## Roadmap
-`ROADMAP.md` is authoritative and **sovereignty-first** (removing trusted third parties from the data path comes before feature breadth). The list below is a pointer only — do **not** maintain a second copy here:
+`ROADMAP.md` is authoritative and **sovereignty-first** (removing trusted third parties from the data path comes before feature breadth). Read its **top banner first** — it carries the dated true-up and the current "NEXT", which is the part that goes stale. The list below is a pointer only — do **not** maintain a second copy here:
+
+**Working next (per the 2026-08-19 true-up):** Digi-ID key isolation → `cfcheckpt` active rejection → restore restructure (onboarding split, then asset-aware sweep) → `assets.digistamp.co` (now unblocked). The **duress PIN is cancelled** — do not resurrect it or build against it.
+
 - Phase 0: Legibility (ARCHITECTURE / THREAT_MODEL / BIP-compliance docs)
 - Phase 1: Sovereign data layer — BIP157/158 (**client shipped & default since v3.5.39**; remaining: peer diversity beyond author infra + bloom-deprecation path)
 - Phase 2: Key & trust hardening (Keystore auth-binding, PIN rate-limit, Digi-ID key isolation, Tor disposition)

@@ -15,13 +15,14 @@ import javax.crypto.spec.PBEKeySpec
  * Result of a [PinManager.verifyPin] call. Replaces the old `Boolean` return so
  * every caller enforces the persisted rate-limit uniformly.
  *
- * Forward-compatible with the Phase 2.2 duress PIN: [Success] is the ONLY
- * valid-credential outcome and can later split into `REAL | DURESS` without any
- * change to the rate-limit logic — the limiter only distinguishes valid-vs-invalid,
- * and any valid PIN (real or decoy) resets the counter.
+ * [Success] is the ONLY valid-credential outcome, so it could later split into
+ * variants without any change to the rate-limit logic — the limiter distinguishes
+ * valid from invalid and nothing else. (The duress/decoy PIN that shape was
+ * originally kept open for was cancelled 2026-08-16; the shape costs nothing and
+ * is left as-is.)
  */
 sealed interface PinVerifyResult {
-    /** Correct PIN. Counters were reset. (Later: carries REAL|DURESS for 2.2.) */
+    /** Correct PIN. Counters were reset. */
     data object Success : PinVerifyResult
 
     /** Wrong PIN. [failCount] is the new consecutive-failure count; [lockedUntil]
@@ -210,7 +211,7 @@ class PinManager internal constructor(private val store: PinStore) {
 
         // 3. Constant-time compare.
         if (compareConstantTime(pin)) {
-            // 4. Any valid PIN resets the limiter (duress-forward-compatible).
+            // 4. Any valid PIN resets the limiter.
             resetRateLimit()
             return PinVerifyResult.Success
         }

@@ -1,5 +1,61 @@
 # DigiByte Wallet — Roadmap
 
+> ## Update — 2026-08-19 (true-up to v4.0.40)
+>
+> Records the 2026-08-16 handoff (`docs/specs/HANDOFF_2026-08-16.md`) and the five
+> releases since. **Each of that handoff's three specs was investigation-first, and in
+> each case the investigation refuted a load-bearing premise.** That is the headline,
+> because two of the three would have shipped the wrong fix.
+>
+> **Shipped**
+>
+> - **DigiAsset balances are correct** (v4.0.36 → v4.0.39). The spec blamed
+>   transaction-history replay drift; the actual causes were a missing implicit-change
+>   rule (DigiAssets returns a partial transfer's remainder to the LAST output — neither
+>   Kotlin nor native applied it, and the native half let a plain-DGB spend destroy an
+>   asset) and a re-sent stuck send counting its change twice. The rule now is: a row
+>   counts only if the native wallet still holds that exact output.
+> - **The address set no longer leaves the device automatically** (v4.0.36). Asset-holding
+>   lookups POSTed the whole address set to a backend. This was the live privacy hole the
+>   handoff was written around, and it is closed.
+> - **Peer re-dial penalties persist across launches** (v4.0.36), with the canon filter
+>   fleet exempt so a cold start cannot starve itself.
+> - **Sync no longer restarts from birth height** (v4.0.40, unplanned but user-facing).
+>   Any mid-session peer-manager rebuild — network drop, 0-peer recovery, stalled filter
+>   chain — floored the chain to the wallet's birth checkpoint and re-scanned over a
+>   million blocks. Device-verified: four rebuilds in 44 seconds, all resuming at tip.
+>
+> **Refuted, and deliberately not built**
+>
+> - **"Sticky 2 ACTIVE + 1 STANDBY" peer retention.** Measurement says 44% of dials are
+>   refused at the door by the peer — slots are scarce to GET, not squandered. Shrinking
+>   to 3 walks into the 0-peer wedge and destroys the filter-header quorum the same spec
+>   asks for. `docs/superpowers/specs/2026-08-16-peer-retention-findings.md`.
+> - **Filter-based rescan of a restored seed's addresses.** Cannot work as specified: the
+>   native invariant is *credit iff derived* — a watched address becomes a filter element
+>   so its block IS fetched, then the transaction is discarded. Replaced by temporary seed
+>   adoption (`docs/superpowers/specs/2026-08-17-restore-as-sovereign-sweep-design.md`).
+>
+> **Cancelled**
+>
+> - **Duress / decoy PIN** (decision 2026-08-16). Struck from Phase 2; no scaffolding had
+>   shipped. Its two real findings are kept where they belong — Digi-ID key isolation now
+>   stands on its own merits, and the covert OP_RETURN beacon stays a non-goal.
+>
+> **NEXT (decided 2026-08-19), in order:**
+>
+> 1. **Digi-ID key isolation** (Phase 2). Now the phase's centre of gravity with duress
+>    gone, and the derivation namespace it was boxed out of is free again.
+> 2. **`cfcheckpt` active rejection** — the Phase 1 client remainder, unchanged from the
+>    2026-08-10 banner and still the honest "finish what v4.0.0 claimed" item.
+> 3. **Restore restructure**, in the split the handoff called for: land the onboarding
+>    change (fresh-wallet-by-default) first, then the asset-aware sweep on the adoption
+>    design.
+> 4. **`assets.digistamp.co`** is **unblocked** — its gate was trustworthy asset balances,
+>    and those landed and are explorer-validated.
+
+---
+
 > ## Update — 2026-08-10 (true-up to v4.0.35)
 >
 > This roadmap's body was written at v3.10.26 and had gone stale across the
@@ -30,9 +86,9 @@
 >   oracle CF-enablement — a stated DigiDollar-mainnet *prerequisite* — is now
 >   overdue, which promotes the Phase 1 fleet-reliability remainder onto
 >   DigiDollar's critical path.
-> - **Phase 2 status:** PIN rate-limit **shipped** (v3.10.35). Duress PIN
->   (designed), Keystore auth-binding, Digi-ID key isolation, and loud Tor
->   fallback remain.
+> - **Phase 2 status:** PIN rate-limit **shipped** (v3.10.35). Keystore
+>   auth-binding, Digi-ID key isolation, and loud Tor fallback remain; the
+>   duress PIN was **cancelled** 2026-08-16 (see the 2026-08-19 banner).
 > - **NEXT (decided 2026-08-10):** finish Phase 1's client half —
 >   `cfcheckpt` graduates from observe-and-log to active rejection — while the
 >   oracle-operator CF checklist runs in parallel (ops-paced). Then Phase 2.
@@ -129,9 +185,8 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   and scheduled in Phase 3, gated on oracle liveness.
 - **PIN brute-force has no rate limit.** `core/…/security/PinManager.kt:43`
   verifies with no backoff, no attempt counter, no wipe policy. This is
-  now the single cheapest high-value hardening item in the repo, and it
-  gates the duress PIN (a decoy PIN is theater while the real PIN is
-  free to brute-force).
+  now the single cheapest high-value hardening item in the repo.
+  **Shipped v3.10.35.**
 - **Key sealing is PIN-gated at the application layer, not at the
   Keystore.** `setUserAuthenticationRequired` remains deliberately off
   (`core/…/security/KeyStoreManager.kt:37`) for API-level crash reasons.
@@ -140,9 +195,10 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
 - **Digi-ID signs with the first wallet address.**
   `core/…/digiid/DigiIdManager.kt:49` calls `signMessage(uri, 0)` —
   index 0 of the main account. Digi-ID compromise = wallet compromise,
-  and (new consequence, see duress spec addendum) the Hub identity is
-  cryptographically the wallet identity, which a duress session must
-  therefore sever.
+  and the Hub identity is cryptographically the wallet identity — so
+  there is no way to present a different identity to the Hub without
+  first isolating this key. With the duress PIN cancelled, this stands
+  on its own as the Phase 2 centrepiece.
 - **Tor is opt-in, OFF by default** (product decision 2026-07-02, stands).
   Routing works (`SafeSocks=0`, v3.7.5); in-app privacy is carried by
   BIP158 (address privacy, default) + Dandelion++ (tx-origin, opt-in);
@@ -192,9 +248,9 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
 | 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & **hardened through v4.0.35**, bloom **removed** (v3.10.x), own-node pairing shipped (Seq 1.1/1.2). 🚧 Remainder: **`cfcheckpt` active rejection (NEXT)** + oracle-bootstrap (seeder demotion) |
 | 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
-| 2 | Key & trust hardening | M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); next: duress PIN A → Keystore binding → Digi-ID isolation → loud Tor fallback |
+| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation → Keystore binding → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
-| 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet and duress-PIN promotion; F-Droid before Play |
+| 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet; F-Droid before Play |
 
 ---
 
@@ -287,40 +343,29 @@ digiscope.me `/wallet` page relaunch.
 
 ## Phase 2 — Key & trust hardening
 
-Resequenced. The June ordering listed these as independent; they are
-not quite — the duress PIN's threat model leans on the rate limit, and
-the duress session's identity handling leans on Digi-ID isolation
-being at least designed. New order:
+Resequenced. The June ordering listed these as independent; they were
+not — but the coupling ran through the duress PIN, which was cancelled
+2026-08-16. What remains is genuinely independent, ordered by risk:
 
 1. **PIN rate-limit (first, small, unblocking).** Exponential backoff:
    3 attempts free, then 1/5/30/60-minute cooldowns, optional
    wipe-after-N behind a settings toggle. `core/…/security/PinManager.kt:43`.
-   A duress PIN shipped before this is a decoy door on a house with no
-   lock; this lands first.
-2. **Duress / decoy PIN — Phase A (wallet protection).** As designed in
-   `docs/superpowers/specs/2026-07-12-duress-pin-design.md`: second PIN
-   opens decoy account 1' (`m/84'/20'/1'`, `m/86'/20'/1'`) pre-funded
-   ~5%; main funds/DigiAssets/DigiDollar and seed unreachable in
-   session; biometrics auto-disabled; no UI tell. **Two spec addenda
-   adopted with this revision:**
-   - **A duress session must sever the Hub/Digi-ID identity.** Because
-     Digi-ID currently signs with the main wallet's first address
-     (`DigiIdManager.kt:49`), a decoy session that can still one-tap
-     into DigiScope authenticates as the *real* user — real handle,
-     chat history, education-portal earnings — collapsing the "small
-     plausible wallet" story. Duress Phase A ships with Hub/Digi-ID
-     either disabled-with-plausible-cover (e.g., logged-out state) or
-     swapped to a decoy identity derived from account 1'. Coordinate
-     the derivation namespace with item 4 below.
-   - **The covert OP_RETURN alert (Phase B) is downgraded to
-     research.** An extra OP_RETURN on duress sends is unreadable
-     (keyed HMAC) but not *invisible* — a coercer inspecting the tx
-     preview or the broadcast sees an output shape this wallet's normal
-     sends don't produce, and the mechanism is documented in this
-     open-source repo. The app-ping alert path ships as Phase B; the
-     on-chain beacon needs a design that makes duress sends
-     shape-identical to normal sends (or explicit acceptance that the
-     beacon trades deniability for notification) before it ships.
+   Shipped v3.10.35.
+2. **Duress / decoy PIN — CANCELLED 2026-08-16.** Not proceeding. The
+   decision is recorded in `docs/specs/HANDOFF_2026-08-16.md`; the design
+   (`docs/superpowers/specs/2026-07-12-duress-pin-design.md`) is kept as
+   a record of why, not as a queued item. No scaffolding shipped, so this
+   is a strike-through rather than a removal task. **Two consequences of
+   the cancellation are worth keeping**, because they were real findings
+   and they outlive the feature:
+   - Digi-ID signing with the main wallet's first address
+     (`DigiIdManager.kt:49`) means any "separate session" concept
+     authenticates as the real user. That is now purely an argument for
+     item 4 below, on its own merits.
+   - The covert on-chain OP_RETURN beacon was analysed as unreadable but
+     not *invisible* — a distinguishable output shape, documented in a
+     public repo. Do not resurrect it under another name.
+
 3. **Keystore user-auth binding, per-API.** Revisit
    `setUserAuthenticationRequired` with per-API probing; enable on
    modern APIs if stable, keep the app-PIN as sole gate on older ones.
@@ -328,17 +373,20 @@ being at least designed. New order:
 4. **Digi-ID key isolation.** Distinct subtree (dedicated purpose code
    or account) so a Digi-ID signature never exposes main-wallet keys;
    one-time migration with a compatibility window on `api.digiscope.me`.
-   Namespace rule (from the duress spec, now binding): the decoy owns
-   purpose 84'/86' account 1'; Digi-ID isolation must not collide, and
-   any future subtree claims get recorded in `docs/derivation/`.
+   Namespace note: the duress design's reservation of purpose 84'/86'
+   account 1' for a decoy is **released** with that cancellation, so
+   Digi-ID isolation is no longer boxed out of it. The standing rule
+   survives the feature — any subtree claim gets recorded in
+   `docs/derivation/` before it ships.
    `core/…/digiid/DigiIdManager.kt:49`.
 5. **Loud Tor fallback.** Tor stays opt-in/OFF by default (2026-07-02
    decision stands), but a user-enabled Tor that fails bootstrap must
    fall back to clearnet *loudly* — main-screen banner + retry — never
    sit at 0 peers, never fall back silently.
 
-**Effort:** M. Items 1 and 5 are days; 2 is the largest; 3 is the
-riskiest (device-matrix testing); 4 is coordination-heavy.
+**Effort:** S–M, reduced by the duress cancellation. Item 1 is shipped;
+5 is days; 3 is the riskiest (device-matrix testing); 4 is
+coordination-heavy and is now the phase's centre of gravity.
 
 ---
 
@@ -395,8 +443,9 @@ feature parity item; nothing else on any chain does it.
    concrete signature-verifying provider is missing. Gated on oracle
    liveness (testnet26 now → mainnet).
 6. **Coin control / UTXO management.** List, freeze, manual-select.
-   On `core/…/UtxoManager.kt`. Gains urgency from the duress PIN
-   (funding the decoy cleanly) and vaults (choosing collateral UTXOs).
+   On `core/…/UtxoManager.kt`. Urgency now comes from vaults (choosing
+   collateral UTXOs) and from DigiAsset sends, which must never select an
+   asset-bearing output as an ordinary input.
 7. **Replace-by-fee (RBF).** Send-screen toggle + bump action.
 8. **Sweep paper wallet (WIF).** Privately queryable now via CF.
 9. **Address book / labels.** Local only; no cloud sync.
@@ -427,11 +476,10 @@ not ship to general users before an independent audit completes:
   mainnet activation of Phase 3's vault features waits for the audit
   even if the softfork activates first (testnet + expert-mode mainnet
   behind a flag are acceptable in the interim).
-- **Public promotion of the duress PIN.** A coercion-safety feature
-  that fails under adversarial review is worse than its absence. It
-  can *exist* in releases pre-audit (labeled experimental); it does not
-  get marketed until an auditor has tried to break the "no UI tell /
-  no stored flag / biometric kill" properties.
+- ~~**Public promotion of the duress PIN.**~~ Moot — the feature was
+  cancelled 2026-08-16. The underlying rule still binds anything like it:
+  a coercion-safety feature that fails adversarial review is worse than
+  its absence.
 
 **Distribution, resequenced: F-Droid before Play.** Reproducible-build
 verification is ~90% there, the sovereignty audience lives on F-Droid,
@@ -467,7 +515,7 @@ Baseline against a modern self-custodial wallet. Status reflects
 | BIP 21 payment URIs | Shipped | |
 | QR scanning | Shipped | |
 | PIN lock | Shipped | Argon2id; **rate-limit shipped v3.10.35** (exponential backoff) |
-| Duress / decoy PIN | Designed | Spec approved 2026-07-12; Phase 2 item 2 |
+| Duress / decoy PIN | ⛔ Cancelled | Decision 2026-08-16 (`docs/specs/HANDOFF_2026-08-16.md`); design kept as a record only |
 | Biometric unlock | Shipped | UI-gate only; Keystore binding — Phase 2 |
 | Seed backup / verify | Shipped | |
 | Seed recovery | Shipped | Universal Restore + foreign-seed sweep (v3.9.0) |
@@ -497,7 +545,7 @@ Baseline against a modern self-custodial wallet. Status reflects
 | In-app bug reporting | Shipped v3.10.26 | Pre-filled device/sync context; DGB bounties |
 | CSV export | Not started | Phase 3 small increment |
 | F-Droid / Play Store | Not started | Phase 4; F-Droid first |
-| Third-party audit | Not started | Phase 4 **gate** for DigiDollar mainnet + duress promotion |
+| Third-party audit | Not started | Phase 4 **gate** for DigiDollar mainnet |
 
 ## Versioning
 
