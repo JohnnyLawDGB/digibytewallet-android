@@ -189,7 +189,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 ## Roadmap
 `ROADMAP.md` is authoritative and **sovereignty-first** (removing trusted third parties from the data path comes before feature breadth). Read its **top banner first** — it carries the dated true-up and the current "NEXT", which is the part that goes stale. The list below is a pointer only — do **not** maintain a second copy here:
 
-**Working next (per the 2026-08-19 true-up):** Digi-ID key isolation → `cfcheckpt` active rejection → restore restructure (onboarding split, then asset-aware sweep) → `assets.digistamp.co` (now unblocked). The **duress PIN is cancelled** — do not resurrect it or build against it.
+**Working next (per the 2026-08-19 true-up):** `cfcheckpt` active rejection → restore restructure (onboarding split, then asset-aware sweep) → Digi-ID key isolation → `assets.digistamp.co` (now unblocked). These are pre-existing roadmap items, not products of the 2026-08-16 handoff. The **duress PIN is cancelled** — do not resurrect it or build against it.
 
 - Phase 0: Legibility (ARCHITECTURE / THREAT_MODEL / BIP-compliance docs)
 - Phase 1: Sovereign data layer — BIP157/158 (**client shipped & default since v3.5.39**; remaining: peer diversity beyond author infra + bloom-deprecation path)

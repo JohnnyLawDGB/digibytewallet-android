@@ -44,15 +44,25 @@
 >
 > **NEXT (decided 2026-08-19), in order:**
 >
-> 1. **Digi-ID key isolation** (Phase 2). Now the phase's centre of gravity with duress
->    gone, and the derivation namespace it was boxed out of is free again.
-> 2. **`cfcheckpt` active rejection** — the Phase 1 client remainder, unchanged from the
->    2026-08-10 banner and still the honest "finish what v4.0.0 claimed" item.
-> 3. **Restore restructure**, in the split the handoff called for: land the onboarding
->    change (fresh-wallet-by-default) first, then the asset-aware sweep on the adoption
->    design.
+> 1. **`cfcheckpt` active rejection** — the Phase 1 client remainder, unchanged from the
+>    2026-08-10 banner and still the honest "finish what v4.0.0 already claims". Chosen to
+>    lead because it is entirely in-app: no derivation migration, no backend coordination,
+>    no migration risk to existing users.
+> 2. **Restore restructure**, in the split the handoff called for: land the onboarding
+>    change (fresh-wallet-by-default — already written, unshipped pending visual
+>    verification) first, then the asset-aware sweep on the adoption design.
+> 3. **Digi-ID key isolation** (Phase 2). Inherits Phase 2's top slot now that duress is
+>    cancelled, and the derivation namespace it was boxed out of is free again — but it is
+>    the most coordination-heavy item in the phase (one-time migration plus a compatibility
+>    window on `api.digiscope.me`), so it does not lead.
 > 4. **`assets.digistamp.co`** is **unblocked** — its gate was trustworthy asset balances,
 >    and those landed and are explorer-validated.
+>
+> Note on provenance: items 1–4 are pre-existing roadmap work, NOT products of the
+> 2026-08-16 handoff. Digi-ID key isolation in particular comes from the security audit
+> (CRITICAL-4 residual: `DigiIdManager.kt:49` signs with `m/44'/20'/0'/0/0`, the main
+> account's first key, so a Digi-ID compromise is a wallet compromise) and has been Phase 2
+> item 4 since the June sequencing.
 
 ---
 
