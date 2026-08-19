@@ -172,7 +172,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - CRITICAL-1: Resolved as designed (auth not required — app uses own PIN). RESIDUAL (ROADMAP Phase 2): no Keystore user-auth binding + no PIN rate-limit — a compromised app process can decrypt the seed without device unlock.
 - CRITICAL-2: Resolved (g_seed static, accessor API)
 - CRITICAL-3: Resolved (ByteArray path, zeroed after use)
-- CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): Digi-ID still signs with the first wallet address (`m/44'/20'/0'/0/0`), not an isolated subtree — key isolation pending.
+- CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): Digi-ID has no dedicated identity path. **Corrected 2026-08-19 — the old text here was wrong twice.** The path is `m/0'/0/0` (the legacy bread-wallet tree), not `m/44'/20'/0'/0/0`: `signMessage`'s second arg is the address FORMAT, and the JNI hardcodes `seed_derive_key(&key, 0, 0)`. And the residual is **linkability, not key exposure** — signing emits a signature not a key, the `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion, `m/0'` is hardened so it cannot be correlated to the BIP84/BIP86 trees, and `m/0'` is only watched for bread-wallet compat (`BRWalletReceiveAddress` hands out BIP84/86 only), so for an app-created wallet that address holds nothing. What remains: every site sees the same identity address (BitID derives per-site from the URI), and a restored bread-wallet seed could have funded that address.
 
 ## Pre-Publish Test Suite
 - `./scripts/pre-publish-test.sh` — 8 scenarios across API 28/33/34/35

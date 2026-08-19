@@ -60,9 +60,10 @@
 >
 > Note on provenance: items 1–4 are pre-existing roadmap work, NOT products of the
 > 2026-08-16 handoff. Digi-ID key isolation in particular comes from the security audit
-> (CRITICAL-4 residual: `DigiIdManager.kt:49` signs with `m/44'/20'/0'/0/0`, the main
-> account's first key, so a Digi-ID compromise is a wallet compromise) and has been Phase 2
-> item 4 since the June sequencing.
+> (CRITICAL-4 residual) and has been Phase 2 item 4 since the June sequencing. Note the
+> audit text is wrong on the specifics: the path is `m/0'/0/0`, not `m/44'/20'/0'/0/0`, and
+> the real cost is cross-site linkability rather than exposure of funded keys — see the
+> corrected entry in "Current state" below.
 
 ---
 
@@ -202,13 +203,35 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   (`core/…/security/KeyStoreManager.kt:37`) for API-level crash reasons.
   Right call at the time; still means a compromised app process can
   decrypt the seed without the device being unlocked.
-- **Digi-ID signs with the first wallet address.**
-  `core/…/digiid/DigiIdManager.kt:49` calls `signMessage(uri, 0)` —
-  index 0 of the main account. Digi-ID compromise = wallet compromise,
-  and the Hub identity is cryptographically the wallet identity — so
-  there is no way to present a different identity to the Hub without
-  first isolating this key. With the duress PIN cancelled, this stands
-  on its own as the Phase 2 centrepiece.
+- **Digi-ID has no dedicated identity path** — corrected 2026-08-19,
+  traced through the JNI rather than inferred. `DigiIdManager.kt:49`
+  calls `signMessage(uri, addressFormat)` (the second argument is the
+  address FORMAT, not an index); the JNI hardcodes
+  `seed_derive_key(&key, 0, 0)` → `BRBIP32PrivKey(chain=0, index=0)` →
+  **`m/0'/0/0`**, the legacy bread-wallet tree.
+
+  **What this is NOT.** Message signing emits a signature, never a key,
+  and the `\x19DigiByte Signed Message:\n` prefix domain-separates the
+  payload from a transaction sighash, so a hostile site cannot disguise
+  a transaction as a login. `m/0'` is also hardened at the first level,
+  as are `m/84'/20'/0'` and `m/86'/…`, so the identity pubkey cannot be
+  used to derive or correlate any funded branch. And `m/0'` is only
+  *pregenerated and watched* for bread-wallet compatibility
+  (`BRWallet.c:491-507`) — every address the app hands out comes from
+  the BIP84/BIP86 trees via `BRWalletReceiveAddress`. For a wallet this
+  app created, `m/0'/0/0` is never handed out and holds nothing.
+
+  **What it actually costs.** (1) Every Digi-ID site sees the SAME
+  identity address, so sites can correlate a user with each other —
+  BitID's per-site `m/13'/…` derivation exists precisely to avoid this;
+  the current code chose one deterministic address on purpose ("a
+  deterministic address for Digi-ID across sessions"). (2) A restored
+  bread-wallet seed whose `m/0'/0/0` DID hold funds gets an identity
+  with public on-chain history. (3) The recoverable-signature scheme
+  publishes that pubkey permanently.
+
+  So this is a **linkability fix, not a key-exposure fix** — real, but
+  smaller than "Digi-ID compromise = wallet compromise" implied.
 - **Tor is opt-in, OFF by default** (product decision 2026-07-02, stands).
   Routing works (`SafeSocks=0`, v3.7.5); in-app privacy is carried by
   BIP158 (address privacy, default) + Dandelion++ (tx-origin, opt-in);
@@ -381,7 +404,10 @@ not — but the coupling ran through the duress PIN, which was cancelled
    modern APIs if stable, keep the app-PIN as sole gate on older ones.
    `core/…/security/KeyStoreManager.kt:37`.
 4. **Digi-ID key isolation.** Distinct subtree (dedicated purpose code
-   or account) so a Digi-ID signature never exposes main-wallet keys;
+   or account) so one identity address is not reused across every site;
+   a per-site index derived from the callback URI, as BitID does, is the
+   shape to copy. NOT a key-exposure fix — see "Current state" for what
+   the current `m/0'/0/0` path does and does not leak;
    one-time migration with a compatibility window on `api.digiscope.me`.
    Namespace note: the duress design's reservation of purpose 84'/86'
    account 1' for a decoy is **released** with that cancellation, so
