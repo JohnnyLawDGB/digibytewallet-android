@@ -116,10 +116,22 @@ device. Implementation:
   **OBSERVE-ONLY mode** (`BRPeerManager.c`, R1 of the Neutrino review):
   each in-range checkpoint is compared against the wallet's own
   computed header and logged as MATCH/MISMATCH, but never rejected or
-  banned. Turning this into enforced trust (reject + ban on mismatch,
-  gate the single-peer re-anchor) is a Phase 2 item.
-- There is no peer-quorum verification. A `getcfcheckpt` wire message
-  exists (`BRPeerSendGetCFCheckpt`) but is not driven by the sync loop.
+  banned. **Superseded on this branch:** enforcement is now ACTIVE — a
+  checkpoint-crossing batch is validated *before* commit, and a mismatch
+  rejects the batch and bans the peer, so a divergent header is never
+  committed. A checkpoint-confirmed chain also vetoes the re-anchor path,
+  closing the single-peer-liar hole. This is Phase **1** remainder (the
+  sovereign data layer), not Phase 2 as this section previously said.
+  The claim it earns is bounded: *the filter chain cannot lie to you
+  below the last checkpoint* (currently height 23,800,000). Blocks above
+  it remain TOFU + continuity + quorum — tip trust is the oracle-bootstrap
+  / own-node track.
+- Peer-quorum verification exists for the continuity re-anchor and now
+  requires an **agreeing majority with a floor of 3** distinct disagreers
+  (was K=2 any-disagree, which could false-fire on an honest reorg). A
+  `getcfcheckpt` wire message exists (`BRPeerSendGetCFCheckpt`) but has no
+  callers — it is deliberately NOT driven: peer-supplied anchors are
+  Sybil-bait without a pin to check them against.
 - If filter peers stall, the session does not fall back to bloom (that
   path was removed); it keeps retrying compact-filter peers.
 
