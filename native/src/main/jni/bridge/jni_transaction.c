@@ -13,6 +13,43 @@
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 
+/* ---------- publish result callback ----------
+ *
+ * BRPeerManagerPublishTx reports EVERY failure through this callback and nothing else:
+ * EINVAL for an unsigned tx, ENOTCONN when the peer manager is not connected, and
+ * ENOTCONN again from the disconnect path that cancels pending publishes.
+ *
+ * Passing NULL here — as this bridge did until 2026-08-20 — is not merely "don't tell me".
+ * The cancellation loop in _peerDisconnected skips entries whose callback is NULL:
+ *
+ *     if (manager->publishedTx[i - 1].callback == NULL) continue;
+ *
+ * so a NULL-callback publish is never cancelled, never freed, and never removed from
+ * publishedTx. It sits in the publish list for the life of the peer manager while the app
+ * reports the send as successful. Combined with the wallet registration that happens just
+ * before publishing, a send the network never accepted still marks its inputs spent — which
+ * is how a wallet ends up spending outputs that exist nowhere else, and how the child of such
+ * a send becomes an unconfirmable orphan (see OrphanSendPredicate).
+ *
+ * The context is heap-allocated and freed here: the callback fires asynchronously on a peer
+ * thread long after the JNI frame returns, so a stack-local would be a use-after-free.
+ */
+typedef struct { char txid[65]; } PublishCtx;
+
+static void _publishResult(void *info, int error)
+{
+    PublishCtx *ctx = (PublishCtx *)info;
+    if (!ctx) return;
+    if (error) {
+        LOGE("publishTransaction: REJECTED txid=%s error=%d (%s) — the network did not "
+             "accept this transaction; the wallet still holds it locally",
+             ctx->txid, error, strerror(error));
+    } else {
+        LOGI("publishTransaction: accepted txid=%s (relayed back by a peer)", ctx->txid);
+    }
+    free(ctx);
+}
+
 /* ---------- createTransaction ---------- */
 
 JNIEXPORT jbyteArray JNICALL
@@ -217,7 +254,12 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
        Kotlin already polls acceptance via getRelayCount (Broadcaster embargo +
        SyncService.rebroadcastStrandedSends), so no native callback is needed.
        Matches publishTransactionStem's proven NULL/NULL pattern below. */
-    BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);
+    /* Non-NULL callback is load-bearing — see _publishResult. On allocation failure fall
+     * back to the old NULL behaviour rather than dropping the send entirely: a publish that
+     * cannot be tracked is still better than no publish at all. */
+    PublishCtx *ctx = calloc(1, sizeof(*ctx));
+    if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
+    BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);
 
     LOGD("publishTransaction: submitted txid=%s", txidHex);
     return (*env)->NewStringUTF(env, txidHex);
@@ -267,13 +309,21 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jo
     BRTransaction *walletCopy = BRTransactionCopy(tx);
     if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
 
-    /* NULL info/callback: a stem callback would be async and the stack-ctx pattern
-       in publishTransaction is UAF-prone; Kotlin monitors via getRelayCount. */
-    int stemmed = BRPeerManagerStemPublishTx(g_peerManager, tx, NULL, NULL);
+    /* Heap ctx, not stack — the callback is async and fires long after this frame returns.
+       A NULL callback would also make the publish invisible to the cancellation path that
+       skips NULL-callback entries, leaving it stuck in publishedTx forever; see
+       _publishResult. */
+    PublishCtx *stemCtx = calloc(1, sizeof(*stemCtx));
+    if (stemCtx) memcpy(stemCtx->txid, txidHex, sizeof(stemCtx->txid));
+    int stemmed = BRPeerManagerStemPublishTx(g_peerManager, tx, stemCtx,
+                                             stemCtx ? _publishResult : NULL);
     if (!stemmed) {
         /* Rare race: the capable peer dropped after the check above. The tx is
            registered but unbroadcast — flood it so it isn't stranded. */
-        BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);
+        if (stemCtx) { free(stemCtx); stemCtx = NULL; }  /* stem never took ownership */
+        PublishCtx *floodCtx = calloc(1, sizeof(*floodCtx));
+        if (floodCtx) memcpy(floodCtx->txid, txidHex, sizeof(floodCtx->txid));
+        BRPeerManagerPublishTx(g_peerManager, tx, floodCtx, floodCtx ? _publishResult : NULL);
         LOGW("publishTransactionStem: no stem peer at submit — flooded instead (txid=%s)", txidHex);
     } else {
         LOGD("publishTransactionStem: stemmed txid=%s", txidHex);
@@ -604,7 +654,11 @@ Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject th
     txidHex[64] = '\0';
 
     BRWalletRegisterTransaction(g_wallet, tx);
-    BRPeerManagerPublishTx(g_peerManager, tx, NULL, NULL);   /* takes ownership; do NOT free tx */
+    /* Non-NULL callback: see _publishResult — NULL makes the publish invisible to the
+       cancellation path and it never leaves publishedTx. */
+    PublishCtx *ctx = calloc(1, sizeof(*ctx));
+    if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
+    BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* takes ownership; do NOT free tx */
 
     return (*env)->NewStringUTF(env, txidHex);
 }
