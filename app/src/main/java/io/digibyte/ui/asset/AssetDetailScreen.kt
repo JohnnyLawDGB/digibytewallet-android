@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -60,6 +61,8 @@ fun AssetDetailScreen(
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val history by viewModel.assetHistory.collectAsStateWithLifecycle()
+
+    var showMediaViewer by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -134,13 +137,23 @@ fun AssetDetailScreen(
                         .padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Large icon
+                    // Large icon. Tapping it opens the artwork full screen — but only when
+                    // there IS artwork: the fallback is a generated letter tile, and making
+                    // that tappable would promise a view that has nothing to show.
                     val iconColor = assetIconColors[colorIndex]
+                    val hasArtwork = remember(meta?.imageUrl) {
+                        AssetImageResolver.resolve(meta?.imageUrl) != null
+                    }
                     AssetIcon(
                         imageUrl = meta?.imageUrl,
                         firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A',
                         iconColor = iconColor,
-                        size = 72.dp
+                        size = 72.dp,
+                        modifier = if (hasArtwork) {
+                            Modifier.clickable { showMediaViewer = true }
+                        } else {
+                            Modifier
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -335,6 +348,16 @@ fun AssetDetailScreen(
                 )
             }
         }
+    }
+
+    // Rendered OUTSIDE the LazyColumn: a Dialog is its own window, and placing it in a
+    // lazily-composed item would tie the open viewer to that item staying composed — it
+    // would vanish if the user scrolled the header off screen.
+    if (showMediaViewer) {
+        AssetMediaViewer(
+            imageUrl = asset?.metadata?.imageUrl,
+            onDismiss = { showMediaViewer = false },
+        )
     }
 }
 

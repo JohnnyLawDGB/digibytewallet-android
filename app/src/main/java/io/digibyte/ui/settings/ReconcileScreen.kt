@@ -298,9 +298,18 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         }
                         stuckResult = if (result.dropped == 0)
                             "No stuck sends to clear."
-                        else
-                            "Cleared ${result.dropped} stuck send(s); corrected ${result.assetRowsCleared} " +
-                                "asset row(s). Balance updates shortly."
+                        else buildString {
+                            append("Cleared ${result.dropped} stuck send(s)")
+                            // Name orphans explicitly: they are the ones that could never
+                            // confirm no matter how long you waited, and until now the only
+                            // cure was a full rebuild-from-chain re-sync.
+                            if (result.orphansCleared > 0) {
+                                append(", ${result.orphansCleared} of them orphaned " +
+                                    "(spending a parent this wallet no longer has)")
+                            }
+                            append("; corrected ${result.assetRowsCleared} asset row(s). ")
+                            append("Balance updates shortly.")
+                        }
                     }
                 },
                 modifier = Modifier

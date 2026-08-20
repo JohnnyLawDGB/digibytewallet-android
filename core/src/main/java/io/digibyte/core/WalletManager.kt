@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.asset.DeadSendPredicate
+import io.digibyte.core.asset.OrphanSendPredicate
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.SyncState
 import io.digibyte.core.sync.CfAbandonmentStore
@@ -32,7 +33,16 @@ sealed class WalletState {
  * still-valid), and [assetRowsCleared] phantom owned DigiAsset UTXO rows a
  * dropped dead send fabricated (see [AssetManager.clearDeadAssetSend]).
  */
-data class StuckSendResult(val dropped: Int, val kept: Int, val assetRowsCleared: Int)
+data class StuckSendResult(
+    val dropped: Int,
+    val kept: Int,
+    val assetRowsCleared: Int,
+    /** Of [dropped], how many were ORPHANS — spending a parent the wallet no longer has, so
+     *  they could never confirm and no peer would ever accept them. Reported separately
+     *  because it is a different failure from a merely-dead send, and a user who was told
+     *  "nothing to clear" by an earlier version deserves to see that it found something. */
+    val orphansCleared: Int = 0,
+)
 
 /**
  * The `cf_birth_height` value to persist for a given native birth-checkpoint height,
@@ -396,9 +406,16 @@ class WalletManager(
         val rows = runCatching { NativeBridge.getTransactionDetails().trim().lines() }
             .getOrDefault(emptyList())
 
+        // Every txid the wallet currently knows, in any confirmation state. Built ONCE for
+        // the pass so an orphan check is a set lookup rather than a JNI call per input.
+        val walletTxids = rows.mapNotNullTo(HashSet()) { line ->
+            line.split("|").firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        }
+
         var dropped = 0
         var kept = 0
         var assetRowsCleared = 0
+        var orphansCleared = 0
         for (line in rows) {
             // Whole per-row body is guarded: a Room/JNI exception on one stuck tx
             // must not skip the remaining rows or the final persist() below.
@@ -428,7 +445,26 @@ class WalletManager(
                         DeadSendPredicate.OutSats(it.split("|").getOrNull(1)?.toLongOrNull() ?: 0L)
                     }
                 )
-                if (!dead) { kept++; return@runCatching } // slow but still valid — spare it, don't touch
+                // An orphan spends a parent the wallet no longer has, so it can never
+                // confirm and no peer will accept it — but it looks healthy to the dead-send
+                // predicate (BRWallet reports it VALID from local state, and an asset marker
+                // sits above the dust floor). Without this, the only cure was a full
+                // rebuild-from-chain re-sync. Reads inputs BEFORE any removal, same as
+                // outputs above.
+                val orphan = !dead && OrphanSendPredicate.isOrphan(
+                    inputs = OrphanSendPredicate.parseInputs(
+                        runCatching { NativeBridge.getTransactionInputsForHash(txid) }.getOrNull()
+                    ),
+                    walletTxids = walletTxids,
+                )
+                if (orphan) {
+                    android.util.Log.w(
+                        "WalletManager",
+                        "clearStuckSends: $txid is an ORPHAN — parent missing from the wallet, " +
+                            "cannot ever confirm; clearing"
+                    )
+                }
+                if (!dead && !orphan) { kept++; return@runCatching } // slow but still valid — spare it
 
                 // Ordering is load-bearing (see dead-asset-send-clear design doc):
                 // remove the transaction from the wallet FIRST. Only once native
@@ -440,6 +476,14 @@ class WalletManager(
                 if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
                     store.remove(txid)
                     dropped++
+                    if (orphan) orphansCleared++
+                    // Removing a parent strands anything built on it — that is how the
+                    // orphan we are fixing was most likely created in the first place.
+                    // Dropping it from the known set means a later row spending it is
+                    // recognised as an orphan within THIS pass rather than surviving to
+                    // the next one. Rows earlier in the list than their parent still need
+                    // a second pass, which is why the caller may run this more than once.
+                    walletTxids.remove(txid)
                     if (assetManager != null) {
                         assetRowsCleared += assetManager.clearDeadAssetSend(txid, ownedSet, outputs)
                     }
@@ -449,7 +493,12 @@ class WalletManager(
             }
         }
         if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
-        return StuckSendResult(dropped = dropped, kept = kept, assetRowsCleared = assetRowsCleared)
+        return StuckSendResult(
+            dropped = dropped,
+            kept = kept,
+            assetRowsCleared = assetRowsCleared,
+            orphansCleared = orphansCleared,
+        )
     }
 
     /**
