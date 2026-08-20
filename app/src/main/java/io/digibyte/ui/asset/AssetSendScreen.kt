@@ -40,6 +40,8 @@ fun AssetSendScreen(
     assetId: String,
     onNavigateBack: () -> Unit,
     prefillAddress: String = "",
+    /** Raw asset units carried by a `digibyte:…?assetId=&assetAmount=` transfer request. */
+    prefillQuantity: String = "",
     onScanQr: () -> Unit = {},
     viewModel: AssetViewModel = hiltViewModel()
 ) {
@@ -69,6 +71,16 @@ fun AssetSendScreen(
         if (prefillAddress.isNotBlank()) {
             recipientAddress = prefillAddress
             addressError = null
+        }
+    }
+
+    // Pre-fill the quantity from an asset transfer request. Pre-filled, NOT locked: the
+    // request is untrusted input, so the user must still be able to see and change what
+    // leaves their wallet before signing.
+    LaunchedEffect(prefillQuantity) {
+        if (prefillQuantity.isNotBlank()) {
+            quantityInput = prefillQuantity
+            quantityError = null
         }
     }
 

@@ -552,15 +552,20 @@ fun AppNavigation(
             }
 
             composable(
-                "asset_send/{assetId}?address={address}",
-                arguments = listOf(navArgument("address") { defaultValue = "" })
+                "asset_send/{assetId}?address={address}&quantity={quantity}",
+                arguments = listOf(
+                    navArgument("address") { defaultValue = "" },
+                    navArgument("quantity") { defaultValue = "" },
+                )
             ) { backStackEntry ->
                 val assetId = backStackEntry.arguments?.getString("assetId") ?: ""
                 val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
+                val prefillQuantity = backStackEntry.arguments?.getString("quantity") ?: ""
                 AssetSendScreen(
                     assetId = assetId,
                     onNavigateBack = { navController.popBackStack() },
                     prefillAddress = prefillAddress,
+                    prefillQuantity = prefillQuantity,
                     onScanQr = {
                         navController.navigate(
                             "qr_scanner?returnTo=" + Uri.encode("asset_send/$assetId")
@@ -587,8 +592,16 @@ fun AppNavigation(
                         // Route the scanned address back to the caller: the asset
                         // send screen when returnTo is set, else the DGB send flow.
                         val encoded = Uri.encode(uri.address)
-                        val dest = if (returnTo.isNotBlank()) "$returnTo?address=$encoded"
-                                   else "send?address=$encoded"
+                        // An asset transfer request names what to send, so it goes to that
+                        // asset's send screen rather than the DGB flow — which would
+                        // otherwise silently drop the asset and prompt for a coin payment.
+                        val assetId = uri.assetId
+                        val dest = when {
+                            assetId != null -> "asset_send/${Uri.encode(assetId)}" +
+                                "?address=$encoded&quantity=${uri.assetAmount}"
+                            returnTo.isNotBlank() -> "$returnTo?address=$encoded"
+                            else -> "send?address=$encoded"
+                        }
                         navController.navigate(dest) {
                             popUpTo("qr_scanner") { inclusive = true }
                         }
