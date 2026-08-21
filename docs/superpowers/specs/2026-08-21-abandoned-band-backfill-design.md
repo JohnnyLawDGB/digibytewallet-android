@@ -115,6 +115,50 @@ that and cost a shipped regression. Red arms must distinguish:
 4. **The band actually retires** — `abandonedBelow` reaches `lo` and `CfAbandonmentStore`
    clears, on a wallet that started with a surfaced gap.
 
+## Mechanism, traced against the code (2026-08-21)
+
+The FETCH step needs no new wire machinery, and the two things that looked like blockers
+are not:
+
+**The locator problem solves itself.** `getheaders` needs locators — block hashes we already
+hold — and the pruned range is exactly what we don't hold. But `BRPeerManagerNew` inserts
+**every block checkpoint** into `manager->blocks` at construction
+(`BRPeerManager.c`, the `params->checkpointsCount` loop): ~503 entries with real hashes,
+50,000 apart. The checkpoint at or below `gapLow` is therefore always available as an anchor.
+For a gap at 24,050,000 that is the 24,000,000 checkpoint — 50k headers to walk, ~4 MB on the
+wire, 25 round trips at `MAX_HEADERS_RESULTS`.
+
+**Backfilled headers are accepted, via the fork branch.** In `_peerRelayedBlock`, a header
+below `lastBlock` and above the newest block checkpoint falls through to
+`else { // new block is on a fork }`, which does `BRSetAdd(manager->blocks, block)`. The
+`fork is now longer than main chain` walk immediately after is skipped, because
+`block->height > manager->lastBlock->height` is false for a backfill. So the headers land in
+the block set, `prevBlock` links build contiguity, `_BRPeerManagerBlockFloor` drops, and
+`BRPeerManagerRetireAbandonedBand` retires further on the next call — with **no change to
+`_peerRelayedBlock` at all.**
+
+Two caveats on that path:
+
+- It logs `chain fork reached height N` per header, which would be tens of thousands of lines.
+  Worth a quiet-mode flag on the backfill.
+- The `old fork` branch above it discards anything at/below the newest block checkpoint
+  (24,000,000). A gap BELOW that height cannot be backfilled this way and would need the
+  discard exempted for a known-main-chain backfill. Not needed for the observed case, which
+  sits above it — but a wallet with an older gap would hit it.
+
+## Built so far
+
+- `BRCFScanLedgerRetireAbandonedTo` — the one lowering path (11 KAT assertions).
+- `BRPeerManagerRetireAbandonedBand` — enforces header-first ordering against
+  `_BRPeerManagerBlockFloor`; retires nothing when nothing is resident, so it is safe to call
+  before any backfill exists.
+
+## Remaining: the driver
+
+Trigger, peer selection, chunked progress and resumption. Deliberately not written at the tail
+of a long session — this is native consensus-adjacent code, and the one regression shipped
+today (v4.0.41 never-brick) came from exactly that kind of push-through.
+
 ## Open question
 
 Whether a peer will serve `getheaders` at that depth reliably from the CF oracle fleet. The
