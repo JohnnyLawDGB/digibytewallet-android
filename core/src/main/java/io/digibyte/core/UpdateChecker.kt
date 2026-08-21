@@ -64,7 +64,14 @@ class UpdateChecker(private val client: OkHttpClient) {
                 }
 
                 val tagName = release.getString("tag_name").removePrefix("v")
-                val releaseNotes = release.optString("body", "").take(500)
+                // Flatten markdown BEFORE truncating: the dialog renders these with a plain
+                // Text() that has no markdown support, so the raw body showed asterisks and
+                // backticks to the user. Stripping first also means the 500-char budget is
+                // spent on words rather than on markup. Truncating first would risk cutting
+                // through a marker pair and leaving an unmatched one behind.
+                val releaseNotes = io.digibyte.core.update.ReleaseNotesPlainText
+                    .render(release.optString("body", ""))
+                    .take(500)
                 val htmlUrl = release.getString("html_url")
                 val isPre = release.optBoolean("prerelease", false)
 
