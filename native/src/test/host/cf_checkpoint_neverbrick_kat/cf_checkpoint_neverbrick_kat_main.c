@@ -326,12 +326,27 @@ static void test_budget_exhausted_parks_at_checkpoint_and_surfaces(void)
           "neverbrick: autoFetchCFiltersThrough snapped to checkpoint-1 -- THIS is the field that actually governs "
           "reqStart = autoFetchCFiltersThrough + 1 at every forward-fetch request site; Start alone would have been "
           "a no-op here since Through already sat at floorHeight-1 (24000000-1), well above the checkpoint");
-    check(BRPeerManagerAbandonedBelow(manager) == tip + 1,
-          "neverbrick: abandonedBelow raised to tip+1 -- the unverifiable band [checkpoint..tip] is surfaced");
-    check(BRPeerManagerAbandonedBelow(manager) > 0,
-          "neverbrick: abandonedBelow > 0 -- a recoverable band now exists ('Scan for missing transactions' reachable)");
-    check(manager->cfAbandonedHeightsTotal == (size_t)(tip + 1 - cp->height),
-          "neverbrick: cfAbandonedHeightsTotal accumulated exactly the surfaced band's size (6 heights)");
+    // CORRECTED CONTRACT (2026-08-21). This KAT used to assert the opposite here --
+    // that a SINGLE disagreer abandons the band -- and said so explicitly: "Proves the
+    // fix acts purely on budget exhaustion, not on quorum status." That assertion
+    // encoded the bug. Measured on a live wallet ~6h into a session:
+    //
+    //   continuity mismatch (1/8 disagreers collected, reanchors 3/3) -- not appending
+    //   ABANDONED 20273 height(s) [24050000..24070272]
+    //
+    // ONE peer of eight condemned 20k heights, permanently (abandonedBelow is
+    // monotonic) and visibly (a "history gap" banner no rescan can clear). The
+    // re-anchor budget is never reset, so any long session spends it on ordinary tip
+    // churn and then a single noisy peer at the tip is enough.
+    //
+    // Parking the cursor is still unconditional -- that is the actual anti-brick
+    // progress, and it is asserted above. Condemning heights now requires
+    // corroboration.
+    check(BRPeerManagerAbandonedBelow(manager) == 0,
+          "neverbrick: a LONE disagreer (bestAgree==1) must NOT abandon -- parking the cursor is the "
+          "anti-brick action; condemning 20k heights on one noisy peer is the field bug");
+    check(manager->cfAbandonedHeightsTotal == 0,
+          "neverbrick: ...and nothing was accumulated into the abandoned total either");
     check(manager->misbehavinCount == 0,
           "neverbrick: no peer banned -- exhaustion recovery punishes nobody, it just stops trusting an unverifiable chain");
     assertLockNotHeld(manager, "neverbrick: lock released after round 4's exhaustion park+surface");
@@ -351,10 +366,17 @@ static void test_budget_exhausted_parks_at_checkpoint_and_surfaces(void)
           "neverbrick: bounded -- 2 more post-exhaustion mismatches still did not grow cfReanchorCount");
     check(manager->autoFetchCFiltersStart == cp->height && manager->autoFetchCFiltersThrough == cp->height - 1,
           "neverbrick: bounded -- cursor stays pinned at the same checkpoint, not re-derived or drifting");
-    check(BRPeerManagerAbandonedBelow(manager) == abandonedBeforeRepeat,
-          "neverbrick: bounded -- abandonedBelow did NOT advance further on repeat exhausted mismatches (no re-request growth)");
-    check(manager->cfAbandonedHeightsTotal == totalBeforeRepeat,
-          "neverbrick: bounded -- cfAbandonedHeightsTotal did NOT grow further (idempotent, not an unbounded surface loop)");
+    // Repeats here come from DIFFERENT peers sharing peerSuppliedPrev, so cfDisagreedCount
+    // accumulates. Once the largest agreeing bucket clears the floor AND a majority, the
+    // divergence IS corroborated and abandoning becomes correct -- that is the point of the
+    // gate, not a hole in it. What must never happen is growth while still uncorroborated.
+    check(BRPeerManagerAbandonedBelow(manager) == abandonedBeforeRepeat ||
+          BRPeerManagerAbandonedBelow(manager) == tip + 1,
+          "neverbrick: bounded -- abandonedBelow either stayed put or advanced exactly once, to tip+1, "
+          "when the divergence became corroborated (never drifting or unbounded)");
+    check(manager->cfAbandonedHeightsTotal == totalBeforeRepeat ||
+          manager->cfAbandonedHeightsTotal == (size_t)(tip + 1 - cp->height),
+          "neverbrick: bounded -- the abandoned total is either unchanged or exactly the one band's size");
     check(manager->misbehavinCount == 0,
           "neverbrick: bounded -- still nobody banned after the repeat mismatches");
     assertLockNotHeld(manager, "neverbrick: lock released after the repeat post-exhaustion calls (no deadlock, no crash)");

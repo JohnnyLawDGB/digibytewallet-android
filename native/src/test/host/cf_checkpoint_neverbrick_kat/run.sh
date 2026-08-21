@@ -110,17 +110,50 @@ if ! grep -q "FAIL: neverbrick: autoFetchCFiltersStart snapped to the TRUSTED ch
     sed 's/^/             | /' "$BUILD_DIR/red.log"
     exit 1
 fi
-if ! grep -q "FAIL: neverbrick: abandonedBelow > 0 -- a recoverable band now exists ('Scan for missing transactions' reachable)" "$BUILD_DIR/red.log"; then
-    echo "GATE FAILED: the UNFIXED build did not fail the abandonedBelow"
-    echo "             surfacing check -- the unfixed exhaustion branch must"
-    echo "             leave abandonedBelow at 0 (no recover-me banner ever"
-    echo "             becomes reachable), and this build didn't reproduce that."
+if ! grep -q "FAIL: neverbrick: bounded -- cursor stays pinned at the same checkpoint" "$BUILD_DIR/red.log"; then
+    echo "GATE FAILED: the UNFIXED build did not fail the cursor-pinning check"
+    echo "             -- with Task 6 compiled out the cursor must never be"
+    echo "             parked at a checkpoint at all, and this build didn't"
+    echo "             reproduce that."
     sed 's/^/             | /' "$BUILD_DIR/red.log"
     exit 1
 fi
 echo "RED gate OK: pre-fix silent-stop shape left the exhausted-budget"
-echo "             mismatch unsurfaced -- cursor NOT snapped to a checkpoint,"
-echo "             abandonedBelow stayed 0. Both expected checks failed."
+echo "             mismatch unhandled -- cursor NOT parked at a checkpoint."
+echo "             NOTE: the 'nothing abandoned' assertions PASS in this arm,"
+echo "             because removing Task 6 also abandons nothing. That arm"
+echo "             therefore cannot prove the quorum gate; the second red arm"
+echo "             below exists precisely for that."
+
+# ── RED 2: never-brick present but UNGATED (the shipped v4.0.41 shape) ─────
+# This is the arm that matters for the 2026-08-21 field bug. -DCF_NEVERBRICK_UNFIXED
+# removes Task 6 wholesale, which cannot distinguish "no never-brick" from
+# "never-brick that condemns 20k heights on ONE noisy peer" -- and it was exactly
+# that missing distinction which let the ungated shape ship.
+build "$BUILD_DIR/cf_checkpoint_neverbrick_kat_ungated" -DCF_NEVERBRICK_QUORUM_UNFIXED
+
+set +e
+"$BUILD_DIR/cf_checkpoint_neverbrick_kat_ungated" > "$BUILD_DIR/red2.log" 2>&1
+RED2_STATUS=$?
+set -e
+
+if [ "$RED2_STATUS" -eq 0 ]; then
+    echo "GATE FAILED: -DCF_NEVERBRICK_QUORUM_UNFIXED build exited 0 -- the"
+    echo "             corroboration gate must be load-bearing. Without it a"
+    echo "             single disagreer abandons the whole band above the top"
+    echo "             checkpoint, which is the shipped v4.0.41 regression."
+    sed 's/^/             | /' "$BUILD_DIR/red2.log"
+    exit 1
+fi
+if ! grep -q "FAIL: neverbrick: a LONE disagreer (bestAgree==1) must NOT abandon" "$BUILD_DIR/red2.log"; then
+    echo "GATE FAILED: the UNGATED build did not fail the lone-disagreer check."
+    echo "             The -D flag is not reaching the corroboration decision,"
+    echo "             so RED 2 is not actually the ungated v4.0.41 shape."
+    sed 's/^/             | /' "$BUILD_DIR/red2.log"
+    exit 1
+fi
+echo "RED 2 gate OK: ungated shape condemned the band on a single disagreer,"
+echo "               exactly as v4.0.41 did in the field."
 
 # ── GREEN: the production shape must pass every check ──────────────────────
 build "$BUILD_DIR/cf_checkpoint_neverbrick_kat"
