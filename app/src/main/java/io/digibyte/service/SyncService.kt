@@ -3249,6 +3249,20 @@ class SyncService : Service() {
         val store = OutgoingTxStore(this)
         var dropped = false
         for (txid in unconfirmed) {
+            // What the network actually said about the last publish. Until v4.0.42 this
+            // could not be asked at all — the bridge passed a NULL callback, so a refused
+            // send was indistinguishable from an accepted one and this loop re-published it
+            // forever. -1 means no verdict yet, which must never read as success.
+            val outcome = runCatching { NativeBridge.getPublishResult(txid) }.getOrDefault(-1)
+                .takeIf { it >= 0 }
+                ?.let { io.digibyte.core.sync.PublishOutcome.of(it) }
+            if (outcome != null && outcome.kind != io.digibyte.core.sync.PublishOutcome.Kind.ACCEPTED) {
+                android.util.Log.w(
+                    "SyncService",
+                    "stranded send ${txid.take(12)}: last publish was ${outcome.kind} " +
+                        "(retry=${outcome.shouldRetry}, terminal=${outcome.isTerminal})"
+                )
+            }
             // Definitive double-spend: the C core marks a tx invalid when its
             // inputs were already spent by another (confirmed) tx. Such a tx can
             // never confirm — drop the phantom and forget the record rather than

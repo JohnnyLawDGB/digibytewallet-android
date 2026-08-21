@@ -36,10 +36,57 @@
  */
 typedef struct { char txid[65]; } PublishCtx;
 
+/* ---------- publish result registry ----------
+ *
+ * The callback fires on a PEER thread, asynchronously, long after the Kotlin caller has
+ * returned. Kotlin therefore cannot be handed the result directly; it has to be able to ASK
+ * later. This is that record — the smallest thing that lets the UI stop saying "Pending" for
+ * a transaction the network refused.
+ *
+ * A fixed ring, not a growing map: this is written from peer threads on every publish for the
+ * life of the process, and an unbounded structure here would be a slow leak in the one place
+ * that must never fail. Oldest entries are overwritten; a result nobody read within
+ * PUBLISH_RESULT_MAX publishes was not being acted on anyway.
+ *
+ * `pending` (-1) distinguishes "asked before the answer arrived" from "delivered, error 0".
+ * Without that the UI would read an in-flight publish as accepted — the exact false-success
+ * this whole change exists to remove.
+ */
+#define PUBLISH_RESULT_MAX 32
+
+typedef struct { char txid[65]; int error; } PublishResult;
+
+static PublishResult g_publishResults[PUBLISH_RESULT_MAX];
+static size_t        g_publishResultNext = 0;
+static pthread_mutex_t g_publishResultLock = PTHREAD_MUTEX_INITIALIZER;
+
+#define PUBLISH_RESULT_PENDING (-1)
+
+static void _publishResultRecord(const char *txid, int error)
+{
+    pthread_mutex_lock(&g_publishResultLock);
+    /* Overwrite an existing entry for the same txid rather than append: a republish must not
+     * leave its older, staler verdict behind for a reader to find first. */
+    for (size_t i = 0; i < PUBLISH_RESULT_MAX; i++) {
+        if (strncmp(g_publishResults[i].txid, txid, 64) == 0) {
+            g_publishResults[i].error = error;
+            pthread_mutex_unlock(&g_publishResultLock);
+            return;
+        }
+    }
+    PublishResult *slot = &g_publishResults[g_publishResultNext];
+    g_publishResultNext = (g_publishResultNext + 1) % PUBLISH_RESULT_MAX;
+    memcpy(slot->txid, txid, 64);
+    slot->txid[64] = '\0';
+    slot->error = error;
+    pthread_mutex_unlock(&g_publishResultLock);
+}
+
 static void _publishResult(void *info, int error)
 {
     PublishCtx *ctx = (PublishCtx *)info;
     if (!ctx) return;
+    _publishResultRecord(ctx->txid, error);
     if (error) {
         LOGE("publishTransaction: REJECTED txid=%s error=%d (%s) — the network did not "
              "accept this transaction; the wallet still holds it locally",
@@ -48,6 +95,29 @@ static void _publishResult(void *info, int error)
         LOGI("publishTransaction: accepted txid=%s (relayed back by a peer)", ctx->txid);
     }
     free(ctx);
+}
+
+/* Returns the recorded publish result for a txid, or PUBLISH_RESULT_PENDING (-1) when no
+ * verdict has arrived (or the entry aged out of the ring). Kotlin maps this through
+ * core/sync/PublishOutcome. */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getPublishResult(JNIEnv *env, jobject thiz,
+                                                            jstring txidHex)
+{
+    (void)thiz;
+    if (!txidHex) return PUBLISH_RESULT_PENDING;
+    const char *txid = (*env)->GetStringUTFChars(env, txidHex, NULL);
+    if (!txid) return PUBLISH_RESULT_PENDING;
+
+    int result = PUBLISH_RESULT_PENDING;
+    pthread_mutex_lock(&g_publishResultLock);
+    for (size_t i = 0; i < PUBLISH_RESULT_MAX; i++) {
+        if (strncmp(g_publishResults[i].txid, txid, 64) == 0) { result = g_publishResults[i].error; break; }
+    }
+    pthread_mutex_unlock(&g_publishResultLock);
+
+    (*env)->ReleaseStringUTFChars(env, txidHex, txid);
+    return result;
 }
 
 /* ---------- createTransaction ---------- */

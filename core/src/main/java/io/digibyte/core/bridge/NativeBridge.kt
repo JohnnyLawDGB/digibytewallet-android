@@ -304,6 +304,19 @@ object NativeBridge {
      *  and by the future M3 parent-walk to recurse toward issuance. */
     external fun getTransactionInputsForHash(txHashHex: String): Array<String>?
 
+    /**
+     * The recorded result of publishing [txHashHex], or **-1 when no verdict has arrived**.
+     *
+     * `BRPeerManagerPublishTx` reports acceptance and failure only through an async callback
+     * that fires on a peer thread, so the result cannot be returned from the publish call —
+     * it has to be asked for afterwards. 0 means a peer relayed the transaction back to us
+     * (genuine acceptance); non-zero is an errno. Map it through
+     * [io.digibyte.core.sync.PublishOutcome] rather than comparing here, and note that -1
+     * (pending) must NEVER be read as success — that is the false-success this exists to
+     * remove.
+     */
+    external fun getPublishResult(txHashHex: String): Int
+
     /** Returns the full serialized bytes of a wallet-known transaction, or
      *  null if the txid isn't in BRWallet. Fast-path for the M3 parent-walk —
      *  when a parent tx happens to be our own send, avoids a network
