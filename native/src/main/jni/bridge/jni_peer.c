@@ -1742,6 +1742,19 @@ Java_io_digibyte_core_bridge_NativeBridge_getAbandonedBelow(JNIEnv *env, jobject
     return (jlong)BRPeerManagerAbandonedBelow(g_peerManager);
 }
 
+/* One step of the abandoned-band backfill: retire what resident headers already allow,
+ * then request the next stretch of headers under the band. Returns heights retired by
+ * THIS call. Driven from Kotlin rather than BRPeerManagerKeepAlive because KeepAlive
+ * already holds manager->lock and the step takes it itself — calling it there would
+ * deadlock. Driving it from the sync tick also keeps progress observable. */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_backfillAbandonedBandStep(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerBackfillAbandonedBandStep(g_peerManager);
+}
+
 JNIEXPORT jlong JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;

@@ -718,6 +718,26 @@ class SyncService : Service() {
                 if (c.size >= 4) android.util.Log.i("SyncService",
                     "cf-ledger: scannedThrough=${c[0]} outstanding=${c[1]} gaveUp=${c[2]} pending=${c[3]}")
             }
+
+            // Abandoned-band backfill. Only runs when a band actually exists, and each
+            // call is a single step: retire whatever the resident headers already allow,
+            // then ask one peer for the next stretch underneath the band. Re-derives
+            // everything from the ledger and the block set each time, so a missed tick or
+            // a dropped peer costs time and nothing else.
+            //
+            // Before this existed the only cures for a "history gap" were a backend
+            // reconcile (which discloses the address set) or a full rebuild from wallet
+            // birth — re-scanning ~24M blocks to recover ~20k.
+            runCatching {
+                if (NativeBridge.getAbandonedBelow() > 0L) {
+                    val retired = NativeBridge.backfillAbandonedBandStep()
+                    if (retired > 0L) {
+                        android.util.Log.i("SyncService",
+                            "cf-backfill: retired $retired abandoned height(s); " +
+                                "abandonedBelow now ${NativeBridge.getAbandonedBelow()}")
+                    }
+                }
+            }.onFailure { android.util.Log.w("SyncService", "cf-backfill step threw", it) }
         }
     }
 

@@ -608,6 +608,18 @@ object NativeBridge {
      *  Monotonic. 0 if the peer manager doesn't exist yet. */
     external fun getAbandonedBelow(): Long
 
+    /**
+     * One step of the abandoned-band backfill: retire whatever the resident block headers
+     * already allow, then request the next stretch of headers underneath the band. Returns
+     * the heights retired by THIS call.
+     *
+     * Safe to call on every tick and safe to call forever — it re-derives everything from
+     * the scan ledger and the block set, so a missed tick, a dropped peer or a process
+     * restart costs time, never correctness. Does nothing when there is no abandoned band
+     * or no connected peer.
+     */
+    external fun backfillAbandonedBandStep(): Long
+
     /** SPAN below the watermark (max(abandonedBelow - start, 0)) — **not** the number of
      *  heights abandoned, and not sound as a measurement. It over-reports (the span includes
      *  heights that were scanned normally, which is why the banner renders a RANGE and never

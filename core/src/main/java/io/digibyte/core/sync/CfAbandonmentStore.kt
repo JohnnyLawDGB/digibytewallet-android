@@ -235,9 +235,23 @@ object CfAbandonmentStore {
      *
      * Returns true iff this call set the recovered signal.
      */
+    /**
+     * Is every height in a band at [bandLow] requestable again?
+     *
+     * Until the backfill existed, `abandonedBelow` had no lowering path, so "still clamping"
+     * and "non-zero" were the same statement and the check below tested for 0. They are no
+     * longer the same: the backfill lowers the floor, and a floor left non-zero by an OLDER,
+     * DEEPER band says nothing about this one. Testing for 0 would leave the user staring at
+     * a warning about a range that has already been recovered.
+     */
+    fun bandIsRetired(bandLow: Long, abandonedBelow: Long): Boolean = abandonedBelow <= bandLow
+
     fun noteScanCoverage(ctx: Context, abandonedBelow: Long, scanFrontier: Long): Boolean {
         val band = unrecoveredBand(ctx) ?: return false
-        if (abandonedBelow != 0L) return false        // hard floor still clamping
+        // The floor must no longer cover THIS band. Partial retirement is not recovery —
+        // telling the user everything is fine while heights are still condemned is worse
+        // than leaving the warning up.
+        if (!bandIsRetired(band.low, abandonedBelow)) return false
         // A frontier of 0 is "not up yet" / a failed native read, NOT an observation.
         // Without this guard a JNI failure would satisfy Phase 1 for free (0 <= high
         // always) and hand the floor-lands-above-the-band case its witness.
