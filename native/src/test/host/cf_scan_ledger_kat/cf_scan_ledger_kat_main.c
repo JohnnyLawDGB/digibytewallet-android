@@ -981,6 +981,77 @@ static void test_forward_fetch_waits_for_every_hole(void) {
           "forward fetch opens only after the whole batch is evaluated");
 }
 
+
+// ---------------------------------------------------------------------------
+// Retiring an abandoned band (2026-08-21). abandonedBelow was monotonic with NO
+// lowering path at all, which made a "history gap" permanent: the only cures were a
+// backend reconcile or a full rebuild from wallet birth — re-scanning ~24M blocks to
+// recover ~20k.
+//
+// It felt like a safety property, but it is a consequence of having no way to put the
+// pruned headers back. The loop: abandoning clamps those heights out of
+// LowestNeededHeight -> the prune floor rises above them -> their block headers are
+// pruned -> getcfilters cannot resolve a stop hash for the range -> the band really IS
+// unrequestable, retroactively justifying the abandonment.
+//
+// So the lowering path exists, but it is NARROW and its contract is the whole point:
+// the CALLER must have made headers for the retired range resident first. The ledger
+// cannot verify that and must not pretend to.
+// ---------------------------------------------------------------------------
+static void test_retire_abandoned_band(void)
+{
+    BRCFScanLedger l;
+    BRCFScanLedgerInit(&l, 24000000);
+
+    uint32_t cnt = 0;
+    BRCFScanLedgerAbandonUnscannableBelow(&l, 24050000, 24070273, &cnt);
+    check(BRCFScanLedgerAbandonedBelow(&l) == 24070273,
+          "retire: precondition -- a band is abandoned up to 24070273");
+
+    // Retire the lower half. abandonedBelow must FOLLOW the caller down, exactly.
+    uint32_t retired = BRCFScanLedgerRetireAbandonedTo(&l, 24060000);
+    check(retired == 10273, "retire: reports exactly the number of heights retired");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 24060000,
+          "retire: abandonedBelow lowered to the caller's new floor");
+
+    // Retiring the rest clears it entirely.
+    retired = BRCFScanLedgerRetireAbandonedTo(&l, 24050000);
+    check(retired == 10000, "retire: the remaining heights are retired");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 24050000,
+          "retire: abandonedBelow reaches the band's low edge");
+
+    // A floor at/above the current one is a NO-OP, never an accidental raise. Raising
+    // is what AbandonUnscannableBelow is for, and this path must not become a second
+    // way to condemn heights.
+    check(BRCFScanLedgerRetireAbandonedTo(&l, 24050000) == 0,
+          "retire: retiring to the same floor is a no-op");
+    check(BRCFScanLedgerRetireAbandonedTo(&l, 24060000) == 0,
+          "retire: a HIGHER floor is a no-op -- this path can only ever lower");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 24050000,
+          "retire: ...and the floor did not move on either no-op");
+
+    // Never below the ledger's own start: those heights were never in scope.
+    check(BRCFScanLedgerRetireAbandonedTo(&l, 23000000) == 0,
+          "retire: a floor below the ledger start is refused, not clamped silently");
+    check(BRCFScanLedgerAbandonedBelow(&l) == 24050000,
+          "retire: ...and the floor is unchanged after that refusal");
+
+    // Retiring must not disturb scan progress. In the field case the band had ALREADY
+    // been scanned (scannedThrough sat exactly at the band top), so retiring is pure
+    // bookkeeping there -- it must not rewind scannedThrough and cause a re-scan.
+    BRCFScanLedger l2;
+    BRCFScanLedgerInit(&l2, 24000000);
+    for (uint32_t h = 24000000; h <= 24070272; h++) BRCFScanLedgerMarkEvaluated(&l2, h);
+    uint32_t before = BRCFScanLedgerScannedThrough(&l2);
+    uint32_t c2 = 0;
+    BRCFScanLedgerAbandonUnscannableBelow(&l2, 24050000, 24070273, &c2);
+    BRCFScanLedgerRetireAbandonedTo(&l2, 24050000);
+    check(BRCFScanLedgerScannedThrough(&l2) == before,
+          "retire: scannedThrough is untouched -- retiring is not a rewind");
+
+    printf("test_retire_abandoned_band: done\n");
+}
+
 int main(void) {
 #ifdef KAT_LEDGER_STRIDE_REDGREEN_ONLY
     // Gate build: run ONLY the stride case so the RED is unambiguous.
@@ -1037,6 +1108,7 @@ int main(void) {
     test_valve_state_persists_v3();     // paced-convoy Task 5: blob v3 + v2 back-compat
     test_v3_stride_survives_a_future_version_bump();   // fix-wave I-2: the version-gate trap, one line over
     test_abandon_unscannable_below();                  // fix-wave C-1: the unscannable-band primitive
+    test_retire_abandoned_band();                      // 2026-08-21: the one lowering path
 
     printf(g_failures ? "\n%d FAILURE(S)\n" : "\nALL PASSED\n", g_failures);
     return g_failures ? 1 : 0;
