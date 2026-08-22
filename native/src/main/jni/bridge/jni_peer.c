@@ -1756,6 +1756,14 @@ Java_io_digibyte_core_bridge_NativeBridge_backfillAbandonedBandStep(JNIEnv *env,
 }
 
 JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getScanLedgerStart(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager) return 0;
+    return (jlong)BRPeerManagerScanLedgerStart(g_peerManager);
+}
+
+JNIEXPORT jlong JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();

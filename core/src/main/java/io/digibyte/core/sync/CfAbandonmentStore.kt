@@ -246,6 +246,43 @@ object CfAbandonmentStore {
      */
     fun bandIsRetired(bandLow: Long, abandonedBelow: Long): Boolean = abandonedBelow <= bandLow
 
+    /**
+     * Was the band demonstrably evaluated, independent of the two-phase witness?
+     *
+     * `noteScanCoverage` needs to SEE the scan frontier inside the band before it accepts
+     * that the band was covered. That works while a band is being actively recovered, but it
+     * strands the case observed on a Note 8 (v4.0.44): the banner showing while native
+     * reported `abandonedBelow == 0`. The band is a persisted Kotlin record; the native
+     * ledger had been re-initialised, so nothing was clamping — but the scan was already far
+     * ABOVE the band, so Phase 1 could never fire again and Phase 2 refuses without it.
+     * Permanently stuck, on a range that had in fact been scanned.
+     *
+     * `scannedThrough` makes the argument directly: it is a CONTIGUOUS high-water mark over
+     * evaluated heights and never advances past an outstanding or given-up hole. If it has
+     * passed the band top, every height in the band was evaluated.
+     *
+     * The load-bearing qualifier is [ledgerStart]. Contiguity is measured FROM there, so
+     * `scannedThrough >= bandHigh` proves nothing about a band BELOW the start — a ledger
+     * re-initialised above the band never looked at it. Concluding otherwise is the false
+     * "all clear" that actually costs someone money, so it is checked explicitly.
+     *
+     * Every zero is treated as a failed read, never as evidence.
+     */
+    fun coverageIsProven(
+        bandLow: Long,
+        bandHigh: Long,
+        ledgerStart: Long,
+        scannedThrough: Long,
+        abandonedBelow: Long,
+        gaveUp: Long,
+    ): Boolean {
+        if (ledgerStart <= 0L || scannedThrough <= 0L) return false   // failed reads
+        if (abandonedBelow != 0L) return false                        // still clamping
+        if (gaveUp != 0L) return false                                // a real hole exists
+        if (ledgerStart > bandLow) return false                       // band predates this ledger
+        return scannedThrough >= bandHigh
+    }
+
     fun noteScanCoverage(ctx: Context, abandonedBelow: Long, scanFrontier: Long): Boolean {
         val band = unrecoveredBand(ctx) ?: return false
         // The floor must no longer cover THIS band. Partial retirement is not recovery —

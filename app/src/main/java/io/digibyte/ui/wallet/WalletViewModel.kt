@@ -671,7 +671,34 @@ class WalletViewModel @Inject constructor(
                     }
                 } else if (CfAbandonmentStore.noteScanCoverage(
                         application, abandonedBelow, scanFrontier,
-                    )
+                    ) || run {
+                        // FOURTH path, for the case the two-phase witness structurally
+                        // cannot reach. Observed on a Note 8 (v4.0.44): the banner showing
+                        // while native reported abandonedBelow == 0. The band is a persisted
+                        // Kotlin record; the native ledger had been re-initialised, so
+                        // nothing was clamping — but the scan sat far ABOVE the band, so
+                        // Phase 1 could never fire again and Phase 2 refuses without it.
+                        // Stuck forever, on a range that had in fact been scanned.
+                        //
+                        // scannedThrough settles it directly: contiguous over evaluated
+                        // heights, never past an outstanding or given-up hole. Qualified by
+                        // the ledger's START, because contiguity is measured from there and a
+                        // ledger re-initialised above the band proves nothing about it.
+                        val band = CfAbandonmentStore.unrecoveredBand(application)
+                        val counts = runCatching { NativeBridge.getCfScanLedgerCounts() }
+                            .getOrDefault(LongArray(0))
+                        val ledgerStart = runCatching { NativeBridge.getScanLedgerStart() }
+                            .getOrDefault(0L)
+                        band != null && counts.size >= 4 &&
+                            CfAbandonmentStore.coverageIsProven(
+                                bandLow = band.low,
+                                bandHigh = band.high,
+                                ledgerStart = ledgerStart,
+                                scannedThrough = counts[0],
+                                abandonedBelow = abandonedBelow,
+                                gaveUp = counts[2],
+                            ) && CfAbandonmentStore.markRecovered(application)
+                    }
                 ) {
                     // THIRD recovery path, and the only unattended one. SyncService's
                     // frozen-CF recovery / corrupt-chain heal / post-timeout re-anchor

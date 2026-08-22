@@ -609,6 +609,16 @@ object NativeBridge {
     external fun getAbandonedBelow(): Long
 
     /**
+     * The scan ledger's start height — the lowest height it has ever been responsible for.
+     *
+     * `scannedThrough` is a CONTIGUOUS high-water mark measured from here, so
+     * "scannedThrough >= X" only proves X was evaluated when `start <= X`. Concluding a
+     * range was covered by a ledger that was re-initialised ABOVE it is the false
+     * "all clear" this guards against.
+     */
+    external fun getScanLedgerStart(): Long
+
+    /**
      * One step of the abandoned-band backfill: retire whatever the resident block headers
      * already allow, then request the next stretch of headers underneath the band. Returns
      * the heights retired by THIS call.
