@@ -1,5 +1,52 @@
 # DigiByte Wallet — Roadmap
 
+> ## Update — 2026-08-22 (true-up to v4.0.46)
+>
+> Six releases since the last banner. The 2026-08-19 "NEXT" list below is **spent** — its
+> first item shipped, and the rest were overtaken by defects found while shipping it.
+>
+> **Shipped**
+>
+> - **`cfcheckpt` active rejection (v4.0.41)** — the Phase 1 client remainder is DONE. A
+>   filter-header batch crossing a pinned checkpoint is validated *before* commit; a peer
+>   serving a divergent chain is rejected and banned rather than appended-then-logged, and a
+>   checkpoint-confirmed chain vetoes the re-anchor path. Checkpoint table extended to
+>   24,050,000. **The work already existed** on an unmerged branch whose submodule commits had
+>   never been pushed — see the near-loss note under Guardrails.
+> - **v4.0.43 — a regression in that same release, fixed.** Its never-brick path acted on ONE
+>   disagreeing peer once a never-reset budget was spent, condemning 20k+ heights on a live
+>   wallet. Now requires the same corroboration a re-anchor does.
+> - **v4.0.42 — a send could report success while the network had refused it.** The JNI passed
+>   a NULL publish callback, which is also how the C core reports failure; worse, a NULL
+>   callback is skipped by the cleanup path, so those publishes never left the queue. Because
+>   the wallet registers a transaction just before publishing, a refused send still marked its
+>   inputs spent — minting local-only UTXOs that later sends built on. `clearStuckSends` now
+>   also clears the orphans that produced.
+> - **v4.0.44–46 — a "history gap" is recoverable and dismissible.** The wallet re-fetches just
+>   the block headers under a gap (anchored to a compiled-in checkpoint, no third party) and
+>   retires the marker as it goes; and a gap recorded with an unknown lower edge can finally
+>   clear. Verified on-device.
+> - **Asset transfer request URIs** (`digibyte:…?assetId=&assetAmount=`), fail-closed — the
+>   deep-link half of the digistamp integration.
+>
+> **NEXT — NOT yet agreed, listed for a decision rather than as a plan:**
+>
+> 1. **Restore restructure** — onboarding split (written, unshipped, needs visual verification)
+>    then the asset-aware sweep on the adoption design.
+> 2. **The second abandonment cause** — `resume frontier below saved block window`, seen in the
+>    same capture as the .41 regression. Pre-existing, untouched, unquantified.
+> 3. **Digi-ID key isolation** — now correctly scoped as per-site derivation (linkability), NOT
+>    key exposure; see the corrected entry in "Current state".
+> 4. **`assets.digistamp.co`** — its gate (trustworthy asset balances) cleared in v4.0.39, and
+>    the transfer-request URI landed in v4.0.42. Buying still needs PSBT, which does not exist.
+>
+> **Guardrails added 2026-08-22**, because each failure below already happened:
+> `scripts/check-submodule-pin.sh` (a pin that resolves locally proves nothing — a shipped pin
+> once existed only in two local worktrees) and `scripts/check-worktree-target.sh` (a cwd reset
+> put a commit in the main checkout, on a stale branch, over an unrelated base).
+
+---
+
 > ## Update — 2026-08-19 (true-up to v4.0.40)
 >
 > Records the 2026-08-16 handoff (`docs/specs/HANDOFF_2026-08-16.md`) and the five
@@ -42,7 +89,7 @@
 >   shipped. Its two real findings are kept where they belong — Digi-ID key isolation now
 >   stands on its own merits, and the covert OP_RETURN beacon stays a non-goal.
 >
-> **NEXT (decided 2026-08-19), in order:**
+> **NEXT (decided 2026-08-19) — ⚠️ SUPERSEDED by the 2026-08-22 banner; item 1 shipped in v4.0.41:**
 >
 > 1. **`cfcheckpt` active rejection** — the Phase 1 client remainder, unchanged from the
 >    2026-08-10 banner and still the honest "finish what v4.0.0 already claims". Chosen to
@@ -279,7 +326,7 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | Phase | Theme | Rough size | Status / ships with |
 |-------|-------|-----------|---------------------|
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
-| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & **hardened through v4.0.35**, bloom **removed** (v3.10.x), own-node pairing shipped (Seq 1.1/1.2). 🚧 Remainder: **`cfcheckpt` active rejection (NEXT)** + oracle-bootstrap (seeder demotion) |
+| 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & hardened through v4.0.46, bloom **removed** (v3.10.x), own-node pairing shipped, **`cfcheckpt` active rejection SHIPPED v4.0.41**. 🚧 Remainder: oracle-bootstrap (seeder demotion) |
 | 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
 | 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation → Keystore binding → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
@@ -348,11 +395,13 @@ every sovereignty claim is hollow if a fresh install can sit at 0 peers:
    exception must generalize (or operators run Path B) before
    activation; resolve the Path A/B open decision when the oracle
    roster is frozen.
-3. **`cfcheckpt` checkpoint verification.** Filter headers are
-   TOFU-plus-quorum today; v3.10.25's observe-and-log cross-check
-   graduates to actively rejecting a misbehaving filter chain. This is
-   the real residual named in the oracle-bootstrap spec, and it should
-   land before v4.0.0 so the major version's trust story is clean.
+3. ~~**`cfcheckpt` checkpoint verification.**~~ **SHIPPED v4.0.41.** Filter
+   headers are validated against the pinned table BEFORE commit; a divergent
+   batch is rejected and the peer banned, and a checkpoint-confirmed chain
+   vetoes the re-anchor. Landed after v4.0.0 rather than before it, so the
+   major version shipped its trust story incomplete — noted for honesty. A
+   regression in the same release (acting on ONE disagreeing peer) was fixed
+   in v4.0.43.
 
 **Effort:** M remaining (the L was the client, and it's done).
 
