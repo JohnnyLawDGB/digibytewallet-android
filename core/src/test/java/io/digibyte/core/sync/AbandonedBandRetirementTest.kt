@@ -127,4 +127,50 @@ class AbandonedBandRetirementTest {
             )
         )
     }
+
+    // ── A band with an UNKNOWN low edge ──────────────────────────────────────────
+    //
+    // When the process was not running through the abandonment window there is no low
+    // hint, and the band is stored as AbandonedBand(0, high, lowKnown = false) — the UI
+    // honestly degrades to "blocks below Y". That 0 is "unknown", NOT "zero", and reading
+    // it literally makes such a band unclearable forever: ledgerStart > 0 always.
+    //
+    // The Note 8's band was exactly this (its abandonment logged lowHint=0).
+    //
+    // An abandoned range cannot extend below the ledger's own start — heights below it
+    // were never in scope to abandon — so for an unknown low the effective low IS the
+    // ledger start, and coverage can be proven over [start..high] like any other band.
+
+    @Test fun an_unknown_low_is_treated_as_the_ledger_start_not_as_zero() {
+        assertTrue(
+            CfAbandonmentStore.coverageIsProven(
+                bandLow = 0L, bandHigh = 24_066_882L, lowKnown = false,
+                ledgerStart = 24_000_000L, scannedThrough = 24_074_267L,
+                abandonedBelow = 0L, gaveUp = 0L,
+            )
+        )
+    }
+
+    /** The relaxation is scoped to lowKnown=false. A band that KNOWS its low edge is
+     *  still held to it — a ledger started above a known low proves nothing. */
+    @Test fun a_known_low_below_the_ledger_start_is_still_refused() {
+        assertFalse(
+            CfAbandonmentStore.coverageIsProven(
+                bandLow = 23_000_000L, bandHigh = 24_066_882L, lowKnown = true,
+                ledgerStart = 24_000_000L, scannedThrough = 24_074_267L,
+                abandonedBelow = 0L, gaveUp = 0L,
+            )
+        )
+    }
+
+    /** An unknown low still cannot excuse a scan that never reached the top. */
+    @Test fun an_unknown_low_still_needs_the_scan_past_the_band_top() {
+        assertFalse(
+            CfAbandonmentStore.coverageIsProven(
+                bandLow = 0L, bandHigh = 24_066_882L, lowKnown = false,
+                ledgerStart = 24_000_000L, scannedThrough = 24_060_000L,
+                abandonedBelow = 0L, gaveUp = 0L,
+            )
+        )
+    }
 }

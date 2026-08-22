@@ -697,6 +697,7 @@ class WalletViewModel @Inject constructor(
                                 scannedThrough = counts[0],
                                 abandonedBelow = abandonedBelow,
                                 gaveUp = counts[2],
+                                lowKnown = band.lowKnown,
                             ) && CfAbandonmentStore.markRecovered(application)
                     }
                 ) {

@@ -275,11 +275,19 @@ object CfAbandonmentStore {
         scannedThrough: Long,
         abandonedBelow: Long,
         gaveUp: Long,
+        lowKnown: Boolean = true,
     ): Boolean {
         if (ledgerStart <= 0L || scannedThrough <= 0L) return false   // failed reads
         if (abandonedBelow != 0L) return false                        // still clamping
         if (gaveUp != 0L) return false                                // a real hole exists
-        if (ledgerStart > bandLow) return false                       // band predates this ledger
+        // A band recorded without a low hint stores low = 0, and that 0 means UNKNOWN, not
+        // zero. Read literally it makes such a band unclearable forever, since ledgerStart
+        // is always > 0 — which is precisely how a wallet ends up displaying a permanent
+        // warning. An abandoned range cannot extend below the ledger's own start (heights
+        // below it were never in scope to abandon), so for an unknown low the effective low
+        // IS the start. The strict check still applies to a band that KNOWS its low edge.
+        val effectiveLow = if (lowKnown) bandLow else ledgerStart
+        if (ledgerStart > effectiveLow) return false                  // band predates this ledger
         return scannedThrough >= bandHigh
     }
 
