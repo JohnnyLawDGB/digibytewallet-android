@@ -6,7 +6,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
 **Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
-**Version:** v4.0.44 (versionCode 40044)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.0.45 (versionCode 40045)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -127,6 +127,26 @@ treat them as history plus decisions, not as instructions:
 - `restore-flow-asset-aware.md` — 🟡 privacy hole closed; the filter-rescan mechanism cannot work (`credit iff derived`)
 
 ## Important Patterns
+
+### Guardrails (run these; they exist because each one already bit us)
+
+```bash
+./scripts/check-submodule-pin.sh          # is the shipped pin durable?  (also in CI)
+ln -sf ../../scripts/check-worktree-target.sh .git/hooks/pre-commit   # once per clone
+```
+
+- **`check-submodule-pin.sh`** — asks the FORK whether the submodule pin is reachable from a
+  durable branch (`develop`/`master`). A pin that resolves locally proves nothing: the object
+  is already in your checkout. Two real incidents: a pin that had never been pushed at all
+  (surviving only in two local worktrees — a `git worktree prune` would have destroyed it),
+  and four shipped releases whose pins existed only on deletable feature branches. **Push
+  core to `develop`, not just a feature branch.** Wired into CI.
+- **`check-worktree-target.sh`** — refuses a commit in the MAIN checkout while worktrees
+  exist. The shell's cwd can reset between commands, and a `git add -A` intended for a
+  worktree then lands on whatever branch main is on, over an unrelated base, sweeping up
+  whatever was already dirty. Override with `ALLOW_MAIN_COMMIT=1` for deliberate
+  merge/release work.
+- **Prefer `git add <explicit paths>` over `git add -A`** when a worktree is in play.
 
 ### Submodule (digibytewallet-core)
 The C core is a git submodule. Use explicit GIT_DIR for submodule commits:

@@ -32,6 +32,14 @@ jobs:
       - name: Lint
         run: ./gradlew lint || true  # Don't fail on lint warnings in alpha
 
+      # A submodule pin that resolves LOCALLY proves nothing — the object is already in
+      # the checkout. This asks the fork whether the pin is reachable from a durable
+      # branch. Two real incidents in Aug 2026: a pin that had never been pushed at all
+      # (surviving only in local worktrees), and four shipped releases whose pins existed
+      # only on feature branches that could be deleted at any time.
+      - name: Submodule pin is durable
+        run: ./scripts/check-submodule-pin.sh
+
       - name: Unit Tests
         run: ./gradlew testMainnetDebugUnitTest
 
