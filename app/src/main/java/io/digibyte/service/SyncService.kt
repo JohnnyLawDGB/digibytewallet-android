@@ -719,6 +719,28 @@ class SyncService : Service() {
                     "cf-ledger: scannedThrough=${c[0]} outstanding=${c[1]} gaveUp=${c[2]} pending=${c[3]}")
             }
 
+            // Stranded-send recovery, on a timer rather than only at sync start.
+            //
+            // rebroadcastStrandedSends had exactly ONE call site — the startup block below
+            // — so a send stranded DURING a session had no recovery at all until the app
+            // was restarted. That is precisely the "I have to restart the app a few times
+            // to get the transaction to broadcast" report: the recovery existed, it just
+            // could not run while you were sitting there waiting for it.
+            //
+            // Rate-limited rather than every tick: a republish is real network traffic, and
+            // the common case is that there is nothing to do. It also costs nothing when
+            // the store is empty, which is the overwhelming majority of ticks.
+            runCatching {
+                val now = System.currentTimeMillis()
+                if (now - lastStrandedRebroadcastMs >= STRANDED_REBROADCAST_INTERVAL_MS &&
+                    NativeBridge.getPeerCount() > 0 &&
+                    OutgoingTxStore(this@SyncService).allTxids().isNotEmpty()
+                ) {
+                    lastStrandedRebroadcastMs = now
+                    rebroadcastStrandedSends()
+                }
+            }.onFailure { android.util.Log.w("SyncService", "periodic stranded-send sweep threw", it) }
+
             // Abandoned-band backfill. Only runs when a band actually exists, and each
             // call is a single step: retire whatever the resident headers already allow,
             // then ask one peer for the next stretch underneath the band. Re-derives
@@ -3370,6 +3392,9 @@ class SyncService : Service() {
      *  the tip, so this is the last boundary window — sub-boundary catch-up isn't
      *  captured here, but the recent bundled checkpoint makes re-syncing that gap
      *  near-instant. */
+    /** Last time the periodic stranded-send sweep ran. 0 = never this process. */
+    @Volatile private var lastStrandedRebroadcastMs: Long = 0L
+
     @Volatile private var lastSavedBlocksData: Pair<ByteArray, Long>? = null
 
     /**
@@ -3809,6 +3834,17 @@ class SyncService : Service() {
          *  reconnect (re-inject + startSync) to a clean peer-manager recreate
          *  (forceReconnect). 3 ticks ≈ 30s — gives the light path a few tries first,
          *  then digs out a manager stuck after long Doze idle. */
+        /**
+         * How often the periodic stranded-send sweep may run.
+         *
+         * 90s is chosen against the failure it recovers from: a publish cancelled by an
+         * unrelated peer's connect timeout. The user should not sit watching a send that
+         * silently died, but a republish is real traffic and a valid-but-slow send must be
+         * given room to confirm on its own before being re-sent — DigiByte blocks are ~15s,
+         * so 90s is several blocks of patience.
+         */
+        private const val STRANDED_REBROADCAST_INTERVAL_MS = 90_000L
+
         private const val ZERO_PEER_RECREATE_THRESHOLD = 3
     }
 }
