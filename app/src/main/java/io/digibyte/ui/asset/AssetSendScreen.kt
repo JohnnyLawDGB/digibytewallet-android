@@ -137,6 +137,14 @@ fun AssetSendScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // What the screen should actually be showing. Extracted to core/asset so the rule
+        // is unit-tested rather than only observable by sending a real asset on a device —
+        // which is how the "still spinning after a successful send" report was found.
+        val screenState = io.digibyte.core.asset.AssetSendScreenState.of(
+            sendSucceeded = sendState is AssetViewModel.SendState.Success,
+            assetLoaded = asset != null,
+        )
+
         // ── Terminal result banner (success / failure) ───────────────────
         when (val s = sendState) {
             is AssetViewModel.SendState.Success -> SendResultBanner(
@@ -155,6 +163,26 @@ fun AssetSendScreen(
         }
         if (sendState !is AssetViewModel.SendState.Idle) {
             Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // A completed send is TERMINAL. Previously the form stayed populated and re-armed
+        // underneath the success banner, so the screen read as an invitation to send the
+        // same transaction again — and the section below showed a permanent spinner,
+        // because the asset it was "loading" had just been sent away and would never come
+        // back. Show the way out instead, and stop rendering the form entirely.
+        if (screenState == io.digibyte.core.asset.AssetSendScreenState.DONE) {
+            Button(
+                onClick = {
+                    viewModel.resetSendState()
+                    onNavigateBack()
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DigiByteAccent),
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+            return@Column
         }
 
         // ── Asset info header ────────────────────────────────────────────
@@ -443,7 +471,8 @@ fun AssetSendScreen(
                 Text("Review & Send", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         } ?: run {
-            // Asset not loaded yet
+            // Only reachable in LOADING now — the DONE case returns above, so this can no
+            // longer spin forever over an asset that was successfully sent away.
             Box(
                 modifier = Modifier.fillMaxWidth().padding(48.dp),
                 contentAlignment = Alignment.Center
