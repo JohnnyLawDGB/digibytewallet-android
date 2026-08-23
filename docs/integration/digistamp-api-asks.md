@@ -78,18 +78,20 @@ never need specific status codes.
 These shapes aren't arbitrary: they match what my wallet already parses from
 another provider. **Hit them exactly and I need close to zero new client code.**
 
-> #### One of these fixes a live bug today
+> #### Why `/tx/raw` matters even though it isn't urgent
 >
-> `GET /tx/raw/{txid}` is worth doing on its own, before anything else here. My
-> wallet currently shows **"metadata offline"** on transferred assets, and that
-> endpoint is the fix.
+> A DigiAsset *transfer* carries no metadata hash in its OP_RETURN — only an
+> issuance does. So to show a name or image for an asset that arrived by transfer,
+> the wallet walks back through each parent transaction to the issuance, and every
+> hop needs a raw transaction lookup.
 >
-> The reason: a DigiAsset *transfer* carries no metadata hash in its OP_RETURN —
-> only an issuance does. To show a name or image for an asset that arrived by
-> transfer, the wallet has to walk back to the issuance transaction, which needs
-> raw transaction lookup. Both sources I have are dead: `api.digiscope.me` 404s,
-> and `api.digiassets.net` answers 200 with an empty body. You're the only one
-> with a healthy DigiAsset node.
+> Today exactly one host serves that: `api.digiscope.me/api/tx/raw`. It works, but
+> it is a single point of failure for every asset name and image in the wallet, and
+> its sibling asset routes have already gone dark (`/api/assets/*` 404s;
+> `api.digiassets.net` answers 200 with an empty body). You have a healthy
+> DigiAsset node, so you are the natural second source.
+>
+> Not urgent, then — but it is the endpoint whose absence would hurt most later.
 
 ### 2. What `/api/mint` takes and returns — one answer
 
