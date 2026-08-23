@@ -196,6 +196,36 @@ native screen and passes no page-supplied value into it unchecked.
 A build-time assertion that **no `@JavascriptInterface` exists anywhere in the app** — the rule
 is only worth as much as its enforcement.
 
+## OPEN — does any of this leak the address set? (raised 2026-08-23, not yet worked)
+
+The wallet runs compact-filters-only so that **the address set never leaves the device**. Any
+digistamp integration has to be held to that, and the question deserves its own pass rather than
+an assurance in passing. First-cut reading of the current surface:
+
+| surface | what leaves the device |
+|---|---|
+| WebView rendering pages | nothing — page loads carry no wallet data |
+| Digi-ID login | **one** address (the identity key) plus a signature. Not the set — but it is a stable identifier, which is the linkability residual already tracked against Digi-ID key isolation |
+| `getRawTransaction(txid)` (parent walk) | txids, not addresses. Reveals *which transactions* the wallet cares about — weaker than address exposure, not nothing |
+| `getAddressHoldings(address)` | **an address, to a third party.** Currently ZERO callers |
+
+The thing to protect is that last row. A marketplace naturally wants to show "your holdings", and
+the lazy way to build it is to POST addresses to the backend — which would hand digistamp exactly
+what BIP157/158 exists to withhold.
+
+**It does not need to.** The wallet already computes asset holdings natively from the compact-
+filter scan; that is what the sovereign native asset-balance work built, and it is why
+`getAddressHoldings` has no callers today. The in-app marketplace should render *the wallet's own*
+holdings next to digistamp's catalogue, never ask digistamp what the user owns.
+
+Worth deciding explicitly: whether `getAddressHoldings` should be **deleted** rather than left
+present-but-unused, since an unused method that leaks is one call site away from leaking.
+
+Also open: whether asset addresses should live in a separate derivation branch from spending
+addresses, so that anything ever disclosed about assets cannot be correlated with DGB balances.
+That is a bigger change (watch-set, recovery, gap limit all move with it) and belongs with the
+Digi-ID key-isolation work, which is the same shape of problem.
+
 ## Open questions
 
 - Does `/api/auth/digiid/callback` return a bearer token in JSON, or set a cookie? A cookie
