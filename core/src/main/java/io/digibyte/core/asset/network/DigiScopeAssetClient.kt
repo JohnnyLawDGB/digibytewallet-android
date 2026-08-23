@@ -35,33 +35,27 @@ class DigiScopeAssetClient(
         .build()
 
     override suspend fun getAssetData(assetId: String): AssetDataResponse? {
-        val json = getJson("$baseUrl/assets/$assetId") as? JSONObject ?: return null
-        if (json.has("error")) return null
-        return AssetDataResponse(
-            assetId = json.optString("assetId", assetId),
-            cid = json.optString("cid").takeIf { it.isNotEmpty() },
-            issuer = json.optString("issuer").takeIf { it.isNotEmpty() },
-            count = json.optLong("count", 0L),
-            decimals = json.optInt("decimals", 0),
-            ipfs = json.optJSONObject("ipfs")?.let { ipfsJsonToMap(it) },
-        )
+        val json = getJson("$baseUrl/digiassets/asset/$assetId") as? JSONObject ?: return null
+        val parsed = DigiScopeAssetParsing.assetData(json, fallbackAssetId = assetId)
+            ?: return null
+        // The ipfs blob, when the backend inlines one, is richer than the parser's remit.
+        return parsed.copy(ipfs = json.optJSONObject("ipfs")?.let { ipfsJsonToMap(it) })
     }
 
     override suspend fun getAddressHoldings(address: String): Map<String, Long>? {
-        val json = getJson("$baseUrl/assets/holdings/$address") as? JSONObject ?: return null
-        if (json.has("error")) return null
-        val result = mutableMapOf<String, Long>()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            result[k] = json.optLong(k, 0L)
-        }
-        return result
+        val json = getJson("$baseUrl/digiassets/address/$address") as? JSONObject ?: return null
+        return DigiScopeAssetParsing.holdings(json)
     }
 
+    /**
+     * NO BACKEND ROUTE EXISTS for this yet (probed 2026-08-23: 404 under every prefix tried),
+     * and nothing in the wallet calls it — so this is a shape waiting for a server, not a
+     * working call. The path below is a guess at the prefix its siblings use; verify it against
+     * a live route before relying on it.
+     */
     override suspend fun getAddressHistory(address: String, limit: Int?): List<String>? {
         val url = buildString {
-            append("$baseUrl/assets/history/$address")
+            append("$baseUrl/digiassets/history/$address")
             if (limit != null) append("?limit=$limit")
         }
         val json = getJson(url) ?: return null
@@ -69,6 +63,11 @@ class DigiScopeAssetClient(
         return List(arr.length()) { arr.optString(it) }.filter { it.isNotEmpty() }
     }
 
+    /**
+     * NO BACKEND ROUTE EXISTS for this yet (probed 2026-08-23: 404), and nothing in the wallet
+     * calls it. Left in place because the rotation's health story will want it, but do not read
+     * a null here as "the node is behind" — it means the route is absent.
+     */
     override suspend fun getSyncState(): SyncStateResponse? {
         val json = getJson("$baseUrl/syncstate") as? JSONObject ?: return null
         if (json.has("error")) return null
