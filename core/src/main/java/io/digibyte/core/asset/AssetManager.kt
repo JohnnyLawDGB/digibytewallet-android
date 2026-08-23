@@ -167,7 +167,16 @@ class AssetManager(
     private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient? = null,
     private val outgoingTxStore: io.digibyte.core.OutgoingTxStore? = null,
     private val walletTxPersister: io.digibyte.core.WalletTxPersister? = null,
+    /** Where the parent-walk keeps what it proves. Defaults to process-lifetime memory so
+     *  callers without a database behave identically, just without persistence. */
+    private val provenanceStore: ProvenanceStore = InMemoryProvenanceStore(),
 ) {
+
+    /** Walks a transfer back to its issuance, resuming rather than restarting. The hop
+     *  function below is the only part that touches the network or JNI. */
+    private val provenanceWalker: AssetProvenanceWalker by lazy {
+        AssetProvenanceWalker(hop = ::classifyProvenanceHop, store = provenanceStore)
+    }
 
     /**
      * Flow of owned assets grouped by asset_id, with quantities and metadata.
@@ -765,8 +774,14 @@ class AssetManager(
      *  2. If the parent's OP_RETURN is a DigiAsset ISSUANCE → compute the
      *     asset ID via [NativeBridge.deriveIssuanceAssetId] using that
      *     parent's own first-input outpoint.
-     *  3. If it's a TRANSFER → recurse with the parent's first input.
-     *  4. Bounded to [MAX_WALK_DEPTH] hops; real chains rarely exceed 2-3.
+     *  3. If it's a TRANSFER → continue from the parent's first input.
+     *  4. Bounded per attempt, NOT in total: an attempt that runs out of hops records where it
+     *     stopped and the next one resumes there, so an arbitrarily deep chain still resolves.
+     *     The old constant capped total reach at 12 hops and discarded partial progress, which
+     *     left an asset transferred more than twelve times permanently nameless — and every
+     *     send-and-receive round trip adds two hops, so testing transfers caused it.
+     *
+     * See [AssetProvenanceWalker] for the progress accounting and its tests.
      *
      * The walk is suspend-only, so callers decide whether to await or fire
      * it into a background scope. When resolution succeeds, placeholder
@@ -790,91 +805,82 @@ class AssetManager(
     )
 
     suspend fun resolveTransferAssetId(startTxHashHex: String): ResolvedAsset? {
-        var currentTxid = startTxHashHex
-        val seen = mutableSetOf<String>()
+        val facts = provenanceWalker.resolve(startTxHashHex)
+        if (facts == null) {
+            android.util.Log.d("AssetManager", "M3 walk: no resolution yet for $startTxHashHex")
+            return null
+        }
+        android.util.Log.i("AssetManager",
+            "M3 resolved $startTxHashHex → ${facts.assetId} " +
+            "(supply=${facts.totalSupply} div=${facts.divisibility})")
+        return ResolvedAsset(
+            assetId = facts.assetId,
+            totalSupply = facts.totalSupply,
+            divisibility = facts.divisibility,
+            metadataCid = facts.metadataCid,
+        )
+    }
 
-        for (depth in 0 until MAX_WALK_DEPTH) {
-            if (!seen.add(currentTxid)) {
-                android.util.Log.d("AssetManager", "M3 walk[$depth]: cycle at $currentTxid — stop")
-                return null
-            }
+    /**
+     * One hop of the parent walk: what kind of transaction is this?
+     *
+     * The distinction that matters is Unavailable vs DeadEnd. A transaction no endpoint could
+     * serve right now is weather — the walk keeps its progress and tries again later. A burn, or
+     * an issuance form we can't derive from, is a verdict, and retrying it forever is waste. The
+     * predecessor collapsed both into "return null", which threw away proven ground every time
+     * a request happened to fail.
+     */
+    private suspend fun classifyProvenanceHop(txid: String): AssetProvenanceWalker.Hop {
+        val rawTx = fetchRawTransactionBytes(txid)
+            ?: return AssetProvenanceWalker.Hop.Unavailable
 
-            val rawTx = fetchRawTransactionBytes(currentTxid)
-            if (rawTx == null) {
-                android.util.Log.d("AssetManager", "M3 walk[$depth]: no raw for $currentTxid — stop")
-                return null
-            }
+        val opReturn = NativeBridge.getOpReturnData(rawTx)
+            ?: return AssetProvenanceWalker.Hop.DeadEnd
+        val header = decoder.decode(opReturn)
+            ?: return AssetProvenanceWalker.Hop.DeadEnd
 
-            val opReturn = NativeBridge.getOpReturnData(rawTx)
-            if (opReturn == null) {
-                android.util.Log.d("AssetManager", "M3 walk[$depth]: no OP_RETURN in $currentTxid — stop")
-                return null
-            }
-            val header = decoder.decode(opReturn)
-            if (header == null) {
-                android.util.Log.d("AssetManager", "M3 walk[$depth]: decoder rejected OP_RETURN of $currentTxid — stop")
-                return null
-            }
+        return when (header.operation) {
+            io.digibyte.core.model.AssetOperation.ISSUANCE -> {
+                if (!header.locked) {
+                    // M1.2b gap: an unlocked issuance needs the spent output's scriptPubKey.
+                    android.util.Log.d("AssetManager", "M3 hop: unlocked issuance at $txid — M1.2b gap")
+                    return AssetProvenanceWalker.Hop.DeadEnd
+                }
+                val firstInput = firstInputOfRawTx(rawTx)
+                    ?: return AssetProvenanceWalker.Hop.DeadEnd
+                val aggregationCode = when (header.aggregation) {
+                    Aggregation.AGGREGATABLE -> 0
+                    Aggregation.HYBRID -> 1
+                    Aggregation.DISPERSED -> 2
+                }
+                val derived = runCatching {
+                    NativeBridge.deriveIssuanceAssetId(
+                        firstInputTxidHex = firstInput.prevTxidHex,
+                        firstInputVout = firstInput.prevVout,
+                        locked = true,
+                        aggregation = aggregationCode,
+                        divisibility = header.divisibility,
+                    )
+                }.getOrNull() ?: return AssetProvenanceWalker.Hop.DeadEnd
 
-            when (header.operation) {
-                io.digibyte.core.model.AssetOperation.ISSUANCE -> {
-                    if (!header.locked) {
-                        android.util.Log.d("AssetManager", "M3 walk[$depth]: unlocked issuance at $currentTxid — M1.2b gap")
-                        return null
-                    }
-                    val firstInput = firstInputOfRawTx(rawTx)
-                    if (firstInput == null) {
-                        android.util.Log.d("AssetManager", "M3 walk[$depth]: can't parse first input of $currentTxid")
-                        return null
-                    }
-                    val aggregationCode = when (header.aggregation) {
-                        Aggregation.AGGREGATABLE -> 0
-                        Aggregation.HYBRID -> 1
-                        Aggregation.DISPERSED -> 2
-                    }
-                    val derived = runCatching {
-                        NativeBridge.deriveIssuanceAssetId(
-                            firstInputTxidHex = firstInput.prevTxidHex,
-                            firstInputVout = firstInput.prevVout,
-                            locked = true,
-                            aggregation = aggregationCode,
-                            divisibility = header.divisibility,
-                        )
-                    }.getOrNull() ?: return null
-                    android.util.Log.d("AssetManager",
-                        "M3 walk[$depth]: issuance $currentTxid → $derived (supply=${header.totalQuantity} div=${header.divisibility})")
-                    return ResolvedAsset(
+                AssetProvenanceWalker.Hop.Issuance(
+                    ResolvedAssetFacts(
                         assetId = derived,
                         totalSupply = header.totalQuantity ?: 0L,
                         divisibility = header.divisibility,
                         metadataCid = header.metadataCid,
                     )
-                }
-                io.digibyte.core.model.AssetOperation.TRANSFER -> {
-                    val firstInput = firstInputOfRawTx(rawTx)
-                    if (firstInput == null) {
-                        android.util.Log.d("AssetManager",
-                            "M3 walk[$depth]: can't parse first input of transfer $currentTxid")
-                        return null
-                    }
-                    android.util.Log.d("AssetManager",
-                        "M3 walk[$depth]: transfer $currentTxid → parent ${firstInput.prevTxidHex}:${firstInput.prevVout}")
-                    currentTxid = firstInput.prevTxidHex
-                }
-                io.digibyte.core.model.AssetOperation.BURN -> {
-                    android.util.Log.d("AssetManager", "M3 walk[$depth]: burn at $currentTxid — stop")
-                    return null
-                }
+                )
             }
+            io.digibyte.core.model.AssetOperation.TRANSFER -> {
+                val firstInput = firstInputOfRawTx(rawTx)
+                    ?: return AssetProvenanceWalker.Hop.DeadEnd
+                AssetProvenanceWalker.Hop.Transfer(firstInput.prevTxidHex)
+            }
+            io.digibyte.core.model.AssetOperation.BURN -> AssetProvenanceWalker.Hop.DeadEnd
         }
-        android.util.Log.d("AssetManager", "M3 walk: exceeded $MAX_WALK_DEPTH hops from $startTxHashHex")
-        return null
     }
 
-    /** Fetch raw tx bytes: prefer BRWallet (free, local, no network) then
-     *  fall back to the asset network client's getRawTransaction. The local
-     *  fast path fires when the parent tx happens to be one our own wallet
-     *  has — common for multi-hop transfers we originated. */
     private suspend fun fetchRawTransactionBytes(txHashHex: String): ByteArray? {
         NativeBridge.getSerializedTransactionForHash(txHashHex)?.let { return it }
         val client = assetNetworkClient ?: return null
@@ -1914,12 +1920,6 @@ class AssetManager(
          *  dust regardless of the change address's script type. The old
          *  1,000 value produced dust change outputs that stalled sends. */
         const val DGB_CHANGE_DUST_THRESHOLD = 5_460L
-
-        /** Max hops the M3 parent-walk will traverse before giving up. In
-         *  practice asset chains are 1-3 transfers deep; this bounds the
-         *  pathological case without blowing up when some chain loops or
-         *  points at a tx no endpoint has. */
-        const val MAX_WALK_DEPTH = 12
 
         /** Consecutive prune passes native must positively lack a NATIVE
          *  row's tx before it's deleted (see [pruneRemovedNativeAssetRowsImpl]). */

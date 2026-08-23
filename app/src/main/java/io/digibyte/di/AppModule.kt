@@ -234,6 +234,18 @@ object AppModule {
 
     @Provides fun provideCachedMessageDao(db: WalletDatabase): CachedMessageDao = db.cachedMessageDao()
 
+    @Provides fun provideAssetProvenanceDao(db: WalletDatabase):
+        io.digibyte.core.db.dao.AssetProvenanceDao = db.assetProvenanceDao()
+
+    /** Persistent memory for the DigiAsset parent-walk. A process-lifetime store would leave a
+     *  deep transfer chain re-walking from zero after every restart, which is how a transferred
+     *  asset ended up with no name and no artwork. */
+    @Provides @Singleton
+    fun provideProvenanceStore(
+        dao: io.digibyte.core.db.dao.AssetProvenanceDao,
+    ): io.digibyte.core.asset.ProvenanceStore =
+        io.digibyte.core.asset.RoomProvenanceStore(dao)
+
     @Provides @Singleton
     fun provideAssetManager(
         utxoDao: UtxoDao,
@@ -243,6 +255,7 @@ object AppModule {
         assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
         outgoing: io.digibyte.core.OutgoingTxStore,
         persister: io.digibyte.core.WalletTxPersister,
+        provenanceStore: io.digibyte.core.asset.ProvenanceStore,
     ): AssetManager = AssetManager(
         utxoDao = utxoDao,
         transactionDao = transactionDao,
@@ -251,6 +264,7 @@ object AppModule {
         assetNetworkClient = assetNetworkClient,
         outgoingTxStore = outgoing,
         walletTxPersister = persister,
+        provenanceStore = provenanceStore,
     )
 
     @Provides @Singleton

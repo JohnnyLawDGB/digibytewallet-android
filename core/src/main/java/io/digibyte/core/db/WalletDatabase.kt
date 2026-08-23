@@ -18,9 +18,11 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         PriceCacheEntity::class,
         AssetMetadataEntity::class,
         DigiIdHistoryEntity::class,
-        CachedMessageEntity::class
+        CachedMessageEntity::class,
+        AssetProvenanceEntity::class,
+        AssetWalkFrontierEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class WalletDatabase : RoomDatabase() {
@@ -33,6 +35,7 @@ abstract class WalletDatabase : RoomDatabase() {
     abstract fun assetMetadataDao(): AssetMetadataDao
     abstract fun digiIdHistoryDao(): DigiIdHistoryDao
     abstract fun cachedMessageDao(): CachedMessageDao
+    abstract fun assetProvenanceDao(): AssetProvenanceDao
 
     companion object {
         /**
@@ -52,7 +55,7 @@ abstract class WalletDatabase : RoomDatabase() {
                 dbFileName
             )
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigration()
                 .build()
         }
