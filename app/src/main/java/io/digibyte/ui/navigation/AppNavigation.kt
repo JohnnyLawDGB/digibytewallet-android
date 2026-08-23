@@ -46,6 +46,7 @@ import io.digibyte.ui.settings.*
 import io.digibyte.ui.hub.ChatScreen
 import io.digibyte.ui.hub.CreateThreadScreen
 import io.digibyte.ui.hub.HubScreen
+import androidx.compose.material.icons.filled.Storefront
 import io.digibyte.ui.hub.ThreadDetailScreen
 import io.digibyte.ui.wallet.*
 import kotlinx.coroutines.Dispatchers
@@ -56,10 +57,12 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
     data object Hub : Screen("hub", "Hub", Icons.AutoMirrored.Filled.Chat)
     data object DigiId : Screen("digiid", "Digi-ID", Icons.Default.Fingerprint)
+    data object Digistamp : Screen("digistamp", "Assets", Icons.Default.Storefront)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
 
-val bottomNavScreens = listOf(Screen.Wallet, Screen.Hub, Screen.DigiId, Screen.Settings)
+val bottomNavScreens =
+    listOf(Screen.Wallet, Screen.Hub, Screen.Digistamp, Screen.DigiId, Screen.Settings)
 
 /** Routes that should NOT show the bottom navigation bar. */
 private val fullScreenRoutes = setOf(
@@ -333,6 +336,16 @@ fun AppNavigation(
                     // transactions", so tapping it must START the scan, not just open the
                     // screen that has another button on it.
                     onNavigateReconcile = { navController.navigate("settings_reconcile?autostart=true") }
+                )
+            }
+
+            composable(Screen.Digistamp.route) {
+                io.digibyte.ui.digistamp.DigistampScreen(
+                    // A page can ask for a wallet screen; it cannot ask for an action. Whatever
+                    // opens here builds its own confirmation from data the wallet verified.
+                    onWalletAction = { uri ->
+                        android.util.Log.i("Digistamp", "wallet action requested: ${uri.scheme}")
+                    },
                 )
             }
 

@@ -40,6 +40,14 @@ jobs:
       - name: Submodule pin is durable
         run: ./scripts/check-submodule-pin.sh
 
+      # The digistamp section renders a third-party site in a WebView inside a wallet that
+      # holds funds. That is defensible only because page JavaScript has NO channel into the
+      # wallet — a page can navigate to a wallet URL, it cannot call a method. Adding a bridge
+      # would swap "there is nothing to call" for "every argument is validated correctly",
+      # which is a much weaker claim. Enforced rather than documented.
+      - name: No WebView JavaScript bridge
+        run: ./scripts/check-no-js-bridge.sh
+
       - name: Unit Tests
         run: ./gradlew testMainnetDebugUnitTest
 

@@ -5,4 +5,20 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!--
+      assets.digistamp.co is a third-party host whose pages render in-app next to an unlocked
+      wallet. Pinning here rather than only in OkHttp is deliberate: a platform pin-set covers
+      WebView traffic too, so one declaration protects both the pages and the API calls.
+
+      Leaf + Let's Encrypt intermediate, matching io.digibyte.core.network.DigistampPins — keep
+      the two in step. Captured 2026-08-23.
+    -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">assets.digistamp.co</domain>
+        <pin-set>
+            <pin digest="SHA-256">APmRUNe9kpbMkhWTnrdA/3y7EIwNGI9MmDKb/DId08I=</pin>
+            <pin digest="SHA-256">s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=</pin>
+        </pin-set>
+    </domain-config>
 </network-security-config>
