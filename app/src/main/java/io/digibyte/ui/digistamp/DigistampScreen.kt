@@ -55,8 +55,13 @@ fun DigistampScreen(
     startUrl: String = DigistampUris.BASE_URL,
 ) {
     val context = LocalContext.current
-    var loading by remember { mutableStateOf(true) }
+    // A revisit re-attaches an already-loaded view, so onPageFinished will not fire again and a
+    // spinner initialised to true would sit forever over a perfectly good page.
+    var loading by remember { mutableStateOf(!DigistampWebViewHost.exists()) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+
+    // Refreshed every composition; the retained client reads it rather than capturing it.
+    DigistampWebViewHost.onWalletAction = onWalletAction
 
     // In-site navigation should feel like the app's own, so Back walks the page history first
     // and only leaves the section when there is nowhere left to go back to.
@@ -66,20 +71,11 @@ fun DigistampScreen(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                @SuppressLint("SetJavaScriptEnabled")
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true          // Next.js will not render without it
-                    settings.domStorageEnabled = true
-
-                    // Deliberately closed. Each of these would hand page script a capability it
-                    // has no business having next to a wallet.
-                    settings.allowFileAccess = false
-                    settings.allowContentAccess = false
-                    settings.javaScriptCanOpenWindowsAutomatically = false
-                    settings.setGeolocationEnabled(false)
-                    // NOTE: addJavascriptInterface is NEVER called. See the class comment.
-
-                    webViewClient = object : WebViewClient() {
+                // Retained, NOT created per visit. Digi-ID sign-in is a two-sided handshake and
+                // the page's poll is what collects the session cookie — disposing this view
+                // mid-navigation killed it. See DigistampWebViewHost.
+                DigistampWebViewHost.obtain(ctx) { view ->
+                    view.webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView,
                             request: WebResourceRequest,
@@ -90,7 +86,7 @@ fun DigistampScreen(
                             // destination, never an instruction — whatever opens must build its
                             // own confirmation from data the wallet fetched and verified itself.
                             if (request.url.scheme == "digibyte" || request.url.scheme == "digiid") {
-                                onWalletAction(request.url)
+                                DigistampWebViewHost.onWalletAction(request.url)
                                 return true
                             }
 
@@ -117,9 +113,8 @@ fun DigistampScreen(
                         }
                     }
 
-                    loadUrl(startUrl)
-                    webView = this
-                }
+                    view.loadUrl(startUrl)
+                }.also { webView = it }
             },
         )
 

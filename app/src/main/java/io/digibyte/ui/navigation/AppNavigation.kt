@@ -344,10 +344,27 @@ fun AppNavigation(
 
             composable(Screen.Digistamp.route) {
                 io.digibyte.ui.digistamp.DigistampScreen(
-                    // A page can ask for a wallet screen; it cannot ask for an action. Whatever
-                    // opens here builds its own confirmation from data the wallet verified.
+                    // A page can ask for a wallet SCREEN; it cannot ask for an action. This
+                    // routes to the same Digi-ID confirmation a scanned QR code reaches, so the
+                    // user sees which domain they are authenticating to and approves it — the
+                    // page supplies a destination, never a decision.
+                    //
+                    // Digistamp's sign-in offers "Or tap here on mobile" beside its QR code,
+                    // which is a digiid:// link. In-app that is the only usable option: you
+                    // cannot scan your own screen.
                     onWalletAction = { uri ->
-                        android.util.Log.i("Digistamp", "wallet action requested: ${uri.scheme}")
+                        val raw = uri.toString()
+                        if (uri.scheme == "digiid") {
+                            val encoded = java.net.URLEncoder.encode(raw, "UTF-8")
+                            navController.navigate("digiid_confirm/$encoded")
+                        } else {
+                            // Nothing else is wired yet. Say so rather than failing silently —
+                            // mint needs the unsigned-transaction inspector first.
+                            android.util.Log.i(
+                                "Digistamp",
+                                "unhandled wallet action: ${uri.scheme} (only digiid is wired)"
+                            )
+                        }
                     },
                 )
             }
