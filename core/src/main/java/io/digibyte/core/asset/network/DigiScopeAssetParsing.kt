@@ -37,6 +37,28 @@ internal object DigiScopeAssetParsing {
         return out
     }
 
+    /**
+     * The FLAT `{assetId: quantity}` shape (digistamp's `/api/assets/holdings/{address}`), as
+     * distinct from digiscope's `{address, assets:[…]}`.
+     *
+     * Drops the `"DigiByte"` key. That entry reports the address's DGB balance in satoshis
+     * alongside its assets; read literally it becomes an asset named DigiByte holding 6000 units
+     * — a phantom row of exactly the kind this codebase has shipped before. DGB is not a
+     * DigiAsset, and its balance comes from the wallet's own UTXO set, never from a third party.
+     */
+    fun flatHoldings(json: JSONObject): Map<String, Long>? {
+        if (json.has("error")) return null
+
+        val out = mutableMapOf<String, Long>()
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            if (k == "DigiByte") continue
+            out[k] = json.optLong(k, 0L)
+        }
+        return out
+    }
+
     /** Asset data to [AssetDataResponse]; null when the body carries an error instead. */
     fun assetData(json: JSONObject, fallbackAssetId: String): AssetDataResponse? {
         if (json.has("error")) return null

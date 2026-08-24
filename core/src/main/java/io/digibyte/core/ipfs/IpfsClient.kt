@@ -23,6 +23,26 @@ class IpfsClient(
     private val gateways: List<String> = DEFAULT_GATEWAYS
 ) {
     companion object {
+        /**
+         * Reduce a provider's CID to the bare identifier, or null if it is not one.
+         *
+         * Strips `ipfs://` and a leading `/ipfs/`. Everything else is REFUSED rather than
+         * repaired: the CID is the integrity check that content is verified against, so a
+         * value that could steer the fetch elsewhere is not something to tidy up and use.
+         */
+        @JvmStatic
+        fun normalizeCid(raw: String?): String? {
+            val trimmed = raw?.trim().orEmpty()
+            if (trimmed.isEmpty()) return null
+
+            val bare = trimmed.removePrefix("ipfs://").removePrefix("/ipfs/").trim()
+
+            if (bare.isEmpty()) return null
+            // A CID is base32/base58 alphanumerics only — no slashes, dots, queries, spaces.
+            if (!bare.all { it.isLetterOrDigit() }) return null
+            return bare
+        }
+
         /** Ordered list of IPFS gateways to try. Our own digiscope.me proxy
          *  is tried first — it resolves anything pinned on the local IPFS
          *  node (including freshly-minted test assets) without depending on
@@ -63,7 +83,14 @@ class IpfsClient(
      * the first gateway that returns a body whose hash matches the CID.
      * Returns `null` if all gateways fail or return unverifiable content.
      */
-    suspend fun fetchVerified(cid: String): ByteArray? = withContext(Dispatchers.IO) {
+    suspend fun fetchVerified(rawCid: String): ByteArray? = withContext(Dispatchers.IO) {
+        // Providers disagree on shape: digistamp returns "ipfs://bafy…", the issuance header
+        // gives a bare CID. The value is pasted into a gateway URL, so a prefix left in place
+        // becomes a 404 that surfaces as "metadata offline".
+        val cid = normalizeCid(rawCid) ?: run {
+            android.util.Log.w(TAG, "fetchVerified: refusing malformed cid")
+            return@withContext null
+        }
         android.util.Log.i(TAG, "fetchVerified: cid=$cid")
         for (gateway in gateways) {
             val result = tryGateway(gateway, cid)

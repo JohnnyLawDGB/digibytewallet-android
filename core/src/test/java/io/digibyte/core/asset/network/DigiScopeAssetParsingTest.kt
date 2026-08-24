@@ -90,6 +90,28 @@ class DigiScopeAssetParsingTest {
         assertNull(DigiScopeAssetParsing.assetData(JSONObject(body), fallbackAssetId = "La3t7"))
     }
 
+    /**
+     * digistamp's holdings route reports the address's DGB alongside its assets, keyed
+     * "DigiByte":
+     *
+     *   {"La3t7Jdv…":1,"DigiByte":6000}
+     *
+     * Taken literally that is an asset named DigiByte holding 6000 units — a phantom row in the
+     * user's asset list, and the wallet already has a history of those. DGB is not a DigiAsset
+     * and its balance comes from the wallet's own UTXO set, never from a third party.
+     */
+    @Test
+    fun `the DigiByte pseudo-asset is not treated as a holding`() {
+        val withDgb = JSONObject(
+            """{"La3t7Jdvjhf5XGGRBqVdny36VWPJ4gJcWMpAxp":1,"DigiByte":6000}"""
+        )
+
+        assertEquals(
+            mapOf("La3t7Jdvjhf5XGGRBqVdny36VWPJ4gJcWMpAxp" to 1L),
+            DigiScopeAssetParsing.flatHoldings(withDgb),
+        )
+    }
+
     /** `mediaUrl` is present and deliberately unused — this pins that it stays that way. */
     @Test
     fun `holdings parsing ignores server-asserted names and media`() {
