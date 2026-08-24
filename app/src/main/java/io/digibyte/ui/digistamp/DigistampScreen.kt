@@ -61,7 +61,21 @@ fun DigistampScreen(
     var webView by remember { mutableStateOf<WebView?>(null) }
 
     // Refreshed every composition; the retained client reads it rather than capturing it.
-    DigistampWebViewHost.onWalletAction = onWalletAction
+    DigistampWebViewHost.onWalletAction = { uri ->
+        DigistampWebViewHost.reloadOnReturn = true
+        onWalletAction(uri)
+    }
+
+    // Returning from a wallet action: ask the site what it thinks now rather than trusting a poll
+    // to have survived the detach. Digi-ID is completed by the SERVER, so a reload is how the
+    // page finds out.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        DigistampWebViewHost.logSessionCookieNames()
+        if (DigistampWebViewHost.reloadOnReturn) {
+            DigistampWebViewHost.reloadOnReturn = false
+            webView?.reload()
+        }
+    }
 
     // In-site navigation should feel like the app's own, so Back walks the page history first
     // and only leaves the section when there is nowhere left to go back to.

@@ -58,6 +58,26 @@ object DigistampWebViewHost {
         return created
     }
 
+    /**
+     * Set when a wallet action was dispatched, so the next visit knows to re-check with the site.
+     *
+     * Digi-ID completes out-of-band: the wallet POSTs the signature and the SERVER marks the
+     * nonce authenticated. The page only learns of it through its own poll, which is unreliable
+     * across a detach — a detached WebView has its timers throttled. Reloading on return asks the
+     * site directly instead of hoping the poll survived.
+     */
+    @Volatile
+    var reloadOnReturn: Boolean = false
+
+    /** What the site currently thinks of us, for diagnosing a sign-in that reports success and
+     *  leaves the page logged out. Names only — never the values, which ARE the session. */
+    fun logSessionCookieNames() {
+        val cookie = android.webkit.CookieManager.getInstance()
+            .getCookie(io.digibyte.core.digistamp.DigistampUris.BASE_URL)
+        val names = cookie?.split(";")?.map { it.substringBefore("=").trim() }?.filter { it.isNotEmpty() }
+        android.util.Log.i("Digistamp", "session cookies present: ${names ?: "none"}")
+    }
+
     /** Detach from whatever parent held it, so it can be re-attached on the next visit. */
     fun detach() {
         (webView?.parent as? android.view.ViewGroup)?.removeView(webView)
