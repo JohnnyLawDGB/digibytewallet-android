@@ -1,5 +1,0 @@
-<resources>
-
-    <dimen name="pin_pad_key_margin_top">6dp</dimen>
-    <dimen name="pin_pad_key_margin_bottom">6dp</dimen>
-</resources>
