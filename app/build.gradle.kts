@@ -57,12 +57,30 @@ android {
 
     buildTypes {
         release {
-            // R8 minification disabled — auto-generated ProGuard rules conflict
-            // with Compose + Hilt. TODO: add proper keep rules and re-enable.
+            // R8 minification still OFF here on purpose. Release signing is CI-only, so a
+            // minified release cannot be installed and exercised before it reaches users —
+            // and R8 breakage is silent, runtime-only, and lands in an app that moves money.
+            // Prove it on `minifiedDebug` first, then flip this.
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
+        }
+
+        // Release's R8 configuration, debug-signed so it can actually be installed and used.
+        // The point is to make minified output TESTABLE: same shrinking, same obfuscation, same
+        // keep rules as release will have, on a build that goes on an emulator or a test device.
+        create("minifiedDebug") {
+            initWith(getByName("debug"))
+            // MUST be false. AGP silently disables all optimization AND obfuscation for
+            // debuggable builds, so a debuggable "minified" build tests nothing and would
+            // have reported R8 as safe without ever running it.
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
         }
     }
 
