@@ -2,6 +2,11 @@
 
 **24 August 2026** · inventory before cutting, not a plan to cut everything
 
+> **STATUS: Tiers 0 and 1 are DONE** (except locale directories, held for a
+> deliberate decision — see step 3). 1,903 lines of uncompiled C and 143
+> resource files removed; exported symbol list proven byte-identical before and
+> after; verified running on a Note 8. Tier 2 deliberately untouched.
+
 ## The headline, which is not what I expected
 
 **Almost none of the bread-wallet residue is reachable code.** The native legacy

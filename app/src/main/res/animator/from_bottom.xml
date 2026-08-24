@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<objectAnimator xmlns:android="http://schemas.android.com/apk/res/android"
-    android:duration="@integer/slide_speed"
-    android:propertyName="yFraction"
-    android:interpolator="@android:anim/decelerate_interpolator"
-    android:valueFrom="1.5f"
-    android:valueTo="0f"
-    android:valueType="floatType"/>
