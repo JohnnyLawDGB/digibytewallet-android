@@ -24,8 +24,8 @@ android {
         applicationId = "io.digibyte"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40055 // x-release-please-version-code
-        versionName = "4.0.55" // x-release-please-version
+        versionCode = 40056 // x-release-please-version-code
+        versionName = "4.0.56" // x-release-please-version
     }
 
     // Match native module flavors
@@ -57,12 +57,19 @@ android {
 
     buildTypes {
         release {
-            // R8 minification still OFF here on purpose. Release signing is CI-only, so a
-            // minified release cannot be installed and exercised before it reaches users —
-            // and R8 breakage is silent, runtime-only, and lands in an app that moves money.
-            // Prove it on `minifiedDebug` first, then flip this.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 ON, obfuscation included. The APK is distributed publicly, so it is the
+            // artifact an attacker works from — shipping readable class names while the source
+            // is private protects the wrong door.
+            //
+            // Proven on `minifiedDebug` (identical R8 config, debug-signed) before flipping:
+            // Note 8, real wallet, JNI + Keystore + SQLCipher + Room + sync + asset resolution
+            // + the Market WebView all intact, mapping confirming AssetManager -> e5.M while
+            // NativeBridge stayed put for JNI linkage.
+            //
+            // CI MUST keep archiving mapping.txt with each release. It is the only way to
+            // decode a user's stack trace afterwards and cannot be regenerated from the APK.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }

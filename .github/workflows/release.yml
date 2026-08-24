@@ -120,6 +120,18 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      # The deobfuscation mapping for this exact build. Without it a crash report from a
+      # user is undecodable, and it cannot be reconstructed from a shipped APK — so it has to
+      # be captured at build time or it is gone. Kept as a workflow artifact rather than a
+      # release asset: it is a debugging key, not something to hand out.
+      - name: Archive R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapping-${{ steps.version.outputs.tag }}
+          path: app/build/outputs/mapping/mainnetRelease/
+          retention-days: 90
+          if-no-files-found: error
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -253,6 +265,20 @@ jobs:
             # /downloads/digibyte-wallet-latest.apk always resolves to the most
             # recent STABLE release.
             ln -sf "/var/www/digiscope-downloads/${FILENAME}" digibyte-wallet-latest.apk
+
+            # Publish the stable version AS DATA next to the binary.
+            #
+            # digiscope.me/wallet showed 4.0.46 while 4.0.55 was the live download, because
+            # the page's version comes from a hand-maintained content file that only moves
+            # when someone edits it. The APK updates itself every release; the number beside
+            # it did not. A page that advertises the wrong version of a wallet is worse than
+            # one that advertises none.
+            #
+            # Written only on the STABLE path, inside the same guard as the symlink, so a
+            # prerelease can never advertise itself as current.
+            printf '{"version":"%s","file":"%s","sha256":"%s","released":"%s"}\n' \
+              "${TAG#v}" "$FILENAME" "$HASH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              > latest.json
             fi
 
             # Re-expose everything via the public downloads dir
