@@ -57,7 +57,10 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
     data object Hub : Screen("hub", "Hub", Icons.AutoMirrored.Filled.Chat)
     data object DigiId : Screen("digiid", "Digi-ID", Icons.Default.Fingerprint)
-    data object Digistamp : Screen("digistamp", "Assets", Icons.Default.Storefront)
+    // NOT "Assets" — the wallet already has an assets screen (route "assets", AssetListScreen),
+    // and two things called Assets in one app is a coin flip for the user. This one is the
+    // digistamp marketplace; the other is what you own.
+    data object Digistamp : Screen("digistamp", "Market", Icons.Default.Storefront)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
 

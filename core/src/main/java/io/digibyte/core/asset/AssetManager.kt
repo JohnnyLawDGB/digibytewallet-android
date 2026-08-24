@@ -810,9 +810,14 @@ class AssetManager(
             android.util.Log.d("AssetManager", "M3 walk: no resolution yet for $startTxHashHex")
             return null
         }
+        // Say WHICH it was. A resolve served from the provenance cache and one that walked the
+        // chain over the network look identical otherwise, and telling them apart on-device is
+        // the only way to see whether the cache is actually earning its keep.
+        val fromCache = provenanceStore.assetFor(startTxHashHex) != null
         android.util.Log.i("AssetManager",
             "M3 resolved $startTxHashHex → ${facts.assetId} " +
-            "(supply=${facts.totalSupply} div=${facts.divisibility})")
+            "(supply=${facts.totalSupply} div=${facts.divisibility}; " +
+            "${if (fromCache) "cached" else "walked"})")
         return ResolvedAsset(
             assetId = facts.assetId,
             totalSupply = facts.totalSupply,
