@@ -41,9 +41,6 @@ class MultiEndpointAssetClient(
     override suspend fun getAssetData(assetId: String): AssetDataResponse? =
         tryEach("getAssetData") { it.getAssetData(assetId) }
 
-    override suspend fun getAddressHoldings(address: String): Map<String, Long>? =
-        tryEach("getAddressHoldings") { it.getAddressHoldings(address) }
-
     override suspend fun getAddressHistory(address: String, limit: Int?): List<String>? =
         tryEach("getAddressHistory") { it.getAddressHistory(address, limit) }
 

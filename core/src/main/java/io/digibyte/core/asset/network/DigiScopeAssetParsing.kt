@@ -14,50 +14,7 @@ import org.json.JSONObject
  */
 internal object DigiScopeAssetParsing {
 
-    /**
-     * Address holdings to `{assetId: quantity}`.
-     *
-     * Quantities only. The response also carries `name`, `decimals` and `mediaUrl`, and the
-     * wallet deliberately ignores them: names and artwork come from IPFS content verified
-     * against its CID, so a compromised backend cannot rename someone's assets.
-     *
-     * An address holding nothing yields an empty map rather than null — empty is an answer, and
-     * null would count as an endpoint failure toward the rotation's circuit breaker.
-     */
-    fun holdings(json: JSONObject): Map<String, Long>? {
-        if (json.has("error")) return null
-        val assets = json.optJSONArray("assets") ?: return null
 
-        val out = mutableMapOf<String, Long>()
-        for (i in 0 until assets.length()) {
-            val row = assets.optJSONObject(i) ?: continue
-            val id = row.optString("assetId").takeIf { it.isNotEmpty() } ?: continue
-            out[id] = (out[id] ?: 0L) + row.optLong("quantity", 0L)
-        }
-        return out
-    }
-
-    /**
-     * The FLAT `{assetId: quantity}` shape (digistamp's `/api/assets/holdings/{address}`), as
-     * distinct from digiscope's `{address, assets:[…]}`.
-     *
-     * Drops the `"DigiByte"` key. That entry reports the address's DGB balance in satoshis
-     * alongside its assets; read literally it becomes an asset named DigiByte holding 6000 units
-     * — a phantom row of exactly the kind this codebase has shipped before. DGB is not a
-     * DigiAsset, and its balance comes from the wallet's own UTXO set, never from a third party.
-     */
-    fun flatHoldings(json: JSONObject): Map<String, Long>? {
-        if (json.has("error")) return null
-
-        val out = mutableMapOf<String, Long>()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            if (k == "DigiByte") continue
-            out[k] = json.optLong(k, 0L)
-        }
-        return out
-    }
 
     /** Asset data to [AssetDataResponse]; null when the body carries an error instead. */
     fun assetData(json: JSONObject, fallbackAssetId: String): AssetDataResponse? {

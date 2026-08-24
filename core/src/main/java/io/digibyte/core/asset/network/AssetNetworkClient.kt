@@ -18,10 +18,16 @@ interface AssetNetworkClient {
      *  @param assetId the DigiAsset identifier, e.g. `La2ih1bm2u4d…`. */
     suspend fun getAssetData(assetId: String): AssetDataResponse?
 
-    /** Return `{assetId: heldQuantity}` for a single address — this is the
-     *  sovereign answer to "what assets does this address hold right now",
-     *  which SPV bloom filters can't deliver reliably. */
-    suspend fun getAddressHoldings(address: String): Map<String, Long>?
+    // getAddressHoldings was REMOVED, deliberately, rather than left unused.
+    //
+    // It sent one of the wallet's addresses to a third party to ask what it holds — exactly
+    // what compact-filters-only sync exists to withhold. It had zero callers, because holdings
+    // are computed natively from the CF scan and always have been. An unused method that leaks
+    // is one call site away from leaking, and "we don't call it" is a weaker guarantee than
+    // "it doesn't exist".
+    //
+    // A marketplace wanting to show "your holdings" must render the WALLET's own view beside
+    // the catalogue, never ask a server what the user owns.
 
     /** Return ordered txids (most recent first) that touched [address] for
      *  asset operations. Used for per-address DigiAsset history recovery. */

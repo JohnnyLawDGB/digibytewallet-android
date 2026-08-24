@@ -47,18 +47,6 @@ class DigiAssetsNetClient(
         )
     }
 
-    override suspend fun getAddressHoldings(address: String): Map<String, Long>? {
-        val json = getJson("$baseUrl/addressinfo/$address") as? JSONObject ?: return null
-        val assetsNode = json.optJSONObject("assets") ?: return emptyMap()
-        val out = mutableMapOf<String, Long>()
-        val keys = assetsNode.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            out[k] = assetsNode.optLong(k, 0L)
-        }
-        return out
-    }
-
     override suspend fun getAddressHistory(address: String, limit: Int?): List<String>? {
         val json = getJson("$baseUrl/addresshistory/$address") ?: return null
         val arr = when (json) {

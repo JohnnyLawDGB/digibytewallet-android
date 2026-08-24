@@ -42,11 +42,6 @@ class DigiScopeAssetClient(
         return parsed.copy(ipfs = json.optJSONObject("ipfs")?.let { ipfsJsonToMap(it) })
     }
 
-    override suspend fun getAddressHoldings(address: String): Map<String, Long>? {
-        val json = getJson("$baseUrl/digiassets/address/$address") as? JSONObject ?: return null
-        return DigiScopeAssetParsing.holdings(json)
-    }
-
     /**
      * NO BACKEND ROUTE EXISTS for this yet (probed 2026-08-23: 404 under every prefix tried),
      * and nothing in the wallet calls it — so this is a shape waiting for a server, not a
