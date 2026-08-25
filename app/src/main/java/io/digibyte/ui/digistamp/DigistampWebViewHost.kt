@@ -69,6 +69,16 @@ object DigistampWebViewHost {
     @Volatile
     var reloadOnReturn: Boolean = false
 
+    /**
+     * A URL the next visit should load.
+     *
+     * The view is RETAINED, so `startUrl` only applies the first time it is built — passing a
+     * different one on a later visit would silently do nothing. Anything wanting to send the
+     * section somewhere specific (the asset screen's Marketplace button) sets this instead.
+     */
+    @Volatile
+    var pendingUrl: String? = null
+
     /** What the site currently thinks of us, for diagnosing a sign-in that reports success and
      *  leaves the page logged out. Names only — never the values, which ARE the session. */
     fun logSessionCookieNames() {

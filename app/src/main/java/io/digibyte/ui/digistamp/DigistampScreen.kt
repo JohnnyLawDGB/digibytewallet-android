@@ -71,6 +71,23 @@ fun DigistampScreen(
     // page finds out.
     androidx.compose.runtime.LaunchedEffect(Unit) {
         DigistampWebViewHost.logSessionCookieNames()
+
+        // A specific destination was requested (e.g. an asset's Marketplace button). Checked
+        // before the reload, because reloading and THEN navigating would show the previous page
+        // first and cost a round trip. Re-validated here rather than trusted: whatever set this
+        // is in-process, but the origin lock is the one rule this screen must never be talked
+        // out of.
+        val requested = DigistampWebViewHost.pendingUrl
+        if (requested != null) {
+            DigistampWebViewHost.pendingUrl = null
+            if (DigistampUris.isInAppOrigin(requested)) {
+                loading = true
+                webView?.loadUrl(requested)
+                return@LaunchedEffect
+            }
+            android.util.Log.w("Digistamp", "refusing off-origin pending url")
+        }
+
         if (DigistampWebViewHost.reloadOnReturn) {
             DigistampWebViewHost.reloadOnReturn = false
             webView?.reload()

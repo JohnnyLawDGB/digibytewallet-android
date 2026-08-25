@@ -580,6 +580,15 @@ fun AppNavigation(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateSend = { id ->
                         navController.navigate("asset_send/${id}")
+                    },
+                    // Opens the asset's page INSIDE the Market section rather than handing it to
+                    // an external browser. Falls back to the marketplace root if the id is not
+                    // one explorerUrlFor will put in a URL.
+                    onNavigateMarketplace = { id ->
+                        io.digibyte.ui.digistamp.DigistampWebViewHost.pendingUrl =
+                            io.digibyte.core.digistamp.DigistampUris.explorerUrlFor(id)
+                                ?: "${io.digibyte.core.digistamp.DigistampUris.BASE_URL}/marketplace"
+                        navController.navigate(Screen.Digistamp.route)
                     }
                 )
             }

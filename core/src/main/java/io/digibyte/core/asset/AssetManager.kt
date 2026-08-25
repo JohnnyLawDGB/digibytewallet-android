@@ -1007,7 +1007,63 @@ class AssetManager(
         }
         android.util.Log.i("AssetManager",
             "sweepKnownTransactions: ${hashes.size} txs scanned, $detected asset txs found")
+
+        retryMissingAssetMetadata()
         return detected
+    }
+
+    /**
+     * Ask again about held assets that still have no metadata.
+     *
+     * Every other getMetadata call sits on a DETECTION path — a new incoming transaction, or the
+     * moment a parent-walk resolves. So an asset whose metadata failed once had no way back:
+     * its row existed, nothing new referenced it, and it stayed a bare `La4WAqZf…` with supply
+     * and divisibility (read from the on-chain header) but no name, permanently.
+     *
+     * That was masked while the fallback provider was broken — digiscope answers its asset route
+     * with `500 Invalid params`, so there was nothing to retry INTO. With digistamp in the
+     * rotation there is, and this is what lets an already-failed asset benefit.
+     *
+     * Cheap by construction: only assets with no metadata row are asked about, and
+     * AssetMetadataService's negative cache holds a failure for ten minutes, so a genuinely
+     * unavailable asset is asked at most once per that window rather than every sweep.
+     */
+    private suspend fun retryMissingAssetMetadata() {
+        val missing = runCatching {
+            utxoDao.getAllAssetUtxosNow()
+                .mapNotNull { it.assetId }
+                .filter { it.isNotEmpty() && !it.startsWith("unresolved:") }
+                .distinct()
+                // "Unnamed" means what the UI means: no row, OR a row with no name. The
+                // parent-walk writes a row carrying the on-chain supply and divisibility with a
+                // NULL name, so a row-exists check matches everything and retries nothing —
+                // which is exactly how this pass silently did nothing the first time.
+                .filter { metadataDao.getMetadata(it)?.name.isNullOrBlank() }
+        }.getOrElse { return }
+
+        if (missing.isEmpty()) return
+        // Log only when the set CHANGES. Some assets are permanently unnamed — their issuance
+        // carried no metadata hash and no provider has a CID (confirmed live for
+        // La4WAqZfAwtxb…: digistamp answers 200 with "cid":null). Those are not a fault to
+        // report; logging them at INFO every sweep would be a line every 30s, forever, in a
+        // shipped app.
+        //
+        // Named, not counted: "1 asset still unnamed" says a retry ran but not WHICH, and
+        // without the id the next question — does any provider even know this asset — cannot be
+        // asked without reading a truncated string off a screen.
+        val signature = missing.sorted().joinToString()
+        if (signature != lastUnnamedSignature) {
+            lastUnnamedSignature = signature
+            android.util.Log.i("AssetManager",
+                "metadata retry: ${missing.size} asset(s) still unnamed: $signature")
+        }
+
+        for (assetId in missing) {
+            // cid = null: we have no CID for these (that is usually WHY they are unnamed), so
+            // resolution goes through the provider fallback rather than IPFS.
+            runCatching { metadataService.getMetadata(assetId, null) }
+                .onFailure { android.util.Log.d("AssetManager", "metadata retry failed for $assetId", it) }
+        }
     }
 
     /**
@@ -1612,6 +1668,10 @@ class AssetManager(
      *  process restart; the walk then runs exactly once per session to
      *  refresh chain facts in case they ever go stale. */
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Last set of unnamed assets logged, so a permanently-unnamed asset is reported once
+     *  rather than on every sweep. See [retryMissingAssetMetadata]. */
+    private var lastUnnamedSignature: String? = null
 
     /** Per-OUTPOINT (`"txid:vout"`) count of consecutive prune passes native
      *  has lacked the tx. Keyed by outpoint, not txid: a single txid can carry

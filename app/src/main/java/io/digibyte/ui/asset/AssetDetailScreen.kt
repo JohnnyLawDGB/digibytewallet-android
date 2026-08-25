@@ -43,13 +43,18 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
-private const val MARKETPLACE_URL = "https://diginexum.trade/"
+// MARKETPLACE_URL ("https://diginexum.trade/") was REMOVED. It was a stale hardcoded host that
+// served a certificate issued for CN=digiassets.info, so tapping Marketplace handed the user a
+// full-page browser security warning — on an asset screen, in a wallet. It also carried no asset
+// id and merely opened a homepage. The button now opens the asset's own page inside the app's
+// Market section; see DigistampUris.explorerUrlFor.
 
 @Composable
 fun AssetDetailScreen(
     assetId: String,
     onNavigateBack: () -> Unit,
     onNavigateSend: (String) -> Unit,
+    onNavigateMarketplace: (String) -> Unit = {},
     viewModel: AssetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -278,7 +283,7 @@ fun AssetDetailScreen(
             ) {
                 // Marketplace button
                 OutlinedButton(
-                    onClick = { openExternalUrl(context, MARKETPLACE_URL) },
+                    onClick = { onNavigateMarketplace(ownedAsset.assetId) },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(

@@ -204,15 +204,26 @@ object AppModule {
     ): AssetMetadataService =
         AssetMetadataService(ipfsClient, dao, assetNetworkClient)
 
-    /** Multi-endpoint asset network client with per-endpoint circuit breaker.
-     *  Priority order: our own cert-pinned proxy first, then the DigiByte Core
-     *  team's official endpoint. Future: add user-configured override. */
+    /**
+     * Multi-endpoint asset network client with a per-endpoint circuit breaker.
+     *
+     * digistamp leads deliberately. An asset whose issuance carries no metadata hash can only
+     * get a name from getAssetData, and that fallback had NOWHERE to go: digiscope answers its
+     * asset route with `500 getassetdata error: Invalid params`, and digistamp — which answers
+     * correctly — was not in the rotation at all. On device that showed as an asset rendering
+     * as a bare `La4WAqZf…`, supply and divisibility present (those come from the on-chain
+     * header) but no name, description or issuer.
+     *
+     * digiscope stays as fallback rather than being replaced. Depending on one host is the
+     * state that produced the outage; two providers speaking the same shapes is the point.
+     */
     @Provides @Singleton
     fun provideAssetNetworkClient(
         okHttpClient: OkHttpClient,
     ): io.digibyte.core.asset.network.AssetNetworkClient =
         io.digibyte.core.asset.network.MultiEndpointAssetClient(
             endpoints = listOf(
+                io.digibyte.core.asset.network.DigistampAssetClient(baseClient = okHttpClient),
                 io.digibyte.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
                 io.digibyte.core.asset.network.DigiAssetsNetClient(baseClient = okHttpClient),
             )

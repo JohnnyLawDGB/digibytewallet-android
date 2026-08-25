@@ -107,6 +107,41 @@ class DigistampUrisTest {
         assertNull(DigistampUris.parseChallenge(JSONObject(mismatched)))
     }
 
+    // ---- per-asset explorer link ----------------------------------------------------------
+
+    /**
+     * Replaces a hardcoded `https://diginexum.trade/` on the asset screen — a stale host whose
+     * certificate is issued for `CN = digiassets.info`, so tapping Marketplace showed users a
+     * full-page browser security warning. It also carried no asset id; it opened a homepage.
+     */
+    @Test fun `builds the explorer url for an asset`() {
+        assertEquals(
+            "https://assets.digistamp.co/explorer/La8knZNCvaMsLp3PLueDShjUvV5YLKBhxzcvBC",
+            DigistampUris.explorerUrlFor("La8knZNCvaMsLp3PLueDShjUvV5YLKBhxzcvBC"),
+        )
+    }
+
+    /**
+     * The asset id becomes part of a URL that a WebView then loads, so anything that could
+     * escape the path is refused rather than encoded. Asset ids are base58 — no slashes, dots,
+     * colons or spaces occur legitimately, so rejecting them costs nothing real.
+     */
+    @Test fun `refuses an asset id that could escape the path`() {
+        assertNull(DigistampUris.explorerUrlFor("../../etc/passwd"))
+        assertNull(DigistampUris.explorerUrlFor("La8k/../../x"))
+        assertNull(DigistampUris.explorerUrlFor("La8k?next=https://evil.example"))
+        assertNull(DigistampUris.explorerUrlFor("La8k#frag"))
+        assertNull(DigistampUris.explorerUrlFor("javascript:alert(1)"))
+        assertNull(DigistampUris.explorerUrlFor(""))
+        assertNull(DigistampUris.explorerUrlFor("   "))
+    }
+
+    /** Whatever it builds must satisfy the origin lock, or the WebView would bounce it out. */
+    @Test fun `what it builds is in-app by construction`() {
+        val url = DigistampUris.explorerUrlFor("La8knZNCvaMsLp3PLueDShjUvV5YLKBhxzcvBC")!!
+        assertTrue(DigistampUris.isInAppOrigin(url))
+    }
+
     @Test fun `an error body or a missing uri yields no challenge`() {
         assertNull(DigistampUris.parseChallenge(JSONObject("""{"error":"rate limited"}""")))
         assertNull(DigistampUris.parseChallenge(JSONObject("""{"nonce":"abc"}""")))

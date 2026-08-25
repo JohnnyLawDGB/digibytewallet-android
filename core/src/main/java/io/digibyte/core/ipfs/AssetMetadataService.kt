@@ -147,15 +147,33 @@ class AssetMetadataService(
                 }
             }
 
-            // Pass 2: digiasset_core network fallback
+            // Pass 2: provider fallback, for assets whose issuance carried no metadata hash.
             val netClient = assetNetworkClient
             if (netClient != null) {
                 val remote = runCatching { netClient.getAssetData(assetId) }.getOrNull()
+
+                // 2a: some providers inline the metadata document.
                 val ipfsMap = remote?.ipfs
                 if (remote != null && ipfsMap != null) {
                     recentlyFailed.remove(negativeKey)
                     val json = JSONObject(ipfsMap)
                     return@withContext storeFromJson(assetId, metadataCid ?: remote.cid, json)
+                }
+
+                // 2b: most return a CID INSTEAD of the document — which is the thing we were
+                // missing, so fetch it. Without this the fallback would retrieve a perfectly
+                // good response, find no inline blob, and discard the very CID it just learned;
+                // the asset stayed a bare id with supply and divisibility but no name.
+                val remoteCid = remote?.cid
+                if (remoteCid != null) {
+                    val bytes = ipfsClient.fetchVerified(remoteCid)
+                    val json = bytes?.let {
+                        runCatching { JSONObject(String(it, Charsets.UTF_8)) }.getOrNull()
+                    }
+                    if (json != null) {
+                        recentlyFailed.remove(negativeKey)
+                        return@withContext storeFromJson(assetId, remoteCid, json)
+                    }
                 }
             }
 

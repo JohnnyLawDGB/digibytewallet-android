@@ -67,6 +67,26 @@ object DigistampUris {
         return DigistampChallenge(digiIdUri = uri, nonce = nonce, callbackUrl = callback)
     }
 
+    /**
+     * The in-app explorer page for [assetId], or null if that id could escape the URL path.
+     *
+     * Replaces a hardcoded `https://diginexum.trade/` on the asset screen — a stale host whose
+     * certificate is issued for `CN = digiassets.info`, so tapping Marketplace presented a
+     * full-page browser security warning. It also carried no asset id and simply opened a
+     * homepage.
+     *
+     * The id lands inside a URL a WebView then loads, so anything that could escape the path is
+     * REFUSED rather than percent-encoded. Asset ids are base58, where no slash, dot, colon,
+     * query or fragment character occurs legitimately — so rejecting them costs nothing real and
+     * removes the question of whether encoding was sufficient.
+     */
+    fun explorerUrlFor(assetId: String?): String? {
+        val id = assetId?.trim().orEmpty()
+        if (id.isEmpty()) return null
+        if (!id.all { it.isLetterOrDigit() }) return null
+        return "$BASE_URL/explorer/$id"
+    }
+
     /** Host of a `digiid://host/path?x=nonce` URI, matching DigiIdRequest's own reading. */
     private fun digiIdHost(uri: String): String =
         uri.removePrefix("digiid://").substringBefore('?').substringBefore('/').substringBefore(':')
