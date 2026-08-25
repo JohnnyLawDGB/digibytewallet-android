@@ -48,6 +48,11 @@ jobs:
       - name: No WebView JavaScript bridge
         run: ./scripts/check-no-js-bridge.sh
 
+      # README and CLAUDE.md both drifted more than ten releases behind the app while each
+      # claimed to be current. A version recorded where it cannot update is wrong by default.
+      - name: Docs state the shipped version
+        run: ./scripts/check-doc-version.sh
+
       - name: Unit Tests
         run: ./gradlew testMainnetDebugUnitTest
 
