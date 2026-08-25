@@ -53,6 +53,12 @@ jobs:
       - name: Docs state the shipped version
         run: ./scripts/check-doc-version.sh
 
+      # Runs on EVERY build, not in the periodic security cycle: a new CVE appears without
+      # anyone touching this repository, so it is the one class of vulnerability whose arrival
+      # is unrelated to our commits — and the only one we cannot find by reading our own code.
+      - name: Dependency CVEs (OSV)
+        run: ./scripts/osv-scan.sh
+
       - name: Unit Tests
         run: ./gradlew testMainnetDebugUnitTest
 

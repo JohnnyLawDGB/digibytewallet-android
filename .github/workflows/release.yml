@@ -189,6 +189,14 @@ jobs:
             Source: https://github.com/JohnnyLawDGB/digibytewallet-android
           prerelease: ${{ contains(github.ref_name, '-beta') }}
 
+      # A security cycle is due every 10 releases. This blocks SHIPPING rather than every
+      # build: development should not stop, but shipping is the point of pressure that actually
+      # gets the review done. The previous arrangement — an agreed practice with no gate —
+      # produced 52 releases without one. Deferring is allowed; record it in the log and move
+      # the marker deliberately.
+      - name: Security cycle is current
+        run: ./scripts/check-security-cycle.sh
+
       - name: Deploy to VPS
         if: success()
         env:
