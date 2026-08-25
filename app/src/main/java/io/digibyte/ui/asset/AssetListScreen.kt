@@ -132,7 +132,23 @@ fun AssetListScreen(
         } else {
             // ── Asset grid ────────────────────────────────────────────────
             Text(
-                text = "${assets.size} asset${if (assets.size != 1) "s" else ""} found",
+                // Artifacts are ENUMERATED, not hidden. An asset whose issuer published no
+                // metadata is still a real on-chain holding, and someone looking at a list of
+                // unfamiliar short ids deserves to know how many of them are that — rather than
+                // wondering which ones the wallet failed to load.
+                text = buildString {
+                    append("${assets.size} asset${if (assets.size != 1) "s" else ""} found")
+                    val artifacts = assets.count {
+                        io.digibyte.core.asset.AssetDisplayLabel.of(
+                            assetId = it.assetId,
+                            hasMetadataRow = it.metadata != null,
+                            name = it.metadata?.name,
+                        ).kind == io.digibyte.core.asset.AssetDisplayLabel.Kind.ARTIFACT
+                    }
+                    if (artifacts > 0) {
+                        append(" · $artifacts artifact${if (artifacts != 1) "s" else ""}")
+                    }
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
@@ -166,23 +182,19 @@ private fun AssetCard(
     asset: OwnedAsset,
     onClick: () -> Unit
 ) {
-    // "unresolved:<txid>" is the M1.1 placeholder for assets we've detected
-    // natively but can't yet derive a real asset-id for (transfers, pre-M3).
-    // Render a friendly short label instead of the raw placeholder.
-    val isUnresolved = asset.assetId.startsWith("unresolved:")
-    val displayName = asset.metadata?.name
-        ?: if (isUnresolved) {
-            "DigiAsset " + asset.assetId.substringAfter("unresolved:").take(6)
-        } else {
-            asset.assetId.take(8) + "…"
-        }
-
-    val symbol = asset.metadata?.symbol
+    // See AssetDisplayLabel: an asset whose issuer published NO metadata is a digital artifact,
+    // not a failed lookup, and previously rendered as a bare truncated base58 id with no
+    // subtitle at all — because the "metadata offline" hint was gated on the metadata row being
+    // ABSENT, and an artifact's row exists (carrying on-chain supply) with only a null name.
+    val label = io.digibyte.core.asset.AssetDisplayLabel.of(
+        assetId = asset.assetId,
+        hasMetadataRow = asset.metadata != null,
+        name = asset.metadata?.name,
+        symbol = asset.metadata?.symbol,
+    )
+    val displayName = label.title
+    val subtitle = label.subtitle
     val firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A'
-
-    // Subtitle replaces symbol when we have no metadata. Gives the user a
-    // concrete "why can't I see the name" signal instead of silent empty.
-    val subtitle = symbol ?: if (asset.metadata == null) "metadata offline" else null
 
     // Pick a deterministic accent color based on the asset ID hash
     val colorIndex = (asset.assetId.hashCode() and 0x7FFFFFFF) % assetIconColors.size
@@ -229,7 +241,11 @@ private fun AssetCard(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (subtitle == symbol) DigiByteAccent
+                    // Accent only for a published symbol. An artifact's "no name published" and
+                    // a pending "metadata offline" are context, not identity, and shouldn't
+                    // compete with the assets that do have a name.
+                    color = if (label.kind == io.digibyte.core.asset.AssetDisplayLabel.Kind.NAMED)
+                                DigiByteAccent
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
