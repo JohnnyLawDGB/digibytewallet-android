@@ -67,5 +67,8 @@ data class AssetMetadata(
     val decimals: Int = 0,
     val totalSupply: Long = 0,
     val issuerAddress: String?,
-    val imageUrl: String?
+    val imageUrl: String?,
+    /** IPFS CID of the metadata document. Carried into the display model so the wallet can spot
+     *  the same document published under more than one assetId — see [AssetDuplicateDetector]. */
+    val metadataCid: String? = null,
 )

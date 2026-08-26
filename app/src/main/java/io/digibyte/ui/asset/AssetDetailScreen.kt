@@ -66,6 +66,7 @@ fun AssetDetailScreen(
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val history by viewModel.assetHistory.collectAsStateWithLifecycle()
+    val owned by viewModel.ownedAssets.collectAsStateWithLifecycle()
 
     var showMediaViewer by remember { mutableStateOf(false) }
 
@@ -247,6 +248,32 @@ fun AssetDetailScreen(
                         else "Unknown"
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    // Same metadata document, a different assetId — the signature of a copied
+                    // asset, because the CID is the one thing a new issuance CAN reuse verbatim.
+                    // Worded as a fact, never a verdict: the wallet cannot tell which of two
+                    // assets is genuine (the earliest issuance it happens to HOLD need not be the
+                    // earliest that exists), so it states what it observed and puts the verified
+                    // issuer right beneath, which is what actually settles it.
+                    val duplicates = remember(assetId, owned) {
+                        io.digibyte.core.asset.AssetDuplicateDetector.assetsSharingMetadata(
+                            assetId = assetId,
+                            held = owned.mapNotNull { it.metadata },
+                        )
+                    }
+                    if (duplicates.isNotEmpty()) {
+                        AssetInfoRow(
+                            label = "Identical metadata",
+                            value = if (duplicates.size == 1)
+                                "Also published under 1 other asset ID you hold. " +
+                                    "Check the verified issuer on both."
+                            else
+                                "Also published under ${duplicates.size} other asset IDs you hold. " +
+                                    "Check the verified issuer on each.",
+                            context = context
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    }
 
                     // Shown ONLY when the chain proves it — the owner of input[0] of the
                     // issuance transaction, which is the outpoint the assetId is derived from.

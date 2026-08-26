@@ -305,6 +305,7 @@ class AssetMetadataService(
         decimals = decimals,
         totalSupply = totalSupply,
         issuerAddress = issuerAddress,
-        imageUrl = imageUrl
+        imageUrl = imageUrl,
+        metadataCid = metadataCid,
     )
 }

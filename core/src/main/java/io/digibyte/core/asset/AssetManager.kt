@@ -225,7 +225,8 @@ class AssetManager(
                             decimals = it.decimals,
                             totalSupply = it.totalSupply,
                             issuerAddress = it.issuerAddress,
-                            imageUrl = it.imageUrl
+                            imageUrl = it.imageUrl,
+                            metadataCid = it.metadataCid,
                         )
                     },
                     utxoCount = utxoCount
