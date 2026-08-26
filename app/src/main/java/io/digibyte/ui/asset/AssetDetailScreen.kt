@@ -248,9 +248,14 @@ fun AssetDetailScreen(
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
+                    // Shown ONLY when the chain proves it — the owner of input[0] of the
+                    // issuance transaction, which is the outpoint the assetId is derived from.
+                    // This row used to display whatever the minter wrote into the metadata, which
+                    // is the one field a forger most wants a wallet to repeat back. When there is
+                    // no proof the row is absent, deliberately: absent beats wrong.
                     if (!meta?.issuerAddress.isNullOrBlank()) {
                         AssetInfoRow(
-                            label = "Issuer Address",
+                            label = "Issuer (verified)",
                             value = meta!!.issuerAddress!!,
                             truncate = true,
                             copyable = true,

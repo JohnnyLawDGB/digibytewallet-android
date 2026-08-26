@@ -52,6 +52,23 @@ class AssetMetadataService(
     private val recentlyFailed = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     internal companion object {
+        /**
+         * The only issuer the wallet will show: the one the chain proves.
+         *
+         * @param proven  issuer derived from the owner of input[0] of the issuance transaction.
+         * @param claimed whatever the metadata document asserted. Accepted as a parameter so the
+         *                rule is stated where it can be read and tested, rather than living as an
+         *                absence somewhere in a parser — and so a test can prove a claim alone
+         *                still yields nothing. It is never used.
+         *
+         * @return the proven issuer, or null. Null renders no row at all, which is the point:
+         *         absent beats wrong, because a wrong attribution is precisely what a forger is
+         *         trying to obtain.
+         */
+        @Suppress("UNUSED_PARAMETER")
+        internal fun provenIssuerOnly(proven: String?, claimed: String?): String? =
+            proven?.takeIf { it.isNotBlank() }
+
         /** 10 minutes. Long enough to stop hammering broken gateways;
          *  short enough that a proxy recovery is picked up naturally
          *  on the next sweep after the interval passes. */
@@ -142,7 +159,10 @@ class AssetMetadataService(
                     val json = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
                     if (json != null) {
                         recentlyFailed.remove(negativeKey)
-                        return@withContext storeFromJson(assetId, metadataCid, json)
+                        // Path 1 resolves the document straight from the issuance's metadata hash and
+                        // never consults a provider, so there is no chain-proven issuer to record.
+                        // null is the correct answer here, and the row simply will not render.
+                        return@withContext storeFromJson(assetId, metadataCid, json, provenIssuer = null)
                     }
                 }
             }
@@ -157,7 +177,7 @@ class AssetMetadataService(
                 if (remote != null && ipfsMap != null) {
                     recentlyFailed.remove(negativeKey)
                     val json = JSONObject(ipfsMap)
-                    return@withContext storeFromJson(assetId, metadataCid ?: remote.cid, json)
+                    return@withContext storeFromJson(assetId, metadataCid ?: remote.cid, json, remote.issuer)
                 }
 
                 // 2b: most return a CID INSTEAD of the document — which is the thing we were
@@ -172,7 +192,7 @@ class AssetMetadataService(
                     }
                     if (json != null) {
                         recentlyFailed.remove(negativeKey)
-                        return@withContext storeFromJson(assetId, remoteCid, json)
+                        return@withContext storeFromJson(assetId, remoteCid, json, remote?.issuer)
                     }
                 }
             }
@@ -183,7 +203,12 @@ class AssetMetadataService(
         }
     }
 
-    private suspend fun storeFromJson(assetId: String, cid: String?, jsonRaw: JSONObject): AssetMetadata {
+    private suspend fun storeFromJson(
+        assetId: String,
+        cid: String?,
+        jsonRaw: JSONObject,
+        provenIssuer: String?,
+    ): AssetMetadata {
         // Canonical DigiAsset metadata wraps everything in {"data": {...}}.
         // Some older tools produce the same fields at top-level. Unwrap if
         // present so downstream code only sees the asset-level shape.
@@ -195,14 +220,21 @@ class AssetMetadataService(
                 ?: json.optString("name").takeIf { it.isNotEmpty() }
         )
 
-        // Issuer — canonical schema has "issuer" as a string (the issuer's
-        // name). Older tools used "issuerAddress" flat or "issuer.address"
-        // nested. Store whichever we find; display code handles it.
-        val issuer = sanitizeShortText(
-            json.optString("issuerAddress").takeIf { it.isNotEmpty() }
-                ?: json.optJSONObject("issuer")?.optString("address")?.takeIf { it.isNotEmpty() }
-                ?: json.optString("issuer").takeIf { it.isNotEmpty() }
-        )
+        // Issuer — deliberately NOT read from this document.
+        //
+        // The metadata carries `issuer` / `issuerAddress` / `issuer.address`, and we used to take
+        // whichever was present and show it as "Issuer Address". Every one of those is written by
+        // whoever minted the asset, which makes attribution the easiest thing in the file to
+        // forge: copy an asset, re-mint it, name the original creator, and the claim arrives with
+        // the image. Rendering it made a forgery MORE convincing, not less. (In practice the bare
+        // `issuer` key is usually a username anyway, so a row labelled "Address" could show a
+        // handle.)
+        //
+        // The issuer now comes from what the chain proves — see [provenIssuerOnly] and the
+        // `proven` argument, which the provider derives from the owner of input[0] of the
+        // issuance transaction. If a display-only, clearly-labelled "self-asserted by the minter"
+        // field is ever wanted, it must be a SEPARATE field with its own label; it must never
+        // flow into this one.
 
         // Image may live under several keys depending on the issuer tool:
         //   "image" — canonical, what our AssetImageResolver expects
@@ -246,7 +278,7 @@ class AssetMetadataService(
             decimals = json.optInt("decimals", 0).coerceIn(0, 7),
             // Negative totalSupply is meaningless and would break UI math.
             totalSupply = json.optLong("totalSupply", 0L).coerceAtLeast(0L),
-            issuerAddress = issuer,
+            issuerAddress = provenIssuerOnly(proven = provenIssuer, claimed = null),
             metadataCid = cid,
             // imageUrl is bounds-checked at render time by AssetImageResolver
             // (refuses non-http(s)/ipfs schemes) but cap length here too so
