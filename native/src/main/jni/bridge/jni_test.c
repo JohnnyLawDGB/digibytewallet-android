@@ -43,7 +43,17 @@
 #define EXPECTED_PROTOCOL_VERSION 70019
 #define EXPECTED_MAGIC            0xdab6c3fau
 #define EXPECTED_PORT             12024
-#define MIN_SEEDS                 8
+/* Was 8, which was right when BRMainNetDNSSeeds held 9 entries. Three dead seeders
+ * (0 addrs each) were deliberately removed on 2026-03-30, leaving 6 — but this floor
+ * was not moved with them, so allConstantsCorrect has been RED ever since and nobody
+ * saw it, because androidTest does not run in CI. Found in the v4.0.58 security cycle
+ * while gating this file out of release builds (finding 5).
+ *
+ * The floor exists to catch the seed array being emptied or mis-patched, not to pin an
+ * exact count, so 5 keeps that meaning against the 6 that are actually there. Moving it
+ * to 6 would go red the day the next seeder dies — which is real news about the network,
+ * not a broken build. */
+#define MIN_SEEDS                 5
 #define MIN_CHECKPOINTS           40   /* 37 original + patched extras */
 
 JNIEXPORT jint JNICALL

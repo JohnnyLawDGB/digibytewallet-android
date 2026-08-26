@@ -4,6 +4,8 @@ import android.content.Context
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -36,6 +38,38 @@ class DgbNodeClient(
         private const val KEY_CUSTOM_ENDPOINT = "custom_rpc_endpoint"
         private const val MAX_ADDRS_PER_REQUEST = 500 // server-side cap
         private const val JSON = "application/json; charset=utf-8"
+
+        /** Path segments at or above this length are treated as an identifier and dropped.
+         *  DGB legacy addresses are 34 chars, bech32 ~42, txids 64; the fixed route words
+         *  this client uses ("address-history", "reconcile", "explorer") are all shorter. */
+        private const val IDENTIFIER_MIN_LEN = 20
+
+        /**
+         * Strip user-identifying path segments and any query string from a URL bound for a log.
+         *
+         * WHY. Every failure path in this client logs its URL, and one of the routes is
+         * `/rpc/address-history/<address>` — so a network blip put one of the user's addresses
+         * in logcat. An address is the most linkable thing this app holds, and the codebase
+         * already redacts it from Digi-ID logs.
+         *
+         * WHAT IT KEEPS, deliberately. Scheme, host, port and the route shape all survive. A
+         * log line reading only "a request failed" would make the next outage harder to
+         * diagnose than the leak was worth, and own-node users — the ones most likely to be
+         * debugging their own setup — need to see which host and port were dialled.
+         *
+         * Runs on a failure path, so it never throws: anything unparseable degrades to a
+         * constant rather than falling back to the raw string, since "unparseable" is exactly
+         * when the contents are least predictable.
+         */
+        internal fun redactUrl(url: String): String {
+            val parsed = url.toHttpUrlOrNull() ?: return "<unparseable url>"
+            val path = parsed.pathSegments.joinToString("/") { seg ->
+                if (seg.length >= IDENTIFIER_MIN_LEN) "<redacted>" else seg
+            }
+            val query = if (parsed.querySize > 0) "?<redacted>" else ""
+            val port = if (parsed.port != HttpUrl.defaultPort(parsed.scheme)) ":${parsed.port}" else ""
+            return "${parsed.scheme}://${parsed.host}$port/$path$query"
+        }
     }
 
     /** OkHttp client with cert pinning for the default digiscope.me endpoint.
@@ -174,14 +208,14 @@ class DgbNodeClient(
         return try {
             client(url).newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    android.util.Log.w("DgbNodeClient", "GET $url returned HTTP ${resp.code}")
+                    android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} returned HTTP ${resp.code}")
                     return null
                 }
                 val body = resp.body?.string() ?: return null
                 JSONObject(body)
             }
         } catch (t: Throwable) {
-            android.util.Log.w("DgbNodeClient", "GET $url threw ${t::class.java.simpleName}: ${t.message}")
+            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
             null
         }
     }
@@ -197,14 +231,14 @@ class DgbNodeClient(
         return try {
             client(url).newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    android.util.Log.w("DgbNodeClient", "POST $url returned HTTP ${resp.code}")
+                    android.util.Log.w("DgbNodeClient", "POST ${redactUrl(url)} returned HTTP ${resp.code}")
                     return null
                 }
                 val body = resp.body?.string() ?: return null
                 JSONObject(body)
             }
         } catch (t: Throwable) {
-            android.util.Log.w("DgbNodeClient", "POST $url threw ${t::class.java.simpleName}: ${t.message}")
+            android.util.Log.w("DgbNodeClient", "POST ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
             null
         }
     }
@@ -224,13 +258,13 @@ class DgbNodeClient(
                 if (!resp.isSuccessful) {
                     android.util.Log.w(
                         "DgbNodeClient",
-                        "reconcile $url returned HTTP ${resp.code} ${resp.message}"
+                        "reconcile ${redactUrl(url)} returned HTTP ${resp.code} ${resp.message}"
                     )
                     return null
                 }
                 val body = resp.body?.string()
                 if (body == null) {
-                    android.util.Log.w("DgbNodeClient", "reconcile $url empty body")
+                    android.util.Log.w("DgbNodeClient", "reconcile ${redactUrl(url)} empty body")
                     return null
                 }
                 parseReconcileResponse(body)
@@ -238,7 +272,7 @@ class DgbNodeClient(
         } catch (t: Throwable) {
             android.util.Log.w(
                 "DgbNodeClient",
-                "reconcile $url threw ${t::class.java.simpleName}: ${t.message}",
+                "reconcile ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}",
                 t
             )
             null

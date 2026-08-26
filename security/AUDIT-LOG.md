@@ -217,7 +217,7 @@ so it is not purely theoretical. Recorded, not fixed.
 
 #### Disposition
 
-Findings **2, 4 and 5 are open**; **1, 3 and 6 are fixed**. Recording them here is what the cycle
+Findings **2 and 4 are open**; **1, 3, 5, 6 and 7 are fixed**. Recording them here is what the cycle
 is for; none of the open ones blocks a release on its own.
 
 **Finding 3 is FIXED (2026-08-26).** `MainActivity.handleDigiIdIntent` now logs the deep link's
@@ -261,6 +261,56 @@ the ask was findings 3 and 6 and widening a security change silently is its own 
 Checked and **not** flagged, so the next reader does not re-chase them: `DgbNodeClient` sends no
 `Authorization` header and embeds no credentials, and the `DigiScopeClient` challenge logs
 ("requesting challenge", "got challenge, signing") carry no nonce.
+
+**Finding 7 is FIXED (2026-08-26).** All seven URL-logging sites in `DgbNodeClient` now go
+through `redactUrl()`, which drops path segments of 20+ characters (DGB addresses are 34, bech32
+~42, txids 64; every fixed route word this client uses is shorter) and any query string.
+
+It deliberately keeps scheme, host, port and route shape. A log line reading only "a request
+failed" would cost more at the next outage than the leak was worth, and own-node users — the
+people most likely to be debugging their own setup — need to see which host and port were
+dialled. Eight unit tests pin **both** halves, because a redactor that blanked everything would
+satisfy the leak assertions on its own: `a url carrying no identifier is unchanged` and
+`a custom node endpoint stays readable` are what stop it being merely destructive. Written
+red-first (`Unresolved reference 'redactUrl'`), then green: 8 tests, 0 skipped, 0 failures.
+It runs on failure paths, so unparseable input degrades to a constant rather than falling back
+to the raw string — "unparseable" is precisely when the contents are least predictable.
+
+**Finding 5 is FIXED (2026-08-26).** `jni_test.c` is now compiled only when
+`CMAKE_BUILD_TYPE STREQUAL "Debug"`, via a `target_sources()` block after `add_library()`. It is
+gated rather than deleted because the test still earns its keep — it checks the mainnet magic,
+port, DNS-seed count and checkpoint count actually compiled in — and androidTest runs against the
+debug variant.
+
+Verified in **both** directions, since a guard that excludes the file from every build looks
+identical to one that works:
+
+| variant | `CMAKE_BUILD_TYPE` | exports `testPeerDiscovery` |
+|---|---|---|
+| `mainnetDebug` | `Debug` | **yes** (1) — PeerTest still links |
+| `mainnetRelease` | `RelWithDebInfo` | **no** (0) — shipped binary is clean |
+
+#### A five-month-red test, found by touching the file it lives in
+
+Running `PeerTest` to prove the debug side still linked showed it linking fine and then
+**failing**: `allConstantsCorrect` expected `0x1f`, got `0x17` — bit 3, "at least 8 DNS seed
+entries", clear.
+
+Not caused by the gating. `BRMainNetDNSSeeds` holds **6** entries, because three dead seeders
+(0 addrs each) were deliberately removed on **2026-03-30** with a comment saying so — and
+`MIN_SEEDS` in `jni_test.c` was left at 8. The test has been red since that day and nobody saw
+it, because **androidTest does not run in CI**. This is the same rot the host-KAT runner was
+built to end (`cf_confirm_kat` had not compiled since the bloom excision); it simply lives in the
+one suite that still has no runner.
+
+`MIN_SEEDS` is now 5. The floor exists to catch the seed array being emptied or mis-patched, not
+to pin an exact count, so 5 keeps that meaning against the 6 present. Pinning it at 6 would go
+red the day the next seeder dies — which is real news about the network, not a broken build.
+`PeerTest` now passes 3/3 on the Note 8.
+
+The underlying gap — no CI runner for androidTest — is **not** fixed here: it needs an emulator
+or device in CI, which is a bigger change than this cycle should absorb. Recorded so it is a
+decision rather than an oversight.
 
 **Finding 1 is FIXED (2026-08-26)** — and the fix came with a measurement that corrects the
 severity in the other direction, so it is recorded here rather than quietly dropped.

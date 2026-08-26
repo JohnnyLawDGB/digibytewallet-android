@@ -113,7 +113,8 @@ add_library(
         src/main/jni/digibytewallet-core/crypto/sha3/sph_echo.h
 
         # JNI bridge — clean bridge (Task 3)
-        src/main/jni/bridge/jni_test.c
+        # NOTE: jni_test.c is deliberately NOT here — it is added below for Debug
+        # builds only. See the target_sources() block after add_library().
         src/main/jni/bridge/jni_bridge.h
         src/main/jni/bridge/jni_wallet.c
         src/main/jni/bridge/jni_transaction.c
@@ -124,6 +125,29 @@ add_library(
         src/main/jni/bridge/jni_derive.c
         src/main/jni/bridge/jni_asset_send.c
 )
+
+# ── Test-only JNI, Debug builds ONLY ────────────────────────────────────────
+# jni_test.c exports Java_io_digibyte_native_1core_PeerTest_testPeerDiscovery, whose
+# only caller is native/src/androidTest/.../PeerTest.kt. That Java class is not in a
+# shipped APK, so in a release build the symbol was an exported entry point nothing
+# could reach — test code in a production binary. Found in the v4.0.58 security cycle
+# (finding 5). It reads compiled-in constants only and touches no wallet state, so this
+# is hygiene rather than a vulnerability, but shipping it buys nothing.
+#
+# Gated on CMAKE_BUILD_TYPE rather than deleted because the test still earns its keep:
+# it checks the mainnet magic, port, DNS seed count and checkpoint count actually
+# compiled in. androidTest runs against the debug variant, which keeps it working.
+#
+# Verify BOTH directions after changing this — a guard that silently excludes the file
+# from every build looks identical to one that works:
+#   debug   .so MUST export testPeerDiscovery (or PeerTest dies on UnsatisfiedLinkError)
+#   release .so MUST NOT
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_sources(core-lib PRIVATE src/main/jni/bridge/jni_test.c)
+    message(STATUS "core-lib: including test-only jni_test.c (CMAKE_BUILD_TYPE=Debug)")
+else()
+    message(STATUS "core-lib: EXCLUDING test-only jni_test.c (CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})")
+endif()
 
 include_directories(src/main/jni/digibytewallet-core/)
 # secp256k1 — single canonical vendored copy (bitcoin-core/secp256k1 v0.4.1),
