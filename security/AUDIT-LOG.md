@@ -217,9 +217,48 @@ so it is not purely theoretical. Recorded, not fixed.
 
 #### Disposition
 
-Findings 1–6 are **open**. Recording them here is what the cycle is for; none of them blocks a
-release on its own, and finding 1 is the one that should be scheduled rather than left to drift,
-because its failure mode is silent wrong-key signing on a funds path.
+Findings 2–6 are **open**. Recording them here is what the cycle is for; none of them blocks a
+release on its own.
+
+**Finding 1 is FIXED (2026-08-26)** — and the fix came with a measurement that corrects the
+severity in the other direction, so it is recorded here rather than quietly dropped.
+
+`jni_derive.c` no longer derives from the JNI pointer. All three seed-taking entry points now
+take a private copy through the new `jni_seed_buffer.h` and hand the caller's array straight
+back untouched on the next line — deliberately immediate, so no later branch *can* reach for it
+and drift back into the old shape. Eleven `secure_zero(seedRaw, …)` sites are gone; the copy is
+what gets wiped. The header also bounds the seed at 64 bytes, a length that previously arrived
+from Java unchecked and went straight into `BRBIP32PrivKeyArrayPath`. `mnemonicToSeed` in the
+same file already worked this way and said why — the fix generalises an argument the file was
+already making.
+
+**The measurement.** A new instrumented test (`SeedBufferOwnershipTest`) was run against the
+**pre-fix** binary on the Galaxy Note 8 (SM-N950U, Android 9, API 28): 3 tests, 0 failures,
+0 skipped. On that runtime `GetByteArrayElements` returns a **copy**, so the pre-fix code was
+wiping a copy and **the bug was not live on that device**. The original entry called the
+dependence on unspecified behaviour confirmed and the live defect unconfirmed; that hedge was
+right, and this is the evidence.
+
+What that does and does not license:
+
+- It does **not** make the pre-fix code safe. It is one ART, on one device, at one API level.
+  Copy-vs-direct can vary with API level, GC configuration, array size and heap state, and the
+  S25 Ultra (API 35) has not been measured.
+- It **does** mean this was not an active fund-loss bug in the field, and it should not be
+  described as one.
+
+**Gating.** The host KAT `seed_buffer_ownership_kat` is the regression gate, because it fails
+closed on the pre-fix shape by construction. It has three arms: RED (the v4.0.58 shape must
+fail, at the specific assertions, having reached test1 — a build error cannot masquerade as
+red), GREEN (production must pass), and WIRED (`jni_derive.c` must actually call
+`seed_buffer_take` at least 3 times and must contain zero wipes of a JNI-owned buffer). The
+WIRED arm exists because the first two would both stay green if the header were written and
+never called; this repo has already had a gate pass while observing nothing after a rename.
+Verified red before the fix and green after.
+
+The device test is deliberately **not** the gate: on a copying runtime it passes before and
+after, so it would prove nothing. Its job is to measure the runtime and to catch a future ART
+that starts returning direct pointers.
 
 #### Trend against the last cycle
 

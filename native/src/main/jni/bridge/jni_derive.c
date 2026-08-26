@@ -33,6 +33,7 @@
 #include "../digibytewallet-core/BRCrypto.h"
 #include "../digibytewallet-core/BRTransaction.h"
 #include "../digibytewallet-core/BRInt.h"
+#include "jni_seed_buffer.h"
 
 #define LOG_TAG "DGB-Derive"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -201,9 +202,23 @@ Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
     jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
     if (!seedRaw) return NULL;
 
+    /* Take a private copy and hand the caller's array straight back, untouched.
+     * Never wipe seedRaw: JNI_ABORT can only discard writes made to a COPY, and
+     * whether GetByteArrayElements gave us one is unspecified. LegacySweepService
+     * loads the seed once and reuses it across derivation profiles, so wiping in
+     * place would empty it for every profile after the first. See
+     * jni_seed_buffer.h. */
+    SeedBuffer seed;
+    const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
+    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    if (!seedOk) {
+        LOGW("rejecting a seed of %d bytes (expected 1..%u)", (int)seedLen, SEED_BUFFER_MAX);
+        return NULL;
+    }
+
     const char *hmac = (*env)->GetStringUTFChars(env, hmacKey, NULL);
     if (!hmac) {
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -215,23 +230,21 @@ Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
         if (!path) {
             (*env)->ReleaseIntArrayElements(env, prefixPath, pathJ, JNI_ABORT);
             (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-            secure_zero(seedRaw, (size_t)seedLen);
-            (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+            seed_buffer_release(&seed);
             return NULL;
         }
         for (jsize i = 0; i < pathLen; i++) path[i] = (uint32_t)pathJ[i];
     }
 
     BRMasterPubKey mpk = BRBIP32MasterPubKeyPath(
-        (const void *)seedRaw, (size_t)seedLen,
+        seed.bytes, seed.len,
         hmac, path, (size_t)pathLen);
 
     /* Clean up intermediates now — seed memory zeroed and released. */
     if (path) { secure_zero(path, (size_t)pathLen * sizeof(uint32_t)); free(path); }
     (*env)->ReleaseIntArrayElements(env, prefixPath, pathJ, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-    secure_zero(seedRaw, (size_t)seedLen);
-    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    seed_buffer_release(&seed);
 
     const int total = gapExternal + gapInternal;
     jclass stringClass = (*env)->FindClass(env, "java/lang/String");
@@ -289,9 +302,23 @@ Java_io_digibyte_core_bridge_NativeBridge_derivePrivateKeyWIF(
     jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
     if (!seedRaw) return NULL;
 
+    /* Take a private copy and hand the caller's array straight back, untouched.
+     * Never wipe seedRaw: JNI_ABORT can only discard writes made to a COPY, and
+     * whether GetByteArrayElements gave us one is unspecified. LegacySweepService
+     * loads the seed once and reuses it across derivation profiles, so wiping in
+     * place would empty it for every profile after the first. See
+     * jni_seed_buffer.h. */
+    SeedBuffer seed;
+    const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
+    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    if (!seedOk) {
+        LOGW("rejecting a seed of %d bytes (expected 1..%u)", (int)seedLen, SEED_BUFFER_MAX);
+        return NULL;
+    }
+
     const char *hmac = (*env)->GetStringUTFChars(env, hmacKey, NULL);
     if (!hmac) {
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -303,22 +330,20 @@ Java_io_digibyte_core_bridge_NativeBridge_derivePrivateKeyWIF(
         if (!path) {
             (*env)->ReleaseIntArrayElements(env, fullPath, pathJ, JNI_ABORT);
             (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-            secure_zero(seedRaw, (size_t)seedLen);
-            (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+            seed_buffer_release(&seed);
             return NULL;
         }
         for (jsize i = 0; i < pathLen; i++) path[i] = (uint32_t)pathJ[i];
     }
 
     BRKey key;
-    BRBIP32PrivKeyArrayPath(&key, (const void *)seedRaw, (size_t)seedLen,
+    BRBIP32PrivKeyArrayPath(&key, seed.bytes, seed.len,
                             hmac, path, (size_t)pathLen);
 
     if (path) { secure_zero(path, (size_t)pathLen * sizeof(uint32_t)); free(path); }
     (*env)->ReleaseIntArrayElements(env, fullPath, pathJ, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-    secure_zero(seedRaw, (size_t)seedLen);
-    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    seed_buffer_release(&seed);
 
     char wif[80];
     size_t n = BRKeyPrivKey(&key, wif, sizeof(wif));
@@ -398,9 +423,23 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
     jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
     if (!seedRaw) return NULL;
 
+    /* Take a private copy and hand the caller's array straight back, untouched.
+     * Never wipe seedRaw: JNI_ABORT can only discard writes made to a COPY, and
+     * whether GetByteArrayElements gave us one is unspecified. LegacySweepService
+     * loads the seed once and reuses it across derivation profiles, so wiping in
+     * place would empty it for every profile after the first. See
+     * jni_seed_buffer.h. */
+    SeedBuffer seed;
+    const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
+    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    if (!seedOk) {
+        LOGW("rejecting a seed of %d bytes (expected 1..%u)", (int)seedLen, SEED_BUFFER_MAX);
+        return NULL;
+    }
+
     const char *hmac = (*env)->GetStringUTFChars(env, hmacKey, NULL);
     if (!hmac) {
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -412,8 +451,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
     if (!keys) {
         (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
         (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        secure_zero(seedRaw, (size_t)seedLen);
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -422,8 +460,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
         free(keys);
         (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
         (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        secure_zero(seedRaw, (size_t)seedLen);
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -468,7 +505,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
         /* Derive key at prefix + chain + index. */
         fullPath[prefixLen] = (uint32_t)chainJ[i];
         fullPath[prefixLen + 1] = (uint32_t)addrIdxJ[i];
-        BRBIP32PrivKeyArrayPath(&keys[i], (const void *)seedRaw, (size_t)seedLen,
+        BRBIP32PrivKeyArrayPath(&keys[i], seed.bytes, seed.len,
                                 hmac, fullPath, (size_t)prefixLen + 2);
         /* BRBIP32PrivKeyArrayPath → BRKeySetSecret(compressed=1) internally. */
 
@@ -495,8 +532,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
         free(keys);
         BRTransactionFree(tx);
         (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        secure_zero(seedRaw, (size_t)seedLen);
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -510,8 +546,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
         free(keys);
         BRTransactionFree(tx);
         (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        secure_zero(seedRaw, (size_t)seedLen);
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -544,8 +579,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
         free(keys);
         BRTransactionFree(tx);
         (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        secure_zero(seedRaw, (size_t)seedLen);
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -554,8 +588,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
         free(keys);
         BRTransactionFree(tx);
         (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        secure_zero(seedRaw, (size_t)seedLen);
-        (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+        seed_buffer_release(&seed);
         return NULL;
     }
 
@@ -568,8 +601,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
     for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
     free(keys);
     (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-    secure_zero(seedRaw, (size_t)seedLen);
-    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    seed_buffer_release(&seed);
 
     if (!signOk || !BRTransactionIsSigned(tx)) {
         LOGW("buildAndSignLegacySweep: signing failed (signOk=%d)", signOk);
