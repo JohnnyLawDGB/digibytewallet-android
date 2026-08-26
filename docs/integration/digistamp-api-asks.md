@@ -65,7 +65,15 @@ GET /assets/history/{address}?limit=50
     → ["txid","txid", ...]              // bare array, newest first
 
 GET /syncstate
-    → {"count":24070312,"sync":0}       // sync = blocks behind, 0 = at tip
+    → {"count":24070312,"sync":0}       // sync: 0 = at tip; NEGATIVE = blocks behind
+                                        // (-40 = 40 behind). Small POSITIVES are
+                                        // states, not distances: 1 stopped,
+                                        // 2 initializing, 3 rewinding, 4 optimizing.
+                                        // Corrected 2026-08-26 — this doc previously
+                                        // said "blocks behind", which inverts the sign
+                                        // and misreads the state codes as distances.
+                                        // The value passes through unmodified from
+                                        // DigiAsset Core so it matches other providers.
 
 GET /tx/raw/{txid}
     → {"hex":"0100000001..."}           // thin getrawtransaction passthrough

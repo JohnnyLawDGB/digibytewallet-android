@@ -217,8 +217,8 @@ so it is not purely theoretical. Recorded, not fixed.
 
 #### Disposition
 
-Finding **4 is open**; **1, 3, 5, 6 and 7 are fixed**; **2 is closed, and partly RETRACTED** —
-see the correction below. Recording them here is what the cycle
+**1, 3, 5, 6 and 7 are fixed**; **2 is closed, and partly RETRACTED** (see the correction below);
+**4 is ACCEPTED — left in place deliberately**. Recording them here is what the cycle
 is for; none of the open ones blocks a release on its own.
 
 **Finding 3 is FIXED (2026-08-26).** `MainActivity.handleDigiIdIntent` now logs the deep link's
@@ -351,6 +351,28 @@ launches, the wallet loads, and there is no `ClassNotFoundException`, `NoSuchMet
 The lesson worth keeping is about the finding, not the rule: it was ranked on how the rule read,
 not on what the build produced. The over-keep numbers in the section above were measured and hold;
 this one item was inferred, and inference is what got it wrong.
+
+#### Finding 4 — ACCEPTED, left in place (2026-08-26)
+
+Owner's decision: leave `digibyte:` and `digiscope:` exported, on the grounds that they pose no
+risk. That reading is correct on the security question — **an exported scheme with no handler has
+no sink, so there is nothing to inject into**. What is there is dead surface and one broken
+promise, neither of which is a vulnerability.
+
+Recorded with the facts, so a future cycle re-finds the decision rather than the finding:
+
+- `digiscope://` appears in **no source file** in this repo. The wallet neither emits nor handles
+  it. Whether anything outside the repo emits it (the site, a notification) was not checked here.
+- `digibyte:` is the opposite shape. The Receive screen **generates** `digibyte:` URIs for its own
+  QR codes (`ReceiveScreen.kt:81,280,339`), and `DigiByteUri.parse` → `onDigiByteUri` → send
+  screen is already wired for the in-app scanner (`QrScannerScreen.kt`, `AppNavigation.kt:633`).
+  The only missing piece is `MainActivity` routing an *intent* into that existing path, so a
+  payment link arriving from a browser launches the app and is silently dropped.
+
+If this is revisited, note it is a product decision and not a security one: wiring `digibyte:`
+would let any web page open the wallet with an address and amount prefilled. That is standard
+BIP21 behaviour and the send screen still requires confirmation — but it is a posture choice,
+which is why it was escalated rather than fixed.
 
 **Finding 1 is FIXED (2026-08-26)** — and the fix came with a measurement that corrects the
 severity in the other direction, so it is recorded here rather than quietly dropped.
