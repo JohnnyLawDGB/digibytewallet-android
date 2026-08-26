@@ -1,6 +1,10 @@
 package io.digibyte.core.ipfs
 
+import io.digibyte.core.asset.network.DigiScopeAssetParsing
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -66,5 +70,71 @@ class AssetIssuerProvenanceTest {
 
     @Test fun `nothing at all yields nothing`() {
         assertNull(AssetMetadataService.provenIssuerOnly(proven = null, claimed = null))
+    }
+
+    // ---- a real, confirmed forgery ----------------------------------------------------------
+
+    /**
+     * DORRO #5, `assets.digistamp.co/listing/cmrxzrkhd02avdo7s7ymb93ue`, verified a forgery by the
+     * wallet owner: a **new issuance** pointing at the **original's IPFS CID**.
+     *
+     * That is the shape worth remembering. Reusing the CID means every metadata-derived field is
+     * byte-identical to the original — same name, same image, same description — and our own
+     * [io.digibyte.core.ipfs.CidVerifier] passes cleanly, because the content genuinely does hash
+     * to that CID. **Content verification proves integrity, never authorship.** Nothing derived
+     * from the document can separate this from the original; only the chain can.
+     *
+     * And it does, flatly. Captured live 2026-08-26:
+     *
+     *   listing page, from the metadata:  DGr3ns1diMzbio2gvU98i6y4gAxkVpweGw
+     *   GET /api/assets/<id>, from chain: DAUsKjc7FK37HPQsKyAsrcVBDqs2Kfmyvh
+     *
+     * Before this fix the wallet showed the first of those, under a label reading "Issuer
+     * Address" — handing the forgery the one thing it could not manufacture for itself.
+     */
+    @Test fun `the DORRO 5 forgery resolves to the address that paid for the issuance`() {
+        // Verbatim response body, GET https://assets.digistamp.co/api/assets/La2rJL6S…, 2026-08-26.
+        val live = JSONObject(
+            """{"assetId":"La2rJL6S35GjytTaNyZVGxmA1mSVfzUhP7PDex",
+                "cid":"QmX4J9pzWpL1DUAGHwPwH2R7AeacmPqBZcdDGy8xWVfkYu",
+                "issuer":"DAUsKjc7FK37HPQsKyAsrcVBDqs2Kfmyvh","count":1,"decimals":0}"""
+        )
+        val claimedInMetadata = "DGr3ns1diMzbio2gvU98i6y4gAxkVpweGw"
+
+        val parsed = DigiScopeAssetParsing.assetData(live, fallbackAssetId = "ignored")!!
+        assertEquals("DAUsKjc7FK37HPQsKyAsrcVBDqs2Kfmyvh", parsed.issuer)
+
+        val shown = AssetMetadataService.provenIssuerOnly(
+            proven = parsed.issuer,
+            claimed = claimedInMetadata,
+        )
+        assertEquals("DAUsKjc7FK37HPQsKyAsrcVBDqs2Kfmyvh", shown)
+        assertNotEquals(
+            "the wallet displayed the address the minter claimed — the forgery's whole purpose",
+            claimedInMetadata, shown,
+        )
+    }
+
+    /**
+     * The residual, stated so it is not mistaken for solved: showing the proven issuer stops the
+     * wallet AMPLIFYING a forgery, but it does not DETECT one. A holder of this asset now sees a
+     * true address they have no way to evaluate, beside artwork identical to the original.
+     *
+     * The detectable signature is the reuse itself — two different assetIds sharing one metadata
+     * CID. The wallet can only see that across assets it holds, and `assets.digistamp.co` exposes
+     * no CID-collision lookup (probed 2026-08-26: no such route). Detection needs either a local
+     * duplicate check across held assets or a signal from the provider, which sees the whole index.
+     */
+    @Test fun `the forged issuance has a different assetId but the original's cid`() {
+        val forgery = JSONObject(
+            """{"assetId":"La2rJL6S35GjytTaNyZVGxmA1mSVfzUhP7PDex",
+                "cid":"QmX4J9pzWpL1DUAGHwPwH2R7AeacmPqBZcdDGy8xWVfkYu","count":1,"decimals":0}"""
+        )
+        val parsed = DigiScopeAssetParsing.assetData(forgery, fallbackAssetId = "ignored")!!
+
+        // The CID is what travelled; the assetId is what could not. An assetId is derived from
+        // input[0] of its own issuance, so a copy necessarily gets a new one.
+        assertEquals("QmX4J9pzWpL1DUAGHwPwH2R7AeacmPqBZcdDGy8xWVfkYu", parsed.cid)
+        assertNotNull("the cid is the field a forger reuses verbatim", parsed.cid)
     }
 }
