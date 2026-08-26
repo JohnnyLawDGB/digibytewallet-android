@@ -909,13 +909,19 @@ class WalletViewModel @Inject constructor(
          * Format satoshis to a human-readable DGB string with up to 8 decimal places.
          * Example: 123456789012 → "1,234.56789012 DGB"
          */
-        fun formatSatoshis(satoshis: Long): String {
+        fun formatSatoshis(satoshis: Long): String = "${formatSatoshisBare(satoshis)} DGB"
+
+        /** The same figure without the " DGB" suffix, for places that show the DigiByte mark
+         *  instead of the word — currently the hero balance. Kept separate rather than made a
+         *  flag on [formatSatoshis] so the two call sites that still want the text ticker
+         *  cannot lose it by accident. */
+        fun formatSatoshisBare(satoshis: Long): String {
             val dgb = satoshis / 100_000_000.0
             val fmt = NumberFormat.getNumberInstance(Locale.US).apply {
                 minimumFractionDigits = 2
                 maximumFractionDigits = 8
             }
-            return "${fmt.format(dgb)} DGB"
+            return fmt.format(dgb)
         }
 
         /** DigiDollar cents → USD string. Example: 5000 → "$50.00" */
