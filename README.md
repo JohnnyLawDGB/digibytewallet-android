@@ -2,7 +2,7 @@
 
 A full Kotlin rewrite of the DigiByte Android wallet — a **sovereignty-first** SPV wallet built on Jetpack Compose over a patched native C core. Compact-filters-only sync (BIP157/158), hardware-backed key custody, DigiDollar + Taproot, DigiAssets v2, Digi-ID authentication, and a Community Hub.
 
-> **Status:** Active development — **v4.0.58**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.44–v4.0.46 make a "history gap" recoverable in place — re-fetching just the block headers under it, and retiring a warning that could previously never be dismissed. **[Download APK](https://digiscope.me/downloads/)** · **[Latest GitHub release](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)**
+> **Status:** Active development — **v4.0.59**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.44–v4.0.46 make a "history gap" recoverable in place — re-fetching just the block headers under it, and retiring a warning that could previously never be dismissed. **[Download APK](https://digiscope.me/downloads/)** · **[Latest GitHub release](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)**
 
 ## Download
 
