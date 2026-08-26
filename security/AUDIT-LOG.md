@@ -217,8 +217,50 @@ so it is not purely theoretical. Recorded, not fixed.
 
 #### Disposition
 
-Findings 2–6 are **open**. Recording them here is what the cycle is for; none of them blocks a
-release on its own.
+Findings **2, 4 and 5 are open**; **1, 3 and 6 are fixed**. Recording them here is what the cycle
+is for; none of the open ones blocks a release on its own.
+
+**Finding 3 is FIXED (2026-08-26).** `MainActivity.handleDigiIdIntent` now logs the deep link's
+**host only**, never the URI. The URI carries the challenge nonce, and a logged nonce is a
+replayable authentication for anything able to read logcat. `DigiIdManager` already logged only
+`request.domain`; this makes the outlier follow the rule the codebase had already settled on.
+Verified in the built APK rather than in the source: the old format string appears **0** times in
+the dex, the redacted one **1**.
+
+A sweep for the same class turned up one more site, recorded below as finding 7.
+
+**Finding 6 is FIXED (2026-08-26).** Deleted `JNIKey.c/.h`, `JNIBase58.c/.h` and
+`JNIBIP32Sequence.c/.h`, plus the commented-out block in `native/CMakeLists.txt` that kept them
+"for reference". Also deleted `app/CMakeLists.txt`, found while checking whether anything still
+compiled them: it is orphaned twice over — no Gradle file references it (only
+`native/build.gradle.kts` declares an `externalNativeBuild`), and the paths it lists
+(`app/src/main/jni/transition/…`) do not exist. A dead build file naming dead sources is the
+most misleading shape this class of residue takes.
+
+Proven inert rather than assumed: `libcore-lib.so` exports **180 symbols before and 180 after,
+byte-identical under diff**. Both sides came from a from-scratch object build (`native/.cxx` and
+the cxx intermediates removed first, 150 objects recompiled) — an earlier claim in this repo
+rested on a day-old `.so`, so the comparison is only worth making when both halves are fresh.
+
+`docs/derivation/LEGACY_DERIVATION.md` cited `JNIBIP32Sequence.c` in its description of the
+fork's wrapper layer; it now says the file was deleted and when, so the reference does not become
+a dead end.
+
+#### Finding 7 (new, open) — a wallet address reaches logcat on a network error
+
+Found while checking whether finding 3 was an instance or a class. `DgbNodeClient` logs the full
+request URL on failure (`:184`, `:207`, `:233`), and one of the endpoints it builds is
+`"${endpoint()}/rpc/address-history/$address"` (`:133`). So a network exception writes one of the
+user's addresses to logcat. For a wallet whose roadmap is sovereignty-first — and which already
+redacts the wallet address from Digi-ID logs for exactly this reason — that is the wrong default,
+even though reading it needs `READ_LOGS` or ADB.
+
+Severity low, same shape and same one-line fix as finding 3. Recorded rather than fixed, because
+the ask was findings 3 and 6 and widening a security change silently is its own bad habit.
+
+Checked and **not** flagged, so the next reader does not re-chase them: `DgbNodeClient` sends no
+`Authorization` header and embeds no credentials, and the `DigiScopeClient` challenge logs
+("requesting challenge", "got challenge, signing") carry no nonce.
 
 **Finding 1 is FIXED (2026-08-26)** — and the fix came with a measurement that corrects the
 severity in the other direction, so it is recorded here rather than quietly dropped.

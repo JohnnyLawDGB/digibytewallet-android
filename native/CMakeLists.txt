@@ -123,10 +123,6 @@ add_library(
         src/main/jni/bridge/jni_transaction_persist.c
         src/main/jni/bridge/jni_derive.c
         src/main/jni/bridge/jni_asset_send.c
-        # Old bridge files retained for reference but NOT compiled:
-        # src/main/jni/bridge/JNIKey.c
-        # src/main/jni/bridge/JNIBase58.c
-        # src/main/jni/bridge/JNIBIP32Sequence.c
 )
 
 include_directories(src/main/jni/digibytewallet-core/)

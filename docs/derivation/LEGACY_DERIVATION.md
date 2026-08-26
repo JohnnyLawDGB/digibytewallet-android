@@ -131,10 +131,12 @@ The **C derivation source itself is unchanged** between
 `DigiByte-Core/digibytewallet-android` master (submodule pin
 `d57c13a…`) and the breadwallet-derived BIP32 logic.
 
-This fork's structural change is at the *wrapper* layer
-(`native/src/main/jni/bridge/JNIBIP32Sequence.c` and the Kotlin
-`core/src/main/java/io/digibyte/core/bridge/NativeBridge.kt`), which reorganizes
-the JNI surface but — based on the audit — calls into the same `BRBIP32*`
+This fork's structural change is at the *wrapper* layer (the Kotlin
+`core/src/main/java/io/digibyte/core/bridge/NativeBridge.kt`; the bread-era
+`native/src/main/jni/bridge/JNIBIP32Sequence.c` this originally described was
+deleted in the v4.0.58 security cycle, having been out of the build since the
+bloom excision), which reorganizes the JNI surface but — based on the audit —
+calls into the same `BRBIP32*`
 functions. The submodule pin difference is unverifiable at audit time (see §1
 warning); if the pinned C lib has been modified, that diff must be pulled into
 this section before this doc is considered complete.

@@ -363,7 +363,10 @@ class MainActivity : FragmentActivity() {
         val uri = intent?.data?.toString()
         if (uri != null && uri.startsWith("digiid://")) {
             pendingDigiIdUri = uri
-            android.util.Log.i("MainActivity", "Captured Digi-ID deep link: $uri")
+            // Host only, never the URI. The URI carries the challenge nonce, and a logged
+            // nonce is a replayable authentication for anything able to read logcat.
+            // DigiIdManager already logs only request.domain; this is the same rule.
+            android.util.Log.i("MainActivity", "Captured Digi-ID deep link for ${intent.data?.host}")
         }
     }
 }
