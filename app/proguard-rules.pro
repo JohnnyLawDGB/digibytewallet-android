@@ -43,17 +43,37 @@
 # whose lookups already fail at runtime. Deliberately NOT kept: keeping absent
 # classes would be a rule that silently protects nothing.
 
-# ---- Enums whose NAMES are persisted ---------------------------------------
-# DisplayCurrency is read back with valueOf(prefs.getString(...)), and the
-# utxos table stores asset_source as the text 'NATIVE'/'BACKEND'. A renamed
-# constant does not crash — it silently fails to match stored data, which is
-# the worst failure mode available to a wallet.
+# ---- Enums -----------------------------------------------------------------
+# values()/valueOf()/$VALUES are the reflective surface every enum needs; keeping
+# them costs nothing and breaks nothing.
+#
+# This block used to end with `public *;`, which kept the public members — and so
+# the CONSTANT NAMES — of every enum in the app, ours and our dependencies'. Its
+# comment justified that with two examples, and one of them was not even an enum:
+# `asset_source` is a TEXT column (UtxoEntity.kt) fed by `object AssetSource`
+# (AssetSource.kt), a holder of String constants. A rule kept alive by a reason
+# that had stopped being true.
+#
+# Enum constant names are descriptive by design — SCANNING, PEER_UNRESPONSIVE —
+# so keeping all of them hands a reader of the APK a map of the state machines.
+# Narrowed in the v4.0.58 security cycle (finding 2) to the two enums that
+# genuinely need their names, each verified by a source sweep rather than assumed.
 -keepclassmembers enum * {
     public static **[] values();
     public static ** valueOf(java.lang.String);
     **[] $VALUES;
-    public *;
 }
+
+# Round-trips through SharedPreferences: written as `.name` (WalletViewModel:417),
+# read back as `valueOf(prefs.getString(...))` (:407). A renamed constant does not
+# crash — it silently stops matching stored data, which is the worst failure mode
+# available to a wallet.
+-keep class io.digibyte.ui.wallet.WalletViewModel$DisplayCurrency { *; }
+
+# `stage.name` is embedded in the bug-report URL (SettingsScreen.kt:169). Renaming
+# it would not break anything; it would just turn every user-submitted report into
+# "stage=a", which is worse than the leak this narrowing is closing.
+-keep class io.digibyte.core.model.SyncStage { *; }
 
 # ---- SQLCipher: JNI-backed, loaded reflectively -----------------------------
 # If these are stripped the encrypted database fails to open, which in this app

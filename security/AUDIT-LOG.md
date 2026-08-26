@@ -217,7 +217,8 @@ so it is not purely theoretical. Recorded, not fixed.
 
 #### Disposition
 
-Findings **2 and 4 are open**; **1, 3, 5, 6 and 7 are fixed**. Recording them here is what the cycle
+Finding **4 is open**; **1, 3, 5, 6 and 7 are fixed**; **2 is closed, and partly RETRACTED** —
+see the correction below. Recording them here is what the cycle
 is for; none of the open ones blocks a release on its own.
 
 **Finding 3 is FIXED (2026-08-26).** `MainActivity.handleDigiIdIntent` now logs the deep link's
@@ -311,6 +312,45 @@ red the day the next seeder dies — which is real news about the network, not a
 The underlying gap — no CI runner for androidTest — is **not** fixed here: it needs an emulator
 or device in CI, which is a bigger change than this cycle should absorb. Recorded so it is a
 decision rather than an oversight.
+
+#### Finding 2 — CORRECTION: the security impact I claimed was wrong
+
+The finding said the `public *;` line in the enum keep rule "leaks the constant names of 23 of our
+enums". **That is not true, and removing the line does not stop it.**
+
+Measured rather than reasoned about. With the line gone, `FILTER_CHAIN_WEDGED`, `REANCHORED`,
+`Connecting`, `Syncing` and `Synced` are all still present as strings in the minified dex. They
+survive because a Kotlin enum passes its constant name to the `Enum(String, int)` super
+constructor, so the name is a constant-pool entry, not a member name. R8 only removes it by enum
+unboxing, which is off the table for any enum whose `values()`/`valueOf()` are kept — and the rule
+keeps those deliberately, for every enum. So the names were never `public *`'s to leak.
+
+What the line actually did was keep the public **members** — methods and properties — of every
+enum in the app and its dependencies. Removing it lets R8 shrink and rename those; the members
+that dropped out of the mapping are library internals (`putThread`, `casWaiters`, `tryCaptureView`).
+A modest shrinking gain, not a disclosure fix.
+
+**The change was kept anyway**, on the two grounds that survive:
+
+- The rule's own comment justified it with `asset_source`, which is a `TEXT` column
+  (`UtxoEntity.kt:17`) fed by `object AssetSource` (`AssetSource.kt:6`) — a holder of `String`
+  constants, not an enum. A keep rule defended by a reason that had stopped being true is how
+  keep rules become permanent.
+- The two enums that genuinely need name fidelity are now named explicitly and for stated
+  reasons, instead of riding on a blanket rule: `DisplayCurrency` round-trips through
+  SharedPreferences (`WalletViewModel.kt:407,417`), and `SyncStage.name` is embedded in the
+  bug-report URL (`SettingsScreen.kt:169`) where renaming would turn every user report into
+  `stage=a`.
+
+Both new `-keep` rules were checked against `seeds.txt` for a positive match — `USD`, `PHP`,
+`Synced`, `Failed` and `$VALUES` are all seeded — because a keep rule naming a class that does not
+exist matches nothing and fails silently. `minifiedDebug` was then installed on the Note 8: it
+launches, the wallet loads, and there is no `ClassNotFoundException`, `NoSuchMethodError`,
+`NoSuchFieldError` or `No enum constant` in the log.
+
+The lesson worth keeping is about the finding, not the rule: it was ranked on how the rule read,
+not on what the build produced. The over-keep numbers in the section above were measured and hold;
+this one item was inferred, and inference is what got it wrong.
 
 **Finding 1 is FIXED (2026-08-26)** — and the fix came with a measurement that corrects the
 severity in the other direction, so it is recorded here rather than quietly dropped.
