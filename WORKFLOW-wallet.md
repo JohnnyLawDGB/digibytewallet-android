@@ -130,10 +130,14 @@ Logical progression — each step is testable before the next begins:
       properties (no tell / no flag / biometric kill), CF sync
       integrity, DigiDollar signing paths.
 - [ ] **4.2** F-Droid submission (finish reproducible-build metadata) —
-      can precede audit completion with honest beta labeling.
+      can precede audit completion with honest beta labeling. **No longer
+      first in the channel order** — see 4.4.
 - [ ] **4.3** Audit-gated releases: DigiDollar mainnet-in-wallet;
       public duress-PIN promotion.
-- [ ] **4.4** Play Store, timed at/after v4.0.0.
+- [ ] **4.4** Play Store — **now the first distribution channel** (developer
+      account approved 2026-08-27; the at/after-v4.0.0 timing condition is
+      already met). Numbering kept for stable references; ordering is 4.4
+      before 4.2.
 - [ ] **4.5** Coldcard QR → NFC → multi-account.
 
 ---
