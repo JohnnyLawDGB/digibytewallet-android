@@ -38,16 +38,22 @@ import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 private const val SEC_PIN_LENGTH = 6
 
-/** Format a re-auth lockout deadline as "Locked — try again in M:SS" at press time.
+/** Format a re-auth lockout deadline as a localised "locked, try again in M:SS" at press time.
  *  (The dialog gates re-render per keystroke; a live tick isn't needed here — the
- *  enforcement lives in PinManager regardless of what this string says.) */
-private fun securityLockedMessage(until: Long): String {
+ *  enforcement lives in PinManager regardless of what this string says.)
+ *  Takes Resources because it is not composable. */
+private fun securityLockedMessage(res: android.content.res.Resources, until: Long): String {
     val remainingMs = (until - System.currentTimeMillis()).coerceAtLeast(0L)
     val totalSec = (remainingMs + 999L) / 1000L
-    return "Locked — try again in %d:%02d".format(totalSec / 60, totalSec % 60)
+    // The M:SS clock itself is a number format, not prose — only the sentence around it is
+    // translated, so the digits read the same in every language.
+    val clock = "%d:%02d".format(totalSec / 60, totalSec % 60)
+    return res.getString(R.string.sec_locked_countdown, clock)
 }
 
 // ── Internal step state for security actions ──────────────────────────────────
@@ -61,6 +67,14 @@ fun SecuritySettingsScreen(
     walletManager: WalletManager,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val appResources = androidx.compose.ui.platform.LocalContext.current.resources
+    val pinChangedMsg = stringResource(R.string.sec_pin_changed)
+    val pinsMismatchMsg = stringResource(R.string.sec_pins_mismatch)
+    val bioRequiredMsg = stringResource(R.string.sec_biometric_required)
+    // Hoisted: used inside click/callback lambdas, which are not composable.
+    val wipeEnabledMsg = stringResource(R.string.sec_wipe_after_enabled, PinManager.WIPE_THRESHOLD)
+    val authViewPhraseMsg = stringResource(R.string.sec_auth_view_phrase)
+    val incorrectPinMsg = stringResource(R.string.sec_incorrect_pin)
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
@@ -76,14 +90,15 @@ fun SecuritySettingsScreen(
     var snackMessage by remember { mutableStateOf<String?>(null) }
 
     // Auto-lock timeout options (ms → label)
-    val timeoutOptions = remember {
-        listOf(
-            60_000L to "1 minute",
-            5 * 60_000L to "5 minutes",
-            15 * 60_000L to "15 minutes",
-            30 * 60_000L to "30 minutes"
-        )
-    }
+    // NOT remember { }: stringResource is composable and cannot be called inside a remember
+    // lambda. Building the list each recomposition is four string lookups, and it has to rebuild
+    // anyway when the language changes.
+    val timeoutOptions = listOf(
+        60_000L to stringResource(R.string.sec_autolock_1m),
+        5 * 60_000L to stringResource(R.string.sec_autolock_5m),
+        15 * 60_000L to stringResource(R.string.sec_autolock_15m),
+        30 * 60_000L to stringResource(R.string.sec_autolock_30m),
+    )
     val currentTimeout by viewModel.autoLockTimeout.collectAsStateWithLifecycle()
     val wipeAfterNEnabled by viewModel.wipeAfterNEnabled.collectAsStateWithLifecycle()
 
@@ -115,7 +130,7 @@ fun SecuritySettingsScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Security", color = Color.White) },
+                title = { Text(stringResource(R.string.set_security), color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
@@ -136,20 +151,20 @@ fun SecuritySettingsScreen(
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
             item {
-                SettingsCategory(title = "PIN & Authentication") {
+                SettingsCategory(title = stringResource(R.string.sec_pin_auth)) {
                     SettingsRow(
                         icon = Icons.Default.Pin,
                         iconTint = DigiByteAccent,
-                        title = "Change PIN",
-                        subtitle = "Update your 6-digit wallet PIN",
+                        title = stringResource(R.string.sec_change_pin),
+                        subtitle = stringResource(R.string.sec_change_pin_sub),
                         onClick = { activeDialog = SecurityDialog.ChangePinVerify }
                     )
                     SettingsRowDivider()
                     SettingsRow(
                         icon = Icons.Default.Fingerprint,
                         iconTint = DigiByteBlue,
-                        title = "Biometric Authentication",
-                        subtitle = if (biometricAvailable) "Fingerprint / face unlock available" else "Not available on this device",
+                        title = stringResource(R.string.sec_biometric),
+                        subtitle = if (biometricAvailable) stringResource(R.string.sec_biometric_yes) else stringResource(R.string.sec_biometric_no),
                         onClick = {},
                         trailing = {
                             Switch(
@@ -168,12 +183,12 @@ fun SecuritySettingsScreen(
                     // Auto-lock timeout dropdown
                     var showTimeoutMenu by remember { mutableStateOf(false) }
                     val currentLabel = timeoutOptions.firstOrNull { it.first == currentTimeout }?.second
-                        ?: "Custom"
+                        ?: stringResource(R.string.sec_autolock_custom)
                     Box {
                         SettingsRow(
                             icon = Icons.Default.Timer,
                             iconTint = Color(0xFFFF9800),
-                            title = "Auto-Lock Timeout",
+                            title = stringResource(R.string.sec_autolock),
                             subtitle = currentLabel,
                             onClick = { showTimeoutMenu = true }
                         )
@@ -207,9 +222,10 @@ fun SecuritySettingsScreen(
                     SettingsRow(
                         icon = Icons.Default.DeleteSweep,
                         iconTint = DigiByteRed,
-                        title = "Wipe After ${PinManager.WIPE_THRESHOLD} Failed PINs",
-                        subtitle = if (wipeAfterNEnabled) "Enabled — wallet erases after ${PinManager.WIPE_THRESHOLD} wrong PINs"
-                                   else "Off — extra protection against PIN brute-force",
+                        title = stringResource(R.string.sec_wipe_after, PinManager.WIPE_THRESHOLD),
+                        subtitle = if (wipeAfterNEnabled)
+                                       stringResource(R.string.sec_wipe_after_on, PinManager.WIPE_THRESHOLD)
+                                   else stringResource(R.string.sec_wipe_after_off),
                         onClick = {
                             if (wipeAfterNEnabled) viewModel.setWipeAfterN(false)
                             else activeDialog = SecurityDialog.WipeAfterNConfirm
@@ -232,24 +248,24 @@ fun SecuritySettingsScreen(
             }
 
             item {
-                SettingsCategory(title = "Recovery Phrase") {
+                SettingsCategory(title = stringResource(R.string.sec_recovery_phrase)) {
                     SettingsRow(
                         icon = Icons.Default.Key,
                         iconTint = Color(0xFFFFD700),
-                        title = "View Recovery Phrase",
-                        subtitle = "Requires PIN + biometric verification",
+                        title = stringResource(R.string.sec_view_phrase),
+                        subtitle = stringResource(R.string.sec_view_phrase_sub),
                         onClick = { activeDialog = SecurityDialog.ViewSeedWarning }
                     )
                 }
             }
 
             item {
-                SettingsCategory(title = "Danger Zone") {
+                SettingsCategory(title = stringResource(R.string.sec_danger_zone)) {
                     SettingsRow(
                         icon = Icons.Default.DeleteForever,
                         iconTint = DigiByteRed,
-                        title = "Wipe Wallet",
-                        subtitle = "Remove all wallet data from this device",
+                        title = stringResource(R.string.sec_wipe_wallet),
+                        subtitle = stringResource(R.string.sec_wipe_wallet_sub),
                         onClick = { activeDialog = SecurityDialog.WipePinVerify }
                     )
                 }
@@ -261,8 +277,8 @@ fun SecuritySettingsScreen(
 
             SecurityDialog.ChangePinVerify -> {
                 PinVerifyDialog(
-                    title = "Verify Current PIN",
-                    subtitle = "Enter your current PIN to continue",
+                    title = stringResource(R.string.sec_verify_pin),
+                    subtitle = stringResource(R.string.sec_verify_pin_sub),
                     pinInput = pinInput,
                     pinError = pinError,
                     onDigit = { d ->
@@ -276,13 +292,13 @@ fun SecuritySettingsScreen(
                                         activeDialog = SecurityDialog.ChangePinNew
                                     }
                                     is PinVerifyResult.LockedOut -> {
-                                        pinError = securityLockedMessage(r.until); pinInput = ""
+                                        pinError = securityLockedMessage(appResources, r.until); pinInput = ""
                                     }
                                     is PinVerifyResult.ShouldWipe -> {
                                         pinInput = ""; resetDialogState(); viewModel.wipeWallet()
                                     }
                                     is PinVerifyResult.Wrong -> {
-                                        pinError = "Incorrect PIN"; pinInput = ""
+                                        pinError = incorrectPinMsg; pinInput = ""
                                     }
                                 }
                             }
@@ -295,8 +311,8 @@ fun SecuritySettingsScreen(
 
             SecurityDialog.ChangePinNew -> {
                 PinVerifyDialog(
-                    title = "New PIN",
-                    subtitle = "Enter your new 6-digit PIN",
+                    title = stringResource(R.string.sec_new_pin),
+                    subtitle = stringResource(R.string.sec_new_pin_sub),
                     pinInput = pinInput,
                     pinError = pinError,
                     onDigit = { d ->
@@ -317,8 +333,8 @@ fun SecuritySettingsScreen(
 
             SecurityDialog.ChangePinConfirm -> {
                 PinVerifyDialog(
-                    title = "Confirm New PIN",
-                    subtitle = "Re-enter your new PIN",
+                    title = stringResource(R.string.sec_confirm_new_pin),
+                    subtitle = stringResource(R.string.sec_confirm_new_pin_sub),
                     pinInput = pinInput,
                     pinError = pinError,
                     onDigit = { d ->
@@ -329,9 +345,9 @@ fun SecuritySettingsScreen(
                                 if (pinInput == newPinFirst) {
                                     viewModel.changePin(pinInput)
                                     resetDialogState()
-                                    snackMessage = "PIN changed successfully"
+                                    snackMessage = pinChangedMsg
                                 } else {
-                                    pinError = "PINs do not match"
+                                    pinError = pinsMismatchMsg
                                     pinInput = ""
                                     activeDialog = SecurityDialog.ChangePinNew
                                 }
@@ -349,7 +365,7 @@ fun SecuritySettingsScreen(
                     containerColor = Color(0xFF1A2742),
                     title = {
                         Text(
-                            "View Recovery Phrase",
+                            stringResource(R.string.sec_view_phrase),
                             color = Color(0xFFFFD700),
                             fontWeight = FontWeight.Bold
                         )
@@ -363,11 +379,7 @@ fun SecuritySettingsScreen(
                                 modifier = Modifier.size(32.dp).align(Alignment.CenterHorizontally)
                             )
                             Text(
-                                "Your recovery phrase gives complete access to your wallet.\n\n" +
-                                "• Never share it with anyone\n" +
-                                "• Never enter it on any website\n" +
-                                "• Store it offline in a safe place\n\n" +
-                                "Continuing requires PIN + biometric authentication.",
+                                stringResource(R.string.sec_view_phrase_body),
                                 color = Color(0xFFB0BEC5),
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -377,12 +389,12 @@ fun SecuritySettingsScreen(
                         TextButton(
                             onClick = { activeDialog = SecurityDialog.ViewSeedPinVerify }
                         ) {
-                            Text("I Understand — Continue", color = Color(0xFFFFD700))
+                            Text(stringResource(R.string.sec_understand), color = Color(0xFFFFD700))
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = ::resetDialogState) {
-                            Text("Cancel", color = Color(0xFF8899AA))
+                            Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
                         }
                     }
                 )
@@ -390,8 +402,8 @@ fun SecuritySettingsScreen(
 
             SecurityDialog.ViewSeedPinVerify -> {
                 PinVerifyDialog(
-                    title = "Verify PIN",
-                    subtitle = "Enter your PIN to view recovery phrase",
+                    title = stringResource(R.string.sec_verify_pin_title),
+                    subtitle = stringResource(R.string.sec_verify_pin_view_sub),
                     pinInput = pinInput,
                     pinError = pinError,
                     onDigit = { d ->
@@ -409,12 +421,12 @@ fun SecuritySettingsScreen(
                                                 val result = biometricAuth.authenticate(
                                                     activity,
                                                     title = "DigiByte Wallet",
-                                                    subtitle = "Authenticate to view recovery phrase"
+                                                    subtitle = authViewPhraseMsg
                                                 )
                                                 if (result is BiometricResult.Success) {
                                                     navController.navigate("settings_view_seed")
                                                 } else {
-                                                    snackMessage = "Biometric authentication required"
+                                                    snackMessage = bioRequiredMsg
                                                 }
                                             } else if (!biometricAvailable) {
                                                 // No biometric hardware — PIN alone suffices
@@ -423,13 +435,13 @@ fun SecuritySettingsScreen(
                                         }
                                     }
                                     is PinVerifyResult.LockedOut -> {
-                                        pinError = securityLockedMessage(r.until); pinInput = ""
+                                        pinError = securityLockedMessage(appResources, r.until); pinInput = ""
                                     }
                                     is PinVerifyResult.ShouldWipe -> {
                                         pinInput = ""; resetDialogState(); viewModel.wipeWallet()
                                     }
                                     is PinVerifyResult.Wrong -> {
-                                        pinError = "Incorrect PIN"; pinInput = ""
+                                        pinError = incorrectPinMsg; pinInput = ""
                                     }
                                 }
                             }
@@ -442,8 +454,8 @@ fun SecuritySettingsScreen(
 
             SecurityDialog.WipePinVerify -> {
                 PinVerifyDialog(
-                    title = "Confirm PIN",
-                    subtitle = "Enter your PIN to wipe the wallet",
+                    title = stringResource(R.string.sec_confirm_pin),
+                    subtitle = stringResource(R.string.sec_confirm_pin_wipe_sub),
                     pinInput = pinInput,
                     pinError = pinError,
                     onDigit = { d ->
@@ -457,13 +469,13 @@ fun SecuritySettingsScreen(
                                         activeDialog = SecurityDialog.WipeConfirmDialog
                                     }
                                     is PinVerifyResult.LockedOut -> {
-                                        pinError = securityLockedMessage(r.until); pinInput = ""
+                                        pinError = securityLockedMessage(appResources, r.until); pinInput = ""
                                     }
                                     is PinVerifyResult.ShouldWipe -> {
                                         pinInput = ""; resetDialogState(); viewModel.wipeWallet()
                                     }
                                     is PinVerifyResult.Wrong -> {
-                                        pinError = "Incorrect PIN"; pinInput = ""
+                                        pinError = incorrectPinMsg; pinInput = ""
                                     }
                                 }
                             }
@@ -479,13 +491,11 @@ fun SecuritySettingsScreen(
                     onDismissRequest = ::resetDialogState,
                     containerColor = Color(0xFF1A2742),
                     title = {
-                        Text("Wipe Wallet", color = DigiByteRed, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.sec_wipe_wallet), color = DigiByteRed, fontWeight = FontWeight.Bold)
                     },
                     text = {
                         Text(
-                            "This cannot be undone.\n\n" +
-                            "All wallet data, keys, and transaction history will be permanently deleted from this device.\n\n" +
-                            "Make sure you have your recovery phrase backed up before continuing.",
+                            stringResource(R.string.sec_wipe_wallet_body),
                             color = Color(0xFFB0BEC5),
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -498,12 +508,12 @@ fun SecuritySettingsScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = DigiByteRed)
                         ) {
-                            Text("Wipe Everything", color = Color.White)
+                            Text(stringResource(R.string.sec_wipe_everything), color = Color.White)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = ::resetDialogState) {
-                            Text("Cancel", color = Color(0xFF8899AA))
+                            Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
                         }
                     }
                 )
@@ -515,15 +525,12 @@ fun SecuritySettingsScreen(
                     onDismissRequest = ::resetDialogState,
                     containerColor = Color(0xFF1A2742),
                     title = {
-                        Text("Wipe After ${PinManager.WIPE_THRESHOLD} Failed PINs", color = DigiByteRed, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.sec_wipe_after, PinManager.WIPE_THRESHOLD), color = DigiByteRed, fontWeight = FontWeight.Bold)
                     },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
-                                "When enabled, ${PinManager.WIPE_THRESHOLD} consecutive incorrect PIN entries will " +
-                                "PERMANENTLY erase this wallet — seed, keys, and history — from this device.\n\n" +
-                                "This is irreversible on-device. Your funds are only recoverable from your " +
-                                "recovery phrase.",
+                                stringResource(R.string.sec_wipe_after_body, PinManager.WIPE_THRESHOLD),
                                 color = Color(0xFFB0BEC5),
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -539,7 +546,7 @@ fun SecuritySettingsScreen(
                                     colors = CheckboxDefaults.colors(checkedColor = DigiByteRed)
                                 )
                                 Text(
-                                    "My recovery phrase is backed up",
+                                    stringResource(R.string.sec_wipe_after_ack),
                                     color = Color.White,
                                     style = MaterialTheme.typography.bodyMedium
                                 )
@@ -552,16 +559,16 @@ fun SecuritySettingsScreen(
                             onClick = {
                                 viewModel.setWipeAfterN(true)
                                 resetDialogState()
-                                snackMessage = "Wipe-after-${PinManager.WIPE_THRESHOLD} enabled"
+                                snackMessage = wipeEnabledMsg
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = DigiByteRed)
                         ) {
-                            Text("Enable", color = Color.White)
+                            Text(stringResource(R.string.sec_enable), color = Color.White)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = ::resetDialogState) {
-                            Text("Cancel", color = Color(0xFF8899AA))
+                            Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
                         }
                     }
                 )
@@ -655,7 +662,7 @@ private fun PinVerifyDialog(
                                             ) {
                                                 Icon(
                                                     Icons.Default.Backspace,
-                                                    contentDescription = "Backspace",
+                                                    contentDescription = stringResource(R.string.pin_backspace),
                                                     tint = Color(0xFF8899AA),
                                                     modifier = Modifier.size(22.dp)
                                                 )
@@ -690,7 +697,7 @@ private fun PinVerifyDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF8899AA))
+                Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
             }
         }
     )

@@ -22,24 +22,25 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
-private val FIAT_CURRENCIES = listOf(
-    "USD" to "US Dollar",
-    "EUR" to "Euro",
-    "GBP" to "British Pound",
-    "JPY" to "Japanese Yen",
-    "AUD" to "Australian Dollar",
-    "CAD" to "Canadian Dollar",
-    "CHF" to "Swiss Franc",
-    "CNY" to "Chinese Yuan",
-    "KRW" to "South Korean Won",
-    "BRL" to "Brazilian Real",
-    "MXN" to "Mexican Peso",
-    "INR" to "Indian Rupee",
-    "ZAR" to "South African Rand",
-    "SEK" to "Swedish Krona",
-    "NOK" to "Norwegian Krone",
+/**
+ * Currency CODES only. The human-readable name comes from [java.util.Currency], which already
+ * knows every one of these in every locale the platform ships — so the picker reads "Euro" in
+ * English, "欧元" in Chinese and "Евро" in Russian without us hand-translating fifteen names into
+ * eleven languages, and without them drifting out of step as the list grows.
+ */
+private val FIAT_CURRENCY_CODES = listOf(
+    "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY",
+    "KRW", "BRL", "MXN", "INR", "ZAR", "SEK", "NOK",
 )
+
+/** Display name for a code in the current locale; falls back to the code itself. */
+private fun currencyName(code: String): String =
+    runCatching { java.util.Currency.getInstance(code).getDisplayName(java.util.Locale.getDefault()) }
+        .getOrNull()?.takeIf { it.isNotBlank() && it != code } ?: code
+
 
 private enum class ThemeChoice { DARK, LIGHT, SYSTEM }
 
@@ -48,6 +49,7 @@ fun DisplaySettingsScreen(
     navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val currencySetFmt = stringResource(R.string.dsp_currency_set)
     val currentCurrency by viewModel.fiatCurrency.collectAsStateWithLifecycle()
 
     // Theme preference is stored in a simple in-process state for now (Phase 2: persist to Room)
@@ -67,7 +69,7 @@ fun DisplaySettingsScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Display", color = Color.White) },
+                title = { Text(stringResource(R.string.set_display), color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
@@ -88,17 +90,17 @@ fun DisplaySettingsScreen(
         ) {
             // ── Fiat currency ────────────────────────────────────────────────
             item {
-                SettingsCategory(title = "Currency") {
-                    val currencyLabel = FIAT_CURRENCIES
-                        .firstOrNull { it.first == currentCurrency }
-                        ?.let { "${it.first} — ${it.second}" }
+                SettingsCategory(title = stringResource(R.string.dsp_currency)) {
+                    val currencyLabel = FIAT_CURRENCY_CODES
+                        .firstOrNull { it == currentCurrency }
+                        ?.let { "$it — ${currencyName(it)}" }
                         ?: currentCurrency
 
                     Box {
                         SettingsRow(
                             icon = Icons.Default.AttachMoney,
                             iconTint = Color(0xFF4CAF50),
-                            title = "Fiat Currency",
+                            title = stringResource(R.string.dsp_fiat_currency),
                             subtitle = currencyLabel,
                             onClick = { showCurrencyMenu = true }
                         )
@@ -109,7 +111,8 @@ fun DisplaySettingsScreen(
                                 .background(Color(0xFF1A2742))
                                 .heightIn(max = 300.dp)
                         ) {
-                            FIAT_CURRENCIES.forEach { (code, name) ->
+                            FIAT_CURRENCY_CODES.forEach { code ->
+                                val name = currencyName(code)
                                 DropdownMenuItem(
                                     text = {
                                         Row(
@@ -142,7 +145,7 @@ fun DisplaySettingsScreen(
                                     onClick = {
                                         viewModel.setFiatCurrency(code)
                                         showCurrencyMenu = false
-                                        snackMessage = "Currency set to $code"
+                                        snackMessage = currencySetFmt.format(code)
                                     }
                                 )
                             }
@@ -153,15 +156,15 @@ fun DisplaySettingsScreen(
 
             // ── Theme ────────────────────────────────────────────────────────
             item {
-                SettingsCategory(title = "Theme") {
+                SettingsCategory(title = stringResource(R.string.dsp_theme)) {
                     Card(
                         shape = RoundedCornerShape(0.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             ThemeOption(
-                                label = "Dark",
-                                description = "Dark blue theme (recommended)",
+                                label = stringResource(R.string.dsp_dark),
+                                description = stringResource(R.string.dsp_dark_sub),
                                 icon = Icons.Default.DarkMode,
                                 iconTint = DigiByteBlue,
                                 selected = themeChoice == ThemeChoice.DARK,
@@ -173,8 +176,8 @@ fun DisplaySettingsScreen(
                                 modifier = Modifier.padding(start = 70.dp)
                             )
                             ThemeOption(
-                                label = "Light",
-                                description = "Light theme",
+                                label = stringResource(R.string.dsp_light),
+                                description = stringResource(R.string.dsp_light_sub),
                                 icon = Icons.Default.LightMode,
                                 iconTint = Color(0xFFFFD700),
                                 selected = themeChoice == ThemeChoice.LIGHT,
@@ -186,8 +189,8 @@ fun DisplaySettingsScreen(
                                 modifier = Modifier.padding(start = 70.dp)
                             )
                             ThemeOption(
-                                label = "System Default",
-                                description = "Follow system dark/light mode",
+                                label = stringResource(R.string.dsp_system),
+                                description = stringResource(R.string.dsp_system_sub),
                                 icon = Icons.Default.SettingsBrightness,
                                 iconTint = Color(0xFF8899AA),
                                 selected = themeChoice == ThemeChoice.SYSTEM,
@@ -201,7 +204,7 @@ fun DisplaySettingsScreen(
             item {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Theme changes will take full effect in a future update.",
+                    text = stringResource(R.string.dsp_theme_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF546E7A),
                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -210,7 +213,7 @@ fun DisplaySettingsScreen(
 
             // ── Price Source ─────────────────────────────────────────────
             item {
-                SettingsCategory(title = "Price Source") {
+                SettingsCategory(title = stringResource(R.string.dsp_price_source)) {
                     Card(
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
@@ -218,7 +221,7 @@ fun DisplaySettingsScreen(
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // External API — active and selected
                             PriceSourceOption(
-                                label = "External API",
+                                label = stringResource(R.string.dsp_external_api),
                                 description = "CoinGecko · Binance",
                                 selected = true,
                                 enabled = true,
@@ -231,8 +234,8 @@ fun DisplaySettingsScreen(
                             )
                             // On-Chain Oracle — greyed out, v9 mainnet pending
                             PriceSourceOption(
-                                label = "On-Chain Oracle",
-                                description = "Available when v9 launches on mainnet",
+                                label = stringResource(R.string.dsp_onchain_oracle),
+                                description = stringResource(R.string.dsp_v9_pending),
                                 selected = false,
                                 enabled = false,
                                 onSelect = {}
@@ -244,8 +247,8 @@ fun DisplaySettingsScreen(
                             )
                             // Auto — greyed out
                             PriceSourceOption(
-                                label = "Auto",
-                                description = "Available when v9 launches on mainnet",
+                                label = stringResource(R.string.dsp_auto),
+                                description = stringResource(R.string.dsp_v9_pending),
                                 selected = false,
                                 enabled = false,
                                 onSelect = {}
@@ -257,7 +260,7 @@ fun DisplaySettingsScreen(
 
             item {
                 Text(
-                    text = "On-chain oracle price feeds require DigiByte v9 on mainnet.",
+                    text = stringResource(R.string.dsp_oracle_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF546E7A),
                     modifier = Modifier.padding(horizontal = 4.dp)

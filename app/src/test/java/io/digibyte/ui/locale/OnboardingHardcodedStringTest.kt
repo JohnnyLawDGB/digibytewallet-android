@@ -63,6 +63,11 @@ class OnboardingHardcodedStringTest {
         "ui/asset/AssetDetailScreen.kt",
         "ui/asset/AssetListScreen.kt",
         "ui/recovery/RecoverFundsScreen.kt",
+        "ui/settings/NetworkInfoScreen.kt",
+        "ui/settings/AboutScreen.kt",
+        "ui/settings/SecuritySettingsScreen.kt",
+        "ui/settings/DisplaySettingsScreen.kt",
+        "ui/digiid/DigiIdConfirmScreen.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -108,7 +113,16 @@ class OnboardingHardcodedStringTest {
         "seed unavailable", "Couldn\'t reach", "no mappable UTXOs", "seed derivation failed",
         "broadcast",
         // Placeholder and format pattern.
-        "0.00123456 DGB", "%.8f", "\$formatted DGB", "\$\$priceFormatted", " · v\$versionName",
+        "0.00123456 DGB", "%.8f", "\$formatted DGB",
+        // Settings: ISO currency codes (the NAMES come from java.util.Currency and are already
+        // localised), URLs, the derivation path, and format-only fragments.
+        "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "KRW", "BRL", "MXN", "INR", "ZAR",
+        "SEK", "NOK", "\$it — \${currencyName(it)}", "CoinGecko · Binance",
+        "m/84\'/20\'/0\'", "DigiByte Wallet", "v\$versionName",
+        "github.com/JohnnyLawDGB/digibytewallet-android", "digibyte.org",
+        "github.com/JohnnyLawDGB/digibytewallet-android/issues",
+        "• \$range", "  ·  \$it", "10.0.0.5  or  node.example.com:12024",
+        "Locked — try again in M:SS", "%d:%02d", "settings_view_seed", "DigiIdResult", "\$\$priceFormatted", " · v\$versionName",
         "\\n\${DigiByteUri.encode(address, sats)}",
         // Date/number patterns and a MIME type. NOTE: the date patterns are also pinned to
         // Locale.US at their call sites — a real i18n gap, but a behaviour change, not a
@@ -133,14 +147,14 @@ class OnboardingHardcodedStringTest {
             // KDoc/block-comment bodies quote UI copy while explaining it, and log lines are for
             // us, not users. Neither is translatable, and both would otherwise be reported as
             // findings the reader has to dismiss by hand every run.
-            .filterNot { it.trimStart().startsWith("*") }
+            .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("/*") }
             .filterNot { it.contains("Log.") }
             .flatMap { line -> quoted.findAll(line).map { it.groupValues[1] }.toList() }
 
     @Test fun `the sources this test scans actually exist`() {
         val missing = COVERED.filterNot { File(srcRoot, it).isFile }
         assertTrue("scan list is stale, cannot see: $missing", missing.isEmpty())
-        assertTrue("nothing scanned", COVERED.size >= 15)
+        assertTrue("nothing scanned", COVERED.size >= 20)
     }
 
     @Test fun `the scan sees literals at all`() {

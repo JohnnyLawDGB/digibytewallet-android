@@ -459,4 +459,180 @@
     <string name="rf_phrase_hint">12 or 24 word recovery phrase</string>
     <string name="rf_scan_for_funds">Scan for funds</string>
 
+    <!-- ── Network info ─────────────────────────────────────────────────────────── -->
+    <string name="ni_sync_status">Sync Status</string>
+    <string name="ni_connected_peers">Connected Peers</string>
+    <string name="ni_synced_block">Synced Block (filters)</string>
+    <string name="ni_chain_height">Chain Height</string>
+    <string name="ni_blocks_remaining">Blocks Remaining</string>
+    <string name="ni_cf_ledger">CF Scan Ledger</string>
+    <string name="ni_scanned_through">Scanned-through</string>
+    <string name="ni_outstanding">Outstanding</string>
+    <string name="ni_gave_up">Gave-up</string>
+    <string name="ni_pending">Pending</string>
+    <string name="ni_scan_holes">Scan Holes</string>
+    <string name="ni_more_holes">+%1$d more…</string>
+    <string name="ni_privacy">Privacy</string>
+    <string name="ni_tor">Tor Routing</string>
+    <string name="ni_dandelion">Dandelion broadcast</string>
+    <string name="ni_dandelion_sub">Hides which peer first saw your transaction. Falls back to a normal broadcast if no Dandelion node is reachable.</string>
+    <string name="ni_own_node">Own node</string>
+    <string name="ni_use_own_node">Use my own node</string>
+    <!-- peerblockfilters=1 is a config key — do NOT translate it. -->
+    <string name="ni_use_own_node_sub">Sync only through your DigiByte node (compact filters). Your node must run peerblockfilters=1.</string>
+    <string name="ni_setup_guide">How to set up your own node</string>
+    <!-- digibyte.conf is a filename — do NOT translate it. -->
+    <string name="ni_setup_guide_sub">Two lines in digibyte.conf let a node you already run serve this wallet. No node yet? Start here.</string>
+    <string name="ni_scan_node_qr">Scan node QR</string>
+    <string name="ni_node_address">Node address (host or host:port)</string>
+    <string name="ni_node_address_err">Enter a valid host, optionally :port (1–65535). IPv6/URLs not supported.</string>
+    <string name="ni_save">Save</string>
+    <string name="ni_exclusive">Only my node (exclusive)</string>
+    <string name="ni_exclusive_sub">Sync solely through your node. If it goes offline the wallet has no other peers until you re-enable public peers.</string>
+
+    <!-- ── About ────────────────────────────────────────────────────────────────── -->
+    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_wallet_info">Wallet Info</string>
+    <string name="ab_wallet_type">Wallet Type</string>
+    <string name="ab_hd_path">HD Path</string>
+    <string name="ab_address_format">Address Format</string>
+    <string name="ab_sync_method">Sync Method</string>
+    <string name="ab_build_info">Build Info</string>
+    <string name="ab_version">Version</string>
+    <string name="ab_core">DigiByte Core</string>
+    <string name="ab_open_source">Open Source</string>
+    <string name="ab_source_code">Source Code</string>
+    <string name="ab_licenses">Licenses</string>
+    <string name="ab_licenses_sub">MIT License — open source</string>
+    <string name="ab_community">DigiByte Community</string>
+    <string name="ab_report_bug">Report a Bug</string>
+
+    <!-- ── Security settings ────────────────────────────────────────────────────── -->
+    <string name="sec_pin_auth">PIN &amp; Authentication</string>
+    <string name="sec_change_pin">Change PIN</string>
+    <string name="sec_change_pin_sub">Update your 6-digit wallet PIN</string>
+    <string name="sec_biometric">Biometric Authentication</string>
+    <string name="sec_biometric_yes">Fingerprint / face unlock available</string>
+    <string name="sec_biometric_no">Not available on this device</string>
+    <string name="sec_autolock">Auto-Lock Timeout</string>
+    <string name="sec_wipe_after">Wipe After %1$d Failed PINs</string>
+    <string name="sec_wipe_after_on">Enabled — wallet erases after %1$d wrong PINs</string>
+    <string name="sec_wipe_after_off">Off — extra protection against PIN brute-force</string>
+    <!-- WARNING: explains permanent, irreversible on-device erasure. -->
+    <string name="sec_wipe_after_body">When enabled, %1$d consecutive incorrect PIN entries will PERMANENTLY erase this wallet — seed, keys, and history — from this device.\n\nThis is irreversible on-device. Your funds are only recoverable from your recovery phrase.</string>
+    <string name="sec_wipe_after_ack">My recovery phrase is backed up</string>
+    <string name="sec_wipe_after_enabled">Wipe-after-%1$d enabled</string>
+    <string name="sec_recovery_phrase">Recovery Phrase</string>
+    <string name="sec_view_phrase">View Recovery Phrase</string>
+    <string name="sec_view_phrase_sub">Requires PIN + biometric verification</string>
+    <!-- WARNING: the three bullets are the only guidance before the phrase is shown. -->
+    <string name="sec_view_phrase_body">Your recovery phrase gives complete access to your wallet.\n\n• Never share it with anyone\n• Never enter it on any website\n• Store it offline in a safe place\n\nContinuing requires PIN + biometric authentication.</string>
+    <string name="sec_understand">I Understand — Continue</string>
+    <string name="sec_danger_zone">Danger Zone</string>
+    <string name="sec_wipe_wallet">Wipe Wallet</string>
+    <string name="sec_wipe_wallet_sub">Remove all wallet data from this device</string>
+    <!-- WARNING: last screen before permanent deletion. -->
+    <string name="sec_wipe_wallet_body">This cannot be undone.\n\nAll wallet data, keys, and transaction history will be permanently deleted from this device.\n\nMake sure you have your recovery phrase backed up before continuing.</string>
+    <string name="sec_wipe_everything">Wipe Everything</string>
+    <string name="sec_verify_pin">Verify Current PIN</string>
+    <string name="sec_verify_pin_sub">Enter your current PIN to continue</string>
+    <string name="sec_new_pin">New PIN</string>
+    <string name="sec_new_pin_sub">Enter your new 6-digit PIN</string>
+    <string name="sec_confirm_new_pin">Confirm New PIN</string>
+    <string name="sec_confirm_new_pin_sub">Re-enter your new PIN</string>
+    <string name="sec_verify_pin_title">Verify PIN</string>
+    <string name="sec_verify_pin_view_sub">Enter your PIN to view recovery phrase</string>
+    <string name="sec_auth_view_phrase">Authenticate to view recovery phrase</string>
+    <string name="sec_confirm_pin">Confirm PIN</string>
+    <string name="sec_confirm_pin_wipe_sub">Enter your PIN to wipe the wallet</string>
+    <string name="sec_incorrect_pin">Incorrect PIN</string>
+    <string name="sec_enable">Enable</string>
+
+    <!-- ── Display settings ─────────────────────────────────────────────────────── -->
+    <string name="dsp_currency">Currency</string>
+    <string name="dsp_fiat_currency">Fiat Currency</string>
+    <string name="dsp_theme">Theme</string>
+    <string name="dsp_dark">Dark</string>
+    <string name="dsp_light">Light</string>
+    <string name="dsp_system">System Default</string>
+    <string name="dsp_theme_note">Theme changes will take full effect in a future update.</string>
+    <string name="dsp_price_source">Price Source</string>
+    <string name="dsp_external_api">External API</string>
+    <string name="dsp_onchain_oracle">On-Chain Oracle</string>
+    <string name="dsp_auto">Auto</string>
+    <string name="dsp_oracle_note">On-chain oracle price feeds require DigiByte v9 on mainnet.</string>
+
+    <!-- ── Digi-ID ──────────────────────────────────────────────────────────────── -->
+    <string name="did_login">Digi-ID Login</string>
+    <string name="did_auth_title">Digi-ID Authentication</string>
+    <string name="did_auth_subtitle">Authenticate to log in to %1$s</string>
+    <string name="did_requesting">is requesting Digi-ID authentication</string>
+    <string name="did_warning">Warning</string>
+    <string name="did_insecure">Insecure Connection</string>
+    <!-- WARNING: the only signal that credentials may be intercepted. -->
+    <string name="did_insecure_body">This site uses HTTP, not HTTPS. Your authentication may be intercepted.</string>
+    <string name="did_callback_url">Callback URL</string>
+    <string name="did_approve">Approve</string>
+    <string name="did_deny">Deny</string>
+    <string name="did_success">Authentication Successful</string>
+    <string name="did_failed">Authentication Failed</string>
+    <string name="did_try_again">Try Again</string>
+
+    <!-- ── Display settings (continued) ─────────────────────────────────────────── -->
+    <string name="dsp_currency_set">Currency set to %1$s</string>
+    <string name="dsp_dark_sub">Dark blue theme (recommended)</string>
+    <string name="dsp_light_sub">Light theme</string>
+    <string name="dsp_system_sub">Follow system dark/light mode</string>
+    <string name="dsp_v9_pending">Available when v9 launches on mainnet</string>
+
+    <!-- ── Network info (continued) ─────────────────────────────────────────────── -->
+    <string name="ni_state_connecting">Connecting…</string>
+    <string name="ni_state_syncing">Syncing (%1$d%%)</string>
+    <string name="ni_state_synced">Synced</string>
+    <string name="ni_state_error">Error</string>
+    <string name="ni_caught_up">Caught up</string>
+    <string name="ni_tor_disabled">Disabled — connecting directly</string>
+    <string name="ni_tor_starting">Starting…</string>
+    <string name="ni_tor_connecting">Connecting to Tor network…</string>
+    <string name="ni_tor_connected">Connected via port %1$d</string>
+    <string name="ni_tor_failed">Failed: %1$s</string>
+    <string name="ni_node_serving">✓ Serving compact filters</string>
+    <string name="ni_node_connecting">Connecting…</string>
+    <string name="ni_node_unreachable">⚠ Not reachable / not serving filters</string>
+
+    <!-- ── Security settings (continued) ────────────────────────────────────────── -->
+    <string name="sec_locked_countdown">Locked — try again in %1$s</string>
+    <string name="sec_autolock_1m">1 minute</string>
+    <string name="sec_autolock_5m">5 minutes</string>
+    <string name="sec_autolock_15m">15 minutes</string>
+    <string name="sec_autolock_30m">30 minutes</string>
+    <string name="sec_autolock_custom">Custom</string>
+    <string name="sec_pin_changed">PIN changed successfully</string>
+    <string name="sec_pins_mismatch">PINs do not match</string>
+    <string name="sec_biometric_required">Biometric authentication required</string>
+
+    <!-- ── Digi-ID (continued) ──────────────────────────────────────────────────── -->
+    <string name="did_logged_in">You are now logged in to %1$s</string>
+
+    <!-- ── About (continued) ────────────────────────────────────────────────────────
+         These explain how the wallet works to someone deciding whether to trust it. They are
+         educational copy, not labels — translate for clarity, and keep the BIP/standard names
+         (BIP84, SLIP44, BIP157/158, SegWit, Bech32, AES-256-GCM) untranslated. -->
+    <string name="ab_type_value">HD Wallet (BIP84)</string>
+    <string name="ab_type_desc">Hierarchical Deterministic wallet created from a seed phrase. Can generate many addresses from one backup — like having unlimited account numbers from one master key.</string>
+    <string name="ab_path_desc">The derivation path used to generate your addresses. 84 = BIP84 standard, 20 = DigiByte coin type (SLIP44), 0 = first account. This ensures any BIP84-compatible wallet can restore your addresses from the same seed phrase. Compatible with Ian Coleman\'s BIP39 tool.</string>
+    <string name="ab_format_value">SegWit (Bech32)</string>
+    <string name="ab_format_desc">Uses modern SegWit addresses starting with dgb1. These are more efficient and have lower fees than older Legacy addresses starting with D.</string>
+    <string name="ab_network_value">Mainnet</string>
+    <string name="ab_network_desc">Mainnet is the real DigiByte network where DGB has actual value. Testnet is for developers to test without real money.</string>
+    <string name="ab_security_value">Self-Custodial</string>
+    <!-- WARNING: "nobody can recover it for you" is the whole point of self-custody. -->
+    <string name="ab_security_desc">Your keys never leave this device. No company or server holds your funds — only you control your wallet. If you lose your seed phrase, nobody can recover it for you.</string>
+    <string name="ab_sync_value">SPV (Compact Filters)</string>
+    <string name="ab_sync_desc">Simplified Payment Verification — syncs directly with the DigiByte P2P network without downloading the full blockchain. Uses BIP157/158 compact block filters: your wallet downloads filters and checks them on-device, so the addresses you own never leave your phone.</string>
+    <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
+    <string name="ab_core_value">9.26 (SPV node)</string>
+    <string name="ab_mit">This software is provided under the MIT License.</string>
+    <string name="ab_tagline">DigiByte is a decentralized blockchain and digital currency.</string>
+
 </resources>

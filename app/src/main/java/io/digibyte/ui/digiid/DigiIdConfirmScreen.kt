@@ -34,6 +34,8 @@ import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
 import io.digibyte.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 /**
  * Shown after scanning a digiid:// QR code.
@@ -53,6 +55,10 @@ fun DigiIdConfirmScreen(
     onNavigateBack: () -> Unit,
     viewModel: DigiIdViewModel = hiltViewModel()
 ) {
+    // Hoisted: used inside the biometric coroutine lambda, which is not composable.
+    val bioTitle = stringResource(R.string.did_auth_title)
+    val bioSubtitleFmt = stringResource(R.string.did_auth_subtitle)
+    val cancelLabel = stringResource(R.string.common_cancel)
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -65,7 +71,7 @@ fun DigiIdConfirmScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Digi-ID Login") },
+                title = { Text(stringResource(R.string.did_login)) },
                 navigationIcon = {
                     IconButton(onClick = {
                         viewModel.clearResult()
@@ -73,7 +79,7 @@ fun DigiIdConfirmScreen(
                     }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = stringResource(R.string.common_back)
                         )
                     }
                 },
@@ -110,9 +116,9 @@ fun DigiIdConfirmScreen(
                                         )) {
                                         val bioResult = biometricAuth.authenticate(
                                             activity = fragmentActivity,
-                                            title = "Digi-ID Authentication",
-                                            subtitle = "Authenticate to log in to ${request.domain}",
-                                            negativeButtonText = "Cancel"
+                                            title = bioTitle,
+                                            subtitle = bioSubtitleFmt.format(request.domain),
+                                            negativeButtonText = cancelLabel
                                         )
                                         if (bioResult is BiometricResult.Success) {
                                             viewModel.authenticate(request)
@@ -133,7 +139,7 @@ fun DigiIdConfirmScreen(
                         ResultContent(
                             success = true,
                             domain = currentResult.domain,
-                            message = "You are now logged in to ${currentResult.domain}",
+                            message = stringResource(R.string.did_logged_in, currentResult.domain),
                             onDone = {
                                 viewModel.clearResult()
                                 onNavigateBack()
@@ -197,7 +203,7 @@ private fun ConfirmContent(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-            text = "is requesting Digi-ID authentication",
+            text = stringResource(R.string.did_requesting),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -220,21 +226,21 @@ private fun ConfirmContent(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
-                        contentDescription = "Warning",
+                        contentDescription = stringResource(R.string.did_warning),
                         tint = DigiByteRed,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "Insecure Connection",
+                            text = stringResource(R.string.did_insecure),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontWeight = FontWeight.Bold
                             ),
                             color = DigiByteRed
                         )
                         Text(
-                            text = "This site uses HTTP, not HTTPS. Your authentication may be intercepted.",
+                            text = stringResource(R.string.did_insecure_body),
                             style = MaterialTheme.typography.bodySmall,
                             color = DigiByteRed.copy(alpha = 0.85f)
                         )
@@ -254,7 +260,7 @@ private fun ConfirmContent(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Callback URL",
+                    text = stringResource(R.string.did_callback_url),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -284,7 +290,7 @@ private fun ConfirmContent(
                 Icon(Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Approve",
+                    text = stringResource(R.string.did_approve),
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -304,7 +310,7 @@ private fun ConfirmContent(
                 Icon(Icons.Default.Close, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Deny",
+                    text = stringResource(R.string.did_deny),
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -330,7 +336,7 @@ private fun ResultContent(
     ) {
         Icon(
             imageVector = if (success) Icons.Default.CheckCircle else Icons.Default.Cancel,
-            contentDescription = if (success) "Success" else "Error",
+            contentDescription = stringResource(if (success) R.string.send_success else R.string.rf_something_wrong),
             tint = if (success) DigiByteGreen else DigiByteRed,
             modifier = Modifier.size(80.dp)
         )
@@ -338,7 +344,7 @@ private fun ResultContent(
         Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = if (success) "Authentication Successful" else "Authentication Failed",
+            text = stringResource(if (success) R.string.did_success else R.string.did_failed),
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
             color = if (success) DigiByteGreen else DigiByteRed,
             textAlign = TextAlign.Center
@@ -364,7 +370,7 @@ private fun ResultContent(
             )
         ) {
             Text(
-                text = if (success) "Done" else "Try Again",
+                text = stringResource(if (success) R.string.common_done else R.string.did_try_again),
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
             )
         }

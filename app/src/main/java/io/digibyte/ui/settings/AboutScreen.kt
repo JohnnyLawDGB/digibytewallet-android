@@ -29,6 +29,8 @@ import androidx.navigation.NavController
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @Composable
 fun AboutScreen(navController: NavController) {
@@ -46,7 +48,7 @@ fun AboutScreen(navController: NavController) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("About", color = Color.White) },
+                title = { Text(stringResource(R.string.set_about), color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
@@ -96,7 +98,7 @@ fun AboutScreen(navController: NavController) {
                             color = DigiByteAccent
                         )
                         Text(
-                            text = "Powered by DigiByte Core 9.26",
+                            text = stringResource(R.string.ab_powered_by),
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF8899AA)
                         )
@@ -106,78 +108,78 @@ fun AboutScreen(navController: NavController) {
 
             // ── Wallet Info ──────────────────────────────────────────────────
             item {
-                SettingsCategory(title = "Wallet Info") {
+                SettingsCategory(title = stringResource(R.string.ab_wallet_info)) {
                     WalletInfoRow(
-                        label = "Wallet Type",
-                        value = "HD Wallet (BIP84)",
-                        description = "Hierarchical Deterministic wallet created from a seed phrase. Can generate many addresses from one backup — like having unlimited account numbers from one master key."
+                        label = stringResource(R.string.ab_wallet_type),
+                        value = stringResource(R.string.ab_type_value),
+                        description = stringResource(R.string.ab_type_desc)
                     )
                     SettingsRowDivider()
                     WalletInfoRow(
-                        label = "HD Path",
+                        label = stringResource(R.string.ab_hd_path),
                         value = derivationPath,
-                        description = "The derivation path used to generate your addresses. 84 = BIP84 standard, 20 = DigiByte coin type (SLIP44), 0 = first account. This ensures any BIP84-compatible wallet can restore your addresses from the same seed phrase. Compatible with Ian Coleman's BIP39 tool."
+                        description = stringResource(R.string.ab_path_desc)
                     )
                     SettingsRowDivider()
                     WalletInfoRow(
-                        label = "Address Format",
-                        value = "SegWit (Bech32)",
-                        description = "Uses modern SegWit addresses starting with dgb1. These are more efficient and have lower fees than older Legacy addresses starting with D."
+                        label = stringResource(R.string.ab_address_format),
+                        value = stringResource(R.string.ab_format_value),
+                        description = stringResource(R.string.ab_format_desc)
                     )
                     SettingsRowDivider()
                     WalletInfoRow(
-                        label = "Network",
-                        value = "Mainnet",
-                        description = "Mainnet is the real DigiByte network where DGB has actual value. Testnet is for developers to test without real money."
+                        label = stringResource(R.string.set_cat_network),
+                        value = stringResource(R.string.ab_network_value),
+                        description = stringResource(R.string.ab_network_desc)
                     )
                     SettingsRowDivider()
                     WalletInfoRow(
-                        label = "Security",
-                        value = "Self-Custodial",
-                        description = "Your keys never leave this device. No company or server holds your funds — only you control your wallet. If you lose your seed phrase, nobody can recover it for you."
+                        label = stringResource(R.string.set_security),
+                        value = stringResource(R.string.ab_security_value),
+                        description = stringResource(R.string.ab_security_desc)
                     )
                     SettingsRowDivider()
                     WalletInfoRow(
-                        label = "Sync Method",
-                        value = "SPV (Compact Filters)",
-                        description = "Simplified Payment Verification — syncs directly with the DigiByte P2P network without downloading the full blockchain. Uses BIP157/158 compact block filters: your wallet downloads filters and checks them on-device, so the addresses you own never leave your phone."
+                        label = stringResource(R.string.ab_sync_method),
+                        value = stringResource(R.string.ab_sync_value),
+                        description = stringResource(R.string.ab_sync_desc)
                     )
                 }
             }
 
             // ── Build info ───────────────────────────────────────────────────
             item {
-                SettingsCategory(title = "Build Info") {
+                SettingsCategory(title = stringResource(R.string.ab_build_info)) {
                     AboutInfoRow(
                         icon = Icons.Default.BuildCircle,
                         iconTint = Color(0xFF4CAF50),
-                        label = "Version",
+                        label = stringResource(R.string.ab_version),
                         value = "v$versionName"
                     )
                     SettingsRowDivider()
                     AboutInfoRow(
                         icon = Icons.Default.Security,
                         iconTint = DigiByteAccent,
-                        label = "Security",
-                        value = "AES-256-GCM seed encryption, hardware-backed Keystore"
+                        label = stringResource(R.string.set_security),
+                        value = stringResource(R.string.ab_security_build)
                     )
                     SettingsRowDivider()
                     AboutInfoRow(
                         icon = Icons.Default.Memory,
                         iconTint = Color(0xFF8899AA),
-                        label = "DigiByte Core",
-                        value = "9.26 (SPV node)"
+                        label = stringResource(R.string.ab_core),
+                        value = stringResource(R.string.ab_core_value)
                     )
                 }
             }
 
             // ── Links ────────────────────────────────────────────────────────
             item {
-                SettingsCategory(title = "Open Source") {
+                SettingsCategory(title = stringResource(R.string.ab_open_source)) {
                     AboutLinkRow(
                         icon = Icons.Default.Code,
                         iconTint = DigiByteBlue,
-                        label = "Source Code",
+                        label = stringResource(R.string.ab_source_code),
                         subtitle = "github.com/JohnnyLawDGB/digibytewallet-android",
                         onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android") }
                     )
@@ -185,15 +187,15 @@ fun AboutScreen(navController: NavController) {
                     AboutLinkRow(
                         icon = Icons.Default.Gavel,
                         iconTint = Color(0xFF8899AA),
-                        label = "Licenses",
-                        subtitle = "MIT License — open source",
+                        label = stringResource(R.string.ab_licenses),
+                        subtitle = stringResource(R.string.ab_licenses_sub),
                         onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android/blob/phase1-modernization/LICENSE") }
                     )
                     SettingsRowDivider()
                     AboutLinkRow(
                         icon = Icons.Default.Forum,
                         iconTint = Color(0xFF4CAF50),
-                        label = "DigiByte Community",
+                        label = stringResource(R.string.ab_community),
                         subtitle = "digibyte.org",
                         onClick = { openUrl("https://digibyte.org") }
                     )
@@ -201,7 +203,7 @@ fun AboutScreen(navController: NavController) {
                     AboutLinkRow(
                         icon = Icons.Default.BugReport,
                         iconTint = Color(0xFFFF9800),
-                        label = "Report a Bug",
+                        label = stringResource(R.string.ab_report_bug),
                         subtitle = "github.com/JohnnyLawDGB/digibytewallet-android/issues",
                         onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android/issues") }
                     )
@@ -216,13 +218,13 @@ fun AboutScreen(navController: NavController) {
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        "This software is provided under the MIT License.",
+                        stringResource(R.string.ab_mit),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF546E7A),
                         fontSize = 11.sp
                     )
                     Text(
-                        "DigiByte is a decentralized blockchain and digital currency.",
+                        stringResource(R.string.ab_tagline),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF546E7A),
                         fontSize = 11.sp
