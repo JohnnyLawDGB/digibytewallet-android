@@ -30,6 +30,8 @@ import io.digibyte.core.model.OwnedAsset
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteNavy
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @Composable
 fun AssetListScreen(
@@ -59,12 +61,12 @@ fun AssetListScreen(
                 IconButton(onClick = onNavigateBack) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.common_back),
                         tint = MaterialTheme.colorScheme.onPrimary
                     )
                 }
                 Text(
-                    text = "DigiAssets",
+                    text = stringResource(R.string.al_title),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.weight(1f)
@@ -89,16 +91,14 @@ fun AssetListScreen(
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "No DigiAssets found",
+                        text = stringResource(R.string.al_none),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onBackground,
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "DigiAssets are tokens issued on the DigiByte blockchain. " +
-                               "Assets you receive will appear here automatically once your wallet " +
-                               "finishes syncing.",
+                        text = stringResource(R.string.al_none_body),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -123,7 +123,7 @@ fun AssetListScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Create DigiAsset on digiscope.me",
+                            text = stringResource(R.string.al_create),
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
@@ -137,7 +137,7 @@ fun AssetListScreen(
                 // unfamiliar short ids deserves to know how many of them are that — rather than
                 // wondering which ones the wallet failed to load.
                 text = buildString {
-                    append("${assets.size} asset${if (assets.size != 1) "s" else ""} found")
+                    append(stringResource(R.string.al_count, assets.size))
                     val artifacts = assets.count {
                         io.digibyte.core.asset.AssetDisplayLabel.of(
                             assetId = it.assetId,
@@ -146,7 +146,7 @@ fun AssetListScreen(
                         ).kind == io.digibyte.core.asset.AssetDisplayLabel.Kind.ARTIFACT
                     }
                     if (artifacts > 0) {
-                        append(" · $artifacts artifact${if (artifacts != 1) "s" else ""}")
+                        append(stringResource(R.string.al_artifacts, artifacts))
                     }
                 },
                 style = MaterialTheme.typography.labelMedium,

@@ -349,4 +349,114 @@
     <string name="lang_unreviewed_note">Translations are new and not yet checked by native speakers. If something reads wrong — especially a warning about your recovery phrase or your coins — please tell us via Settings → Report a bug.</string>
     <string name="lang_selected">Selected</string>
 
+    <!-- ── DigiAsset send ───────────────────────────────────────────────────────── -->
+    <string name="as_send_title">Send Asset</string>
+    <string name="as_broadcast">Transaction broadcast</string>
+    <string name="as_send_failed">Send failed</string>
+    <string name="as_balance">Balance: %1$s</string>
+    <string name="as_quantity">Quantity</string>
+    <string name="as_tokens">tokens</string>
+    <string name="as_units">units</string>
+    <string name="as_fee_note">Asset transactions require DGB for network fees</string>
+    <string name="as_err_recipient">Enter a recipient address</string>
+    <string name="as_err_quantity">Enter a valid quantity</string>
+    <string name="as_confirm_title">Confirm Asset Send</string>
+    <string name="as_asset">Asset</string>
+    <!-- WARNING: an asset spent as ordinary DGB is destroyed. "Irreversible" must stay blunt. -->
+    <string name="as_verify_warning">Verify the full address above carefully.\nAsset transfers are irreversible.</string>
+    <string name="as_confirm">Confirm</string>
+    <string name="as_cost_preview">DGB cost preview</string>
+    <string name="as_recipient_marker">Recipient marker</string>
+    <string name="as_change_marker">Asset-change marker</string>
+    <string name="as_network_fee_est">Network fee (est.)</string>
+    <string name="as_total_dgb">Total DGB</string>
+    <string name="as_stays">%1$s %2$s stays in your wallet</string>
+
+    <!-- ── DigiAsset detail ─────────────────────────────────────────────────────── -->
+    <string name="ad_title">Asset Details</string>
+    <string name="ad_balance">Balance</string>
+    <string name="ad_info">Asset Info</string>
+    <string name="ad_description">Description</string>
+    <string name="ad_total_supply">Total Supply</string>
+    <string name="ad_unknown">Unknown</string>
+    <string name="ad_identical_metadata">Identical metadata</string>
+    <!-- WARNING: this is the forgery signal — a second asset ID reusing another\'s metadata.
+         Do not soften "Check the verified issuer". -->
+    <string name="ad_dup_one">Also published under 1 other asset ID you hold. Check the verified issuer on both.</string>
+    <string name="ad_dup_many">Also published under %1$d other asset IDs you hold. Check the verified issuer on each.</string>
+    <string name="ad_issuer_verified">Issuer (verified)</string>
+    <string name="ad_divisibility">Divisibility</string>
+    <string name="ad_indivisible">Indivisible (whole units only)</string>
+    <string name="ad_decimals">%1$d decimal places</string>
+    <string name="ad_utxos_held">UTXOs Held</string>
+    <string name="ad_marketplace">Marketplace</string>
+    <string name="ad_transfer_history">Transfer History</string>
+    <string name="ad_no_transfers">No asset transfers recorded yet.</string>
+    <string name="ad_asset_id">Asset ID</string>
+    <string name="ad_copy_asset_id">Copy asset ID</string>
+
+    <!-- ── DigiAsset list ───────────────────────────────────────────────────────── -->
+    <string name="al_title">DigiAssets</string>
+    <string name="al_none">No DigiAssets found</string>
+    <string name="al_none_body">DigiAssets are tokens issued on the DigiByte blockchain. Assets you receive will appear here automatically once your wallet finishes syncing.</string>
+    <string name="al_create">Create DigiAsset on digiscope.me</string>
+    <string name="al_count">%1$d assets found</string>
+    <string name="al_artifacts"> · %1$d artifacts</string>
+
+    <!-- ── Legacy recovery / sweep ──────────────────────────────────────────────────
+         This flow moves someone\'s coins out of a wallet they may be abandoning. Several of these
+         strings explain why funds were deliberately NOT moved; a translation that reads as an
+         error instead of a decision will make people think the wallet lost their money. -->
+    <string name="rf_title">Recover funds from another wallet</string>
+    <string name="rf_checking_paths">Checking older derivation paths…</string>
+    <string name="rf_scanning_phrase">Scanning the entered phrase…</string>
+    <string name="rf_sweeping">Sweeping…</string>
+    <string name="rf_may_take">This may take a moment</string>
+    <string name="rf_couldnt_finish">Couldn\'t finish checking</string>
+    <string name="rf_none_found">No recoverable funds found</string>
+    <!-- %1$s is a comma-separated list of derivation path names. -->
+    <string name="rf_partial_body">Some derivation paths could not be checked, so this is not a final answer — there may be funds we haven\'t seen. Try again in a moment.\n\nUnchecked: %1$s</string>
+    <string name="rf_no_coins">This seed has no coins on other derivation paths.</string>
+    <string name="rf_recoverable_balance">Recoverable balance</string>
+    <string name="rf_found_on">FOUND ON</string>
+    <string name="rf_destination">DESTINATION</string>
+    <string name="rf_into_this_wallet">Into this wallet</string>
+    <string name="rf_native_addr_note">Funds will appear at your native receive address</string>
+    <string name="rf_advanced_send">Advanced ▸ Send to a different address</string>
+    <string name="rf_address_hint">DigiByte address (D…, S…, dgb1q…)</string>
+    <!-- WARNING: the last check before sending someone\'s coins somewhere they cannot get them
+         back from. Keep "NOT" emphatic and "irreversible" literal. -->
+    <string name="rf_not_in_wallet">This address is NOT in your wallet — sweeps are irreversible</string>
+    <string name="rf_sweep">Sweep funds</string>
+    <string name="rf_bip49_note">Manual recovery for now — wrapped segwit (BIP49) won\'t be swept automatically</string>
+    <string name="rf_sweep_submitted">Sweep submitted</string>
+    <string name="rf_will_appear">Recovered funds will appear once confirmed.</string>
+    <string name="rf_txid">TXID</string>
+    <string name="rf_pending">Pending network confirmation</string>
+    <string name="rf_held_assets">%1$d left behind — DigiAssets</string>
+    <string name="rf_held_assets_body">These coins carry DigiAssets. Sweeping them as ordinary DGB would destroy the assets, so they were left in the old wallet along with enough DGB to move them later.</string>
+    <string name="rf_held_reserve">%1$d kept back — to move the assets</string>
+    <string name="rf_held_reserve_body">A DigiAsset costs a network fee to move, and its own coin is far too small to pay it. This much DGB stayed behind so the assets above can be transferred without you having to send funds back to the old wallet.</string>
+    <string name="rf_shortfall_title">Not enough DGB to move the assets</string>
+    <string name="rf_shortfall_body">The assets above are safe, but this wallet is about %1$s short of the fees needed to move them. Nothing was swept, so what is here can still pay toward it — send a little DGB to the old wallet and try again.</string>
+    <string name="rf_held_unknown">%1$d left behind — could not check</string>
+    <string name="rf_held_unknown_body">We could not read the transactions these came from, so we could not tell whether they carry DigiAssets. They were left alone rather than risked. Trying again later may clear this.</string>
+    <string name="rf_and_more">…and %1$d more</string>
+    <string name="rf_something_wrong">Something went wrong</string>
+    <string name="rf_err_network">Could not reach the lookup service. Check your internet connection and try again.</string>
+    <string name="rf_err_timeout">The request timed out. Try again when you have a stronger connection.</string>
+    <string name="rf_err_seed">Wallet seed could not be loaded. Unlock your wallet and try again.</string>
+    <string name="rf_err_lookup">Could not reach the lookup service. Try again later.</string>
+    <string name="rf_err_generic">Something went wrong — try again.</string>
+    <string name="rf_fail_unknown">Failed for an unknown reason.</string>
+    <string name="rf_fail_no_utxos">No spendable outputs could be mapped to signing keys.</string>
+    <string name="rf_fail_derive">Could not derive keys from seed for this path.</string>
+    <string name="rf_fail_broadcast">Transaction broadcast failed. Try again when connected to peers.</string>
+    <string name="rf_fail_generic">Couldn\'t sweep this one — try again.</string>
+    <string name="rf_this_wallet">This wallet</string>
+    <string name="rf_other_phrase">Another wallet\'s phrase</string>
+    <string name="rf_other_phrase_body">Enter another wallet\'s recovery phrase to move its funds into this wallet. The phrase is used once to sign the transfer and is never saved.</string>
+    <string name="rf_phrase_hint">12 or 24 word recovery phrase</string>
+    <string name="rf_scan_for_funds">Scan for funds</string>
+
 </resources>

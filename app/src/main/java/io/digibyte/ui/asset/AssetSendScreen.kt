@@ -34,6 +34,8 @@ import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
 import io.digibyte.ui.theme.DigiByteRed
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @Composable
 fun AssetSendScreen(
@@ -53,6 +55,10 @@ fun AssetSendScreen(
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
+    // Hoisted: used inside onClick lambdas and non-composable string fallbacks.
+    val tokensLabel = stringResource(R.string.as_tokens)
+    val errRecipient = stringResource(R.string.as_err_recipient)
+    val errQuantity = stringResource(R.string.as_err_quantity)
     val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
     val customFeeInput by viewModel.customFeeInput.collectAsStateWithLifecycle()
     val estimatedFeeSat by viewModel.estimatedFeeSat.collectAsStateWithLifecycle()
@@ -126,10 +132,10 @@ fun AssetSendScreen(
         // ── Top bar ──────────────────────────────────────────────────────
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
             }
             Text(
-                text = "Send Asset",
+                text = stringResource(R.string.as_send_title),
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.weight(1f)
             )
@@ -149,13 +155,13 @@ fun AssetSendScreen(
         when (val s = sendState) {
             is AssetViewModel.SendState.Success -> SendResultBanner(
                 success = true,
-                title = "Transaction broadcast",
+                title = stringResource(R.string.as_broadcast),
                 detail = "txid ${s.txid.take(12)}…${s.txid.takeLast(8)}",
                 onDismiss = { viewModel.resetSendState() }
             )
             is AssetViewModel.SendState.Failure -> SendResultBanner(
                 success = false,
-                title = "Send failed",
+                title = stringResource(R.string.as_send_failed),
                 detail = s.message,
                 onDismiss = { viewModel.resetSendState() }
             )
@@ -180,7 +186,7 @@ fun AssetSendScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteAccent),
             ) {
-                Text("Done", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(stringResource(R.string.common_done), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
             return@Column
         }
@@ -213,7 +219,7 @@ fun AssetSendScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Balance: ${formatAssetQuantity(ownedAsset.quantity, ownedAsset.metadata?.decimals ?: 0)}",
+                            text = stringResource(R.string.as_balance, formatAssetQuantity(ownedAsset.quantity, ownedAsset.metadata?.decimals ?: 0)),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -225,7 +231,7 @@ fun AssetSendScreen(
 
             // ── Recipient address ─────────────────────────────────────────
             Text(
-                text = "Recipient Address",
+                text = stringResource(R.string.send_recipient_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -247,7 +253,7 @@ fun AssetSendScreen(
                     .fillMaxWidth()
                     .border(1.dp, addressBorderColor, RoundedCornerShape(8.dp)),
                 placeholder = {
-                    Text("dgb1q… or D…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.send_hint_dgb), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 },
                 trailingIcon = {
                     Row {
@@ -261,14 +267,14 @@ fun AssetSendScreen(
                         }) {
                             Icon(
                                 Icons.Default.ContentPaste,
-                                contentDescription = "Paste",
+                                contentDescription = stringResource(R.string.send_paste),
                                 tint = DigiByteAccent
                             )
                         }
                         IconButton(onClick = onScanQr) {
                             Icon(
                                 Icons.Default.QrCodeScanner,
-                                contentDescription = "Scan QR",
+                                contentDescription = stringResource(R.string.send_scan_qr),
                                 tint = DigiByteAccent
                             )
                         }
@@ -293,7 +299,7 @@ fun AssetSendScreen(
             // ── Quantity input ────────────────────────────────────────────
             val decimals = ownedAsset.metadata?.decimals ?: 0
             Text(
-                text = "Quantity",
+                text = stringResource(R.string.as_quantity),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -327,7 +333,7 @@ fun AssetSendScreen(
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     ) {
                         Text(
-                            "MAX",
+                            stringResource(R.string.send_max),
                             color = DigiByteAccent,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
@@ -336,7 +342,7 @@ fun AssetSendScreen(
                 },
                 suffix = {
                     Text(
-                        text = ownedAsset.metadata?.symbol ?: "tokens",
+                        text = ownedAsset.metadata?.symbol ?: tokensLabel,
                         color = DigiByteAccent,
                         fontWeight = FontWeight.Bold
                     )
@@ -367,21 +373,21 @@ fun AssetSendScreen(
             // optional custom TOTAL-DGB override — identical UX to Send DGB.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Network Fee",
+                    text = stringResource(R.string.send_network_fee),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(onClick = { viewModel.toggleCustomFee() }) {
                     Text(
-                        text = if (isCustomFee) "Default" else "Custom",
+                        text = if (isCustomFee) stringResource(R.string.send_fee_default) else stringResource(R.string.send_fee_custom),
                         style = MaterialTheme.typography.labelMedium,
                         color = DigiByteAccent
                     )
                 }
             }
             Text(
-                text = "Asset transactions require DGB for network fees",
+                text = stringResource(R.string.as_fee_note),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
@@ -412,17 +418,17 @@ fun AssetSendScreen(
 
             when (feeWarning) {
                 is AssetFeeWarning.BelowRelay -> Text(
-                    text = "⚠ Below minimum relay fee — transaction may not broadcast",
+                    text = stringResource(R.string.send_fee_below_min),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFFFA000)
                 )
                 is AssetFeeWarning.ZeroFee -> Text(
-                    text = "Fee required",
+                    text = stringResource(R.string.send_fee_required),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteRed
                 )
                 is AssetFeeWarning.None -> Text(
-                    text = "Confirms in ~15 seconds",
+                    text = stringResource(R.string.send_confirms_15s),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteGreen
                 )
@@ -446,12 +452,12 @@ fun AssetSendScreen(
                 onClick = {
                     var valid = true
                     if (recipientAddress.isBlank()) {
-                        addressError = "Enter a recipient address"
+                        addressError = errRecipient
                         valid = false
                     }
                     if (quantityInput.isBlank() || quantityInput.toDoubleOrNull() == null ||
                         quantityInput.toDouble() <= 0) {
-                        quantityError = "Enter a valid quantity"
+                        quantityError = errQuantity
                         valid = false
                     }
                     if (valid) showConfirmDialog = true
@@ -468,7 +474,7 @@ fun AssetSendScreen(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Review & Send", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(stringResource(R.string.send_review), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         } ?: run {
             // Only reachable in LOADING now — the DONE case returns above, so this can no
@@ -514,21 +520,24 @@ private fun AssetSendConfirmDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Confirm Asset Send",
+                    text = stringResource(R.string.as_confirm_title),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
                 AssetConfirmRow(
-                    label = "Asset",
+                    label = stringResource(R.string.as_asset),
                     value = asset.metadata?.name ?: asset.assetId.take(12) + "…"
                 )
-                AssetConfirmRow(label = "Quantity", value = "$quantityInput ${asset.metadata?.symbol ?: "tokens"}")
-                // Full address — never truncated per security requirement
-                AssetConfirmRow(label = "To", value = recipientAddress)
                 AssetConfirmRow(
-                    label = "Network fee",
+                    label = stringResource(R.string.as_quantity),
+                    value = "$quantityInput ${asset.metadata?.symbol ?: stringResource(R.string.as_tokens)}",
+                )
+                // Full address — never truncated per security requirement
+                AssetConfirmRow(label = stringResource(R.string.send_to), value = recipientAddress)
+                AssetConfirmRow(
+                    label = stringResource(R.string.send_network_fee_row),
                     value = String.format("%.8f DGB", feeSats / 100_000_000.0)
                 )
 
@@ -544,7 +553,7 @@ private fun AssetSendConfirmDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Verify the full address above carefully.\nAsset transfers are irreversible.",
+                    text = stringResource(R.string.as_verify_warning),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -561,7 +570,7 @@ private fun AssetSendConfirmDialog(
                         modifier = Modifier.weight(1f),
                         enabled = !sending,
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.common_cancel))
                     }
                     Button(
                         onClick = onConfirm,
@@ -576,7 +585,7 @@ private fun AssetSendConfirmDialog(
                                 color = Color.White,
                             )
                         } else {
-                            Text("Confirm", fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.as_confirm), fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -626,7 +635,7 @@ private fun SendResultBanner(
                 )
             }
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = accent)
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.common_dismiss), tint = accent)
             }
         }
     }
@@ -713,22 +722,22 @@ private fun CostPreviewCard(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             Text(
-                text = "DGB cost preview",
+                text = stringResource(R.string.as_cost_preview),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(8.dp))
-            CostRow("Recipient marker", "${formatSats(DA_MARKER_SATS_UI)} sats")
+            CostRow(stringResource(R.string.as_recipient_marker), "${formatSats(DA_MARKER_SATS_UI)} sats")
             if (needsAssetChange) {
-                CostRow("Asset-change marker", "${formatSats(DA_MARKER_SATS_UI)} sats")
+                CostRow(stringResource(R.string.as_change_marker), "${formatSats(DA_MARKER_SATS_UI)} sats")
             }
-            CostRow("Network fee (est.)", "≈ ${formatSats(feeSats)} sats")
+            CostRow(stringResource(R.string.as_network_fee_est), "≈ ${formatSats(feeSats)} sats")
             Spacer(modifier = Modifier.height(6.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
             Spacer(modifier = Modifier.height(6.dp))
             CostRow(
-                label = "Total DGB",
+                label = stringResource(R.string.as_total_dgb),
                 value = "≈ ${formatSats(totalSats)} sats (${formatDgb(totalSats)} DGB)",
                 emphasize = true,
             )
@@ -737,9 +746,9 @@ private fun CostPreviewCard(
             if (needsAssetChange && typedInternalQty != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 val keptInternal = ownedAsset.quantity - typedInternalQty
-                val symbol = ownedAsset.metadata?.symbol ?: "units"
+                val symbol = ownedAsset.metadata?.symbol ?: stringResource(R.string.as_units)
                 Text(
-                    text = "${formatAssetQuantity(keptInternal, decimals)} $symbol stays in your wallet",
+                    text = stringResource(R.string.as_stays, formatAssetQuantity(keptInternal, decimals), symbol),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent,
                 )

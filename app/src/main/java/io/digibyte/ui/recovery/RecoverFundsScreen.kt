@@ -29,6 +29,9 @@ import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.recovery.LegacySweepService
 import io.digibyte.core.recovery.RecoveryScanService
 import io.digibyte.core.recovery.SweepDestination
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 private val BG = Color(0xFF0A1628)
 private val CARD = Color(0xFF1A2742)
@@ -62,7 +65,7 @@ fun RecoverFundsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Recover funds from another wallet",
+                        text = stringResource(R.string.rf_title),
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp,
@@ -74,7 +77,7 @@ fun RecoverFundsScreen(
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.common_back),
                             tint = Color.White
                         )
                     }
@@ -113,10 +116,10 @@ fun RecoverFundsScreen(
             Box(Modifier.weight(1f)) {
                 when (val s = state) {
                     is RecoverFundsViewModel.UiState.Classifying -> ScanningBody(
-                        if (mode == RecoverMode.ThisWallet) "Checking older derivation paths…"
-                        else "Scanning the entered phrase…"
+                        if (mode == RecoverMode.ThisWallet) stringResource(R.string.rf_checking_paths)
+                        else stringResource(R.string.rf_scanning_phrase)
                     )
-                    is RecoverFundsViewModel.UiState.Sweeping -> ScanningBody("Sweeping…")
+                    is RecoverFundsViewModel.UiState.Sweeping -> ScanningBody(stringResource(R.string.rf_sweeping))
                     is RecoverFundsViewModel.UiState.Findings -> FindingsBody(
                         findings = s.findings,
                         totalSat = s.totalSat,
@@ -165,7 +168,7 @@ private fun ScanningBody(label: String) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "This may take a moment",
+            text = stringResource(R.string.rf_may_take),
             color = MUTED,
             style = MaterialTheme.typography.bodySmall
         )
@@ -227,8 +230,8 @@ private fun FindingsBody(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = if (incomplete) "Couldn't finish checking"
-                               else "No recoverable funds found",
+                        text = if (incomplete) stringResource(R.string.rf_couldnt_finish)
+                               else stringResource(R.string.rf_none_found),
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
@@ -236,10 +239,11 @@ private fun FindingsBody(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = if (incomplete)
-                            "Some derivation paths could not be checked, so this is not a " +
-                                "final answer — there may be funds we haven't seen. Try again " +
-                                "in a moment.\n\nUnchecked: " + partialFailurePaths.joinToString(", ")
-                        else "This seed has no coins on other derivation paths.",
+                            stringResource(
+                                R.string.rf_partial_body,
+                                partialFailurePaths.joinToString(", "),
+                            )
+                        else stringResource(R.string.rf_no_coins),
                         color = MUTED,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -275,7 +279,7 @@ private fun FindingsBody(
                         Spacer(Modifier.width(14.dp))
                         Column {
                             Text(
-                                text = "Recoverable balance",
+                                text = stringResource(R.string.rf_recoverable_balance),
                                 color = MUTED,
                                 style = MaterialTheme.typography.bodySmall
                             )
@@ -293,7 +297,7 @@ private fun FindingsBody(
             // Section header
             item {
                 Text(
-                    text = "FOUND ON",
+                    text = stringResource(R.string.rf_found_on),
                     color = MUTED,
                     style = MaterialTheme.typography.labelSmall,
                     letterSpacing = 1.sp,
@@ -312,7 +316,7 @@ private fun FindingsBody(
         if (hasSweepable) {
             item {
                 Text(
-                    text = "DESTINATION",
+                    text = stringResource(R.string.rf_destination),
                     color = MUTED,
                     style = MaterialTheme.typography.labelSmall,
                     letterSpacing = 1.sp,
@@ -352,13 +356,13 @@ private fun FindingsBody(
                             Spacer(Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "Into this wallet",
+                                    text = stringResource(R.string.rf_into_this_wallet),
                                     color = Color.White,
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = "Funds will appear at your native receive address",
+                                    text = stringResource(R.string.rf_native_addr_note),
                                     color = MUTED,
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -386,7 +390,7 @@ private fun FindingsBody(
                                 Spacer(Modifier.width(8.dp))
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
-                                        text = "Advanced ▸ Send to a different address",
+                                        text = stringResource(R.string.rf_advanced_send),
                                         color = if (externalExpanded) ACCENT else MUTED,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = if (externalExpanded) FontWeight.Medium else FontWeight.Normal
@@ -400,7 +404,7 @@ private fun FindingsBody(
                                                 onValueChange = { externalAddress = it },
                                                 placeholder = {
                                                     Text(
-                                                        "DigiByte address (D…, S…, dgb1q…)",
+                                                        stringResource(R.string.rf_address_hint),
                                                         color = MUTED,
                                                         style = MaterialTheme.typography.bodySmall
                                                     )
@@ -460,7 +464,7 @@ private fun FindingsBody(
                                                 )
                                                 Spacer(Modifier.width(6.dp))
                                                 Text(
-                                                    text = "This address is NOT in your wallet — sweeps are irreversible",
+                                                    text = stringResource(R.string.rf_not_in_wallet),
                                                     color = WARNING_RED,
                                                     style = MaterialTheme.typography.bodySmall,
                                                     fontWeight = FontWeight.Medium
@@ -506,7 +510,7 @@ private fun FindingsBody(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "Sweep funds",
+                        text = stringResource(R.string.rf_sweep),
                         fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyLarge
                     )
@@ -590,7 +594,7 @@ private fun FindingCard(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "Manual recovery for now — wrapped segwit (BIP49) won’t be swept automatically",
+                        text = stringResource(R.string.rf_bip49_note),
                         color = AMBER,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -624,7 +628,7 @@ private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    text = "Sweep submitted",
+                    text = stringResource(R.string.rf_sweep_submitted),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
@@ -639,7 +643,7 @@ private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
         item {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Recovered funds will appear once confirmed.",
+                text = stringResource(R.string.rf_will_appear),
                 color = MUTED,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 4.dp)
@@ -699,7 +703,7 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                 HorizontalDivider(color = DIVIDER, thickness = 0.5.dp)
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "TXID",
+                    text = stringResource(R.string.rf_txid),
                     color = MUTED,
                     style = MaterialTheme.typography.labelSmall,
                     letterSpacing = 0.8.sp
@@ -715,14 +719,14 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Pending network confirmation",
+                    text = stringResource(R.string.rf_pending),
                     color = MUTED,
                     style = MaterialTheme.typography.labelSmall
                 )
             } else if (!succeeded) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = friendlyFailureReason(outcome.failureReason),
+                    text = friendlyFailureReason(LocalContext.current.resources, outcome.failureReason),
                     color = WARNING_RED,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -738,19 +742,15 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
             // which from the person deciding what to do next.
             if (outcome.heldBackAssets.isNotEmpty()) {
                 HeldBackNote(
-                    title = "${outcome.heldBackAssets.size} left behind — DigiAssets",
-                    body = "These coins carry DigiAssets. Sweeping them as ordinary DGB would " +
-                        "destroy the assets, so they were left in the old wallet along with " +
-                        "enough DGB to move them later.",
+                    title = stringResource(R.string.rf_held_assets, outcome.heldBackAssets.size),
+                    body = stringResource(R.string.rf_held_assets_body),
                     outpoints = outcome.heldBackAssets,
                 )
             }
             if (outcome.heldBackFeeReserve.isNotEmpty()) {
                 HeldBackNote(
-                    title = "${outcome.heldBackFeeReserve.size} kept back — to move the assets",
-                    body = "A DigiAsset costs a network fee to move, and its own coin is far too " +
-                        "small to pay it. This much DGB stayed behind so the assets above can be " +
-                        "transferred without you having to send funds back to the old wallet.",
+                    title = stringResource(R.string.rf_held_reserve, outcome.heldBackFeeReserve.size),
+                    body = stringResource(R.string.rf_held_reserve_body),
                     outpoints = outcome.heldBackFeeReserve,
                 )
             }
@@ -759,26 +759,24 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                 // leave this wallet until it is funded.
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "Not enough DGB to move the assets",
+                    text = stringResource(R.string.rf_shortfall_title),
                     color = WARNING_RED,
                     style = MaterialTheme.typography.labelLarge
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "The assets above are safe, but this wallet is about " +
-                        "${formatSatToDgb(outcome.feeReserveShortfall)} short of the fees needed " +
-                        "to move them. Nothing was swept, so what is here can still pay toward " +
-                        "it — send a little DGB to the old wallet and try again.",
+                    text = stringResource(
+                        R.string.rf_shortfall_body,
+                        formatSatToDgb(outcome.feeReserveShortfall),
+                    ),
                     color = MUTED,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
             if (outcome.heldBackUnknown.isNotEmpty()) {
                 HeldBackNote(
-                    title = "${outcome.heldBackUnknown.size} left behind — could not check",
-                    body = "We could not read the transactions these came from, so we could not " +
-                        "tell whether they carry DigiAssets. They were left alone rather than " +
-                        "risked. Trying again later may clear this.",
+                    title = stringResource(R.string.rf_held_unknown, outcome.heldBackUnknown.size),
+                    body = stringResource(R.string.rf_held_unknown_body),
                     outpoints = outcome.heldBackUnknown,
                 )
             }
@@ -813,7 +811,7 @@ private fun HeldBackNote(title: String, body: String, outpoints: List<String>) {
     }
     if (outpoints.size > 5) {
         Text(
-            text = "…and ${outpoints.size - 5} more",
+            text = stringResource(R.string.rf_and_more, outpoints.size - 5),
             color = MUTED,
             style = MaterialTheme.typography.labelSmall
         )
@@ -839,14 +837,14 @@ private fun ErrorBody(reason: String, onRetry: () -> Unit) {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "Something went wrong",
+            text = stringResource(R.string.rf_something_wrong),
             color = Color.White,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = friendlyErrorReason(reason),
+            text = friendlyErrorReason(LocalContext.current.resources, reason),
             color = MUTED,
             style = MaterialTheme.typography.bodySmall,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -859,7 +857,7 @@ private fun ErrorBody(reason: String, onRetry: () -> Unit) {
         ) {
             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Retry", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.seed_retry), fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -874,30 +872,36 @@ private fun formatSatToDgb(sat: Long): String {
 }
 
 /** Map raw exception/service text to friendlier copy where obviously raw. */
-private fun friendlyErrorReason(reason: String): String = when {
+private fun friendlyErrorReason(
+    res: android.content.res.Resources,
+    reason: String,
+): String = when {
     reason.contains("UnknownHostException", ignoreCase = true) ||
             reason.contains("Unable to resolve host", ignoreCase = true) ->
-        "Could not reach the lookup service. Check your internet connection and try again."
+        res.getString(R.string.rf_err_network)
     reason.contains("SocketTimeoutException", ignoreCase = true) ||
             reason.contains("timeout", ignoreCase = true) ->
-        "The request timed out. Try again when you have a stronger connection."
+        res.getString(R.string.rf_err_timeout)
     reason.contains("seed unavailable", ignoreCase = true) ->
-        "Wallet seed could not be loaded. Unlock your wallet and try again."
+        res.getString(R.string.rf_err_seed)
     reason.contains("Couldn't reach", ignoreCase = true) ->
-        "Could not reach the lookup service. Try again later."
-    else -> "Something went wrong — try again."
+        res.getString(R.string.rf_err_lookup)
+    else -> res.getString(R.string.rf_err_generic)
 }
 
 /** Map sweep failure reasons to friendlier copy. */
-private fun friendlyFailureReason(reason: String?): String = when {
-    reason == null -> "Failed for an unknown reason."
+private fun friendlyFailureReason(
+    res: android.content.res.Resources,
+    reason: String?,
+): String = when {
+    reason == null -> res.getString(R.string.rf_fail_unknown)
     reason.contains("no mappable UTXOs", ignoreCase = true) ->
-        "No spendable outputs could be mapped to signing keys."
+        res.getString(R.string.rf_fail_no_utxos)
     reason.contains("seed derivation failed", ignoreCase = true) ->
-        "Could not derive keys from seed for this path."
+        res.getString(R.string.rf_fail_derive)
     reason.contains("broadcast", ignoreCase = true) ->
-        "Transaction broadcast failed. Try again when connected to peers."
-    else -> "Couldn't sweep this one — try again."
+        res.getString(R.string.rf_fail_broadcast)
+    else -> res.getString(R.string.rf_fail_generic)
 }
 
 // ── Mode selector + foreign-phrase entry ─────────────────────────────────────
@@ -911,7 +915,7 @@ private fun ModeSelector(mode: RecoverMode, enabled: Boolean, onChange: (Recover
             selected = mode == RecoverMode.ThisWallet,
             onClick = { onChange(RecoverMode.ThisWallet) },
             enabled = enabled,
-            label = { Text("This wallet") },
+            label = { Text(stringResource(R.string.rf_this_wallet)) },
             colors = FilterChipDefaults.filterChipColors(
                 containerColor = CARD,
                 labelColor = MUTED,
@@ -923,7 +927,7 @@ private fun ModeSelector(mode: RecoverMode, enabled: Boolean, onChange: (Recover
             selected = mode == RecoverMode.AnotherPhrase,
             onClick = { onChange(RecoverMode.AnotherPhrase) },
             enabled = enabled,
-            label = { Text("Another wallet's phrase") },
+            label = { Text(stringResource(R.string.rf_other_phrase)) },
             colors = FilterChipDefaults.filterChipColors(
                 containerColor = CARD,
                 labelColor = MUTED,
@@ -938,8 +942,7 @@ private fun ModeSelector(mode: RecoverMode, enabled: Boolean, onChange: (Recover
 private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: String?, onScan: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
-            "Enter another wallet's recovery phrase to move its funds into this wallet. " +
-                "The phrase is used once to sign the transfer and is never saved.",
+            stringResource(R.string.rf_other_phrase_body),
             color = Color(0xFFB0BEC5),
             fontSize = 13.sp
         )
@@ -952,7 +955,7 @@ private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: Strin
             onValueChange = { onPhrase(it.lowercase()) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
-            label = { Text("12 or 24 word recovery phrase") },
+            label = { Text(stringResource(R.string.rf_phrase_hint)) },
             isError = error != null,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -989,7 +992,7 @@ private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: Strin
                 disabledContentColor = Color.White.copy(alpha = 0.4f)
             )
         ) {
-            Text("Scan for funds", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.rf_scan_for_funds), fontWeight = FontWeight.SemiBold)
         }
     }
 }

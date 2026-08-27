@@ -59,6 +59,10 @@ class OnboardingHardcodedStringTest {
         "ui/wallet/SendScreen.kt",
         "ui/settings/SettingsScreen.kt",
         "ui/locale/LanguagePickerSheet.kt",
+        "ui/asset/AssetSendScreen.kt",
+        "ui/asset/AssetDetailScreen.kt",
+        "ui/asset/AssetListScreen.kt",
+        "ui/recovery/RecoverFundsScreen.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -87,7 +91,24 @@ class OnboardingHardcodedStringTest {
         // Send: literal address prefixes and value+ticker composites.
         "TD…", "DD…", "%.8f DGB", "\$amountDgb DGB", "\$\$amountFiat", "txid",
         // Build flavour, a version fallback, and the brand+version footer.
-        "digiTestnet", "unknown", "DigiByte Wallet v\$versionName", "\$\$priceFormatted", " · v\$versionName",
+        "digiTestnet", "unknown", "DigiByte Wallet v\$versionName",
+        // Asset screens: truncated ids, unit composites ("sats" is a unit like DGB) and format
+        // patterns. Each is a value plus a symbol, with no sentence to translate.
+        "txid \${s.txid.take(12)}…\${s.txid.takeLast(8)}",
+        "\$quantityInput \${asset.metadata?.symbol ?: stringResource(R.string.as_tokens)}",
+        "\${formatSats(DA_MARKER_SATS_UI)} sats", "≈ \${formatSats(feeSats)} sats",
+        "≈ \${formatSats(totalSats)} sats (\${formatDgb(totalSats)} DGB)",
+        "\${ownedAsset.utxoCount}", "ID: \${assetId.take(12)}…",
+        "\${value.take(12)}…\${value.takeLast(8)}", "\${tx.txid.take(8)}…",
+        "MMM dd, yyyy HH:mm", "%,d", "%.\${decimals}f", ".repeat(decimals)}",
+        // Recovery: these are MATCHERS against exception and service text, not UI copy. They MUST
+        // stay English — translating them would silently stop the friendly-message mapping from
+        // ever matching, and the user would get the raw stack-trace text in every language.
+        "UnknownHostException", "Unable to resolve host", "SocketTimeoutException", "timeout",
+        "seed unavailable", "Couldn\'t reach", "no mappable UTXOs", "seed derivation failed",
+        "broadcast",
+        // Placeholder and format pattern.
+        "0.00123456 DGB", "%.8f", "\$formatted DGB", "\$\$priceFormatted", " · v\$versionName",
         "\\n\${DigiByteUri.encode(address, sats)}",
         // Date/number patterns and a MIME type. NOTE: the date patterns are also pinned to
         // Locale.US at their call sites — a real i18n gap, but a behaviour change, not a
@@ -119,7 +140,7 @@ class OnboardingHardcodedStringTest {
     @Test fun `the sources this test scans actually exist`() {
         val missing = COVERED.filterNot { File(srcRoot, it).isFile }
         assertTrue("scan list is stale, cannot see: $missing", missing.isEmpty())
-        assertTrue("nothing scanned", COVERED.size >= 11)
+        assertTrue("nothing scanned", COVERED.size >= 15)
     }
 
     @Test fun `the scan sees literals at all`() {

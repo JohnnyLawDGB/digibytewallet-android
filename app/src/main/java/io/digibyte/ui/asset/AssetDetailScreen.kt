@@ -42,6 +42,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 // MARKETPLACE_URL ("https://diginexum.trade/") was REMOVED. It was a stale hardcoded host that
 // served a certificate issued for CN=digiassets.info, so tapping Marketplace handed the user a
@@ -92,12 +94,12 @@ fun AssetDetailScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.common_back),
                             tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                     Text(
-                        text = "Asset Details",
+                        text = stringResource(R.string.ad_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.weight(1f)
@@ -191,7 +193,7 @@ fun AssetDetailScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "Balance",
+                                text = stringResource(R.string.ad_balance),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -230,22 +232,22 @@ fun AssetDetailScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Asset Info",
+                        text = stringResource(R.string.ad_info),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (!meta?.description.isNullOrBlank()) {
-                        AssetInfoRow(label = "Description", value = meta!!.description!!)
+                        AssetInfoRow(label = stringResource(R.string.ad_description), value = meta!!.description!!)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     }
 
                     AssetInfoRow(
-                        label = "Total Supply",
+                        label = stringResource(R.string.ad_total_supply),
                         value = if ((meta?.totalSupply ?: 0) > 0)
                             formatAssetQuantity(meta!!.totalSupply, meta.decimals)
-                        else "Unknown"
+                        else stringResource(R.string.ad_unknown)
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
@@ -263,13 +265,11 @@ fun AssetDetailScreen(
                     }
                     if (duplicates.isNotEmpty()) {
                         AssetInfoRow(
-                            label = "Identical metadata",
+                            label = stringResource(R.string.ad_identical_metadata),
                             value = if (duplicates.size == 1)
-                                "Also published under 1 other asset ID you hold. " +
-                                    "Check the verified issuer on both."
+                                stringResource(R.string.ad_dup_one)
                             else
-                                "Also published under ${duplicates.size} other asset IDs you hold. " +
-                                    "Check the verified issuer on each.",
+                                stringResource(R.string.ad_dup_many, duplicates.size),
                             context = context
                         )
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -282,7 +282,7 @@ fun AssetDetailScreen(
                     // no proof the row is absent, deliberately: absent beats wrong.
                     if (!meta?.issuerAddress.isNullOrBlank()) {
                         AssetInfoRow(
-                            label = "Issuer (verified)",
+                            label = stringResource(R.string.ad_issuer_verified),
                             value = meta!!.issuerAddress!!,
                             truncate = true,
                             copyable = true,
@@ -292,15 +292,15 @@ fun AssetDetailScreen(
                     }
 
                     AssetInfoRow(
-                        label = "Divisibility",
+                        label = stringResource(R.string.ad_divisibility),
                         value = when (val d = meta?.decimals ?: 0) {
-                            0 -> "Indivisible (whole units only)"
-                            else -> "$d decimal places"
+                            0 -> stringResource(R.string.ad_indivisible)
+                            else -> stringResource(R.string.ad_decimals, d)
                         }
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                    AssetInfoRow(label = "UTXOs Held", value = "${ownedAsset.utxoCount}")
+                    AssetInfoRow(label = stringResource(R.string.ad_utxos_held), value = "${ownedAsset.utxoCount}")
                 }
             }
         }
@@ -328,7 +328,7 @@ fun AssetDetailScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Marketplace", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(stringResource(R.string.ad_marketplace), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
 
                 // Send button
@@ -346,7 +346,7 @@ fun AssetDetailScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Send", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(stringResource(R.string.wallet_send), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
         }
@@ -354,7 +354,7 @@ fun AssetDetailScreen(
         // ── Transfer history ──────────────────────────────────────────────
         item {
             Text(
-                text = "Transfer History",
+                text = stringResource(R.string.ad_transfer_history),
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -370,7 +370,7 @@ fun AssetDetailScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No asset transfers recorded yet.",
+                        text = stringResource(R.string.ad_no_transfers),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -403,6 +403,7 @@ fun AssetDetailScreen(
 @Composable
 private fun AssetIdRow(assetId: String, context: Context) {
     var copied by remember { mutableStateOf(false) }
+    val assetIdClipLabel = stringResource(R.string.ad_asset_id)
 
     LaunchedEffect(copied) {
         if (copied) {
@@ -423,14 +424,14 @@ private fun AssetIdRow(assetId: String, context: Context) {
         IconButton(
             onClick = {
                 val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                cb?.setPrimaryClip(ClipData.newPlainText("Asset ID", assetId))
+                cb?.setPrimaryClip(ClipData.newPlainText(assetIdClipLabel, assetId))
                 copied = true
             },
             modifier = Modifier.size(28.dp)
         ) {
             Icon(
                 imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                contentDescription = "Copy asset ID",
+                contentDescription = stringResource(R.string.ad_copy_asset_id),
                 tint = if (copied) DigiByteGreen else DigiByteAccent,
                 modifier = Modifier.size(14.dp)
             )
@@ -483,7 +484,7 @@ private fun AssetInfoRow(
                 ) {
                     Icon(
                         imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                        contentDescription = "Copy",
+                        contentDescription = stringResource(R.string.common_copy),
                         tint = if (copied) DigiByteGreen else DigiByteAccent,
                         modifier = Modifier.size(16.dp)
                     )
@@ -500,7 +501,7 @@ private fun AssetTransferItem(
 ) {
     val isSend = tx.amount < 0
     val amountColor = if (isSend) DigiByteRed else DigiByteGreen
-    val amountPrefix = if (isSend) "Sent" else "Received"
+    val amountPrefix = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received)
 
     val dateStr = remember(tx.timestamp) {
         SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
