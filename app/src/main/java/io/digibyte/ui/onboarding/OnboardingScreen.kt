@@ -106,24 +106,21 @@ fun OnboardingScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Recover wallet button
-            OutlinedButton(
-                onClick = { navController.navigate("mnemonic_input") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DigiByteAccent),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = DigiByteAccent)
-            ) {
-                Text(
-                    text = stringResource(R.string.onb_recover),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
+            // NO RESTORE AT FIRST RUN — deliberate, and a security decision rather than a
+            // UX one.
+            //
+            // Restoring an old phrase re-imports its keys, including legacy derivations whose
+            // public keys may already be exposed on-chain. P2PK outputs carry the public key
+            // in the output script itself, and any legacy address that has ever been SPENT from
+            // has published its key in the spending input. Those coins are readable to anyone
+            // holding a sufficiently capable quantum computer, whenever that arrives.
+            //
+            // So the wallet creates fresh keys here, and an older wallet's funds are TRANSFERRED
+            // in from Settings instead — landing on never-spent addresses whose keys are still
+            // behind a hash. Importing would carry the exposure forward; sweeping leaves it behind.
+            //
+            // The restore/transfer code itself is unchanged and still reachable from
+            // Settings -> Recovery. This removes the first-run entry point, not the capability.
 
             Spacer(modifier = Modifier.height(40.dp))
 

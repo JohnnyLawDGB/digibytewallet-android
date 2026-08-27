@@ -45,7 +45,27 @@ an asset behind is recoverable. Burning it is not.
 
 ### Target state
 
-- **First run offers create-new only.** Restore moves to a deliberate, findable side flow.
+- **First run offers create-new only — DONE 2026-08-27, and for a security reason, not a UX one.**
+
+  Restoring an old phrase re-imports its keys, including legacy derivations whose public keys may
+  already be exposed on-chain. **P2PK outputs carry the public key in the output script itself**,
+  and any legacy address that has ever been *spent from* has published its key in the spending
+  input. Those coins are readable to anyone with a sufficiently capable quantum computer, whenever
+  that arrives.
+
+  So the wallet generates fresh keys at first run, and an older wallet's funds are **transferred
+  in** from Settings — landing on never-spent addresses whose keys are still behind a hash.
+  Importing carries the exposure forward; sweeping leaves it behind.
+
+  The restore/transfer code is unchanged and still reachable from Settings → Recovery. The
+  first-run *entry point* was removed, not the capability. The lost-PIN path is unaffected: it
+  uses `restoreFromDisk` via `pin_setup`, never `mnemonic_input`.
+
+  Consequence to keep in view: someone reinstalling after losing a phone now creates a wallet
+  first and transfers into it. That is the intended trade — they end up on modern keys — but it
+  makes the Settings transfer flow **the only route back to funds**, so its discoverability and
+  its completeness (every derivation path, every address encoding, assets included) stop being
+  nice-to-haves.
 - **Restore is asset-aware:** DigiAssets are enumerated, carried, or explicitly skipped with a
   reason. Never silently consumed.
 - **The two flows are named for what they do.** "Restore a wallet" (replace this one) and "Sweep
