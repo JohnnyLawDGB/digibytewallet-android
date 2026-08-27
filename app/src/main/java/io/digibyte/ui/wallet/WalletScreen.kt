@@ -61,6 +61,8 @@ fun WalletScreen(
     val txTypedAmounts by viewModel.txTypedAmounts.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
+    val displayCurrency by viewModel.displayCurrency.collectAsStateWithLifecycle()
+    var showCurrencyPicker by remember { mutableStateOf(false) }
     val syncProgressInfo by viewModel.syncProgressInfo.collectAsStateWithLifecycle()
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
     val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
@@ -119,7 +121,7 @@ fun WalletScreen(
                         // CF-gated — matches the sync card/overlay, never "synced"
                         // while cfheaders is still catching up.
                         isSynced = syncProgressInfo.stage == SyncStage.Synced,
-                        onFiatTap = { viewModel.cycleCurrency() }
+                        onFiatTap = { showCurrencyPicker = true }
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -325,6 +327,20 @@ fun WalletScreen(
             }
         }
     }
+    }
+
+    // Opened by tapping the equivalent line under the balance. Rendered here rather than inside
+    // the LazyColumn: a sheet declared inside a scrolling item is disposed the moment that item
+    // scrolls out of view, which closes it under the user's finger.
+    if (showCurrencyPicker) {
+        io.digibyte.ui.components.CurrencyPickerSheet(
+            selected = displayCurrency,
+            onSelect = {
+                viewModel.selectCurrency(it)
+                showCurrencyPicker = false
+            },
+            onDismiss = { showCurrencyPicker = false },
+        )
     }
 }
 

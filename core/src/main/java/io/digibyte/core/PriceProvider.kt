@@ -18,7 +18,46 @@ data class PriceData(
     val change24h: Double,
     val source: String,
     val updatedAt: Long,
-    val pricePhp: Double = 0.0
+    val pricePhp: Double = 0.0,
+    /**
+     * Every rate the last fetch returned, keyed by lower-case currency code ("usd", "jpy").
+     *
+     * [priceUsd] and [pricePhp] are kept as real fields rather than folded in here, so that the
+     * Send screen, the price card and the Room cache — none of which care about the display
+     * picker — carry on working untouched.
+     */
+    val rates: Map<String, Double> = emptyMap(),
+) {
+    /**
+     * Rate for [code], or 0.0 when this fetch did not carry it.
+     *
+     * Falls back to the two legacy fields so a row cached BEFORE [rates] existed still answers
+     * for USD and PHP instead of silently reading as "no rate" after an upgrade.
+     */
+    fun rateFor(code: String): Double {
+        val key = code.trim().lowercase(java.util.Locale.US)
+        rates[key]?.let { if (it > 0.0) return it }
+        return when (key) {
+            "usd" -> priceUsd
+            "php" -> pricePhp
+            else -> 0.0
+        }
+    }
+}
+
+/**
+ * Currencies fetched on every price tick.
+ *
+ * CoinGecko takes them as one comma-separated request, so the whole set costs exactly what USD
+ * alone used to — there is no per-currency price to pay for breadth here, and no reason to make
+ * the user wait for a second call when they switch.
+ *
+ * Ordered roughly by the size of the DigiByte-using population rather than alphabetically; the
+ * picker shows them in this order.
+ */
+val SUPPORTED_PRICE_CURRENCIES: List<String> = listOf(
+    "usd", "btc", "eur", "inr", "cny", "jpy", "brl", "ngn", "php",
+    "idr", "rub", "gbp", "krw", "vnd", "try", "mxn", "cad", "aud", "zar",
 )
 
 /**
@@ -130,15 +169,25 @@ class PriceProvider(
     private fun fetchFromCoinGecko(): PriceData {
         val body = fetcher.fetch(
             "https://api.coingecko.com/api/v3/simple/price" +
-            "?ids=digibyte&vs_currencies=usd,php&include_24hr_change=true"
+            "?ids=digibyte&vs_currencies=${SUPPORTED_PRICE_CURRENCIES.joinToString(",")}" +
+            "&include_24hr_change=true"
         )
         val json = JSONObject(body).getJSONObject("digibyte")
+
+        // Take whatever came back rather than a fixed set: a currency CoinGecko stops quoting
+        // should read as "no rate" and show a dash, not as a stale number kept alive here.
+        val rates = SUPPORTED_PRICE_CURRENCIES.mapNotNull { code ->
+            val v = json.optDouble(code, 0.0)
+            if (v > 0.0) code to v else null
+        }.toMap()
+
         return PriceData(
             priceUsd = json.getDouble("usd"),
             change24h = json.optDouble("usd_24h_change", 0.0),
             source = "coingecko",
             updatedAt = System.currentTimeMillis(),
-            pricePhp = json.optDouble("php", 0.0)
+            pricePhp = json.optDouble("php", 0.0),
+            rates = rates,
         )
     }
 

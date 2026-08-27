@@ -400,53 +400,64 @@ class WalletViewModel @Inject constructor(
     private val _price = MutableStateFlow<PriceData?>(null)
     val price: StateFlow<PriceData?> = _price.asStateFlow()
 
-    /** Display currency: USD, BTC, or PHP. Persisted to SharedPreferences. */
-    enum class DisplayCurrency { USD, BTC, PHP }
+    /**
+     * Display currency for the hero's "≈ …" line. Persisted to SharedPreferences BY NAME, which
+     * is why app/proguard-rules.pro keeps this class: a renamed constant would not crash, it
+     * would silently stop matching what is stored.
+     *
+     * [code] is the CoinGecko / ISO-4217 key; [label] is what the picker shows. Order here is
+     * the order the picker lists them in.
+     */
+    enum class DisplayCurrency(val code: String, val label: String) {
+        USD("usd", "US Dollar"),
+        BTC("btc", "Bitcoin"),
+        EUR("eur", "Euro"),
+        INR("inr", "Indian Rupee"),
+        CNY("cny", "Chinese Yuan"),
+        JPY("jpy", "Japanese Yen"),
+        BRL("brl", "Brazilian Real"),
+        NGN("ngn", "Nigerian Naira"),
+        PHP("php", "Philippine Peso"),
+        IDR("idr", "Indonesian Rupiah"),
+        RUB("rub", "Russian Ruble"),
+        GBP("gbp", "British Pound"),
+        KRW("krw", "South Korean Won"),
+        VND("vnd", "Vietnamese Dong"),
+        TRY("try", "Turkish Lira"),
+        MXN("mxn", "Mexican Peso"),
+        CAD("cad", "Canadian Dollar"),
+        AUD("aud", "Australian Dollar"),
+        ZAR("zar", "South African Rand"),
+    }
     val displayCurrency = MutableStateFlow(
         try {
             DisplayCurrency.valueOf(prefs.getString("display_currency", "USD") ?: "USD")
         } catch (e: Exception) { DisplayCurrency.USD }
     )
 
-    fun cycleCurrency() {
-        displayCurrency.value = when (displayCurrency.value) {
-            DisplayCurrency.USD -> DisplayCurrency.BTC
-            DisplayCurrency.BTC -> DisplayCurrency.PHP
-            DisplayCurrency.PHP -> DisplayCurrency.USD
-        }
-        prefs.edit().putString("display_currency", displayCurrency.value.name).apply()
+    /** Set from the picker. Replaces the old tap-to-cycle, which needed up to 18 taps to get
+     *  back to where you started once the list grew past a handful. */
+    fun selectCurrency(currency: DisplayCurrency) {
+        displayCurrency.value = currency
+        prefs.edit().putString("display_currency", currency.name).apply()
     }
 
-    /** Fiat balance string — changes based on selected display currency. */
+    /**
+     * Fiat balance string for the hero.
+     *
+     * Formatting and the rate lookup both live outside this flow — in [io.digibyte.core.FiatDisplay]
+     * and [io.digibyte.core.PriceData.rateFor] — so both are unit-tested. The version this
+     * replaces computed Bitcoin as `dgbUsd / 60000.0` against a hardcoded price that never
+     * updated, and it survived for months because nothing checked it and nobody can eyeball a
+     * conversion.
+     */
     val fiatBalance: StateFlow<String> = combine(balance, price, displayCurrency) { sats, priceData, currency ->
         val dgb = sats / 100_000_000.0
-        when (currency) {
-            DisplayCurrency.USD -> {
-                if (priceData == null || priceData.priceUsd <= 0.0) return@combine "$ --"
-                val fmt = NumberFormat.getCurrencyInstance(Locale.US)
-                fmt.format(dgb * priceData.priceUsd)
-            }
-            DisplayCurrency.BTC -> {
-                // DGB/BTC — show as satoshis equivalent via USD cross rate
-                if (priceData == null || priceData.priceUsd <= 0.0) return@combine "BTC --"
-                val btcPrice = try {
-                    // Approximate: 1 BTC ≈ $60,000+ — use ratio
-                    val dgbUsd = dgb * priceData.priceUsd
-                    val btcApprox = dgbUsd / 60000.0 // rough estimate
-                    String.format("%.8f BTC", btcApprox)
-                } catch (e: Exception) { "BTC --" }
-                btcPrice
-            }
-            DisplayCurrency.PHP -> {
-                if (priceData == null || priceData.pricePhp <= 0.0) return@combine "₱ --"
-                val php = dgb * priceData.pricePhp
-                val fmt = NumberFormat.getNumberInstance().apply {
-                    minimumFractionDigits = 2
-                    maximumFractionDigits = 2
-                }
-                "₱${fmt.format(php)}"
-            }
-        }
+        io.digibyte.core.FiatDisplay.format(
+            dgb = dgb,
+            code = currency.code,
+            rate = priceData?.rateFor(currency.code) ?: 0.0,
+        )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "$ --")
 
     init {
