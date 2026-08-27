@@ -154,6 +154,48 @@ Java_io_digibyte_core_bridge_NativeBridge_setNetwork(JNIEnv *env, jobject thiz, 
     LOGI("setNetwork: isTestnet=%d", isTestnet ? 1 : 0);
 }
 
+/*
+ * OPTIONAL BIP39 passphrase (the "12+1 / 24+1" word).
+ *
+ * BRBIP39DeriveKey builds its PBKDF2 salt as a stack VLA sized by the passphrase:
+ *
+ *     char salt[strlen("mnemonic") + strlen(passphrase) + 1];
+ *
+ * so an unbounded passphrase is a stack overflow. The Kotlin layer caps the length and NFKD-
+ * normalises (BRBIP39DeriveKey does neither — its header states normalisation is the caller's
+ * job), but native must not depend on a caller staying honest, so the bound is enforced here too.
+ *
+ * A NULL or empty passphrase yields salt "mnemonic", which is exactly what every wallet created
+ * before this feature derived — absent and empty must stay the same wallet.
+ */
+#define PASSPHRASE_MAX 128
+
+/* Returns 1 and fills `out` (NUL-terminated) on success, 0 if the passphrase is too long.
+ * `*needsRelease` tells the caller whether to release the jstring chars afterwards. */
+static int passphrase_copy(JNIEnv *env, jstring passphrase, char *out, size_t outSize) {
+    out[0] = '\0';
+    if (!passphrase) return 1;
+
+    const char *chars = (*env)->GetStringUTFChars(env, passphrase, NULL);
+    if (!chars) return 1;   /* treat an unreadable passphrase as absent rather than failing */
+
+    const size_t len = strlen(chars);
+    if (len >= outSize) {
+        (*env)->ReleaseStringUTFChars(env, passphrase, chars);
+        LOGW("passphrase rejected: length=%zu exceeds %zu", len, outSize - 1);
+        return 0;
+    }
+    memcpy(out, chars, len);
+    out[len] = '\0';
+    (*env)->ReleaseStringUTFChars(env, passphrase, chars);
+    return 1;
+}
+
+/* NULL for an empty passphrase, so absent and "" derive identically. */
+static const char *passphrase_or_null(const char *buf) {
+    return (buf && buf[0] != '\0') ? buf : NULL;
+}
+
 /* ---------- createWallet ---------- */
 
 JNIEXPORT jboolean JNICALL
@@ -236,8 +278,12 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
 
 JNIEXPORT jboolean JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
-                                                                  jbyteArray phraseBytes) {
+                                                                  jbyteArray phraseBytes,
+                                                                  jstring passphrase) {
     (void)thiz;
+
+    char passBuf[PASSPHRASE_MAX + 1];
+    if (!passphrase_copy(env, passphrase, passBuf, sizeof(passBuf))) return JNI_FALSE;
 
     if (!phraseBytes) {
         LOGW("createWalletFromBytes: phraseBytes is null");
@@ -262,8 +308,9 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     }
 
     uint8_t seed[64];
-    BRBIP39DeriveKey(seed, phraseChars, NULL);
+    BRBIP39DeriveKey(seed, phraseChars, passphrase_or_null(passBuf));
     secure_zero(phraseChars, sizeof(phraseChars));
+    secure_zero(passBuf, sizeof(passBuf));
 
     BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
     /* Taproot (BIP86: m/86'/20'/0') twin from the SAME seed — installed after BRWalletNew. */
@@ -400,8 +447,12 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWallet(JNIEnv *env, jobject thi
 JNIEXPORT jboolean JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
                                                                    jbyteArray phraseBytes,
-                                                                   jlong creationTimestamp) {
+                                                                   jlong creationTimestamp,
+                                                                   jstring passphrase) {
     (void)thiz;
+
+    char passBuf[PASSPHRASE_MAX + 1];
+    if (!passphrase_copy(env, passphrase, passBuf, sizeof(passBuf))) return JNI_FALSE;
 
     if (!phraseBytes) {
         LOGW("recoverWalletFromBytes: phraseBytes is null");
@@ -425,8 +476,9 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
     }
 
     uint8_t seed[64];
-    BRBIP39DeriveKey(seed, phraseChars, NULL);
+    BRBIP39DeriveKey(seed, phraseChars, passphrase_or_null(passBuf));
     secure_zero(phraseChars, sizeof(phraseChars));
+    secure_zero(passBuf, sizeof(passBuf));
 
     BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
     BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));

@@ -71,14 +71,16 @@ class SeedIsolationTest {
 
     @Test
     fun `NativeBridge createWalletFromBytes accepts ByteArray and returns Boolean`() {
-        val method = NativeBridge::class.java.getDeclaredMethod("createWalletFromBytes", ByteArray::class.java)
+        val method = NativeBridge::class.java.getDeclaredMethod("createWalletFromBytes", ByteArray::class.java, String::class.java)
         assertEquals("createWalletFromBytes must return Boolean, not the seed",
             Boolean::class.javaPrimitiveType, method.returnType)
     }
 
     @Test
     fun `NativeBridge recoverWalletFromBytes accepts ByteArray and returns Boolean`() {
-        val method = NativeBridge::class.java.getDeclaredMethod("recoverWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType)
+        val method = NativeBridge::class.java.getDeclaredMethod(
+            "recoverWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType, String::class.java
+        )
         assertEquals("recoverWalletFromBytes must return Boolean, not the seed",
             Boolean::class.javaPrimitiveType, method.returnType)
     }

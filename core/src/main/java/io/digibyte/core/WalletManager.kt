@@ -109,17 +109,23 @@ class WalletManager(
      * Create a new wallet from a mnemonic phrase.
      * Encrypts and persists the phrase to disk.
      */
-    fun createWallet(mnemonic: String): Boolean {
+    fun createWallet(mnemonic: String, passphrase: String? = null): Boolean {
+        // Default null keeps every existing caller — and every existing wallet — unchanged.
+        if (!Bip39Passphrase.isValid(passphrase)) return false
+        val prepared = Bip39Passphrase.prepare(passphrase)
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            val success = NativeBridge.createWalletFromBytes(mnemonicBytes)
+            val success = NativeBridge.createWalletFromBytes(mnemonicBytes, prepared)
             if (success) {
                 persistSeed(mnemonicBytes)
+                persistPassphrase(prepared)
                 // Persist creation time so restoreFromDisk uses the right sync checkpoint
                 prefs.edit().putLong("wallet_creation_time", System.currentTimeMillis() / 1000).apply()
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
-                saveSeedFingerprint(mnemonicBytes)
+                deriveSeedForIdentity(mnemonicBytes)?.let { s2 ->
+                    try { saveSeedFingerprintV2(s2) } finally { s2.fill(0) }
+                }
                 NativeBridge.rescan()
             }
             return success
@@ -132,15 +138,24 @@ class WalletManager(
      * Recover wallet from mnemonic and creation timestamp.
      * Encrypts and persists the phrase to disk.
      */
-    fun recoverWallet(mnemonic: String, creationTimestamp: Long): Boolean {
+    fun recoverWallet(
+        mnemonic: String,
+        creationTimestamp: Long,
+        passphrase: String? = null,
+    ): Boolean {
+        if (!Bip39Passphrase.isValid(passphrase)) return false
+        val prepared = Bip39Passphrase.prepare(passphrase)
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            val success = NativeBridge.recoverWalletFromBytes(mnemonicBytes, creationTimestamp)
+            val success = NativeBridge.recoverWalletFromBytes(mnemonicBytes, creationTimestamp, prepared)
             if (success) {
                 persistSeed(mnemonicBytes)
+                persistPassphrase(prepared)
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
-                saveSeedFingerprint(mnemonicBytes)
+                deriveSeedForIdentity(mnemonicBytes)?.let { s2 ->
+                    try { saveSeedFingerprintV2(s2) } finally { s2.fill(0) }
+                }
                 // PERSIST the creation time (mirror createWallet, line 97). Without this,
                 // restoreFromDisk finds no wallet_creation_time on the next launch and feeds
                 // native the HARDCODED 2026 fallback (line 229) → getWalletBirthCheckpointHeight
@@ -204,9 +219,27 @@ class WalletManager(
             // Only clear saved blocks/peers if the seed has changed (e.g. after
             // uninstall/reinstall with a different mnemonic). On normal app restarts
             // the seed is the same, so we KEEP the saved blocks to resume sync.
-            if (!seedFingerprintMatches(seedBytes)) {
-                clearSyncData()
-                saveSeedFingerprint(seedBytes)
+            // Identity is the DERIVED seed, so a passphrase distinguishes wallets that share a
+            // mnemonic. v1 (mnemonic-based) is still honoured for installs that predate this, so
+            // upgrading does not clear sync data and re-sync everyone from the floor.
+            val identitySeed = deriveSeedForIdentity(seedBytes)
+            if (identitySeed == null) {
+                // Derivation failed — do NOT guess. Clearing on a failed derivation would throw
+                // away good sync data over a transient native error.
+                // Worded without the trigger words the NetworkLeakTest gate scans for. That rule
+                // is deliberately broad — a line that already mentions the secret is one edit away
+                // from interpolating it — so it is respected rather than narrowed.
+                android.util.Log.w("WalletManager", "wallet identity unavailable; leaving sync data intact")
+            } else {
+                try {
+                    val verdict = SeedFingerprint.evaluate(storedFingerprints(), seedBytes, identitySeed)
+                    if (verdict.seedChanged) clearSyncData()
+                    if (verdict.writeV2) {
+                        prefs.edit().putString("seed_fingerprint_v2", verdict.v2ToWrite).apply()
+                    }
+                } finally {
+                    identitySeed.fill(0)
+                }
             }
 
             // BIP84 upgrade detection: mark migration complete.
@@ -255,10 +288,16 @@ class WalletManager(
             // Use recoverWalletFromBytes with the original creation timestamp so the
             // peer manager starts syncing from the right checkpoint — not NOW.
             val creationTime = prefs.getLong("wallet_creation_time", 0L)
+            // The stored passphrase MUST come along. This is the unlock path — it runs on every
+            // restart, on resume, and from BootGuard. Rebuilding a passphrase wallet without it
+            // derives a different seed, so the wallet would open with different addresses and
+            // report a zero balance, on a wallet whose coins are perfectly safe. Null for the
+            // overwhelming majority of wallets, which have no passphrase.
+            val storedPass = loadPassphrase()
             val success = if (creationTime > 0) {
-                NativeBridge.recoverWalletFromBytes(seedBytes, creationTime)
+                NativeBridge.recoverWalletFromBytes(seedBytes, creationTime, storedPass)
             } else {
-                NativeBridge.recoverWalletFromBytes(seedBytes, 1774252800L)
+                NativeBridge.recoverWalletFromBytes(seedBytes, 1774252800L, storedPass)
             }
             if (success) {
                 _walletState.value = WalletState.Unlocked
@@ -652,6 +691,49 @@ class WalletManager(
             .apply()
     }
 
+    /**
+     * Persist the OPTIONAL BIP39 passphrase, under the same Keystore key as the mnemonic.
+     *
+     * Stored rather than prompted because [restoreFromDisk] runs from resume and BootGuard paths
+     * with no UI attached — a passphrase that had to be typed on every unlock would leave those
+     * unable to rebuild the wallet, and background sync would stop until the user next opened the
+     * app. The cost is stated in the spec: a stored passphrase protects the written BACKUP, not
+     * the device, because it sits behind the same door as the mnemonic.
+     *
+     * A null or blank passphrase writes nothing — BIP39 treats absent and empty identically
+     * (salt = "mnemonic"), so an absent entry and an empty one must remain the same wallet.
+     */
+    private fun persistPassphrase(passphrase: String?) {
+        val value = passphrase?.takeIf { it.isNotEmpty() }
+        if (value == null) {
+            prefs.edit().remove("encrypted_pass").remove("encrypted_pass_iv").apply()
+            return
+        }
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        try {
+            keyStoreManager.createKey()
+            val encrypted = keyStoreManager.encrypt(bytes)
+            prefs.edit()
+                .putString("encrypted_pass", bytesToHex(encrypted.ciphertext))
+                .putString("encrypted_pass_iv", bytesToHex(encrypted.iv))
+                .apply()
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
+    /** The stored passphrase, or null when this wallet has none (the default). */
+    private fun loadPassphrase(): String? {
+        val ct = prefs.getString("encrypted_pass", null) ?: return null
+        val iv = prefs.getString("encrypted_pass_iv", null) ?: return null
+        return try {
+            val bytes = keyStoreManager.decrypt(EncryptedData(hexToBytes(ct), hexToBytes(iv)))
+            bytes?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun loadSeed(): ByteArray? {
         val ciphertextHex = prefs.getString("encrypted_seed", null) ?: return null
         val ivHex = prefs.getString("encrypted_seed_iv", null) ?: return null
@@ -714,21 +796,32 @@ class WalletManager(
     }
 
     /**
-     * Store a SHA-256 fingerprint of the mnemonic so we can detect seed changes
-     * on subsequent restarts without decrypting the full seed for comparison.
+     * Store the wallet's identity so restarts can tell whether the seed changed.
+     *
+     * Now over the DERIVED seed rather than the mnemonic: a BIP39 passphrase lets one mnemonic
+     * open many wallets, which would all share a mnemonic-based fingerprint and silently inherit
+     * each other's sync data. See [SeedFingerprint] for why it is versioned rather than replaced
+     * — recomputing in place would clear sync data for every existing install on first launch.
      */
-    private fun saveSeedFingerprint(mnemonicBytes: ByteArray) {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(mnemonicBytes)
-        prefs.edit().putString("seed_fingerprint", bytesToHex(hash)).apply()
+    private fun saveSeedFingerprintV2(seedBytes: ByteArray) {
+        prefs.edit().putString("seed_fingerprint_v2", SeedFingerprint.v2(seedBytes)).apply()
     }
 
-    private fun seedFingerprintMatches(mnemonicBytes: ByteArray): Boolean {
-        val saved = prefs.getString("seed_fingerprint", null) ?: return false
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = bytesToHex(digest.digest(mnemonicBytes))
-        return saved == hash
-    }
+    private fun storedFingerprints() = SeedFingerprint.Stored(
+        v1 = prefs.getString("seed_fingerprint", null),
+        v2 = prefs.getString("seed_fingerprint_v2", null),
+    )
+
+    /**
+     * The 64-byte seed for a mnemonic under this wallet's stored passphrase (usually none).
+     * Caller must zero the result.
+     */
+    private fun deriveSeedForIdentity(mnemonicBytes: ByteArray): ByteArray? =
+        try {
+            NativeBridge.mnemonicToSeed(mnemonicBytes, loadPassphrase())?.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            null
+        }
 
     // ── Hex utilities ────────────────────────────────────────────
 
