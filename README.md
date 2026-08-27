@@ -2,7 +2,7 @@
 
 A full Kotlin rewrite of the DigiByte Android wallet — a **sovereignty-first** SPV wallet built on Jetpack Compose over a patched native C core. Compact-filters-only sync (BIP157/158), hardware-backed key custody, DigiDollar + Taproot, DigiAssets v2, Digi-ID authentication, and a Community Hub.
 
-> **Status:** Active development — **v4.0.64**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.63–v4.0.64 make the wallet speak 12 languages — German, Spanish, Hindi, Chinese, Japanese, Portuguese (BR), Indonesian, Vietnamese, Turkish, Russian and Filipino alongside English — with a language picker on the first screen, before any wallet is created. **[Download APK](https://digiscope.me/downloads/)** · **[Latest GitHub release](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)**
+> **Status:** Active development — **v4.0.65**. BIP157/158 is the only sync path (the bloom wire path was removed in v4.0.0), DigiDollar and Taproot are wired end-to-end, own-node pairing shipped. v4.0.63–v4.0.65 make the wallet speak 12 languages — German, Spanish, Hindi, Chinese, Japanese, Portuguese (BR), Indonesian, Vietnamese, Turkish, Russian and Filipino alongside English — with a language picker on the first screen, before any wallet is created. **[Download APK](https://digiscope.me/downloads/)** · **[Latest GitHub release](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)**
 
 ## Download
 
