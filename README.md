@@ -62,6 +62,7 @@ Removing trusted third parties from the wallet's data path comes before feature 
 - **Sovereign asset balances (v4.0.39)** — computed from the native watch-set, not a backend. A row counts only when the native wallet still holds that exact output; a row the wallet cannot confirm it holds is not counted on the strength of where it came from. Implicit change (the DigiAssets rule that sends the leftover of a partial transfer to the last output) is credited, and an abandoned send that was re-sent no longer counts its change twice.
 - **UTXO protection** — asset-bearing UTXOs are segregated from DGB coin selection; you cannot accidentally spend an asset as a fee.
 - **Trustless IPFS metadata** — asset metadata fetched from gateways with CID hash verification. No gateway trust, no on-device daemon.
+- **In-app Market (DigiStamp)** — [assets.digistamp.co](https://assets.digistamp.co/) is housed in the wallet, origin-locked: only that host renders in-app and everything else is handed to the system browser. There is **no JavaScript bridge** — page code cannot ask the wallet for a signature, an address, or a balance. The only channel from page to wallet is navigation, which opens a native screen the user reads before acting.
 
 ### Digi-ID
 - **Real message signing** — Bitcoin-style compact signatures via `BRKeyCompactSign` in the C core.
@@ -202,7 +203,7 @@ See [VERIFICATION.md](VERIFICATION.md) for multi-party attestation instructions.
 
 ## Related
 
-- **DigiNexum Marketplace:** [diginexum.trade](https://diginexum.trade/) — DigiAsset marketplace
+- **DigiStamp Marketplace:** [assets.digistamp.co](https://assets.digistamp.co/) — the DigiAsset marketplace the wallet integrates with, and the site served in the in-app Market section
 - **DigiScope:** [digiscope.me](https://digiscope.me) — DigiByte community platform
 - **Dandelion++ DIP:** [DigiByte-Core/dips#15](https://github.com/DigiByte-Core/dips/pull/15) — SPV stem-phase privacy
 - **Original wallet:** [DigiByte-Core/digibytewallet-android](https://github.com/DigiByte-Core/digibytewallet-android)
