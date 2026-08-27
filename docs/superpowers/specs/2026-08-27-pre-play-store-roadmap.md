@@ -1,10 +1,10 @@
 # Pre-Play-Store roadmap — future state
 
 **Status:** future state, not a plan. Nothing here is scheduled or designed to task level.
-**Gate:** items 1–3 complete before submitting to the Play Store. **Item 4 is not active.**
+**Gate:** items 1–3 **and 5** complete before submitting to the Play Store. **Item 4 is not active.**
 **Written:** 2026-08-27, against v4.0.60.
 
-Four items, one of them **not active**. One is a **funds-safety gap that is live today**; the
+Five items, one of them **not active**. One is a **funds-safety gap that is live today**; the
 rest are product work. Ordered by consequence, not by effort.
 
 ---
@@ -260,3 +260,54 @@ Items 1 and 2 both touch seed handling and restore, and item 1's first task — 
 the asset burn — should happen before either is designed, because the answer changes what restore
 has to do. Item 3 is independent and can proceed in parallel. Item 4 is blocked on an external
 dependency and may be answered by deciding not to ship it.
+
+
+---
+
+## 5. Localisation — selectable language
+
+**Added 2026-08-27, and it gates the Play Store** (owner's call: a global chain's wallet launching
+English-only is a weak first impression, and Play surfaces localised listings).
+
+### Measured scope
+
+| | |
+|---|---|
+| Hardcoded UI strings | **~426** across **36 files** |
+| `stringResource()` call sites today | **0** |
+| Core-module candidates (errors, refusal reasons) | ~76 |
+| Existing `values/strings.xml` | 365 lines of bread-wallet legacy, entirely unused |
+
+### Two things that make it more than extraction
+
+**A half-extracted app is worse than an unextracted one.** English and Spanish on one screen reads
+as broken. Extraction has to complete per-screen, not per-string, so the unit of work is a screen.
+
+**This wallet's riskiest text is its warnings.** "Sweeping them as ordinary DGB would destroy the
+assets." "Anyone with these words can take your DGB." "Downgrading afterwards is not supported."
+A mistranslation there costs someone money. Machine translation gives coverage quickly and is
+exactly where that goes wrong, so warnings are held back for human review before release while
+ordinary UI text can ship from a machine pass.
+
+### Languages
+
+The currency picker's markets, so the two upgrades tell one story: Hindi, Chinese, Japanese,
+Portuguese (BR), Spanish, Indonesian, Vietnamese, Turkish, Russian, Filipino — plus English as the
+source. Each names itself in its own script; a language list written only in English is unusable
+by exactly the people who need it.
+
+### Mechanism
+
+No appcompat dependency and `MainActivity : FragmentActivity`, so `AppCompatDelegate` is not
+available. Persist the tag, wrap the context in `attachBaseContext` (works on minSdk 26), and also
+inform `LocaleManager` on API 33+ so the OS per-app language picker lists the wallet.
+`supportsRtl` is already true, so Arabic is not structurally blocked if it is added later.
+
+`AppLocale` (done) resolves a stored tag and, critically, **fails to "follow the system"** rather
+than throwing: that value is read on every cold start before any UI exists, and a wallet whose
+settings screen is unreachable because of its own language setting cannot be fixed by its owner.
+
+### Remaining
+
+Extraction (36 screens), the picker UI, the machine-translation pass, and human review of the
+warning strings before any of it ships.
