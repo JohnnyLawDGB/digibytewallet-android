@@ -54,6 +54,9 @@ class RecoverFundsViewModel @Inject constructor(
             val findings: List<RecoveryScanService.ProfileResult>,
             val totalSat: Long,
             val backendUnreachable: Boolean,
+            /** Some derivation paths could not be checked. The findings below are therefore
+             *  incomplete, and "no funds" must not be presented as a settled answer. */
+            val partialFailurePaths: List<String> = emptyList(),
             val isForeign: Boolean = false,
         ) : UiState()
         data object Sweeping : UiState()
@@ -123,6 +126,7 @@ class RecoverFundsViewModel @Inject constructor(
                                 findings = s.nonNativeWithFunds,
                                 totalSat = s.totalBalanceSat,
                                 backendUnreachable = false,
+                                partialFailurePaths = s.unreachableProfileLabels,
                             )
                         }
                     }
@@ -207,6 +211,7 @@ class RecoverFundsViewModel @Inject constructor(
                         } else UiState.Findings(
                             findings = set, totalSat = set.sumOf { it.totalSat },
                             backendUnreachable = false, isForeign = true,
+                            partialFailurePaths = s.unreachableProfileLabels,
                         )
                     }
                     is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)

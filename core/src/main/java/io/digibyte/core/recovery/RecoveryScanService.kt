@@ -52,6 +52,27 @@ class RecoveryScanService(
                 results.isNotEmpty() &&
                 results.filter { it.addresses.isNotEmpty() }
                     .all { !it.reachableBackend }
+
+            /**
+             * ANY profile we asked about and could not reach.
+             *
+             * [allBackendUnreachable] only fires on a total outage, so a scan where one path
+             * failed and the rest came back empty reported a confident "No recoverable funds
+             * found" — a definite answer to a question it had not finished asking. That is how a
+             * real bug stayed hidden: one profile's request was rejected, five others legitimately
+             * found nothing, and the wallet said no funds while half a billion sats sat on the
+             * path that failed.
+             *
+             * Finding funds does not clear this either: a balance from two paths with a third
+             * silently unchecked reads as "that's everything".
+             */
+            val anyBackendUnreachable: Boolean =
+                results.any { it.addresses.isNotEmpty() && !it.reachableBackend }
+
+            /** Names of the paths that could not be checked, so the user is told WHICH. */
+            val unreachableProfileLabels: List<String> =
+                results.filter { it.addresses.isNotEmpty() && !it.reachableBackend }
+                    .map { it.profile.label }
         }
         data class Failed(val reason: String) : State()
     }

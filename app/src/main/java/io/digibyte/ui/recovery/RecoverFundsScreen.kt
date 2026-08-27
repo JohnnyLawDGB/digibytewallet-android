@@ -123,6 +123,7 @@ fun RecoverFundsScreen(
                         // Foreign: sweep to THIS wallet only (no external option shown).
                         onSweepNative = { if (s.isForeign) vm.sweepForeign() else vm.sweep(SweepDestination.Native) },
                         onSweepExternal = if (s.isForeign) null else { addr -> vm.sweep(SweepDestination.External(addr)) },
+                        partialFailurePaths = s.partialFailurePaths,
                     )
                     is RecoverFundsViewModel.UiState.Done -> ResultBody(s.outcomes)
                     is RecoverFundsViewModel.UiState.Error ->
@@ -179,6 +180,8 @@ private fun FindingsBody(
     totalSat: Long,
     onSweepNative: () -> Unit,
     onSweepExternal: ((String) -> Unit)?,
+    /** Paths the scan could not reach. Non-empty means these findings are incomplete. */
+    partialFailurePaths: List<String> = emptyList(),
 ) {
     var externalExpanded by remember { mutableStateOf(false) }
     var externalAddress by remember { mutableStateOf("") }
@@ -210,22 +213,33 @@ private fun FindingsBody(
                         .padding(top = 48.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // A scan that could not check every path has NOT established that there are
+                    // no funds. Showing a green tick and "no funds found" there is a confident
+                    // answer to a question the wallet did not finish asking — and a user who
+                    // reads it stops looking. Distinct outcome, distinct wording, distinct icon.
+                    val incomplete = partialFailurePaths.isNotEmpty()
                     Icon(
-                        imageVector = Icons.Default.CheckCircle,
+                        imageVector = if (incomplete) Icons.Default.ErrorOutline
+                                      else Icons.Default.CheckCircle,
                         contentDescription = null,
-                        tint = SUCCESS_GREEN,
+                        tint = if (incomplete) WARNING_RED else SUCCESS_GREEN,
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "No recoverable funds found",
+                        text = if (incomplete) "Couldn't finish checking"
+                               else "No recoverable funds found",
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "This seed has no coins on other derivation paths.",
+                        text = if (incomplete)
+                            "Some derivation paths could not be checked, so this is not a " +
+                                "final answer — there may be funds we haven't seen. Try again " +
+                                "in a moment.\n\nUnchecked: " + partialFailurePaths.joinToString(", ")
+                        else "This seed has no coins on other derivation paths.",
                         color = MUTED,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
