@@ -61,6 +61,10 @@ fun UnlockScreen(
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
 
+    // Hoisted: these are assigned inside event lambdas, which are not composable.
+    val unlockFailedMsg = stringResource(R.string.unlock_err_failed)
+    val wipingMsg = stringResource(R.string.unlock_wiping)
+    val attemptsLeftFmt = stringResource(R.string.unlock_attempts_left)
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     // Persisted PIN rate-limit (PinManager). lockedUntil is the wall-clock epoch-ms
@@ -125,7 +129,7 @@ fun UnlockScreen(
             throw e
         } catch (t: Throwable) {
             android.util.Log.e("UnlockScreen", "unlock failed: ${t.message}", t)
-            errorMessage = "Unlock failed. Please try again."
+            errorMessage = unlockFailedMsg
         } finally {
             isUnlocking = false
         }
@@ -187,7 +191,7 @@ fun UnlockScreen(
                     errorMessage = null // the countdown text takes over
                 } else {
                     val before = (PinManager.FREE_ATTEMPTS + 1) - result.failCount
-                    errorMessage = "Incorrect PIN — $before ${if (before == 1) "attempt" else "attempts"} before lockout"
+                    errorMessage = attemptsLeftFmt.format(before)
                 }
             }
             is PinVerifyResult.LockedOut -> {
@@ -201,7 +205,7 @@ fun UnlockScreen(
                 // (a kill here completes the wipe next launch). The caller owns the
                 // destructive wallet wipe — PinManager can only clear dgb_pin_store.
                 currentInput = ""
-                errorMessage = "Too many failed attempts — wiping wallet"
+                errorMessage = wipingMsg
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         walletManager.wipeWallet()
@@ -270,7 +274,10 @@ fun UnlockScreen(
                 if (isLocked) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "Locked — try again in ${formatLockCountdown(lockedUntil - nowTick)}",
+                        text = stringResource(
+                            R.string.unlock_locked,
+                            formatLockCountdown(lockedUntil - nowTick),
+                        ),
                         color = Color(0xFFFF9800),
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center

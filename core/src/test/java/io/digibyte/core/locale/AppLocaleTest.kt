@@ -1,6 +1,7 @@
 package io.digibyte.core.locale
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -77,6 +78,20 @@ class AppLocaleTest {
     @Test fun `a region variant we do not list falls back to its base language`() {
         assertEquals("es", AppLocale.resolve("es-MX")?.tag)
         assertEquals("zh", AppLocale.resolve("zh-Hans")?.tag)
+    }
+
+
+    /**
+     * German. Added after the first ten because the DigiByte community's German-speaking share is
+     * large out of proportion to Germany's size in any currency table — the original list was
+     * derived from the currency picker's markets, and that derivation missed it.
+     */
+    @Test fun `german is supported and names itself`() {
+        val de = AppLocale.SUPPORTED.firstOrNull { it.tag == "de" }
+        assertNotNull("German is missing from the supported set", de)
+        assertEquals("Deutsch", de!!.endonym)
+        assertEquals("de", AppLocale.resolve("de-AT")?.tag)
+        assertEquals("de", AppLocale.resolve("de-CH")?.tag)
     }
 
     @Test fun `tags are unique`() {

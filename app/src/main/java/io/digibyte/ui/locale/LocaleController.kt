@@ -68,6 +68,19 @@ object LocaleController {
     }
 
     /**
+     * Persist a choice AND rebuild the screen so it takes effect.
+     *
+     * Every caller wants this, not [set]. Resources are resolved when a context is created, so a
+     * screen that is already running keeps the old language until it is rebuilt — and a language
+     * setting that appears to do nothing is worse than not offering one. The recreate is the part
+     * that is easy to forget, which is why it lives here rather than at each call site.
+     */
+    fun apply(context: Context, entry: AppLocale.Entry?) {
+        set(context, entry)
+        (context as? android.app.Activity)?.recreate()
+    }
+
+    /**
      * Wrap a base context so resources resolve in the chosen language.
      *
      * Called from `attachBaseContext`. Returns the context unchanged when following the system,

@@ -59,6 +59,10 @@ fun PinSetupScreen(
 
     var step by remember { mutableStateOf(PinStep.ENTER) }
     var firstPin by remember { mutableStateOf("") }
+    // Hoisted: the assignments below happen inside event lambdas, which are not composable.
+    val pinMismatchMsg = stringResource(R.string.pin_err_mismatch)
+    val pinSaveFailedMsg = stringResource(R.string.pin_err_save)
+    val walletFailedMsg = stringResource(R.string.pin_err_wallet)
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var biometricAvailable by remember { mutableStateOf(false) }
@@ -122,7 +126,7 @@ fun PinSetupScreen(
                                                             }
                                                         } else {
                                                             isPinSaving = false
-                                                            errorMessage = "Wallet creation failed. Please try again."
+                                                            errorMessage = walletFailedMsg
                                                             currentInput = ""
                                                             step = PinStep.ENTER
                                                             firstPin = ""
@@ -137,14 +141,14 @@ fun PinSetupScreen(
                                                     }
                                                 } else {
                                                     isPinSaving = false
-                                                    errorMessage = "Failed to save PIN. Please try again."
+                                                    errorMessage = pinSaveFailedMsg
                                                     currentInput = ""
                                                     step = PinStep.ENTER
                                                     firstPin = ""
                                                 }
                                             }
                                         } else {
-                                            errorMessage = "PINs do not match. Please try again."
+                                            errorMessage = pinMismatchMsg
                                             currentInput = ""
                                             firstPin = ""
                                             step = PinStep.ENTER
@@ -222,7 +226,10 @@ private fun PinEntryContent(
             ) { currentStep ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = if (currentStep == PinStep.ENTER) "Set Your PIN" else "Confirm Your PIN",
+                        text = stringResource(
+                            if (currentStep == PinStep.ENTER) R.string.pin_set_title
+                            else R.string.pin_confirm_title
+                        ),
                         style = MaterialTheme.typography.headlineSmall,
                         color = Color.White,
                         fontWeight = FontWeight.Bold
@@ -230,9 +237,9 @@ private fun PinEntryContent(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = if (currentStep == PinStep.ENTER)
-                            "Choose a 6-digit PIN to protect your wallet"
+                            stringResource(R.string.pin_set_body)
                         else
-                            "Enter your PIN again to confirm",
+                            stringResource(R.string.pin_confirm_body),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFFB0BEC5),
                         textAlign = TextAlign.Center

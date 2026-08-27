@@ -50,4 +50,32 @@
     <string name="recover_body">अपना वॉलेट पुनर्स्थापित करने के लिए अपना रिकवरी वाक्यांश दर्ज करें।</string>
     <string name="recover_continue">जारी रखें</string>
 
+    <string name="seed_retry">फिर से कोशिश करें</string>
+    <string name="verify_next">आगे</string>
+    <string name="verify_finish">पूरा करें</string>
+    <string name="verify_success_title">सत्यापित!</string>
+    <string name="verify_retry_title">चलिए फिर से कोशिश करते हैं</string>
+    <string name="verify_success_body">आपका रिकवरी वाक्यांश सुरक्षित रूप से लिख लिया गया है। अब एक PIN सेट करें।</string>
+    <string name="verify_retry_body">कुछ उत्तर गलत थे। कृपया अपना रिकवरी वाक्यांश जाँचें और फिर से कोशिश करें।</string>
+    <string name="verify_setup_pin">PIN सेट करें</string>
+    <string name="verify_try_again">फिर से कोशिश करें</string>
+    <string name="pin_set_title">अपना PIN सेट करें</string>
+    <string name="pin_confirm_title">अपने PIN की पुष्टि करें</string>
+    <string name="pin_set_body">अपने वॉलेट की सुरक्षा के लिए 6 अंकों का PIN चुनें</string>
+    <string name="pin_confirm_body">पुष्टि के लिए अपना PIN फिर से दर्ज करें</string>
+    <string name="pin_err_mismatch">PIN मेल नहीं खाते। कृपया फिर से कोशिश करें।</string>
+    <string name="pin_err_save">PIN सहेजा नहीं जा सका। कृपया फिर से कोशिश करें।</string>
+    <string name="pin_err_wallet">वॉलेट नहीं बनाया जा सका। कृपया फिर से कोशिश करें।</string>
+    <string name="unlock_err_failed">अनलॉक विफल रहा। कृपया फिर से कोशिश करें।</string>
+    <string name="unlock_wiping">बहुत अधिक विफल प्रयास — वॉलेट मिटाया जा रहा है</string>
+    <string name="unlock_attempts_left">गलत PIN। शेष प्रयास: %1$d</string>
+    <string name="battery_title">पृष्ठभूमि में सिंक चालू रखें</string>
+    <string name="battery_body">स्क्रीन बंद होने पर Android इस वॉलेट को स्लीप में डाल सकता है, जिससे DigiByte नेटवर्क से इसका कनेक्शन टूट जाता है और यह तब तक 0 पीयर पर अटका रह सकता है जब तक आप इसे दोबारा न खोलें।\n\nइसे बिना प्रतिबंध चलने दें ताकि सिंक जारी रहे।</string>
+    <string name="battery_body_samsung">\n\nSamsung पर, Device Care → Battery → \"Never sleeping apps\" भी खोलें और DigiByte Wallet जोड़ें।</string>
+    <string name="battery_open_settings">सेटिंग्स खोलें</string>
+    <string name="tor_title">नई गोपनीयता सुविधा</string>
+    <string name="tor_body">Tor रूटिंग अब उपलब्ध है। सक्षम होने पर, आपका वॉलेट Tor के माध्यम से DigiByte नेटवर्क से जुड़ता है और पीयर से आपका IP पता छिपाता है।\n\nTor रूटिंग सक्षम करें?</string>
+    <string name="tor_enable">सक्षम करें</string>
+    <string name="common_not_now">अभी नहीं</string>
+
 </resources>

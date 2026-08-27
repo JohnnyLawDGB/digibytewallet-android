@@ -41,6 +41,14 @@ fun OnboardingScreen(
                 )
             )
     ) {
+        // Above the centred column, not inside it: the language control must not shift the
+        // layout, and it has to be reachable before any wallet decision is made.
+        io.digibyte.ui.locale.LanguageChip(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 20.dp, end = 20.dp),
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()

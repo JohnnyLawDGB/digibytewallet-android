@@ -159,7 +159,10 @@ fun SeedVerifyScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
                 ) {
                     Text(
-                        text = if (currentQuestion < questions.size - 1) "Next" else "Finish",
+                        text = stringResource(
+                            if (currentQuestion < questions.size - 1) R.string.verify_next
+                            else R.string.verify_finish
+                        ),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -244,7 +247,9 @@ private fun VerifyResultScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (allCorrect) "Verified!" else "Let's try again",
+            text = stringResource(
+                if (allCorrect) R.string.verify_success_title else R.string.verify_retry_title
+            ),
             style = MaterialTheme.typography.headlineMedium,
             color = if (allCorrect) DigiByteGreen else DigiByteRed,
             fontWeight = FontWeight.Bold,
@@ -255,9 +260,9 @@ private fun VerifyResultScreen(
 
         Text(
             text = if (allCorrect)
-                "Your seed phrase is safely written down. Now let's set up a PIN."
+                stringResource(R.string.verify_success_body)
             else
-                "Some answers were incorrect. Please review your seed phrase and try again.",
+                stringResource(R.string.verify_retry_body),
             style = MaterialTheme.typography.bodyLarge,
             color = Color(0xFFB0BEC5),
             textAlign = TextAlign.Center,
@@ -275,7 +280,7 @@ private fun VerifyResultScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
-                Text("Set Up PIN", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.verify_setup_pin), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         } else {
             Button(
@@ -286,7 +291,7 @@ private fun VerifyResultScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
-                Text("Try Again", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.verify_try_again), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

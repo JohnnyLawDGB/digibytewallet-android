@@ -38,7 +38,15 @@ object AppLocale {
         fun toLocale(): Locale = Locale.forLanguageTag(tag)
     }
 
-    /** English first as the source language; the rest in the currency picker's order. */
+    /**
+     * English first as the source language; then the currency picker's markets in its order.
+     *
+     * German is here for a different reason and so sits apart from that derivation: the
+     * German-speaking share of DigiByte's community is far larger than any currency table would
+     * suggest. Deriving the language list from the currency list was a reasonable start and an
+     * incomplete rule — where people hold DGB is not the same question as which fiat they price
+     * it in. Later additions should come from where the community actually is.
+     */
     val SUPPORTED: List<Entry> = listOf(
         Entry("en", "English", "English"),
         Entry("hi", "हिन्दी", "Hindi"),
@@ -50,6 +58,7 @@ object AppLocale {
         Entry("vi", "Tiếng Việt", "Vietnamese"),
         Entry("tr", "Türkçe", "Turkish"),
         Entry("ru", "Русский", "Russian"),
+        Entry("de", "Deutsch", "German"),
         Entry("fil", "Filipino", "Filipino"),
     )
 

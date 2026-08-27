@@ -16,5 +16,6 @@
         <locale android:name="vi"/>
         <locale android:name="tr"/>
         <locale android:name="ru"/>
+        <locale android:name="de"/>
         <locale android:name="fil"/>
 </locale-config>

@@ -50,4 +50,32 @@
     <string name="recover_body">Ilagay ang iyong recovery phrase para maibalik ang iyong wallet.</string>
     <string name="recover_continue">Magpatuloy</string>
 
+    <string name="seed_retry">Subukan ulit</string>
+    <string name="verify_next">Susunod</string>
+    <string name="verify_finish">Tapusin</string>
+    <string name="verify_success_title">Na-verify!</string>
+    <string name="verify_retry_title">Subukan nating muli</string>
+    <string name="verify_success_body">Ligtas nang naisulat ang iyong recovery phrase. Ngayon, mag-set up ng PIN.</string>
+    <string name="verify_retry_body">May mga maling sagot. Pakisuri ang iyong recovery phrase at subukan ulit.</string>
+    <string name="verify_setup_pin">Mag-set up ng PIN</string>
+    <string name="verify_try_again">Subukan ulit</string>
+    <string name="pin_set_title">Itakda ang iyong PIN</string>
+    <string name="pin_confirm_title">Kumpirmahin ang iyong PIN</string>
+    <string name="pin_set_body">Pumili ng 6-digit na PIN para protektahan ang iyong wallet</string>
+    <string name="pin_confirm_body">Ilagay ulit ang iyong PIN para kumpirmahin</string>
+    <string name="pin_err_mismatch">Hindi tugma ang mga PIN. Pakisubukan ulit.</string>
+    <string name="pin_err_save">Hindi na-save ang PIN. Pakisubukan ulit.</string>
+    <string name="pin_err_wallet">Hindi nagawa ang wallet. Pakisubukan ulit.</string>
+    <string name="unlock_err_failed">Hindi na-unlock. Pakisubukan ulit.</string>
+    <string name="unlock_wiping">Masyadong maraming maling subok — binubura ang wallet</string>
+    <string name="unlock_attempts_left">Maling PIN. Natitirang subok: %1$d</string>
+    <string name="battery_title">Panatilihing tumatakbo ang sync sa background</string>
+    <string name="battery_body">Maaaring patulugin ng Android ang wallet na ito kapag naka-off ang screen, kaya nawawala ang koneksyon nito sa DigiByte network at maaaring maiwan sa 0 peers hanggang buksan mo ulit.\n\nPayagan itong tumakbo nang walang restriksyon para magpatuloy ang sync.</string>
+    <string name="battery_body_samsung">\n\nSa Samsung, buksan din ang Device Care → Battery → \"Never sleeping apps\" at idagdag ang DigiByte Wallet.</string>
+    <string name="battery_open_settings">Buksan ang mga setting</string>
+    <string name="tor_title">Bagong Feature sa Privacy</string>
+    <string name="tor_body">Available na ang Tor routing. Kapag naka-enable, kumokonekta ang iyong wallet sa DigiByte network sa pamamagitan ng Tor, na itinatago ang iyong IP address sa mga peer.\n\nI-enable ang Tor routing?</string>
+    <string name="tor_enable">I-enable</string>
+    <string name="common_not_now">Hindi muna</string>
+
 </resources>

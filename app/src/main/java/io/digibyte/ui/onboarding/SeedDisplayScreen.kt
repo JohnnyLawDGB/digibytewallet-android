@@ -84,7 +84,7 @@ fun SeedDisplayScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { viewModel.generateMnemonic() }) {
-                        Text("Retry")
+                        Text(stringResource(R.string.seed_retry))
                     }
                 }
             }

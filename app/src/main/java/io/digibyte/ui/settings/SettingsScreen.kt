@@ -39,13 +39,9 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
         io.digibyte.ui.locale.LanguagePickerSheet(
             selected = currentLanguage,
             onSelect = { entry ->
-                io.digibyte.ui.locale.LocaleController.set(localeContext, entry)
                 currentLanguage = entry
                 showLanguagePicker = false
-                // Resources are resolved when a context is created, so a running screen keeps the
-                // old language until it is rebuilt. Recreate rather than leave the user tapping a
-                // setting that appears to do nothing.
-                (localeContext as? android.app.Activity)?.recreate()
+                io.digibyte.ui.locale.LocaleController.apply(localeContext, entry)
             },
             onDismiss = { showLanguagePicker = false },
         )

@@ -52,4 +52,32 @@
     <string name="recover_body">Introduce tu frase de recuperación para restaurar tu billetera.</string>
     <string name="recover_continue">Continuar</string>
 
+    <string name="seed_retry">Reintentar</string>
+    <string name="verify_next">Siguiente</string>
+    <string name="verify_finish">Finalizar</string>
+    <string name="verify_success_title">¡Verificado!</string>
+    <string name="verify_retry_title">Intentémoslo de nuevo</string>
+    <string name="verify_success_body">Tu frase de recuperación está anotada de forma segura. Ahora configura un PIN.</string>
+    <string name="verify_retry_body">Algunas respuestas fueron incorrectas. Revisa tu frase de recuperación e inténtalo de nuevo.</string>
+    <string name="verify_setup_pin">Configurar PIN</string>
+    <string name="verify_try_again">Intentar de nuevo</string>
+    <string name="pin_set_title">Establece tu PIN</string>
+    <string name="pin_confirm_title">Confirma tu PIN</string>
+    <string name="pin_set_body">Elige un PIN de 6 dígitos para proteger tu billetera</string>
+    <string name="pin_confirm_body">Introduce tu PIN de nuevo para confirmarlo</string>
+    <string name="pin_err_mismatch">Los PIN no coinciden. Inténtalo de nuevo.</string>
+    <string name="pin_err_save">No se pudo guardar el PIN. Inténtalo de nuevo.</string>
+    <string name="pin_err_wallet">No se pudo crear la billetera. Inténtalo de nuevo.</string>
+    <string name="unlock_err_failed">No se pudo desbloquear. Inténtalo de nuevo.</string>
+    <string name="unlock_wiping">Demasiados intentos fallidos — borrando la billetera</string>
+    <string name="unlock_attempts_left">PIN incorrecto. Intentos restantes: %1$d</string>
+    <string name="battery_title">Mantener la sincronización en segundo plano</string>
+    <string name="battery_body">Android puede suspender esta billetera cuando la pantalla está apagada, lo que corta su conexión con la red DigiByte y puede dejarla en 0 pares hasta que la vuelvas a abrir.\n\nPermite que se ejecute sin restricciones para que siga sincronizando.</string>
+    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade DigiByte Wallet.</string>
+    <string name="battery_open_settings">Abrir ajustes</string>
+    <string name="tor_title">Nueva función de privacidad</string>
+    <string name="tor_body">El enrutamiento Tor ya está disponible. Cuando se activa, tu billetera se conecta a la red DigiByte a través de Tor, ocultando tu dirección IP a los pares.\n\n¿Activar el enrutamiento Tor?</string>
+    <string name="tor_enable">Activar</string>
+    <string name="common_not_now">Ahora no</string>
+
 </resources>

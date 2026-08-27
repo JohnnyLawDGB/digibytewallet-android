@@ -50,4 +50,32 @@
     <string name="recover_body">Введите фразу восстановления, чтобы восстановить кошелёк.</string>
     <string name="recover_continue">Продолжить</string>
 
+    <string name="seed_retry">Повторить</string>
+    <string name="verify_next">Далее</string>
+    <string name="verify_finish">Готово</string>
+    <string name="verify_success_title">Проверено!</string>
+    <string name="verify_retry_title">Попробуем ещё раз</string>
+    <string name="verify_success_body">Ваша фраза восстановления надёжно записана. Теперь задайте PIN-код.</string>
+    <string name="verify_retry_body">Некоторые ответы неверны. Проверьте фразу восстановления и попробуйте снова.</string>
+    <string name="verify_setup_pin">Задать PIN-код</string>
+    <string name="verify_try_again">Попробовать снова</string>
+    <string name="pin_set_title">Задайте PIN-код</string>
+    <string name="pin_confirm_title">Подтвердите PIN-код</string>
+    <string name="pin_set_body">Выберите 6-значный PIN-код для защиты кошелька</string>
+    <string name="pin_confirm_body">Введите PIN-код ещё раз для подтверждения</string>
+    <string name="pin_err_mismatch">PIN-коды не совпадают. Попробуйте снова.</string>
+    <string name="pin_err_save">Не удалось сохранить PIN-код. Попробуйте снова.</string>
+    <string name="pin_err_wallet">Не удалось создать кошелёк. Попробуйте снова.</string>
+    <string name="unlock_err_failed">Не удалось разблокировать. Попробуйте снова.</string>
+    <string name="unlock_wiping">Слишком много неудачных попыток — кошелёк удаляется</string>
+    <string name="unlock_attempts_left">Неверный PIN-код. Осталось попыток: %1$d</string>
+    <string name="battery_title">Продолжать синхронизацию в фоне</string>
+    <string name="battery_body">Когда экран выключен, Android может перевести кошелёк в спящий режим. Это разрывает соединение с сетью DigiByte, и кошелёк может остаться с 0 узлов, пока вы не откроете приложение снова.\n\nРазрешите работу без ограничений, чтобы синхронизация продолжалась.</string>
+    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте DigiByte Wallet.</string>
+    <string name="battery_open_settings">Открыть настройки</string>
+    <string name="tor_title">Новая функция приватности</string>
+    <string name="tor_body">Маршрутизация через Tor теперь доступна. При включении кошелёк подключается к сети DigiByte через Tor, скрывая ваш IP-адрес от узлов.\n\nВключить маршрутизацию Tor?</string>
+    <string name="tor_enable">Включить</string>
+    <string name="common_not_now">Не сейчас</string>
+
 </resources>

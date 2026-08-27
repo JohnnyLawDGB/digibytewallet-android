@@ -50,4 +50,32 @@
     <string name="recover_body">输入您的助记词以恢复钱包。</string>
     <string name="recover_continue">继续</string>
 
+    <string name="seed_retry">重试</string>
+    <string name="verify_next">下一步</string>
+    <string name="verify_finish">完成</string>
+    <string name="verify_success_title">已验证！</string>
+    <string name="verify_retry_title">再试一次</string>
+    <string name="verify_success_body">您的恢复助记词已安全记录。现在设置 PIN 码。</string>
+    <string name="verify_retry_body">部分答案不正确。请检查您的恢复助记词后重试。</string>
+    <string name="verify_setup_pin">设置 PIN 码</string>
+    <string name="verify_try_again">再试一次</string>
+    <string name="pin_set_title">设置 PIN 码</string>
+    <string name="pin_confirm_title">确认 PIN 码</string>
+    <string name="pin_set_body">选择 6 位 PIN 码以保护您的钱包</string>
+    <string name="pin_confirm_body">再次输入 PIN 码以确认</string>
+    <string name="pin_err_mismatch">PIN 码不一致，请重试。</string>
+    <string name="pin_err_save">PIN 码保存失败，请重试。</string>
+    <string name="pin_err_wallet">钱包创建失败，请重试。</string>
+    <string name="unlock_err_failed">解锁失败，请重试。</string>
+    <string name="unlock_wiping">失败次数过多 — 正在清除钱包</string>
+    <string name="unlock_attempts_left">PIN 码错误。剩余尝试次数：%1$d</string>
+    <string name="battery_title">保持后台同步</string>
+    <string name="battery_body">息屏时 Android 可能会让此钱包休眠，从而中断它与 DigiByte 网络的连接，并可能使其停留在 0 个节点，直到您重新打开应用。\n\n请允许其无限制运行，以便持续同步。</string>
+    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 DigiByte Wallet。</string>
+    <string name="battery_open_settings">打开设置</string>
+    <string name="tor_title">新的隐私功能</string>
+    <string name="tor_body">现已支持 Tor 路由。启用后，您的钱包将通过 Tor 连接到 DigiByte 网络，向节点隐藏您的 IP 地址。\n\n是否启用 Tor 路由？</string>
+    <string name="tor_enable">启用</string>
+    <string name="common_not_now">暂不</string>
+
 </resources>

@@ -6,6 +6,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.res.stringResource
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.collectAsState
@@ -156,22 +157,20 @@ class MainActivity : FragmentActivity() {
                 if (showTorPrompt) {
                     AlertDialog(
                         onDismissRequest = { promptCallback(false) },
-                        title = { Text("New Privacy Feature") },
+                        title = { Text(stringResource(R.string.tor_title)) },
                         text = {
                             Text(
-                                "Tor routing is now available. When enabled, your wallet " +
-                                "connects to the DigiByte network through Tor, hiding your IP " +
-                                "address from peers.\n\nEnable Tor routing?"
+                                stringResource(R.string.tor_body)
                             )
                         },
                         confirmButton = {
                             TextButton(onClick = { promptCallback(true) }) {
-                                Text("Enable")
+                                Text(stringResource(R.string.tor_enable))
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { promptCallback(false) }) {
-                                Text("Not now")
+                                Text(stringResource(R.string.common_not_now))
                             }
                         }
                     )
@@ -224,17 +223,12 @@ class MainActivity : FragmentActivity() {
                 if (showBatteryPrompt) {
                     AlertDialog(
                         onDismissRequest = { showBatteryPrompt = false },
-                        title = { Text("Keep sync running in the background") },
+                        title = { Text(stringResource(R.string.battery_title)) },
                         text = {
                             Text(
-                                "Android can put this wallet to sleep when the screen is off, " +
-                                "which drops its connection to the DigiByte network and can leave " +
-                                "it stuck at 0 peers until you reopen it.\n\nAllow it to run " +
-                                "unrestricted so it keeps syncing." +
+                                stringResource(R.string.battery_body) +
                                 (if (io.digibyte.util.BatteryOptimization.isSamsung)
-                                    "\n\nOn Samsung, also open Device Care → Battery → " +
-                                    "Background usage limits → \"Never sleeping apps\" and add " +
-                                    "DigiByte Wallet."
+                                    stringResource(R.string.battery_body_samsung)
                                  else "")
                             )
                         },
@@ -242,7 +236,7 @@ class MainActivity : FragmentActivity() {
                             TextButton(onClick = {
                                 io.digibyte.util.BatteryOptimization.openBatterySettings(this@MainActivity)
                                 showBatteryPrompt = false
-                            }) { Text("Open settings") }
+                            }) { Text(stringResource(R.string.battery_open_settings)) }
                         },
                         dismissButton = {
                             TextButton(onClick = {
@@ -250,7 +244,7 @@ class MainActivity : FragmentActivity() {
                                     "dgb_settings", android.content.Context.MODE_PRIVATE)
                                     .edit().putBoolean("battery_prompt_dismissed", true).apply()
                                 showBatteryPrompt = false
-                            }) { Text("Not now") }
+                            }) { Text(stringResource(R.string.common_not_now)) }
                         }
                     )
                 }

@@ -50,4 +50,32 @@
     <string name="recover_body">Masukkan frasa pemulihan Anda untuk memulihkan dompet.</string>
     <string name="recover_continue">Lanjutkan</string>
 
+    <string name="seed_retry">Coba lagi</string>
+    <string name="verify_next">Berikutnya</string>
+    <string name="verify_finish">Selesai</string>
+    <string name="verify_success_title">Terverifikasi!</string>
+    <string name="verify_retry_title">Mari coba lagi</string>
+    <string name="verify_success_body">Frasa pemulihan Anda sudah dicatat dengan aman. Sekarang atur PIN.</string>
+    <string name="verify_retry_body">Beberapa jawaban salah. Periksa kembali frasa pemulihan Anda lalu coba lagi.</string>
+    <string name="verify_setup_pin">Atur PIN</string>
+    <string name="verify_try_again">Coba lagi</string>
+    <string name="pin_set_title">Atur PIN Anda</string>
+    <string name="pin_confirm_title">Konfirmasi PIN Anda</string>
+    <string name="pin_set_body">Pilih PIN 6 digit untuk melindungi dompet Anda</string>
+    <string name="pin_confirm_body">Masukkan PIN Anda sekali lagi untuk konfirmasi</string>
+    <string name="pin_err_mismatch">PIN tidak cocok. Silakan coba lagi.</string>
+    <string name="pin_err_save">Gagal menyimpan PIN. Silakan coba lagi.</string>
+    <string name="pin_err_wallet">Gagal membuat dompet. Silakan coba lagi.</string>
+    <string name="unlock_err_failed">Gagal membuka kunci. Silakan coba lagi.</string>
+    <string name="unlock_wiping">Terlalu banyak percobaan gagal — menghapus dompet</string>
+    <string name="unlock_attempts_left">PIN salah. Sisa percobaan: %1$d</string>
+    <string name="battery_title">Jaga sinkronisasi tetap berjalan di latar belakang</string>
+    <string name="battery_body">Android dapat menidurkan dompet ini saat layar mati, sehingga koneksinya ke jaringan DigiByte terputus dan bisa tertahan di 0 peer sampai Anda membukanya kembali.\n\nIzinkan berjalan tanpa batasan agar sinkronisasi terus berlanjut.</string>
+    <string name="battery_body_samsung">\n\nDi Samsung, buka juga Device Care → Baterai → \"Aplikasi yang tidak pernah tidur\" lalu tambahkan DigiByte Wallet.</string>
+    <string name="battery_open_settings">Buka pengaturan</string>
+    <string name="tor_title">Fitur Privasi Baru</string>
+    <string name="tor_body">Perutean Tor kini tersedia. Saat diaktifkan, dompet Anda terhubung ke jaringan DigiByte melalui Tor sehingga alamat IP Anda tersembunyi dari peer.\n\nAktifkan perutean Tor?</string>
+    <string name="tor_enable">Aktifkan</string>
+    <string name="common_not_now">Nanti saja</string>
+
 </resources>
