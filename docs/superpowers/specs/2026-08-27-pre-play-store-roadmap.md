@@ -172,18 +172,49 @@ beyond `CN_CUSTODY`.
 **So every "buy DGB with a card" page is fiat → BTC/USDT → swap to DGB.** Two hops, two spreads,
 and the card statement names a different asset than the user believes they bought.
 
-### The options
+### Direction: ChangeNOW, as the reference integration
 
-1. **Swap widget** (ChangeNOW / Changelly) — honest about being a swap, but the user needs crypto
-   already. Does not answer "my friend has dollars and wants DGB".
+**Decided 2026-08-27.** Wire ChangeNOW in — an account already exists — and treat it as the
+worked example of how the wallet supports an external provider at all. Not scheduled; recorded so
+the next person starts from the decision rather than the survey.
+
+What it does and does not give:
+
+- **It is a swap, not a fiat on-ramp.** It answers "I hold BTC and want DGB". It does not answer
+  "I have dollars". The UI has to say so plainly, or a Buy tab that cannot take money is worse
+  than no Buy tab.
+- Non-custodial: funds move between wallets, and the payout goes to an address we supply.
+- Live pair confirmed 2026-08-27: `btc_dgb`, minimum **0.0001763 BTC**, 0.01 BTC ≈ **155,227
+  DGB**, quoted 10–60 minutes. Fixed-rate is supported.
+
+**Widget or API is the real design decision, and it turns on one thing: the payout address.**
+
+The embed widget takes `from`, `to`, `amount`, `link_id` and styling, but has **no documented
+parameter to prefill and lock the payout address**. In a wallet that is the whole argument: it
+would mean the user pasting their own DGB address into a third-party page rendered inside the
+app. Mistype it and the funds are gone, and a wallet that owns the address has no business asking
+its user to re-enter it.
+
+The API path creates the exchange with `address` set to a receive address the wallet derives
+itself, then shows a native screen with the deposit address and QR. More work, no second WebView
+next to a hot wallet, and the destination is never user-typed or page-supplied. **The wallet must
+supply the address; it must never accept one back from a page.**
+
+If the widget is chosen anyway for speed, the origin-lock and no-JS-bridge pattern already built
+for the digistamp WebView is the precedent to follow — but the address question does not go away.
+
+### The options that were weighed
+
+1. **Swap widget / API** (ChangeNOW) — chosen, above.
 2. **Two-hop on-ramp** — embed fiat→BTC, then swap. Works today. The combined cost must be shown
    as one number, or it reads as a terrible DGB price and the wallet wears the blame for someone
    else's spread.
 3. **Hand off to exchanges** with real DGB/fiat books — no integration, no liability, weakest UX.
 4. **Ship nothing** until a direct rail exists, and spend the effort on getting DGB onto one.
 
-Both Guardarian and ChangeNOW run non-custodial widget/API partner programmes that deliver to a
-user-supplied address, which suits a sovereignty-first wallet. Neither fixes the missing fiat leg.
+Guardarian also runs a non-custodial partner programme delivering to a user-supplied address, so
+it stays a viable second provider if the fiat leg ever appears — its DGB listing is swap-only
+today, not a card rail.
 
 ### Re-checking (rails change quietly)
 
