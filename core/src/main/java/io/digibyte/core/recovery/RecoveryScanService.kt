@@ -153,7 +153,12 @@ class RecoveryScanService(
                     profile = profile,
                     addresses = addrs,
                     derivedAddresses = derived,
-                    utxos = fetched?.utxos ?: emptyList(),
+                    // Deduped at the door: the reconcile endpoint has returned one outpoint
+                    // twice (confirmed AND h=0). Left alone it double-counts the balance and,
+                    // worse, makes the sweep spend the same input twice — invalid by consensus,
+                    // so the whole transaction is rejected for a reason that points nowhere near
+                    // a duplicated JSON row.
+                    utxos = UtxoDedup.byOutpoint(fetched?.utxos ?: emptyList()),
                     rawTxs = fetched?.rawTxs ?: emptyMap(),
                     reachableBackend = fetched != null,
                 )
