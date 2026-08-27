@@ -521,4 +521,7 @@
     <string name="ab_mit">Bu yazılım MIT Lisansı kapsamında sunulmaktadır.</string>
     <string name="ab_tagline">DigiByte merkeziyetsiz bir blok zinciri ve dijital para birimidir.</string>
 
+    <string name="tx_conf_short">%1$d onay</string>
+    <string name="tx_confirmed">Onaylandı</string>
+
 </resources>

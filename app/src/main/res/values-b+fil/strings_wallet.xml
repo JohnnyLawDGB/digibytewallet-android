@@ -521,4 +521,7 @@
     <string name="ab_mit">Ang software na ito ay ibinibigay sa ilalim ng MIT License.</string>
     <string name="ab_tagline">Ang DigiByte ay isang desentralisadong blockchain at digital na pera.</string>
 
+    <string name="tx_conf_short">%1$d na kump.</string>
+    <string name="tx_confirmed">Nakumpirma</string>
+
 </resources>

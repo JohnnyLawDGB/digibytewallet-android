@@ -521,4 +521,7 @@
     <string name="ab_mit">Phần mềm này được cung cấp theo Giấy phép MIT.</string>
     <string name="ab_tagline">DigiByte là một blockchain phi tập trung và một loại tiền kỹ thuật số.</string>
 
+    <string name="tx_conf_short">%1$d xác nhận</string>
+    <string name="tx_confirmed">Đã xác nhận</string>
+
 </resources>

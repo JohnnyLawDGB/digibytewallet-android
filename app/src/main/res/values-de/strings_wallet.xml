@@ -529,4 +529,7 @@
     <string name="ab_mit">Diese Software wird unter der MIT-Lizenz bereitgestellt.</string>
     <string name="ab_tagline">DigiByte ist eine dezentrale Blockchain und digitale Währung.</string>
 
+    <string name="tx_conf_short">%1$d Best.</string>
+    <string name="tx_confirmed">Bestätigt</string>
+
 </resources>

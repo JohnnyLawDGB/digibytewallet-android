@@ -521,4 +521,7 @@
     <string name="ab_mit">Perangkat lunak ini disediakan di bawah Lisensi MIT.</string>
     <string name="ab_tagline">DigiByte adalah blockchain terdesentralisasi dan mata uang digital.</string>
 
+    <string name="tx_conf_short">%1$d konf.</string>
+    <string name="tx_confirmed">Terkonfirmasi</string>
+
 </resources>

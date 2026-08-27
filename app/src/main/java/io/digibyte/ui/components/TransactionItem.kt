@@ -20,9 +20,11 @@ import io.digibyte.ui.theme.DigiByteRed
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 /**
- * Confirmations at which a transaction is shown as settled ("Confirmed"). DigiByte
+ * Confirmations at which a transaction is shown as settled (stringResource(R.string.tx_confirmed)). DigiByte
  * mines ~every 15s, so 4 confirmations ≈ 1 minute. Historical txs re-synced during
  * catch-up are already deep (high confirmations), so this latency only applies to
  * genuinely-new incoming transactions — legitimate settlement time.
@@ -115,7 +117,7 @@ fun TransactionItem(
                     Icon(
                         imageVector = if (isSend) Icons.Default.ArrowUpward
                                       else Icons.Default.ArrowDownward,
-                        contentDescription = if (isSend) "Sent" else "Received",
+                        contentDescription = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received),
                         tint = if (isSend) DigiByteRed else DigiByteGreen,
                         modifier = Modifier.size(20.dp)
                     )
@@ -128,7 +130,7 @@ fun TransactionItem(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (isSend) "Sent" else "Received",
+                        text = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received),
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -199,9 +201,9 @@ private fun TypeChip(kind: TxKind) {
 @Composable
 private fun ConfirmationsBadge(confirmations: Int) {
     val (label, color) = when {
-        confirmations == 0 -> "Unconfirmed" to MaterialTheme.colorScheme.error
-        confirmations < CONFIRMED_THRESHOLD -> "$confirmations conf." to Color(0xFFFFA726) // amber
-        else               -> "Confirmed" to DigiByteGreen
+        confirmations == 0 -> stringResource(R.string.txd_unconfirmed) to MaterialTheme.colorScheme.error
+        confirmations < CONFIRMED_THRESHOLD -> stringResource(R.string.tx_conf_short, confirmations) to Color(0xFFFFA726) // amber
+        else               -> stringResource(R.string.tx_confirmed) to DigiByteGreen
     }
     Surface(
         shape = MaterialTheme.shapes.extraSmall,

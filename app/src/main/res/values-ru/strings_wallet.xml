@@ -521,4 +521,7 @@
     <string name="ab_mit">Это программное обеспечение распространяется по лицензии MIT.</string>
     <string name="ab_tagline">DigiByte — децентрализованный блокчейн и цифровая валюта.</string>
 
+    <string name="tx_conf_short">подтв.: %1$d</string>
+    <string name="tx_confirmed">Подтверждена</string>
+
 </resources>

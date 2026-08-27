@@ -635,4 +635,9 @@
     <string name="ab_mit">This software is provided under the MIT License.</string>
     <string name="ab_tagline">DigiByte is a decentralized blockchain and digital currency.</string>
 
+    <!-- ── Activity list row ────────────────────────────────────────────────────────
+         The most-read component in the app: every transaction on the home screen. -->
+    <string name="tx_conf_short">%1$d conf.</string>
+    <string name="tx_confirmed">Confirmed</string>
+
 </resources>

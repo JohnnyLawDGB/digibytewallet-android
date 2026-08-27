@@ -68,6 +68,11 @@ class OnboardingHardcodedStringTest {
         "ui/settings/SecuritySettingsScreen.kt",
         "ui/settings/DisplaySettingsScreen.kt",
         "ui/digiid/DigiIdConfirmScreen.kt",
+        // The activity row: the most-read component in the app, and the one the source scan
+        // missed because it is a shared component rather than a screen. Found by eye on a
+        // German build on the Note 8 — which is exactly the failure mode the gate exists to
+        // stop, so the file goes IN the gate rather than just getting fixed.
+        "ui/components/TransactionItem.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -122,6 +127,10 @@ class OnboardingHardcodedStringTest {
         "github.com/JohnnyLawDGB/digibytewallet-android", "digibyte.org",
         "github.com/JohnnyLawDGB/digibytewallet-android/issues",
         "• \$range", "  ·  \$it", "10.0.0.5  or  node.example.com:12024",
+        // Activity row: value+ticker composites, a date pattern, a truncated address, and the
+        // two asset-kind badges (brand names).
+        "\$amountPrefix\$typedAmount", "\$amountPrefix\$amountFormatted DGB", "MMM dd, yyyy",
+        "\${address.take(8)}…\${address.takeLast(8)}", "DigiDollar", "DigiAsset",
         "Locked — try again in M:SS", "%d:%02d", "settings_view_seed", "DigiIdResult", "\$\$priceFormatted", " · v\$versionName",
         "\\n\${DigiByteUri.encode(address, sats)}",
         // Date/number patterns and a MIME type. NOTE: the date patterns are also pinned to
@@ -154,7 +163,7 @@ class OnboardingHardcodedStringTest {
     @Test fun `the sources this test scans actually exist`() {
         val missing = COVERED.filterNot { File(srcRoot, it).isFile }
         assertTrue("scan list is stale, cannot see: $missing", missing.isEmpty())
-        assertTrue("nothing scanned", COVERED.size >= 20)
+        assertTrue("nothing scanned", COVERED.size >= 21)
     }
 
     @Test fun `the scan sees literals at all`() {

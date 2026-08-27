@@ -521,4 +521,7 @@
     <string name="ab_mit">यह सॉफ़्टवेयर MIT लाइसेंस के तहत प्रदान किया गया है।</string>
     <string name="ab_tagline">DigiByte एक विकेंद्रीकृत ब्लॉकचेन और डिजिटल मुद्रा है।</string>
 
+    <string name="tx_conf_short">%1$d पुष्टि</string>
+    <string name="tx_confirmed">पुष्ट</string>
+
 </resources>

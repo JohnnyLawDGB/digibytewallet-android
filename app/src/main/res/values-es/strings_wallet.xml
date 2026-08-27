@@ -523,4 +523,7 @@
     <string name="ab_mit">Este software se proporciona bajo la Licencia MIT.</string>
     <string name="ab_tagline">DigiByte es una cadena de bloques descentralizada y una moneda digital.</string>
 
+    <string name="tx_conf_short">%1$d conf.</string>
+    <string name="tx_confirmed">Confirmada</string>
+
 </resources>

@@ -521,4 +521,7 @@
     <string name="ab_mit">本ソフトウェアは MIT ライセンスのもとで提供されています。</string>
     <string name="ab_tagline">DigiByte は分散型ブロックチェーンおよびデジタル通貨です。</string>
 
+    <string name="tx_conf_short">%1$d 承認</string>
+    <string name="tx_confirmed">承認済み</string>
+
 </resources>

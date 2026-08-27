@@ -521,4 +521,7 @@
     <string name="ab_mit">本软件依据 MIT 许可证提供。</string>
     <string name="ab_tagline">DigiByte 是一条去中心化区块链和数字货币。</string>
 
+    <string name="tx_conf_short">%1$d 次确认</string>
+    <string name="tx_confirmed">已确认</string>
+
 </resources>
