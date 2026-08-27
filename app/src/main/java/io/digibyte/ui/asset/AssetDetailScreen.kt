@@ -504,8 +504,7 @@ private fun AssetTransferItem(
     val amountPrefix = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received)
 
     val dateStr = remember(tx.timestamp) {
-        SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
-            .format(Date(tx.timestamp * 1000L))
+        io.digibyte.core.DateDisplay.dateTime(tx.timestamp * 1000L)
     }
 
     Card(

@@ -84,8 +84,9 @@ fun TransactionItem(
         "$amountPrefix$amountFormatted DGB"
     }
 
-    val dateStr = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-        .format(Date(tx.timestamp * 1000L))
+    // DateDisplay, not a pattern string: a pattern pins American day/month order even when the
+    // locale is German, which is how this rendered "Aug. 24, 2026" in a German build.
+    val dateStr = io.digibyte.core.DateDisplay.date(tx.timestamp * 1000L)
 
     // Show first 8 + ellipsis + last 8 chars of the counterpart address
     val address = if (isSend) tx.toAddress else tx.fromAddress

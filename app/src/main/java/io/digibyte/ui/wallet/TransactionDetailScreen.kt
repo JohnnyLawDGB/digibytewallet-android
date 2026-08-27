@@ -111,8 +111,7 @@ private fun TransactionDetailContent(
         maximumFractionDigits = 8
     }.format(feeDgb)
 
-    val dateStr = SimpleDateFormat("MMM dd, yyyy HH:mm:ss", Locale.getDefault())
-        .format(Date(tx.timestamp * 1000L))
+    val dateStr = io.digibyte.core.DateDisplay.dateTime(tx.timestamp * 1000L)
 
     Column(
         modifier = Modifier

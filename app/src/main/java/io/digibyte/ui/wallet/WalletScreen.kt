@@ -512,11 +512,13 @@ private fun formatEta(res: android.content.res.Resources, seconds: Long): String
     }
 }
 
-private fun formatRecoveryDate(unixSeconds: Long): String {
-    val sdf = java.text.SimpleDateFormat("MMMM yyyy", Locale.US)
-    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-    return sdf.format(java.util.Date(unixSeconds * 1000))
-}
+private fun formatRecoveryDate(unixSeconds: Long): String =
+    // UTC on purpose: this is the scan floor, a chain fact, not a local wall-clock moment.
+    // The LANGUAGE follows the user; the zone does not.
+    io.digibyte.core.DateDisplay.monthYear(
+        millis = unixSeconds * 1000,
+        zone = java.util.TimeZone.getTimeZone("UTC"),
+    )
 
 @Composable
 private fun WalletActionButton(

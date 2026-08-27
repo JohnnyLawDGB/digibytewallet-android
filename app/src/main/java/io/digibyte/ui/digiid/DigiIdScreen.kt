@@ -195,7 +195,6 @@ private fun formatTimeAgo(epochSeconds: Long): String {
         diff < 3600   -> "${diff / 60}m ago"
         diff < 86400  -> "${diff / 3600}h ago"
         diff < 604800 -> "${diff / 86400}d ago"
-        else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-            .format(Date(epochSeconds * 1000))
+        else -> io.digibyte.core.DateDisplay.date(epochSeconds * 1000)
     }
 }
