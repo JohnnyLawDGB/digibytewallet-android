@@ -251,15 +251,27 @@ class RecoveryScanService(
     ): Map<DerivationProfile, List<DerivedAddress>> {
         val result = LinkedHashMap<DerivationProfile, List<DerivedAddress>>(profiles.size)
         for (profile in profiles) {
-            val arr = NativeBridge.deriveAddresses(
-                seedBytes,
-                profile.hmacKey,
-                profile.prefixPath,
-                profile.gapExternal,
-                profile.gapInternal,
-                profile.addressFormat,
-            ) ?: emptyArray()
-            result[profile] = mapDerived(arr, profile.gapExternal)
+            // Every encoding this profile can appear as, not just its default. A format is a way
+            // of writing a key, not a different key — coins at a non-default encoding were
+            // invisible, and recovery reported "no funds found" rather than admitting it had not
+            // looked. See DerivationProfile.extraAddressFormats for why P2SH is excluded.
+            val formats = listOf(profile.addressFormat) + profile.extraAddressFormats
+            val derived = LinkedHashMap<String, DerivedAddress>()
+            for (format in formats) {
+                val arr = NativeBridge.deriveAddresses(
+                    seedBytes,
+                    profile.hmacKey,
+                    profile.prefixPath,
+                    profile.gapExternal,
+                    profile.gapInternal,
+                    format,
+                ) ?: emptyArray()
+                // Keyed by address so an encoding coinciding with another is not queried twice.
+                // chain/index are identical across encodings of one key, so whichever entry wins
+                // carries the same signing position.
+                for (d in mapDerived(arr, profile.gapExternal)) derived.putIfAbsent(d.address, d)
+            }
+            result[profile] = derived.values.toList()
         }
         return result
     }

@@ -25,6 +25,23 @@ data class DerivationProfile(
     val prefixPath: IntArray,
     /** 0 = P2PKH (D...), 1 = P2WPKH bech32 (dgb1q...), 2 = P2SH-P2WPKH (S...). */
     val addressFormat: Int,
+    /**
+     * Other encodings of the SAME keys to probe as well.
+     *
+     * An address format is a way of writing a public key, not a different key. This wallet's own
+     * Receive screen offers one BIP84 key as bech32 AND as legacy (D…), so a user who received on
+     * the Legacy tab has coins a bech32-only scan cannot see — and recovery answers "no funds
+     * found". Silently, about their money.
+     *
+     * NOT P2SH-P2WPKH (format 2), deliberately: the reconcile backend rejects DigiByte S…
+     * addresses with `invalid address` / HTTP 400, and one bad address fails the WHOLE batch —
+     * so probing it does not merely miss those coins, it blinds the entire profile. Revisit if
+     * the backend learns to accept them.
+     *
+     * Set only where the wallet actually hands out more than one encoding; probing every format
+     * everywhere would multiply the address set for paths that never had the option.
+     */
+    val extraAddressFormats: List<Int> = emptyList(),
     /** True when this profile matches the wallet's native derivation
      *  (BIP84 DGB). UI treats this specially — no sweep, just import. */
     val isNative: Boolean,
@@ -64,6 +81,9 @@ data class DerivationProfile(
                 hmacKey = HMAC_STANDARD,
                 prefixPath = hardened(84, 20, 0),
                 addressFormat = P2WPKH,
+                // The Receive screen hands out this same key as Legacy (D…) too. Without this,
+                // coins received on that tab are invisible to recovery.
+                extraAddressFormats = listOf(P2PKH),
                 isNative = true,
             ),
             DerivationProfile(
@@ -118,7 +138,8 @@ data class DerivationProfile(
         return label == other.label &&
                 hmacKey == other.hmacKey &&
                 prefixPath.contentEquals(other.prefixPath) &&
-                addressFormat == other.addressFormat
+                addressFormat == other.addressFormat &&
+                extraAddressFormats == other.extraAddressFormats
     }
 
     override fun hashCode(): Int {
@@ -126,6 +147,7 @@ data class DerivationProfile(
         h = 31 * h + hmacKey.hashCode()
         h = 31 * h + prefixPath.contentHashCode()
         h = 31 * h + addressFormat
+        h = 31 * h + extraAddressFormats.hashCode()
         return h
     }
 
