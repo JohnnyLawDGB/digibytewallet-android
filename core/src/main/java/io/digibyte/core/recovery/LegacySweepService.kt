@@ -224,15 +224,34 @@ class LegacySweepService(
         val inputs = assembleSweepInputs(sweepableResult)
 
         if (inputs.txids.isEmpty()) {
-            val reason = if (inputs.skippedNoScript.isNotEmpty())
-                "all ${inputs.skippedNoScript.size} UTXO(s) missing scriptPubKey (old backend?)"
-            else "no mappable UTXOs"
+            // "Everything was kept on purpose" and "nothing could be used" both arrive here with
+            // no inputs, and they mean opposite things. Reporting the first as FAILED with "no
+            // mappable UTXOs" tells someone looking at a wallet they can see has coins in it that
+            // it malfunctioned and their funds are at risk — when in fact the wallet deliberately
+            // kept them so their DigiAsset would still be movable.
+            val reservedEverything = reserve.reserved.isNotEmpty() && reserve.shortfall == 0L
+            val reason = when {
+                reservedEverything ->
+                    "Nothing was swept — all of it was kept back so your " +
+                        "${partition.assetBearing.size} DigiAsset(s) can still be moved. " +
+                        "Your coins are safe where they are."
+                inputs.skippedNoScript.isNotEmpty() ->
+                    "all ${inputs.skippedNoScript.size} UTXO(s) missing scriptPubKey (old backend?)"
+                else -> "no mappable UTXOs"
+            }
             return SweepOutcome(
                 profile, null, null, 0L, 0, reason,
-                broadcastState = BroadcastState.FAILED,
+                // Not a failure when it was deliberate. PENDING would imply a broadcast, so the
+                // sweep reports FAILED only for the cases that actually went wrong.
+                broadcastState = if (reservedEverything) BroadcastState.PENDING
+                                 else BroadcastState.FAILED,
                 skippedNoScript = inputs.skippedNoScript,
                 heldBackAssets = heldAssets,
                 heldBackUnknown = heldUnknown,
+                // Previously omitted here, so the one branch where the reserve explains
+                // EVERYTHING was the one branch that did not mention it.
+                heldBackFeeReserve = heldReserve,
+                feeReserveShortfall = reserve.shortfall,
             )
         }
 
