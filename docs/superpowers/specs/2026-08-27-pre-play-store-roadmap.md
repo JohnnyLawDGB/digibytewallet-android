@@ -1,11 +1,11 @@
 # Pre-Play-Store roadmap — future state
 
 **Status:** future state, not a plan. Nothing here is scheduled or designed to task level.
-**Gate:** all four items complete before submitting to the Play Store.
+**Gate:** items 1–3 complete before submitting to the Play Store. **Item 4 is not active.**
 **Written:** 2026-08-27, against v4.0.60.
 
-Four items. One of them is a **funds-safety gap that is live today**; the rest are product work.
-They are ordered by consequence, not by effort.
+Four items, one of them **not active**. One is a **funds-safety gap that is live today**; the
+rest are product work. Ordered by consequence, not by effort.
 
 ---
 
@@ -152,7 +152,10 @@ is what remains rather than something new to build.
 
 ---
 
-## 4. Buy tab — blocked on a rail that does not exist
+## 4. Buy tab — NOT ACTIVE
+
+**Status: not active (2026-08-27).** Parked deliberately, not forgotten. The research below is
+kept because it is the expensive part and it will go stale quietly — re-check before reviving.
 
 ### The finding
 
@@ -215,6 +218,28 @@ for the digistamp WebView is the precedent to follow — but the address questio
 Guardarian also runs a non-custodial partner programme delivering to a user-supplied address, so
 it stays a viable second provider if the fiat leg ever appears — its DGB listing is swap-only
 today, not a card rail.
+
+### Simplex — unverified, and unverifiable from outside
+
+Simplex did once offer direct debit-card purchase of DGB, which is why it is worth chasing. It is
+now **owned by Nuvei** (acquired for $250M), and post-acquisition asset lists have been pruned
+across the industry.
+
+**Attempted verification 2026-08-27 and could not settle it either way:**
+
+- `sandbox.test-simplexcc.com/v2/supported_crypto_currencies` exists but returns
+  `"query.public_key is required` — the supported-currency list sits **behind partner
+  credentials**, unlike Transak, Guardarian and ChangeNOW, whose lists are public.
+- `buy.simplex.com` serves a 30 KB JavaScript shell and loads its currency list client-side, so
+  the served HTML contains no coins at all — not even BTC. It confirms nothing about DGB.
+
+So Simplex is **unknown**, not "no". That distinction matters: the other three were ruled in or
+out on live data, and this one simply cannot be checked without a key.
+
+**To resolve it,** either use a Simplex/Nuvei partner `public_key` against the endpoint above, or
+ask them directly whether DGB is still a supported payout asset. If it is, Simplex becomes the
+only known **direct fiat→DGB** rail found so far and changes the shape of this whole item — the
+two-hop compromise stops being necessary.
 
 ### Re-checking (rails change quietly)
 
