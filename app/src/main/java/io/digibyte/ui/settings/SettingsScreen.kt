@@ -29,6 +29,28 @@ import io.digibyte.ui.theme.DigiByteBlue
 
 @Composable
 fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = hiltViewModel()) {
+    val localeContext = androidx.compose.ui.platform.LocalContext.current
+    var showLanguagePicker by remember { mutableStateOf(false) }
+    var currentLanguage by remember {
+        mutableStateOf(io.digibyte.ui.locale.LocaleController.current(localeContext))
+    }
+
+    if (showLanguagePicker) {
+        io.digibyte.ui.locale.LanguagePickerSheet(
+            selected = currentLanguage,
+            onSelect = { entry ->
+                io.digibyte.ui.locale.LocaleController.set(localeContext, entry)
+                currentLanguage = entry
+                showLanguagePicker = false
+                // Resources are resolved when a context is created, so a running screen keeps the
+                // old language until it is rebuilt. Recreate rather than leave the user tapping a
+                // setting that appears to do nothing.
+                (localeContext as? android.app.Activity)?.recreate()
+            },
+            onDismiss = { showLanguagePicker = false },
+        )
+    }
+
     val context = androidx.compose.ui.platform.LocalContext.current
     val versionName = try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
@@ -105,6 +127,16 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                     title = "Display",
                     subtitle = "Fiat currency, theme",
                     onClick = { navController.navigate("settings_display") }
+                )
+                // Subtitle shows the CURRENT language in its own script, so someone who has
+                // landed in a language they cannot read can still recognise this row and get
+                // back out of it.
+                SettingsRow(
+                    icon = Icons.Default.Language,
+                    iconTint = Color(0xFF4CAF50),
+                    title = "Language",
+                    subtitle = currentLanguage?.endonym ?: "Follow device language",
+                    onClick = { showLanguagePicker = true }
                 )
             }
         }

@@ -44,6 +44,19 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
+    /**
+     * Applies the chosen language before anything else exists.
+     *
+     * Resources are resolved from the context they are read through, so the language has to be in
+     * place here — before the activity, before Compose. LocaleController.wrap is total: an
+     * unreadable stored value yields the system language rather than an exception, because a
+     * wallet that cannot start is one its owner cannot fix, and the setting that broke it is
+     * exactly the one they would need to reach.
+     */
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(io.digibyte.ui.locale.LocaleController.wrap(newBase))
+    }
+
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var pinManager: PinManager
     @Inject lateinit var biometricAuth: BiometricAuth

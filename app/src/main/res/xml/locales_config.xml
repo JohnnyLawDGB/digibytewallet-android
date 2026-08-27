@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Languages the wallet ships. Android 13+ reads this to list the app in Settings -> System ->
+  Languages -> App languages, so the OS picker and the in-app picker offer the same set.
+  Keep in step with io.digibyte.core.locale.AppLocale.SUPPORTED — a language listed here with no
+  values-xx resources silently falls back to English, which looks like the setting was ignored.
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+        <locale android:name="en"/>
+        <locale android:name="hi"/>
+        <locale android:name="zh"/>
+        <locale android:name="ja"/>
+        <locale android:name="pt-BR"/>
+        <locale android:name="es"/>
+        <locale android:name="id"/>
+        <locale android:name="vi"/>
+        <locale android:name="tr"/>
+        <locale android:name="ru"/>
+        <locale android:name="fil"/>
+</locale-config>
