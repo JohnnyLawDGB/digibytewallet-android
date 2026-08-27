@@ -713,7 +713,68 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+
+            // Coins deliberately left behind. Shown on failed outcomes too: someone
+            // troubleshooting a failed sweep still needs to know what was held back, and this is
+            // exactly when that detail would otherwise go missing.
+            //
+            // The two lists stay separate because they are different facts. "Carries a DigiAsset"
+            // is a decision the wallet made on purpose; "could not tell" is an admission, and it
+            // may clear on a retry. Merging them into one "skipped" count would hide which is
+            // which from the person deciding what to do next.
+            if (outcome.heldBackAssets.isNotEmpty()) {
+                HeldBackNote(
+                    title = "${outcome.heldBackAssets.size} left behind — DigiAssets",
+                    body = "These coins carry DigiAssets. Sweeping them as ordinary DGB would " +
+                        "destroy the assets, so they were left in the old wallet. They are safe " +
+                        "there and can be moved separately.",
+                    outpoints = outcome.heldBackAssets,
+                )
+            }
+            if (outcome.heldBackUnknown.isNotEmpty()) {
+                HeldBackNote(
+                    title = "${outcome.heldBackUnknown.size} left behind — could not check",
+                    body = "We could not read the transactions these came from, so we could not " +
+                        "tell whether they carry DigiAssets. They were left alone rather than " +
+                        "risked. Trying again later may clear this.",
+                    outpoints = outcome.heldBackUnknown,
+                )
+            }
         }
+    }
+}
+
+/** One held-back group: what was left, why, and which outpoints — so a user can look them up
+ *  rather than take the wallet's word for it. */
+@Composable
+private fun HeldBackNote(title: String, body: String, outpoints: List<String>) {
+    Spacer(Modifier.height(12.dp))
+    Text(
+        text = title,
+        color = Color(0xFFFFC107),
+        style = MaterialTheme.typography.labelLarge
+    )
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = body,
+        color = MUTED,
+        style = MaterialTheme.typography.bodySmall
+    )
+    // Capped: a wallet with dozens of asset outputs would otherwise push the actual result off
+    // screen. The count in the title is always the true one.
+    outpoints.take(5).forEach { op ->
+        Text(
+            text = op,
+            color = MUTED,
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+    if (outpoints.size > 5) {
+        Text(
+            text = "…and ${outpoints.size - 5} more",
+            color = MUTED,
+            style = MaterialTheme.typography.labelSmall
+        )
     }
 }
 
