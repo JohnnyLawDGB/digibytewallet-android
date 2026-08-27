@@ -40,6 +40,11 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+/** How far above the size-derived estimate an implied fee may sit before the transaction is
+ *  refused. Generous enough for fee-rate disagreement and rounding; tight enough that a missing
+ *  change output — the realistic way value gets burned here — cannot slip through. */
+#define FOREIGN_TX_MAX_FEE_FACTOR 3
+
 static void secure_zero(volatile void *p, size_t n) {
     volatile uint8_t *v = (volatile uint8_t *)p;
     while (n--) *v++ = 0;
@@ -674,4 +679,262 @@ Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
     jboolean isSigned = BRTransactionIsSigned(tx) ? JNI_TRUE : JNI_FALSE;
     BRTransactionFree(tx);
     return isSigned;
+}
+
+/**
+ * Build and sign a transaction from a FOREIGN seed with CALLER-SPECIFIED outputs.
+ *
+ * buildAndSignLegacySweep derives keys from any seed but can only produce one plain output.
+ * buildAndSignAssetTransferTx builds arbitrary outputs — DigiAsset markers, OP_RETURN and all —
+ * but signs with g_wallet's session seed, so it cannot touch a wallet the user is migrating FROM.
+ * Moving a DigiAsset out of an old wallet needs both halves, which is this.
+ *
+ * The DigiAsset structure is decided in Kotlin and arrives as outputAddresses / outputAmounts /
+ * outputScriptsHex, exactly as the asset-send path already does it. An empty address means the
+ * output is a raw script (the OP_RETURN marker) taken from outputScriptsHex instead.
+ *
+ * ## The fee is IMPLIED, and that is the dangerous part
+ *
+ * The sweep computes `out = totalIn - fee`, so it cannot leak value. Here the caller states the
+ * outputs, and whatever is left over becomes the fee — including anything the caller forgot to
+ * account for. A transfer that spends a 6,000-sat asset UTXO plus a 100,000-sat fee UTXO and
+ * writes back only the asset output burns roughly 100,000 sats on a transaction that should cost
+ * about 40,000. Nothing rejects that: it is a perfectly valid transaction, and the miner keeps
+ * the difference.
+ *
+ * So the implied fee is checked in BOTH directions before signing:
+ *   too LOW  — below the relay minimum, the transaction simply never confirms.
+ *   too HIGH — far above what the size justifies, which means the caller lost track of value.
+ *              Refused rather than signed, because the loss is silent and irreversible.
+ *
+ * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
+    JNIEnv *env, jobject thiz,
+    jbyteArray seedBytes,
+    jstring hmacKey,
+    jintArray prefixPath,
+    jobjectArray txidsHex,
+    jintArray vouts,
+    jlongArray amounts,
+    jintArray chainIndices,
+    jintArray addressIndices,
+    jobjectArray scriptPubKeysHex,
+    jobjectArray outputAddresses,
+    jlongArray outputAmounts,
+    jobjectArray outputScriptsHex,
+    jlong feePerKb)
+{
+    (void)thiz;
+    if (!seedBytes || !hmacKey || !prefixPath || !txidsHex || !vouts || !amounts ||
+        !chainIndices || !addressIndices || !scriptPubKeysHex ||
+        !outputAddresses || !outputAmounts || !outputScriptsHex) return NULL;
+
+    const jsize inputCount = (*env)->GetArrayLength(env, txidsHex);
+    const jsize outputCount = (*env)->GetArrayLength(env, outputAddresses);
+    if (inputCount <= 0 || outputCount <= 0) return NULL;
+    if ((*env)->GetArrayLength(env, vouts) != inputCount) return NULL;
+    if ((*env)->GetArrayLength(env, amounts) != inputCount) return NULL;
+    if ((*env)->GetArrayLength(env, chainIndices) != inputCount) return NULL;
+    if ((*env)->GetArrayLength(env, addressIndices) != inputCount) return NULL;
+    if ((*env)->GetArrayLength(env, scriptPubKeysHex) != inputCount) return NULL;
+    if ((*env)->GetArrayLength(env, outputAmounts) != outputCount) return NULL;
+    if ((*env)->GetArrayLength(env, outputScriptsHex) != outputCount) return NULL;
+
+    const jsize seedLen = (*env)->GetArrayLength(env, seedBytes);
+    jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
+    if (!seedRaw) return NULL;
+
+    /* Private copy; the caller's array goes straight back untouched. See jni_seed_buffer.h. */
+    SeedBuffer seed;
+    const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
+    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    if (!seedOk) {
+        LOGW("buildAndSignForeignTx: rejecting a seed of %d bytes", (int)seedLen);
+        return NULL;
+    }
+
+    const char *hmac = (*env)->GetStringUTFChars(env, hmacKey, NULL);
+    if (!hmac) { seed_buffer_release(&seed); return NULL; }
+
+    const jsize prefixLen = (*env)->GetArrayLength(env, prefixPath);
+    jint *prefixJ = (*env)->GetIntArrayElements(env, prefixPath, NULL);
+
+    BRKey *keys = (BRKey *)calloc((size_t)inputCount, sizeof(BRKey));
+    if (!keys) {
+        (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
+        (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
+        seed_buffer_release(&seed);
+        return NULL;
+    }
+
+    BRTransaction *tx = BRTransactionNew();
+    if (!tx) {
+        free(keys);
+        (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
+        (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
+        seed_buffer_release(&seed);
+        return NULL;
+    }
+
+    jint  *voutJ    = (*env)->GetIntArrayElements(env, vouts, NULL);
+    jlong *amtJ     = (*env)->GetLongArrayElements(env, amounts, NULL);
+    jint  *chainJ   = (*env)->GetIntArrayElements(env, chainIndices, NULL);
+    jint  *addrIdxJ = (*env)->GetIntArrayElements(env, addressIndices, NULL);
+    jlong *outAmtJ  = (*env)->GetLongArrayElements(env, outputAmounts, NULL);
+
+    int ok = 1;
+    uint64_t totalIn = 0;
+    uint32_t *fullPath = (uint32_t *)calloc((size_t)prefixLen + 2, sizeof(uint32_t));
+    if (!fullPath) ok = 0;
+
+    /* ── Inputs: derive the signing key for each, at its own (chain, index). ── */
+    for (jsize i = 0; ok && i < inputCount; i++) {
+        jstring txidJ   = (jstring)(*env)->GetObjectArrayElement(env, txidsHex, i);
+        jstring scriptJ = (jstring)(*env)->GetObjectArrayElement(env, scriptPubKeysHex, i);
+        if (!txidJ || !scriptJ) { ok = 0; break; }
+
+        const char *txidStr   = (*env)->GetStringUTFChars(env, txidJ, NULL);
+        const char *scriptStr = (*env)->GetStringUTFChars(env, scriptJ, NULL);
+
+        uint8_t txidBytes[32];
+        uint8_t scriptBytes[256];
+        size_t txidLen   = txidStr   ? hex_to_bytes(txidStr, txidBytes, sizeof(txidBytes)) : 0;
+        size_t scriptLen = scriptStr ? hex_to_bytes(scriptStr, scriptBytes, sizeof(scriptBytes)) : 0;
+
+        if (txidStr)   (*env)->ReleaseStringUTFChars(env, txidJ, txidStr);
+        if (scriptStr) (*env)->ReleaseStringUTFChars(env, scriptJ, scriptStr);
+        (*env)->DeleteLocalRef(env, txidJ);
+        (*env)->DeleteLocalRef(env, scriptJ);
+
+        if (txidLen != 32 || scriptLen == 0 || amtJ[i] <= 0) { ok = 0; break; }
+
+        UInt256 txHash;
+        /* Display-order hex is reversed relative to internal byte order. */
+        for (int b = 0; b < 32; b++) txHash.u8[b] = txidBytes[31 - b];
+
+        for (jsize p = 0; p < prefixLen; p++) fullPath[p] = (uint32_t)prefixJ[p];
+        fullPath[prefixLen]     = (uint32_t)chainJ[i];
+        fullPath[prefixLen + 1] = (uint32_t)addrIdxJ[i];
+        BRBIP32PrivKeyArrayPath(&keys[i], seed.bytes, seed.len,
+                                hmac, fullPath, (size_t)prefixLen + 2);
+
+        BRTransactionAddInput(tx, txHash, (uint32_t)voutJ[i], (uint64_t)amtJ[i],
+                              scriptBytes, scriptLen, NULL, 0, NULL, 0, TXIN_SEQUENCE);
+        totalIn += (uint64_t)amtJ[i];
+    }
+
+    /* ── Outputs: address outputs, or raw scripts for the DigiAsset OP_RETURN. ── */
+    uint64_t totalOut = 0;
+    for (jsize i = 0; ok && i < outputCount; i++) {
+        jstring addrJ   = (jstring)(*env)->GetObjectArrayElement(env, outputAddresses, i);
+        jstring scriptJ = (jstring)(*env)->GetObjectArrayElement(env, outputScriptsHex, i);
+        if (!addrJ) { ok = 0; break; }
+
+        const char *addrStr = (*env)->GetStringUTFChars(env, addrJ, NULL);
+        uint8_t scriptBytes[256];
+        size_t scriptLen = 0;
+
+        if (addrStr && addrStr[0] != '\0') {
+            scriptLen = BRAddressScriptPubKey(scriptBytes, sizeof(scriptBytes), addrStr);
+            (*env)->ReleaseStringUTFChars(env, addrJ, addrStr);
+            if (scriptLen == 0) {
+                LOGW("buildAndSignForeignTx: invalid output address at %d", (int)i);
+                ok = 0;
+            }
+        } else {
+            if (addrStr) (*env)->ReleaseStringUTFChars(env, addrJ, addrStr);
+            if (!scriptJ) { ok = 0; }
+            else {
+                const char *scriptStr = (*env)->GetStringUTFChars(env, scriptJ, NULL);
+                scriptLen = scriptStr ? hex_to_bytes(scriptStr, scriptBytes, sizeof(scriptBytes)) : 0;
+                if (scriptStr) (*env)->ReleaseStringUTFChars(env, scriptJ, scriptStr);
+                if (scriptLen == 0) {
+                    LOGW("buildAndSignForeignTx: empty raw script at %d", (int)i);
+                    ok = 0;
+                }
+            }
+        }
+
+        (*env)->DeleteLocalRef(env, addrJ);
+        if (scriptJ) (*env)->DeleteLocalRef(env, scriptJ);
+
+        if (ok) {
+            if (outAmtJ[i] < 0) { ok = 0; break; }
+            BRTransactionAddOutput(tx, (uint64_t)outAmtJ[i], scriptBytes, scriptLen);
+            totalOut += (uint64_t)outAmtJ[i];
+        }
+    }
+
+    (*env)->ReleaseIntArrayElements(env, vouts, voutJ, JNI_ABORT);
+    (*env)->ReleaseLongArrayElements(env, amounts, amtJ, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, chainIndices, chainJ, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, addressIndices, addrIdxJ, JNI_ABORT);
+    (*env)->ReleaseLongArrayElements(env, outputAmounts, outAmtJ, JNI_ABORT);
+    if (fullPath) { secure_zero(fullPath, ((size_t)prefixLen + 2) * sizeof(uint32_t)); free(fullPath); }
+    (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
+
+    if (!ok || totalOut > totalIn) {
+        if (totalOut > totalIn) {
+            LOGW("buildAndSignForeignTx: outputs %llu exceed inputs %llu",
+                 (unsigned long long)totalOut, (unsigned long long)totalIn);
+        }
+        for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
+        free(keys);
+        BRTransactionFree(tx);
+        (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
+        seed_buffer_release(&seed);
+        return NULL;
+    }
+
+    /* ── The implied fee, checked BOTH ways. See the header comment. ── */
+    const uint64_t impliedFee = totalIn - totalOut;
+    size_t estSize = 10 + (size_t)inputCount * 160 + (size_t)outputCount * 34;
+    uint64_t expectedFee = ((uint64_t)estSize * (uint64_t)feePerKb) / 1000;
+    if (expectedFee < 1000) expectedFee = 1000; /* DGB min relay */
+
+    if (impliedFee < expectedFee) {
+        LOGW("buildAndSignForeignTx: implied fee %llu below the %llu this size needs — "
+             "would not relay", (unsigned long long)impliedFee, (unsigned long long)expectedFee);
+        ok = 0;
+    } else if (impliedFee > expectedFee * FOREIGN_TX_MAX_FEE_FACTOR) {
+        /* The caller lost track of value — almost always a missing change output. Burning it is
+         * silent and irreversible, so refuse rather than sign. */
+        LOGW("buildAndSignForeignTx: implied fee %llu is over %dx the expected %llu — "
+             "refusing to burn the difference (missing change output?)",
+             (unsigned long long)impliedFee, FOREIGN_TX_MAX_FEE_FACTOR,
+             (unsigned long long)expectedFee);
+        ok = 0;
+    }
+
+    int signOk = 0;
+    if (ok) signOk = BRTransactionSign(tx, 0, keys, (size_t)inputCount);
+
+    for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
+    free(keys);
+    (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
+    seed_buffer_release(&seed);
+
+    if (!ok || !signOk || !BRTransactionIsSigned(tx)) {
+        LOGW("buildAndSignForeignTx: signing failed or refused (ok=%d signOk=%d)", ok, signOk);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    size_t len = BRTransactionSerialize(tx, NULL, 0);
+    uint8_t *ser = (uint8_t *)malloc(len);
+    if (!ser) { BRTransactionFree(tx); return NULL; }
+    len = BRTransactionSerialize(tx, ser, len);
+    BRTransactionFree(tx);
+
+    char *hex = (char *)malloc(len * 2 + 1);
+    if (!hex) { free(ser); return NULL; }
+    for (size_t i = 0; i < len; i++) sprintf(hex + i * 2, "%02x", ser[i]);
+    hex[len * 2] = '\0';
+    free(ser);
+
+    jstring result = (*env)->NewStringUTF(env, hex);
+    free(hex);
+    return result;
 }

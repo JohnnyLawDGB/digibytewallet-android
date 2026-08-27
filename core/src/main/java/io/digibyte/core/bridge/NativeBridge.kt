@@ -486,6 +486,39 @@ object NativeBridge {
         outputScriptsHex: Array<String>,
     ): String?
 
+    /**
+     * Build and sign a transaction from a FOREIGN seed with caller-specified outputs.
+     *
+     * [buildAndSignLegacySweep] derives keys from any seed but produces one plain output;
+     * [buildAndSignAssetTransferTx] builds DigiAsset outputs but signs with the CURRENT wallet.
+     * Moving an asset out of a wallet the user is migrating from needs both, which is this.
+     *
+     * An empty entry in [outputAddresses] means that output is a raw script taken from
+     * [outputScriptsHex] instead — that is how the DigiAsset OP_RETURN marker is passed.
+     *
+     * THE FEE IS IMPLIED: `sum(amounts) - sum(outputAmounts)`. A caller that omits a change
+     * output does not get an error, it burns the remainder. Native refuses a fee below what the
+     * transaction's size needs (it would never relay) AND one far above it (value being lost
+     * silently), so a missing change output fails loudly instead of costing the user coins.
+     *
+     * @return signed transaction hex, or null on any refusal — reasons are logged natively.
+     */
+    external fun buildAndSignForeignTx(
+        seedBytes: ByteArray,
+        hmacKey: String,
+        prefixPath: IntArray,
+        txidsHex: Array<String>,
+        vouts: IntArray,
+        amounts: LongArray,
+        chainIndices: IntArray,
+        addressIndices: IntArray,
+        scriptPubKeysHex: Array<String>,
+        outputAddresses: Array<String>,
+        outputAmounts: LongArray,
+        outputScriptsHex: Array<String>,
+        feePerKb: Long,
+    ): String?
+
     external fun buildAndSignLegacySweep(
         seedBytes: ByteArray,
         hmacKey: String,
