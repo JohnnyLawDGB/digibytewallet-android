@@ -181,7 +181,12 @@ class RecoveryScanClassifyTest {
         // walletTxPersister) are relaxed mocks -- the BIP49 branch
         // short-circuits before ever touching them, and seedBytes is unused
         // too (short-circuits before any JNI), so a zero buffer is fine.
-        val result = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true)).sweepFromSeed(
+        val result = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true), ForeignUtxoAssetClassifier(
+            // These tests are not about assets; a classifier that answers "plain, and I
+            // could tell" keeps them testing what they test rather than the new guard.
+            fetchRawTx = { byteArrayOf(1) },
+            isAssetTx = { false },
+        )).sweepFromSeed(
             seedBytes = ByteArray(64),
             nonNativeResults = done.nonNativeWithFunds,
             destAddress = "dgb1qdummydestinationplaceholderaddr",

@@ -44,6 +44,7 @@ class RecoverFundsViewModel @Inject constructor(
     private val seedProvider: SeedProvider,
     private val outgoingTxStore: io.digibyte.core.OutgoingTxStore,
     private val walletTxPersister: io.digibyte.core.WalletTxPersister,
+    private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
 ) : ViewModel() {
 
     sealed class UiState {
@@ -59,6 +60,19 @@ class RecoverFundsViewModel @Inject constructor(
         data class Done(val outcomes: List<LegacySweepService.SweepOutcome>) : UiState()
         data class Error(val reason: String) : UiState()
     }
+
+
+    /**
+     * Decides which of the foreign seed's UTXOs may be spent as plain DGB.
+     *
+     * A DigiAsset lives on a specific UTXO; sweeping it as ordinary DGB destroys it. The raw
+     * transaction comes from the asset provider and the marker check from the native parser —
+     * the same one the wallet's own asset detection uses.
+     */
+    private fun assetClassifier() = io.digibyte.core.recovery.ForeignUtxoAssetClassifier(
+        fetchRawTx = { txid -> assetNetworkClient.getRawTransaction(txid) },
+        isAssetTx = { raw -> io.digibyte.core.bridge.NativeBridge.isAssetTransaction(raw) },
+    )
 
     private val _state = MutableStateFlow<UiState>(UiState.Idle)
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -151,7 +165,7 @@ class RecoverFundsViewModel @Inject constructor(
                     }
                     try {
                         val result = withContext(Dispatchers.IO) {
-                            LegacySweepService(outgoingTxStore, walletTxPersister).sweepFromSeed(
+                            LegacySweepService(outgoingTxStore, walletTxPersister, assetClassifier()).sweepFromSeed(
                                 seedBytes = seed,
                                 nonNativeResults = findings,
                                 destAddress = res.address,
@@ -231,7 +245,7 @@ class RecoverFundsViewModel @Inject constructor(
             }
             try {
                 val result = withContext(Dispatchers.IO) {
-                    LegacySweepService(outgoingTxStore, walletTxPersister).sweepFromSeed(
+                    LegacySweepService(outgoingTxStore, walletTxPersister, assetClassifier()).sweepFromSeed(
                         seedBytes = seed,
                         nonNativeResults = findings,   // foreign: all-funded incl. native
                         destAddress = dest.address,

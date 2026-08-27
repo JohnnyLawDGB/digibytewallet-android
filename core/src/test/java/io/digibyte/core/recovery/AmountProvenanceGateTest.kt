@@ -20,7 +20,12 @@ import org.junit.Test
  * so relaxed mocks keep this a pure-JVM test with zero durability side effects.
  */
 class AmountProvenanceGateTest {
-    private val service = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true))
+    private val service = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true), ForeignUtxoAssetClassifier(
+            // These tests are not about assets; a classifier that answers "plain, and I
+            // could tell" keeps them testing what they test rather than the new guard.
+            fetchRawTx = { byteArrayOf(1) },
+            isAssetTx = { false },
+        ))
     private val legacyProfile =
         DerivationProfile.BUILT_INS.first { it.label == "Legacy DigiByte mobile wallet" }
     private val addr = "DCrAZfrumyKz36cDfE8YCL2fJc5eU7Ffxk"

@@ -20,6 +20,15 @@ import kotlinx.coroutines.withContext
 class LegacySweepService(
     private val outgoingTxStore: OutgoingTxStore,
     private val walletTxPersister: WalletTxPersister,
+    /**
+     * Decides which of a foreign seed's UTXOs may be spent as plain DGB.
+     *
+     * REQUIRED, deliberately. A nullable classifier would have to default either to sweeping
+     * everything — which destroys any DigiAsset on the seed — or to sweeping nothing, which
+     * silently breaks recovery. Making the compiler demand it means the decision is made once,
+     * at the call site, by someone who can see it.
+     */
+    private val assetClassifier: ForeignUtxoAssetClassifier,
 ) {
 
     /** Acceptance state of a sweep broadcast. A returned txid means the tx
@@ -40,6 +49,13 @@ class LegacySweepService(
         /** Addresses whose backend row had no scriptPubKey and were skipped
          *  rather than aborting the profile (bug #4). Empty on a clean sweep. */
         val skippedNoScript: List<String> = emptyList(),
+        /** Outpoints ("txid:vout") left behind because they carry a DigiAsset. Spending these as
+         *  plain DGB would destroy the asset, so the sweep proceeds without them and says so. */
+        val heldBackAssets: List<String> = emptyList(),
+        /** Outpoints left behind because the asset question could not be answered — a raw tx that
+         *  would not fetch or parse. Distinct from [heldBackAssets]: these MIGHT be plain DGB.
+         *  Held anyway, because being wrong here burns an asset. Retrying later may free them. */
+        val heldBackUnknown: List<String> = emptyList(),
     )
 
     data class Result(
@@ -95,6 +111,10 @@ class LegacySweepService(
          *  .shouldApplyOutgoingOverride). External-address sweeps pass false. */
         destIsSelf: Boolean = false,
     ): Result {
+        // Classified ONCE for the whole sweep rather than per profile: profiles share addresses
+        // and therefore parent transactions, and the classifier caches by txid within a call.
+        val verdicts = assetClassifier.classify(nonNativeResults.flatMap { it.utxos })
+
         val outcomes = nonNativeResults.map { result ->
             if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
                 SweepOutcome(result.profile, null, null, 0L, 0,
@@ -106,7 +126,7 @@ class LegacySweepService(
                     SweepOutcome(result.profile, null, null, 0L, 0, refusal,
                         broadcastState = BroadcastState.FAILED)
                 } else {
-                    sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf)
+                    sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf, verdicts)
                 }
             }
         }
@@ -149,13 +169,36 @@ class LegacySweepService(
         destAddress: String,
         feePerKb: Long,
         destIsSelf: Boolean,
+        verdicts: Map<io.digibyte.core.reconcile.UtxoEntry, ForeignUtxoAssetClassifier.Verdict>,
     ): SweepOutcome {
         val profile = result.profile
+
+        // Hold back anything carrying a DigiAsset, and anything we could not ask about. Spending
+        // an asset UTXO as plain DGB destroys the asset — it is not moved, it is gone — so the
+        // sweep proceeds WITHOUT them and reports what it left, rather than refusing outright:
+        // the held-back coins are still safe in the old wallet and can be moved deliberately.
+        val partition = SweepPartition.split(
+            utxos = result.utxos,
+            carriesAsset = { verdicts[it]?.carriesAsset ?: false },
+            // Absent from the map means never classified — same fail-closed answer as a failed
+            // lookup. A UTXO the classifier never saw must not be swept by default.
+            classified = { verdicts[it]?.classified ?: false },
+        )
+        val heldAssets = partition.assetBearing.map { "${it.txid}:${it.vout}" }
+        val heldUnknown = partition.unclassified.map { "${it.txid}:${it.vout}" }
+        if (heldAssets.isNotEmpty() || heldUnknown.isNotEmpty()) {
+            android.util.Log.i(
+                "LegacySweep",
+                "profile=${profile.label}: holding back ${heldAssets.size} asset-bearing and " +
+                    "${heldUnknown.size} unclassified outpoint(s); sweeping ${partition.sweepable.size}",
+            )
+        }
+        val sweepableResult = result.copy(utxos = partition.sweepable)
         // #3: each UTXO's (chain,index) is carried straight from its
         // DerivedAddress — no positional reconstruction vs gapExternal, so a
         // dropped empty slot can't sign the wrong child key. #4: a UTXO with a
         // null scriptPubKey is collected in skippedNoScript, not fatal.
-        val inputs = assembleSweepInputs(result)
+        val inputs = assembleSweepInputs(sweepableResult)
 
         if (inputs.txids.isEmpty()) {
             val reason = if (inputs.skippedNoScript.isNotEmpty())
@@ -165,6 +208,8 @@ class LegacySweepService(
                 profile, null, null, 0L, 0, reason,
                 broadcastState = BroadcastState.FAILED,
                 skippedNoScript = inputs.skippedNoScript,
+                heldBackAssets = heldAssets,
+                heldBackUnknown = heldUnknown,
             )
         }
 
@@ -185,6 +230,8 @@ class LegacySweepService(
             "buildAndSignLegacySweep failed (sign mismatch or dust)",
             broadcastState = BroadcastState.FAILED,
             skippedNoScript = inputs.skippedNoScript,
+            heldBackAssets = heldAssets,
+            heldBackUnknown = heldUnknown,
         )
 
         // Broadcast via the existing publishTransaction JNI — it takes raw
@@ -195,6 +242,8 @@ class LegacySweepService(
                 "signed hex malformed (self-check failed)",
                 broadcastState = BroadcastState.FAILED,
                 skippedNoScript = inputs.skippedNoScript,
+                heldBackAssets = heldAssets,
+                heldBackUnknown = heldUnknown,
             )
 
         val txid = Broadcaster.broadcast(txBytes)
@@ -237,6 +286,8 @@ class LegacySweepService(
             // A non-null txid is local relay only — PENDING, never confirmed (#6).
             broadcastState = if (txid == null) BroadcastState.FAILED else BroadcastState.PENDING,
             skippedNoScript = inputs.skippedNoScript,
+            heldBackAssets = heldAssets,
+            heldBackUnknown = heldUnknown,
         )
     }
 
