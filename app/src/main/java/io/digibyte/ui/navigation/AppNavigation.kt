@@ -419,7 +419,7 @@ fun AppNavigation(
                                 val ok = digiScopeClient.submitDigiRunnerScore(
                                     score, distance, coins, livesRemaining
                                 )
-                                val msg = if (ok) "Score submitted!" else "Score submit failed — are you logged in?"
+                                val msg = if (ok) context.getString(R.string.game_score_submitted) else context.getString(R.string.game_score_failed)
                                 Toast.makeText(gameContext, msg, Toast.LENGTH_SHORT).show()
                             }
                         },
@@ -438,7 +438,7 @@ fun AppNavigation(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Close game",
+                            contentDescription = stringResource(R.string.game_close),
                             tint = Color.White
                         )
                     }

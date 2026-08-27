@@ -23,7 +23,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import androidx.compose.ui.res.stringResource
 import io.digibyte.BuildConfig
+import io.digibyte.R
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 
@@ -75,7 +77,7 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
     ) {
         item {
             Text(
-                text = "Settings",
+                text = stringResource(R.string.set_title),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
@@ -84,44 +86,44 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
         }
 
         item {
-            SettingsCategory(title = "Security & Privacy") {
+            SettingsCategory(title = stringResource(R.string.set_cat_security)) {
                 SettingsRow(
                     icon = Icons.Default.Lock,
                     iconTint = DigiByteAccent,
-                    title = "Security",
-                    subtitle = "PIN, biometric auth, seed phrase, auto-lock",
+                    title = stringResource(R.string.set_security),
+                    subtitle = stringResource(R.string.set_security_sub),
                     onClick = { navController.navigate("settings_security") }
                 )
             }
         }
 
         item {
-            SettingsCategory(title = "Network") {
+            SettingsCategory(title = stringResource(R.string.set_cat_network)) {
                 SettingsRow(
                     icon = Icons.Default.WifiTethering,
                     iconTint = Color(0xFF4CAF50),
-                    title = "Network Info",
-                    subtitle = "Peers, sync status, block height",
+                    title = stringResource(R.string.set_network_info),
+                    subtitle = stringResource(R.string.set_network_info_sub),
                     onClick = { navController.navigate("settings_network") }
                 )
                 SettingsRowDivider()
                 SettingsRow(
                     icon = Icons.Default.BatteryChargingFull,
                     iconTint = Color(0xFF4CAF50),
-                    title = "Background sync",
-                    subtitle = "Allow unrestricted battery so sync keeps running with the screen off",
+                    title = stringResource(R.string.set_background_sync),
+                    subtitle = stringResource(R.string.set_background_sync_sub),
                     onClick = { io.digibyte.util.BatteryOptimization.openBatterySettings(context) }
                 )
             }
         }
 
         item {
-            SettingsCategory(title = "Appearance") {
+            SettingsCategory(title = stringResource(R.string.set_cat_appearance)) {
                 SettingsRow(
                     icon = Icons.Default.Palette,
                     iconTint = Color(0xFFFF9800),
-                    title = "Display",
-                    subtitle = "Fiat currency, theme",
+                    title = stringResource(R.string.set_display),
+                    subtitle = stringResource(R.string.set_display_sub),
                     onClick = { navController.navigate("settings_display") }
                 )
                 // Subtitle shows the CURRENT language in its own script, so someone who has
@@ -130,43 +132,43 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                 SettingsRow(
                     icon = Icons.Default.Language,
                     iconTint = Color(0xFF4CAF50),
-                    title = "Language",
-                    subtitle = currentLanguage?.endonym ?: "Follow device language",
+                    title = stringResource(R.string.set_language),
+                    subtitle = currentLanguage?.endonym ?: stringResource(R.string.set_language_follow),
                     onClick = { showLanguagePicker = true }
                 )
             }
         }
 
         item {
-            SettingsCategory(title = "Recovery") {
+            SettingsCategory(title = stringResource(R.string.set_cat_recovery)) {
                 SettingsRow(
                     icon = Icons.Default.CloudSync,
                     iconTint = Color(0xFF26C6DA),
-                    title = "Scan for missing funds",
-                    subtitle = "Query a DGB node for UTXOs on wallet addresses",
+                    title = stringResource(R.string.set_scan_funds),
+                    subtitle = stringResource(R.string.set_scan_funds_sub),
                     onClick = { navController.navigate("settings_reconcile") }
                 )
                 SettingsRowDivider()
                 SettingsRow(
                     icon = Icons.Default.Savings,
                     iconTint = Color(0xFF26C6DA),
-                    title = "Recover funds from another wallet",
-                    subtitle = "Sweep coins from old/other derivation paths into this wallet",
+                    title = stringResource(R.string.set_recover_other),
+                    subtitle = stringResource(R.string.set_recover_other_sub),
                     onClick = { navController.navigate("recover_funds") }
                 )
             }
         }
 
         item {
-            SettingsCategory(title = "Info") {
+            SettingsCategory(title = stringResource(R.string.set_cat_info)) {
                 SettingsRow(
                     icon = Icons.Default.BugReport,
                     iconTint = Color(0xFFFF6D00),
-                    title = "Beta updates",
+                    title = stringResource(R.string.set_beta),
                     subtitle = if (betaUpdatesEnabled)
-                        "On — you'll be offered pre-release builds for testing"
+                        stringResource(R.string.set_beta_on)
                     else
-                        "Off — only stable releases are offered",
+                        stringResource(R.string.set_beta_off),
                     onClick = { viewModel.setBetaUpdatesEnabled(!betaUpdatesEnabled) },
                     trailing = {
                         Switch(
@@ -183,16 +185,16 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                 SettingsRow(
                     icon = Icons.Default.Info,
                     iconTint = DigiByteBlue,
-                    title = "About",
-                    subtitle = "Version, licenses, open source",
+                    title = stringResource(R.string.set_about),
+                    subtitle = stringResource(R.string.set_about_sub),
                     onClick = { navController.navigate("settings_about") }
                 )
                 SettingsRowDivider()
                 SettingsRow(
                     icon = Icons.Default.BugReport,
                     iconTint = Color(0xFFFF6D00),
-                    title = "Report a bug / feedback",
-                    subtitle = "Send an issue or idea — device & version info is filled in for you",
+                    title = stringResource(R.string.set_report_bug),
+                    subtitle = stringResource(R.string.set_report_bug_sub),
                     onClick = {
                         val url = buildBugReportUrl(context, syncFrontier.stage.name)
                         runCatching {
@@ -211,15 +213,15 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
         // Dev-only: never rendered in a mainnet release build (see isDevBuild above).
         if (isDevBuild) {
             item {
-                SettingsCategory(title = "Advanced / Developer") {
+                SettingsCategory(title = stringResource(R.string.set_cat_advanced)) {
                     SettingsRow(
                         icon = Icons.Default.BugReport,
                         iconTint = Color(0xFFFF6D00),
-                        title = "Network",
+                        title = stringResource(R.string.set_cat_network),
                         subtitle = if (networkTestnetEnabled)
-                            "Testnet — test chain, same recovery phrase"
+                            stringResource(R.string.set_net_testnet)
                         else
-                            "Mainnet — production chain",
+                            stringResource(R.string.set_net_mainnet),
                         onClick = {
                             pendingNetworkTestnet = !networkTestnetEnabled
                             showNetworkConfirmDialog = true
@@ -265,7 +267,7 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
             containerColor = Color(0xFF1A2742),
             title = {
                 Text(
-                    text = if (goingToTestnet) "Switch to Testnet?" else "Switch to Mainnet?",
+                    text = if (goingToTestnet) stringResource(R.string.set_switch_testnet) else stringResource(R.string.set_switch_mainnet),
                     color = Color.White,
                     fontWeight = FontWeight.Bold
                 )
@@ -273,9 +275,9 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
             text = {
                 Text(
                     text = if (goingToTestnet)
-                        "The app will restart and sync the test chain. Your recovery phrase is unchanged."
+                        stringResource(R.string.set_switch_testnet_body)
                     else
-                        "The app will restart and sync the main chain. Your recovery phrase is unchanged.",
+                        stringResource(R.string.set_switch_mainnet_body),
                     color = Color(0xFFB0BEC5)
                 )
             },
@@ -284,12 +286,12 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                     showNetworkConfirmDialog = false
                     viewModel.setNetworkTestnet(goingToTestnet)
                 }) {
-                    Text("Restart", color = Color(0xFFFF6D00))
+                    Text(stringResource(R.string.set_restart), color = Color(0xFFFF6D00))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNetworkConfirmDialog = false }) {
-                    Text("Cancel", color = Color(0xFF8899AA))
+                    Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
                 }
             }
         )

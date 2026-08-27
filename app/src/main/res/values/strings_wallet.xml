@@ -234,4 +234,119 @@
     <string name="nav_digiid">Digi-ID</string>
     <string name="nav_settings">Settings</string>
 
+    <!-- ── Send ─────────────────────────────────────────────────────────────────────
+         The highest-consequence screen in the app: a transaction is irreversible, and a
+         mistranslated warning here costs someone their coins. Everything marked WARNING needs a
+         native speaker before it can be called reviewed. -->
+    <string name="send_confirm_title">Confirm Send</string>
+    <string name="send_auth_subtitle">Authenticate to broadcast transaction</string>
+    <string name="send_confirm_dd_title">Confirm DigiDollar Send</string>
+    <string name="send_dd_failed">DigiDollar send failed</string>
+    <string name="send_title_dd">Send DigiDollar</string>
+    <string name="send_title_dgb">Send DGB</string>
+    <!-- Address prefixes in parentheses are literal — never translate them. -->
+    <string name="send_recipient_dd_testnet">DigiDollar address (TD…)</string>
+    <string name="send_recipient_dd">DigiDollar address (DD…)</string>
+    <string name="send_recipient_label">Recipient Address</string>
+    <string name="send_paste">Paste</string>
+    <string name="send_scan_qr">Scan QR</string>
+    <string name="send_invalid_dd">Invalid DigiDollar address</string>
+    <string name="send_invalid_dgb">Invalid DigiByte address</string>
+    <string name="send_amount">Amount</string>
+    <string name="send_max">MAX</string>
+    <string name="send_available_dd">Available: %1$s DigiDollar</string>
+    <string name="send_err_invalid_amount">Enter a valid amount</string>
+    <string name="send_err_no_dd">You have no DigiDollar to send</string>
+    <!-- DigiDollar is USD-denominated by definition, so the $1.00 floor is not a display
+         currency and must stay in dollars. -->
+    <string name="send_err_min_usd">Minimum is $1.00</string>
+    <string name="send_err_exceeds_dd">Exceeds available DigiDollar</string>
+    <string name="send_err_exceeds_max">Exceeds maximum per transaction</string>
+    <string name="send_fee_in_dgb">Network fee paid in DGB</string>
+    <string name="send_switch_to_usd">Switch to USD</string>
+    <string name="send_switch_to_dgb">Switch to DGB</string>
+    <string name="send_approx_usd">≈ $%1$s USD</string>
+    <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_network_fee">Network Fee</string>
+    <string name="send_network_fee_row">Network fee</string>
+    <string name="send_fee_default">Default</string>
+    <string name="send_fee_custom">Custom</string>
+    <!-- WARNING: a softened version of this lets someone broadcast a transaction that never
+         relays and looks to them like lost coins. -->
+    <string name="send_fee_below_min">⚠ Below minimum relay fee — transaction may not broadcast</string>
+    <string name="send_fee_required">Fee required</string>
+    <string name="send_confirms_15s">Confirms in ~15 seconds</string>
+    <string name="send_no_peers">No DigiByte peers connected — can\'t broadcast right now. Reconnecting…</string>
+    <!-- WARNING: sending before the scan completes can spend from a balance the wallet has not
+         finished recovering. -->
+    <string name="send_wait_for_sync">Wait for sync to finish before sending — your full balance is still being recovered.</string>
+    <string name="send_broadcasting">Broadcasting…</string>
+    <string name="send_review">Review &amp; Send</string>
+    <string name="send_dialog_title">Confirm Transaction</string>
+    <string name="send_dd_dialog_title">Confirm DigiDollar Transfer</string>
+    <string name="send_to">To</string>
+    <string name="send_approx_usd_label">≈ USD</string>
+    <string name="send_amount_dd">$%1$s DigiDollar</string>
+    <string name="send_paid_in_dgb">Paid in DGB</string>
+    <!-- WARNING: the last thing shown before an irreversible transfer. "Irreversible" must stay
+         blunt — no softening to "cannot usually be undone". -->
+    <string name="send_verify_warning">Verify the full address above carefully.\nTransactions are irreversible.</string>
+    <string name="send_send">Send</string>
+    <string name="send_success">Success</string>
+    <string name="send_sent_title">Transaction Sent!</string>
+    <string name="send_txid_label">Transaction ID:</string>
+    <string name="send_copy_txid">Copy TXID</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_done">Done</string>
+
+    <!-- "or" is the only translatable word; the prefixes are literal address forms. -->
+    <string name="send_hint_dgb">dgb1q… or D…</string>
+    <string name="game_score_submitted">Score submitted!</string>
+    <string name="game_score_failed">Score submit failed — are you logged in?</string>
+    <string name="game_close">Close game</string>
+
+    <!-- ── Settings ─────────────────────────────────────────────────────────────── -->
+    <string name="set_title">Settings</string>
+    <string name="set_cat_security">Security &amp; Privacy</string>
+    <string name="set_security">Security</string>
+    <string name="set_security_sub">PIN, biometric auth, seed phrase, auto-lock</string>
+    <string name="set_cat_network">Network</string>
+    <string name="set_network_info">Network Info</string>
+    <string name="set_network_info_sub">Peers, sync status, block height</string>
+    <string name="set_background_sync">Background sync</string>
+    <string name="set_background_sync_sub">Allow unrestricted battery so sync keeps running with the screen off</string>
+    <string name="set_cat_appearance">Appearance</string>
+    <string name="set_display">Display</string>
+    <string name="set_display_sub">Fiat currency, theme</string>
+    <string name="set_language">Language</string>
+    <string name="set_language_follow">Follow device language</string>
+    <string name="set_cat_recovery">Recovery</string>
+    <string name="set_scan_funds">Scan for missing funds</string>
+    <string name="set_scan_funds_sub">Query a DGB node for UTXOs on wallet addresses</string>
+    <string name="set_recover_other">Recover funds from another wallet</string>
+    <string name="set_recover_other_sub">Sweep coins from old/other derivation paths into this wallet</string>
+    <string name="set_cat_info">Info</string>
+    <string name="set_beta">Beta updates</string>
+    <string name="set_beta_on">On — you\'ll be offered pre-release builds for testing</string>
+    <string name="set_beta_off">Off — only stable releases are offered</string>
+    <string name="set_about">About</string>
+    <string name="set_about_sub">Version, licenses, open source</string>
+    <string name="set_report_bug">Report a bug / feedback</string>
+    <string name="set_report_bug_sub">Send an issue or idea — device &amp; version info is filled in for you</string>
+    <string name="set_cat_advanced">Advanced / Developer</string>
+    <string name="set_net_testnet">Testnet — test chain, same recovery phrase</string>
+    <string name="set_net_mainnet">Mainnet — production chain</string>
+    <string name="set_switch_testnet">Switch to Testnet?</string>
+    <string name="set_switch_mainnet">Switch to Mainnet?</string>
+    <string name="set_switch_testnet_body">The app will restart and sync the test chain. Your recovery phrase is unchanged.</string>
+    <string name="set_switch_mainnet_body">The app will restart and sync the main chain. Your recovery phrase is unchanged.</string>
+    <string name="set_restart">Restart</string>
+
+    <!-- ── Language picker ──────────────────────────────────────────────────────────
+         These MUST be translated: a picker that explains itself only in English is unreadable
+         by the person opening it. -->
+    <string name="lang_restart_note">Changing this restarts the wallet screen. Your coins, phrase and settings are untouched.</string>
+    <string name="lang_unreviewed_note">Translations are new and not yet checked by native speakers. If something reads wrong — especially a warning about your recovery phrase or your coins — please tell us via Settings → Report a bug.</string>
+    <string name="lang_selected">Selected</string>
+
 </resources>

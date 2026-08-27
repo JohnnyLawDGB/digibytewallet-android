@@ -10,9 +10,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.digibyte.R
 import io.digibyte.core.locale.AppLocale
 import io.digibyte.ui.theme.DigiByteAccent
 
@@ -41,13 +43,13 @@ fun LanguagePickerSheet(
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Text(
-            text = "Language",
+            text = stringResource(R.string.set_language),
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 4.dp),
         )
         Text(
-            text = "Changing this restarts the wallet screen. Your coins, phrase and settings are untouched.",
+            text = stringResource(R.string.lang_restart_note),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
@@ -58,9 +60,7 @@ fun LanguagePickerSheet(
         // route back to us instead of quietly costing trust, and Settings already has the
         // reporting link to send them to.
         Text(
-            text = "Translations are new and not yet checked by native speakers. If something " +
-                "reads wrong — especially a warning about your recovery phrase or your coins — " +
-                "please tell us via Settings → Report a bug.",
+            text = stringResource(R.string.lang_unreviewed_note),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
@@ -70,7 +70,7 @@ fun LanguagePickerSheet(
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
             item {
                 LanguageRow(
-                    primary = "Follow device language",
+                    primary = stringResource(R.string.set_language_follow),
                     secondary = null,
                     isSelected = selected == null,
                     onClick = { onSelect(null) },
@@ -124,7 +124,7 @@ private fun LanguageRow(
         if (isSelected) {
             Icon(
                 imageVector = Icons.Default.Check,
-                contentDescription = "Selected",
+                contentDescription = stringResource(R.string.lang_selected),
                 tint = DigiByteAccent,
                 modifier = Modifier.size(20.dp),
             )

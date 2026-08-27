@@ -56,12 +56,21 @@ class OnboardingHardcodedStringTest {
         "ui/wallet/WalletScreen.kt",
         "ui/wallet/ReceiveScreen.kt",
         "ui/wallet/TransactionDetailScreen.kt",
+        "ui/wallet/SendScreen.kt",
+        "ui/settings/SettingsScreen.kt",
+        "ui/locale/LanguagePickerSheet.kt",
+        // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
+        // names and argument keys, so an every-literal scan would need an allow-list longer than
+        // the file and would stop meaning anything. Its user-visible text is three toast/label
+        // strings, now in resources, and its nav labels are R.string references on Screen.
     )
 
     /** Navigation routes — identifiers the code matches on, never shown to anyone. */
     private val ROUTES = setOf(
         "onboarding", "wallet", "unlock", "pin_setup", "seed_verify", "recover_funds",
         "seed_display/{wordCount}", "seed_display/\$selectedWordCount",
+        "settings_security", "settings_network", "settings_display", "settings_reconcile",
+        "settings_about",
     )
 
     /** Compose animation labels, log tags, and format fragments. */
@@ -74,7 +83,11 @@ class OnboardingHardcodedStringTest {
         "DGB", "TESTNET", "USD",
         // Composites of already-localised parts plus a ticker or a bare number.
         "\$amountPrefix\$amountFormatted DGB", "\$feeFormatted DGB", "\$\$priceFormatted",
-        "\$changePrefix \$changeFormatted%", "\$\$priceFormatted", " · v\$versionName",
+        "\$changePrefix \$changeFormatted%",
+        // Send: literal address prefixes and value+ticker composites.
+        "TD…", "DD…", "%.8f DGB", "\$amountDgb DGB", "\$\$amountFiat", "txid",
+        // Build flavour, a version fallback, and the brand+version footer.
+        "digiTestnet", "unknown", "DigiByte Wallet v\$versionName", "\$\$priceFormatted", " · v\$versionName",
         "\\n\${DigiByteUri.encode(address, sats)}",
         // Date/number patterns and a MIME type. NOTE: the date patterns are also pinned to
         // Locale.US at their call sites — a real i18n gap, but a behaviour change, not a
@@ -106,7 +119,7 @@ class OnboardingHardcodedStringTest {
     @Test fun `the sources this test scans actually exist`() {
         val missing = COVERED.filterNot { File(srcRoot, it).isFile }
         assertTrue("scan list is stale, cannot see: $missing", missing.isEmpty())
-        assertTrue("nothing scanned", COVERED.size >= 8)
+        assertTrue("nothing scanned", COVERED.size >= 11)
     }
 
     @Test fun `the scan sees literals at all`() {

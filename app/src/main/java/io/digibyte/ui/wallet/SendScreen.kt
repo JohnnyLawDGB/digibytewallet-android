@@ -37,6 +37,8 @@ import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @Composable
 fun SendScreen(
@@ -70,6 +72,11 @@ fun SendScreen(
     val validationError by viewModel.validationError.collectAsStateWithLifecycle()
     val peerCount by walletViewModel.peerCount.collectAsStateWithLifecycle()
     val syncProgressInfo by walletViewModel.syncProgressInfo.collectAsStateWithLifecycle()
+    // Hoisted: used inside coroutine/callback lambdas, which are not composable.
+    val bioConfirmTitle = stringResource(R.string.send_confirm_title)
+    val bioAuthSubtitle = stringResource(R.string.send_auth_subtitle)
+    val bioConfirmDdTitle = stringResource(R.string.send_confirm_dd_title)
+    val ddFailedMsg = stringResource(R.string.send_dd_failed)
     val hasPeers = peerCount > 0
     val isFullySynced = syncProgressInfo.stage == io.digibyte.core.model.SyncStage.Synced
     val canSend = hasPeers && isFullySynced
@@ -116,8 +123,8 @@ fun SendScreen(
                     if (activity != null && biometricAuth.canAuthenticate(activity)) {
                         val result = biometricAuth.authenticate(
                             activity,
-                            title = "Confirm Send",
-                            subtitle = "Authenticate to broadcast transaction"
+                            title = bioConfirmTitle,
+                            subtitle = bioAuthSubtitle
                         )
                         if (result is BiometricResult.Success) {
                             viewModel.send()
@@ -153,8 +160,8 @@ fun SendScreen(
                         val authed = if (activity != null && biometricAuth.canAuthenticate(activity)) {
                             biometricAuth.authenticate(
                                 activity,
-                                title = "Confirm DigiDollar Send",
-                                subtitle = "Authenticate to broadcast transaction"
+                                title = bioConfirmDdTitle,
+                                subtitle = bioAuthSubtitle
                             ) is BiometricResult.Success
                         } else {
                             // No biometric hardware — the confirmation dialog is the gate (matches DGB).
@@ -172,7 +179,7 @@ fun SendScreen(
                                 } else {
                                     android.widget.Toast.makeText(
                                         context,
-                                        "DigiDollar send failed",
+                                        ddFailedMsg,
                                         android.widget.Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -197,10 +204,10 @@ fun SendScreen(
         // Top bar
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
             }
             Text(
-                text = if (effectiveDdMode) "Send DigiDollar" else "Send DGB",
+                text = if (effectiveDdMode) stringResource(R.string.send_title_dd) else stringResource(R.string.send_title_dgb),
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.weight(1f)
             )
@@ -211,8 +218,8 @@ fun SendScreen(
         // ── Address input ─────────────────────────────────────────────────
         Text(
             text = if (effectiveDdMode) {
-                if (onTestnet) "DigiDollar address (TD…)" else "DigiDollar address (DD…)"
-            } else "Recipient Address",
+                if (onTestnet) stringResource(R.string.send_recipient_dd_testnet) else stringResource(R.string.send_recipient_dd)
+            } else stringResource(R.string.send_recipient_label),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -232,7 +239,7 @@ fun SendScreen(
                 .border(1.dp, addressBorderColor, RoundedCornerShape(8.dp)),
             placeholder = {
                 Text(
-                    if (effectiveDdMode) (if (onTestnet) "TD…" else "DD…") else "dgb1q… or D…",
+                    if (effectiveDdMode) (if (onTestnet) "TD…" else "DD…") else stringResource(R.string.send_hint_dgb),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },
@@ -244,14 +251,14 @@ fun SendScreen(
                         val text = cb?.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
                         if (text.isNotBlank()) viewModel.onAddressChanged(text)
                     }) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = "Paste",
+                        Icon(Icons.Default.ContentPaste, contentDescription = stringResource(R.string.send_paste),
                              tint = DigiByteAccent)
                     }
                     // Scan QR
                     IconButton(onClick = {
                         onScanQr { scanned -> viewModel.applyScannedUri(scanned) }
                     }) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan QR",
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = stringResource(R.string.send_scan_qr),
                              tint = DigiByteAccent)
                     }
                 }
@@ -263,7 +270,7 @@ fun SendScreen(
 
         if (effectiveAddressValid == false) {
             Text(
-                text = if (effectiveDdMode) "Invalid DigiDollar address" else "Invalid DigiByte address",
+                text = if (effectiveDdMode) stringResource(R.string.send_invalid_dd) else stringResource(R.string.send_invalid_dgb),
                 style = MaterialTheme.typography.labelSmall,
                 color = DigiByteRed,
                 modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -276,7 +283,7 @@ fun SendScreen(
         if (effectiveDdMode) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Amount",
+                    text = stringResource(R.string.send_amount),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
@@ -286,7 +293,7 @@ fun SendScreen(
                     enabled = ddBalance > 0
                 ) {
                     Text(
-                        text = "MAX",
+                        text = stringResource(R.string.send_max),
                         style = MaterialTheme.typography.labelMedium,
                         color = if (ddBalance > 0) DigiByteAccent else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -307,18 +314,18 @@ fun SendScreen(
             // Available DigiDollar ceiling + inline amount validation (mirrors the
             // send button's ddAmountValid gate so the error and the disabled state agree).
             Text(
-                text = "Available: ${SendViewModel.formatDdUsd(ddBalance)} DigiDollar",
+                text = stringResource(R.string.send_available_dd, SendViewModel.formatDdUsd(ddBalance)),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             val ddCents = SendViewModel.parseUsdToCents(amountFiat)
             val ddAmountError: String? = when {
                 amountFiat.isBlank()                 -> null
-                ddCents == null                      -> "Enter a valid amount"
-                ddBalance <= 0L                      -> "You have no DigiDollar to send"
-                ddCents < SendViewModel.DD_MIN_CENTS -> "Minimum is $1.00"
-                ddCents > ddBalance                  -> "Exceeds available DigiDollar"
-                ddCents > SendViewModel.DD_MAX_CENTS -> "Exceeds maximum per transaction"
+                ddCents == null                      -> stringResource(R.string.send_err_invalid_amount)
+                ddBalance <= 0L                      -> stringResource(R.string.send_err_no_dd)
+                ddCents < SendViewModel.DD_MIN_CENTS -> stringResource(R.string.send_err_min_usd)
+                ddCents > ddBalance                  -> stringResource(R.string.send_err_exceeds_dd)
+                ddCents > SendViewModel.DD_MAX_CENTS -> stringResource(R.string.send_err_exceeds_max)
                 else                                 -> null
             }
             if (ddAmountError != null) {
@@ -331,21 +338,21 @@ fun SendScreen(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Network fee paid in DGB",
+                text = stringResource(R.string.send_fee_in_dgb),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Amount",
+                    text = stringResource(R.string.send_amount),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(onClick = { inputIsDgb = !inputIsDgb }) {
                     Text(
-                        text = if (inputIsDgb) "Switch to USD" else "Switch to DGB",
+                        text = stringResource(if (inputIsDgb) R.string.send_switch_to_usd else R.string.send_switch_to_dgb),
                         style = MaterialTheme.typography.labelMedium,
                         color = DigiByteAccent
                     )
@@ -367,7 +374,7 @@ fun SendScreen(
                 )
                 if (amountFiat.isNotBlank()) {
                     Text(
-                        text = "≈ $$amountFiat USD",
+                        text = stringResource(R.string.send_approx_usd, amountFiat),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -386,7 +393,7 @@ fun SendScreen(
                 )
                 if (amountDgb.isNotBlank()) {
                     Text(
-                        text = "≈ $amountDgb DGB",
+                        text = stringResource(R.string.send_approx_dgb, amountDgb),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -403,14 +410,14 @@ fun SendScreen(
         if (!effectiveDdMode) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Network Fee",
+                    text = stringResource(R.string.send_network_fee),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(onClick = { viewModel.toggleCustomFee() }) {
                     Text(
-                        text = if (isCustomFee) "Default" else "Custom",
+                        text = if (isCustomFee) stringResource(R.string.send_fee_default) else stringResource(R.string.send_fee_custom),
                         style = MaterialTheme.typography.labelMedium,
                         color = DigiByteAccent
                     )
@@ -445,21 +452,21 @@ fun SendScreen(
             when (feeWarning) {
                 is FeeWarning.BelowRelay -> {
                     Text(
-                        text = "⚠ Below minimum relay fee — transaction may not broadcast",
+                        text = stringResource(R.string.send_fee_below_min),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFFFFA000)
                     )
                 }
                 is FeeWarning.ZeroFee -> {
                     Text(
-                        text = "Fee required",
+                        text = stringResource(R.string.send_fee_required),
                         style = MaterialTheme.typography.labelSmall,
                         color = DigiByteRed
                     )
                 }
                 is FeeWarning.None -> {
                     Text(
-                        text = "Confirms in ~15 seconds",
+                        text = stringResource(R.string.send_confirms_15s),
                         style = MaterialTheme.typography.labelSmall,
                         color = DigiByteGreen
                     )
@@ -499,7 +506,7 @@ fun SendScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "No DigiByte peers connected — can't broadcast right now. Reconnecting…",
+                    text = stringResource(R.string.send_no_peers),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFFFCC66)
                 )
@@ -525,7 +532,7 @@ fun SendScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Wait for sync to finish before sending — your full balance is still being recovered.",
+                    text = stringResource(R.string.send_wait_for_sync),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFFFCC66)
                 )
@@ -557,12 +564,12 @@ fun SendScreen(
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Broadcasting…")
+                    Text(stringResource(R.string.send_broadcasting))
                 } else {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
                          modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Send DigiDollar", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(stringResource(R.string.send_title_dd), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         } else {
@@ -585,12 +592,12 @@ fun SendScreen(
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Broadcasting…")
+                    Text(stringResource(R.string.send_broadcasting))
                 } else {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
                          modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Review & Send", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(stringResource(R.string.send_review), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
 
@@ -638,20 +645,20 @@ private fun SendConfirmationDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Confirm Transaction",
+                    text = stringResource(R.string.send_dialog_title),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                ConfirmRow(label = "To", value = address) // FULL address — never truncated
-                ConfirmRow(label = "Amount", value = "$amountDgb DGB")
+                ConfirmRow(label = stringResource(R.string.send_to), value = address) // FULL address — never truncated
+                ConfirmRow(label = stringResource(R.string.send_amount), value = "$amountDgb DGB")
                 if (amountFiat.isNotBlank()) {
-                    ConfirmRow(label = "≈ USD", value = "$$amountFiat")
+                    ConfirmRow(label = stringResource(R.string.send_approx_usd_label), value = "$$amountFiat")
                 }
                 val feeDgb = feeEstimate / 100_000_000.0
                 ConfirmRow(
-                    label = "Network fee",
+                    label = stringResource(R.string.send_network_fee_row),
                     value = String.format("%.8f DGB", feeDgb)
                 )
 
@@ -662,7 +669,7 @@ private fun SendConfirmationDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Verify the full address above carefully.\nTransactions are irreversible.",
+                    text = stringResource(R.string.send_verify_warning),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -678,7 +685,7 @@ private fun SendConfirmationDialog(
                         onClick = onCancel,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.common_cancel))
                     }
                     Button(
                         onClick = onConfirm,
@@ -687,7 +694,7 @@ private fun SendConfirmationDialog(
                             containerColor = MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        Text("Send", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.send_send), fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -721,15 +728,15 @@ private fun DigiDollarConfirmationDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Confirm DigiDollar Transfer",
+                    text = stringResource(R.string.send_dd_dialog_title),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                ConfirmRow(label = "To", value = address) // FULL address — never truncated
-                ConfirmRow(label = "Amount", value = "$$amountUsd DigiDollar")
-                ConfirmRow(label = "Network fee", value = "Paid in DGB")
+                ConfirmRow(label = stringResource(R.string.send_to), value = address) // FULL address — never truncated
+                ConfirmRow(label = stringResource(R.string.send_amount), value = stringResource(R.string.send_amount_dd, amountUsd))
+                ConfirmRow(label = stringResource(R.string.send_network_fee_row), value = stringResource(R.string.send_paid_in_dgb))
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -738,7 +745,7 @@ private fun DigiDollarConfirmationDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Verify the full address above carefully.\nTransactions are irreversible.",
+                    text = stringResource(R.string.send_verify_warning),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -754,7 +761,7 @@ private fun DigiDollarConfirmationDialog(
                         onClick = onCancel,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.common_cancel))
                     }
                     Button(
                         onClick = onConfirm,
@@ -763,7 +770,7 @@ private fun DigiDollarConfirmationDialog(
                             containerColor = MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        Text("Send", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.send_send), fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -805,7 +812,7 @@ private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
     ) {
         Icon(
             imageVector = Icons.Default.CheckCircle,
-            contentDescription = "Success",
+            contentDescription = stringResource(R.string.send_success),
             tint = DigiByteGreen,
             modifier = Modifier.size(72.dp)
         )
@@ -813,7 +820,7 @@ private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Transaction Sent!",
+            text = stringResource(R.string.send_sent_title),
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onBackground
         )
@@ -821,7 +828,7 @@ private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Transaction ID:",
+            text = stringResource(R.string.send_txid_label),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -849,7 +856,7 @@ private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
             Icon(Icons.Default.ContentCopy, contentDescription = null,
                  modifier = Modifier.size(16.dp), tint = DigiByteAccent)
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Copy TXID", color = DigiByteAccent)
+            Text(stringResource(R.string.send_copy_txid), color = DigiByteAccent)
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -861,7 +868,7 @@ private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
                 .height(52.dp),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("Done", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(stringResource(R.string.common_done), fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
     }
 }
