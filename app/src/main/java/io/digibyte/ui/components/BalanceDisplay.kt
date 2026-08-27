@@ -17,6 +17,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.digibyte.ui.theme.DigiByteAccent
+import io.digibyte.ui.theme.DigiDollarGreen
+import io.digibyte.ui.theme.DigiDollarGreenBright
 
 /**
  * Hero balance: the native DGB amount is the large primary figure, with the
@@ -100,7 +102,9 @@ fun BalanceDisplay(
             Spacer(modifier = Modifier.height(12.dp))
             Surface(
                 shape = RoundedCornerShape(percent = 50),
-                color = DigiByteAccent.copy(alpha = alpha * 0.15f)
+                // Tinted to DigiDollar's own green, not the DGB accent. The pill's job is to
+                // say "separate asset"; a blue container holding a green mark said the reverse.
+                color = DigiDollarGreen.copy(alpha = alpha * 0.22f)
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -117,7 +121,7 @@ fun BalanceDisplay(
                         // is a name for the amount beside it, and a mark that outweighed the
                         // number would invert that.
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(20.dp)
                             .alpha(alpha)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -127,7 +131,7 @@ fun BalanceDisplay(
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         ),
-                        color = accent
+                        color = DigiDollarGreenBright.copy(alpha = alpha)
                     )
                 }
             }

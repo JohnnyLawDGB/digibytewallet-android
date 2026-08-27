@@ -8,6 +8,16 @@ import androidx.compose.ui.graphics.Color
 val DigiByteNavy = Color(0xFF002352)
 val DigiByteBlue = Color(0xFF0066CC)
 val DigiByteAccent = Color(0xFF00AAFF)
+
+/** DigiDollar's own green, sampled from the ring of `dd_symbol` (#16804F) so the palette and the
+ *  mark cannot drift apart. Used to tint the hero's DigiDollar pill: that pill exists to say the
+ *  balance in it is a SEPARATE asset rather than part of the DGB total, and a blue container
+ *  around a green mark made it look like the opposite. */
+val DigiDollarGreen = Color(0xFF16804F)
+
+/** The same green lifted for text. #16804F is a mid green and reads as muddy on the navy hero;
+ *  this keeps the hue but takes the amount back to the legibility the blue had. */
+val DigiDollarGreenBright = Color(0xFF2FD186)
 val DigiByteGreen = Color(0xFF4CAF50)
 val DigiByteRed = Color(0xFFE53935)
 
