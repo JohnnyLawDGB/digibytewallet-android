@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Vietnamese (vi).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">Bảo vệ DGB của bạn</string>
+    <string name="onb_tagline">Khóa của bạn, tiền của bạn. Không có bên thứ ba.</string>
+    <string name="onb_seed_length">Độ dài cụm từ khôi phục</string>
+    <string name="onb_words_count">%1$d từ</string>
+    <string name="onb_create">Tạo ví mới</string>
+    <string name="onb_recover">Khôi phục ví hiện có</string>
+    <string name="onb_footer">DigiByte — An toàn, Nhanh chóng, Phi tập trung</string>
+    <string name="app_name_display">Ví DigiByte</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">Ảnh chụp màn hình đã bị chặn. Hãy ghi lại những từ này — chúng không thể khôi phục được.</string>
+    <string name="seed_title">Cụm từ khôi phục của bạn</string>
+    <string name="seed_word_count">Cụm từ khôi phục %1$d từ</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">Không bao giờ chia sẻ cụm từ khôi phục của bạn</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">Ghi ra giấy, không lưu dưới dạng số</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">Cất giữ ở nơi an toàn và riêng tư</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">Bất kỳ ai có những từ này đều có thể lấy DGB của bạn</string>
+    <string name="seed_written_down">Tôi đã ghi lại</string>
+    <string name="verify_progress">Xác minh %1$d trên %2$d</string>
+    <string name="verify_question">Từ thứ %1$d là gì?</string>
+    <string name="pin_biometric_prompt_title">Bật mở khóa sinh trắc học</string>
+    <string name="pin_biometric_prompt_subtitle">Xác thực để bật mở khóa bằng vân tay/khuôn mặt</string>
+    <string name="pin_biometric_ask">Bật mở khóa sinh trắc học?</string>
+    <string name="pin_biometric_body">Dùng vân tay hoặc khuôn mặt để mở ví nhanh chóng. Bạn vẫn luôn có thể dùng mã PIN.</string>
+    <string name="pin_biometric_enable">Bật sinh trắc học</string>
+    <string name="pin_biometric_skip">Để sau</string>
+    <string name="pin_backspace">Xóa</string>
+    <string name="unlock_title">Nhập mã PIN</string>
+    <string name="unlock_subtitle">Nhập mã PIN 6 chữ số để mở khóa</string>
+    <string name="unlock_locked">Đã khóa — thử lại sau %1$s</string>
+    <string name="unlock_unlocking">Đang mở khóa…</string>
+    <string name="unlock_biometrics_cd">Mở khóa bằng sinh trắc học</string>
+    <string name="recover_title">Khôi phục ví</string>
+    <string name="recover_body">Nhập cụm từ khôi phục để khôi phục ví của bạn.</string>
+    <string name="recover_continue">Tiếp tục</string>
+
+</resources>

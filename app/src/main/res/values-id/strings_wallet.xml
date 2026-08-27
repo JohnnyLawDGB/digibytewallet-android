@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Indonesian (id).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">Amankan DGB Anda</string>
+    <string name="onb_tagline">Kunci Anda, koin Anda. Tanpa pihak ketiga.</string>
+    <string name="onb_seed_length">Panjang frasa pemulihan</string>
+    <string name="onb_words_count">%1$d kata</string>
+    <string name="onb_create">Buat Dompet Baru</string>
+    <string name="onb_recover">Pulihkan Dompet yang Ada</string>
+    <string name="onb_footer">DigiByte — Aman, Cepat, Terdesentralisasi</string>
+    <string name="app_name_display">Dompet DigiByte</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">Tangkapan layar diblokir. Tulis kata-kata ini: kata-kata ini tidak dapat dipulihkan.</string>
+    <string name="seed_title">Frasa Pemulihan Anda</string>
+    <string name="seed_word_count">Frasa pemulihan %1$d kata</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">Jangan pernah bagikan frasa pemulihan Anda</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">Tulis di kertas, bukan secara digital</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">Simpan di tempat yang aman dan pribadi</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">Siapa pun yang memiliki kata-kata ini dapat mengambil DGB Anda</string>
+    <string name="seed_written_down">Saya sudah menulisnya</string>
+    <string name="verify_progress">Verifikasi %1$d dari %2$d</string>
+    <string name="verify_question">Apa kata ke-%1$d?</string>
+    <string name="pin_biometric_prompt_title">Aktifkan Buka Kunci Biometrik</string>
+    <string name="pin_biometric_prompt_subtitle">Autentikasi untuk mengaktifkan buka kunci sidik jari/wajah</string>
+    <string name="pin_biometric_ask">Aktifkan buka kunci biometrik?</string>
+    <string name="pin_biometric_body">Gunakan sidik jari atau wajah Anda untuk membuka dompet dengan cepat. Anda selalu dapat memakai PIN.</string>
+    <string name="pin_biometric_enable">Aktifkan Biometrik</string>
+    <string name="pin_biometric_skip">Nanti saja</string>
+    <string name="pin_backspace">Hapus</string>
+    <string name="unlock_title">Masukkan PIN</string>
+    <string name="unlock_subtitle">Masukkan PIN 6 digit Anda untuk membuka</string>
+    <string name="unlock_locked">Terkunci — coba lagi dalam %1$s</string>
+    <string name="unlock_unlocking">Membuka…</string>
+    <string name="unlock_biometrics_cd">Buka dengan biometrik</string>
+    <string name="recover_title">Pulihkan Dompet</string>
+    <string name="recover_body">Masukkan frasa pemulihan Anda untuk memulihkan dompet.</string>
+    <string name="recover_continue">Lanjutkan</string>
+
+</resources>

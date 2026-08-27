@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Japanese (ja).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">DGB を安全に保管</string>
+    <string name="onb_tagline">あなたの鍵、あなたのコイン。第三者はいません。</string>
+    <string name="onb_seed_length">リカバリーフレーズの長さ</string>
+    <string name="onb_words_count">%1$d 単語</string>
+    <string name="onb_create">新しいウォレットを作成</string>
+    <string name="onb_recover">既存のウォレットを復元</string>
+    <string name="onb_footer">DigiByte — 安全、高速、分散型</string>
+    <string name="app_name_display">DigiByte ウォレット</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">スクリーンショットは無効です。これらの単語を書き留めてください — 復元することはできません。</string>
+    <string name="seed_title">あなたのリカバリーフレーズ</string>
+    <string name="seed_word_count">%1$d 単語のリカバリーフレーズ</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">リカバリーフレーズは絶対に共有しないでください</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">デジタルではなく紙に書いてください</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">安全で人目につかない場所に保管してください</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">この単語を知っている人は誰でもあなたの DGB を持ち出せます</string>
+    <string name="seed_written_down">書き留めました</string>
+    <string name="verify_progress">確認 %1$d / %2$d</string>
+    <string name="verify_question">%1$d 番目の単語は何ですか？</string>
+    <string name="pin_biometric_prompt_title">生体認証ロック解除を有効にする</string>
+    <string name="pin_biometric_prompt_subtitle">指紋・顔認証を有効にするために認証してください</string>
+    <string name="pin_biometric_ask">生体認証ロック解除を有効にしますか？</string>
+    <string name="pin_biometric_body">指紋または顔でウォレットをすばやくロック解除できます。PIN もいつでも使用できます。</string>
+    <string name="pin_biometric_enable">生体認証を有効にする</string>
+    <string name="pin_biometric_skip">今はしない</string>
+    <string name="pin_backspace">バックスペース</string>
+    <string name="unlock_title">PIN を入力</string>
+    <string name="unlock_subtitle">ロック解除するには 6 桁の PIN を入力してください</string>
+    <string name="unlock_locked">ロック中 — %1$s 後に再試行してください</string>
+    <string name="unlock_unlocking">ロック解除中…</string>
+    <string name="unlock_biometrics_cd">生体認証でロック解除</string>
+    <string name="recover_title">ウォレットを復元</string>
+    <string name="recover_body">ウォレットを復元するにはリカバリーフレーズを入力してください。</string>
+    <string name="recover_continue">続ける</string>
+
+</resources>

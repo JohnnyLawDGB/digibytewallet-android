@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Portuguese (Brazil) (pt-BR).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">Proteja seus DGB</string>
+    <string name="onb_tagline">Suas chaves, suas moedas. Sem intermediários.</string>
+    <string name="onb_seed_length">Tamanho da frase de recuperação</string>
+    <string name="onb_words_count">%1$d palavras</string>
+    <string name="onb_create">Criar nova carteira</string>
+    <string name="onb_recover">Recuperar carteira existente</string>
+    <string name="onb_footer">DigiByte — Segura, rápida, descentralizada</string>
+    <string name="app_name_display">Carteira DigiByte</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">As capturas de tela estão bloqueadas. Anote estas palavras: elas não podem ser recuperadas.</string>
+    <string name="seed_title">Sua frase de recuperação</string>
+    <string name="seed_word_count">Frase de recuperação de %1$d palavras</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">Nunca compartilhe sua frase de recuperação</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">Escreva no papel, não em formato digital</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">Guarde em um lugar seguro e privado</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">Qualquer pessoa com estas palavras pode levar seus DGB</string>
+    <string name="seed_written_down">Já anotei</string>
+    <string name="verify_progress">Verificação %1$d de %2$d</string>
+    <string name="verify_question">Qual é a palavra nº %1$d?</string>
+    <string name="pin_biometric_prompt_title">Ativar desbloqueio biométrico</string>
+    <string name="pin_biometric_prompt_subtitle">Autentique-se para ativar o desbloqueio por digital ou rosto</string>
+    <string name="pin_biometric_ask">Ativar desbloqueio biométrico?</string>
+    <string name="pin_biometric_body">Use sua digital ou seu rosto para desbloquear a carteira rapidamente. Você sempre pode usar o PIN.</string>
+    <string name="pin_biometric_enable">Ativar biometria</string>
+    <string name="pin_biometric_skip">Agora não</string>
+    <string name="pin_backspace">Retrocesso</string>
+    <string name="unlock_title">Digite o PIN</string>
+    <string name="unlock_subtitle">Digite seu PIN de 6 dígitos para desbloquear</string>
+    <string name="unlock_locked">Bloqueado — tente novamente em %1$s</string>
+    <string name="unlock_unlocking">Desbloqueando…</string>
+    <string name="unlock_biometrics_cd">Desbloquear com biometria</string>
+    <string name="recover_title">Recuperar carteira</string>
+    <string name="recover_body">Digite sua frase de recuperação para restaurar sua carteira.</string>
+    <string name="recover_continue">Continuar</string>
+
+</resources>

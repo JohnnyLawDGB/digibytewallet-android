@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Turkish (tr).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">DGB\'nizi güvene alın</string>
+    <string name="onb_tagline">Anahtarlarınız, paranız. Aracı yok.</string>
+    <string name="onb_seed_length">Kurtarma ifadesi uzunluğu</string>
+    <string name="onb_words_count">%1$d kelime</string>
+    <string name="onb_create">Yeni Cüzdan Oluştur</string>
+    <string name="onb_recover">Mevcut Cüzdanı Kurtar</string>
+    <string name="onb_footer">DigiByte — Güvenli, Hızlı, Merkeziyetsiz</string>
+    <string name="app_name_display">DigiByte Cüzdanı</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">Ekran görüntüleri engellendi. Bu kelimeleri yazın — geri getirilemezler.</string>
+    <string name="seed_title">Kurtarma İfadeniz</string>
+    <string name="seed_word_count">%1$d kelimelik kurtarma ifadesi</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">Kurtarma ifadenizi asla paylaşmayın</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">Dijital olarak değil, kâğıda yazın</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">Güvenli ve özel bir yerde saklayın</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">Bu kelimelere sahip olan herkes DGB\'nizi alabilir</string>
+    <string name="seed_written_down">Bunları yazdım</string>
+    <string name="verify_progress">Doğrulama %2$d / %1$d</string>
+    <string name="verify_question">%1$d. kelime nedir?</string>
+    <string name="pin_biometric_prompt_title">Biyometrik Kilit Açmayı Etkinleştir</string>
+    <string name="pin_biometric_prompt_subtitle">Parmak izi/yüz ile kilit açmayı etkinleştirmek için kimliğinizi doğrulayın</string>
+    <string name="pin_biometric_ask">Biyometrik kilit açma etkinleştirilsin mi?</string>
+    <string name="pin_biometric_body">Cüzdanı hızlıca açmak için parmak izinizi veya yüzünüzü kullanın. Dilediğinizde PIN\'i de kullanabilirsiniz.</string>
+    <string name="pin_biometric_enable">Biyometriyi Etkinleştir</string>
+    <string name="pin_biometric_skip">Şimdi değil</string>
+    <string name="pin_backspace">Geri sil</string>
+    <string name="unlock_title">PIN girin</string>
+    <string name="unlock_subtitle">Kilidi açmak için 6 haneli PIN\'inizi girin</string>
+    <string name="unlock_locked">Kilitli — %1$s sonra tekrar deneyin</string>
+    <string name="unlock_unlocking">Kilit açılıyor…</string>
+    <string name="unlock_biometrics_cd">Biyometri ile aç</string>
+    <string name="recover_title">Cüzdanı Kurtar</string>
+    <string name="recover_body">Cüzdanınızı geri yüklemek için kurtarma ifadenizi girin.</string>
+    <string name="recover_continue">Devam</string>
+
+</resources>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Russian (ru).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">Защитите свои DGB</string>
+    <string name="onb_tagline">Ваши ключи, ваши монеты. Без посредников.</string>
+    <string name="onb_seed_length">Длина фразы восстановления</string>
+    <string name="onb_words_count">%1$d слов</string>
+    <string name="onb_create">Создать новый кошелёк</string>
+    <string name="onb_recover">Восстановить существующий кошелёк</string>
+    <string name="onb_footer">DigiByte — безопасно, быстро, децентрализованно</string>
+    <string name="app_name_display">Кошелёк DigiByte</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">Снимки экрана заблокированы. Запишите эти слова — восстановить их невозможно.</string>
+    <string name="seed_title">Ваша фраза восстановления</string>
+    <string name="seed_word_count">Фраза восстановления из %1$d слов</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">Никогда не сообщайте свою фразу восстановления</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">Запишите на бумаге, а не в цифровом виде</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">Храните в безопасном и укромном месте</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">Любой, у кого есть эти слова, может забрать ваши DGB</string>
+    <string name="seed_written_down">Я записал их</string>
+    <string name="verify_progress">Проверка %1$d из %2$d</string>
+    <string name="verify_question">Какое слово №%1$d?</string>
+    <string name="pin_biometric_prompt_title">Включить биометрическую разблокировку</string>
+    <string name="pin_biometric_prompt_subtitle">Пройдите проверку, чтобы включить разблокировку по отпечатку или лицу</string>
+    <string name="pin_biometric_ask">Включить биометрическую разблокировку?</string>
+    <string name="pin_biometric_body">Используйте отпечаток пальца или лицо, чтобы быстро разблокировать кошелёк. PIN-код всегда остаётся доступен.</string>
+    <string name="pin_biometric_enable">Включить биометрию</string>
+    <string name="pin_biometric_skip">Не сейчас</string>
+    <string name="pin_backspace">Backspace</string>
+    <string name="unlock_title">Введите PIN-код</string>
+    <string name="unlock_subtitle">Введите 6-значный PIN-код для разблокировки</string>
+    <string name="unlock_locked">Заблокировано — повторите через %1$s</string>
+    <string name="unlock_unlocking">Разблокировка…</string>
+    <string name="unlock_biometrics_cd">Разблокировать по биометрии</string>
+    <string name="recover_title">Восстановить кошелёк</string>
+    <string name="recover_body">Введите фразу восстановления, чтобы восстановить кошелёк.</string>
+    <string name="recover_continue">Продолжить</string>
+
+</resources>

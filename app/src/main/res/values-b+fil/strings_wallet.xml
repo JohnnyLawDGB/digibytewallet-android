@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Filipino (fil).
+
+  STATUS: machine-assisted, NOT reviewed by a native speaker. The strings marked WARNING carry
+  real financial consequence: a softened "cannot be recovered", or a vague "anyone with these
+  words", is the difference between someone keeping their coins and losing them. These need a
+  fluent reader before release. Ordinary UI text is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">I-secure ang iyong DGB</string>
+    <string name="onb_tagline">Ang iyong mga susi, ang iyong barya. Walang third party.</string>
+    <string name="onb_seed_length">Haba ng recovery phrase</string>
+    <string name="onb_words_count">%1$d na salita</string>
+    <string name="onb_create">Gumawa ng Bagong Wallet</string>
+    <string name="onb_recover">I-recover ang Umiiral na Wallet</string>
+    <string name="onb_footer">DigiByte — Ligtas, Mabilis, Desentralisado</string>
+    <string name="app_name_display">DigiByte Wallet</string>
+    <!-- WARNING -->
+    <string name="seed_screenshot_blocked">Naka-block ang screenshot. Isulat ang mga salitang ito — hindi na ito mababawi.</string>
+    <string name="seed_title">Ang Iyong Recovery Phrase</string>
+    <string name="seed_word_count">Recovery phrase na %1$d na salita</string>
+    <!-- WARNING -->
+    <string name="seed_never_share">Huwag kailanman ibahagi ang iyong recovery phrase</string>
+    <!-- WARNING -->
+    <string name="seed_tip_paper">Isulat sa papel, hindi sa digital</string>
+    <!-- WARNING -->
+    <string name="seed_tip_safe">Itago sa ligtas at pribadong lugar</string>
+    <!-- WARNING -->
+    <string name="seed_tip_anyone">Sinumang may hawak ng mga salitang ito ay maaaring kunin ang iyong DGB</string>
+    <string name="seed_written_down">Naisulat ko na</string>
+    <string name="verify_progress">Pagpapatunay %1$d ng %2$d</string>
+    <string name="verify_question">Ano ang salitang #%1$d?</string>
+    <string name="pin_biometric_prompt_title">I-enable ang Biometric Unlock</string>
+    <string name="pin_biometric_prompt_subtitle">Mag-authenticate para i-enable ang fingerprint/face unlock</string>
+    <string name="pin_biometric_ask">I-enable ang biometric unlock?</string>
+    <string name="pin_biometric_body">Gamitin ang iyong fingerprint o mukha para mabilis na ma-unlock ang wallet. Puwede mo pa ring gamitin ang PIN.</string>
+    <string name="pin_biometric_enable">I-enable ang Biometrics</string>
+    <string name="pin_biometric_skip">Sa susunod na lang</string>
+    <string name="pin_backspace">Backspace</string>
+    <string name="unlock_title">Ilagay ang PIN</string>
+    <string name="unlock_subtitle">Ilagay ang iyong 6-digit na PIN para mag-unlock</string>
+    <string name="unlock_locked">Naka-lock — subukan ulit sa %1$s</string>
+    <string name="unlock_unlocking">Ina-unlock…</string>
+    <string name="unlock_biometrics_cd">I-unlock gamit ang biometrics</string>
+    <string name="recover_title">I-recover ang Wallet</string>
+    <string name="recover_body">Ilagay ang iyong recovery phrase para maibalik ang iyong wallet.</string>
+    <string name="recover_continue">Magpatuloy</string>
+
+</resources>
