@@ -92,6 +92,10 @@ Each is testable. Numbers are referenced by the implementation plan.
   "no funds found **with this passphrase**", plus a retry. Same class of defect as the
   `anyBackendUnreachable` fix: a confident answer to a question we did not finish asking,
   about someone's money.
+- **R11 — Creation only; existing wallets are never offered it.** No Settings entry point, no
+  prompt, no migration path. An existing wallet's derivation must be provably untouched by this
+  change (§8), and the surest way to keep that true is to give the passphrase no way to reach a
+  wallet that already exists.
 - **R10 — Wipe paths clear it.** `WalletDataEraser` and `StaleDataWiper` must remove the
   passphrase with the seed. A passphrase surviving a wipe is a secret outliving the wallet it
   belonged to.
@@ -164,5 +168,7 @@ A test must assert that an install carrying only v1 does not clear sync data on 
 1. Length cap: 128 characters proposed. Any reason to go higher?
 2. Does `SeedViewScreen` reveal the passphrase behind the same PIN + biometric gate as the
    phrase, or a second confirmation?
-3. Should an existing wallet be offered "add a passphrase" at all, given §9 says that is a new
-   wallet? Current lean: no — creation only, to avoid implying an in-place upgrade.
+3. ~~Should an existing wallet be offered "add a passphrase"?~~ **RESOLVED 2026-08-27: no.**
+   Creation only. Adding a passphrase to an existing wallet is a different wallet with different
+   addresses, not an edit — offering it in Settings would imply an in-place upgrade that does not
+   exist, and the first thing the user would see is a zero balance. See R11.
