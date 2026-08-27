@@ -22,7 +22,9 @@ import io.digibyte.ui.theme.DigiByteAccent
  * Hero balance: the native DGB amount is the large primary figure, with the
  * chosen fiat/crypto equivalent (USD / BTC / PHP — tap to cycle) below it.
  * DigiDollar held, if any, is shown as a distinct pill beneath — it is a
- * separate dollar-denominated asset, not part of the DGB total.
+ * separate dollar-denominated asset, not part of the DGB total. Both currencies
+ * are named by their mark rather than in words; see the contentDescription note
+ * on each, because a logo that replaces a word has to keep saying it aloud.
  *
  * @param fiatAmount  Pre-formatted equivalent string in the chosen currency, e.g. "$12.34"
  * @param dgbAmount   Pre-formatted DGB amount WITHOUT the ticker, e.g. "1,234.56789012" —
@@ -104,13 +106,19 @@ fun BalanceDisplay(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "DigiDollar",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp
-                        ),
-                        color = equivColor
+                    Image(
+                        painter = painterResource(id = io.digibyte.R.drawable.dd_symbol),
+                        // Replaces the word "DigiDollar". Without this a screen reader would
+                        // announce a bare dollar figure with nothing to say which currency it
+                        // is — and this pill sits directly beneath a DGB balance, so "which
+                        // currency" is the entire point of the label.
+                        contentDescription = "DigiDollar",
+                        // Sized to the 13sp label it replaced, not to the hero's figure: this
+                        // is a name for the amount beside it, and a mark that outweighed the
+                        // number would invert that.
+                        modifier = Modifier
+                            .size(18.dp)
+                            .alpha(alpha)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
