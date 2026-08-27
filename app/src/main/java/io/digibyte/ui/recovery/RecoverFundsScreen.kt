@@ -55,6 +55,9 @@ fun RecoverFundsScreen(
     // Android's saved-instance-state Bundle (larger exposure surface than the
     // in-memory-only convention used by MnemonicInputScreen.kt).
     var phrase by remember { mutableStateOf("") }
+    // Same reasoning as `phrase` above: never rememberSaveable, so a foreign passphrase is not
+    // written to a saved-state bundle.
+    var passphrase by remember { mutableStateOf("") }
 
     LaunchedEffect(mode) {
         if (mode == RecoverMode.ThisWallet && state is RecoverFundsViewModel.UiState.Idle) vm.classify()
@@ -110,6 +113,7 @@ fun RecoverFundsScreen(
                 if (newMode != mode) {
                     mode = newMode
                     phrase = ""
+                    passphrase = ""
                     vm.reset()
                 }
             }
@@ -131,11 +135,13 @@ fun RecoverFundsScreen(
                     is RecoverFundsViewModel.UiState.Done -> ResultBody(s.outcomes)
                     is RecoverFundsViewModel.UiState.Error ->
                         if (mode == RecoverMode.AnotherPhrase)
-                            PhraseEntry(phrase, { phrase = it }, error = s.reason) { vm.classifyForeign(phrase) }
+                            PhraseEntry(phrase, { phrase = it }, error = s.reason, passphrase = passphrase,
+                                onPassphrase = { passphrase = it }) { vm.classifyForeign(phrase, passphrase) }
                         else ErrorBody(reason = s.reason, onRetry = { vm.classify() })
                     else -> // Idle
                         if (mode == RecoverMode.AnotherPhrase)
-                            PhraseEntry(phrase, { phrase = it }, error = null) { vm.classifyForeign(phrase) }
+                            PhraseEntry(phrase, { phrase = it }, error = null, passphrase = passphrase,
+                                onPassphrase = { passphrase = it }) { vm.classifyForeign(phrase, passphrase) }
                         else Unit
                 }
             }
@@ -939,7 +945,14 @@ private fun ModeSelector(mode: RecoverMode, enabled: Boolean, onChange: (Recover
 }
 
 @Composable
-private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: String?, onScan: () -> Unit) {
+private fun PhraseEntry(
+    phrase: String,
+    onPhrase: (String) -> Unit,
+    error: String?,
+    passphrase: String,
+    onPassphrase: (String) -> Unit,
+    onScan: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
             stringResource(R.string.rf_other_phrase_body),
@@ -971,6 +984,33 @@ private fun PhraseEntry(phrase: String, onPhrase: (String) -> Unit, error: Strin
             ),
             shape = RoundedCornerShape(8.dp)
         )
+        Spacer(Modifier.height(10.dp))
+
+        // Optional BIP39 passphrase. Labelled so that leaving it blank is obviously correct for
+        // the overwhelming majority of phrases — a field that looks required would have people
+        // inventing a passphrase and restoring an empty wallet.
+        OutlinedTextField(
+            value = passphrase,
+            onValueChange = onPassphrase,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text(stringResource(R.string.pass_restore_label)) },
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                autoCorrect = false,
+                capitalization = KeyboardCapitalization.None,
+            ),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = ACCENT,
+                unfocusedBorderColor = DIVIDER,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = ACCENT,
+            ),
+            shape = RoundedCornerShape(8.dp),
+        )
+
         if (error != null) {
             Spacer(Modifier.height(6.dp))
             // classifyForeign()'s messages are already user-friendly copy —

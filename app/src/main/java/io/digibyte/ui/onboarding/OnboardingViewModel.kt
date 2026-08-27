@@ -47,6 +47,18 @@ class OnboardingViewModel @Inject constructor(
         _wordCount = count
     }
 
+    /**
+     * OPTIONAL BIP39 passphrase, in memory only until the wallet is created.
+     *
+     * Held here rather than passed through navigation arguments so it never enters a back-stack
+     * entry, a saved-state bundle, or a deep link.
+     */
+    private var _passphrase: String? = null
+
+    fun setPassphrase(value: String?) { _passphrase = value?.takeIf { it.isNotEmpty() } }
+
+    fun hasPassphrase(): Boolean = _passphrase != null
+
     /** Returns the current in-memory mnemonic words. */
     fun getMnemonicWords(): List<String> = _mnemonic
 
@@ -102,9 +114,42 @@ class OnboardingViewModel @Inject constructor(
         }
         viewModelScope.launch {
             val result = recoveryScanService.scan(phrase, passphrase)
+
+            // When a passphrase was supplied and found nothing, ask the other question too:
+            // does this phrase have funds WITHOUT it? A BIP39 passphrase has no checksum, so a
+            // typo derives a valid empty wallet and the scan honestly reports nothing — which
+            // reads to the user as stolen coins. One extra pass turns that into "check the
+            // passphrase", which is a five-second fix instead of a panic.
+            val comparison: Long? =
+                if (passphrase != null &&
+                    result is io.digibyte.core.recovery.RecoveryScanService.State.Done &&
+                    result.totalBalanceSat == 0L &&
+                    !result.anyBackendUnreachable
+                ) {
+                    (recoveryScanService.scan(phrase, null)
+                        as? io.digibyte.core.recovery.RecoveryScanService.State.Done)
+                        ?.totalBalanceSat
+                } else null
+
+            _passphraseVerdict.value = if (result is io.digibyte.core.recovery.RecoveryScanService.State.Done) {
+                io.digibyte.core.recovery.PassphraseScanVerdict.of(
+                    withPassphraseSat = result.totalBalanceSat,
+                    withoutPassphraseSat = comparison,
+                    incomplete = result.anyBackendUnreachable,
+                )
+            } else null
+
+            // The comparison scan overwrote the observable state; put the real answer back so the
+            // UI never shows funds that belong to a wallet the user is not restoring.
             _scanResults.value = result
         }
     }
+
+    /** Why a passphrase scan came back empty, when one was supplied. Null when not applicable. */
+    private val _passphraseVerdict =
+        MutableStateFlow<io.digibyte.core.recovery.PassphraseScanVerdict.Outcome?>(null)
+    val passphraseVerdict: StateFlow<io.digibyte.core.recovery.PassphraseScanVerdict.Outcome?> =
+        _passphraseVerdict
 
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) {
@@ -116,9 +161,12 @@ class OnboardingViewModel @Inject constructor(
                 // before this, and clearing afterward wipes the freshly-set
                 // PIN. (recoverWallet keeps its clearPin because it runs
                 // before pin_setup, replacing any stale-from-prior-install PIN.)
-                walletManager.createWallet(phrase)
+                walletManager.createWallet(phrase, _passphrase)
             }
             wipeMnemonicFromMemory()
+            // The passphrase is now in the Keystore envelope; there is no reason for the
+            // ViewModel to keep holding it.
+            _passphrase = null
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet creation failed")
             onResult(success)
         }

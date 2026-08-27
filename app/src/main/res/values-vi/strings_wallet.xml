@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Nâng cao — thêm cụm mật khẩu</string>
+    <string name="pass_optional">Tùy chọn</string>
+    <string name="pass_what">Cụm mật khẩu là một từ hoặc câu bổ sung do bạn chọn. Khi có nó, chỉ riêng cụm từ khôi phục không còn đủ để mở ví này — người nhặt được các từ bạn ghi ra cũng không tiêu được tiền của bạn.</string>
+    <string name="pass_warn">Hãy ghi cụm mật khẩu cùng với cụm từ khôi phục và giữ cả hai. Nếu mất, riêng các từ đó sẽ KHÔNG khôi phục được ví, và không ai có thể lấy lại giúp bạn.</string>
+    <string name="pass_scope">Điều này bảo vệ bản sao lưu bạn ghi ra giấy. Trên điện thoại này, mã PIN vẫn là thứ khóa ví.</string>
+    <string name="pass_enter">Cụm mật khẩu</string>
+    <string name="pass_confirm">Xác nhận cụm mật khẩu</string>
+    <string name="pass_mismatch">Cụm mật khẩu không khớp</string>
+    <string name="pass_too_long">Quá dài — tối đa %1$d ký tự</string>
+    <string name="pass_set">Đã đặt cụm mật khẩu</string>
+    <string name="pass_none">Không có cụm mật khẩu</string>
+    <string name="pass_restore_label">Cụm mật khẩu (để trống nếu bạn không dùng)</string>
+    <string name="pass_restore_none">Không tìm thấy tiền với cụm mật khẩu này.</string>
+    <string name="pass_restore_typo">Không có tiền với cụm mật khẩu đó — nhưng cụm từ khôi phục này CÓ tiền khi không dùng cụm mật khẩu. Hãy kiểm tra lỗi gõ, hoặc để trống.</string>
+    <string name="pass_restore_retry">Thử cụm mật khẩu khác</string>
+
 </resources>

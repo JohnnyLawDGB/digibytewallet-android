@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Gelişmiş — parola ekle</string>
+    <string name="pass_optional">İsteğe bağlı</string>
+    <string name="pass_what">Parola, kendi seçtiğiniz ek bir kelime ya da cümledir. Parola varsa kurtarma ifadeniz tek başına bu cüzdanı açmaya yetmez — yazılı kelimeleri bulan biri coinlerinizi harcayamaz.</string>
+    <string name="pass_warn">Parolayı kurtarma ifadenizle birlikte yazın ve ikisini de saklayın. Kaybederseniz bu kelimeler tek başına cüzdanınızı GERİ GETİRMEZ ve kimse sizin için kurtaramaz.</string>
+    <string name="pass_scope">Bu, yazılı yedeğinizi korur. Bu telefonda cüzdanı kilitli tutan hâlâ PIN\'inizdir.</string>
+    <string name="pass_enter">Parola</string>
+    <string name="pass_confirm">Parolayı onayla</string>
+    <string name="pass_mismatch">Parolalar eşleşmiyor</string>
+    <string name="pass_too_long">Çok uzun — en fazla %1$d karakter</string>
+    <string name="pass_set">Parola ayarlandı</string>
+    <string name="pass_none">Parola yok</string>
+    <string name="pass_restore_label">Parola (kullanmadıysanız boş bırakın)</string>
+    <string name="pass_restore_none">Bu parolayla hiçbir bakiye bulunamadı.</string>
+    <string name="pass_restore_typo">Bu parolayla bakiye yok — ancak bu kurtarma ifadesinin parolasız bakiyesi VAR. Parolada yazım hatası olup olmadığını kontrol edin veya boş bırakın.</string>
+    <string name="pass_restore_retry">Başka bir parola dene</string>
+
 </resources>

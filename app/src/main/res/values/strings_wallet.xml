@@ -647,4 +647,30 @@
     <!-- Currency code and its localised name, e.g. "EUR — Euro". Both halves come from data. -->
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <!-- ── BIP39 passphrase (optional, "12+1 / 24+1") ───────────────────────────────
+         WARNING throughout. A BIP39 passphrase has no checksum: a typo does not error, it
+         opens a different, valid, EMPTY wallet. And because the app remembers the passphrase,
+         the user is encouraged not to write it down — so their paper backup silently stops
+         working. Every string here exists to fight one of those two failures. Do not soften. -->
+    <string name="pass_advanced">Advanced — add a passphrase</string>
+    <string name="pass_optional">Optional</string>
+    <string name="pass_what">A passphrase is an extra word or sentence of your own. With one, your recovery phrase alone is no longer enough to open this wallet — someone who finds the written words cannot spend your coins.</string>
+    <!-- WARNING: this is the sentence that prevents a lost wallet. -->
+    <string name="pass_warn">Write the passphrase down with your recovery phrase and keep both. If you lose it, these words alone will NOT restore your wallet, and nobody can recover it for you.</string>
+    <!-- Honest scope: it protects the written backup, not the phone. See the design spec. -->
+    <string name="pass_scope">This protects your written backup. On this phone your PIN is still what keeps the wallet locked.</string>
+    <string name="pass_enter">Passphrase</string>
+    <string name="pass_confirm">Confirm passphrase</string>
+    <string name="pass_mismatch">Passphrases do not match</string>
+    <string name="pass_too_long">Too long — %1$d characters maximum</string>
+    <string name="pass_set">Passphrase set</string>
+    <string name="pass_none">No passphrase</string>
+
+    <!-- ── Passphrase on the restore side ──────────────────────────────────────────── -->
+    <string name="pass_restore_label">Passphrase (leave blank if you did not use one)</string>
+    <!-- WARNING: a wrong passphrase finds an empty wallet and looks exactly like lost coins. -->
+    <string name="pass_restore_none">No funds found with this passphrase.</string>
+    <string name="pass_restore_typo">No funds with that passphrase — but this recovery phrase DOES have funds without one. Check the passphrase for a typo, or leave it blank.</string>
+    <string name="pass_restore_retry">Try a different passphrase</string>
+
 </resources>

@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">高级 — 添加密码短语</string>
+    <string name="pass_optional">可选</string>
+    <string name="pass_what">密码短语是您自己设定的一个额外单词或句子。设置后，仅凭恢复助记词已不足以打开此钱包 — 即使有人找到了写下的单词，也无法动用您的币。</string>
+    <string name="pass_warn">请把密码短语与恢复助记词一起写下并妥善保管。一旦遗失，仅凭这些单词将无法恢复您的钱包，也没有任何人能替您找回。</string>
+    <string name="pass_scope">这保护的是您写下的备份。在这部手机上，锁住钱包的仍然是您的 PIN 码。</string>
+    <string name="pass_enter">密码短语</string>
+    <string name="pass_confirm">确认密码短语</string>
+    <string name="pass_mismatch">密码短语不一致</string>
+    <string name="pass_too_long">过长 — 最多 %1$d 个字符</string>
+    <string name="pass_set">已设置密码短语</string>
+    <string name="pass_none">无密码短语</string>
+    <string name="pass_restore_label">密码短语（未使用则留空）</string>
+    <string name="pass_restore_none">使用此密码短语未找到任何资金。</string>
+    <string name="pass_restore_typo">使用该密码短语未找到资金 — 但这组恢复助记词在不使用密码短语时确实有资金。请检查密码短语是否输错，或将其留空。</string>
+    <string name="pass_restore_retry">尝试其他密码短语</string>
+
 </resources>

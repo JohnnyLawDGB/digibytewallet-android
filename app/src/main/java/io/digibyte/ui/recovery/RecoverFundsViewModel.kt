@@ -91,6 +91,8 @@ class RecoverFundsViewModel @Inject constructor(
     // sweepForeign so the sweep re-derives the same seed. Cleared after sweep /
     // on reset. (A JVM String can't be zeroed — same accepted limit as restore.)
     private var pendingForeignMnemonic: String? = null
+    /** NFKD-normalised passphrase for the phrase being restored, or null. Never persisted. */
+    private var pendingForeignPassphrase: String? = null
 
     // The coroutine launched by whichever of classify/sweep/classifyForeign/
     // sweepForeign is currently in flight. reset() cancels it so a stale scan
@@ -103,6 +105,7 @@ class RecoverFundsViewModel @Inject constructor(
     fun reset() {
         activeJob?.cancel()
         pendingForeignMnemonic = null
+        pendingForeignPassphrase = null
         _state.value = UiState.Idle
     }
 
@@ -190,16 +193,17 @@ class RecoverFundsViewModel @Inject constructor(
     }
 
     /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
-    fun classifyForeign(mnemonic: String) {
+    fun classifyForeign(mnemonic: String, passphrase: String? = null) {
         val phrase = mnemonic.trim().split(Regex("\\s+")).joinToString(" ") { it.lowercase() }
         if (!NativeBridge.isValidMnemonic(phrase)) {
             _state.value = UiState.Error("That doesn't look like a valid recovery phrase.")
             return
         }
         pendingForeignMnemonic = phrase
+        pendingForeignPassphrase = io.digibyte.core.Bip39Passphrase.prepare(passphrase)
         _state.value = UiState.Classifying
         activeJob = viewModelScope.launch {
-            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
+            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
             }
             try {
@@ -243,9 +247,10 @@ class RecoverFundsViewModel @Inject constructor(
         }
         _state.value = UiState.Sweeping
         activeJob = viewModelScope.launch {
-            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null) ?: run {
+            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase.")
                 pendingForeignMnemonic = null
+        pendingForeignPassphrase = null
                 return@launch
             }
             try {
@@ -265,6 +270,7 @@ class RecoverFundsViewModel @Inject constructor(
             } finally {
                 seed.fill(0)
                 pendingForeignMnemonic = null
+        pendingForeignPassphrase = null
             }
         }
     }

@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Lanjutan — tambahkan frasa sandi</string>
+    <string name="pass_optional">Opsional</string>
+    <string name="pass_what">Frasa sandi adalah kata atau kalimat tambahan pilihan Anda. Dengan itu, frasa pemulihan saja tidak lagi cukup untuk membuka dompet ini — orang yang menemukan kata-kata tertulis Anda tidak bisa memakai koin Anda.</string>
+    <string name="pass_warn">Catat frasa sandi bersama frasa pemulihan Anda dan simpan keduanya. Jika hilang, kata-kata itu saja TIDAK akan memulihkan dompet Anda, dan tidak ada yang bisa memulihkannya untuk Anda.</string>
+    <string name="pass_scope">Ini melindungi cadangan tertulis Anda. Di ponsel ini, PIN Anda tetap yang mengunci dompet.</string>
+    <string name="pass_enter">Frasa sandi</string>
+    <string name="pass_confirm">Konfirmasi frasa sandi</string>
+    <string name="pass_mismatch">Frasa sandi tidak cocok</string>
+    <string name="pass_too_long">Terlalu panjang — maksimal %1$d karakter</string>
+    <string name="pass_set">Frasa sandi diatur</string>
+    <string name="pass_none">Tanpa frasa sandi</string>
+    <string name="pass_restore_label">Frasa sandi (kosongkan jika Anda tidak memakainya)</string>
+    <string name="pass_restore_none">Tidak ada dana ditemukan dengan frasa sandi ini.</string>
+    <string name="pass_restore_typo">Tidak ada dana dengan frasa sandi itu — tetapi frasa pemulihan ini MEMANG punya dana tanpa frasa sandi. Periksa salah ketik, atau kosongkan saja.</string>
+    <string name="pass_restore_retry">Coba frasa sandi lain</string>
+
 </resources>

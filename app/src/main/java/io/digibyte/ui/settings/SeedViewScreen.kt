@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,6 +26,7 @@ import androidx.navigation.NavController
 import io.digibyte.core.WalletManager
 import io.digibyte.core.security.KeyStoreManager
 import io.digibyte.ui.theme.DigiByteRed
+import io.digibyte.R
 
 /**
  * Displays the recovery seed phrase.
@@ -46,6 +48,36 @@ fun SeedViewScreen(
         window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    /**
+     * The stored BIP39 passphrase, if this wallet has one.
+     *
+     * Shown WITH the phrase, deliberately. The app holds the passphrase so the wallet can rebuild
+     * itself on every restart — which means a user who writes down only the twelve words is
+     * holding half a backup while believing it is whole. Revealing the phrase without it would
+     * make this screen actively misleading: it is titled "Recovery Phrase" and would be showing
+     * something that no longer recovers anything on its own.
+     *
+     * Behind the same PIN + biometric gate as the phrase, because it is the same secret material.
+     */
+    val storedPassphrase: String? = remember {
+        try {
+            val prefs = view.context.getSharedPreferences("dgb_wallet_seed", android.content.Context.MODE_PRIVATE)
+            val ct = prefs.getString("encrypted_pass", null)
+            val iv = prefs.getString("encrypted_pass_iv", null)
+            if (ct != null && iv != null) {
+                val decrypted = keyStoreManager.decrypt(
+                    io.digibyte.core.security.EncryptedData(
+                        ct.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
+                        iv.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
+                    )
+                )
+                decrypted?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
+            } else null
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -170,6 +202,38 @@ fun SeedViewScreen(
                                 fontSize = 15.sp
                             )
                         }
+                    }
+                }
+            }
+
+            // The passphrase, if there is one. Silent when there is not — the overwhelming
+            // majority of wallets — so this screen is unchanged for them.
+            if (storedPassphrase != null) {
+                Spacer(Modifier.height(20.dp))
+                Card(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text(
+                            text = stringResource(R.string.pass_enter),
+                            color = Color(0xFF8FA1B8),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = storedPassphrase,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 15.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.pass_warn),
+                            color = Color(0xFFFFCC66),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }

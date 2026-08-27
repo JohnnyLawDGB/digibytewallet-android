@@ -115,7 +115,7 @@ class WalletManagerRescanTest {
         try {
             assertTrue(
                 "native wallet failed to load — cannot exercise the ledger",
-                NativeBridge.recoverWalletFromBytes(bytes, 1_700_000_000L),
+                NativeBridge.recoverWalletFromBytes(bytes, 1_700_000_000L, null),
             )
         } finally {
             bytes.fill(0)

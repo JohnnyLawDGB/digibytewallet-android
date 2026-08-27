@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">उन्नत — पासफ़्रेज़ जोड़ें</string>
+    <string name="pass_optional">वैकल्पिक</string>
+    <string name="pass_what">पासफ़्रेज़ आपका चुना हुआ एक अतिरिक्त शब्द या वाक्य है। इसके साथ, केवल आपका रिकवरी वाक्यांश इस वॉलेट को खोलने के लिए पर्याप्त नहीं रहता — जो लिखे हुए शब्द पा जाए, वह आपके सिक्के खर्च नहीं कर सकता।</string>
+    <string name="pass_warn">पासफ़्रेज़ को अपने रिकवरी वाक्यांश के साथ लिखकर दोनों सुरक्षित रखें। यदि यह खो गया, तो केवल ये शब्द आपका वॉलेट पुनर्स्थापित नहीं करेंगे, और कोई भी इसे आपके लिए वापस नहीं ला सकता।</string>
+    <string name="pass_scope">यह आपके लिखित बैकअप की रक्षा करता है। इस फ़ोन पर वॉलेट को लॉक रखने वाला अब भी आपका PIN है।</string>
+    <string name="pass_enter">पासफ़्रेज़</string>
+    <string name="pass_confirm">पासफ़्रेज़ की पुष्टि करें</string>
+    <string name="pass_mismatch">पासफ़्रेज़ मेल नहीं खाते</string>
+    <string name="pass_too_long">बहुत लंबा — अधिकतम %1$d वर्ण</string>
+    <string name="pass_set">पासफ़्रेज़ सेट</string>
+    <string name="pass_none">कोई पासफ़्रेज़ नहीं</string>
+    <string name="pass_restore_label">पासफ़्रेज़ (यदि आपने उपयोग नहीं किया तो खाली छोड़ें)</string>
+    <string name="pass_restore_none">इस पासफ़्रेज़ के साथ कोई फंड नहीं मिला।</string>
+    <string name="pass_restore_typo">उस पासफ़्रेज़ के साथ कोई फंड नहीं — लेकिन इस रिकवरी वाक्यांश में बिना पासफ़्रेज़ के फंड हैं। पासफ़्रेज़ में टाइपिंग गलती जाँचें, या इसे खाली छोड़ें।</string>
+    <string name="pass_restore_retry">कोई दूसरा पासफ़्रेज़ आज़माएँ</string>
+
 </resources>

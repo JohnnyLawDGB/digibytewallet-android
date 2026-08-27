@@ -531,4 +531,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Avanzado — añadir una frase de contraseña</string>
+    <string name="pass_optional">Opcional</string>
+    <string name="pass_what">Una frase de contraseña es una palabra o frase adicional tuya. Con ella, tu frase de recuperación por sí sola ya no basta para abrir esta billetera — quien encuentre las palabras escritas no podrá gastar tus monedas.</string>
+    <string name="pass_warn">Anota la frase de contraseña junto a tu frase de recuperación y guarda ambas. Si la pierdes, esas palabras por sí solas NO restaurarán tu billetera, y nadie podrá recuperarla por ti.</string>
+    <string name="pass_scope">Esto protege tu copia escrita. En este teléfono tu PIN sigue siendo lo que mantiene bloqueada la billetera.</string>
+    <string name="pass_enter">Frase de contraseña</string>
+    <string name="pass_confirm">Confirma la frase de contraseña</string>
+    <string name="pass_mismatch">Las frases de contraseña no coinciden</string>
+    <string name="pass_too_long">Demasiado larga — máximo %1$d caracteres</string>
+    <string name="pass_set">Frase de contraseña establecida</string>
+    <string name="pass_none">Sin frase de contraseña</string>
+    <string name="pass_restore_label">Frase de contraseña (déjala en blanco si no usaste una)</string>
+    <string name="pass_restore_none">No se encontraron fondos con esta frase de contraseña.</string>
+    <string name="pass_restore_typo">Sin fondos con esa frase de contraseña — pero esta frase de recuperación SÍ tiene fondos sin ninguna. Revisa si hay una errata, o déjala en blanco.</string>
+    <string name="pass_restore_retry">Probar otra frase de contraseña</string>
+
 </resources>

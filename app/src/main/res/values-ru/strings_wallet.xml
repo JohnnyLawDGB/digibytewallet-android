@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Дополнительно — добавить парольную фразу</string>
+    <string name="pass_optional">Необязательно</string>
+    <string name="pass_what">Парольная фраза — это дополнительное слово или предложение, которое выбираете вы. С ней одной только фразы восстановления уже недостаточно, чтобы открыть этот кошелёк: тот, кто найдёт записанные слова, не сможет потратить ваши монеты.</string>
+    <string name="pass_warn">Запишите парольную фразу вместе с фразой восстановления и храните обе. Если вы её потеряете, эти слова сами по себе НЕ восстановят кошелёк, и никто не сможет вернуть его за вас.</string>
+    <string name="pass_scope">Это защищает вашу записанную резервную копию. На этом телефоне кошелёк по-прежнему запирает PIN-код.</string>
+    <string name="pass_enter">Парольная фраза</string>
+    <string name="pass_confirm">Подтвердите парольную фразу</string>
+    <string name="pass_mismatch">Парольные фразы не совпадают</string>
+    <string name="pass_too_long">Слишком длинная — не более %1$d символов</string>
+    <string name="pass_set">Парольная фраза задана</string>
+    <string name="pass_none">Без парольной фразы</string>
+    <string name="pass_restore_label">Парольная фраза (оставьте пустым, если не использовали)</string>
+    <string name="pass_restore_none">С этой парольной фразой средства не найдены.</string>
+    <string name="pass_restore_typo">С этой парольной фразой средств нет — но у этой фразы восстановления средства ЕСТЬ без парольной фразы. Проверьте опечатку или оставьте поле пустым.</string>
+    <string name="pass_restore_retry">Попробовать другую парольную фразу</string>
+
 </resources>

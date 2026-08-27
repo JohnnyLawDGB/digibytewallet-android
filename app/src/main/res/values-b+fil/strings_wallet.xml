@@ -529,4 +529,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Advanced — magdagdag ng passphrase</string>
+    <string name="pass_optional">Opsyonal</string>
+    <string name="pass_what">Ang passphrase ay karagdagang salita o pangungusap na ikaw ang pumipili. Kapag may nito, hindi na sapat ang recovery phrase mo lang para buksan ang wallet na ito — hindi magagastos ng sinumang makakita ng nakasulat na mga salita ang mga coin mo.</string>
+    <string name="pass_warn">Isulat ang passphrase kasama ang recovery phrase mo at itago pareho. Kapag nawala ito, HINDI maibabalik ng mga salitang iyon lang ang wallet mo, at walang makakabawi nito para sa iyo.</string>
+    <string name="pass_scope">Pinoprotektahan nito ang nakasulat mong backup. Sa teleponong ito, ang PIN mo pa rin ang nagla-lock sa wallet.</string>
+    <string name="pass_enter">Passphrase</string>
+    <string name="pass_confirm">Kumpirmahin ang passphrase</string>
+    <string name="pass_mismatch">Hindi tugma ang mga passphrase</string>
+    <string name="pass_too_long">Masyadong mahaba — %1$d na karakter ang maximum</string>
+    <string name="pass_set">Nakatakda ang passphrase</string>
+    <string name="pass_none">Walang passphrase</string>
+    <string name="pass_restore_label">Passphrase (iwanang blangko kung wala kang ginamit)</string>
+    <string name="pass_restore_none">Walang pondong nakita gamit ang passphrase na ito.</string>
+    <string name="pass_restore_typo">Walang pondo sa passphrase na iyon — pero MAY pondo ang recovery phrase na ito kapag walang passphrase. Suriin kung may typo, o iwanang blangko.</string>
+    <string name="pass_restore_retry">Sumubok ng ibang passphrase</string>
+
 </resources>

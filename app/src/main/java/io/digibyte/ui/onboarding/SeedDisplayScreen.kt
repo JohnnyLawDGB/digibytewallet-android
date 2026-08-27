@@ -5,6 +5,7 @@ import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +37,9 @@ fun SeedDisplayScreen(
     wordCount: Int,
     viewModel: OnboardingViewModel = hiltViewModel()
 ) {
+    // In-memory only, and never navigated with — see the Button's onClick.
+    var passphrase by remember { mutableStateOf("") }
+    var passphraseConfirm by remember { mutableStateOf("") }
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -96,6 +100,15 @@ fun SeedDisplayScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        // imePadding BEFORE verticalScroll so the scrollable viewport shrinks to
+                        // the space the keyboard leaves. The activity sets adjustResize, but it
+                        // also calls enableEdgeToEdge(), and an edge-to-edge window does NOT
+                        // resize for the IME — Compose has to inset it. Without this the
+                        // passphrase confirm field sits under the keyboard, unreachable: measured
+                        // at bounds [66,2176][1014,2220] on a 2220px screen, clipped to 44px.
+                        // Every other screen with a text field already does this; this one only
+                        // just acquired one.
+                        .imePadding()
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -178,10 +191,27 @@ fun SeedDisplayScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Optional BIP39 passphrase. Collapsed by default; a wallet created without
+                    // opening it derives exactly what it would have before this existed.
+                    PassphraseSection(
+                        passphrase = passphrase,
+                        confirm = passphraseConfirm,
+                        onPassphraseChange = { passphrase = it },
+                        onConfirmChange = { passphraseConfirm = it },
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
-                        onClick = { navController.navigate("seed_verify") },
+                        onClick = {
+                            // Committed here rather than on the next screen so the value cannot
+                            // travel through a navigation argument or saved-state bundle.
+                            viewModel.setPassphrase(passphrase)
+                            navController.navigate("seed_verify")
+                        },
+                        enabled = passphraseEntryReady(passphrase, passphraseConfirm),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),

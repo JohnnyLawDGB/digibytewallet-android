@@ -537,4 +537,20 @@
 
     <string name="dsp_currency_subtitle">%1$s — %2$s</string>
 
+    <string name="pass_advanced">Erweitert — Passphrase hinzufügen</string>
+    <string name="pass_optional">Optional</string>
+    <string name="pass_what">Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl. Mit ihr reicht Ihre Wiederherstellungsphrase allein nicht mehr aus, um diese Wallet zu öffnen — wer die notierten Wörter findet, kann Ihre Coins nicht ausgeben.</string>
+    <string name="pass_warn">Notieren Sie die Passphrase zusammen mit Ihrer Wiederherstellungsphrase und bewahren Sie beides auf. Wenn Sie sie verlieren, stellen diese Wörter allein Ihre Wallet NICHT wieder her, und niemand kann sie für Sie wiederherstellen.</string>
+    <string name="pass_scope">Dies schützt Ihr notiertes Backup. Auf diesem Telefon bleibt Ihre PIN das, was die Wallet sperrt.</string>
+    <string name="pass_enter">Passphrase</string>
+    <string name="pass_confirm">Passphrase bestätigen</string>
+    <string name="pass_mismatch">Passphrasen stimmen nicht überein</string>
+    <string name="pass_too_long">Zu lang — maximal %1$d Zeichen</string>
+    <string name="pass_set">Passphrase gesetzt</string>
+    <string name="pass_none">Keine Passphrase</string>
+    <string name="pass_restore_label">Passphrase (leer lassen, wenn Sie keine verwendet haben)</string>
+    <string name="pass_restore_none">Mit dieser Passphrase wurde kein Guthaben gefunden.</string>
+    <string name="pass_restore_typo">Kein Guthaben mit dieser Passphrase — aber diese Wiederherstellungsphrase HAT Guthaben ohne Passphrase. Prüfen Sie die Passphrase auf Tippfehler oder lassen Sie sie leer.</string>
+    <string name="pass_restore_retry">Andere Passphrase versuchen</string>
+
 </resources>
