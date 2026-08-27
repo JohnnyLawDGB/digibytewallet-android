@@ -37,6 +37,8 @@ import io.digibyte.ui.theme.DigiByteNavy
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -210,25 +212,25 @@ fun WalletScreen(
             ) {
                 WalletActionButton(
                     icon = Icons.AutoMirrored.Filled.Send,
-                    label = "Send",
+                    label = stringResource(R.string.wallet_send),
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateSend
                 )
                 WalletActionButton(
                     icon = Icons.Default.QrCodeScanner,
-                    label = "Receive",
+                    label = stringResource(R.string.wallet_receive),
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateReceive
                 )
                 WalletActionButton(
                     icon = Icons.Default.CropFree,
-                    label = "Scan",
+                    label = stringResource(R.string.wallet_scan),
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateScan
                 )
                 WalletActionButton(
                     icon = Icons.Default.Stars,
-                    label = "Assets",
+                    label = stringResource(R.string.wallet_assets),
                     modifier = Modifier.weight(1f),
                     onClick = onNavigateAssets
                 )
@@ -288,7 +290,7 @@ fun WalletScreen(
         // ── Recent activity header ────────────────────────────────────────
         item {
             Text(
-                text = "Recent Activity",
+                text = stringResource(R.string.wallet_recent_activity),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -305,7 +307,7 @@ fun WalletScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No transactions yet.\nSend or receive DGB to get started.",
+                        text = stringResource(R.string.wallet_no_transactions),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -369,13 +371,14 @@ private fun SyncProgressCard(
             // carries the range and the recovery action).
             val (icon, headline) = when {
                 info.abandonedBandHolding -> Icons.Filled.ErrorOutline to
-                    "Scan complete — part of your history is unverified"
+                    stringResource(R.string.wallet_sync_gap_headline)
                 info.stage == SyncStage.Connecting -> Icons.Filled.CloudSync to
-                    "Connecting to DigiByte network"
+                    stringResource(R.string.wallet_sync_connecting)
                 info.stage == SyncStage.Syncing -> Icons.Filled.Search to
-                    "Scanning for your transactions"
-                info.stage == SyncStage.Synced -> Icons.Filled.CheckCircle to "Up to date"
-                else -> Icons.Filled.ErrorOutline to "Sync failed"
+                    stringResource(R.string.wallet_sync_scanning)
+                info.stage == SyncStage.Synced -> Icons.Filled.CheckCircle to
+                    stringResource(R.string.wallet_sync_uptodate)
+                else -> Icons.Filled.ErrorOutline to stringResource(R.string.wallet_sync_failed)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -396,7 +399,11 @@ private fun SyncProgressCard(
             // Block X of Y, where data is meaningful.
             if (info.targetBlock > 0 && info.currentBlock > 0) {
                 Text(
-                    text = "Block ${formatThousands(info.currentBlock)} of ${formatThousands(info.targetBlock)}",
+                    text = stringResource(
+                        R.string.wallet_block_of,
+                        formatThousands(info.currentBlock),
+                        formatThousands(info.targetBlock),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFB8C5D6)
                 )
@@ -422,11 +429,16 @@ private fun SyncProgressCard(
             if (info.stage == SyncStage.Syncing && !info.abandonedBandHolding) {
                 val pct = (info.progressFraction * 100).toInt()
                 val etaSeconds = info.etaSeconds
-                val blocks = "${formatThousands(info.blocksBehind)} blocks"
+                val blocks = stringResource(
+                    R.string.wallet_blocks_count, formatThousands(info.blocksBehind)
+                )
+                val res = LocalContext.current.resources
                 val text = when {
-                    pct >= 100 -> "Finishing up — verifying recent blocks"
-                    etaSeconds != null -> "$pct% complete · $blocks · ${formatEta(etaSeconds)} remaining"
-                    else -> "$pct% complete · $blocks remaining · estimating…"
+                    pct >= 100 -> stringResource(R.string.wallet_sync_finishing)
+                    etaSeconds != null -> stringResource(
+                        R.string.wallet_sync_progress_eta, pct, blocks, formatEta(res, etaSeconds)
+                    )
+                    else -> stringResource(R.string.wallet_sync_progress_no_eta, pct, blocks)
                 }
                 Text(
                     text = text,
@@ -438,7 +450,11 @@ private fun SyncProgressCard(
             // Running totals — what the scan has surfaced so far.
             if (info.matchCount > 0 || info.runningBalanceSat > 0) {
                 Text(
-                    text = "Found ${info.matchCount} transaction${if (info.matchCount != 1) "s" else ""}, $runningBalanceDisplay so far",
+                    text = stringResource(
+                        R.string.wallet_scan_found,
+                        info.matchCount,
+                        runningBalanceDisplay,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFB8C5D6)
                 )
@@ -465,8 +481,7 @@ private fun SyncProgressCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Showing transactions from ${formatRecoveryDate(recoveryTs)} onward. " +
-                                "Earlier history is not being recovered.",
+                        text = stringResource(R.string.wallet_recovery_window, formatRecoveryDate(recoveryTs)),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFFFFCC66)
                     )
@@ -480,15 +495,16 @@ private fun formatThousands(value: Long): String {
     return NumberFormat.getNumberInstance(Locale.US).format(value)
 }
 
-private fun formatEta(seconds: Long): String {
-    if (seconds <= 0) return "estimating…"
+private fun formatEta(res: android.content.res.Resources, seconds: Long): String {
+    if (seconds <= 0) return res.getString(R.string.wallet_eta_estimating)
     return when {
-        seconds < 60 -> "~${seconds}s"
-        seconds < 3600 -> "~${seconds / 60} min"
+        seconds < 60 -> res.getString(R.string.wallet_eta_seconds, seconds)
+        seconds < 3600 -> res.getString(R.string.wallet_eta_minutes, seconds / 60)
         else -> {
             val hours = seconds / 3600
             val mins = (seconds % 3600) / 60
-            if (mins == 0L) "~${hours}h" else "~${hours}h ${mins}m"
+            if (mins == 0L) res.getString(R.string.wallet_eta_hours, hours)
+            else res.getString(R.string.wallet_eta_hours_mins, hours, mins)
         }
     }
 }
@@ -566,7 +582,7 @@ private fun PriceFeedCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "DGB / USD",
+                    text = stringResource(R.string.wallet_price_pair, "USD"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -586,7 +602,7 @@ private fun PriceFeedCard(
                     color = changeColor
                 )
                 Text(
-                    text = "via $source",
+                    text = stringResource(R.string.wallet_price_via, source),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -615,7 +631,7 @@ private fun TestnetBadge() {
     ) {
         Icon(
             imageVector = Icons.Default.BugReport,
-            contentDescription = "Testnet active",
+            contentDescription = stringResource(R.string.wallet_testnet_active),
             tint = Color(0xFFFFB74D),
             modifier = Modifier.size(12.dp)
         )
@@ -652,13 +668,13 @@ private fun TorIndicator(torState: TorState) {
     ) {
         Icon(
             imageVector = Icons.Default.VpnLock,
-            contentDescription = "Tor active",
+            contentDescription = stringResource(R.string.wallet_tor_active),
             tint = Color(0xFFB39DDB),
             modifier = Modifier.size(12.dp)
         )
         Spacer(modifier = Modifier.width(4.dp))
         Text(
-            text = "Tor — your IP stays hidden",
+            text = stringResource(R.string.wallet_tor_hidden),
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFFB39DDB)
         )
@@ -681,8 +697,8 @@ private fun SyncIndicator(info: SyncProgressInfo) {
             // progress hits 100 but stage is still Syncing (final wrap-up),
             // show "Finishing up" instead of "100%".
             val status = when {
-                pct >= 100 -> "Finishing up · ${info.peerCount} peers"
-                else -> "Syncing · ${info.peerCount} peers · ${pct}%"
+                pct >= 100 -> stringResource(R.string.wallet_status_finishing_peers, info.peerCount)
+                else -> stringResource(R.string.wallet_status_syncing, info.peerCount, pct)
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -723,10 +739,13 @@ private fun SyncIndicator(info: SyncProgressInfo) {
         SyncStage.Synced -> {
             val v = if (versionName.isNotEmpty()) " · v$versionName" else ""
             val statusText = when {
-                info.peerCount > 0 && info.currentBlock > 0 ->
-                    "Connected · ${info.peerCount} peers · Block ${formatThousands(info.currentBlock)}$v"
-                info.peerCount > 0 -> "Connected · ${info.peerCount} peers$v"
-                else -> "Connected$v"
+                info.peerCount > 0 && info.currentBlock > 0 -> stringResource(
+                    R.string.wallet_status_connected_block,
+                    info.peerCount, formatThousands(info.currentBlock), v,
+                )
+                info.peerCount > 0 ->
+                    stringResource(R.string.wallet_status_connected_peers, info.peerCount, v)
+                else -> stringResource(R.string.wallet_status_connected, v)
             }
             Text(
                 text = statusText,
@@ -736,16 +755,16 @@ private fun SyncIndicator(info: SyncProgressInfo) {
         }
         SyncStage.Failed -> {
             Text(
-                text = "Disconnected · ${info.peerCount} peers",
+                text = stringResource(R.string.wallet_disconnected_peers, info.peerCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
             )
         }
         SyncStage.Connecting -> {
             val text = if (info.peerCount > 0)
-                "Connecting · ${info.peerCount} peers"
+                stringResource(R.string.wallet_status_connecting_peers, info.peerCount)
             else
-                "Connecting…"
+                stringResource(R.string.wallet_status_connecting)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -786,15 +805,25 @@ private fun SyncIndicator(info: SyncProgressInfo) {
  * a wallet that abandoned one deep height it reads as the entire history, so
  * "N blocks abandoned" would be a straight lie.
  */
-internal fun abandonedBandMessage(band: io.digibyte.core.sync.AbandonedBand): String {
-    val range = if (band.lowKnown && band.low in 1..band.high) {
-        "blocks ${formatThousands(band.low)}–${formatThousands(band.high)}"
-    } else {
-        "blocks below ${formatThousands(band.high + 1)}"
-    }
-    return "Part of your history ($range) couldn't be verified from the filter " +
-        "fleet — tap to scan for missing transactions."
+internal sealed interface AbandonedRange {
+    /** Both ends observed: the exact inclusive range. */
+    data class Between(val low: String, val high: String) : AbandonedRange
+    /** Bottom never observed: an exclusive watermark, which is TRUE where a
+     *  fabricated lower bound would claim the whole history was abandoned. */
+    data class Below(val watermark: String) : AbandonedRange
 }
+
+/**
+ * The range only. Kept pure and free of prose so it stays unit-testable after
+ * localisation — the property that matters is which range is named, not the
+ * sentence around it, and the sentence now lives in strings_wallet.xml.
+ */
+internal fun abandonedBandRange(band: io.digibyte.core.sync.AbandonedBand): AbandonedRange =
+    if (band.lowKnown && band.low in 1..band.high) {
+        AbandonedRange.Between(formatThousands(band.low), formatThousands(band.high))
+    } else {
+        AbandonedRange.Below(formatThousands(band.high + 1))
+    }
 
 /**
  * Persistent recover-me banner for an abandoned compact-filter band (paced-convoy
@@ -808,7 +837,7 @@ internal fun abandonedBandMessage(band: io.digibyte.core.sync.AbandonedBand): St
  * Consequently this banner is NOT dismissible and NOT inside the sync card: it
  * survives the flip to "Synced" and clears only when a recovery has actually
  * covered the band ([io.digibyte.core.sync.CfAbandonmentStore]). Both recovery
- * paths live behind [onScan]: "Scan for missing transactions" (the node reconcile,
+ * paths live behind [onScan]: stringResource(R.string.wallet_scan_missing) (the node reconcile,
  * CF-independent, covers any height) and "Full rebuild from chain" (the rescan,
  * which now also deletes the persisted CF scan ledger so the re-`Init` really does
  * clear `abandonedBelow`).
@@ -842,14 +871,22 @@ private fun AbandonedBandBanner(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "History gap — some blocks weren't verified",
+                    text = stringResource(R.string.wallet_history_gap),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = androidx.compose.ui.graphics.Color(0xFFFFD580),
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = abandonedBandMessage(band),
+                text = stringResource(
+                    R.string.wallet_gap_body,
+                    when (val r = abandonedBandRange(band)) {
+                        is AbandonedRange.Between ->
+                            stringResource(R.string.wallet_gap_range_between, r.low, r.high)
+                        is AbandonedRange.Below ->
+                            stringResource(R.string.wallet_gap_range_below, r.watermark)
+                    },
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
@@ -859,7 +896,7 @@ private fun AbandonedBandBanner(
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                     containerColor = DigiByteAccent,
                 ),
-            ) { Text("Scan for missing transactions") }
+            ) { Text(stringResource(R.string.wallet_scan_missing)) }
         }
     }
 }
@@ -897,15 +934,14 @@ private fun ReconcileFailedBanner(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Balance refresh failed",
+                    text = stringResource(R.string.wallet_balance_refresh_failed),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = androidx.compose.ui.graphics.Color(0xFFFFD580),
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "We couldn't reach the reconcile node after this upgrade. " +
-                       "Your balance shown may be out of date.",
+                text = stringResource(R.string.wallet_reconcile_unreachable),
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
@@ -916,9 +952,9 @@ private fun ReconcileFailedBanner(
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = DigiByteAccent,
                     ),
-                ) { Text("Retry now") }
+                ) { Text(stringResource(R.string.common_retry_now)) }
                 androidx.compose.material3.OutlinedButton(onClick = onDismiss) {
-                    Text("Dismiss")
+                    Text(stringResource(R.string.common_dismiss))
                 }
             }
         }
@@ -950,16 +986,14 @@ private fun TorFailureBanner() {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Tor unavailable — using direct connections",
+                    text = stringResource(R.string.wallet_tor_unavailable),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = androidx.compose.ui.graphics.Color(0xFFFFD580),
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Tor didn't reach the network in time so the wallet is " +
-                       "connecting directly to peers for this session. Your IP " +
-                       "is visible to peers until you restart the app.",
+                text = stringResource(R.string.wallet_tor_timeout),
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
@@ -1004,16 +1038,14 @@ private fun OwnNodeDarkBanner(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Your node is offline",
+                    text = stringResource(R.string.wallet_node_offline),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = androidx.compose.ui.graphics.Color(0xFFFFD580),
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "The paired node isn't reachable or isn't serving compact " +
-                       "filters right now. Check that it's running and reachable, " +
-                       "and that it has peerblockfilters=1 set.",
+                text = stringResource(R.string.wallet_node_offline_body),
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
@@ -1025,10 +1057,10 @@ private fun OwnNodeDarkBanner(
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                             containerColor = DigiByteAccent,
                         ),
-                    ) { Text("Use public peers") }
+                    ) { Text(stringResource(R.string.wallet_use_public_peers)) }
                 }
                 androidx.compose.material3.OutlinedButton(onClick = onOpenSettings) {
-                    Text("Node settings")
+                    Text(stringResource(R.string.wallet_node_settings))
                 }
             }
         }
@@ -1052,7 +1084,7 @@ private fun OwnNodeHealthChip(modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "✓ Own node serving",
+            text = stringResource(R.string.wallet_own_node_serving),
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFF6FCF97),
         )

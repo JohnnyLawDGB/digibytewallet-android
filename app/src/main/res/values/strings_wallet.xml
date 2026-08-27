@@ -108,4 +108,130 @@
 
     <string name="common_not_now">Not now</string>
 
+    <!-- ── Shared across wallet screens ─────────────────────────────────────────── -->
+    <string name="common_back">Back</string>
+    <string name="common_copy">Copy</string>
+    <string name="common_copied">Copied!</string>
+    <string name="common_share">Share</string>
+    <string name="common_dismiss">Dismiss</string>
+    <string name="common_retry_now">Retry now</string>
+
+    <!-- ── Wallet home ──────────────────────────────────────────────────────────── -->
+    <string name="wallet_send">Send</string>
+    <string name="wallet_receive">Receive</string>
+    <string name="wallet_scan">Scan</string>
+    <string name="wallet_assets">Assets</string>
+    <string name="wallet_recent_activity">Recent Activity</string>
+    <string name="wallet_no_transactions">No transactions yet.\nSend or receive DGB to get started.</string>
+    <string name="wallet_block_of">Block %1$s of %2$s</string>
+    <string name="wallet_scan_found">Found %1$d transactions, %2$s so far</string>
+    <string name="wallet_recovery_window">Showing transactions from %1$s onward. Earlier history is not being recovered.</string>
+    <!-- %1$s is a currency code. NOTE: the price card still passes USD unconditionally — it does
+         not yet follow the display-currency setting. The format string is ready for when it does. -->
+    <string name="wallet_price_pair">DGB / %1$s</string>
+    <string name="wallet_price_via">via %1$s</string>
+    <string name="wallet_testnet_active">Testnet active</string>
+    <string name="wallet_tor_active">Tor active</string>
+    <string name="wallet_tor_hidden">Tor — your IP stays hidden</string>
+    <string name="wallet_disconnected_peers">Disconnected · %1$d peers</string>
+    <string name="wallet_history_gap">History gap — some blocks weren\'t verified</string>
+    <string name="wallet_scan_missing">Scan for missing transactions</string>
+    <string name="wallet_balance_refresh_failed">Balance refresh failed</string>
+    <string name="wallet_reconcile_unreachable">We couldn\'t reach the reconcile node after this upgrade. Your balance shown may be out of date.</string>
+    <string name="wallet_tor_unavailable">Tor unavailable — using direct connections</string>
+    <string name="wallet_tor_timeout">Tor didn\'t reach the network in time so the wallet is connecting directly to peers for this session. Your IP is visible to peers until you restart the app.</string>
+    <string name="wallet_node_offline">Your node is offline</string>
+    <!-- peerblockfilters=1 is a config key in the user\'s node file — do NOT translate it. -->
+    <string name="wallet_node_offline_body">The paired node isn\'t reachable or isn\'t serving compact filters right now. Check that it\'s running and reachable, and that it has peerblockfilters=1 set.</string>
+    <string name="wallet_use_public_peers">Use public peers</string>
+    <string name="wallet_node_settings">Node settings</string>
+    <string name="wallet_own_node_serving">✓ Own node serving</string>
+
+    <!-- ── Receive ──────────────────────────────────────────────────────────────── -->
+    <string name="receive_title_dd">Receive DigiDollar</string>
+    <string name="receive_title_dgb">Receive DGB</string>
+    <string name="receive_no_peers">No peers connected. Incoming transactions won\'t appear here until the wallet reconnects.</string>
+    <string name="receive_address_dd">Your DigiDollar Address</string>
+    <string name="receive_address_dgb">Your DigiByte Address</string>
+    <!-- The parenthesised prefixes are literal address prefixes — never translate them. -->
+    <string name="receive_fmt_segwit">SegWit (dgb1q…)</string>
+    <string name="receive_fmt_legacy">Legacy (D…)</string>
+    <string name="receive_fmt_taproot">Taproot (dgb1p…)</string>
+    <string name="receive_request_amount">Request Specific Amount (Optional)</string>
+    <string name="receive_amount_label">Amount</string>
+    <string name="receive_qr_encodes">QR encodes: %1$s</string>
+    <string name="receive_dd_note">DigiDollar is received as USD-denominated tokens. Share this DigiDollar address — the QR carries the address only (no amount request).</string>
+
+    <!-- ── Transaction detail ───────────────────────────────────────────────────── -->
+    <string name="txd_title">Transaction Details</string>
+    <string name="txd_not_found">Transaction not found</string>
+    <string name="txd_sent">Sent</string>
+    <string name="txd_received">Received</string>
+    <string name="txd_transaction_id">Transaction ID</string>
+    <string name="txd_block_height">Block Height</string>
+    <string name="txd_pending">Pending</string>
+    <string name="txd_confirmations">Confirmations</string>
+    <string name="txd_unconfirmed">Unconfirmed</string>
+    <string name="txd_confirmations_final">%1$d (Final)</string>
+    <string name="txd_timestamp">Timestamp</string>
+    <string name="txd_network_fee">Network Fee</string>
+    <string name="txd_to_address">To Address</string>
+    <string name="txd_from_address">From Address</string>
+    <string name="txd_view_explorer">View on Explorer</string>
+    <string name="txd_back_to_wallet">Back to Wallet</string>
+
+    <!-- ── Sync status (card headline, progress line, header status) ────────────── -->
+    <string name="wallet_sync_gap_headline">Scan complete — part of your history is unverified</string>
+    <string name="wallet_sync_connecting">Connecting to DigiByte network</string>
+    <string name="wallet_sync_scanning">Scanning for your transactions</string>
+    <string name="wallet_sync_uptodate">Up to date</string>
+    <string name="wallet_sync_failed">Sync failed</string>
+    <string name="wallet_sync_finishing">Finishing up — verifying recent blocks</string>
+    <string name="wallet_blocks_count">%1$s blocks</string>
+    <string name="wallet_sync_progress_eta">%1$d%% complete · %2$s · %3$s remaining</string>
+    <string name="wallet_sync_progress_no_eta">%1$d%% complete · %2$s remaining · estimating…</string>
+    <string name="wallet_eta_estimating">estimating…</string>
+    <string name="wallet_eta_seconds">~%1$ds</string>
+    <string name="wallet_eta_minutes">~%1$d min</string>
+    <string name="wallet_eta_hours">~%1$dh</string>
+    <string name="wallet_eta_hours_mins">~%1$dh %2$dm</string>
+    <string name="wallet_status_finishing_peers">Finishing up · %1$d peers</string>
+    <string name="wallet_status_syncing">Syncing · %1$d peers · %2$d%%</string>
+    <!-- %3$s / %2$s is an already-formatted version suffix like " · v4.0.62" — not translatable. -->
+    <string name="wallet_status_connected_block">Connected · %1$d peers · Block %2$s%3$s</string>
+    <string name="wallet_status_connected_peers">Connected · %1$d peers%2$s</string>
+    <string name="wallet_status_connected">Connected%1$s</string>
+    <string name="wallet_status_connecting_peers">Connecting · %1$d peers</string>
+    <string name="wallet_status_connecting">Connecting…</string>
+
+    <!-- ── Unverified-history banner ────────────────────────────────────────────── -->
+    <!-- The range is a RANGE, never a count: see AbandonedBandBannerTextTest for why a count
+         would overstate the gap by the wallet\'s entire scanned history. -->
+    <string name="wallet_gap_range_between">blocks %1$s–%2$s</string>
+    <string name="wallet_gap_range_below">blocks below %1$s</string>
+    <string name="wallet_gap_body">Part of your history (%1$s) couldn\'t be verified from the filter fleet — tap to scan for missing transactions.</string>
+
+    <!-- ── Receive (continued) ──────────────────────────────────────────────────── -->
+    <string name="receive_address_unavailable">Address unavailable</string>
+    <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
+    <string name="receive_fmt_dd">DigiDollar (DD…)</string>
+    <string name="receive_clip_dd">DigiDollar address</string>
+    <string name="receive_clip_dgb">DGB address</string>
+    <string name="receive_share_dd">My DigiDollar address: %1$s</string>
+    <string name="receive_share_dgb">My DigiByte address: %1$s</string>
+    <string name="receive_share_title">Share Address</string>
+
+    <!-- ── Transaction detail (continued) ───────────────────────────────────────── -->
+    <string name="txd_confirmations_count">%1$d confirmations</string>
+    <string name="txd_confirmed_n">Confirmed (%1$d)</string>
+
+    <!-- ── Bottom navigation ────────────────────────────────────────────────────── -->
+    <string name="nav_wallet">Wallet</string>
+    <string name="nav_hub">Hub</string>
+    <!-- NOT "Assets": the wallet already has an assets screen. This one is the marketplace. -->
+    <string name="nav_market">Market</string>
+    <!-- Digi-ID is a protocol name — never translated. -->
+    <string name="nav_digiid">Digi-ID</string>
+    <string name="nav_settings">Settings</string>
+
 </resources>

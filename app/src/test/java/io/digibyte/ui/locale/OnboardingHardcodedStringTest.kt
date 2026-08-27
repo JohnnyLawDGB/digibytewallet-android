@@ -51,6 +51,11 @@ class OnboardingHardcodedStringTest {
         // before the user has seen anything else — the battery one explains how to stop the
         // wallet losing its network connection, which is useless to someone who cannot read it.
         "MainActivity.kt",
+        // The money path. Localised after a user walked a German build screen by screen and
+        // found English on every one of them.
+        "ui/wallet/WalletScreen.kt",
+        "ui/wallet/ReceiveScreen.kt",
+        "ui/wallet/TransactionDetailScreen.kt",
     )
 
     /** Navigation routes — identifiers the code matches on, never shown to anyone. */
@@ -65,6 +70,18 @@ class OnboardingHardcodedStringTest {
         // Log messages and pref keys, never rendered.
         "battery_prompt_dismissed", "beta_updates",
         "dgb_settings", "digiid://", "connection refused", "backstop wipe failed",
+        // Ticker, network name and unit — brand-class, never translated (see strings_wallet.xml).
+        "DGB", "TESTNET", "USD",
+        // Composites of already-localised parts plus a ticker or a bare number.
+        "\$amountPrefix\$amountFormatted DGB", "\$feeFormatted DGB", "\$\$priceFormatted",
+        "\$changePrefix \$changeFormatted%", "\$\$priceFormatted", " · v\$versionName",
+        "\\n\${DigiByteUri.encode(address, sats)}",
+        // Date/number patterns and a MIME type. NOTE: the date patterns are also pinned to
+        // Locale.US at their call sites — a real i18n gap, but a behaviour change, not a
+        // missing string, so it is tracked separately rather than silenced here.
+        "MMMM yyyy", "MMM dd, yyyy HH:mm:ss", "UTC", "%.2f", "text/plain",
+        // Regex artefact: a line of the form `if (x) "a" else "b"` splits across the quotes.
+        " else ",
         "Captured Digi-ID deep link for \${intent.data?.host}",
         "\$number", "• \$tip", "%d:%02d", ", ", "DigiByte",
     )
@@ -89,7 +106,7 @@ class OnboardingHardcodedStringTest {
     @Test fun `the sources this test scans actually exist`() {
         val missing = COVERED.filterNot { File(srcRoot, it).isFile }
         assertTrue("scan list is stale, cannot see: $missing", missing.isEmpty())
-        assertTrue("nothing scanned", COVERED.size >= 5)
+        assertTrue("nothing scanned", COVERED.size >= 8)
     }
 
     @Test fun `the scan sees literals at all`() {

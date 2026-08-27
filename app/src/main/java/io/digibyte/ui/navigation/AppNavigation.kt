@@ -48,20 +48,22 @@ import io.digibyte.ui.hub.CreateThreadScreen
 import io.digibyte.ui.hub.HubScreen
 import androidx.compose.material.icons.filled.Storefront
 import io.digibyte.ui.hub.ThreadDetailScreen
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import io.digibyte.ui.wallet.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    data object Wallet : Screen("wallet", "Wallet", Icons.Default.Home)
-    data object Hub : Screen("hub", "Hub", Icons.AutoMirrored.Filled.Chat)
-    data object DigiId : Screen("digiid", "Digi-ID", Icons.Default.Fingerprint)
+sealed class Screen(val route: String, val labelRes: Int, val icon: ImageVector) {
+    data object Wallet : Screen("wallet", R.string.nav_wallet, Icons.Default.Home)
+    data object Hub : Screen("hub", R.string.nav_hub, Icons.AutoMirrored.Filled.Chat)
+    data object DigiId : Screen("digiid", R.string.nav_digiid, Icons.Default.Fingerprint)
     // NOT "Assets" — the wallet already has an assets screen (route "assets", AssetListScreen),
     // and two things called Assets in one app is a coin flip for the user. This one is the
     // digistamp marketplace; the other is what you own.
-    data object Digistamp : Screen("digistamp", "Market", Icons.Default.Storefront)
-    data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    data object Digistamp : Screen("digistamp", R.string.nav_market, Icons.Default.Storefront)
+    data object Settings : Screen("settings", R.string.nav_settings, Icons.Default.Settings)
 }
 
 val bottomNavScreens =
@@ -169,8 +171,8 @@ fun AppNavigation(
                 NavigationBar {
                     bottomNavScreens.forEach { screen ->
                         NavigationBarItem(
-                            icon = { Icon(screen.icon, contentDescription = screen.label) },
-                            label = { Text(screen.label) },
+                            icon = { Icon(screen.icon, contentDescription = stringResource(screen.labelRes)) },
+                            label = { Text(stringResource(screen.labelRes)) },
                             selected = currentRoute == screen.route,
                             onClick = {
                                 navController.navigate(screen.route) {

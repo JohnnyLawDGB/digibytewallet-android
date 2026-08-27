@@ -72,6 +72,15 @@ The wallet keeps re-hitting the same "won't sync / no confirms for days" class. 
 
 - **Recreate must resume near tip (FIXED v4.0.40 — do NOT reintroduce).** Every recovery path used to call `forceReconnect()` + `startSync()`, which rebuilds the manager from the **stale cold-start `g_savedBlocks`** — loaded once at launch, never refreshed — flooring `manager->lastBlock` to the birth checkpoint and re-arming auto-fetch at `cf_birth_height`. Measured: 24,052,509 → 22,650,000 and ~6h to climb back. The fix is ordering plus retention, and all three parts are load-bearing: **(1)** refresh the near-tip window BEFORE the rebuild consumes it and restore the CF ledger AFTER the new manager exists (`core/sync/RecreateSequence`); **(2)** routine recovery keeps the scan ledger — only `FILTER_CHAIN_CORRUPT` / `SCAN_LEDGER_CORRUPT` / `WALLET_RESET` may drop it (`core/sync/CfRecoveryPolicy`); **(3)** flush the live block window and ledger to disk BEFORE the teardown, since both restore steps read the last *persisted* snapshot (`flushLiveStateBeforeRecreate`). Parts 1+2 alone leave a one-save-interval give-back charged on every recovery. Any new recovery path must go through `recreatePeerManagerResumingNearTip()`.
 
+### Localisation (12 languages — NOT optional per-change)
+Any user-facing string ships in **all 12 languages in the same commit** — English plus the 11 in `AppLocale.SUPPORTED` (de, es, hi, zh, ja, pt-BR, id, vi, tr, ru, fil). English-first means broken in eleven languages until a user reports it screen by screen, which is exactly how the onboarding gaps were found.
+- Keys live in `app/src/main/res/values*/strings_wallet.xml`, deliberately separate from the dead bread-wallet `strings.xml`.
+- Locale dirs use **Android qualifiers, not BCP-47**: `values-b+pt+BR`, `values-b+fil`. The BCP-47 spelling compiles, ships, and never loads.
+- Three places must agree: `AppLocale.SUPPORTED`, `xml/locales_config.xml`, `values-xx/`.
+- Two gates in `app/src/test/java/io/digibyte/ui/locale/`: `LocaleResourceParityTest` (a key missing from a language) and `OnboardingHardcodedStringTest` (a string never extracted — parity cannot see these, as there is no key to be missing). **Add each screen to `COVERED` as it is localised**; the gate only sees files listed there.
+- Language picker: Settings → Appearance, and a `LanguageChip` on onboarding. The onboarding one is load-bearing — Settings sits behind wallet creation.
+- Translations are machine-assisted and unreviewed; the picker says so. Seed-phrase and wallet-wipe warnings need a native speaker before they can be called done.
+
 ### Fee Structure
 - Single default fee: `DEFAULT_FEE_PER_KB` (100 sat/byte) — DigiByte min relay fee
 - Confirms in ~15 seconds (no fee market on DGB)

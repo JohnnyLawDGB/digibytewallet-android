@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -56,11 +58,18 @@ fun ReceiveScreen(
     // Pre-derive each format once so toggling the chip doesn't re-run the JNI
     // key-derivation path. getReceiveAddress format: 0 = legacy, 2 = bech32 P2WPKH,
     // 3 = Taproot P2TR; DigiDollar comes from getDigiDollarReceiveAddress().
-    val legacyAddress = remember { viewModel.getReceiveAddress(0, 0) ?: "Address unavailable" }
-    val bech32Address = remember { viewModel.getReceiveAddress(0, 2) ?: "Address unavailable" }
-    val taprootAddress = remember { viewModel.getReceiveAddress(0, 3) ?: "Address unavailable" }
+    val unavailable = stringResource(R.string.receive_address_unavailable)
+    // Hoisted: used inside click/share lambdas, which are not composable.
+    val clipLabelDd = stringResource(R.string.receive_clip_dd)
+    val clipLabelDgb = stringResource(R.string.receive_clip_dgb)
+    val shareDd = stringResource(R.string.receive_share_dd)
+    val shareDgb = stringResource(R.string.receive_share_dgb)
+    val shareTitle = stringResource(R.string.receive_share_title)
+    val legacyAddress = remember(unavailable) { viewModel.getReceiveAddress(0, 0) ?: unavailable }
+    val bech32Address = remember(unavailable) { viewModel.getReceiveAddress(0, 2) ?: unavailable }
+    val taprootAddress = remember(unavailable) { viewModel.getReceiveAddress(0, 3) ?: unavailable }
     val digiDollarAddress = remember {
-        if (ddActive) viewModel.getDigiDollarReceiveAddress() ?: "Address unavailable" else null
+        if (ddActive) viewModel.getDigiDollarReceiveAddress() ?: unavailable else null
     }
     val address = when (addressFormat) {
         0 -> legacyAddress
@@ -110,10 +119,10 @@ fun ReceiveScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
             }
             Text(
-                text = if (isDigiDollar) "Receive DigiDollar" else "Receive DGB",
+                text = if (isDigiDollar) stringResource(R.string.receive_title_dd) else stringResource(R.string.receive_title_dgb),
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.weight(1f)
             )
@@ -141,7 +150,7 @@ fun ReceiveScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "No peers connected. Incoming transactions won't appear here until the wallet reconnects.",
+                    text = stringResource(R.string.receive_no_peers),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFFFCC66)
                 )
@@ -172,7 +181,7 @@ fun ReceiveScreen(
 
         // Address display (selectable + copyable)
         Text(
-            text = if (isDigiDollar) "Your DigiDollar Address" else "Your DigiByte Address",
+            text = if (isDigiDollar) stringResource(R.string.receive_address_dd) else stringResource(R.string.receive_address_dgb),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -213,17 +222,17 @@ fun ReceiveScreen(
             FilterChip(
                 selected = addressFormat == 2,
                 onClick = { addressFormat = 2 },
-                label = { Text("SegWit (dgb1q…)", fontSize = 12.sp) }
+                label = { Text(stringResource(R.string.receive_fmt_segwit), fontSize = 12.sp) }
             )
             FilterChip(
                 selected = addressFormat == 0,
                 onClick = { addressFormat = 0 },
-                label = { Text("Legacy (D…)", fontSize = 12.sp) }
+                label = { Text(stringResource(R.string.receive_fmt_legacy), fontSize = 12.sp) }
             )
             FilterChip(
                 selected = addressFormat == 4,
                 onClick = { addressFormat = 4 },
-                label = { Text("Taproot (dgb1p…)", fontSize = 12.sp) }
+                label = { Text(stringResource(R.string.receive_fmt_taproot), fontSize = 12.sp) }
             )
             FilterChip(
                 selected = addressFormat == 3 && ddActive,
@@ -231,7 +240,7 @@ fun ReceiveScreen(
                 onClick = { if (ddActive) addressFormat = 3 },
                 label = {
                     Text(
-                        if (onTestnet) "DigiDollar (TD…)" else "DigiDollar (DD…)",
+                        stringResource(if (onTestnet) R.string.receive_fmt_dd_testnet else R.string.receive_fmt_dd),
                         fontSize = 12.sp
                     )
                 }
@@ -248,7 +257,7 @@ fun ReceiveScreen(
             OutlinedButton(
                 onClick = {
                     val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    val clipLabel = if (isDigiDollar) "DigiDollar address" else "DGB address"
+                    val clipLabel = if (isDigiDollar) clipLabelDd else clipLabelDgb
                     cb?.setPrimaryClip(ClipData.newPlainText(clipLabel, address))
                     showCopied = true
                 },
@@ -256,13 +265,13 @@ fun ReceiveScreen(
             ) {
                 Icon(
                     imageVector = if (showCopied) Icons.Default.Check else Icons.Default.ContentCopy,
-                    contentDescription = "Copy",
+                    contentDescription = stringResource(R.string.common_copy),
                     tint = if (showCopied) DigiByteGreen else DigiByteAccent,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (showCopied) "Copied!" else "Copy",
+                    text = stringResource(if (showCopied) R.string.common_copied else R.string.common_copy),
                     color = if (showCopied) DigiByteGreen else DigiByteAccent
                 )
             }
@@ -272,9 +281,9 @@ fun ReceiveScreen(
                     val shareText = buildString {
                         if (isDigiDollar) {
                             // DigiDollar addresses aren't DGB-URI targets — share the raw address only.
-                            append("My DigiDollar address: $address")
+                            append(shareDd.format(address))
                         } else {
-                            append("My DigiByte address: $address")
+                            append(shareDgb.format(address))
                             val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
                             if (sats != null && sats > 0) {
                                 append("\n${DigiByteUri.encode(address, sats)}")
@@ -285,7 +294,7 @@ fun ReceiveScreen(
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, shareText)
                     }
-                    context.startActivity(Intent.createChooser(intent, "Share Address"))
+                    context.startActivity(Intent.createChooser(intent, shareTitle))
                 },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(
@@ -294,11 +303,11 @@ fun ReceiveScreen(
             ) {
                 Icon(
                     Icons.Default.Share,
-                    contentDescription = "Share",
+                    contentDescription = stringResource(R.string.common_share),
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Share")
+                Text(stringResource(R.string.common_share))
             }
         }
 
@@ -313,7 +322,7 @@ fun ReceiveScreen(
 
             // Optional amount input
             Text(
-                text = "Request Specific Amount (Optional)",
+                text = stringResource(R.string.receive_request_amount),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -329,14 +338,20 @@ fun ReceiveScreen(
                 suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
-                label = { Text("Amount") },
+                label = { Text(stringResource(R.string.receive_amount_label)) },
                 shape = RoundedCornerShape(8.dp)
             )
 
             if (amountInput.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "QR encodes: ${DigiByteUri.encode(address, amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() })}",
+                    text = stringResource(
+                        R.string.receive_qr_encodes,
+                        DigiByteUri.encode(
+                            address,
+                            amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() },
+                        ),
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -347,7 +362,7 @@ fun ReceiveScreen(
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "DigiDollar is received as USD-denominated tokens. Share this DigiDollar address — the QR carries the address only (no amount request).",
+                text = stringResource(R.string.receive_dd_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

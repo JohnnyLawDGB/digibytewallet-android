@@ -35,6 +35,8 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 @Composable
 fun TransactionDetailScreen(
@@ -58,10 +60,10 @@ fun TransactionDetailScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
             }
             Text(
-                text = "Transaction Details",
+                text = stringResource(R.string.txd_title),
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
             )
         }
@@ -72,7 +74,7 @@ fun TransactionDetailScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Transaction not found",
+                    text = stringResource(R.string.txd_not_found),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -134,7 +136,7 @@ private fun TransactionDetailContent(
             ) {
                 Icon(
                     imageVector = if (isSend) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                    contentDescription = if (isSend) "Sent" else "Received",
+                    contentDescription = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received),
                     tint = amountColor,
                     modifier = Modifier.size(36.dp)
                 )
@@ -163,7 +165,7 @@ private fun TransactionDetailContent(
             Column(modifier = Modifier.padding(16.dp)) {
                 // TXID — full, copyable
                 DetailRow(
-                    label = "Transaction ID",
+                    label = stringResource(R.string.txd_transaction_id),
                     value = tx.txid,
                     copyable = true,
                     context = context
@@ -171,25 +173,30 @@ private fun TransactionDetailContent(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                DetailRow(label = "Block Height", value = if (tx.blockHeight > 0) tx.blockHeight.toString() else "Pending")
+                DetailRow(
+                    label = stringResource(R.string.txd_block_height),
+                    value = if (tx.blockHeight > 0) tx.blockHeight.toString()
+                            else stringResource(R.string.txd_pending),
+                )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                DetailRow(label = "Confirmations", value = when {
-                    tx.confirmations == 0 -> "Unconfirmed"
-                    tx.confirmations >= CONFIRMED_THRESHOLD -> "${tx.confirmations} (Final)"
+                DetailRow(label = stringResource(R.string.txd_confirmations), value = when {
+                    tx.confirmations == 0 -> stringResource(R.string.txd_unconfirmed)
+                    tx.confirmations >= CONFIRMED_THRESHOLD ->
+                        stringResource(R.string.txd_confirmations_final, tx.confirmations)
                     else -> tx.confirmations.toString()
                 })
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                DetailRow(label = "Timestamp", value = dateStr)
+                DetailRow(label = stringResource(R.string.txd_timestamp), value = dateStr)
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                DetailRow(label = "Network Fee", value = "$feeFormatted DGB")
+                DetailRow(label = stringResource(R.string.txd_network_fee), value = "$feeFormatted DGB")
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 if (tx.toAddress.isNotBlank()) {
                     DetailRow(
-                        label = "To Address",
+                        label = stringResource(R.string.txd_to_address),
                         value = tx.toAddress,
                         copyable = true,
                         context = context
@@ -199,7 +206,7 @@ private fun TransactionDetailContent(
 
                 if (tx.fromAddress.isNotBlank()) {
                     DetailRow(
-                        label = "From Address",
+                        label = stringResource(R.string.txd_from_address),
                         value = tx.fromAddress,
                         copyable = true,
                         context = context
@@ -223,7 +230,7 @@ private fun TransactionDetailContent(
         ) {
             Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("View on Explorer", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.txd_view_explorer), fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -232,7 +239,7 @@ private fun TransactionDetailContent(
             onClick = onNavigateBack,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Back to Wallet")
+            Text(stringResource(R.string.txd_back_to_wallet))
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -287,7 +294,7 @@ private fun DetailRow(
                 ) {
                     Icon(
                         imageVector = if (showCopied) Icons.Default.Check else Icons.Default.ContentCopy,
-                        contentDescription = "Copy",
+                        contentDescription = stringResource(R.string.common_copy),
                         tint = if (showCopied) DigiByteGreen else DigiByteAccent,
                         modifier = Modifier.size(16.dp)
                     )
@@ -300,9 +307,12 @@ private fun DetailRow(
 @Composable
 private fun ConfirmationsBadge(confirmations: Int) {
     val (label, color) = when {
-        confirmations == 0 -> "Unconfirmed" to MaterialTheme.colorScheme.error
-        confirmations < CONFIRMED_THRESHOLD -> "$confirmations confirmation${if (confirmations > 1) "s" else ""}" to Color(0xFFFFA726)
-        else               -> "Confirmed ($confirmations)" to DigiByteGreen
+        confirmations == 0 ->
+            stringResource(R.string.txd_unconfirmed) to MaterialTheme.colorScheme.error
+        confirmations < CONFIRMED_THRESHOLD ->
+            stringResource(R.string.txd_confirmations_count, confirmations) to Color(0xFFFFA726)
+        else ->
+            stringResource(R.string.txd_confirmed_n, confirmations) to DigiByteGreen
     }
     Surface(
         shape = RoundedCornerShape(12.dp),
