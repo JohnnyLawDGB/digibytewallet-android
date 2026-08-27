@@ -50,6 +50,19 @@ fun LanguagePickerSheet(
             text = "Changing this restarts the wallet screen. Your coins, phrase and settings are untouched.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
+        )
+        // Said plainly rather than discovered. These translations have not been checked by native
+        // speakers yet, and the strings that matter most — the ones about losing your coins — are
+        // exactly where a machine translation goes wrong. Telling people gives a wrong word a
+        // route back to us instead of quietly costing trust, and Settings already has the
+        // reporting link to send them to.
+        Text(
+            text = "Translations are new and not yet checked by native speakers. If something " +
+                "reads wrong — especially a warning about your recovery phrase or your coins — " +
+                "please tell us via Settings → Report a bug.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
         )
         HorizontalDivider()
