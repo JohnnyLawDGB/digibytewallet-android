@@ -78,7 +78,7 @@ fun BalanceDisplay(
                 // Dimmed with everything else when showing a last-known snapshot; an
                 // undimmed logo beside a faded balance reads as though it were live.
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(44.dp)
                     .alpha(alpha)
             )
         }
@@ -121,7 +121,7 @@ fun BalanceDisplay(
                         // is a name for the amount beside it, and a mark that outweighed the
                         // number would invert that.
                         modifier = Modifier
-                            .size(20.dp)
+                            .size(29.dp)
                             .alpha(alpha)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
