@@ -107,7 +107,7 @@ fun BalanceDisplay(
                 color = DigiDollarGreen.copy(alpha = alpha * 0.22f)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Image(
@@ -124,12 +124,16 @@ fun BalanceDisplay(
                             .size(20.dp)
                             .alpha(alpha)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = ddAmount,
-                        style = MaterialTheme.typography.titleSmall.copy(
+                        // Two-thirds of the hero's 40sp. The mark beside it is two-thirds of the
+                        // hero's 30dp, so the pill is a true scaled copy of the DGB section
+                        // rather than a differently-proportioned one: both keep the same 0.75
+                        // mark-to-text ratio.
+                        style = MaterialTheme.typography.headlineSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                            fontSize = 27.sp
                         ),
                         color = DigiDollarGreenBright.copy(alpha = alpha)
                     )
