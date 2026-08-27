@@ -526,4 +526,9 @@
     <string name="tx_conf_short">%1$d conf.</string>
     <string name="tx_confirmed">Confirmada</string>
 
+    <string name="cur_title">Moneda de visualización</string>
+    <string name="cur_note">Tu saldo de DigiByte es siempre el real — esto solo cambia con qué se compara.</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

@@ -36,10 +36,7 @@ private val FIAT_CURRENCY_CODES = listOf(
     "KRW", "BRL", "MXN", "INR", "ZAR", "SEK", "NOK",
 )
 
-/** Display name for a code in the current locale; falls back to the code itself. */
-private fun currencyName(code: String): String =
-    runCatching { java.util.Currency.getInstance(code).getDisplayName(java.util.Locale.getDefault()) }
-        .getOrNull()?.takeIf { it.isNotBlank() && it != code } ?: code
+
 
 
 private enum class ThemeChoice { DARK, LIGHT, SYSTEM }
@@ -50,14 +47,38 @@ fun DisplaySettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currencySetFmt = stringResource(R.string.dsp_currency_set)
-    val currentCurrency by viewModel.fiatCurrency.collectAsStateWithLifecycle()
+    // The SAME store the wallet reads. This screen used to write WalletConfig.fiatCurrency in
+    // Room, which nothing else read — so it showed USD while the home screen showed BTC.
+    val currencyContext = androidx.compose.ui.platform.LocalContext.current
+    var currentCurrency by remember {
+        mutableStateOf(
+            io.digibyte.ui.wallet.DisplayCurrencyStore.resolve(
+                pref = io.digibyte.ui.wallet.DisplayCurrencyStore.storedPref(currencyContext),
+                legacy = null,
+            )
+        )
+    }
 
     // Theme preference is stored in a simple in-process state for now (Phase 2: persist to Room)
     var themeChoice by remember { mutableStateOf(ThemeChoice.DARK) }
     var showCurrencyMenu by remember { mutableStateOf(false) }
 
-    val snackbarHostState = remember { SnackbarHostState() }
     var snackMessage by remember { mutableStateOf<String?>(null) }
+
+    if (showCurrencyMenu) {
+        io.digibyte.ui.components.CurrencyPickerSheet(
+            selected = currentCurrency,
+            onSelect = { picked ->
+                io.digibyte.ui.wallet.DisplayCurrencyStore.save(currencyContext, picked)
+                currentCurrency = picked
+                showCurrencyMenu = false
+                snackMessage = currencySetFmt.format(picked.name)
+            },
+            onDismiss = { showCurrencyMenu = false },
+        )
+    }
+
+    val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(snackMessage) {
         snackMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -91,66 +112,17 @@ fun DisplaySettingsScreen(
             // ── Fiat currency ────────────────────────────────────────────────
             item {
                 SettingsCategory(title = stringResource(R.string.dsp_currency)) {
-                    val currencyLabel = FIAT_CURRENCY_CODES
-                        .firstOrNull { it == currentCurrency }
-                        ?.let { "$it — ${currencyName(it)}" }
-                        ?: currentCurrency
-
-                    Box {
-                        SettingsRow(
-                            icon = Icons.Default.AttachMoney,
-                            iconTint = Color(0xFF4CAF50),
-                            title = stringResource(R.string.dsp_fiat_currency),
-                            subtitle = currencyLabel,
-                            onClick = { showCurrencyMenu = true }
-                        )
-                        DropdownMenu(
-                            expanded = showCurrencyMenu,
-                            onDismissRequest = { showCurrencyMenu = false },
-                            modifier = Modifier
-                                .background(Color(0xFF1A2742))
-                                .heightIn(max = 300.dp)
-                        ) {
-                            FIAT_CURRENCY_CODES.forEach { code ->
-                                val name = currencyName(code)
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Text(
-                                                code,
-                                                color = if (code == currentCurrency) DigiByteAccent else Color.White,
-                                                fontWeight = if (code == currentCurrency) FontWeight.SemiBold else FontWeight.Normal,
-                                                modifier = Modifier.width(40.dp)
-                                            )
-                                            Text(
-                                                name,
-                                                color = if (code == currentCurrency) DigiByteAccent else Color(0xFF8899AA),
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
-                                        }
-                                    },
-                                    trailingIcon = if (code == currentCurrency) {
-                                        {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                null,
-                                                tint = DigiByteAccent,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    } else null,
-                                    onClick = {
-                                        viewModel.setFiatCurrency(code)
-                                        showCurrencyMenu = false
-                                        snackMessage = currencySetFmt.format(code)
-                                    }
-                                )
-                            }
-                        }
-                    }
+                    SettingsRow(
+                        icon = Icons.Default.AttachMoney,
+                        iconTint = Color(0xFF4CAF50),
+                        title = stringResource(R.string.dsp_fiat_currency),
+                        subtitle = stringResource(
+                            R.string.dsp_currency_subtitle,
+                            currentCurrency.name,
+                            io.digibyte.ui.components.currencyDisplayName(currentCurrency),
+                        ),
+                        onClick = { showCurrencyMenu = true }
+                    )
                 }
             }
 

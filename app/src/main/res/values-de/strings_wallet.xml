@@ -532,4 +532,9 @@
     <string name="tx_conf_short">%1$d Best.</string>
     <string name="tx_confirmed">Bestätigt</string>
 
+    <string name="cur_title">Anzeigewährung</string>
+    <string name="cur_note">Ihr DigiByte-Guthaben ist immer das echte — dies ändert nur, womit es verglichen wird.</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

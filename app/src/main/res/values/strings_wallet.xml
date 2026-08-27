@@ -640,4 +640,11 @@
     <string name="tx_conf_short">%1$d conf.</string>
     <string name="tx_confirmed">Confirmed</string>
 
+    <!-- ── Currency picker ──────────────────────────────────────────────────────── -->
+    <string name="cur_title">Display currency</string>
+    <string name="cur_note">Your DigiByte balance is always the real one — this only changes what it is compared against.</string>
+
+    <!-- Currency code and its localised name, e.g. "EUR — Euro". Both halves come from data. -->
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

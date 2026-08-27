@@ -524,4 +524,9 @@
     <string name="tx_conf_short">%1$d onay</string>
     <string name="tx_confirmed">Onaylandı</string>
 
+    <string name="cur_title">Görüntüleme para birimi</string>
+    <string name="cur_note">DigiByte bakiyeniz her zaman gerçek olandır — bu yalnızca neyle karşılaştırıldığını değiştirir.</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

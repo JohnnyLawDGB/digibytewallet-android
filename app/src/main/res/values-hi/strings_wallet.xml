@@ -524,4 +524,9 @@
     <string name="tx_conf_short">%1$d पुष्टि</string>
     <string name="tx_confirmed">पुष्ट</string>
 
+    <string name="cur_title">प्रदर्शन मुद्रा</string>
+    <string name="cur_note">आपका DigiByte बैलेंस हमेशा वास्तविक होता है — यह केवल यह बदलता है कि उसकी तुलना किससे की जाए।</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

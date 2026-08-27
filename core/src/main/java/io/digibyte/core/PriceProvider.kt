@@ -58,6 +58,10 @@ data class PriceData(
 val SUPPORTED_PRICE_CURRENCIES: List<String> = listOf(
     "usd", "btc", "eur", "inr", "cny", "jpy", "brl", "ngn", "php",
     "idr", "rub", "gbp", "krw", "vnd", "try", "mxn", "cad", "aud", "zar",
+    // Added when the two currency pickers were unified: the Settings list offered these three
+    // while this one did not, so choosing one stored a currency no fetch ever carried and the
+    // balance read "--" for good. Anything the picker can show has to be fetched here.
+    "chf", "sek", "nok",
 )
 
 /**

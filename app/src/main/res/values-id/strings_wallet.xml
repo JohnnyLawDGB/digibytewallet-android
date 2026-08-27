@@ -524,4 +524,9 @@
     <string name="tx_conf_short">%1$d konf.</string>
     <string name="tx_confirmed">Terkonfirmasi</string>
 
+    <string name="cur_title">Mata uang tampilan</string>
+    <string name="cur_note">Saldo DigiByte Anda selalu yang sebenarnya — ini hanya mengubah pembandingnya.</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

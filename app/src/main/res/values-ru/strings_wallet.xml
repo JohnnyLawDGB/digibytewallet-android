@@ -524,4 +524,9 @@
     <string name="tx_conf_short">подтв.: %1$d</string>
     <string name="tx_confirmed">Подтверждена</string>
 
+    <string name="cur_title">Валюта отображения</string>
+    <string name="cur_note">Ваш баланс DigiByte всегда настоящий — это меняет только то, с чем он сравнивается.</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

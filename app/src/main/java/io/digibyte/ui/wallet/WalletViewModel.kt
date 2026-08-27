@@ -428,15 +428,41 @@ class WalletViewModel @Inject constructor(
         CAD("cad", "Canadian Dollar"),
         AUD("aud", "Australian Dollar"),
         ZAR("zar", "South African Rand"),
+        CHF("chf", "Swiss Franc"),
+        SEK("sek", "Swedish Krona"),
+        NOK("nok", "Norwegian Krone"),
     }
+    /**
+     * Preference only, resolved synchronously — the hero renders during startup, before the
+     * database is necessarily open, so this cannot wait on a query. The one-time migration from
+     * the old Settings store happens in [adoptLegacyCurrencyIfUnset] just after.
+     */
     val displayCurrency = MutableStateFlow(
-        try {
-            DisplayCurrency.valueOf(prefs.getString("display_currency", "USD") ?: "USD")
-        } catch (e: Exception) { DisplayCurrency.USD }
+        DisplayCurrencyStore.resolve(pref = prefs.getString("display_currency", null), legacy = null)
     )
 
-    /** Set from the picker. Replaces the old tap-to-cycle, which needed up to 18 taps to get
-     *  back to where you started once the list grew past a handful. */
+    /**
+     * Adopt a currency chosen in Settings → Display before that picker was wired to anything.
+     *
+     * It wrote WalletConfig.fiatCurrency, which nothing read. Someone who picked EUR there made a
+     * real choice into a control that looked like it worked; resetting them to USD now would be
+     * the wallet overriding a decision they believe they already made. Runs once — the value is
+     * written to the preference, so the next start needs no database read at all.
+     */
+    private fun adoptLegacyCurrencyIfUnset() {
+        if (prefs.getString("display_currency", null) != null) return
+        viewModelScope.launch {
+            val legacy = withContext(Dispatchers.IO) {
+                runCatching { walletConfigDao.get()?.fiatCurrency }.getOrNull()
+            }
+            val resolved = DisplayCurrencyStore.resolve(pref = null, legacy = legacy)
+            if (resolved != displayCurrency.value) displayCurrency.value = resolved
+            prefs.edit().putString("display_currency", resolved.name).apply()
+        }
+    }
+
+    /** Set from either picker — the hero's or Settings → Display. Both write the same key, so
+     *  the two screens can no longer disagree about what the user chose. */
     fun selectCurrency(currency: DisplayCurrency) {
         displayCurrency.value = currency
         prefs.edit().putString("display_currency", currency.name).apply()
@@ -461,6 +487,7 @@ class WalletViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "$ --")
 
     init {
+        adoptLegacyCurrencyIfUnset()
         fetchPricePeriodically()
         pollNativeBalance()
         loadRecoveryTimestamp()

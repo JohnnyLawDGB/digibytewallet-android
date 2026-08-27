@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.wallet.WalletViewModel.DisplayCurrency
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 
 /**
  * Picks the currency the hero balance is quoted in.
@@ -49,13 +51,13 @@ fun CurrencyPickerSheet(
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Text(
-            text = "Display currency",
+            text = stringResource(R.string.cur_title),
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 4.dp),
         )
         Text(
-            text = "Your DigiByte balance is always the real one — this only changes what it is compared against.",
+            text = stringResource(R.string.cur_note),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
@@ -73,7 +75,7 @@ fun CurrencyPickerSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = currency.label,
+                        text = currencyDisplayName(currency),
                         style = MaterialTheme.typography.bodyLarge.copy(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         ),
@@ -91,7 +93,7 @@ fun CurrencyPickerSheet(
                     if (isSelected) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            contentDescription = "Selected",
+                            contentDescription = stringResource(R.string.lang_selected),
                             tint = DigiByteAccent,
                             modifier = Modifier.size(20.dp),
                         )
@@ -104,3 +106,15 @@ fun CurrencyPickerSheet(
         }
     }
 }
+
+/**
+ * A currency's name in the CURRENT locale — "Euro" in English, "欧元" in Chinese, "Евро" in
+ * Russian. [java.util.Currency] already knows all of them, so the enum's English
+ * [DisplayCurrency.label] is only a fallback: it covers BTC, which is not an ISO-4217 currency
+ * and therefore has no platform name.
+ */
+internal fun currencyDisplayName(currency: DisplayCurrency): String =
+    runCatching {
+        java.util.Currency.getInstance(currency.name)
+            .getDisplayName(java.util.Locale.getDefault())
+    }.getOrNull()?.takeIf { it.isNotBlank() && it != currency.name } ?: currency.label

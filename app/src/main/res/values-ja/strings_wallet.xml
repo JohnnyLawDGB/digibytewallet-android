@@ -524,4 +524,9 @@
     <string name="tx_conf_short">%1$d 承認</string>
     <string name="tx_confirmed">承認済み</string>
 
+    <string name="cur_title">表示通貨</string>
+    <string name="cur_note">DigiByte の残高は常に実際のものです — これは比較対象を変えるだけです。</string>
+
+    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+
 </resources>

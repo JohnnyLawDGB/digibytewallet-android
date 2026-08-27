@@ -73,6 +73,7 @@ class OnboardingHardcodedStringTest {
         // German build on the Note 8 — which is exactly the failure mode the gate exists to
         // stop, so the file goes IN the gate rather than just getting fixed.
         "ui/components/TransactionItem.kt",
+        "ui/components/CurrencyPickerSheet.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -163,7 +164,7 @@ class OnboardingHardcodedStringTest {
     @Test fun `the sources this test scans actually exist`() {
         val missing = COVERED.filterNot { File(srcRoot, it).isFile }
         assertTrue("scan list is stale, cannot see: $missing", missing.isEmpty())
-        assertTrue("nothing scanned", COVERED.size >= 21)
+        assertTrue("nothing scanned", COVERED.size >= 22)
     }
 
     @Test fun `the scan sees literals at all`() {

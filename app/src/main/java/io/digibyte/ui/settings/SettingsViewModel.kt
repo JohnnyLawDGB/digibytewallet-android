@@ -118,6 +118,8 @@ class SettingsViewModel @Inject constructor(
     private val _config = MutableStateFlow(WalletConfigEntity())
     val config: StateFlow<WalletConfigEntity> = _config.asStateFlow()
 
+    /** Legacy, unread by any screen — see the note where setFiatCurrency used to be. */
+    @Deprecated("The display currency lives in DisplayCurrencyStore; this is migration-only state.")
     val fiatCurrency: StateFlow<String> = _config.map { it.fiatCurrency }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "USD")
 
@@ -381,13 +383,15 @@ class SettingsViewModel @Inject constructor(
     }
 
     // ── Display preferences ───────────────────────────────────────────────────
-    fun setFiatCurrency(currency: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val updated = (_config.value).copy(fiatCurrency = currency)
-            walletConfigDao.upsert(updated)
-            _config.value = updated
-        }
-    }
+    /**
+     * REMOVED — the display currency now has one home, [io.digibyte.ui.wallet.DisplayCurrencyStore].
+     *
+     * This wrote WalletConfig.fiatCurrency, which nothing read except the screen that wrote it,
+     * so Settings could show USD while the wallet showed BTC. The Room column stays for one
+     * reason only: WalletViewModel reads it once, to adopt a currency someone chose here before
+     * the control was wired to anything. Writing it again would resurrect the second source of
+     * truth this deleted.
+     */
 
     fun setAutoLockTimeout(ms: Long) {
         viewModelScope.launch(Dispatchers.IO) {
