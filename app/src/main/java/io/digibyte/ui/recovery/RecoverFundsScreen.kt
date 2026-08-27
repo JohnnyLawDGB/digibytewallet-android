@@ -726,9 +726,37 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                 HeldBackNote(
                     title = "${outcome.heldBackAssets.size} left behind — DigiAssets",
                     body = "These coins carry DigiAssets. Sweeping them as ordinary DGB would " +
-                        "destroy the assets, so they were left in the old wallet. They are safe " +
-                        "there and can be moved separately.",
+                        "destroy the assets, so they were left in the old wallet along with " +
+                        "enough DGB to move them later.",
                     outpoints = outcome.heldBackAssets,
+                )
+            }
+            if (outcome.heldBackFeeReserve.isNotEmpty()) {
+                HeldBackNote(
+                    title = "${outcome.heldBackFeeReserve.size} kept back — to move the assets",
+                    body = "A DigiAsset costs a network fee to move, and its own coin is far too " +
+                        "small to pay it. This much DGB stayed behind so the assets above can be " +
+                        "transferred without you having to send funds back to the old wallet.",
+                    outpoints = outcome.heldBackFeeReserve,
+                )
+            }
+            if (outcome.feeReserveShortfall > 0L) {
+                // Said plainly because the user has to act on it: the assets are safe but cannot
+                // leave this wallet until it is funded.
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Not enough DGB to move the assets",
+                    color = WARNING_RED,
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "The assets above are safe, but this wallet is about " +
+                        "${formatSatToDgb(outcome.feeReserveShortfall)} short of the fees needed " +
+                        "to move them. Nothing was swept, so what is here can still pay toward " +
+                        "it — send a little DGB to the old wallet and try again.",
+                    color = MUTED,
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
             if (outcome.heldBackUnknown.isNotEmpty()) {

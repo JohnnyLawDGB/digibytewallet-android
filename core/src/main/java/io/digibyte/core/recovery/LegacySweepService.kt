@@ -56,6 +56,12 @@ class LegacySweepService(
          *  would not fetch or parse. Distinct from [heldBackAssets]: these MIGHT be plain DGB.
          *  Held anyway, because being wrong here burns an asset. Retrying later may free them. */
         val heldBackUnknown: List<String> = emptyList(),
+        /** Outpoints kept back as fee money so the held assets can actually be moved later.
+         *  Without this the assets survive the sweep and are then unmovable. */
+        val heldBackFeeReserve: List<String> = emptyList(),
+        /** Sats short of what the held assets need to move. Non-zero means they cannot leave this
+         *  wallet without new funds — the user has to be told, not left to discover it. */
+        val feeReserveShortfall: Long = 0L,
     )
 
     data class Result(
@@ -193,7 +199,24 @@ class LegacySweepService(
                     "${heldUnknown.size} unclassified outpoint(s); sweeping ${partition.sweepable.size}",
             )
         }
-        val sweepableResult = result.copy(utxos = partition.sweepable)
+        // Assets must move while the DGB that pays their fees is still here. Holding an asset
+        // back but taking every coin around it leaves it safe and UNMOVABLE — its own marker
+        // output is ~6,000 sats against a ~40,000 sat transfer — stranded in a wallet the user is
+        // walking away from. So the fee money stays put until the asset does.
+        val reserve = AssetFeeReserve.reserve(
+            sweepable = partition.sweepable,
+            assetCount = partition.assetBearing.size,
+        )
+        val heldReserve = reserve.reserved.map { "${it.txid}:${it.vout}" }
+        if (heldReserve.isNotEmpty()) {
+            android.util.Log.i(
+                "LegacySweep",
+                "profile=${profile.label}: reserving ${reserve.reserved.sumOf { it.amountSatoshi }} " +
+                    "sats across ${heldReserve.size} outpoint(s) to move ${partition.assetBearing.size} " +
+                    "asset(s); shortfall=${reserve.shortfall}",
+            )
+        }
+        val sweepableResult = result.copy(utxos = reserve.stillSweepable)
         // #3: each UTXO's (chain,index) is carried straight from its
         // DerivedAddress — no positional reconstruction vs gapExternal, so a
         // dropped empty slot can't sign the wrong child key. #4: a UTXO with a
@@ -232,6 +255,8 @@ class LegacySweepService(
             skippedNoScript = inputs.skippedNoScript,
             heldBackAssets = heldAssets,
             heldBackUnknown = heldUnknown,
+            heldBackFeeReserve = heldReserve,
+            feeReserveShortfall = reserve.shortfall,
         )
 
         // Broadcast via the existing publishTransaction JNI — it takes raw
@@ -288,6 +313,8 @@ class LegacySweepService(
             skippedNoScript = inputs.skippedNoScript,
             heldBackAssets = heldAssets,
             heldBackUnknown = heldUnknown,
+            heldBackFeeReserve = heldReserve,
+            feeReserveShortfall = reserve.shortfall,
         )
     }
 
