@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  User-facing text for the wallet's own screens.
+
+  Deliberately separate from values/strings.xml, which is 365 lines of bread-wallet legacy that
+  nothing in this app references. Mixing new keys into it would make the dead half impossible to
+  identify later.
+
+  TRANSLATION NOTE. The warning strings here are not ordinary UI text — they are the difference
+  between someone keeping their money and losing it. A machine pass is fine for buttons and
+  headings; anything marked WARNING below needs a native speaker's eye before it ships, because a
+  softened "cannot be recovered" or a vague "anyone with these words" costs somebody their coins.
+
+  Brand names (DigiByte, DGB) are NOT translated.
+-->
+<resources>
+
+    <!-- ── Onboarding: first screen ─────────────────────────────────────────────── -->
+    <string name="onb_title">Secure your DGB</string>
+    <string name="onb_tagline">Your keys, your coins. No third parties.</string>
+    <string name="onb_seed_length">Seed phrase length</string>
+    <string name="onb_words_count">%1$d words</string>
+    <string name="onb_create">Create New Wallet</string>
+    <string name="onb_recover">Recover Existing Wallet</string>
+    <string name="onb_footer">DigiByte — Secure, Fast, Decentralized</string>
+    <string name="app_name_display">DigiByte Wallet</string>
+
+    <!-- ── Seed display ─────────────────────────────────────────────────────────── -->
+    <!-- WARNING: "cannot be recovered" is the whole point. Do not soften it. -->
+    <string name="seed_screenshot_blocked">Screenshots are blocked. Write these words down — they cannot be recovered.</string>
+    <string name="seed_title">Your Recovery Phrase</string>
+    <string name="seed_word_count">%1$d-word seed phrase</string>
+    <!-- WARNING: the three tips below are the only thing standing between a user and a
+         drained wallet. Translate for clarity over elegance. -->
+    <string name="seed_never_share">Never share your seed phrase</string>
+    <string name="seed_tip_paper">Write it on paper — not digitally</string>
+    <string name="seed_tip_safe">Store it somewhere safe and private</string>
+    <string name="seed_tip_anyone">Anyone with these words can take your DGB</string>
+    <string name="seed_written_down">I have written these down</string>
+
+    <!-- ── Seed verification ────────────────────────────────────────────────────── -->
+    <string name="verify_progress">Verification %1$d of %2$d</string>
+    <string name="verify_question">What is word #%1$d?</string>
+
+    <!-- ── PIN setup ────────────────────────────────────────────────────────────── -->
+    <string name="pin_biometric_prompt_title">Enable Biometric Unlock</string>
+    <string name="pin_biometric_prompt_subtitle">Authenticate to enable fingerprint/face unlock</string>
+    <string name="pin_biometric_ask">Enable Biometric Unlock?</string>
+    <string name="pin_biometric_body">Use your fingerprint or face to unlock the wallet quickly. You can always use your PIN instead.</string>
+    <string name="pin_biometric_enable">Enable Biometrics</string>
+    <string name="pin_biometric_skip">Skip for now</string>
+    <string name="pin_backspace">Backspace</string>
+
+    <!-- ── Unlock ───────────────────────────────────────────────────────────────── -->
+    <string name="unlock_title">Enter PIN</string>
+    <string name="unlock_subtitle">Enter your 6-digit PIN to unlock</string>
+    <string name="unlock_locked">Locked — try again in %1$s</string>
+    <string name="unlock_unlocking">Unlocking…</string>
+    <string name="unlock_biometrics_cd">Unlock with biometrics</string>
+
+    <!-- ── Recover ──────────────────────────────────────────────────────────────── -->
+    <string name="recover_title">Recover Wallet</string>
+    <string name="recover_body">Enter your seed phrase to restore your wallet.</string>
+    <string name="recover_continue">Continue</string>
+
+</resources>

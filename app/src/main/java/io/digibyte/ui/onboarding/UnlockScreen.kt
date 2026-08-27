@@ -13,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -231,7 +233,7 @@ fun UnlockScreen(
                 Spacer(Modifier.height(40.dp))
 
                 Text(
-                    text = "Enter PIN",
+                    text = stringResource(R.string.unlock_title),
                     style = MaterialTheme.typography.headlineSmall,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
@@ -240,7 +242,7 @@ fun UnlockScreen(
                 Spacer(Modifier.height(8.dp))
 
                 Text(
-                    text = "Enter your 6-digit PIN to unlock",
+                    text = stringResource(R.string.unlock_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFFB0BEC5),
                     textAlign = TextAlign.Center
@@ -295,7 +297,7 @@ fun UnlockScreen(
                             color = DigiByteAccent
                         )
                         Text(
-                            text = "Unlocking…",
+                            text = stringResource(R.string.unlock_unlocking),
                             color = Color(0xFFB0BEC5),
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -321,7 +323,7 @@ fun UnlockScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Fingerprint,
-                            contentDescription = "Unlock with biometrics",
+                            contentDescription = stringResource(R.string.unlock_biometrics_cd),
                             tint = if (isUnlocking) Color(0xFF546E7A) else DigiByteAccent,
                             modifier = Modifier.size(40.dp)
                         )
@@ -363,7 +365,7 @@ fun UnlockScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Backspace,
-                                            contentDescription = "Backspace",
+                                            contentDescription = stringResource(R.string.pin_backspace),
                                             tint = Color(0xFFB0BEC5),
                                             modifier = Modifier.size(26.dp)
                                         )

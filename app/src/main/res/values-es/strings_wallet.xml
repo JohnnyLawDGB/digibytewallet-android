@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Spanish (es).
+
+  STATUS: machine-assisted, NOT yet reviewed by a native speaker. The strings marked WARNING in
+  values/strings_wallet.xml carry real financial consequence — "no se pueden recuperar",
+  "cualquiera que tenga estas palabras" — and must be checked by someone fluent before this
+  ships to users. Everything else is ordinary UI text and is safe to iterate on.
+
+  Brand names (DigiByte, DGB) are left untranslated on purpose.
+-->
+<resources>
+
+    <string name="onb_title">Protege tus DGB</string>
+    <string name="onb_tagline">Tus llaves, tus monedas. Sin intermediarios.</string>
+    <string name="onb_seed_length">Longitud de la frase de recuperación</string>
+    <string name="onb_words_count">%1$d palabras</string>
+    <string name="onb_create">Crear billetera nueva</string>
+    <string name="onb_recover">Recuperar billetera existente</string>
+    <string name="onb_footer">DigiByte — Segura, rápida, descentralizada</string>
+    <string name="app_name_display">Billetera DigiByte</string>
+
+    <!-- WARNING: "no se pueden recuperar" must stay as absolute as the English. -->
+    <string name="seed_screenshot_blocked">Las capturas de pantalla están bloqueadas. Anota estas palabras: no se pueden recuperar.</string>
+    <string name="seed_title">Tu frase de recuperación</string>
+    <string name="seed_word_count">Frase de recuperación de %1$d palabras</string>
+    <!-- WARNING: these three are the last line of defence. -->
+    <string name="seed_never_share">Nunca compartas tu frase de recuperación</string>
+    <string name="seed_tip_paper">Escríbela en papel, no en formato digital</string>
+    <string name="seed_tip_safe">Guárdala en un lugar seguro y privado</string>
+    <string name="seed_tip_anyone">Cualquiera que tenga estas palabras puede quedarse con tus DGB</string>
+    <string name="seed_written_down">Ya las he anotado</string>
+
+    <string name="verify_progress">Verificación %1$d de %2$d</string>
+    <string name="verify_question">¿Cuál es la palabra n.º %1$d?</string>
+
+    <string name="pin_biometric_prompt_title">Activar desbloqueo biométrico</string>
+    <string name="pin_biometric_prompt_subtitle">Autentícate para activar el desbloqueo con huella o rostro</string>
+    <string name="pin_biometric_ask">¿Activar el desbloqueo biométrico?</string>
+    <string name="pin_biometric_body">Usa tu huella o tu rostro para desbloquear la billetera rápidamente. Siempre puedes usar tu PIN.</string>
+    <string name="pin_biometric_enable">Activar biometría</string>
+    <string name="pin_biometric_skip">Ahora no</string>
+    <string name="pin_backspace">Retroceso</string>
+
+    <string name="unlock_title">Introduce el PIN</string>
+    <string name="unlock_subtitle">Introduce tu PIN de 6 dígitos para desbloquear</string>
+    <string name="unlock_locked">Bloqueado: inténtalo de nuevo en %1$s</string>
+    <string name="unlock_unlocking">Desbloqueando…</string>
+    <string name="unlock_biometrics_cd">Desbloquear con biometría</string>
+
+    <string name="recover_title">Recuperar billetera</string>
+    <string name="recover_body">Introduce tu frase de recuperación para restaurar tu billetera.</string>
+    <string name="recover_continue">Continuar</string>
+
+</resources>

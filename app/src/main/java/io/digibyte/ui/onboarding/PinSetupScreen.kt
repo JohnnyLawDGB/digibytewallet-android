@@ -18,6 +18,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -170,8 +172,8 @@ fun PinSetupScreen(
                             if (activity != null) {
                                 biometricAuth.authenticate(
                                     activity,
-                                    title = "Enable Biometric Unlock",
-                                    subtitle = "Authenticate to enable fingerprint/face unlock"
+                                    title = context.getString(R.string.pin_biometric_prompt_title),
+                                    subtitle = context.getString(R.string.pin_biometric_prompt_subtitle)
                                 )
                             }
                             // Wallet already created before reaching biometric step.
@@ -331,7 +333,7 @@ private fun NumericKeypad(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Backspace,
-                                    contentDescription = "Backspace",
+                                    contentDescription = stringResource(R.string.pin_backspace),
                                     tint = Color(0xFFB0BEC5),
                                     modifier = Modifier.size(26.dp)
                                 )
@@ -384,7 +386,7 @@ private fun BiometricOptInContent(
         Spacer(Modifier.height(24.dp))
 
         Text(
-            text = "Enable Biometric Unlock?",
+            text = stringResource(R.string.pin_biometric_ask),
             style = MaterialTheme.typography.headlineSmall,
             color = Color.White,
             fontWeight = FontWeight.Bold,
@@ -394,7 +396,7 @@ private fun BiometricOptInContent(
         Spacer(Modifier.height(12.dp))
 
         Text(
-            text = "Use your fingerprint or face to unlock the wallet quickly. You can always use your PIN instead.",
+            text = stringResource(R.string.pin_biometric_body),
             style = MaterialTheme.typography.bodyLarge,
             color = Color(0xFFB0BEC5),
             textAlign = TextAlign.Center,
@@ -412,7 +414,7 @@ private fun BiometricOptInContent(
             colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
         ) {
             Text(
-                text = "Enable Biometrics",
+                text = stringResource(R.string.pin_biometric_enable),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -425,7 +427,7 @@ private fun BiometricOptInContent(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = "Skip for now",
+                text = stringResource(R.string.pin_biometric_skip),
                 color = Color(0xFFB0BEC5),
                 fontSize = 15.sp
             )

@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -62,14 +64,14 @@ fun MnemonicInputScreen(
                 .padding(horizontal = 24.dp, vertical = 24.dp)
         ) {
             Text(
-                text = "Recover Wallet",
+                text = stringResource(R.string.recover_title),
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Enter your seed phrase to restore your wallet.",
+                text = stringResource(R.string.recover_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFB0BEC5)
             )
@@ -204,7 +206,7 @@ fun MnemonicInputScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
                 Text(
-                    text = "Continue",
+                    text = stringResource(R.string.recover_continue),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )

@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -116,7 +118,7 @@ fun SeedDisplayScreen(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Screenshots are blocked. Write these words down — they cannot be recovered.",
+                            text = stringResource(R.string.seed_screenshot_blocked),
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFB0BEC5),
                             lineHeight = 18.sp
@@ -126,7 +128,7 @@ fun SeedDisplayScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Text(
-                        text = "Your Recovery Phrase",
+                        text = stringResource(R.string.seed_title),
                         style = MaterialTheme.typography.headlineSmall,
                         color = Color.White,
                         fontWeight = FontWeight.Bold
@@ -135,7 +137,7 @@ fun SeedDisplayScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "${words.size}-word seed phrase",
+                        text = stringResource(R.string.seed_word_count, words.size),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFFB0BEC5)
                     )
@@ -155,16 +157,16 @@ fun SeedDisplayScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Never share your seed phrase",
+                                text = stringResource(R.string.seed_never_share),
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFFFF8A65),
                                 fontSize = 14.sp
                             )
                             Spacer(Modifier.height(6.dp))
                             listOf(
-                                "Write it on paper — not digitally",
-                                "Store it somewhere safe and private",
-                                "Anyone with these words can take your DGB"
+                                stringResource(R.string.seed_tip_paper),
+                                stringResource(R.string.seed_tip_safe),
+                                stringResource(R.string.seed_tip_anyone)
                             ).forEach { tip ->
                                 Text(
                                     text = "• $tip",
@@ -187,7 +189,7 @@ fun SeedDisplayScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
                     ) {
                         Text(
-                            text = "I have written these down",
+                            text = stringResource(R.string.seed_written_down),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
                         )

@@ -9,6 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -52,7 +54,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(48.dp))
 
             Text(
-                text = "Secure your DGB",
+                text = stringResource(R.string.onb_title),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
@@ -62,7 +64,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Your keys, your coins. No third parties.",
+                text = stringResource(R.string.onb_tagline),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFB0BEC5),
                 textAlign = TextAlign.Center
@@ -72,7 +74,7 @@ fun OnboardingScreen(
 
             // Word count toggle — only relevant for create flow
             Text(
-                text = "Seed phrase length",
+                text = stringResource(R.string.onb_seed_length),
                 style = MaterialTheme.typography.labelMedium,
                 color = Color(0xFFB0BEC5),
                 modifier = Modifier.align(Alignment.Start)
@@ -98,7 +100,7 @@ fun OnboardingScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
                 Text(
-                    text = "Create New Wallet",
+                    text = stringResource(R.string.onb_create),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -117,7 +119,7 @@ fun OnboardingScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = DigiByteAccent)
             ) {
                 Text(
-                    text = "Recover Existing Wallet",
+                    text = stringResource(R.string.onb_recover),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -126,7 +128,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             Text(
-                text = "DigiByte — Secure, Fast, Decentralized",
+                text = stringResource(R.string.onb_footer),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF546E7A),
                 textAlign = TextAlign.Center
@@ -161,7 +163,7 @@ private fun WordCountToggle(selected: Int, onSelect: (Int) -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "$count words",
+                        text = stringResource(R.string.onb_words_count, count),
                         color = if (isSelected) Color.White else Color(0xFFB0BEC5),
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         fontSize = 15.sp
@@ -182,7 +184,7 @@ fun DigiByteLogoHeader() {
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "DigiByte Wallet",
+            text = stringResource(R.string.app_name_display),
             style = MaterialTheme.typography.titleLarge,
             color = DigiByteAccent,
             fontWeight = FontWeight.Bold,

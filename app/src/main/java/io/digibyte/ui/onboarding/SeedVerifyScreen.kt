@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -93,7 +95,7 @@ fun SeedVerifyScreen(
             ) {
                 // Progress indicator
                 Text(
-                    text = "Verification ${currentQuestion + 1} of ${questions.size}",
+                    text = stringResource(R.string.verify_progress, currentQuestion + 1, questions.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = Color(0xFFB0BEC5)
                 )
@@ -175,7 +177,7 @@ private fun QuestionCard(
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text = "What is word #${question.position}?",
+            text = stringResource(R.string.verify_question, question.position),
             style = MaterialTheme.typography.headlineSmall,
             color = Color.White,
             fontWeight = FontWeight.Bold,
