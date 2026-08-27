@@ -1,5 +1,28 @@
 # DigiByte Wallet — Roadmap
 
+> ## Update — 2026-08-27 (distribution: Play is unblocked)
+>
+> **The Play Console developer account is approved.** Publishing is no longer waiting on
+> anything external, which invalidates the "F-Droid before Play" sequencing recorded in
+> Phase 4 — that order existed because Play was the uncertain channel, and it no longer is.
+>
+> **Play now goes first; F-Droid follows.** Real installs on real devices are worth more
+> right now than the last ~10% of reproducible-build verification, and the listing's own
+> timing condition ("at or after v4.0.0") was met long ago. F-Droid's rationale is
+> untouched — it is simply no longer the gate. Phase 4 and the feature inventory are
+> updated to match.
+>
+> **digiscope.me now leads its homepage with the wallet** (Native DigiByte, DigiDollar,
+> DigiAssets, sovereign design, universal key restore, 50+ languages) and advertises
+> "Google Play release approaching". This roadmap said "Not started, F-Droid first" while
+> that copy was live; the two now agree.
+>
+> **Unchanged:** the third-party audit is still a gate, and Play's crypto-wallet review is
+> still erratic — the threat model + audit report remain the mitigation, and review latency
+> is now the only external unknown left in the channel.
+
+---
+
 > ## Update — 2026-08-22 (true-up to v4.0.46)
 >
 > Six releases since the last banner. The 2026-08-19 "NEXT" list below is **spent** — its
@@ -330,7 +353,7 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
 | 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation → Keystore binding → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
-| 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet; F-Droid before Play |
+| 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet; **Play Console account approved 2026-08-27 — Play first, F-Droid follows** |
 
 ---
 
@@ -566,12 +589,19 @@ not ship to general users before an independent audit completes:
   a coercion-safety feature that fails adversarial review is worse than
   its absence.
 
-**Distribution, resequenced: F-Droid before Play.** Reproducible-build
-verification is ~90% there, the sovereignty audience lives on F-Droid,
-and its review process rewards exactly the legibility docs this repo
-already has. Play Store follows (its crypto-wallet review is erratic;
-the threat model + audit report are the mitigation), timed with or
-after v4.0.0 so the listing carries the strongest true claims.
+**Distribution, resequenced again (2026-08-27): Play first, F-Droid
+follows.** The Play Console developer account is **approved**, so
+publishing is no longer gated on anything external — which removes the
+constraint that put F-Droid first. Getting real installs on real devices
+now beats waiting on the last ~10% of reproducible-build verification,
+and digiscope.me already leads its homepage with the wallet. The Play
+listing's timing condition is met: v4.0.0 shipped, so the listing carries
+the strongest true claims. Play's crypto-wallet review is still erratic;
+the threat model + audit report remain the mitigation.
+
+F-Droid follows, and its rationale is unchanged — the sovereignty
+audience lives there and its review process rewards exactly the
+legibility docs this repo already has. It is simply no longer the gate.
 
 **Hardware & reach, after:**
 
@@ -629,7 +659,8 @@ Baseline against a modern self-custodial wallet. Status reflects
 | Own-node pairing | **Shipped** — first-class flow | Primitive v3.10.1 + QR-scan/verify/pin/health (Seq 1.1/1.2), additive default + exclusive mode. Clearnet only — onion pairing, oracle-bootstrap, `cfcheckpt` remain Phase 1 remainder |
 | In-app bug reporting | Shipped v3.10.26 | Pre-filled device/sync context; DGB bounties |
 | CSV export | Not started | Phase 3 small increment |
-| F-Droid / Play Store | Not started | Phase 4; F-Droid first |
+| Google Play | **Unblocked** — developer account approved 2026-08-27 | Phase 4, now first; listing not yet submitted. Review latency is the remaining unknown |
+| F-Droid | Not started | Phase 4, after Play; reproducible-build verification ~90% |
 | Third-party audit | Not started | Phase 4 **gate** for DigiDollar mainnet |
 
 ## Versioning
