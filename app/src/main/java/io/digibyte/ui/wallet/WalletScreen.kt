@@ -275,10 +275,13 @@ fun WalletScreen(
         item {
             price?.let { p ->
                 PriceFeedCard(
-                    priceUsd = p.priceUsd,
+                    // The rate for the currency the user actually chose — the same setting the
+                    // balance above already honours. This card used to render USD regardless,
+                    // so a wallet set to NGN showed "≈ NGN0.00" over "DGB / USD $0.005102".
+                    currencyCode = displayCurrency.code,
+                    rate = p.rateFor(displayCurrency.code),
                     change24h = p.change24h,
                     source = p.source,
-                    pricePhp = p.pricePhp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
@@ -551,16 +554,16 @@ private fun WalletActionButton(
 
 @Composable
 private fun PriceFeedCard(
-    priceUsd: Double,
+    currencyCode: String,
+    rate: Double,
     change24h: Double,
     source: String,
-    pricePhp: Double = 0.0,
     modifier: Modifier = Modifier
 ) {
-    val priceFormatted = NumberFormat.getNumberInstance(Locale.US).apply {
-        minimumFractionDigits = 6
-        maximumFractionDigits = 6
-    }.format(priceUsd)
+    // FiatDisplay.formatUnitPrice, not a fixed six decimals: DGB is sub-cent in USD and needs
+    // six, but is above 1 in naira or rupees where six would be noise. It also renders "--"
+    // rather than a confident zero when the fetch did not carry this currency.
+    val priceFormatted = io.digibyte.core.FiatDisplay.formatUnitPrice(currencyCode, rate)
 
     val changeFormatted = String.format("%.2f", abs(change24h))
     val isPositive = change24h >= 0.0
@@ -582,12 +585,12 @@ private fun PriceFeedCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.wallet_price_pair, "USD"),
+                    text = stringResource(R.string.wallet_price_pair, currencyCode.uppercase()),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "$$priceFormatted",
+                    text = priceFormatted,
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp
