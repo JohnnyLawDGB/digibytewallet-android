@@ -105,7 +105,7 @@ fun PassphraseSection(
             )
             if (tooLong) {
                 Text(
-                    text = stringResource(R.string.pass_too_long, Bip39Passphrase.MAX_LENGTH),
+                    text = stringResource(R.string.pass_too_long, Bip39Passphrase.MAX_BYTES),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )

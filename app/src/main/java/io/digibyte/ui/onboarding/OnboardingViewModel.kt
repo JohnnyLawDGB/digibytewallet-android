@@ -53,9 +53,17 @@ class OnboardingViewModel @Inject constructor(
      * Held here rather than passed through navigation arguments so it never enters a back-stack
      * entry, a saved-state bundle, or a deep link.
      */
-    private var _passphrase: String? = null
+    private var _passphrase: ByteArray? = null
 
-    fun setPassphrase(value: String?) { _passphrase = value?.takeIf { it.isNotEmpty() } }
+    /**
+     * Converted to bytes on the way in, so the String the user typed is not held across the four
+     * setup screens. It used to be kept as a String from the seed screen until wallet creation —
+     * a secret that could not be wiped, alive for the whole flow.
+     */
+    fun setPassphrase(value: String?) {
+        _passphrase?.fill(0)
+        _passphrase = io.digibyte.core.Bip39Passphrase.prepare(value)
+    }
 
     fun hasPassphrase(): Boolean = _passphrase != null
 
@@ -113,7 +121,14 @@ class OnboardingViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            val result = recoveryScanService.scan(phrase, passphrase)
+            // Converted at the boundary and zeroed straight after: the ViewModel keeps the
+            // String only as long as the user is typing it.
+            val passBytes = io.digibyte.core.Bip39Passphrase.prepare(passphrase)
+            val result = try {
+                recoveryScanService.scan(phrase, passBytes)
+            } finally {
+                passBytes?.fill(0)
+            }
 
             // When a passphrase was supplied and found nothing, ask the other question too:
             // does this phrase have funds WITHOUT it? A BIP39 passphrase has no checksum, so a
@@ -165,7 +180,8 @@ class OnboardingViewModel @Inject constructor(
             }
             wipeMnemonicFromMemory()
             // The passphrase is now in the Keystore envelope; there is no reason for the
-            // ViewModel to keep holding it.
+            // ViewModel to keep holding it — and now it can actually be wiped.
+            _passphrase?.fill(0)
             _passphrase = null
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet creation failed")
             onResult(success)

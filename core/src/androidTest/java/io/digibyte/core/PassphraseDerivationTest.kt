@@ -47,7 +47,7 @@ class PassphraseDerivationTest {
 
     /** The interop anchor, across the real JNI boundary this time. */
     @Test fun aPassphraseReachesTheNativeDerivation() {
-        val seed = NativeBridge.mnemonicToSeed(bytes, "TREZOR")
+        val seed = NativeBridge.mnemonicToSeed(bytes, "TREZOR".toByteArray(Charsets.UTF_8))
         assertNotNull(seed)
         assertEquals(
             "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553" +
@@ -60,7 +60,7 @@ class PassphraseDerivationTest {
     /** The whole point: same words, different passphrase, different wallet. */
     @Test fun aPassphraseProducesADifferentWallet() {
         val plain = NativeBridge.mnemonicToSeed(bytes, null)!!
-        val withPass = NativeBridge.mnemonicToSeed(bytes, "test123")!!
+        val withPass = NativeBridge.mnemonicToSeed(bytes, "test123".toByteArray(Charsets.UTF_8))!!
         assertNotEquals(hex(plain), hex(withPass))
         plain.fill(0); withPass.fill(0)
     }
@@ -71,7 +71,7 @@ class PassphraseDerivationTest {
      */
     @Test fun nullAndEmptyAgreeAcrossJni() {
         val a = NativeBridge.mnemonicToSeed(bytes, null)!!
-        val b = NativeBridge.mnemonicToSeed(bytes, "")!!
+        val b = NativeBridge.mnemonicToSeed(bytes, ByteArray(0))!!
         assertEquals(hex(a), hex(b))
         a.fill(0); b.fill(0)
     }
@@ -94,7 +94,7 @@ class PassphraseDerivationTest {
      * sized by its length.
      */
     @Test fun anOverlongPassphraseIsRejectedBeforeJni() {
-        val over = "x".repeat(Bip39Passphrase.MAX_LENGTH + 1)
+        val over = "x".repeat(Bip39Passphrase.MAX_BYTES + 1)
         assertEquals(false, Bip39Passphrase.isValid(over))
     }
 }

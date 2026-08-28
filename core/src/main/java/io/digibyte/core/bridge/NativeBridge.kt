@@ -32,13 +32,13 @@ object NativeBridge {
     external fun recoverWallet(phrase: String, creationTimestamp: Long): Boolean
 
     /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
-    external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: String?): Boolean
+    external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: ByteArray?): Boolean
 
     /** Recover wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
     external fun recoverWalletFromBytes(
         phraseBytes: ByteArray,
         creationTimestamp: Long,
-        passphrase: String?,
+        passphrase: ByteArray?,
     ): Boolean
 
     /** Authorize a session (called after biometric unlock). Token is Keystore-decrypted auth blob. */
@@ -424,7 +424,7 @@ object NativeBridge {
 
     /** Derive the 64-byte BIP39 seed from a mnemonic + optional passphrase.
      *  Caller must `fill(0)` the returned ByteArray when done. */
-    external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: String?): ByteArray?
+    external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: ByteArray?): ByteArray?
 
     /** Derive external + internal addresses under a hardened path prefix.
      *  Returns external[0..gapExternal-1] followed by internal[0..gapInternal-1].

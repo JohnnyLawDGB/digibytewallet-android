@@ -71,7 +71,7 @@ class SeedIsolationTest {
 
     @Test
     fun `NativeBridge createWalletFromBytes accepts ByteArray and returns Boolean`() {
-        val method = NativeBridge::class.java.getDeclaredMethod("createWalletFromBytes", ByteArray::class.java, String::class.java)
+        val method = NativeBridge::class.java.getDeclaredMethod("createWalletFromBytes", ByteArray::class.java, ByteArray::class.java)
         assertEquals("createWalletFromBytes must return Boolean, not the seed",
             Boolean::class.javaPrimitiveType, method.returnType)
     }
@@ -79,10 +79,44 @@ class SeedIsolationTest {
     @Test
     fun `NativeBridge recoverWalletFromBytes accepts ByteArray and returns Boolean`() {
         val method = NativeBridge::class.java.getDeclaredMethod(
-            "recoverWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType, String::class.java
+            "recoverWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType, ByteArray::class.java
         )
         assertEquals("recoverWalletFromBytes must return Boolean, not the seed",
             Boolean::class.javaPrimitiveType, method.returnType)
+    }
+
+    /**
+     * The passphrase is seed material and must cross JNI as bytes, never as a String.
+     *
+     * CLAUDE.md:51 records the CRITICAL-3 remediation making the mnemonic a ByteArray so it never
+     * becomes an immutable JVM String — one that cannot be zeroed and lives on the heap until GC
+     * chooses otherwise. The passphrase is the other half of the same secret; the two together
+     * ARE the wallet. It originally shipped as a String at every hop, which quietly did not
+     * extend that guarantee to it.
+     *
+     * This is the gate on that decision. A String parameter here means the invariant has silently
+     * regressed, and a document nobody re-reads would not have caught it.
+     */
+    @Test
+    fun `NativeBridge passphrase parameters are ByteArray, never String`() {
+        val create = NativeBridge::class.java.getDeclaredMethod(
+            "createWalletFromBytes", ByteArray::class.java, ByteArray::class.java
+        )
+        assertEquals(Boolean::class.javaPrimitiveType, create.returnType)
+
+        NativeBridge::class.java.getDeclaredMethod(
+            "recoverWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType, ByteArray::class.java
+        )
+        NativeBridge::class.java.getDeclaredMethod(
+            "mnemonicToSeed", ByteArray::class.java, ByteArray::class.java
+        )
+
+        // And no String-typed passphrase overload may creep back in alongside them.
+        val stringy = NativeBridge::class.java.declaredMethods.filter { m ->
+            m.name in setOf("createWalletFromBytes", "recoverWalletFromBytes", "mnemonicToSeed") &&
+                m.parameterTypes.any { it == String::class.java }
+        }
+        assertTrue("passphrase must not cross JNI as a String: $stringy", stringy.isEmpty())
     }
 
     @Test

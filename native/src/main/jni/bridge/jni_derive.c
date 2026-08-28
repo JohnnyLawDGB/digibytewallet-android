@@ -123,7 +123,7 @@ static int pubkey_to_address(BRKey *key, int addressFormat, char *out, size_t ou
  * Kotlin signature:
  *   external fun mnemonicToSeed(
  *       phraseBytes: ByteArray,      // UTF-8 bytes of the mnemonic
- *       passphrase: String?          // BIP39 optional passphrase, null = ""
+ *       passphrase: ByteArray?       // NFKD UTF-8 bytes, null = no passphrase
  *   ): ByteArray
  *
  * Caller should zero the returned ByteArray via fill(0) once done scanning.
@@ -132,7 +132,7 @@ JNIEXPORT jbyteArray JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
     JNIEnv *env, jobject thiz,
     jbyteArray phraseBytes,
-    jstring passphrase)
+    jbyteArray passphrase)
 {
     (void)thiz;
     if (!phraseBytes) return NULL;
@@ -152,14 +152,25 @@ Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
     phraseCopy[phraseLen] = '\0';
     (*env)->ReleaseByteArrayElements(env, phraseBytes, phraseRaw, JNI_ABORT);
 
-    const char *pass = NULL;
-    if (passphrase) pass = (*env)->GetStringUTFChars(env, passphrase, NULL);
+    /* Bytes, not a jstring: a String cannot be zeroed on the Kotlin side, and a JNI string
+     * pointer must not be written through (see jni_seed_buffer.h). Copied into a buffer we own
+     * so it can be wiped like the phrase beside it. */
+    char passCopy[129];
+    passCopy[0] = '\0';
+    if (passphrase) {
+        const jsize passLen = (*env)->GetArrayLength(env, passphrase);
+        if (passLen < 0 || (size_t)passLen >= sizeof(passCopy)) {
+            secure_zero(phraseCopy, sizeof(phraseCopy));
+            return NULL;
+        }
+        if (passLen > 0) (*env)->GetByteArrayRegion(env, passphrase, 0, passLen, (jbyte *)passCopy);
+        passCopy[passLen] = '\0';
+    }
 
     uint8_t seed[64];
-    BRBIP39DeriveKey(seed, phraseCopy, pass);
+    BRBIP39DeriveKey(seed, phraseCopy, passCopy[0] ? passCopy : NULL);
     secure_zero(phraseCopy, sizeof(phraseCopy));
-
-    if (pass) (*env)->ReleaseStringUTFChars(env, passphrase, pass);
+    secure_zero(passCopy, sizeof(passCopy));
 
     jbyteArray result = (*env)->NewByteArray(env, sizeof(seed));
     if (!result) {

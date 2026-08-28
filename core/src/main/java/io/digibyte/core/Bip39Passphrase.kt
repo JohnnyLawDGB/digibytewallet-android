@@ -5,51 +5,64 @@ import java.text.Normalizer
 /**
  * Prepares an optional BIP39 passphrase for the native derivation.
  *
- * ## Why normalisation is not optional
+ * ## Why this hands back bytes
  *
- * `BRBIP39DeriveKey` performs none — it concatenates `"mnemonic" + passphrase` and runs PBKDF2 —
- * and its header states plainly that the caller must supply NFKD-normalised input. Unicode gives
- * "café" at least two spellings: composed (U+00E9) and decomposed (e + U+0301). A user typing the
- * same visible passphrase on Android and in Electrum can produce either, and unnormalised they
- * derive different wallets.
+ * `CLAUDE.md:51` records a deliberate CRITICAL-3 remediation: the mnemonic is carried as a
+ * `ByteArray` so it never becomes an immutable JVM `String`. A String cannot be zeroed, lives on
+ * the heap until GC chooses otherwise, and may be duplicated by GC compaction. The passphrase is
+ * the other half of the same secret — the two together ARE the wallet — and it originally shipped
+ * as a String at every hop, quietly not extending that guarantee to it.
  *
- * The failure mode is the worst kind available here: it appears at RESTORE, on someone else's
- * software, with a valid empty wallet and no error to explain it.
+ * The window cannot be closed completely. Compose text entry produces a String, and
+ * [Normalizer] only operates on one, so a single transient copy is unavoidable and this file is
+ * where it lives and dies. What the ByteArray return DOES remove are the copies that persist:
+ * the value held in a ViewModel for the life of a screen, the one returned by
+ * `WalletManager.loadPassphrase()`, and the one handed across JNI. Those are now bytes that every
+ * caller zeroes.
  *
- * ## Why the length is bounded
+ * ## Normalisation is not optional
  *
- * The PBKDF2 salt is a stack VLA sized by the passphrase, so an unbounded value is a stack
- * overflow. Native enforces the same bound; this layer exists so the user can be told before
- * they commit to a passphrase that will be rejected.
+ * `BRBIP39DeriveKey` performs none and its header states the caller must supply NFKD. Unicode
+ * gives "café" at least two spellings; unnormalised they derive different wallets, and the user
+ * discovers that at RESTORE, on someone else's software, with a valid empty wallet and no error.
  *
- * The bound is measured AFTER normalisation, because decomposition lengthens strings — a value
- * that fits before normalising can overflow after it.
+ * ## The cap is BYTES, and that is a fix
  *
- * ## Absent and empty are the same thing
- *
- * BIP39 salts with `"mnemonic" + passphrase`, so no passphrase and an empty one derive the same
- * seed. Every wallet created before this feature used the former; they must never diverge.
+ * The PBKDF2 salt is a stack buffer sized in bytes. This originally measured the cap in
+ * CHARACTERS, so 128 CJK characters — 384 UTF-8 bytes — passed here and were rejected by native.
+ * Wallet creation returned false and the user saw "Wallet creation failed" with nothing pointing
+ * at the passphrase. Both sides now count the same unit.
  */
 object Bip39Passphrase {
 
-    /** Characters allowed after normalisation. Mirrors PASSPHRASE_MAX in jni_wallet.c. */
-    const val MAX_LENGTH = 128
+    /** Maximum UTF-8 bytes after normalisation. Mirrors PASSPHRASE_MAX in jni_wallet.c. */
+    const val MAX_BYTES = 128
 
     /**
-     * Normalise for derivation.
+     * Normalise to NFKD and encode as UTF-8.
      *
-     * @return the NFKD form, or null when there is no passphrase. Whitespace is deliberately NOT
-     *   trimmed: " " is a real, if unwise, passphrase, and silently trimming it would derive a
-     *   different wallet from the one the user set up elsewhere.
+     * @return the bytes, or null when there is no passphrase. **The caller owns the result and
+     *   must `fill(0)` it when done.** Whitespace is deliberately NOT trimmed: " " is a real, if
+     *   unwise, passphrase, and silently trimming it would derive a different wallet from the one
+     *   the user set up elsewhere.
      */
-    fun prepare(raw: String?): String? {
+    fun prepare(raw: String?): ByteArray? {
         if (raw.isNullOrEmpty()) return null
-        return Normalizer.normalize(raw, Normalizer.Form.NFKD)
+        return Normalizer.normalize(raw, Normalizer.Form.NFKD).toByteArray(Charsets.UTF_8)
     }
 
-    /** Whether this passphrase can be used. Absent and empty are valid — the feature is optional. */
+    /**
+     * Whether this passphrase can be used. Absent and empty are valid — the feature is optional.
+     *
+     * Zeroes its own working copy: validation runs on every keystroke in the entry field, and a
+     * rejected passphrase is still a passphrase.
+     */
     fun isValid(raw: String?): Boolean {
         val prepared = prepare(raw) ?: return true
-        return prepared.length <= MAX_LENGTH
+        return try {
+            prepared.size <= MAX_BYTES
+        } finally {
+            prepared.fill(0)
+        }
     }
 }

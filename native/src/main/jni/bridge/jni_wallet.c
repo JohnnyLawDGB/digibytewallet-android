@@ -170,26 +170,32 @@ Java_io_digibyte_core_bridge_NativeBridge_setNetwork(JNIEnv *env, jobject thiz, 
  */
 #define PASSPHRASE_MAX 128
 
-/* Returns 1 and fills `out` (NUL-terminated) on success, 0 if the passphrase is too long.
- * `*needsRelease` tells the caller whether to release the jstring chars afterwards. */
-static int passphrase_copy(JNIEnv *env, jstring passphrase, char *out, size_t outSize) {
+/* Copy the passphrase out of a jbyteArray into a buffer we own.
+ *
+ * A jbyteArray rather than a jstring, matching the mnemonic. `GetStringUTFChars` hands back a
+ * pointer the VM may or may not own, cannot be zeroed safely (writing through a JNI pointer we do
+ * not own is exactly the bug jni_seed_buffer.h exists to prevent), and on the Kotlin side forces
+ * the secret to live in an immutable String that can never be wiped. Bytes can be wiped on both
+ * sides of the boundary.
+ *
+ * Returns 1 on success (out is NUL-terminated), 0 if the passphrase is too long. JNI_ABORT on
+ * release: we only ever read, so there is nothing to write back.
+ */
+static int passphrase_copy(JNIEnv *env, jbyteArray passphrase, char *out, size_t outSize) {
     out[0] = '\0';
     if (!passphrase) return 1;
 
-    const char *chars = (*env)->GetStringUTFChars(env, passphrase, NULL);
-    if (!chars) return 1;   /* treat an unreadable passphrase as absent rather than failing */
-
-    const size_t len = strlen(chars);
-    if (len >= outSize) {
-        (*env)->ReleaseStringUTFChars(env, passphrase, chars);
-        /* Deliberately does NOT log the length. It is an attribute of a secret, and the Kotlin
-         * layer already rejects over-long values before reaching here — this is the backstop. */
+    const jsize len = (*env)->GetArrayLength(env, passphrase);
+    if (len < 0 || (size_t)len >= outSize) {
+        /* Deliberately does NOT log the length. It is an attribute of a secret, and Kotlin
+         * already rejects over-long values before reaching here — this is the backstop. */
         LOGW("passphrase rejected: too long");
         return 0;
     }
-    memcpy(out, chars, len);
+    if (len > 0) {
+        (*env)->GetByteArrayRegion(env, passphrase, 0, len, (jbyte *)out);
+    }
     out[len] = '\0';
-    (*env)->ReleaseStringUTFChars(env, passphrase, chars);
     return 1;
 }
 
@@ -281,7 +287,7 @@ Java_io_digibyte_core_bridge_NativeBridge_createWallet(JNIEnv *env, jobject thiz
 JNIEXPORT jboolean JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
                                                                   jbyteArray phraseBytes,
-                                                                  jstring passphrase) {
+                                                                  jbyteArray passphrase) {
     (void)thiz;
 
 
@@ -464,7 +470,7 @@ JNIEXPORT jboolean JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
                                                                    jbyteArray phraseBytes,
                                                                    jlong creationTimestamp,
-                                                                   jstring passphrase) {
+                                                                   jbyteArray passphrase) {
     (void)thiz;
 
 

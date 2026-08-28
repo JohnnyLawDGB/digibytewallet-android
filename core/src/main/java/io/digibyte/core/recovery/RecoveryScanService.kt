@@ -204,7 +204,8 @@ class RecoveryScanService(
 
     suspend fun scan(
         mnemonic: String,
-        passphrase: String? = null,
+        /** NFKD UTF-8 bytes, or null. Caller owns and zeroes them. */
+        passphrase: ByteArray? = null,
     ): State = withContext(Dispatchers.IO) {
         val phraseBytes = mnemonic.trim().lowercase().toByteArray(Charsets.UTF_8)
         var seed: ByteArray? = null

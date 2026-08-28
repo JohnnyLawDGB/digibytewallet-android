@@ -83,7 +83,8 @@ class LegacySweepService(
      * for zeroing the mnemonic from its own state after this call returns. */
     suspend fun sweep(
         mnemonic: String,
-        passphrase: String?,
+        /** NFKD UTF-8 bytes, or null. Caller owns and zeroes them. */
+        passphrase: ByteArray?,
         nonNativeResults: List<RecoveryScanService.ProfileResult>,
         destAddress: String,
         feePerKb: Long = 100_000L, // DGB min relay × 1 sat/byte

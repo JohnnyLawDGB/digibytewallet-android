@@ -39,13 +39,13 @@ class PassphraseEntryTest {
         assertFalse(passphraseEntryReady("hunter2 ", "hunter2"))
     }
 
-    @Test fun `over the length cap blocks even when confirmed`() {
-        val over = "x".repeat(Bip39Passphrase.MAX_LENGTH + 1)
+    @Test fun `over the byte cap blocks even when confirmed`() {
+        val over = "x".repeat(Bip39Passphrase.MAX_BYTES + 1)
         assertFalse(passphraseEntryReady(over, over))
     }
 
     @Test fun `exactly at the cap is allowed`() {
-        val at = "x".repeat(Bip39Passphrase.MAX_LENGTH)
+        val at = "x".repeat(Bip39Passphrase.MAX_BYTES)
         assertTrue(passphraseEntryReady(at, at))
     }
 }

@@ -91,8 +91,12 @@ class RecoverFundsViewModel @Inject constructor(
     // sweepForeign so the sweep re-derives the same seed. Cleared after sweep /
     // on reset. (A JVM String can't be zeroed — same accepted limit as restore.)
     private var pendingForeignMnemonic: String? = null
-    /** NFKD-normalised passphrase for the phrase being restored, or null. Never persisted. */
-    private var pendingForeignPassphrase: String? = null
+    /**
+     * NFKD UTF-8 bytes of the passphrase for the phrase being restored, or null. Never persisted,
+     * and zeroed on every reset path — this used to be a String that lived for the whole screen
+     * and could not be wiped.
+     */
+    private var pendingForeignPassphrase: ByteArray? = null
 
     /**
      * Why a passphrase restore came back empty. Null when no passphrase was supplied.
@@ -116,6 +120,7 @@ class RecoverFundsViewModel @Inject constructor(
     fun reset() {
         activeJob?.cancel()
         pendingForeignMnemonic = null
+        pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
         _passphraseVerdict.value = null
         _state.value = UiState.Idle
@@ -212,6 +217,7 @@ class RecoverFundsViewModel @Inject constructor(
             return
         }
         pendingForeignMnemonic = phrase
+        pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = io.digibyte.core.Bip39Passphrase.prepare(passphrase)
         _state.value = UiState.Classifying
         activeJob = viewModelScope.launch {
@@ -291,6 +297,7 @@ class RecoverFundsViewModel @Inject constructor(
             val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase.")
                 pendingForeignMnemonic = null
+        pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
         _passphraseVerdict.value = null
                 return@launch
@@ -312,6 +319,7 @@ class RecoverFundsViewModel @Inject constructor(
             } finally {
                 seed.fill(0)
                 pendingForeignMnemonic = null
+        pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
         _passphraseVerdict.value = null
             }

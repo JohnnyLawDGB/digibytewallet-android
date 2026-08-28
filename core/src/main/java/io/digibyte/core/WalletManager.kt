@@ -109,10 +109,15 @@ class WalletManager(
      * Create a new wallet from a mnemonic phrase.
      * Encrypts and persists the phrase to disk.
      */
-    fun createWallet(mnemonic: String, passphrase: String? = null): Boolean {
+    /**
+     * @param passphrase NFKD UTF-8 bytes, or null. **The CALLER owns these and must zero them** —
+     *   this does not, because wiping a buffer it was merely handed is the mistake jni_derive.c
+     *   already had to be corrected for once.
+     */
+    fun createWallet(mnemonic: String, passphrase: ByteArray? = null): Boolean {
         // Default null keeps every existing caller — and every existing wallet — unchanged.
-        if (!Bip39Passphrase.isValid(passphrase)) return false
-        val prepared = Bip39Passphrase.prepare(passphrase)
+        if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
+        val prepared = passphrase
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
             val success = NativeBridge.createWalletFromBytes(mnemonicBytes, prepared)
@@ -141,10 +146,11 @@ class WalletManager(
     fun recoverWallet(
         mnemonic: String,
         creationTimestamp: Long,
-        passphrase: String? = null,
+        /** NFKD UTF-8 bytes, or null. Caller owns and zeroes them; see [createWallet]. */
+        passphrase: ByteArray? = null,
     ): Boolean {
-        if (!Bip39Passphrase.isValid(passphrase)) return false
-        val prepared = Bip39Passphrase.prepare(passphrase)
+        if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
+        val prepared = passphrase
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
             val success = NativeBridge.recoverWalletFromBytes(mnemonicBytes, creationTimestamp, prepared)
@@ -294,10 +300,14 @@ class WalletManager(
             // report a zero balance, on a wallet whose coins are perfectly safe. Null for the
             // overwhelming majority of wallets, which have no passphrase.
             val storedPass = loadPassphrase()
-            val success = if (creationTime > 0) {
-                NativeBridge.recoverWalletFromBytes(seedBytes, creationTime, storedPass)
-            } else {
-                NativeBridge.recoverWalletFromBytes(seedBytes, 1774252800L, storedPass)
+            val success = try {
+                if (creationTime > 0) {
+                    NativeBridge.recoverWalletFromBytes(seedBytes, creationTime, storedPass)
+                } else {
+                    NativeBridge.recoverWalletFromBytes(seedBytes, 1774252800L, storedPass)
+                }
+            } finally {
+                storedPass?.fill(0)
             }
             if (success) {
                 _walletState.value = WalletState.Unlocked
@@ -703,35 +713,35 @@ class WalletManager(
      * A null or blank passphrase writes nothing — BIP39 treats absent and empty identically
      * (salt = "mnemonic"), so an absent entry and an empty one must remain the same wallet.
      */
-    private fun persistPassphrase(passphrase: String?) {
-        val value = passphrase?.takeIf { it.isNotEmpty() }
-        if (value == null) {
+    /** @param passphrase NFKD UTF-8 bytes, or null. The caller still owns and must zero them. */
+    private fun persistPassphrase(passphrase: ByteArray?) {
+        if (passphrase == null || passphrase.isEmpty()) {
             prefs.edit().remove("encrypted_pass").remove("encrypted_pass_iv").apply()
             return
         }
-        val bytes = value.toByteArray(Charsets.UTF_8)
-        try {
-            keyStoreManager.createKey()
-            val encrypted = keyStoreManager.encrypt(bytes)
-            prefs.edit()
-                .putString("encrypted_pass", bytesToHex(encrypted.ciphertext))
-                .putString("encrypted_pass_iv", bytesToHex(encrypted.iv))
-                .apply()
-        } finally {
-            bytes.fill(0)
-        }
+        keyStoreManager.createKey()
+        val encrypted = keyStoreManager.encrypt(passphrase)
+        prefs.edit()
+            .putString("encrypted_pass", bytesToHex(encrypted.ciphertext))
+            .putString("encrypted_pass_iv", bytesToHex(encrypted.iv))
+            .apply()
     }
 
-    /** The stored passphrase, or null when this wallet has none (the default). */
-    private fun loadPassphrase(): String? {
-        val ct = prefs.getString("encrypted_pass", null) ?: return null
-        val iv = prefs.getString("encrypted_pass_iv", null) ?: return null
-        return try {
-            val bytes = keyStoreManager.decrypt(EncryptedData(hexToBytes(ct), hexToBytes(iv)))
-            bytes?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
-        } catch (e: Exception) {
-            null
-        }
+    /**
+     * The stored passphrase as NFKD UTF-8 bytes, or null when this wallet has none.
+     *
+     * Bytes rather than a String so the caller can wipe it — the version this replaces built a
+     * String from the decrypted bytes, which then could not be zeroed and outlived every use.
+     * **The caller owns the result and must `fill(0)` it.**
+     */
+    private fun loadPassphrase(): ByteArray? = try {
+        val ct = prefs.getString("encrypted_pass", null)
+        val iv = prefs.getString("encrypted_pass_iv", null)
+        if (ct == null || iv == null) null
+        else keyStoreManager.decrypt(EncryptedData(hexToBytes(ct), hexToBytes(iv)))
+            ?.takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+        null
     }
 
     private fun loadSeed(): ByteArray? {
@@ -764,9 +774,14 @@ class WalletManager(
     fun loadBip39Seed(): ByteArray? {
         val mnemonicBytes = loadSeed() ?: return null
         return try {
-            // No passphrase: this wallet does not use a BIP39 passphrase
-            // (createWallet/recoverWallet never pass one).
-            val seed = NativeBridge.mnemonicToSeed(mnemonicBytes, null)
+            // Carries the wallet's stored passphrase, if it has one — a passphrase wallet's
+            // recovery/sweep seed must match the seed it actually derives from.
+            val pass = loadPassphrase()
+            val seed = try {
+                NativeBridge.mnemonicToSeed(mnemonicBytes, pass)
+            } finally {
+                pass?.fill(0)
+            }
             if (seed == null || seed.isEmpty()) null else seed
         } catch (e: Exception) {
             null
@@ -816,12 +831,16 @@ class WalletManager(
      * The 64-byte seed for a mnemonic under this wallet's stored passphrase (usually none).
      * Caller must zero the result.
      */
-    private fun deriveSeedForIdentity(mnemonicBytes: ByteArray): ByteArray? =
-        try {
-            NativeBridge.mnemonicToSeed(mnemonicBytes, loadPassphrase())?.takeIf { it.isNotEmpty() }
+    private fun deriveSeedForIdentity(mnemonicBytes: ByteArray): ByteArray? {
+        val pass = loadPassphrase()
+        return try {
+            NativeBridge.mnemonicToSeed(mnemonicBytes, pass)?.takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
             null
+        } finally {
+            pass?.fill(0)
         }
+    }
 
     // ── Hex utilities ────────────────────────────────────────────
 
