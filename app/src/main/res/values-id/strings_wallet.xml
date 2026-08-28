@@ -532,7 +532,7 @@
     <string name="pass_advanced">Lanjutan — tambahkan frasa sandi</string>
     <string name="pass_optional">Opsional</string>
     <string name="pass_what">Frasa sandi adalah kata atau kalimat tambahan pilihan Anda. Dengan itu, frasa pemulihan saja tidak lagi cukup untuk membuka dompet ini — orang yang menemukan kata-kata tertulis Anda tidak bisa memakai koin Anda.</string>
-    <string name="pass_warn">Catat frasa sandi bersama frasa pemulihan Anda dan simpan keduanya. Jika hilang, kata-kata itu saja TIDAK akan memulihkan dompet Anda, dan tidak ada yang bisa memulihkannya untuk Anda.</string>
+    <string name="pass_warn">Catat frasa sandi, tetapi simpan TERPISAH dari frasa pemulihan Anda — disimpan di tempat yang sama, keduanya kembali menjadi satu rahasia dan frasa sandi tidak melindungi apa pun. Jika hilang, kata-kata itu saja TIDAK akan memulihkan dompet Anda, dan tidak ada yang bisa memulihkannya untuk Anda.</string>
     <string name="pass_scope">Ini melindungi cadangan tertulis Anda. Di ponsel ini, PIN Anda tetap yang mengunci dompet.</string>
     <string name="pass_enter">Frasa sandi</string>
     <string name="pass_confirm">Konfirmasi frasa sandi</string>

@@ -532,7 +532,7 @@
     <string name="pass_advanced">Gelişmiş — parola ekle</string>
     <string name="pass_optional">İsteğe bağlı</string>
     <string name="pass_what">Parola, kendi seçtiğiniz ek bir kelime ya da cümledir. Parola varsa kurtarma ifadeniz tek başına bu cüzdanı açmaya yetmez — yazılı kelimeleri bulan biri coinlerinizi harcayamaz.</string>
-    <string name="pass_warn">Parolayı kurtarma ifadenizle birlikte yazın ve ikisini de saklayın. Kaybederseniz bu kelimeler tek başına cüzdanınızı GERİ GETİRMEZ ve kimse sizin için kurtaramaz.</string>
+    <string name="pass_warn">Parolayı yazın, ancak kurtarma ifadenizden AYRI bir yerde saklayın — aynı yerde tutulduklarında ikisi yeniden tek bir sır olur ve parola hiçbir şeyi korumaz. Parolayı kaybederseniz, bu kelimeler tek başına cüzdanınızı geri YÜKLEYEMEZ ve kimse sizin için kurtaramaz.</string>
     <string name="pass_scope">Bu, yazılı yedeğinizi korur. Bu telefonda cüzdanı kilitli tutan hâlâ PIN\'inizdir.</string>
     <string name="pass_enter">Parola</string>
     <string name="pass_confirm">Parolayı onayla</string>

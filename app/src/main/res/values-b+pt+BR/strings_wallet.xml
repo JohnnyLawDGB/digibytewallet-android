@@ -532,7 +532,7 @@
     <string name="pass_advanced">Avançado — adicionar uma frase-senha</string>
     <string name="pass_optional">Opcional</string>
     <string name="pass_what">Uma frase-senha é uma palavra ou frase adicional escolhida por você. Com ela, sua frase de recuperação sozinha deixa de ser suficiente para abrir esta carteira — quem encontrar as palavras anotadas não conseguirá gastar suas moedas.</string>
-    <string name="pass_warn">Anote a frase-senha junto com sua frase de recuperação e guarde as duas. Se você perdê-la, essas palavras sozinhas NÃO restaurarão sua carteira, e ninguém poderá recuperá-la para você.</string>
+    <string name="pass_warn">Anote a frase-senha, mas guarde-a SEPARADA da sua frase de recuperação — no mesmo lugar, as duas voltam a ser um único segredo e a frase-senha não protege mais nada. Se você perdê-la, essas palavras sozinhas NÃO restaurarão sua carteira, e ninguém poderá recuperá-la para você.</string>
     <string name="pass_scope">Isso protege seu backup escrito. Neste telefone, quem mantém a carteira bloqueada continua sendo o seu PIN.</string>
     <string name="pass_enter">Frase-senha</string>
     <string name="pass_confirm">Confirme a frase-senha</string>

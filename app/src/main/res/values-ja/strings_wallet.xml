@@ -532,7 +532,7 @@
     <string name="pass_advanced">詳細 — パスフレーズを追加</string>
     <string name="pass_optional">任意</string>
     <string name="pass_what">パスフレーズは、あなたが決める追加の単語や文章です。設定すると、リカバリーフレーズだけではこのウォレットを開けなくなります — 書き留めた単語を見つけた人でも、あなたのコインは使えません。</string>
-    <string name="pass_warn">パスフレーズはリカバリーフレーズと一緒に書き留め、両方を保管してください。失うと、これらの単語だけではウォレットを復元できず、誰も代わりに復元することはできません。</string>
+    <string name="pass_warn">パスフレーズは書き留めてください。ただし、リカバリーフレーズとは別の場所に保管してください。同じ場所に置くと両者は再び一つの秘密になり、パスフレーズは何も守りません。紛失すると、これらの単語だけではウォレットを復元できず、誰も代わりに復元することはできません。</string>
     <string name="pass_scope">これは書き留めたバックアップを守るものです。この端末では、ウォレットをロックしているのは引き続き PIN です。</string>
     <string name="pass_enter">パスフレーズ</string>
     <string name="pass_confirm">パスフレーズの確認</string>

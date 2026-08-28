@@ -514,7 +514,7 @@
     <string name="pass_advanced">Avancé — ajouter une phrase secrète</string>
     <string name="pass_optional">Facultatif</string>
     <string name="pass_what">Une phrase secrète est un mot ou une phrase supplémentaire de votre choix. Avec elle, votre phrase de récupération seule ne suffit plus à ouvrir ce portefeuille — quelqu\'un qui trouverait les mots écrits ne pourrait pas dépenser vos pièces.</string>
-    <string name="pass_warn">Notez la phrase secrète avec votre phrase de récupération et conservez les deux. Si vous la perdez, ces mots seuls ne restaureront PAS votre portefeuille, et personne ne pourra le récupérer à votre place.</string>
+    <string name="pass_warn">Notez la phrase secrète, mais conservez-la SÉPARÉMENT de votre phrase de récupération — rangées au même endroit, elles ne forment à nouveau qu\'un seul secret et la phrase secrète ne protège plus rien. Si vous la perdez, ces mots seuls ne restaureront PAS votre portefeuille, et personne ne pourra le récupérer à votre place.</string>
     <string name="pass_scope">Ceci protège votre sauvegarde écrite. Sur ce téléphone, c\'est toujours votre code PIN qui verrouille le portefeuille.</string>
     <string name="pass_enter">Phrase secrète</string>
     <string name="pass_confirm">Confirmer la phrase secrète</string>

@@ -656,7 +656,7 @@
     <string name="pass_optional">Optional</string>
     <string name="pass_what">A passphrase is an extra word or sentence of your own. With one, your recovery phrase alone is no longer enough to open this wallet — someone who finds the written words cannot spend your coins.</string>
     <!-- WARNING: this is the sentence that prevents a lost wallet. -->
-    <string name="pass_warn">Write the passphrase down with your recovery phrase and keep both. If you lose it, these words alone will NOT restore your wallet, and nobody can recover it for you.</string>
+    <string name="pass_warn">Write the passphrase down, but keep it SEPARATE from your recovery phrase — in the same place they are one secret again, and the passphrase protects nothing. If you lose it, these words alone will NOT restore your wallet, and nobody can recover it for you.</string>
     <!-- Honest scope: it protects the written backup, not the phone. See the design spec. -->
     <string name="pass_scope">This protects your written backup. On this phone your PIN is still what keeps the wallet locked.</string>
     <string name="pass_enter">Passphrase</string>

@@ -532,7 +532,7 @@
     <string name="pass_advanced">Advanced — magdagdag ng passphrase</string>
     <string name="pass_optional">Opsyonal</string>
     <string name="pass_what">Ang passphrase ay karagdagang salita o pangungusap na ikaw ang pumipili. Kapag may nito, hindi na sapat ang recovery phrase mo lang para buksan ang wallet na ito — hindi magagastos ng sinumang makakita ng nakasulat na mga salita ang mga coin mo.</string>
-    <string name="pass_warn">Isulat ang passphrase kasama ang recovery phrase mo at itago pareho. Kapag nawala ito, HINDI maibabalik ng mga salitang iyon lang ang wallet mo, at walang makakabawi nito para sa iyo.</string>
+    <string name="pass_warn">Isulat ang passphrase, ngunit itago ito nang HIWALAY sa iyong recovery phrase — kapag magkasama sa iisang lugar, muli silang nagiging iisang lihim at wala nang pinoprotektahan ang passphrase. Kung mawala ito, ang mga salitang ito lamang ay HINDI makakapagbalik ng iyong wallet, at walang makakabawi nito para sa iyo.</string>
     <string name="pass_scope">Pinoprotektahan nito ang nakasulat mong backup. Sa teleponong ito, ang PIN mo pa rin ang nagla-lock sa wallet.</string>
     <string name="pass_enter">Passphrase</string>
     <string name="pass_confirm">Kumpirmahin ang passphrase</string>

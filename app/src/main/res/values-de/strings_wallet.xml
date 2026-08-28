@@ -540,7 +540,7 @@
     <string name="pass_advanced">Erweitert — Passphrase hinzufügen</string>
     <string name="pass_optional">Optional</string>
     <string name="pass_what">Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl. Mit ihr reicht Ihre Wiederherstellungsphrase allein nicht mehr aus, um diese Wallet zu öffnen — wer die notierten Wörter findet, kann Ihre Coins nicht ausgeben.</string>
-    <string name="pass_warn">Notieren Sie die Passphrase zusammen mit Ihrer Wiederherstellungsphrase und bewahren Sie beides auf. Wenn Sie sie verlieren, stellen diese Wörter allein Ihre Wallet NICHT wieder her, und niemand kann sie für Sie wiederherstellen.</string>
+    <string name="pass_warn">Notieren Sie die Passphrase, bewahren Sie sie aber GETRENNT von Ihrer Wiederherstellungsphrase auf — am selben Ort sind beide wieder ein einziges Geheimnis, und die Passphrase schützt nichts mehr. Wenn Sie sie verlieren, stellen diese Wörter allein Ihre Wallet NICHT wieder her, und niemand kann sie für Sie wiederherstellen.</string>
     <string name="pass_scope">Dies schützt Ihr notiertes Backup. Auf diesem Telefon bleibt Ihre PIN das, was die Wallet sperrt.</string>
     <string name="pass_enter">Passphrase</string>
     <string name="pass_confirm">Passphrase bestätigen</string>
