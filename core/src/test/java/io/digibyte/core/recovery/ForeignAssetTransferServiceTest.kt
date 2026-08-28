@@ -76,6 +76,14 @@ class ForeignAssetTransferServiceTest {
         isAssetTx = { it.contentEquals(byteArrayOf(1)) },
     )
 
+    /** Everything handed to OutgoingTxStore, so the self-transfer flag can be asserted. */
+    data class Recorded(
+        val txid: String, val sentSats: Long, val feeSats: Long,
+        val toAddress: String, val isSelfTransfer: Boolean,
+    )
+
+    private val recorded = mutableListOf<Recorded>()
+
     private fun service(
         sign: (ForeignAssetTransferPlan.Plan, ByteArray, DerivationProfile, Long) -> String? =
             { _, _, _, _ -> "00ff" },
@@ -86,6 +94,9 @@ class ForeignAssetTransferServiceTest {
         parseOutputs = parse,
         sign = sign,
         broadcast = broadcast,
+        // android.util.Log is an unmocked stub on the JVM and throws when called.
+        log = { _, _ -> },
+        recordOutgoing = { t, s, f, to, self -> recorded += Recorded(t, s, f, to, self) },
     )
 
     private fun run(svc: ForeignAssetTransferService, results: List<RecoveryScanService.ProfileResult>) =
@@ -183,5 +194,31 @@ class ForeignAssetTransferServiceTest {
         val r = run(service(), listOf(plainOnly))
         assertTrue(r.moves.isEmpty())
         assertFalse("an empty batch moved nothing, so it is not 'all moved'", r.allMoved)
+    }
+
+    /**
+     * The move must be recorded as a SELF transfer.
+     *
+     * Observed on mainnet 2026-08-28: the asset arrived and the balance went 90 -> 91, and the
+     * activity list showed it as "Sent". The destination is this wallet's own receive address, so
+     * the C core categorizes the transaction as a receive; recording it as an ordinary outgoing
+     * send makes the list override that categorization and show a balance-INCREASING transaction
+     * as money leaving. The swept DGB rendered correctly in the same run because
+     * LegacySweepService passes the flag and this did not.
+     *
+     * See OutgoingTxStore.shouldApplyOutgoingOverride — the rule already existed; this path just
+     * never opted into it.
+     */
+    @Test fun `the move is recorded as a self transfer, not an outgoing send`() {
+        run(service(), listOf(profileResult()))
+
+        val rec = recorded.single()
+        assertEquals("txid-moved", rec.txid)
+        assertEquals(dest, rec.toAddress)
+        assertTrue(
+            "recorded as an external send — the activity list will render this " +
+                "balance-increasing asset move as \"Sent\"",
+            rec.isSelfTransfer,
+        )
     }
 }

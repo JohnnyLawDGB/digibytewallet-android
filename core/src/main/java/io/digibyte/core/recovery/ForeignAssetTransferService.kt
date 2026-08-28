@@ -41,6 +41,33 @@ class ForeignAssetTransferService(
         ::nativeSign,
     /** Broadcast signed bytes. Returns the relay txid, or null. */
     private val broadcast: (ByteArray) -> String? = { Broadcaster.broadcast(it) },
+    /**
+     * Record the outgoing transaction for durability and activity-list rendering.
+     *
+     * Injected so `isSelfTransfer` is assertable. It is not a detail: the move sends to an
+     * address THIS wallet owns, so the C core categorizes it as a receive. Recording it as an
+     * ordinary send makes the activity list override that and show the user "Sent" for a
+     * transaction that increased their balance — see OutgoingTxStore.shouldApplyOutgoingOverride.
+     */
+    /**
+     * Where progress and refusals go.
+     *
+     * Injected rather than calling android.util.Log directly so the orchestration stays testable
+     * on a JVM, where android.util.Log is an unmocked stub that throws. Flipping
+     * returnDefaultValues for the whole module would fix the symptom by making every other
+     * Android stub silently return null across 800-odd tests.
+     */
+    private val log: (level: Char, message: String) -> Unit = { level, message ->
+        if (level == 'w') android.util.Log.w(TAG, message) else android.util.Log.i(TAG, message)
+    },
+    private val recordOutgoing: (
+        txid: String, sentSats: Long, feeSats: Long, toAddress: String, isSelfTransfer: Boolean,
+    ) -> Unit = { txid, sent, fee, to, self ->
+        outgoingTxStore?.record(
+            txid = txid, sentSats = sent, feeSats = fee, toAddress = to, isSelfTransfer = self,
+        )
+        walletTxPersister?.persist()
+    },
 ) {
 
     /** What became of one asset. [txid] is non-null only once the transfer reached relay. */
@@ -83,6 +110,10 @@ class ForeignAssetTransferService(
             )
             if (partition.assetBearing.isEmpty()) continue
 
+            log('i', "profile=${result.profile.label}: ${partition.assetBearing.size} asset-bearing " +
+                    "outpoint(s) to move, ${partition.sweepable.size} plain",
+            )
+
             val reserve = AssetFeeReserve.reserve(
                 sweepable = partition.sweepable,
                 assetCount = partition.assetBearing.size,
@@ -116,16 +147,28 @@ class ForeignAssetTransferService(
             // the sweep, not here, and dropping it only narrows the pool.
             val feePool = reserve.reserved.mapNotNull { toSpend(it, byAddress) }
 
+            log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s) / " +
+                    "${feePool.sumOf { it.amountSat }} sats; units=" +
+                    assets.joinToString { "${it.spend.txid.take(8)}:${it.spend.vout}=${it.units}" },
+            )
+
             val planned = ForeignAssetTransferBatch.plan(assets, feePool, destAddress, feePerKb)
 
             for (item in planned) {
                 when (val r = item.result) {
-                    is ForeignAssetTransferPlan.Result.Refused ->
+                    is ForeignAssetTransferPlan.Result.Refused -> {
+                        log('w', "${item.outpoint}: refused — ${r.reason}: ${r.detail}")
                         moves += Move(item.outpoint, 0L, null, "${r.reason}: ${r.detail}")
+                    }
 
                     is ForeignAssetTransferPlan.Result.Ok -> {
+                        log('i', "${item.outpoint}: planned ${r.plan.assetUnits} unit(s), " +
+                                "${r.plan.inputs.size} input(s), fee ${r.plan.feeSat} sats, " +
+                                "change ${r.plan.outputs.last().amountSat} sats -> $destAddress",
+                        )
                         val signed = sign(r.plan, seedBytes, result.profile, feePerKb)
                         if (signed == null) {
+                            log('w', "${item.outpoint}: native refused to sign")
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
                                 "native refused to sign — see log for the reason")
                             continue
@@ -138,6 +181,7 @@ class ForeignAssetTransferService(
                         }
                         val txid = broadcast(bytes)
                         if (txid == null) {
+                            log('w', "${item.outpoint}: broadcast failed")
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
                                 "broadcast failed — check peer connection")
                             continue
@@ -146,14 +190,18 @@ class ForeignAssetTransferService(
                         // a force-stop within a second of broadcast does not strand the transfer.
                         // Best-effort: never affects on-chain state.
                         runCatching {
-                            outgoingTxStore?.record(
-                                txid = txid,
-                                sentSats = DA_MARKER_SATS,
-                                feeSats = r.plan.feeSat,
-                                toAddress = destAddress,
+                            recordOutgoing(
+                                txid,
+                                DA_MARKER_SATS,
+                                r.plan.feeSat,
+                                destAddress,
+                                // The destination is OUR receive address. Without this the
+                                // activity list renders a balance-increasing asset move as
+                                // "Sent" — observed on mainnet, 2026-08-28.
+                                true,
                             )
-                            walletTxPersister?.persist()
                         }
+                        log('i', "${item.outpoint}: MOVED in $txid")
                         moves += Move(item.outpoint, r.plan.assetUnits, txid, null)
                     }
                 }
@@ -196,6 +244,9 @@ class ForeignAssetTransferService(
     }
 
     companion object {
+        /** Matches LegacySweepService's tag convention so a whole recovery reads as one story. */
+        private const val TAG = "ForeignAssetMove"
+
         private fun nativeParseOutputs(rawTx: ByteArray): List<ForeignAssetQuantity.Output>? =
             NativeBridge.getRawTransactionOutputs(rawTx)?.mapNotNull { line ->
                 val parts = line.split("|", limit = 3)
