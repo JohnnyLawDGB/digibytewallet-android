@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">Không có tiền với cụm mật khẩu đó — nhưng cụm từ khôi phục này CÓ tiền khi không dùng cụm mật khẩu. Hãy kiểm tra lỗi gõ, hoặc để trống.</string>
     <string name="pass_restore_retry">Thử cụm mật khẩu khác</string>
 
+    <string name="verify_show_phrase">Hiện lại cụm từ khôi phục của tôi</string>
+
 </resources>

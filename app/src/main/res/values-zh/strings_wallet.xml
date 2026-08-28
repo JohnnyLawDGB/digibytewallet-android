@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">使用该密码短语未找到资金 — 但这组恢复助记词在不使用密码短语时确实有资金。请检查密码短语是否输错，或将其留空。</string>
     <string name="pass_restore_retry">尝试其他密码短语</string>
 
+    <string name="verify_show_phrase">再次显示我的恢复助记词</string>
+
 </resources>

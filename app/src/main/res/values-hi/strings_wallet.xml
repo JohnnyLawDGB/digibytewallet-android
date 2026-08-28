@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">उस पासफ़्रेज़ के साथ कोई फंड नहीं — लेकिन इस रिकवरी वाक्यांश में बिना पासफ़्रेज़ के फंड हैं। पासफ़्रेज़ में टाइपिंग गलती जाँचें, या इसे खाली छोड़ें।</string>
     <string name="pass_restore_retry">कोई दूसरा पासफ़्रेज़ आज़माएँ</string>
 
+    <string name="verify_show_phrase">मेरा रिकवरी वाक्यांश फिर से दिखाएँ</string>
+
 </resources>

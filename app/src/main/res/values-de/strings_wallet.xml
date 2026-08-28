@@ -553,4 +553,6 @@
     <string name="pass_restore_typo">Kein Guthaben mit dieser Passphrase — aber diese Wiederherstellungsphrase HAT Guthaben ohne Passphrase. Prüfen Sie die Passphrase auf Tippfehler oder lassen Sie sie leer.</string>
     <string name="pass_restore_retry">Andere Passphrase versuchen</string>
 
+    <string name="verify_show_phrase">Wiederherstellungsphrase erneut anzeigen</string>
+
 </resources>

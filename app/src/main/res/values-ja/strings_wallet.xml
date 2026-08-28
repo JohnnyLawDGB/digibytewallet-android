@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">そのパスフレーズでは資金が見つかりませんでしたが、このリカバリーフレーズにはパスフレーズなしで資金があります。パスフレーズの入力ミスを確認するか、空欄にしてください。</string>
     <string name="pass_restore_retry">別のパスフレーズを試す</string>
 
+    <string name="verify_show_phrase">リカバリーフレーズをもう一度表示</string>
+
 </resources>

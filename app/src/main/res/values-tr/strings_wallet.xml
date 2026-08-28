@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">Bu parolayla bakiye yok — ancak bu kurtarma ifadesinin parolasız bakiyesi VAR. Parolada yazım hatası olup olmadığını kontrol edin veya boş bırakın.</string>
     <string name="pass_restore_retry">Başka bir parola dene</string>
 
+    <string name="verify_show_phrase">Kurtarma ifademi tekrar göster</string>
+
 </resources>

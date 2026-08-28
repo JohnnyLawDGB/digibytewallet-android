@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">Tidak ada dana dengan frasa sandi itu — tetapi frasa pemulihan ini MEMANG punya dana tanpa frasa sandi. Periksa salah ketik, atau kosongkan saja.</string>
     <string name="pass_restore_retry">Coba frasa sandi lain</string>
 
+    <string name="verify_show_phrase">Tampilkan lagi frasa pemulihan saya</string>
+
 </resources>

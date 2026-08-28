@@ -547,4 +547,6 @@
     <string name="pass_restore_typo">Sin fondos con esa frase de contraseña — pero esta frase de recuperación SÍ tiene fondos sin ninguna. Revisa si hay una errata, o déjala en blanco.</string>
     <string name="pass_restore_retry">Probar otra frase de contraseña</string>
 
+    <string name="verify_show_phrase">Ver de nuevo mi frase de recuperación</string>
+
 </resources>

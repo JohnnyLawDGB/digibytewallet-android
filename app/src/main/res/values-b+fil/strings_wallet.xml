@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">Walang pondo sa passphrase na iyon — pero MAY pondo ang recovery phrase na ito kapag walang passphrase. Suriin kung may typo, o iwanang blangko.</string>
     <string name="pass_restore_retry">Sumubok ng ibang passphrase</string>
 
+    <string name="verify_show_phrase">Ipakita ulit ang recovery phrase ko</string>
+
 </resources>

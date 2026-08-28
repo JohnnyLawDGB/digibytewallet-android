@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">Nenhum fundo com essa frase-senha — mas esta frase de recuperação TEM fundos sem nenhuma. Verifique se há erro de digitação, ou deixe em branco.</string>
     <string name="pass_restore_retry">Tentar outra frase-senha</string>
 
+    <string name="verify_show_phrase">Mostrar minha frase de recuperação novamente</string>
+
 </resources>

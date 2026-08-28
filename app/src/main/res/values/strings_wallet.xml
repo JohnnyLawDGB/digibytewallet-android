@@ -673,4 +673,9 @@
     <string name="pass_restore_typo">No funds with that passphrase — but this recovery phrase DOES have funds without one. Check the passphrase for a typo, or leave it blank.</string>
     <string name="pass_restore_retry">Try a different passphrase</string>
 
+    <!-- Shown after a failed verification. The retry copy tells the user to review their
+         recovery phrase; without this the screen offers no way to do that, and the only route
+         back is a system gesture nobody thinks to try while being told they got it wrong. -->
+    <string name="verify_show_phrase">Show my recovery phrase again</string>
+
 </resources>

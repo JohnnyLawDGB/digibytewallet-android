@@ -80,6 +80,14 @@ fun SeedVerifyScreen(
                     correctCount = 0
                     showResult = false
                 },
+                onShowPhrase = {
+                    // Back to the words. They are still in the ViewModel, so this costs nothing
+                    // and it is the action the retry copy already tells the user to take.
+                    // System Back happens to do this too — verified on device — but an
+                    // undiscoverable gesture is not an answer when someone has just been told
+                    // they got their recovery phrase wrong.
+                    navController.popBackStack()
+                },
                 onContinue = {
                     navController.navigate("pin_setup") {
                         popUpTo("seed_display/{wordCount}") { inclusive = true }
@@ -237,6 +245,7 @@ private fun QuestionCard(
 private fun VerifyResultScreen(
     allCorrect: Boolean,
     onRetry: () -> Unit,
+    onShowPhrase: () -> Unit,
     onContinue: () -> Unit
 ) {
     Column(
@@ -292,6 +301,19 @@ private fun VerifyResultScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
                 Text(stringResource(R.string.verify_try_again), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // The screen above says "review your seed phrase". Until this existed it gave no way
+            // to do that: onRetry only reset the quiz counters, and the words were reachable only
+            // by a system Back gesture with nothing on screen to suggest it. Someone who wrote a
+            // word down wrong was left re-failing a quiz they could not check their answer against.
+            TextButton(
+                onClick = onShowPhrase,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.verify_show_phrase), fontSize = 15.sp)
             }
         }
     }

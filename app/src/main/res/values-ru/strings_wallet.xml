@@ -545,4 +545,6 @@
     <string name="pass_restore_typo">С этой парольной фразой средств нет — но у этой фразы восстановления средства ЕСТЬ без парольной фразы. Проверьте опечатку или оставьте поле пустым.</string>
     <string name="pass_restore_retry">Попробовать другую парольную фразу</string>
 
+    <string name="verify_show_phrase">Показать фразу восстановления снова</string>
+
 </resources>
