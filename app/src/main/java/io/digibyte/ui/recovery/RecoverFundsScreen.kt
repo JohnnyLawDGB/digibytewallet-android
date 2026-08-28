@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -48,6 +49,7 @@ fun RecoverFundsScreen(
     navController: NavController,
     vm: RecoverFundsViewModel = hiltViewModel(),
 ) {
+    val passphraseVerdict by vm.passphraseVerdict.collectAsState()
     val state by vm.state.collectAsState()
 
     var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
@@ -131,6 +133,7 @@ fun RecoverFundsScreen(
                         onSweepNative = { if (s.isForeign) vm.sweepForeign() else vm.sweep(SweepDestination.Native) },
                         onSweepExternal = if (s.isForeign) null else { addr -> vm.sweep(SweepDestination.External(addr)) },
                         partialFailurePaths = s.partialFailurePaths,
+                        verdict = passphraseVerdict,
                     )
                     is RecoverFundsViewModel.UiState.Done -> ResultBody(s.outcomes)
                     is RecoverFundsViewModel.UiState.Error ->
@@ -191,6 +194,7 @@ private fun FindingsBody(
     onSweepExternal: ((String) -> Unit)?,
     /** Paths the scan could not reach. Non-empty means these findings are incomplete. */
     partialFailurePaths: List<String> = emptyList(),
+    verdict: io.digibyte.core.recovery.PassphraseScanVerdict.Outcome? = null,
 ) {
     var externalExpanded by remember { mutableStateOf(false) }
     var externalAddress by remember { mutableStateOf("") }
@@ -227,29 +231,40 @@ private fun FindingsBody(
                     // answer to a question the wallet did not finish asking — and a user who
                     // reads it stops looking. Distinct outcome, distinct wording, distinct icon.
                     val incomplete = partialFailurePaths.isNotEmpty()
+                    // A passphrase was supplied and found nothing, but the SAME phrase has funds
+                    // without one. That is the most actionable thing we can say, and it takes
+                    // priority over both "nothing found" and "couldn't finish" — see
+                    // PassphraseScanVerdict for why a positive observation outranks an
+                    // incomplete scan.
+                    val typo = verdict == io.digibyte.core.recovery.PassphraseScanVerdict.Outcome.LIKELY_TYPO
                     Icon(
-                        imageVector = if (incomplete) Icons.Default.ErrorOutline
+                        imageVector = if (incomplete || typo) Icons.Default.ErrorOutline
                                       else Icons.Default.CheckCircle,
                         contentDescription = null,
-                        tint = if (incomplete) WARNING_RED else SUCCESS_GREEN,
+                        tint = if (incomplete || typo) WARNING_RED else SUCCESS_GREEN,
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = if (incomplete) stringResource(R.string.rf_couldnt_finish)
-                               else stringResource(R.string.rf_none_found),
+                        text = when {
+                            typo -> stringResource(R.string.pass_restore_none)
+                            incomplete -> stringResource(R.string.rf_couldnt_finish)
+                            else -> stringResource(R.string.rf_none_found)
+                        },
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = if (incomplete)
-                            stringResource(
+                        text = when {
+                            typo -> stringResource(R.string.pass_restore_typo)
+                            incomplete -> stringResource(
                                 R.string.rf_partial_body,
                                 partialFailurePaths.joinToString(", "),
                             )
-                        else stringResource(R.string.rf_no_coins),
+                            else -> stringResource(R.string.rf_no_coins)
+                        },
                         color = MUTED,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center

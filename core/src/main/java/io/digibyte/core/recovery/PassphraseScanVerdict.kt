@@ -36,11 +36,19 @@ object PassphraseScanVerdict {
      * @param incomplete           true when any derivation path could not be checked.
      */
     fun of(withPassphraseSat: Long, withoutPassphraseSat: Long?, incomplete: Boolean): Outcome = when {
-        // Outranks everything: an unfinished scan has not earned "nothing found" OR "you
-        // mistyped", and the second would send someone hunting a typo that does not exist.
-        incomplete -> Outcome.INCOMPLETE
+        // POSITIVE findings first, and deliberately ahead of `incomplete`.
+        //
+        // The first version of this put `incomplete` on top, which sounded conservative and was
+        // wrong. BIP49 fails against the reconcile backend on every scan, so `incomplete` is
+        // effectively always true — the typo hint, the most useful sentence in this flow, could
+        // never fire for anyone. It passed its unit test and was unreachable in production.
+        //
+        // Money observed on an address is observed. An unchecked BIP49 path cannot make it
+        // untrue. Only the NEGATIVE conclusion — "nothing anywhere" — is a claim about paths the
+        // wallet never looked at, and that is the one that has to wait for a complete scan.
         withPassphraseSat > 0L -> Outcome.FOUND
         (withoutPassphraseSat ?: 0L) > 0L -> Outcome.LIKELY_TYPO
+        incomplete -> Outcome.INCOMPLETE
         else -> Outcome.NONE_ANYWHERE
     }
 }

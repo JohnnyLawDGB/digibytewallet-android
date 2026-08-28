@@ -49,18 +49,39 @@ class PassphraseScanVerdictTest {
     }
 
     /**
-     * An incomplete scan must never resolve to either "found nothing" or "you mistyped". Both
-     * are claims the wallet has not earned, and the second would send someone hunting for a typo
-     * that does not exist.
+     * An incomplete scan cannot support "found nothing" — that is a negative claim about paths
+     * the wallet never checked.
      */
-    @Test fun `an incomplete scan outranks every other verdict`() {
-        listOf(0L to 0L, 0L to 900L, 500L to 0L).forEach { (w, wo) ->
-            assertEquals(
-                "incomplete must win for withPass=$w withoutPass=$wo",
-                PassphraseScanVerdict.Outcome.INCOMPLETE,
-                PassphraseScanVerdict.of(w, wo, incomplete = true),
-            )
-        }
+    @Test fun `an incomplete scan cannot claim nothing was found`() {
+        assertEquals(
+            PassphraseScanVerdict.Outcome.INCOMPLETE,
+            PassphraseScanVerdict.of(withPassphraseSat = 0L, withoutPassphraseSat = 0L, incomplete = true),
+        )
+    }
+
+    /**
+     * CORRECTED after device testing. Incompleteness must NOT suppress a positive finding.
+     *
+     * The original rule let INCOMPLETE outrank everything, which sounded conservative and was
+     * wrong: BIP49 fails against this backend on every scan, so `incomplete` is effectively
+     * always true, and the typo hint could never fire for anyone. The most useful sentence in
+     * the flow was unreachable in production while passing its unit test.
+     *
+     * "This phrase has funds without a passphrase" is a POSITIVE observation. It does not depend
+     * on the paths that failed, so an unchecked BIP49 cannot make it untrue. Only the negative
+     * conclusion needs a complete scan.
+     */
+    @Test fun `a positive finding survives an incomplete scan`() {
+        assertEquals(
+            "funds under the passphrase are found, whatever else went unchecked",
+            PassphraseScanVerdict.Outcome.FOUND,
+            PassphraseScanVerdict.of(withPassphraseSat = 500L, withoutPassphraseSat = 0L, incomplete = true),
+        )
+        assertEquals(
+            "funds WITHOUT the passphrase are equally observed, and far more actionable",
+            PassphraseScanVerdict.Outcome.LIKELY_TYPO,
+            PassphraseScanVerdict.of(withPassphraseSat = 0L, withoutPassphraseSat = 900L, incomplete = true),
+        )
     }
 
     /**

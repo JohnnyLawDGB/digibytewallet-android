@@ -94,6 +94,17 @@ class RecoverFundsViewModel @Inject constructor(
     /** NFKD-normalised passphrase for the phrase being restored, or null. Never persisted. */
     private var pendingForeignPassphrase: String? = null
 
+    /**
+     * Why a passphrase restore came back empty. Null when no passphrase was supplied.
+     *
+     * Wired here rather than only in OnboardingViewModel because THIS is the flow a user
+     * actually reaches — the onboarding copy was unreachable in production.
+     */
+    private val _passphraseVerdict =
+        MutableStateFlow<io.digibyte.core.recovery.PassphraseScanVerdict.Outcome?>(null)
+    val passphraseVerdict: StateFlow<io.digibyte.core.recovery.PassphraseScanVerdict.Outcome?> =
+        _passphraseVerdict
+
     // The coroutine launched by whichever of classify/sweep/classifyForeign/
     // sweepForeign is currently in flight. reset() cancels it so a stale scan
     // or sweep can't complete afterwards and overwrite the Idle state it just
@@ -106,6 +117,7 @@ class RecoverFundsViewModel @Inject constructor(
         activeJob?.cancel()
         pendingForeignMnemonic = null
         pendingForeignPassphrase = null
+        _passphraseVerdict.value = null
         _state.value = UiState.Idle
     }
 
@@ -210,10 +222,39 @@ class RecoverFundsViewModel @Inject constructor(
                 when (val s = withContext(Dispatchers.IO) { scanService.scanFromSeed(seed) }) {
                     is RecoveryScanService.State.Done -> {
                         val set = sweepSet(s, isForeign = true)      // includes native
+                        val total = set.sumOf { it.totalSat }
+
+                        // A passphrase was supplied and found nothing. Ask the OTHER question:
+                        // does this phrase have funds without it? A BIP39 passphrase has no
+                        // checksum, so a typo derives a valid EMPTY wallet and the honest answer
+                        // — "no funds" — reads to the user as stolen coins. One more scan turns
+                        // that into "check the passphrase".
+                        val bareTotal: Long? =
+                            if (pendingForeignPassphrase != null && total == 0L) {
+                                val bare = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null)
+                                bare?.let {
+                                    try {
+                                        (withContext(Dispatchers.IO) { scanService.scanFromSeed(it) }
+                                            as? RecoveryScanService.State.Done)
+                                            ?.let { d -> sweepSet(d, isForeign = true).sumOf { f -> f.totalSat } }
+                                    } finally {
+                                        it.fill(0)
+                                    }
+                                }
+                            } else null
+
+                        _passphraseVerdict.value =
+                            if (pendingForeignPassphrase == null) null
+                            else io.digibyte.core.recovery.PassphraseScanVerdict.of(
+                                withPassphraseSat = total,
+                                withoutPassphraseSat = bareTotal,
+                                incomplete = s.unreachableProfileLabels.isNotEmpty(),
+                            )
+
                         _state.value = if (s.allBackendUnreachable) {
                             UiState.Error("Couldn't reach the lookup service — try again")
                         } else UiState.Findings(
-                            findings = set, totalSat = set.sumOf { it.totalSat },
+                            findings = set, totalSat = total,
                             backendUnreachable = false, isForeign = true,
                             partialFailurePaths = s.unreachableProfileLabels,
                         )
@@ -251,6 +292,7 @@ class RecoverFundsViewModel @Inject constructor(
                 _state.value = UiState.Error("Could not derive keys from that phrase.")
                 pendingForeignMnemonic = null
         pendingForeignPassphrase = null
+        _passphraseVerdict.value = null
                 return@launch
             }
             try {
@@ -271,6 +313,7 @@ class RecoverFundsViewModel @Inject constructor(
                 seed.fill(0)
                 pendingForeignMnemonic = null
         pendingForeignPassphrase = null
+        _passphraseVerdict.value = null
             }
         }
     }
