@@ -182,7 +182,9 @@ static int passphrase_copy(JNIEnv *env, jstring passphrase, char *out, size_t ou
     const size_t len = strlen(chars);
     if (len >= outSize) {
         (*env)->ReleaseStringUTFChars(env, passphrase, chars);
-        LOGW("passphrase rejected: length=%zu exceeds %zu", len, outSize - 1);
+        /* Deliberately does NOT log the length. It is an attribute of a secret, and the Kotlin
+         * layer already rejects over-long values before reaching here — this is the backstop. */
+        LOGW("passphrase rejected: too long");
         return 0;
     }
     memcpy(out, chars, len);
@@ -282,8 +284,6 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
                                                                   jstring passphrase) {
     (void)thiz;
 
-    char passBuf[PASSPHRASE_MAX + 1];
-    if (!passphrase_copy(env, passphrase, passBuf, sizeof(passBuf))) return JNI_FALSE;
 
     if (!phraseBytes) {
         LOGW("createWalletFromBytes: phraseBytes is null");
@@ -303,6 +303,22 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
 
     if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
         LOGW("createWalletFromBytes: invalid BIP39 phrase");
+        secure_zero(phraseChars, sizeof(phraseChars));
+        return JNI_FALSE;
+    }
+
+    /* The passphrase is copied HERE, not at function entry.
+     *
+     * It used to be read at the top, which left three `return JNI_FALSE` paths between the copy
+     * and the only secure_zero — a null phrase, a bad length, and an invalid BIP39 phrase all
+     * returned with the plaintext still on the stack. Adding three more zeroing calls would have
+     * worked until someone added a fourth early return.
+     *
+     * Copying it after every validation removes the paths instead of guarding them: the buffer
+     * now exists only in the region that uses it. */
+    char passBuf[PASSPHRASE_MAX + 1];
+    if (!passphrase_copy(env, passphrase, passBuf, sizeof(passBuf))) {
+        secure_zero(passBuf, sizeof(passBuf));
         secure_zero(phraseChars, sizeof(phraseChars));
         return JNI_FALSE;
     }
@@ -451,8 +467,6 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
                                                                    jstring passphrase) {
     (void)thiz;
 
-    char passBuf[PASSPHRASE_MAX + 1];
-    if (!passphrase_copy(env, passphrase, passBuf, sizeof(passBuf))) return JNI_FALSE;
 
     if (!phraseBytes) {
         LOGW("recoverWalletFromBytes: phraseBytes is null");
@@ -471,6 +485,22 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
 
     if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
         LOGW("recoverWalletFromBytes: invalid BIP39 phrase");
+        secure_zero(phraseChars, sizeof(phraseChars));
+        return JNI_FALSE;
+    }
+
+    /* The passphrase is copied HERE, not at function entry.
+     *
+     * It used to be read at the top, which left three `return JNI_FALSE` paths between the copy
+     * and the only secure_zero — a null phrase, a bad length, and an invalid BIP39 phrase all
+     * returned with the plaintext still on the stack. Adding three more zeroing calls would have
+     * worked until someone added a fourth early return.
+     *
+     * Copying it after every validation removes the paths instead of guarding them: the buffer
+     * now exists only in the region that uses it. */
+    char passBuf[PASSPHRASE_MAX + 1];
+    if (!passphrase_copy(env, passphrase, passBuf, sizeof(passBuf))) {
+        secure_zero(passBuf, sizeof(passBuf));
         secure_zero(phraseChars, sizeof(phraseChars));
         return JNI_FALSE;
     }
