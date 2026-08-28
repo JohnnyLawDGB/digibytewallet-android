@@ -52,7 +52,11 @@ object NativeBridge {
     external fun dumpAllAddresses(): String
     external fun walletContainsAddress(address: String): Boolean
     external fun registerRawTransaction(rawTx: ByteArray, blockHeight: Long, blockTimestamp: Long): Boolean
-    external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: String?): ByteArray?
+    /** NOTE: `passphrase` is a ByteArray, matching the production declaration. It was left as
+     *  String? here through the v4.0.67 passphrase refactor, which made the JNI signature stop
+     *  matching the C — every instrumented test touching it would have thrown
+     *  UnsatisfiedLinkError. Nothing caught it because androidTest has no CI runner. */
+    external fun mnemonicToSeed(phraseBytes: ByteArray, passphrase: ByteArray?): ByteArray?
     external fun deriveAddresses(seedBytes: ByteArray, hmacKey: String, prefixPath: IntArray, gapExternal: Int, gapInternal: Int, addressFormat: Int): Array<String>?
     external fun derivePrivateKeyWIF(seedBytes: ByteArray, hmacKey: String, fullPath: IntArray): String?
     external fun addressToScriptPubKey(address: String): ByteArray?
@@ -69,5 +73,23 @@ object NativeBridge {
         destAddress: String,
         feePerKb: Long,
     ): String?
+    external fun getRawTransactionOutputs(rawTx: ByteArray): Array<String>?
+
+    external fun buildAndSignForeignAssetTransfer(
+        seedBytes: ByteArray,
+        hmacKey: String,
+        prefixPath: IntArray,
+        txidsHex: Array<String>,
+        vouts: IntArray,
+        amounts: LongArray,
+        chainIndices: IntArray,
+        addressIndices: IntArray,
+        scriptPubKeysHex: Array<String>,
+        outputAddresses: Array<String>,
+        outputAmounts: LongArray,
+        outputScriptsHex: Array<String>,
+        feePerKb: Long,
+    ): String?
+
     external fun isRawTransactionSigned(rawTxHex: String): Boolean
 }
