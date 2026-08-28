@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">Đang chuyển tài sản…</string>
     <string name="rf_move_result">Đã chuyển %1$d trên %2$d tài sản</string>
     <string name="rf_move_failed">%1$s — chưa chuyển: %2$s</string>
+    <string name="pass_screen_title">Thêm cụm mật khẩu?</string>
+    <string name="pass_screen_subtitle">Không bắt buộc, và hầu hết mọi người nên bỏ qua. Cụm mật khẩu là một từ hoặc câu bổ sung do bạn chọn; nếu không có nó, riêng cụm từ khôi phục sẽ không còn mở được ví này.</string>
+    <string name="pass_screen_continue_with">Tiếp tục với cụm mật khẩu</string>
+    <string name="pass_screen_continue_without">Tiếp tục mà không dùng</string>
+    <string name="pass_screen_separate_note">Hãy cất giữ nó tách riêng khỏi những từ bạn vừa ghi lại.</string>
 </resources>

@@ -554,4 +554,9 @@
     <string name="rf_moving_assets">Moviendo activos…</string>
     <string name="rf_move_result">%1$d de %2$d activos movidos</string>
     <string name="rf_move_failed">%1$s: no se movió — %2$s</string>
+    <string name="pass_screen_title">¿Añadir una frase de contraseña?</string>
+    <string name="pass_screen_subtitle">Opcional, y la mayoría debería omitirlo. Una frase de contraseña es una palabra o frase adicional tuya sin la cual tu frase de recuperación ya no puede abrir esta billetera.</string>
+    <string name="pass_screen_continue_with">Continuar con frase de contraseña</string>
+    <string name="pass_screen_continue_without">Continuar sin ella</string>
+    <string name="pass_screen_separate_note">Guárdala en un lugar separado de las palabras que acabas de anotar.</string>
 </resources>

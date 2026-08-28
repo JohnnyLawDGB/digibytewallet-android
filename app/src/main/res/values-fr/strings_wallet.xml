@@ -532,4 +532,9 @@
     <string name="rf_moving_assets">Déplacement des actifs…</string>
     <string name="rf_move_result">%1$d actifs sur %2$d déplacés</string>
     <string name="rf_move_failed">%1$s — non déplacé : %2$s</string>
+    <string name="pass_screen_title">Ajouter une phrase secrète ?</string>
+    <string name="pass_screen_subtitle">Facultatif, et la plupart des gens devraient passer cette étape. Une phrase secrète est un mot ou une phrase supplémentaire de votre choix, sans lequel votre phrase de récupération seule ne peut plus ouvrir ce portefeuille.</string>
+    <string name="pass_screen_continue_with">Continuer avec une phrase secrète</string>
+    <string name="pass_screen_continue_without">Continuer sans</string>
+    <string name="pass_screen_separate_note">Conservez-la séparément des mots que vous venez de noter.</string>
 </resources>

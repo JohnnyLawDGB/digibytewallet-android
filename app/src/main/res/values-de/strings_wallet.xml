@@ -560,4 +560,9 @@
     <string name="rf_moving_assets">Assets werden bewegt…</string>
     <string name="rf_move_result">%1$d von %2$d Assets bewegt</string>
     <string name="rf_move_failed">%1$s — nicht bewegt: %2$s</string>
+    <string name="pass_screen_title">Passphrase hinzufügen?</string>
+    <string name="pass_screen_subtitle">Optional — die meisten sollten dies überspringen. Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl, ohne den Ihre Wiederherstellungsphrase diese Wallet nicht mehr öffnen kann.</string>
+    <string name="pass_screen_continue_with">Mit Passphrase fortfahren</string>
+    <string name="pass_screen_continue_without">Ohne fortfahren</string>
+    <string name="pass_screen_separate_note">Bewahren Sie sie getrennt von den soeben notierten Wörtern auf.</string>
 </resources>

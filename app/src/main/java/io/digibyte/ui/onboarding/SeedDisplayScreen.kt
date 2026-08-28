@@ -37,9 +37,6 @@ fun SeedDisplayScreen(
     wordCount: Int,
     viewModel: OnboardingViewModel = hiltViewModel()
 ) {
-    // In-memory only, and never navigated with — see the Button's onClick.
-    var passphrase by remember { mutableStateOf("") }
-    var passphraseConfirm by remember { mutableStateOf("") }
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -100,14 +97,9 @@ fun SeedDisplayScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        // imePadding BEFORE verticalScroll so the scrollable viewport shrinks to
-                        // the space the keyboard leaves. The activity sets adjustResize, but it
-                        // also calls enableEdgeToEdge(), and an edge-to-edge window does NOT
-                        // resize for the IME — Compose has to inset it. Without this the
-                        // passphrase confirm field sits under the keyboard, unreachable: measured
-                        // at bounds [66,2176][1014,2220] on a 2220px screen, clipped to 44px.
-                        // Every other screen with a text field already does this; this one only
-                        // just acquired one.
+                        // imePadding BEFORE verticalScroll, kept as the house pattern for any
+                        // screen that may gain a text field. See PassphraseScreen for what goes
+                        // wrong without it.
                         .imePadding()
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 24.dp),
@@ -193,25 +185,14 @@ fun SeedDisplayScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Optional BIP39 passphrase. Collapsed by default; a wallet created without
-                    // opening it derives exactly what it would have before this existed.
-                    PassphraseSection(
-                        passphrase = passphrase,
-                        confirm = passphraseConfirm,
-                        onPassphraseChange = { passphrase = it },
-                        onConfirmChange = { passphraseConfirm = it },
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
+                    // The optional BIP39 passphrase used to live here, directly beneath the
+                    // words. It now has its own screen AFTER verification: a passphrase stored
+                    // beside the seed protects nothing, and a page that showed both invited
+                    // exactly the note-taking the warning tells the user to avoid. See
+                    // PassphraseScreen and SeedAndPassphraseSeparationTest.
 
                     Button(
-                        onClick = {
-                            // Committed here rather than on the next screen so the value cannot
-                            // travel through a navigation argument or saved-state bundle.
-                            viewModel.setPassphrase(passphrase)
-                            navController.navigate("seed_verify")
-                        },
-                        enabled = passphraseEntryReady(passphrase, passphraseConfirm),
+                        onClick = { navController.navigate("seed_verify") },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),

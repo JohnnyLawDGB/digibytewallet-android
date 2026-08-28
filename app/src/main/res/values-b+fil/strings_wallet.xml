@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">Inililipat ang mga asset…</string>
     <string name="rf_move_result">%1$d sa %2$d na asset ang nailipat</string>
     <string name="rf_move_failed">%1$s — hindi nailipat: %2$s</string>
+    <string name="pass_screen_title">Magdagdag ng passphrase?</string>
+    <string name="pass_screen_subtitle">Opsyonal, at dapat itong laktawan ng karamihan. Ang passphrase ay karagdagang salita o pangungusap na ikaw ang pumipili; kung wala ito, hindi na kayang buksan ng recovery phrase lamang ang wallet na ito.</string>
+    <string name="pass_screen_continue_with">Magpatuloy nang may passphrase</string>
+    <string name="pass_screen_continue_without">Magpatuloy nang wala nito</string>
+    <string name="pass_screen_separate_note">Itago ito nang hiwalay sa mga salitang kasusulat mo lang.</string>
 </resources>

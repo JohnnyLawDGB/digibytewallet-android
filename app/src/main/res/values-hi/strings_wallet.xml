@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">संपत्तियाँ भेजी जा रही हैं…</string>
     <string name="rf_move_result">%2$d में से %1$d संपत्तियाँ भेजी गईं</string>
     <string name="rf_move_failed">%1$s — नहीं भेजी गई: %2$s</string>
+    <string name="pass_screen_title">पासफ़्रेज़ जोड़ें?</string>
+    <string name="pass_screen_subtitle">वैकल्पिक — अधिकांश लोगों को इसे छोड़ देना चाहिए। पासफ़्रेज़ आपका अपना एक अतिरिक्त शब्द या वाक्य है, जिसके बिना आपका रिकवरी वाक्यांश अकेले यह वॉलेट नहीं खोल सकता।</string>
+    <string name="pass_screen_continue_with">पासफ़्रेज़ के साथ जारी रखें</string>
+    <string name="pass_screen_continue_without">इसके बिना जारी रखें</string>
+    <string name="pass_screen_separate_note">इसे उन शब्दों से अलग जगह रखें जो आपने अभी लिखे हैं।</string>
 </resources>

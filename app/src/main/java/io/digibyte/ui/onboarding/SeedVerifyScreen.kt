@@ -89,7 +89,10 @@ fun SeedVerifyScreen(
                     navController.popBackStack()
                 },
                 onContinue = {
-                    navController.navigate("pin_setup") {
+                    // The passphrase question comes AFTER this, on its own screen. The words are
+                    // written down and proven by now, so the two secrets are never recorded in
+                    // one sitting — see PassphraseScreen.
+                    navController.navigate("seed_passphrase") {
                         popUpTo("seed_display/{wordCount}") { inclusive = true }
                     }
                 }

@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">資産を移動中…</string>
     <string name="rf_move_result">%2$d 件中 %1$d 件の資産を移動しました</string>
     <string name="rf_move_failed">%1$s — 未移動：%2$s</string>
+    <string name="pass_screen_title">パスフレーズを追加しますか？</string>
+    <string name="pass_screen_subtitle">任意です。ほとんどの方はスキップして構いません。パスフレーズはご自身で決める追加の単語や文で、これがないとリカバリーフレーズだけではこのウォレットを開けなくなります。</string>
+    <string name="pass_screen_continue_with">パスフレーズを設定して続ける</string>
+    <string name="pass_screen_continue_without">設定せずに続ける</string>
+    <string name="pass_screen_separate_note">いま書き留めた単語とは別の場所に保管してください。</string>
 </resources>

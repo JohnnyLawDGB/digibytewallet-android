@@ -74,6 +74,7 @@ private val fullScreenRoutes = setOf(
     "onboarding",
     "seed_display/{wordCount}",
     "seed_verify",
+    "seed_passphrase",
     "mnemonic_input",
     "recovery_scan",
     "recovery_date",
@@ -238,6 +239,17 @@ fun AppNavigation(
                 }
                 val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 SeedVerifyScreen(navController = navController, viewModel = sharedViewModel)
+            }
+
+            composable("seed_passphrase") { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("onboarding")
+                }
+                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                io.digibyte.ui.onboarding.PassphraseScreen(
+                    navController = navController,
+                    viewModel = sharedViewModel,
+                )
             }
 
             composable("mnemonic_input") { backStackEntry ->

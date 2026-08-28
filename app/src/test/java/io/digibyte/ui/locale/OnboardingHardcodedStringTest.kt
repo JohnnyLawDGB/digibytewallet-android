@@ -83,7 +83,8 @@ class OnboardingHardcodedStringTest {
 
     /** Navigation routes — identifiers the code matches on, never shown to anyone. */
     private val ROUTES = setOf(
-        "onboarding", "wallet", "unlock", "pin_setup", "seed_verify", "recover_funds",
+        "onboarding", "wallet", "unlock", "pin_setup", "seed_verify", "seed_passphrase",
+        "recover_funds",
         "seed_display/{wordCount}", "seed_display/\$selectedWordCount",
         "settings_security", "settings_network", "settings_display", "settings_reconcile",
         "settings_about",

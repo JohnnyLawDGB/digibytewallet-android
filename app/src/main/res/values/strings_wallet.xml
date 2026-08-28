@@ -683,4 +683,9 @@
     <string name="rf_moving_assets">Moving assets…</string>
     <string name="rf_move_result">%1$d of %2$d assets moved</string>
     <string name="rf_move_failed">%1$s — not moved: %2$s</string>
+    <string name="pass_screen_title">Add a passphrase?</string>
+    <string name="pass_screen_subtitle">Optional, and most people should skip it. A passphrase is an extra word or sentence of your own that your recovery phrase alone can no longer open this wallet without.</string>
+    <string name="pass_screen_continue_with">Continue with a passphrase</string>
+    <string name="pass_screen_continue_without">Continue without one</string>
+    <string name="pass_screen_separate_note">Keep it somewhere separate from the words you just wrote down.</string>
 </resources>

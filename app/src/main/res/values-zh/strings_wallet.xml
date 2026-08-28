@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">正在转移资产…</string>
     <string name="rf_move_result">已转移 %2$d 项资产中的 %1$d 项</string>
     <string name="rf_move_failed">%1$s — 未转移：%2$s</string>
+    <string name="pass_screen_title">添加密码短语？</string>
+    <string name="pass_screen_subtitle">可选，大多数人应跳过。密码短语是您自己设定的额外单词或句子；没有它，仅凭助记词将无法打开此钱包。</string>
+    <string name="pass_screen_continue_with">使用密码短语继续</string>
+    <string name="pass_screen_continue_without">不使用并继续</string>
+    <string name="pass_screen_separate_note">请将它与您刚刚写下的助记词分开保管。</string>
 </resources>

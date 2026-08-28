@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">Перемещение активов…</string>
     <string name="rf_move_result">Перемещено %1$d из %2$d активов</string>
     <string name="rf_move_failed">%1$s — не перемещён: %2$s</string>
+    <string name="pass_screen_title">Добавить парольную фразу?</string>
+    <string name="pass_screen_subtitle">Необязательно, и большинству стоит пропустить этот шаг. Парольная фраза — это дополнительное слово или предложение на ваш выбор; без неё одна лишь секретная фраза больше не откроет этот кошелёк.</string>
+    <string name="pass_screen_continue_with">Продолжить с парольной фразой</string>
+    <string name="pass_screen_continue_without">Продолжить без неё</string>
+    <string name="pass_screen_separate_note">Храните её отдельно от слов, которые вы только что записали.</string>
 </resources>

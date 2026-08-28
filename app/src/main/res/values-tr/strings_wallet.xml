@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">Varlıklar taşınıyor…</string>
     <string name="rf_move_result">%2$d varlıktan %1$d tanesi taşındı</string>
     <string name="rf_move_failed">%1$s — taşınamadı: %2$s</string>
+    <string name="pass_screen_title">Parola eklensin mi?</string>
+    <string name="pass_screen_subtitle">İsteğe bağlıdır ve çoğu kişi bunu atlamalıdır. Parola, kendi belirlediğiniz ek bir kelime veya cümledir; o olmadan kurtarma ifadeniz tek başına bu cüzdanı artık açamaz.</string>
+    <string name="pass_screen_continue_with">Parola ile devam et</string>
+    <string name="pass_screen_continue_without">Parolasız devam et</string>
+    <string name="pass_screen_separate_note">Az önce yazdığınız kelimelerden ayrı bir yerde saklayın.</string>
 </resources>

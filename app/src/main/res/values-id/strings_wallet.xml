@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">Memindahkan aset…</string>
     <string name="rf_move_result">%1$d dari %2$d aset dipindahkan</string>
     <string name="rf_move_failed">%1$s — tidak dipindahkan: %2$s</string>
+    <string name="pass_screen_title">Tambahkan frasa sandi?</string>
+    <string name="pass_screen_subtitle">Opsional, dan sebagian besar orang sebaiknya melewatinya. Frasa sandi adalah kata atau kalimat tambahan milik Anda; tanpanya, frasa pemulihan saja tidak lagi bisa membuka dompet ini.</string>
+    <string name="pass_screen_continue_with">Lanjutkan dengan frasa sandi</string>
+    <string name="pass_screen_continue_without">Lanjutkan tanpa itu</string>
+    <string name="pass_screen_separate_note">Simpan terpisah dari kata-kata yang baru saja Anda catat.</string>
 </resources>

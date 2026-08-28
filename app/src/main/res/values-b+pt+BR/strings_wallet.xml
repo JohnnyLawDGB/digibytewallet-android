@@ -552,4 +552,9 @@
     <string name="rf_moving_assets">Movendo ativos…</string>
     <string name="rf_move_result">%1$d de %2$d ativos movidos</string>
     <string name="rf_move_failed">%1$s — não movido: %2$s</string>
+    <string name="pass_screen_title">Adicionar uma frase-senha?</string>
+    <string name="pass_screen_subtitle">Opcional, e a maioria das pessoas deve pular. A frase-senha é uma palavra ou frase extra escolhida por você; sem ela, a frase de recuperação sozinha não abre mais esta carteira.</string>
+    <string name="pass_screen_continue_with">Continuar com frase-senha</string>
+    <string name="pass_screen_continue_without">Continuar sem ela</string>
+    <string name="pass_screen_separate_note">Guarde-a separada das palavras que você acabou de anotar.</string>
 </resources>
