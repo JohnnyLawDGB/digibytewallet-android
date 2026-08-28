@@ -527,4 +527,9 @@
     <string name="pass_restore_typo">Aucun fonds avec cette phrase secrète — mais cette phrase de récupération EN CONTIENT sans phrase secrète. Vérifiez qu\'il n\'y a pas de faute de frappe, ou laissez le champ vide.</string>
     <string name="pass_restore_retry">Essayer une autre phrase secrète</string>
     <string name="verify_show_phrase">Afficher à nouveau ma phrase de récupération</string>
+    <string name="rf_move_assets">Déplacer mes DigiAssets ici</string>
+    <string name="rf_move_assets_body">Utilise les DGB conservés ci-dessus pour envoyer les actifs vers ce portefeuille. Les transferts d\'actifs sont irréversibles.</string>
+    <string name="rf_moving_assets">Déplacement des actifs…</string>
+    <string name="rf_move_result">%1$d actifs sur %2$d déplacés</string>
+    <string name="rf_move_failed">%1$s — non déplacé : %2$s</string>
 </resources>

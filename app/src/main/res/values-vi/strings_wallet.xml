@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">Hiện lại cụm từ khôi phục của tôi</string>
 
+    <string name="rf_move_assets">Chuyển DigiAssets của tôi về đây</string>
+    <string name="rf_move_assets_body">Dùng số DGB được giữ lại ở trên để gửi tài sản về ví này. Chuyển tài sản là không thể hoàn tác.</string>
+    <string name="rf_moving_assets">Đang chuyển tài sản…</string>
+    <string name="rf_move_result">Đã chuyển %1$d trên %2$d tài sản</string>
+    <string name="rf_move_failed">%1$s — chưa chuyển: %2$s</string>
 </resources>

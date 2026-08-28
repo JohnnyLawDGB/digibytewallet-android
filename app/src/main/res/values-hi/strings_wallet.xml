@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">मेरा रिकवरी वाक्यांश फिर से दिखाएँ</string>
 
+    <string name="rf_move_assets">मेरे DigiAssets यहाँ लाएँ</string>
+    <string name="rf_move_assets_body">ऊपर रखे गए DGB खर्च करके संपत्तियाँ इस वॉलेट में भेजता है। संपत्ति हस्तांतरण अपरिवर्तनीय हैं।</string>
+    <string name="rf_moving_assets">संपत्तियाँ भेजी जा रही हैं…</string>
+    <string name="rf_move_result">%2$d में से %1$d संपत्तियाँ भेजी गईं</string>
+    <string name="rf_move_failed">%1$s — नहीं भेजी गई: %2$s</string>
 </resources>

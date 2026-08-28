@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">Ipakita ulit ang recovery phrase ko</string>
 
+    <string name="rf_move_assets">Ilipat dito ang aking DigiAssets</string>
+    <string name="rf_move_assets_body">Gagamitin ang DGB na itinabi sa itaas para ipadala ang mga asset sa wallet na ito. Hindi na mababawi ang paglilipat ng asset.</string>
+    <string name="rf_moving_assets">Inililipat ang mga asset…</string>
+    <string name="rf_move_result">%1$d sa %2$d na asset ang nailipat</string>
+    <string name="rf_move_failed">%1$s — hindi nailipat: %2$s</string>
 </resources>

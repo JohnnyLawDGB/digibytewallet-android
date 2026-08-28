@@ -678,4 +678,9 @@
          back is a system gesture nobody thinks to try while being told they got it wrong. -->
     <string name="verify_show_phrase">Show my recovery phrase again</string>
 
+    <string name="rf_move_assets">Move my DigiAssets here</string>
+    <string name="rf_move_assets_body">Spends the DGB kept back above to send the assets to this wallet. Asset transfers are irreversible.</string>
+    <string name="rf_moving_assets">Moving assets…</string>
+    <string name="rf_move_result">%1$d of %2$d assets moved</string>
+    <string name="rf_move_failed">%1$s — not moved: %2$s</string>
 </resources>

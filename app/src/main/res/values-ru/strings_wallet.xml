@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">Показать фразу восстановления снова</string>
 
+    <string name="rf_move_assets">Переместить мои DigiAssets сюда</string>
+    <string name="rf_move_assets_body">Использует оставленные выше DGB, чтобы отправить активы в этот кошелёк. Переводы активов необратимы.</string>
+    <string name="rf_moving_assets">Перемещение активов…</string>
+    <string name="rf_move_result">Перемещено %1$d из %2$d активов</string>
+    <string name="rf_move_failed">%1$s — не перемещён: %2$s</string>
 </resources>

@@ -555,4 +555,9 @@
 
     <string name="verify_show_phrase">Wiederherstellungsphrase erneut anzeigen</string>
 
+    <string name="rf_move_assets">Meine DigiAssets hierher bewegen</string>
+    <string name="rf_move_assets_body">Verwendet die oben zurückbehaltenen DGB, um die Assets an diese Wallet zu senden. Asset-Übertragungen sind unwiderruflich.</string>
+    <string name="rf_moving_assets">Assets werden bewegt…</string>
+    <string name="rf_move_result">%1$d von %2$d Assets bewegt</string>
+    <string name="rf_move_failed">%1$s — nicht bewegt: %2$s</string>
 </resources>

@@ -549,4 +549,9 @@
 
     <string name="verify_show_phrase">Ver de nuevo mi frase de recuperación</string>
 
+    <string name="rf_move_assets">Mover mis DigiAssets aquí</string>
+    <string name="rf_move_assets_body">Usa los DGB reservados arriba para enviar los activos a esta billetera. Las transferencias de activos son irreversibles.</string>
+    <string name="rf_moving_assets">Moviendo activos…</string>
+    <string name="rf_move_result">%1$d de %2$d activos movidos</string>
+    <string name="rf_move_failed">%1$s: no se movió — %2$s</string>
 </resources>

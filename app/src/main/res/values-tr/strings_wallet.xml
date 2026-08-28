@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">Kurtarma ifademi tekrar göster</string>
 
+    <string name="rf_move_assets">DigiAssets varlıklarımı buraya taşı</string>
+    <string name="rf_move_assets_body">Varlıkları bu cüzdana göndermek için yukarıda ayrılan DGB kullanılır. Varlık transferleri geri alınamaz.</string>
+    <string name="rf_moving_assets">Varlıklar taşınıyor…</string>
+    <string name="rf_move_result">%2$d varlıktan %1$d tanesi taşındı</string>
+    <string name="rf_move_failed">%1$s — taşınamadı: %2$s</string>
 </resources>

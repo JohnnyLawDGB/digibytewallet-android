@@ -51,6 +51,7 @@ fun RecoverFundsScreen(
 ) {
     val passphraseVerdict by vm.passphraseVerdict.collectAsState()
     val state by vm.state.collectAsState()
+    val assetMove by vm.assetMove.collectAsState()
 
     var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
     // Not rememberSaveable: a foreign recovery phrase must not be written to
@@ -135,7 +136,11 @@ fun RecoverFundsScreen(
                         partialFailurePaths = s.partialFailurePaths,
                         verdict = passphraseVerdict,
                     )
-                    is RecoverFundsViewModel.UiState.Done -> ResultBody(s.outcomes)
+                    is RecoverFundsViewModel.UiState.Done -> ResultBody(
+                        outcomes = s.outcomes,
+                        assetMove = assetMove,
+                        onMoveAssets = { vm.moveHeldAssets() },
+                    )
                     is RecoverFundsViewModel.UiState.Error ->
                         if (mode == RecoverMode.AnotherPhrase)
                             PhraseEntry(phrase, { phrase = it }, error = s.reason, passphrase = passphrase,
@@ -628,7 +633,11 @@ private fun FindingCard(
 // ── Done: per-outcome results ─────────────────────────────────────────────────
 
 @Composable
-private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
+private fun ResultBody(
+    outcomes: List<LegacySweepService.SweepOutcome>,
+    assetMove: RecoverFundsViewModel.AssetMoveState,
+    onMoveAssets: () -> Unit,
+) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -661,6 +670,16 @@ private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
             OutcomeCard(outcome)
         }
 
+        // Moving the DigiAssets the sweep held back. Offered only when there ARE any, and only
+        // once — the action spans every profile, so one button, not one per outcome card.
+        //
+        // Deliberately a separate press rather than a tail of the sweep: an asset transfer is
+        // irreversible and spends the reserve, and the user has just been told in plain words
+        // what was held back and why. Acting on that is their decision to make.
+        if (outcomes.any { it.heldBackAssets.isNotEmpty() }) {
+            item { AssetMoveSection(assetMove, onMoveAssets) }
+        }
+
         item {
             Spacer(Modifier.height(4.dp))
             Text(
@@ -669,6 +688,82 @@ private fun ResultBody(outcomes: List<LegacySweepService.SweepOutcome>) {
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun AssetMoveSection(
+    move: RecoverFundsViewModel.AssetMoveState,
+    onMoveAssets: () -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CARD)
+    ) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.rf_move_assets_body),
+                color = MUTED,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(12.dp))
+
+            when (move) {
+                is RecoverFundsViewModel.AssetMoveState.Idle -> {
+                    Button(
+                        onClick = onMoveAssets,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.rf_move_assets)) }
+                }
+
+                is RecoverFundsViewModel.AssetMoveState.Moving -> {
+                    Text(
+                        text = stringResource(R.string.rf_moving_assets),
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                is RecoverFundsViewModel.AssetMoveState.Done -> {
+                    val moved = move.moves.count { it.moved }
+                    Text(
+                        text = stringResource(R.string.rf_move_result, moved, move.moves.size),
+                        color = if (moved == move.moves.size) SUCCESS_GREEN else Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    // Every asset that did NOT move is named with its reason. A summary count
+                    // alone would let a partial failure read as a clean run.
+                    move.moves.filter { !it.moved }.forEach { failed ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(
+                                R.string.rf_move_failed,
+                                failed.outpoint,
+                                failed.failureReason ?: "",
+                            ),
+                            color = WARNING_RED,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+
+                is RecoverFundsViewModel.AssetMoveState.Error -> {
+                    Text(
+                        text = move.reason,
+                        color = WARNING_RED,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        onClick = onMoveAssets,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.rf_move_assets)) }
+                }
+            }
         }
     }
 }

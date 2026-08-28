@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">Tampilkan lagi frasa pemulihan saya</string>
 
+    <string name="rf_move_assets">Pindahkan DigiAssets saya ke sini</string>
+    <string name="rf_move_assets_body">Menggunakan DGB yang disimpan di atas untuk mengirim aset ke dompet ini. Transfer aset tidak dapat dibatalkan.</string>
+    <string name="rf_moving_assets">Memindahkan aset…</string>
+    <string name="rf_move_result">%1$d dari %2$d aset dipindahkan</string>
+    <string name="rf_move_failed">%1$s — tidak dipindahkan: %2$s</string>
 </resources>

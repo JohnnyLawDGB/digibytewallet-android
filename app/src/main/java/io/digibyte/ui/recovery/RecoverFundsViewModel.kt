@@ -64,6 +64,20 @@ class RecoverFundsViewModel @Inject constructor(
         data class Error(val reason: String) : UiState()
     }
 
+    /**
+     * Moving the DigiAssets the sweep deliberately left behind.
+     *
+     * A separate flow from [UiState] on purpose. The sweep has already broadcast by the time
+     * this runs, so its result must stay on screen — an asset move that failed cannot be allowed
+     * to overwrite the record of coins that DID move.
+     */
+    sealed class AssetMoveState {
+        data object Idle : AssetMoveState()
+        data object Moving : AssetMoveState()
+        data class Done(val moves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>) : AssetMoveState()
+        data class Error(val reason: String) : AssetMoveState()
+    }
+
 
     /**
      * Decides which of the foreign seed's UTXOs may be spent as plain DGB.
@@ -86,6 +100,17 @@ class RecoverFundsViewModel @Inject constructor(
      * sweep outcome's `inputCount`.
      */
     private var lastFindings: List<RecoveryScanService.ProfileResult> = emptyList()
+
+    private val _assetMove = MutableStateFlow<AssetMoveState>(AssetMoveState.Idle)
+    val assetMove: StateFlow<AssetMoveState> = _assetMove.asStateFlow()
+
+    /** The findings the last sweep ran against, kept so the asset move can reuse them without
+     *  re-scanning. Cleared by [reset] with everything else. */
+    private var sweptFindings: List<RecoveryScanService.ProfileResult> = emptyList()
+
+    /** True when the last sweep used an entered phrase rather than this wallet's own seed —
+     *  which decides where [moveHeldAssets] gets its signing seed from. */
+    private var sweptForeign: Boolean = false
 
     // Transient: the entered foreign phrase, held between classifyForeign and
     // sweepForeign so the sweep re-derives the same seed. Cleared after sweep /
@@ -123,6 +148,9 @@ class RecoverFundsViewModel @Inject constructor(
         pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
         _passphraseVerdict.value = null
+        sweptFindings = emptyList()
+        sweptForeign = false
+        _assetMove.value = AssetMoveState.Idle
         _state.value = UiState.Idle
     }
 
@@ -196,6 +224,8 @@ class RecoverFundsViewModel @Inject constructor(
                                 destIsSelf = destIsSelf,
                             )
                         }
+                        sweptFindings = findings
+                        sweptForeign = false
                         _state.value = UiState.Done(result.outcomes)
                     } catch (e: CancellationException) {
                         throw e
@@ -311,6 +341,8 @@ class RecoverFundsViewModel @Inject constructor(
                         destIsSelf = true,             // lands in THIS wallet -> receive
                     )
                 }
+                sweptFindings = findings
+                sweptForeign = true
                 _state.value = UiState.Done(result.outcomes)
             } catch (e: CancellationException) {
                 throw e
@@ -318,10 +350,80 @@ class RecoverFundsViewModel @Inject constructor(
                 _state.value = UiState.Error(t.message ?: "Sweep failed")
             } finally {
                 seed.fill(0)
+                // The phrase is deliberately NOT cleared here any more. Moving the DigiAssets the
+                // sweep held back needs the same seed, and it is a separate user-confirmed step
+                // that happens after this returns. It is cleared by reset() when the user leaves
+                // the screen, and by moveHeldAssets() as soon as the move finishes — so the
+                // window is "this screen, until the assets are dealt with" rather than the whole
+                // session. A JVM String still cannot be zeroed; that limit is unchanged.
+                _passphraseVerdict.value = null
+            }
+        }
+    }
+
+    /**
+     * Move the DigiAssets the sweep left behind into this wallet, paying with the DGB it
+     * reserved for exactly that.
+     *
+     * Separate from [sweep] because it is irreversible and deserves its own confirmation, and
+     * because it has to remain runnable after a sweep that already broadcast. Safe to run more
+     * than once: an asset that already moved is no longer in the old wallet's UTXO set, so the
+     * second attempt finds nothing to move rather than double-spending.
+     */
+    fun moveHeldAssets() {
+        val findings = sweptFindings.ifEmpty { lastFindings }
+        if (findings.isEmpty()) {
+            _assetMove.value = AssetMoveState.Error("Nothing to move — scan first.")
+            return
+        }
+        val dest = SweepDestination.Native.resolve(
+            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
+            validator = { NativeBridge.isValidAddress(it) },
+        )
+        if (dest !is DestResolution.Ok) {
+            _assetMove.value = AssetMoveState.Error("Could not get a destination address")
+            return
+        }
+
+        _assetMove.value = AssetMoveState.Moving
+        activeJob = viewModelScope.launch {
+            val foreignPhrase = pendingForeignMnemonic
+            val seed: ByteArray? = if (sweptForeign) {
+                if (foreignPhrase == null) null
+                else NativeBridge.mnemonicToSeed(foreignPhrase.toByteArray(), pendingForeignPassphrase)
+            } else {
+                seedProvider.loadSeed()
+            }
+            if (seed == null) {
+                _assetMove.value = AssetMoveState.Error(
+                    "The recovery phrase is no longer available — scan again to move the assets."
+                )
+                return@launch
+            }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    io.digibyte.core.recovery.ForeignAssetTransferService(
+                        assetClassifier = assetClassifier(),
+                        outgoingTxStore = outgoingTxStore,
+                        walletTxPersister = walletTxPersister,
+                    ).moveAssets(
+                        seedBytes = seed,
+                        results = findings,
+                        destAddress = dest.address,
+                    )
+                }
+                _assetMove.value = AssetMoveState.Done(result.moves)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                _assetMove.value = AssetMoveState.Error(t.message ?: "Could not move the assets")
+            } finally {
+                seed.fill(0)
+                // The assets have been dealt with one way or the other; the phrase has no further
+                // use on this screen.
                 pendingForeignMnemonic = null
-        pendingForeignPassphrase?.fill(0)
-        pendingForeignPassphrase = null
-        _passphraseVerdict.value = null
+                pendingForeignPassphrase?.fill(0)
+                pendingForeignPassphrase = null
             }
         }
     }

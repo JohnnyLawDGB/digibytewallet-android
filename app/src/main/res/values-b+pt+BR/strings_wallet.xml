@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">Mostrar minha frase de recuperação novamente</string>
 
+    <string name="rf_move_assets">Mover meus DigiAssets para cá</string>
+    <string name="rf_move_assets_body">Usa os DGB reservados acima para enviar os ativos para esta carteira. Transferências de ativos são irreversíveis.</string>
+    <string name="rf_moving_assets">Movendo ativos…</string>
+    <string name="rf_move_result">%1$d de %2$d ativos movidos</string>
+    <string name="rf_move_failed">%1$s — não movido: %2$s</string>
 </resources>

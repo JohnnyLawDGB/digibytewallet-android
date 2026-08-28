@@ -547,4 +547,9 @@
 
     <string name="verify_show_phrase">再次显示我的恢复助记词</string>
 
+    <string name="rf_move_assets">将我的 DigiAssets 转到此处</string>
+    <string name="rf_move_assets_body">使用上方保留的 DGB 将资产发送到此钱包。资产转账不可撤销。</string>
+    <string name="rf_moving_assets">正在转移资产…</string>
+    <string name="rf_move_result">已转移 %2$d 项资产中的 %1$d 项</string>
+    <string name="rf_move_failed">%1$s — 未转移：%2$s</string>
 </resources>
