@@ -34,6 +34,7 @@
 #include "../digibytewallet-core/BRTransaction.h"
 #include "../digibytewallet-core/BRInt.h"
 #include "jni_seed_buffer.h"
+#include "foreign_tx_fee_guard.h"
 
 #define LOG_TAG "DGB-Derive"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -43,7 +44,6 @@
 /** How far above the size-derived estimate an implied fee may sit before the transaction is
  *  refused. Generous enough for fee-rate disagreement and rounding; tight enough that a missing
  *  change output — the realistic way value gets burned here — cannot slip through. */
-#define FOREIGN_TX_MAX_FEE_FACTOR 3
 
 static void secure_zero(volatile void *p, size_t n) {
     volatile uint8_t *v = (volatile uint8_t *)p;
@@ -721,7 +721,7 @@ Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
 JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
+Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignAssetTransfer(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -762,7 +762,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
     const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
     (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
     if (!seedOk) {
-        LOGW("buildAndSignForeignTx: rejecting a seed of %d bytes", (int)seedLen);
+        LOGW("buildAndSignForeignAssetTransfer: rejecting a seed of %d bytes", (int)seedLen);
         return NULL;
     }
 
@@ -851,7 +851,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
             scriptLen = BRAddressScriptPubKey(scriptBytes, sizeof(scriptBytes), addrStr);
             (*env)->ReleaseStringUTFChars(env, addrJ, addrStr);
             if (scriptLen == 0) {
-                LOGW("buildAndSignForeignTx: invalid output address at %d", (int)i);
+                LOGW("buildAndSignForeignAssetTransfer: invalid output address at %d", (int)i);
                 ok = 0;
             }
         } else {
@@ -862,7 +862,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
                 scriptLen = scriptStr ? hex_to_bytes(scriptStr, scriptBytes, sizeof(scriptBytes)) : 0;
                 if (scriptStr) (*env)->ReleaseStringUTFChars(env, scriptJ, scriptStr);
                 if (scriptLen == 0) {
-                    LOGW("buildAndSignForeignTx: empty raw script at %d", (int)i);
+                    LOGW("buildAndSignForeignAssetTransfer: empty raw script at %d", (int)i);
                     ok = 0;
                 }
             }
@@ -888,7 +888,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
 
     if (!ok || totalOut > totalIn) {
         if (totalOut > totalIn) {
-            LOGW("buildAndSignForeignTx: outputs %llu exceed inputs %llu",
+            LOGW("buildAndSignForeignAssetTransfer: outputs %llu exceed inputs %llu",
                  (unsigned long long)totalOut, (unsigned long long)totalIn);
         }
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
@@ -899,24 +899,38 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
         return NULL;
     }
 
-    /* ── The implied fee, checked BOTH ways. See the header comment. ── */
-    const uint64_t impliedFee = totalIn - totalOut;
-    size_t estSize = 10 + (size_t)inputCount * 160 + (size_t)outputCount * 34;
-    uint64_t expectedFee = ((uint64_t)estSize * (uint64_t)feePerKb) / 1000;
-    if (expectedFee < 1000) expectedFee = 1000; /* DGB min relay */
+    /* ── The implied fee, checked BOTH ways. See foreign_tx_fee_guard.h. ──
+     * The band lives in a JNI-free header so foreign_tx_fee_guard_kat can pin its exact
+     * boundaries on the host; reaching them on a device needs a real asset and a real fee
+     * UTXO, which is not a test you run per commit. */
+    uint64_t impliedFee = 0, expectedFee = 0;
+    const ForeignTxFeeVerdict feeVerdict = foreign_tx_fee_check(
+        totalIn, totalOut, (size_t)inputCount, (size_t)outputCount,
+        (uint64_t)feePerKb, &impliedFee, &expectedFee);
 
-    if (impliedFee < expectedFee) {
-        LOGW("buildAndSignForeignTx: implied fee %llu below the %llu this size needs — "
-             "would not relay", (unsigned long long)impliedFee, (unsigned long long)expectedFee);
-        ok = 0;
-    } else if (impliedFee > expectedFee * FOREIGN_TX_MAX_FEE_FACTOR) {
-        /* The caller lost track of value — almost always a missing change output. Burning it is
-         * silent and irreversible, so refuse rather than sign. */
-        LOGW("buildAndSignForeignTx: implied fee %llu is over %dx the expected %llu — "
-             "refusing to burn the difference (missing change output?)",
-             (unsigned long long)impliedFee, FOREIGN_TX_MAX_FEE_FACTOR,
-             (unsigned long long)expectedFee);
-        ok = 0;
+    switch (feeVerdict) {
+        case FOREIGN_TX_FEE_OK:
+            break;
+        case FOREIGN_TX_FEE_TOO_LOW:
+            LOGW("buildAndSignForeignAssetTransfer: implied fee %llu below the %llu this size "
+                 "needs — would not relay",
+                 (unsigned long long)impliedFee, (unsigned long long)expectedFee);
+            ok = 0;
+            break;
+        case FOREIGN_TX_FEE_TOO_HIGH:
+            /* The caller lost track of value — almost always a missing change output. Burning
+             * it is silent and irreversible, so refuse rather than sign. */
+            LOGW("buildAndSignForeignAssetTransfer: implied fee %llu is over %dx the expected "
+                 "%llu — refusing to burn the difference (missing change output?)",
+                 (unsigned long long)impliedFee, FOREIGN_TX_MAX_FEE_FACTOR,
+                 (unsigned long long)expectedFee);
+            ok = 0;
+            break;
+        case FOREIGN_TX_FEE_OVERSPEND:
+            /* Already caught above; kept so a future reordering cannot fall through silently. */
+            LOGW("buildAndSignForeignAssetTransfer: outputs exceed inputs");
+            ok = 0;
+            break;
     }
 
     int signOk = 0;
@@ -928,7 +942,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignTx(
     seed_buffer_release(&seed);
 
     if (!ok || !signOk || !BRTransactionIsSigned(tx)) {
-        LOGW("buildAndSignForeignTx: signing failed or refused (ok=%d signOk=%d)", ok, signOk);
+        LOGW("buildAndSignForeignAssetTransfer: signing failed or refused (ok=%d signOk=%d)", ok, signOk);
         BRTransactionFree(tx);
         return NULL;
     }

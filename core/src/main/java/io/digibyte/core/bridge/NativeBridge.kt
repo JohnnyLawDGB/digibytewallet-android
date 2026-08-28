@@ -296,6 +296,17 @@ object NativeBridge {
      *  detection on SPV receive to avoid round-tripping raw bytes. */
     external fun getTransactionOutputsForHash(txHashHex: String): Array<String>?
 
+    /** The outputs of a transaction the wallet does NOT know, parsed from raw bytes, in the same
+     *  "vout|satoshis|scriptHex" form as [getTransactionOutputsForHash].
+     *
+     *  Recovery needs this: a seed the user is migrating away from has no transactions registered
+     *  in `BRWallet`, so the only way to read its outputs is from the raw parent transactions the
+     *  scan already fetched. Parsing happens natively, through the same hardened parser every
+     *  other raw-tx path uses, rather than in a second Kotlin parser fed attacker-supplied bytes.
+     *
+     *  Null on a parse failure or an empty array — never partial output. */
+    external fun getRawTransactionOutputs(rawTx: ByteArray): Array<String>?
+
     /** The wallet's spendable NATIVE DigiByte UTXOs (excludes asset/DD dust) as
      *  newline-separated "txidHex|vout|amountSats|scriptPubKeyHex" lines, "" if none.
      *  Sovereign source for the DigiAsset-send DGB fee — the Room is_asset=0 partition
@@ -507,7 +518,7 @@ object NativeBridge {
      *
      * @return signed transaction hex, or null on any refusal — reasons are logged natively.
      */
-    external fun buildAndSignForeignTx(
+    external fun buildAndSignForeignAssetTransfer(
         seedBytes: ByteArray,
         hmacKey: String,
         prefixPath: IntArray,

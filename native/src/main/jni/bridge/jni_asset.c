@@ -7,6 +7,7 @@
  *   isAssetTransaction          - wraps BRTXContainsAsset() from BRDigiAsset.c
  *   getOpReturnData             - extracts raw OP_RETURN script bytes from raw tx
  *   getTransactionOutputsForHash - walks a wallet-known tx's outputs by txid hex
+ *   getRawTransactionOutputs    - same, but from raw bytes (foreign/unregistered tx)
  *
  * All JNI function names match io.digibyte.core.bridge.NativeBridge.
  * Raw transaction bytes are deserialized via BRTransactionParse() and freed
@@ -146,6 +147,92 @@ Java_io_digibyte_core_bridge_NativeBridge_getOpReturnData(JNIEnv *env, jobject t
     if (!result) {
         LOGD("getOpReturnData: no OP_RETURN output found");
     }
+    return result;
+}
+
+/* ---------- getRawTransactionOutputs ---------- */
+
+/*
+ * public static native String[] getRawTransactionOutputs(byte[] rawTx);
+ *
+ * Same output listing as getTransactionOutputsForHash, but sourced from raw
+ * bytes instead of BRWallet:
+ *
+ *     "<vout>|<satoshis>|<scriptHex>"
+ *
+ * getTransactionOutputsForHash can only answer for transactions the wallet
+ * has registered. A seed the user is migrating AWAY from has none registered,
+ * so recovery has to work from the raw parent transactions the scan already
+ * fetched. That is the only difference; the format is identical so the same
+ * Kotlin parsing serves both.
+ *
+ * These bytes come from a remote lookup and are attacker-influenced, so they
+ * go through BRTransactionParse — the same hardened parser every other raw-tx
+ * entry point uses — rather than a second parser written in Kotlin. Returns
+ * NULL on a null/empty array or a parse failure; never partially-valid data.
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionOutputs(JNIEnv *env, jobject thiz,
+                                                                     jbyteArray rawTx) {
+    (void)thiz;
+
+    if (!rawTx) {
+        LOGW("getRawTransactionOutputs: rawTx is null");
+        return NULL;
+    }
+
+    jsize txLen = (*env)->GetArrayLength(env, rawTx);
+    if (txLen <= 0) {
+        LOGW("getRawTransactionOutputs: empty rawTx");
+        return NULL;
+    }
+
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, rawTx, NULL);
+    if (!txBytes) {
+        LOGE("getRawTransactionOutputs: failed to pin rawTx byte array");
+        return NULL;
+    }
+
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
+
+    if (!tx) {
+        LOGW("getRawTransactionOutputs: BRTransactionParse returned NULL");
+        return NULL;
+    }
+
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    if (!stringClass) { BRTransactionFree(tx); return NULL; }
+
+    jobjectArray result = (*env)->NewObjectArray(env, (jsize)tx->outCount, stringClass, NULL);
+    if (!result) { BRTransactionFree(tx); return NULL; }
+
+    for (size_t i = 0; i < tx->outCount; i++) {
+        const BRTxOutput *out = &tx->outputs[i];
+        size_t bufSize = 64 + out->scriptLen * 2 + 1;
+        char *buf = (char *)malloc(bufSize);
+        if (!buf) continue;
+
+        int header = snprintf(buf, bufSize, "%zu|%llu|", i, (unsigned long long)out->amount);
+        if (header < 0 || (size_t)header >= bufSize) { free(buf); continue; }
+
+        char *p = buf + header;
+        for (size_t j = 0; j < out->scriptLen; j++) {
+            snprintf(p, 3, "%02x", out->script[j]);
+            p += 2;
+        }
+        *p = '\0';
+
+        jstring s = (*env)->NewStringUTF(env, buf);
+        free(buf);
+        if (s) {
+            (*env)->SetObjectArrayElement(env, result, (jsize)i, s);
+            (*env)->DeleteLocalRef(env, s);
+        }
+    }
+
+    LOGD("getRawTransactionOutputs: returned %zu outputs", tx->outCount);
+    BRTransactionFree(tx);
     return result;
 }
 
