@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">設定せずに続ける</string>
     <string name="pass_screen_separate_note">いま書き留めた単語とは別の場所に保管してください。</string>
     <string name="rf_will_move_assets">復元時に、まず %1$d 件の DigiAsset アウトポイントがこのウォレットへ移されます。資産の送信は取り消せません。</string>
+    <string name="send_fail_title">取引は送信されていません</string>
+    <string name="send_fail_nothing_sent">ウォレットからは何も出ていません。コインはそのままです。</string>
+    <string name="send_fail_insufficient_fee">残高は金額に加えてネットワーク手数料も賄う必要があります。少し減らすか MAX をお使いください。</string>
+    <string name="send_fail_broadcast">公開するためのピアに接続できませんでした。少し待ってからもう一度お試しください。</string>
+    <string name="send_fail_signing">取引に署名できませんでした。ウォレットのロックを解除してお試しください。</string>
+    <string name="send_fail_address">その宛先アドレスは無効です。ご確認のうえ再度お試しください。</string>
+    <string name="send_fail_amount">0 より大きい金額を入力してください。</string>
+    <string name="send_fail_unknown">取引を送信できませんでした。</string>
+    <string name="send_fail_try_again">再試行</string>
 </resources>

@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">Magpatuloy nang wala nito</string>
     <string name="pass_screen_separate_note">Itago ito nang hiwalay sa mga salitang kasusulat mo lang.</string>
     <string name="rf_will_move_assets">Ililipat muna ng pagbawi ang %1$d DigiAsset outpoint sa wallet na ito. Hindi na mababawi ang paglilipat ng asset.</string>
+    <string name="send_fail_title">Hindi naipadala ang transaksyon</string>
+    <string name="send_fail_nothing_sent">Walang lumabas sa iyong wallet. Buo pa rin ang iyong mga barya.</string>
+    <string name="send_fail_insufficient_fee">Kailangang sapat ang balanse mo para sa halaga at sa network fee. Magpadala nang bahagyang mas maliit, o gamitin ang MAX.</string>
+    <string name="send_fail_broadcast">Walang naabot na peer ang wallet mo para i-publish ito. Maghintay saglit at subukan ulit.</string>
+    <string name="send_fail_signing">Hindi ma-sign ang transaksyon. I-unlock ang wallet mo at subukan ulit.</string>
+    <string name="send_fail_address">Hindi wasto ang address ng tatanggap. Suriin at subukan ulit.</string>
+    <string name="send_fail_amount">Maglagay ng halagang mas malaki sa zero.</string>
+    <string name="send_fail_unknown">Hindi naipadala ang transaksyon.</string>
+    <string name="send_fail_try_again">Subukan ulit</string>
 </resources>

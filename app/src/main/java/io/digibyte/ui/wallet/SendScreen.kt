@@ -97,6 +97,21 @@ fun SendScreen(
 
     var inputIsDgb by remember { mutableStateOf(true) }
 
+    // ── Failure overlay ───────────────────────────────────────────────────
+    // Given the SAME weight as success, deliberately. This used to be one line of bodySmall red
+    // text at the bottom of the form, below the button and below the fold if the form happened to
+    // be scrolled, with nothing to dismiss. Success meanwhile blocked the whole app until
+    // acknowledged. The quiet outcome was the one that mattered: reproduced on a Note 8, a failed
+    // send was indistinguishable from nothing having happened, which is how three real sends came
+    // to be described as having "not registered anywhere".
+    if (sendState is SendState.Error) {
+        SendFailureScreen(
+            failure = io.digibyte.core.send.SendFailure.of((sendState as SendState.Error).message),
+            onDismiss = { viewModel.resetState() },
+        )
+        return
+    }
+
     // ── Success overlay ───────────────────────────────────────────────────
     if (sendState is SendState.Success || ddSentTxid != null) {
         SendSuccessScreen(
@@ -601,16 +616,8 @@ fun SendScreen(
                 }
             }
 
-            if (sendState is SendState.Error) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = (sendState as SendState.Error).message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DigiByteRed,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+            // The inline error line lived here. It is now a blocking overlay — see the failure
+            // overlay at the top of SendScreen.
         }
     }
 }
@@ -796,7 +803,106 @@ private fun ConfirmRow(label: String, value: String) {
     }
 }
 
-// ── Success screen ───────────────────────────────────────────────────────────
+// ── Outcome screens ──────────────────────────────────────────────────────────
+// Failure and success are both full-screen and both must be dismissed. That symmetry is the
+// point: see SendFailureScreen.
+
+/**
+ * A send that did not go out, shown with the same prominence as one that did.
+ *
+ * Blocking and dismissible on purpose: an outcome the user can walk past without noticing is an
+ * outcome they will assume went the other way. [io.digibyte.core.send.SendFailure] decides what
+ * happened and whether trying again could help; this only renders it.
+ */
+@Composable
+private fun SendFailureScreen(
+    failure: io.digibyte.core.send.SendFailure,
+    onDismiss: () -> Unit,
+) {
+    // Switched on the enum rather than the guidance key: string literals in UI code are what the
+    // untranslated-literal gate is looking for, and matching on a key would have meant teaching
+    // that gate to ignore exactly the kind of literal it exists to catch.
+    val guidance = when (failure.kind) {
+        io.digibyte.core.send.SendFailure.Kind.INSUFFICIENT -> stringResource(R.string.send_fail_insufficient_fee)
+        io.digibyte.core.send.SendFailure.Kind.BROADCAST -> stringResource(R.string.send_fail_broadcast)
+        io.digibyte.core.send.SendFailure.Kind.SIGNING -> stringResource(R.string.send_fail_signing)
+        io.digibyte.core.send.SendFailure.Kind.ADDRESS -> stringResource(R.string.send_fail_address)
+        io.digibyte.core.send.SendFailure.Kind.AMOUNT -> stringResource(R.string.send_fail_amount)
+        io.digibyte.core.send.SendFailure.Kind.UNKNOWN -> stringResource(R.string.send_fail_unknown)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Info,
+            contentDescription = null,
+            tint = DigiByteRed,
+            modifier = Modifier.size(72.dp)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = stringResource(R.string.send_fail_title),
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Said plainly, because the first thing anyone needs to know is that their coins did not
+        // move and are still theirs.
+        Text(
+            text = stringResource(R.string.send_fail_nothing_sent),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = guidance,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+
+        // The raw reason, kept for the failures nobody anticipated — it is what a bug report has
+        // to contain, and it is the only clue when the classification falls through to UNKNOWN.
+        if (failure.kind == io.digibyte.core.send.SendFailure.Kind.UNKNOWN) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = failure.rawReason,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Button(
+            onClick = onDismiss,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(
+                text = stringResource(
+                    if (failure.retryable) R.string.send_fail_try_again else R.string.common_done
+                ),
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
 
 @Composable
 private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {

@@ -217,6 +217,8 @@ class SendViewModel @Inject constructor(
      * Execute the send after biometric/pin auth succeeds.
      * Collects spendable UTXOs then calls TransactionBuilder.
      */
+    private val TAG = "DGB-Send"
+
     fun send() {
         val addr = address.value
         val sats = amountSatoshis() ?: run {
@@ -228,12 +230,36 @@ class SendViewModel @Inject constructor(
         _sendState.value = SendState.Sending
 
         viewModelScope.launch {
-            // Collect spendable UTXOs once
-            val utxos = utxoManager.getSpendableUtxos().first()
-            val result = transactionBuilder.sendTransaction(addr, sats, feePerKb, utxos)
-            _sendState.value = when (result) {
-                is TxResult.Success -> SendState.Success(result.txid)
-                is TxResult.Error   -> SendState.Error(result.message)
+            // Every attempt is logged, not just the ones that succeed. A send that fails leaves
+            // nothing behind otherwise — no transaction, no store entry, nothing in the activity
+            // list — so when someone reports "it just didn't register anywhere" there is nothing
+            // to look at. This is the only durable trace a failed attempt produces.
+            android.util.Log.i(TAG, "send attempt: $sats sats to ${addr.take(12)}… at $feePerKb/kB")
+            try {
+                // Collect spendable UTXOs once
+                val utxos = utxoManager.getSpendableUtxos().first()
+                val result = transactionBuilder.sendTransaction(addr, sats, feePerKb, utxos)
+                _sendState.value = when (result) {
+                    is TxResult.Success -> {
+                        android.util.Log.i(TAG, "send accepted: ${result.txid}")
+                        SendState.Success(result.txid)
+                    }
+                    is TxResult.Error -> {
+                        android.util.Log.w(TAG, "send refused: ${result.message}")
+                        SendState.Error(result.message)
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // The screen went away mid-send. Nothing to show — but say so, because the
+                // alternative is a send that vanishes from the record entirely.
+                android.util.Log.w(TAG, "send cancelled before completing")
+                throw e
+            } catch (t: Throwable) {
+                // Without this the coroutine dies and _sendState stays at Sending forever: the
+                // button never re-enables, no outcome is ever shown, and nothing is recorded.
+                // A throw must become a visible failure, not a permanent spinner.
+                android.util.Log.e(TAG, "send threw", t)
+                _sendState.value = SendState.Error(t.message ?: "The transaction could not be sent.")
             }
         }
     }

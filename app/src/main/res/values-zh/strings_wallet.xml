@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">不使用并继续</string>
     <string name="pass_screen_separate_note">请将它与您刚刚写下的助记词分开保管。</string>
     <string name="rf_will_move_assets">恢复此钱包时会先将 %1$d 个 DigiAsset 输出点转入。资产转账不可撤销。</string>
+    <string name="send_fail_title">交易未发送</string>
+    <string name="send_fail_nothing_sent">没有任何资金离开您的钱包。您的币未受影响。</string>
+    <string name="send_fail_insufficient_fee">您的余额需要同时覆盖金额和网络手续费。请少发一些，或使用 MAX。</string>
+    <string name="send_fail_broadcast">您的钱包无法连接到任何节点来广播此交易。请稍候再试。</string>
+    <string name="send_fail_signing">交易无法签名。请解锁钱包后重试。</string>
+    <string name="send_fail_address">该收款地址无效。请检查后重试。</string>
+    <string name="send_fail_amount">请输入大于零的金额。</string>
+    <string name="send_fail_unknown">交易无法发送。</string>
+    <string name="send_fail_try_again">重试</string>
 </resources>

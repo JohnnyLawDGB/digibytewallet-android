@@ -562,4 +562,13 @@
     <string name="pass_screen_continue_without">Ohne fortfahren</string>
     <string name="pass_screen_separate_note">Bewahren Sie sie getrennt von den soeben notierten Wörtern auf.</string>
     <string name="rf_will_move_assets">Bei der Wiederherstellung werden zuerst %1$d DigiAsset-Outpoint(s) in diese Wallet verschoben. Asset-Übertragungen sind unwiderruflich.</string>
+    <string name="send_fail_title">Transaktion nicht gesendet</string>
+    <string name="send_fail_nothing_sent">Es hat nichts Ihre Wallet verlassen. Ihre Coins sind unberührt.</string>
+    <string name="send_fail_insufficient_fee">Ihr Guthaben muss auch die Netzwerkgebühr decken, nicht nur den Betrag. Senden Sie etwas weniger oder nutzen Sie MAX.</string>
+    <string name="send_fail_broadcast">Ihre Wallet konnte keine Peers erreichen, um dies zu veröffentlichen. Warten Sie kurz und versuchen Sie es erneut.</string>
+    <string name="send_fail_signing">Die Transaktion konnte nicht signiert werden. Entsperren Sie Ihre Wallet und versuchen Sie es erneut.</string>
+    <string name="send_fail_address">Diese Empfängeradresse ist ungültig. Bitte prüfen Sie sie.</string>
+    <string name="send_fail_amount">Geben Sie einen Betrag größer als null ein.</string>
+    <string name="send_fail_unknown">Die Transaktion konnte nicht gesendet werden.</string>
+    <string name="send_fail_try_again">Erneut versuchen</string>
 </resources>

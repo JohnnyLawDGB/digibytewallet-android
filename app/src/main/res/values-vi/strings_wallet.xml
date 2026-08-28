@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">Tiếp tục mà không dùng</string>
     <string name="pass_screen_separate_note">Hãy cất giữ nó tách riêng khỏi những từ bạn vừa ghi lại.</string>
     <string name="rf_will_move_assets">Việc khôi phục sẽ chuyển %1$d outpoint DigiAsset về ví này trước. Chuyển tài sản là không thể hoàn tác.</string>
+    <string name="send_fail_title">Giao dịch chưa được gửi</string>
+    <string name="send_fail_nothing_sent">Không có gì rời khỏi ví của bạn. Số coin của bạn vẫn nguyên vẹn.</string>
+    <string name="send_fail_insufficient_fee">Số dư phải đủ cho cả phí mạng lẫn số tiền gửi. Hãy gửi ít hơn một chút, hoặc dùng MAX.</string>
+    <string name="send_fail_broadcast">Ví của bạn không liên hệ được peer nào để phát giao dịch. Hãy đợi một lát rồi thử lại.</string>
+    <string name="send_fail_signing">Không thể ký giao dịch. Hãy mở khóa ví và thử lại.</string>
+    <string name="send_fail_address">Địa chỉ người nhận không hợp lệ. Hãy kiểm tra và thử lại.</string>
+    <string name="send_fail_amount">Hãy nhập số tiền lớn hơn không.</string>
+    <string name="send_fail_unknown">Không thể gửi giao dịch.</string>
+    <string name="send_fail_try_again">Thử lại</string>
 </resources>

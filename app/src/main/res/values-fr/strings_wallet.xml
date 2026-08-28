@@ -534,4 +534,13 @@
     <string name="pass_screen_continue_without">Continuer sans</string>
     <string name="pass_screen_separate_note">Conservez-la séparément des mots que vous venez de noter.</string>
     <string name="rf_will_move_assets">La récupération déplacera d\'abord %1$d outpoint(s) DigiAsset vers ce portefeuille. Les transferts d\'actifs sont irréversibles.</string>
+    <string name="send_fail_title">Transaction non envoyée</string>
+    <string name="send_fail_nothing_sent">Rien n\'a quitté votre portefeuille. Vos pièces sont intactes.</string>
+    <string name="send_fail_insufficient_fee">Votre solde doit couvrir les frais de réseau en plus du montant. Envoyez un peu moins, ou utilisez MAX.</string>
+    <string name="send_fail_broadcast">Votre portefeuille n\'a pu joindre aucun pair pour publier cette transaction. Patientez un instant et réessayez.</string>
+    <string name="send_fail_signing">La transaction n\'a pas pu être signée. Déverrouillez votre portefeuille et réessayez.</string>
+    <string name="send_fail_address">Cette adresse de destinataire n\'est pas valide. Vérifiez-la et réessayez.</string>
+    <string name="send_fail_amount">Saisissez un montant supérieur à zéro.</string>
+    <string name="send_fail_unknown">La transaction n\'a pas pu être envoyée.</string>
+    <string name="send_fail_try_again">Réessayer</string>
 </resources>

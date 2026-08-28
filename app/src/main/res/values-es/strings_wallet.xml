@@ -556,4 +556,13 @@
     <string name="pass_screen_continue_without">Continuar sin ella</string>
     <string name="pass_screen_separate_note">Guárdala en un lugar separado de las palabras que acabas de anotar.</string>
     <string name="rf_will_move_assets">La recuperación moverá primero %1$d punto(s) de salida DigiAsset a esta billetera. Las transferencias de activos son irreversibles.</string>
+    <string name="send_fail_title">Transacción no enviada</string>
+    <string name="send_fail_nothing_sent">Nada salió de tu billetera. Tus monedas están intactas.</string>
+    <string name="send_fail_insufficient_fee">Tu saldo debe cubrir la comisión de red además del importe. Envía un poco menos o usa MAX.</string>
+    <string name="send_fail_broadcast">Tu billetera no pudo contactar con ningún par para publicarla. Espera un momento e inténtalo de nuevo.</string>
+    <string name="send_fail_signing">No se pudo firmar la transacción. Desbloquea tu billetera e inténtalo de nuevo.</string>
+    <string name="send_fail_address">Esa dirección de destinatario no es válida. Compruébala e inténtalo de nuevo.</string>
+    <string name="send_fail_amount">Introduce un importe mayor que cero.</string>
+    <string name="send_fail_unknown">No se pudo enviar la transacción.</string>
+    <string name="send_fail_try_again">Reintentar</string>
 </resources>

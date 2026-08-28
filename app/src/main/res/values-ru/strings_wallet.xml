@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">Продолжить без неё</string>
     <string name="pass_screen_separate_note">Храните её отдельно от слов, которые вы только что записали.</string>
     <string name="rf_will_move_assets">При восстановлении сначала будут перемещены %1$d выходов DigiAsset в этот кошелёк. Переводы активов необратимы.</string>
+    <string name="send_fail_title">Транзакция не отправлена</string>
+    <string name="send_fail_nothing_sent">Из вашего кошелька ничего не ушло. Ваши монеты на месте.</string>
+    <string name="send_fail_insufficient_fee">Баланса должно хватать и на сумму, и на комиссию сети. Отправьте немного меньше или используйте MAX.</string>
+    <string name="send_fail_broadcast">Кошелёк не смог связаться ни с одним узлом, чтобы опубликовать транзакцию. Подождите немного и повторите.</string>
+    <string name="send_fail_signing">Не удалось подписать транзакцию. Разблокируйте кошелёк и повторите.</string>
+    <string name="send_fail_address">Этот адрес получателя недействителен. Проверьте его и повторите.</string>
+    <string name="send_fail_amount">Введите сумму больше нуля.</string>
+    <string name="send_fail_unknown">Не удалось отправить транзакцию.</string>
+    <string name="send_fail_try_again">Повторить</string>
 </resources>

@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">Lanjutkan tanpa itu</string>
     <string name="pass_screen_separate_note">Simpan terpisah dari kata-kata yang baru saja Anda catat.</string>
     <string name="rf_will_move_assets">Pemulihan akan lebih dulu memindahkan %1$d outpoint DigiAsset ke dompet ini. Transfer aset tidak dapat dibatalkan.</string>
+    <string name="send_fail_title">Transaksi tidak terkirim</string>
+    <string name="send_fail_nothing_sent">Tidak ada yang keluar dari dompet Anda. Koin Anda tetap utuh.</string>
+    <string name="send_fail_insufficient_fee">Saldo Anda harus menutup biaya jaringan selain jumlahnya. Kirim sedikit lebih kecil, atau gunakan MAX.</string>
+    <string name="send_fail_broadcast">Dompet Anda tidak dapat menjangkau peer mana pun untuk mempublikasikannya. Tunggu sebentar lalu coba lagi.</string>
+    <string name="send_fail_signing">Transaksi tidak dapat ditandatangani. Buka kunci dompet Anda lalu coba lagi.</string>
+    <string name="send_fail_address">Alamat penerima itu tidak valid. Periksa lalu coba lagi.</string>
+    <string name="send_fail_amount">Masukkan jumlah lebih besar dari nol.</string>
+    <string name="send_fail_unknown">Transaksi tidak dapat dikirim.</string>
+    <string name="send_fail_try_again">Coba lagi</string>
 </resources>

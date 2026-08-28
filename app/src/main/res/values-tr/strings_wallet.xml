@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">Parolasız devam et</string>
     <string name="pass_screen_separate_note">Az önce yazdığınız kelimelerden ayrı bir yerde saklayın.</string>
     <string name="rf_will_move_assets">Kurtarma işlemi önce %1$d DigiAsset çıkış noktasını bu cüzdana taşır. Varlık transferleri geri alınamaz.</string>
+    <string name="send_fail_title">İşlem gönderilmedi</string>
+    <string name="send_fail_nothing_sent">Cüzdanınızdan hiçbir şey çıkmadı. Coinleriniz olduğu gibi duruyor.</string>
+    <string name="send_fail_insufficient_fee">Bakiyenizin tutarın yanı sıra ağ ücretini de karşılaması gerekir. Biraz daha az gönderin veya MAX kullanın.</string>
+    <string name="send_fail_broadcast">Cüzdanınız bunu yayınlamak için hiçbir eşe ulaşamadı. Biraz bekleyip tekrar deneyin.</string>
+    <string name="send_fail_signing">İşlem imzalanamadı. Cüzdanınızın kilidini açıp tekrar deneyin.</string>
+    <string name="send_fail_address">Bu alıcı adresi geçerli değil. Kontrol edip tekrar deneyin.</string>
+    <string name="send_fail_amount">Sıfırdan büyük bir tutar girin.</string>
+    <string name="send_fail_unknown">İşlem gönderilemedi.</string>
+    <string name="send_fail_try_again">Tekrar dene</string>
 </resources>

@@ -554,4 +554,13 @@
     <string name="pass_screen_continue_without">Continuar sem ela</string>
     <string name="pass_screen_separate_note">Guarde-a separada das palavras que você acabou de anotar.</string>
     <string name="rf_will_move_assets">A recuperação moverá primeiro %1$d outpoint(s) DigiAsset para esta carteira. Transferências de ativos são irreversíveis.</string>
+    <string name="send_fail_title">Transação não enviada</string>
+    <string name="send_fail_nothing_sent">Nada saiu da sua carteira. Suas moedas estão intactas.</string>
+    <string name="send_fail_insufficient_fee">Seu saldo precisa cobrir a taxa de rede além do valor. Envie um pouco menos ou use MAX.</string>
+    <string name="send_fail_broadcast">Sua carteira não conseguiu alcançar nenhum par para publicá-la. Aguarde um momento e tente de novo.</string>
+    <string name="send_fail_signing">Não foi possível assinar a transação. Desbloqueie sua carteira e tente de novo.</string>
+    <string name="send_fail_address">Esse endereço de destinatário não é válido. Confira e tente de novo.</string>
+    <string name="send_fail_amount">Informe um valor maior que zero.</string>
+    <string name="send_fail_unknown">Não foi possível enviar a transação.</string>
+    <string name="send_fail_try_again">Tentar de novo</string>
 </resources>

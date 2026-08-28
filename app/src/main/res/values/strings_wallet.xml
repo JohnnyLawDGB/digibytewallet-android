@@ -685,4 +685,13 @@
     <string name="pass_screen_continue_without">Continue without one</string>
     <string name="pass_screen_separate_note">Keep it somewhere separate from the words you just wrote down.</string>
     <string name="rf_will_move_assets">Recovering this wallet will also move %1$d DigiAsset outpoint(s) into it first. Asset transfers are irreversible.</string>
+    <string name="send_fail_title">Transaction not sent</string>
+    <string name="send_fail_nothing_sent">Nothing left your wallet. Your coins are untouched.</string>
+    <string name="send_fail_insufficient_fee">Your balance has to cover the network fee as well as the amount. Try sending slightly less, or use MAX.</string>
+    <string name="send_fail_broadcast">Your wallet could not reach any peers to publish this. Wait a moment and try again.</string>
+    <string name="send_fail_signing">The transaction could not be signed. Unlock your wallet and try again.</string>
+    <string name="send_fail_address">That recipient address is not valid. Check it and try again.</string>
+    <string name="send_fail_amount">Enter an amount greater than zero.</string>
+    <string name="send_fail_unknown">The transaction could not be sent.</string>
+    <string name="send_fail_try_again">Try again</string>
 </resources>
