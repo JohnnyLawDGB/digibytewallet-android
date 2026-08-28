@@ -355,7 +355,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Warten auf Netzwerkbestätigung</string>
     <string name="rf_held_assets">%1$d zurückgelassen — DigiAssets</string>
-    <string name="rf_held_assets_body">Diese Coins tragen DigiAssets. Sie als gewöhnliche DGB zu übertragen würde die Assets zerstören, daher blieben sie in der alten Wallet — zusammen mit genug DGB, um sie später zu bewegen.</string>
+    <string name="rf_held_assets_body">Diese Coins tragen DigiAssets, und ihr Transfer ist nicht gelungen — sie blieben daher in der alten Wallet, statt als gewöhnliche DGB verschoben und dabei zerstört zu werden. Führen Sie die Wiederherstellung erneut aus.</string>
     <string name="rf_held_unknown">%1$d zurückgelassen — konnte nicht geprüft werden</string>
     <string name="rf_held_unknown_body">Wir konnten die Transaktionen, aus denen diese stammen, nicht lesen und daher nicht feststellen, ob sie DigiAssets tragen. Sie wurden in Ruhe gelassen statt riskiert. Ein späterer Versuch kann das klären.</string>
     <string name="rf_and_more">…und %1$d weitere</string>

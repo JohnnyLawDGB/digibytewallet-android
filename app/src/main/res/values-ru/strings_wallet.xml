@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Ожидание подтверждения сетью</string>
     <string name="rf_held_assets">Оставлено: %1$d — DigiAssets</string>
-    <string name="rf_held_assets_body">На этих монетах есть DigiAssets. Перевод их как обычных DGB уничтожил бы активы, поэтому они остались в старом кошельке вместе с достаточным количеством DGB, чтобы перевести их позже.</string>
+    <string name="rf_held_assets_body">Эти монеты несут DigiAssets, и переместить их не удалось — поэтому они остались в старом кошельке, а не были выметены как обычные DGB, что уничтожило бы их. Запустите восстановление ещё раз, чтобы повторить попытку.</string>
     <string name="rf_held_unknown">Оставлено: %1$d — не удалось проверить</string>
     <string name="rf_held_unknown_body">Мы не смогли прочитать транзакции, из которых они получены, и поэтому не смогли определить, несут ли они DigiAssets. Их оставили нетронутыми, а не стали рисковать. Повторная попытка позже может это прояснить.</string>
     <string name="rf_and_more">…и ещё %1$d</string>

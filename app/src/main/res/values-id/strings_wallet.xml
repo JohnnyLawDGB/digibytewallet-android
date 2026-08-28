@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Menunggu konfirmasi jaringan</string>
     <string name="rf_held_assets">%1$d ditinggalkan — DigiAssets</string>
-    <string name="rf_held_assets_body">Koin ini membawa DigiAssets. Menyapunya sebagai DGB biasa akan menghancurkan asetnya, jadi koin itu ditinggal di dompet lama beserta DGB yang cukup untuk memindahkannya nanti.</string>
+    <string name="rf_held_assets_body">Koin ini membawa DigiAssets dan pemindahannya tidak berhasil — jadi dibiarkan di dompet lama alih-alih disapu sebagai DGB biasa, yang akan menghancurkannya. Jalankan pemulihan lagi untuk mencoba ulang.</string>
     <string name="rf_held_unknown">%1$d ditinggalkan — tidak dapat diperiksa</string>
     <string name="rf_held_unknown_body">Kami tidak dapat membaca transaksi asalnya, sehingga tidak bisa memastikan apakah koin itu membawa DigiAssets. Koin itu dibiarkan saja daripada dipertaruhkan. Mencoba lagi nanti mungkin menyelesaikannya.</string>
     <string name="rf_and_more">…dan %1$d lagi</string>

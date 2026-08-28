@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">等待网络确认</string>
     <string name="rf_held_assets">%1$d 笔留在原处 — DigiAssets</string>
-    <string name="rf_held_assets_body">这些币携带 DigiAssets。将它们当作普通 DGB 归集会销毁这些资产，因此它们被留在旧钱包中，并留下了足够的 DGB 供日后转移。</string>
+    <string name="rf_held_assets_body">这些币携带 DigiAssets，且转移未成功——因此它们被留在旧钱包中，而不是作为普通 DGB 转出（那样会销毁资产）。请重新运行恢复以重试。</string>
     <string name="rf_held_unknown">%1$d 笔留在原处 — 无法检查</string>
     <string name="rf_held_unknown_body">我们无法读取它们来源的交易，因此无法判断其是否携带 DigiAssets。为避免风险，它们被保留原处。稍后重试可能可以解决。</string>
     <string name="rf_and_more">…还有 %1$d 笔</string>

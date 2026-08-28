@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">नेटवर्क पुष्टि लंबित</string>
     <string name="rf_held_assets">%1$d पीछे छूटे — DigiAssets</string>
-    <string name="rf_held_assets_body">इन सिक्कों पर DigiAssets हैं। इन्हें सामान्य DGB की तरह स्वीप करने से एसेट नष्ट हो जाते, इसलिए इन्हें पुराने वॉलेट में छोड़ दिया गया, साथ में इतना DGB भी कि बाद में उन्हें भेजा जा सके।</string>
+    <string name="rf_held_assets_body">इन सिक्कों पर DigiAssets हैं और उन्हें भेजना सफल नहीं हुआ — इसलिए उन्हें सामान्य DGB की तरह भेजने के बजाय पुराने वॉलेट में ही छोड़ दिया गया, क्योंकि वैसा करने पर वे नष्ट हो जातीं। पुनः प्रयास के लिए रिकवरी दोबारा चलाएँ।</string>
     <string name="rf_held_unknown">%1$d पीछे छूटे — जाँच नहीं हो सकी</string>
     <string name="rf_held_unknown_body">हम उन लेनदेन को नहीं पढ़ सके जिनसे ये आए, इसलिए यह नहीं बता सके कि उन पर DigiAssets हैं या नहीं। जोखिम लेने के बजाय उन्हें छोड़ दिया गया। बाद में फिर कोशिश करने पर यह ठीक हो सकता है।</string>
     <string name="rf_and_more">…और %1$d अन्य</string>

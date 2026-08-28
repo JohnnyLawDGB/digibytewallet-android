@@ -434,7 +434,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Pending network confirmation</string>
     <string name="rf_held_assets">%1$d left behind — DigiAssets</string>
-    <string name="rf_held_assets_body">These coins carry DigiAssets. Sweeping them as ordinary DGB would destroy the assets, so they were left in the old wallet along with enough DGB to move them later.</string>
+    <string name="rf_held_assets_body">These coins carry DigiAssets, and moving them did not succeed — so they were left in the old wallet rather than swept as ordinary DGB, which would have destroyed them. Run the recovery again to retry.</string>
     <string name="rf_held_unknown">%1$d left behind — could not check</string>
     <string name="rf_held_unknown_body">We could not read the transactions these came from, so we could not tell whether they carry DigiAssets. They were left alone rather than risked. Trying again later may clear this.</string>
     <string name="rf_and_more">…and %1$d more</string>

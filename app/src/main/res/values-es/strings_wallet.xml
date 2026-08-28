@@ -349,7 +349,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Pendiente de confirmación de la red</string>
     <string name="rf_held_assets">%1$d dejadas atrás — DigiAssets</string>
-    <string name="rf_held_assets_body">Estas monedas llevan DigiAssets. Barrerlas como DGB normal destruiría los activos, así que se dejaron en la billetera antigua junto con suficiente DGB para moverlos más adelante.</string>
+    <string name="rf_held_assets_body">Estas monedas llevan DigiAssets y su traslado no se completó, así que se quedaron en la billetera antigua en lugar de barrerse como DGB normales, lo que las habría destruido. Vuelve a ejecutar la recuperación para reintentarlo.</string>
     <string name="rf_held_unknown">%1$d dejadas atrás — no se pudieron comprobar</string>
     <string name="rf_held_unknown_body">No pudimos leer las transacciones de las que provienen, así que no pudimos saber si llevan DigiAssets. Se dejaron intactas en lugar de arriesgarlas. Volver a intentarlo más tarde puede resolverlo.</string>
     <string name="rf_and_more">…y %1$d más</string>

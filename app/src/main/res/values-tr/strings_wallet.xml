@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Ağ onayı bekleniyor</string>
     <string name="rf_held_assets">%1$d tanesi bırakıldı — DigiAssets</string>
-    <string name="rf_held_assets_body">Bu coinler DigiAssets taşıyor. Onları sıradan DGB gibi aktarmak varlıkları yok ederdi; bu yüzden ileride taşınabilmeleri için yeterli DGB ile birlikte eski cüzdanda bırakıldılar.</string>
+    <string name="rf_held_assets_body">Bu coinler DigiAssets taşıyor ve taşınmaları başarısız oldu — bu yüzden onları yok edecek olan sıradan DGB olarak süpürmek yerine eski cüzdanda bırakıldılar. Yeniden denemek için kurtarmayı tekrar çalıştırın.</string>
     <string name="rf_held_unknown">%1$d tanesi bırakıldı — kontrol edilemedi</string>
     <string name="rf_held_unknown_body">Bunların geldiği işlemleri okuyamadık, bu yüzden DigiAssets taşıyıp taşımadıklarını belirleyemedik. Riske atmak yerine oldukları gibi bırakıldılar. Daha sonra tekrar denemek bunu çözebilir.</string>
     <string name="rf_and_more">…ve %1$d tane daha</string>

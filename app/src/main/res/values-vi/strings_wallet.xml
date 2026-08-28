@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Chờ mạng xác nhận</string>
     <string name="rf_held_assets">%1$d khoản để lại — DigiAssets</string>
-    <string name="rf_held_assets_body">Những đồng này mang DigiAssets. Gom chúng như DGB thông thường sẽ hủy tài sản, nên chúng được để lại trong ví cũ cùng đủ DGB để chuyển đi sau.</string>
+    <string name="rf_held_assets_body">Những đồng này mang DigiAssets và việc chuyển đã không thành công — nên chúng được giữ lại trong ví cũ thay vì bị quét như DGB thường, điều sẽ phá hủy chúng. Hãy chạy lại quá trình khôi phục để thử lại.</string>
     <string name="rf_held_unknown">%1$d khoản để lại — không kiểm tra được</string>
     <string name="rf_held_unknown_body">Chúng tôi không đọc được các giao dịch nguồn của chúng, nên không biết chúng có mang DigiAssets hay không. Chúng được để nguyên thay vì mạo hiểm. Thử lại sau có thể xử lý được.</string>
     <string name="rf_and_more">…và %1$d khoản nữa</string>

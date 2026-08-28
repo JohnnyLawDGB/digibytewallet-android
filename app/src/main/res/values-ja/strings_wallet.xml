@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">ネットワークの承認待ち</string>
     <string name="rf_held_assets">%1$d 件をそのまま残しました — DigiAssets</string>
-    <string name="rf_held_assets_body">これらのコインは DigiAssets を保持しています。通常の DGB として集約するとアセットが失われるため、後で移動できるだけの DGB とともに旧ウォレットに残しました。</string>
+    <string name="rf_held_assets_body">これらのコインは DigiAssets を保持しており、移動に失敗しました。通常の DGB として送ると資産が失われるため、旧ウォレットに残しています。復元をもう一度実行して再試行してください。</string>
     <string name="rf_held_unknown">%1$d 件をそのまま残しました — 確認できませんでした</string>
     <string name="rf_held_unknown_body">これらの出所となる取引を読み取れなかったため、DigiAssets を保持しているか判断できませんでした。リスクを避けてそのまま残しています。後でもう一度試すと解消する場合があります。</string>
     <string name="rf_and_more">…ほか %1$d 件</string>

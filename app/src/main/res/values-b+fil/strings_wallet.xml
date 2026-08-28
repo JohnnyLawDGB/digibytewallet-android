@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Naghihintay ng kumpirmasyon ng network</string>
     <string name="rf_held_assets">%1$d ang naiwan — DigiAssets</string>
-    <string name="rf_held_assets_body">May dalang DigiAssets ang mga coin na ito. Kung isi-sweep bilang ordinaryong DGB, masisira ang mga asset, kaya iniwan ang mga ito sa lumang wallet kasama ang sapat na DGB para mailipat sa ibang pagkakataon.</string>
+    <string name="rf_held_assets_body">May dalang DigiAssets ang mga barya na ito at hindi nagtagumpay ang paglilipat — kaya naiwan sila sa lumang wallet sa halip na walisin bilang ordinaryong DGB, na sisira sa kanila. Patakbuhin muli ang pagbawi para subukan ulit.</string>
     <string name="rf_held_unknown">%1$d ang naiwan — hindi masuri</string>
     <string name="rf_held_unknown_body">Hindi namin mabasa ang mga transaksyong pinanggalingan ng mga ito, kaya hindi namin masabi kung may dala silang DigiAssets. Iniwan na lang ang mga ito kaysa ipagsapalaran. Maaaring maayos ito kapag sinubukan ulit mamaya.</string>
     <string name="rf_and_more">…at %1$d pa</string>

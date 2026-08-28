@@ -347,7 +347,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Aguardando confirmação da rede</string>
     <string name="rf_held_assets">%1$d deixadas para trás — DigiAssets</string>
-    <string name="rf_held_assets_body">Estas moedas carregam DigiAssets. Varrê-las como DGB comum destruiria os ativos, então elas ficaram na carteira antiga junto com DGB suficiente para movê-los depois.</string>
+    <string name="rf_held_assets_body">Estas moedas carregam DigiAssets e a movimentação não funcionou — então ficaram na carteira antiga em vez de serem varridas como DGB comum, o que as destruiria. Execute a recuperação novamente para tentar de novo.</string>
     <string name="rf_held_unknown">%1$d deixadas para trás — não foi possível verificar</string>
     <string name="rf_held_unknown_body">Não conseguimos ler as transações de origem delas, então não pudemos saber se carregam DigiAssets. Elas foram deixadas intactas em vez de arriscadas. Tentar de novo mais tarde pode resolver.</string>
     <string name="rf_and_more">…e mais %1$d</string>

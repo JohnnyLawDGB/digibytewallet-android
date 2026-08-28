@@ -696,7 +696,7 @@ private fun ResultBody(
         }
 
         items(outcomes) { outcome ->
-            OutcomeCard(outcome)
+            OutcomeCard(outcome, assetMoves)
         }
 
         // Moving the DigiAssets the sweep held back. Offered only when there ARE any, and only
@@ -757,7 +757,10 @@ private fun AssetMoveSection(
     }
 }
 @Composable
-private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
+private fun OutcomeCard(
+    outcome: LegacySweepService.SweepOutcome,
+    assetMoves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move> = emptyList(),
+) {
     // "succeeded" here means the broadcast was submitted (reached local relay),
     // NOT confirmed — a PENDING tx still shows a check plus the pending caption
     // below so we never claim confirmed success on local relay alone (#6).
@@ -844,11 +847,20 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
             // is a decision the wallet made on purpose; "could not tell" is an admission, and it
             // may clear on a retry. Merging them into one "skipped" count would hide which is
             // which from the person deciding what to do next.
-            if (outcome.heldBackAssets.isNotEmpty()) {
+            // Only assets that did NOT move. The sweep excludes every asset-bearing outpoint —
+            // spending one as plain DGB destroys it — and under the old order "excluded from the
+            // sweep" and "left behind" were the same list. Since assets move FIRST now they are
+            // not, and reading one as the other printed "2 left behind" directly above "2 of 2
+            // assets moved" on a real mainnet run. See RecoverySequence.assetsLeftBehind.
+            val leftBehind = io.digibyte.core.recovery.RecoverySequence.assetsLeftBehind(
+                assetBearing = outcome.heldBackAssets,
+                moves = assetMoves,
+            )
+            if (leftBehind.isNotEmpty()) {
                 HeldBackNote(
-                    title = stringResource(R.string.rf_held_assets, outcome.heldBackAssets.size),
+                    title = stringResource(R.string.rf_held_assets, leftBehind.size),
                     body = stringResource(R.string.rf_held_assets_body),
-                    outpoints = outcome.heldBackAssets,
+                    outpoints = leftBehind,
                 )
             }
             // The fee-reserve and shortfall notes are gone with AssetFeeReserve. Assets now move

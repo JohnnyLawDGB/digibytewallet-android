@@ -336,7 +336,7 @@
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">En attente de confirmation du réseau</string>
     <string name="rf_held_assets">%1$d laissés en arrière — DigiAssets</string>
-    <string name="rf_held_assets_body">Ces pièces portent des DigiAssets. Les balayer comme des DGB ordinaires détruirait les actifs : elles ont donc été laissées dans l\'ancien portefeuille, avec assez de DGB pour les déplacer plus tard.</string>
+    <string name="rf_held_assets_body">Ces pièces portent des DigiAssets et leur déplacement a échoué — elles sont donc restées dans l\'ancien portefeuille plutôt que d\'être balayées comme des DGB ordinaires, ce qui les aurait détruites. Relancez la récupération pour réessayer.</string>
     <string name="rf_held_unknown">%1$d laissés en arrière — vérification impossible</string>
     <string name="rf_held_unknown_body">Nous n\'avons pas pu lire les transactions dont ces pièces proviennent, donc impossible de savoir si elles portent des DigiAssets. Elles ont été laissées intactes plutôt que risquées. Réessayer plus tard peut résoudre ce point.</string>
     <string name="rf_and_more">…et %1$d de plus</string>
