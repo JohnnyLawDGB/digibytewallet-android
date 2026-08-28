@@ -348,10 +348,6 @@
     <string name="rf_pending">Ожидание подтверждения сетью</string>
     <string name="rf_held_assets">Оставлено: %1$d — DigiAssets</string>
     <string name="rf_held_assets_body">На этих монетах есть DigiAssets. Перевод их как обычных DGB уничтожил бы активы, поэтому они остались в старом кошельке вместе с достаточным количеством DGB, чтобы перевести их позже.</string>
-    <string name="rf_held_reserve">Удержано: %1$d — для перевода активов</string>
-    <string name="rf_held_reserve_body">Перевод DigiAsset требует комиссии сети, а его собственная монета слишком мала, чтобы её оплатить. Столько DGB осталось, чтобы активы выше можно было перевести, не отправляя средства обратно в старый кошелёк.</string>
-    <string name="rf_shortfall_title">Недостаточно DGB для перевода активов</string>
-    <string name="rf_shortfall_body">Активы выше в безопасности, но этому кошельку не хватает примерно %1$s на комиссии для их перевода. Ничего не переведено, поэтому имеющееся всё ещё можно на это направить — отправьте немного DGB в старый кошелёк и повторите попытку.</string>
     <string name="rf_held_unknown">Оставлено: %1$d — не удалось проверить</string>
     <string name="rf_held_unknown_body">Мы не смогли прочитать транзакции, из которых они получены, и поэтому не смогли определить, несут ли они DigiAssets. Их оставили нетронутыми, а не стали рисковать. Повторная попытка позже может это прояснить.</string>
     <string name="rf_and_more">…и ещё %1$d</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">Продолжить с парольной фразой</string>
     <string name="pass_screen_continue_without">Продолжить без неё</string>
     <string name="pass_screen_separate_note">Храните её отдельно от слов, которые вы только что записали.</string>
+    <string name="rf_will_move_assets">При восстановлении сначала будут перемещены %1$d выходов DigiAsset в этот кошелёк. Переводы активов необратимы.</string>
 </resources>

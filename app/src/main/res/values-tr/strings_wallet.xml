@@ -348,10 +348,6 @@
     <string name="rf_pending">Ağ onayı bekleniyor</string>
     <string name="rf_held_assets">%1$d tanesi bırakıldı — DigiAssets</string>
     <string name="rf_held_assets_body">Bu coinler DigiAssets taşıyor. Onları sıradan DGB gibi aktarmak varlıkları yok ederdi; bu yüzden ileride taşınabilmeleri için yeterli DGB ile birlikte eski cüzdanda bırakıldılar.</string>
-    <string name="rf_held_reserve">%1$d tanesi ayrıldı — varlıkları taşımak için</string>
-    <string name="rf_held_reserve_body">Bir DigiAsset\'i taşımak ağ ücreti gerektirir ve kendi coini bunu ödemek için fazlasıyla küçüktür. Yukarıdaki varlıklar, eski cüzdana para geri göndermenize gerek kalmadan taşınabilsin diye bu kadar DGB geride bırakıldı.</string>
-    <string name="rf_shortfall_title">Varlıkları taşımak için yeterli DGB yok</string>
-    <string name="rf_shortfall_body">Yukarıdaki varlıklar güvende, ancak bu cüzdanda onları taşımak için gereken ücretten yaklaşık %1$s eksik var. Hiçbir şey aktarılmadı, dolayısıyla buradaki bakiye hâlâ bunun için kullanılabilir — eski cüzdana biraz DGB gönderip tekrar deneyin.</string>
     <string name="rf_held_unknown">%1$d tanesi bırakıldı — kontrol edilemedi</string>
     <string name="rf_held_unknown_body">Bunların geldiği işlemleri okuyamadık, bu yüzden DigiAssets taşıyıp taşımadıklarını belirleyemedik. Riske atmak yerine oldukları gibi bırakıldılar. Daha sonra tekrar denemek bunu çözebilir.</string>
     <string name="rf_and_more">…ve %1$d tane daha</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">Parola ile devam et</string>
     <string name="pass_screen_continue_without">Parolasız devam et</string>
     <string name="pass_screen_separate_note">Az önce yazdığınız kelimelerden ayrı bir yerde saklayın.</string>
+    <string name="rf_will_move_assets">Kurtarma işlemi önce %1$d DigiAsset çıkış noktasını bu cüzdana taşır. Varlık transferleri geri alınamaz.</string>
 </resources>

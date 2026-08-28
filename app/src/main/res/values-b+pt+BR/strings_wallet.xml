@@ -348,10 +348,6 @@
     <string name="rf_pending">Aguardando confirmação da rede</string>
     <string name="rf_held_assets">%1$d deixadas para trás — DigiAssets</string>
     <string name="rf_held_assets_body">Estas moedas carregam DigiAssets. Varrê-las como DGB comum destruiria os ativos, então elas ficaram na carteira antiga junto com DGB suficiente para movê-los depois.</string>
-    <string name="rf_held_reserve">%1$d reservadas — para mover os ativos</string>
-    <string name="rf_held_reserve_body">Mover um DigiAsset custa uma taxa de rede, e a própria moeda dele é pequena demais para pagá-la. Esta quantia de DGB ficou para trás para que os ativos acima possam ser transferidos sem que você precise enviar fundos de volta à carteira antiga.</string>
-    <string name="rf_shortfall_title">DGB insuficiente para mover os ativos</string>
-    <string name="rf_shortfall_body">Os ativos acima estão seguros, mas faltam cerca de %1$s nesta carteira para as taxas necessárias para movê-los. Nada foi varrido, então o que está aqui ainda pode ser usado para isso — envie um pouco de DGB para a carteira antiga e tente novamente.</string>
     <string name="rf_held_unknown">%1$d deixadas para trás — não foi possível verificar</string>
     <string name="rf_held_unknown_body">Não conseguimos ler as transações de origem delas, então não pudemos saber se carregam DigiAssets. Elas foram deixadas intactas em vez de arriscadas. Tentar de novo mais tarde pode resolver.</string>
     <string name="rf_and_more">…e mais %1$d</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">Continuar com frase-senha</string>
     <string name="pass_screen_continue_without">Continuar sem ela</string>
     <string name="pass_screen_separate_note">Guarde-a separada das palavras que você acabou de anotar.</string>
+    <string name="rf_will_move_assets">A recuperação moverá primeiro %1$d outpoint(s) DigiAsset para esta carteira. Transferências de ativos são irreversíveis.</string>
 </resources>

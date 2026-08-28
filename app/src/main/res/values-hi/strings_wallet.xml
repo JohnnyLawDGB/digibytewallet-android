@@ -348,10 +348,6 @@
     <string name="rf_pending">नेटवर्क पुष्टि लंबित</string>
     <string name="rf_held_assets">%1$d पीछे छूटे — DigiAssets</string>
     <string name="rf_held_assets_body">इन सिक्कों पर DigiAssets हैं। इन्हें सामान्य DGB की तरह स्वीप करने से एसेट नष्ट हो जाते, इसलिए इन्हें पुराने वॉलेट में छोड़ दिया गया, साथ में इतना DGB भी कि बाद में उन्हें भेजा जा सके।</string>
-    <string name="rf_held_reserve">%1$d रोके गए — एसेट भेजने के लिए</string>
-    <string name="rf_held_reserve_body">DigiAsset भेजने में नेटवर्क शुल्क लगता है, और उसका अपना सिक्का उसे चुकाने के लिए बहुत छोटा है। इतना DGB पीछे रखा गया ताकि ऊपर दिए एसेट भेजे जा सकें और आपको पुराने वॉलेट में फंड वापस न भेजना पड़े।</string>
-    <string name="rf_shortfall_title">एसेट भेजने के लिए पर्याप्त DGB नहीं</string>
-    <string name="rf_shortfall_body">ऊपर दिए एसेट सुरक्षित हैं, लेकिन इस वॉलेट में उन्हें भेजने के शुल्क से लगभग %1$s कम है। कुछ भी स्वीप नहीं किया गया, इसलिए यहाँ जो है वह इसमें काम आ सकता है — पुराने वॉलेट में थोड़ा DGB भेजें और फिर कोशिश करें।</string>
     <string name="rf_held_unknown">%1$d पीछे छूटे — जाँच नहीं हो सकी</string>
     <string name="rf_held_unknown_body">हम उन लेनदेन को नहीं पढ़ सके जिनसे ये आए, इसलिए यह नहीं बता सके कि उन पर DigiAssets हैं या नहीं। जोखिम लेने के बजाय उन्हें छोड़ दिया गया। बाद में फिर कोशिश करने पर यह ठीक हो सकता है।</string>
     <string name="rf_and_more">…और %1$d अन्य</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">पासफ़्रेज़ के साथ जारी रखें</string>
     <string name="pass_screen_continue_without">इसके बिना जारी रखें</string>
     <string name="pass_screen_separate_note">इसे उन शब्दों से अलग जगह रखें जो आपने अभी लिखे हैं।</string>
+    <string name="rf_will_move_assets">पुनर्प्राप्ति पहले %1$d DigiAsset आउटपॉइंट इस वॉलेट में भेजेगी। संपत्ति हस्तांतरण अपरिवर्तनीय हैं।</string>
 </resources>

@@ -356,10 +356,6 @@
     <string name="rf_pending">Warten auf Netzwerkbestätigung</string>
     <string name="rf_held_assets">%1$d zurückgelassen — DigiAssets</string>
     <string name="rf_held_assets_body">Diese Coins tragen DigiAssets. Sie als gewöhnliche DGB zu übertragen würde die Assets zerstören, daher blieben sie in der alten Wallet — zusammen mit genug DGB, um sie später zu bewegen.</string>
-    <string name="rf_held_reserve">%1$d zurückbehalten — um die Assets zu bewegen</string>
-    <string name="rf_held_reserve_body">Das Bewegen eines DigiAssets kostet eine Netzwerkgebühr, und sein eigener Coin ist viel zu klein, um sie zu zahlen. So viel DGB blieb zurück, damit die Assets oben übertragen werden können, ohne dass Sie Guthaben an die alte Wallet zurücksenden müssen.</string>
-    <string name="rf_shortfall_title">Nicht genug DGB, um die Assets zu bewegen</string>
-    <string name="rf_shortfall_body">Die Assets oben sind sicher, aber dieser Wallet fehlen etwa %1$s für die nötigen Gebühren, um sie zu bewegen. Es wurde nichts übertragen, sodass das Vorhandene weiterhin dafür verwendet werden kann — senden Sie etwas DGB an die alte Wallet und versuchen Sie es erneut.</string>
     <string name="rf_held_unknown">%1$d zurückgelassen — konnte nicht geprüft werden</string>
     <string name="rf_held_unknown_body">Wir konnten die Transaktionen, aus denen diese stammen, nicht lesen und daher nicht feststellen, ob sie DigiAssets tragen. Sie wurden in Ruhe gelassen statt riskiert. Ein späterer Versuch kann das klären.</string>
     <string name="rf_and_more">…und %1$d weitere</string>
@@ -565,4 +561,5 @@
     <string name="pass_screen_continue_with">Mit Passphrase fortfahren</string>
     <string name="pass_screen_continue_without">Ohne fortfahren</string>
     <string name="pass_screen_separate_note">Bewahren Sie sie getrennt von den soeben notierten Wörtern auf.</string>
+    <string name="rf_will_move_assets">Bei der Wiederherstellung werden zuerst %1$d DigiAsset-Outpoint(s) in diese Wallet verschoben. Asset-Übertragungen sind unwiderruflich.</string>
 </resources>

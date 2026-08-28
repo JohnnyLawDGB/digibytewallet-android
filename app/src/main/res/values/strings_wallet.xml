@@ -435,10 +435,6 @@
     <string name="rf_pending">Pending network confirmation</string>
     <string name="rf_held_assets">%1$d left behind — DigiAssets</string>
     <string name="rf_held_assets_body">These coins carry DigiAssets. Sweeping them as ordinary DGB would destroy the assets, so they were left in the old wallet along with enough DGB to move them later.</string>
-    <string name="rf_held_reserve">%1$d kept back — to move the assets</string>
-    <string name="rf_held_reserve_body">A DigiAsset costs a network fee to move, and its own coin is far too small to pay it. This much DGB stayed behind so the assets above can be transferred without you having to send funds back to the old wallet.</string>
-    <string name="rf_shortfall_title">Not enough DGB to move the assets</string>
-    <string name="rf_shortfall_body">The assets above are safe, but this wallet is about %1$s short of the fees needed to move them. Nothing was swept, so what is here can still pay toward it — send a little DGB to the old wallet and try again.</string>
     <string name="rf_held_unknown">%1$d left behind — could not check</string>
     <string name="rf_held_unknown_body">We could not read the transactions these came from, so we could not tell whether they carry DigiAssets. They were left alone rather than risked. Trying again later may clear this.</string>
     <string name="rf_and_more">…and %1$d more</string>
@@ -688,4 +684,5 @@
     <string name="pass_screen_continue_with">Continue with a passphrase</string>
     <string name="pass_screen_continue_without">Continue without one</string>
     <string name="pass_screen_separate_note">Keep it somewhere separate from the words you just wrote down.</string>
+    <string name="rf_will_move_assets">Recovering this wallet will also move %1$d DigiAsset outpoint(s) into it first. Asset transfers are irreversible.</string>
 </resources>

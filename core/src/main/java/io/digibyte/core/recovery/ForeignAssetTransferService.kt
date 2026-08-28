@@ -76,6 +76,9 @@ class ForeignAssetTransferService(
         val units: Long,
         val txid: String?,
         val failureReason: String?,
+        /** Every outpoint this move's plan spends. Empty when no plan was built. The sweep is
+         *  the complement of these — see [RecoverySequence.sweepExclusions]. */
+        val spentInputs: List<String> = emptyList(),
     ) {
         val moved: Boolean get() = txid != null
     }
@@ -97,8 +100,12 @@ class ForeignAssetTransferService(
         results: List<RecoveryScanService.ProfileResult>,
         destAddress: String,
         feePerKb: Long = 100_000L,
+        /** Reuses the sweep's classification. Each pass fetches every parent transaction, so
+         *  classifying twice for one recovery doubles the network work for the same answer. */
+        precomputedVerdicts: Map<io.digibyte.core.reconcile.UtxoEntry, ForeignUtxoAssetClassifier.Verdict>? = null,
     ): Result = withContext(Dispatchers.IO) {
-        val verdicts = assetClassifier.classify(results.flatMap { it.utxos })
+        val verdicts = precomputedVerdicts
+            ?: assetClassifier.classify(results.flatMap { it.utxos })
         val moves = mutableListOf<Move>()
 
         for (result in results) {
@@ -112,11 +119,6 @@ class ForeignAssetTransferService(
 
             log('i', "profile=${result.profile.label}: ${partition.assetBearing.size} asset-bearing " +
                     "outpoint(s) to move, ${partition.sweepable.size} plain",
-            )
-
-            val reserve = AssetFeeReserve.reserve(
-                sweepable = partition.sweepable,
-                assetCount = partition.assetBearing.size,
             )
 
             val byAddress = result.derivedAddresses.associateBy { it.address }
@@ -145,7 +147,10 @@ class ForeignAssetTransferService(
             }
             // A fee UTXO we cannot sign for is simply not usable as fee money; it is reported by
             // the sweep, not here, and dropping it only narrows the pool.
-            val feePool = reserve.reserved.mapNotNull { toSpend(it, byAddress) }
+            // Every plain-DGB outpoint, not a reserved subset. The sweep has not run yet, so
+            // all of it is still available — and what these plans spend is what the sweep will
+            // exclude. Nothing is estimated.
+            val feePool = partition.sweepable.mapNotNull { toSpend(it, byAddress) }
 
             log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s) / " +
                     "${feePool.sumOf { it.amountSat }} sats; units=" +
@@ -158,6 +163,7 @@ class ForeignAssetTransferService(
                 when (val r = item.result) {
                     is ForeignAssetTransferPlan.Result.Refused -> {
                         log('w', "${item.outpoint}: refused — ${r.reason}: ${r.detail}")
+                        // No plan, so no inputs to protect beyond the asset outpoint itself.
                         moves += Move(item.outpoint, 0L, null, "${r.reason}: ${r.detail}")
                     }
 
@@ -170,20 +176,22 @@ class ForeignAssetTransferService(
                         if (signed == null) {
                             log('w', "${item.outpoint}: native refused to sign")
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
-                                "native refused to sign — see log for the reason")
+                                "native refused to sign — see log for the reason",
+                                spentInputs = r.plan.outpoints())
                             continue
                         }
                         val bytes = runCatching { hexToBytes(signed) }.getOrNull()
                         if (bytes == null) {
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
-                                "signed hex malformed")
+                                "signed hex malformed", spentInputs = r.plan.outpoints())
                             continue
                         }
                         val txid = broadcast(bytes)
                         if (txid == null) {
                             log('w', "${item.outpoint}: broadcast failed")
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
-                                "broadcast failed — check peer connection")
+                                "broadcast failed — check peer connection",
+                                spentInputs = r.plan.outpoints())
                             continue
                         }
                         // Same durability path the sweep and the wallet's own asset send use, so
@@ -202,7 +210,8 @@ class ForeignAssetTransferService(
                             )
                         }
                         log('i', "${item.outpoint}: MOVED in $txid")
-                        moves += Move(item.outpoint, r.plan.assetUnits, txid, null)
+                        moves += Move(item.outpoint, r.plan.assetUnits, txid, null,
+                            spentInputs = r.plan.outpoints())
                     }
                 }
             }
@@ -210,6 +219,9 @@ class ForeignAssetTransferService(
 
         Result(moves)
     }
+
+    private fun ForeignAssetTransferPlan.Plan.outpoints(): List<String> =
+        inputs.map { "${it.txid}:${it.vout}" }
 
     /** Units on this outpoint, read from the parent transaction the scan already fetched. */
     private fun unitsOn(

@@ -56,12 +56,10 @@ class LegacySweepService(
          *  would not fetch or parse. Distinct from [heldBackAssets]: these MIGHT be plain DGB.
          *  Held anyway, because being wrong here burns an asset. Retrying later may free them. */
         val heldBackUnknown: List<String> = emptyList(),
-        /** Outpoints kept back as fee money so the held assets can actually be moved later.
-         *  Without this the assets survive the sweep and are then unmovable. */
+        /** Outpoints the DigiAsset moves already claimed — spent by a move that broadcast, or
+         *  held for one that failed and will be retried. Not a reserve: these are the exact
+         *  inputs concrete plans named, which is why AssetFeeReserve's estimate is gone. */
         val heldBackFeeReserve: List<String> = emptyList(),
-        /** Sats short of what the held assets need to move. Non-zero means they cannot leave this
-         *  wallet without new funds — the user has to be told, not left to discover it. */
-        val feeReserveShortfall: Long = 0L,
     )
 
     data class Result(
@@ -97,7 +95,13 @@ class LegacySweepService(
                 ?: return@withContext Result(nonNativeResults.map {
                     SweepOutcome(it.profile, null, null, 0L, 0, "seed derivation failed", BroadcastState.FAILED)
                 })
-            sweepFromSeed(seedBytes, nonNativeResults, destAddress, feePerKb, destIsSelf)
+            sweepFromSeed(
+                seedBytes = seedBytes,
+                nonNativeResults = nonNativeResults,
+                destAddress = destAddress,
+                feePerKb = feePerKb,
+                destIsSelf = destIsSelf,
+            )
         } finally {
             seedBytes?.fill(0)
             phraseBytes.fill(0)
@@ -111,6 +115,13 @@ class LegacySweepService(
         nonNativeResults: List<RecoveryScanService.ProfileResult>,
         destAddress: String,
         feePerKb: Long = 100_000L,
+        /** Outpoints the DigiAsset moves already spent, or are holding for a retry. The sweep is
+         *  the complement of these — see [RecoverySequence.sweepExclusions]. Empty when the
+         *  wallet holds no assets. */
+        excludeOutpoints: Set<String> = emptySet(),
+        /** Reuses the move phase's classification rather than fetching every parent transaction
+         *  a second time for the same answer. */
+        precomputedVerdicts: Map<io.digibyte.core.reconcile.UtxoEntry, ForeignUtxoAssetClassifier.Verdict>? = null,
         /** True when [destAddress] is an address THIS wallet owns (the default
          *  "recover into my own wallet" path). Recorded on the OutgoingTxStore
          *  entry so the activity list won't misrender the balance-increasing
@@ -120,7 +131,8 @@ class LegacySweepService(
     ): Result {
         // Classified ONCE for the whole sweep rather than per profile: profiles share addresses
         // and therefore parent transactions, and the classifier caches by txid within a call.
-        val verdicts = assetClassifier.classify(nonNativeResults.flatMap { it.utxos })
+        val verdicts = precomputedVerdicts
+            ?: assetClassifier.classify(nonNativeResults.flatMap { it.utxos })
 
         val outcomes = nonNativeResults.map { result ->
             if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
@@ -133,7 +145,8 @@ class LegacySweepService(
                     SweepOutcome(result.profile, null, null, 0L, 0, refusal,
                         broadcastState = BroadcastState.FAILED)
                 } else {
-                    sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf, verdicts)
+                    sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf, verdicts,
+                        excludeOutpoints)
                 }
             }
         }
@@ -177,6 +190,7 @@ class LegacySweepService(
         feePerKb: Long,
         destIsSelf: Boolean,
         verdicts: Map<io.digibyte.core.reconcile.UtxoEntry, ForeignUtxoAssetClassifier.Verdict>,
+        excludeOutpoints: Set<String>,
     ): SweepOutcome {
         val profile = result.profile
 
@@ -200,24 +214,23 @@ class LegacySweepService(
                     "${heldUnknown.size} unclassified outpoint(s); sweeping ${partition.sweepable.size}",
             )
         }
-        // Assets must move while the DGB that pays their fees is still here. Holding an asset
-        // back but taking every coin around it leaves it safe and UNMOVABLE — its own marker
-        // output is ~6,000 sats against a ~40,000 sat transfer — stranded in a wallet the user is
-        // walking away from. So the fee money stays put until the asset does.
-        val reserve = AssetFeeReserve.reserve(
-            sweepable = partition.sweepable,
-            assetCount = partition.assetBearing.size,
-        )
-        val heldReserve = reserve.reserved.map { "${it.txid}:${it.vout}" }
-        if (heldReserve.isNotEmpty()) {
+        // The DigiAsset moves have already run. What they spent — and, for a move that failed,
+        // what its plan named — is excluded here. This used to be AssetFeeReserve holding back a
+        // per-asset CONSTANT chosen before anything knew what a transfer costs; it shipped at
+        // 40,000 sats against a real 54,900-70,100. Reordered, there is nothing to estimate:
+        // these are the outpoints concrete plans actually claimed. See RecoverySequence.
+        val stillSweepable = partition.sweepable.filterNot { "${it.txid}:${it.vout}" in excludeOutpoints }
+        val heldForAssets = partition.sweepable
+            .filter { "${it.txid}:${it.vout}" in excludeOutpoints }
+            .map { "${it.txid}:${it.vout}" }
+        if (heldForAssets.isNotEmpty()) {
             android.util.Log.i(
                 "LegacySweep",
-                "profile=${profile.label}: reserving ${reserve.reserved.sumOf { it.amountSatoshi }} " +
-                    "sats across ${heldReserve.size} outpoint(s) to move ${partition.assetBearing.size} " +
-                    "asset(s); shortfall=${reserve.shortfall}",
+                "profile=${profile.label}: ${heldForAssets.size} outpoint(s) already claimed by " +
+                    "the DigiAsset move(s); sweeping ${stillSweepable.size}",
             )
         }
-        val sweepableResult = result.copy(utxos = reserve.stillSweepable)
+        val sweepableResult = result.copy(utxos = stillSweepable)
         // #3: each UTXO's (chain,index) is carried straight from its
         // DerivedAddress — no positional reconstruction vs gapExternal, so a
         // dropped empty slot can't sign the wrong child key. #4: a UTXO with a
@@ -230,7 +243,7 @@ class LegacySweepService(
             // mappable UTXOs" tells someone looking at a wallet they can see has coins in it that
             // it malfunctioned and their funds are at risk — when in fact the wallet deliberately
             // kept them so their DigiAsset would still be movable.
-            val reservedEverything = reserve.reserved.isNotEmpty() && reserve.shortfall == 0L
+            val reservedEverything = heldForAssets.isNotEmpty()
             val reason = when {
                 reservedEverything ->
                     "Nothing was swept — all of it was kept back so your " +
@@ -251,8 +264,7 @@ class LegacySweepService(
                 heldBackUnknown = heldUnknown,
                 // Previously omitted here, so the one branch where the reserve explains
                 // EVERYTHING was the one branch that did not mention it.
-                heldBackFeeReserve = heldReserve,
-                feeReserveShortfall = reserve.shortfall,
+                heldBackFeeReserve = heldForAssets,
             )
         }
 
@@ -275,8 +287,7 @@ class LegacySweepService(
             skippedNoScript = inputs.skippedNoScript,
             heldBackAssets = heldAssets,
             heldBackUnknown = heldUnknown,
-            heldBackFeeReserve = heldReserve,
-            feeReserveShortfall = reserve.shortfall,
+            heldBackFeeReserve = heldForAssets,
         )
 
         // Broadcast via the existing publishTransaction JNI — it takes raw
@@ -333,8 +344,7 @@ class LegacySweepService(
             skippedNoScript = inputs.skippedNoScript,
             heldBackAssets = heldAssets,
             heldBackUnknown = heldUnknown,
-            heldBackFeeReserve = heldReserve,
-            feeReserveShortfall = reserve.shortfall,
+            heldBackFeeReserve = heldForAssets,
         )
     }
 

@@ -337,10 +337,6 @@
     <string name="rf_pending">En attente de confirmation du réseau</string>
     <string name="rf_held_assets">%1$d laissés en arrière — DigiAssets</string>
     <string name="rf_held_assets_body">Ces pièces portent des DigiAssets. Les balayer comme des DGB ordinaires détruirait les actifs : elles ont donc été laissées dans l\'ancien portefeuille, avec assez de DGB pour les déplacer plus tard.</string>
-    <string name="rf_held_reserve">%1$d conservés — pour déplacer les actifs</string>
-    <string name="rf_held_reserve_body">Déplacer un DigiAsset coûte des frais de réseau, et sa propre pièce est bien trop petite pour les payer. Ce montant de DGB est resté en arrière afin que les actifs ci-dessus puissent être transférés sans que vous ayez à renvoyer des fonds vers l\'ancien portefeuille.</string>
-    <string name="rf_shortfall_title">Pas assez de DGB pour déplacer les actifs</string>
-    <string name="rf_shortfall_body">Les actifs ci-dessus sont en sécurité, mais il manque environ %1$s à ce portefeuille pour couvrir les frais de leur déplacement. Rien n\'a été balayé : ce qui s\'y trouve peut donc encore y contribuer — envoyez un peu de DGB à l\'ancien portefeuille et réessayez.</string>
     <string name="rf_held_unknown">%1$d laissés en arrière — vérification impossible</string>
     <string name="rf_held_unknown_body">Nous n\'avons pas pu lire les transactions dont ces pièces proviennent, donc impossible de savoir si elles portent des DigiAssets. Elles ont été laissées intactes plutôt que risquées. Réessayer plus tard peut résoudre ce point.</string>
     <string name="rf_and_more">…et %1$d de plus</string>
@@ -537,4 +533,5 @@
     <string name="pass_screen_continue_with">Continuer avec une phrase secrète</string>
     <string name="pass_screen_continue_without">Continuer sans</string>
     <string name="pass_screen_separate_note">Conservez-la séparément des mots que vous venez de noter.</string>
+    <string name="rf_will_move_assets">La récupération déplacera d\'abord %1$d outpoint(s) DigiAsset vers ce portefeuille. Les transferts d\'actifs sont irréversibles.</string>
 </resources>

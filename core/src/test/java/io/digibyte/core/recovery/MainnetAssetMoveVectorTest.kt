@@ -51,6 +51,11 @@ class MainnetAssetMoveVectorTest {
 
     private val dest = "dgb1qtlevm6s950xg5kyvmup7vk2zrt3d9u2pcj8f59"
 
+    private fun spend(u: UtxoEntry) = ForeignAssetTransferPlan.Spend(
+        txid = u.txid, vout = u.vout, amountSat = u.amountSatoshi,
+        scriptPubKeyHex = script, chain = 0, index = 0,
+    )
+
     // ---- the quantity, read from somebody else's encoder ---------------------------------------
 
     @Test fun `units are read off the real marker`() {
@@ -80,30 +85,49 @@ class MainnetAssetMoveVectorTest {
         assertEquals(10_000_000L, split.sweepableSat)
     }
 
-    // ---- the reserve, and what is left to sweep -------------------------------------------------
+    // ---- what the move takes, and what is left to sweep ---------------------------------------
 
-    @Test fun `one output funds the move and the other is still swept`() {
-        val reserve = AssetFeeReserve.reserve(sweepable = listOf(dgbA, dgbB), assetCount = 1)
+    /**
+     * Assets-first: the move plans against BOTH plain outputs and takes only what it needs. What
+     * it spends is then excluded from the sweep, and the rest is swept.
+     *
+     * Under the old order this was AssetFeeReserve holding back a per-asset constant guessed
+     * before the transfer existed. Here the number comes from the plan itself.
+     */
+    @Test fun `the move takes one output and the other is still swept`() {
+        val units = ForeignAssetQuantity.unitsOn(assetTxOutputs, vout = 0)
+        val planned = ForeignAssetTransferBatch.plan(
+            assets = listOf(ForeignAssetTransferBatch.AssetItem(spend(assetUtxo), units)),
+            feePool = listOf(spend(dgbA), spend(dgbB)),
+            destAddress = dest,
+            feePerKb = 100_000L,
+        )
+        val plan = (planned.single().result as ForeignAssetTransferPlan.Result.Ok).plan
 
-        assertEquals("exactly one output held back", 1, reserve.reserved.size)
-        assertEquals("the other is still swept", 1, reserve.stillSweepable.size)
-        assertEquals("nothing is short", 0L, reserve.shortfall)
+        assertEquals("asset input plus exactly one fee input", 2, plan.inputs.size)
+
+        val excluded = RecoverySequence.sweepExclusions(
+            listOf(
+                RecoverySequence.MoveRecord(
+                    outpoint = "${assetUtxo.txid}:${assetUtxo.vout}",
+                    spentInputs = plan.inputs.map { "${it.txid}:${it.vout}" },
+                    broadcast = true,
+                ),
+            ),
+        )
+        val stillSweepable = listOf(dgbA, dgbB).filterNot { "${it.txid}:${it.vout}" in excluded }
+        assertEquals("one plain output survives for the sweep", 1, stillSweepable.size)
+        assertEquals(5_000_000L, stillSweepable.single().amountSatoshi)
     }
 
     // ---- the transfer itself ---------------------------------------------------------------------
 
     @Test fun `the move plans successfully against the real wallet`() {
-        val reserve = AssetFeeReserve.reserve(sweepable = listOf(dgbA, dgbB), assetCount = 1)
         val units = ForeignAssetQuantity.unitsOn(assetTxOutputs, vout = 0)
 
-        fun spend(u: UtxoEntry, chain: Int, index: Int) = ForeignAssetTransferPlan.Spend(
-            txid = u.txid, vout = u.vout, amountSat = u.amountSatoshi,
-            scriptPubKeyHex = script, chain = chain, index = index,
-        )
-
         val planned = ForeignAssetTransferBatch.plan(
-            assets = listOf(ForeignAssetTransferBatch.AssetItem(spend(assetUtxo, 0, 0), units)),
-            feePool = reserve.reserved.map { spend(it, 0, 0) },
+            assets = listOf(ForeignAssetTransferBatch.AssetItem(spend(assetUtxo), units)),
+            feePool = listOf(spend(dgbA), spend(dgbB)),
             destAddress = dest,
             feePerKb = 100_000L,
         )

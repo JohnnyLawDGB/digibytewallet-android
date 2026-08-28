@@ -350,10 +350,6 @@
     <string name="rf_pending">Pendiente de confirmación de la red</string>
     <string name="rf_held_assets">%1$d dejadas atrás — DigiAssets</string>
     <string name="rf_held_assets_body">Estas monedas llevan DigiAssets. Barrerlas como DGB normal destruiría los activos, así que se dejaron en la billetera antigua junto con suficiente DGB para moverlos más adelante.</string>
-    <string name="rf_held_reserve">%1$d reservadas — para mover los activos</string>
-    <string name="rf_held_reserve_body">Mover un DigiAsset cuesta una comisión de red, y su propia moneda es demasiado pequeña para pagarla. Esta cantidad de DGB se quedó atrás para que los activos de arriba puedan transferirse sin que tengas que devolver fondos a la billetera antigua.</string>
-    <string name="rf_shortfall_title">No hay suficiente DGB para mover los activos</string>
-    <string name="rf_shortfall_body">Los activos de arriba están a salvo, pero a esta billetera le faltan unos %1$s para las comisiones necesarias para moverlos. No se barrió nada, así que lo que hay aquí todavía puede contribuir — envía un poco de DGB a la billetera antigua e inténtalo de nuevo.</string>
     <string name="rf_held_unknown">%1$d dejadas atrás — no se pudieron comprobar</string>
     <string name="rf_held_unknown_body">No pudimos leer las transacciones de las que provienen, así que no pudimos saber si llevan DigiAssets. Se dejaron intactas en lugar de arriesgarlas. Volver a intentarlo más tarde puede resolverlo.</string>
     <string name="rf_and_more">…y %1$d más</string>
@@ -559,4 +555,5 @@
     <string name="pass_screen_continue_with">Continuar con frase de contraseña</string>
     <string name="pass_screen_continue_without">Continuar sin ella</string>
     <string name="pass_screen_separate_note">Guárdala en un lugar separado de las palabras que acabas de anotar.</string>
+    <string name="rf_will_move_assets">La recuperación moverá primero %1$d punto(s) de salida DigiAsset a esta billetera. Las transferencias de activos son irreversibles.</string>
 </resources>

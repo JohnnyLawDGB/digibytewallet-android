@@ -58,25 +58,26 @@ class RecoverFundsViewModel @Inject constructor(
              *  incomplete, and "no funds" must not be presented as a settled answer. */
             val partialFailurePaths: List<String> = emptyList(),
             val isForeign: Boolean = false,
+            /**
+             * How many outpoints look asset-bearing, counted from the raw parent transactions the
+             * scan ALREADY fetched — no extra network. Used to warn before the recovery runs,
+             * because moving an asset is irreversible and the user should be told first.
+             *
+             * Coarse in the same direction as ForeignUtxoAssetClassifier: it counts outpoints
+             * whose parent transaction carries a DigiAsset marker. Over-counting warns about an
+             * asset that turns out to be plain change; under-counting would fail to warn at all.
+             */
+            val assetOutpointCount: Int = 0,
         ) : UiState()
         data object Sweeping : UiState()
-        data class Done(val outcomes: List<LegacySweepService.SweepOutcome>) : UiState()
+        data class Done(
+            val outcomes: List<LegacySweepService.SweepOutcome>,
+            /** What happened to each DigiAsset, in the phase that ran BEFORE the sweep. */
+            val assetMoves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move> = emptyList(),
+        ) : UiState()
         data class Error(val reason: String) : UiState()
     }
 
-    /**
-     * Moving the DigiAssets the sweep deliberately left behind.
-     *
-     * A separate flow from [UiState] on purpose. The sweep has already broadcast by the time
-     * this runs, so its result must stay on screen — an asset move that failed cannot be allowed
-     * to overwrite the record of coins that DID move.
-     */
-    sealed class AssetMoveState {
-        data object Idle : AssetMoveState()
-        data object Moving : AssetMoveState()
-        data class Done(val moves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>) : AssetMoveState()
-        data class Error(val reason: String) : AssetMoveState()
-    }
 
 
     /**
@@ -101,8 +102,6 @@ class RecoverFundsViewModel @Inject constructor(
      */
     private var lastFindings: List<RecoveryScanService.ProfileResult> = emptyList()
 
-    private val _assetMove = MutableStateFlow<AssetMoveState>(AssetMoveState.Idle)
-    val assetMove: StateFlow<AssetMoveState> = _assetMove.asStateFlow()
 
     /** The findings the last sweep ran against, kept so the asset move can reuse them without
      *  re-scanning. Cleared by [reset] with everything else. */
@@ -150,7 +149,6 @@ class RecoverFundsViewModel @Inject constructor(
         _passphraseVerdict.value = null
         sweptFindings = emptyList()
         sweptForeign = false
-        _assetMove.value = AssetMoveState.Idle
         _state.value = UiState.Idle
     }
 
@@ -175,6 +173,7 @@ class RecoverFundsViewModel @Inject constructor(
                                 totalSat = s.totalBalanceSat,
                                 backendUnreachable = false,
                                 partialFailurePaths = s.unreachableProfileLabels,
+                                assetOutpointCount = countAssetOutpoints(s.nonNativeWithFunds),
                             )
                         }
                     }
@@ -216,17 +215,12 @@ class RecoverFundsViewModel @Inject constructor(
                         return@launch
                     }
                     try {
-                        val result = withContext(Dispatchers.IO) {
-                            LegacySweepService(outgoingTxStore, walletTxPersister, assetClassifier()).sweepFromSeed(
-                                seedBytes = seed,
-                                nonNativeResults = findings,
-                                destAddress = res.address,
-                                destIsSelf = destIsSelf,
-                            )
+                        val (moves, result) = withContext(Dispatchers.IO) {
+                            runRecovery(seed, findings, res.address, destIsSelf)
                         }
                         sweptFindings = findings
                         sweptForeign = false
-                        _state.value = UiState.Done(result.outcomes)
+                        _state.value = UiState.Done(result.outcomes, moves)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (t: Throwable) {
@@ -237,6 +231,78 @@ class RecoverFundsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Count outpoints whose parent transaction carries a DigiAsset marker.
+     *
+     * Reads the raw transactions the scan already fetched, so this costs no network — the marker
+     * check is a native call over bytes we hold. That is what makes it usable on the findings
+     * screen, before the user commits to anything.
+     */
+    private fun countAssetOutpoints(results: List<RecoveryScanService.ProfileResult>): Int =
+        results.sumOf { r ->
+            r.utxos.count { u ->
+                val hex = r.rawTxs[u.txid]?.hex ?: return@count false
+                runCatching {
+                    val b = ByteArray(hex.length / 2) {
+                        hex.substring(it * 2, it * 2 + 2).toInt(16).toByte()
+                    }
+                    NativeBridge.isAssetTransaction(b)
+                }.getOrDefault(false)
+            }
+        }
+
+    /**
+     * The recovery itself: move the DigiAssets, then sweep what they did not spend.
+     *
+     * Order matters and is the whole point. Sweeping first forced something to hold DGB back so
+     * the assets could pay their own transfer fee, and that hold-back had to guess the fee before
+     * the transfer existed. Moving first means the plans are built while every coin is still
+     * there, so the sweep's input set is the exact complement of what they claimed — nothing is
+     * estimated. See RecoverySequence.
+     */
+    private suspend fun runRecovery(
+        seed: ByteArray,
+        findings: List<RecoveryScanService.ProfileResult>,
+        destAddress: String,
+        destIsSelf: Boolean,
+    ): Pair<List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>, LegacySweepService.Result> {
+        val classifier = assetClassifier()
+        // Classified ONCE for both phases. Each pass fetches every parent transaction, so
+        // classifying twice for one recovery doubles the network work for the same answer.
+        val verdicts = classifier.classify(findings.flatMap { it.utxos })
+
+        val moves = io.digibyte.core.recovery.ForeignAssetTransferService(
+            assetClassifier = classifier,
+            outgoingTxStore = outgoingTxStore,
+            walletTxPersister = walletTxPersister,
+        ).moveAssets(
+            seedBytes = seed,
+            results = findings,
+            destAddress = destAddress,
+            precomputedVerdicts = verdicts,
+        ).moves
+
+        val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
+            moves.map {
+                io.digibyte.core.recovery.RecoverySequence.MoveRecord(
+                    outpoint = it.outpoint,
+                    spentInputs = it.spentInputs,
+                    broadcast = it.moved,
+                )
+            }
+        )
+
+        val swept = LegacySweepService(outgoingTxStore, walletTxPersister, classifier).sweepFromSeed(
+            seedBytes = seed,
+            nonNativeResults = findings,
+            destAddress = destAddress,
+            excludeOutpoints = exclusions,
+            precomputedVerdicts = verdicts,
+            destIsSelf = destIsSelf,
+        )
+        return moves to swept
     }
 
     /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
@@ -293,6 +359,7 @@ class RecoverFundsViewModel @Inject constructor(
                             findings = set, totalSat = total,
                             backendUnreachable = false, isForeign = true,
                             partialFailurePaths = s.unreachableProfileLabels,
+                            assetOutpointCount = countAssetOutpoints(set),
                         )
                     }
                     is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)
@@ -333,17 +400,13 @@ class RecoverFundsViewModel @Inject constructor(
                 return@launch
             }
             try {
-                val result = withContext(Dispatchers.IO) {
-                    LegacySweepService(outgoingTxStore, walletTxPersister, assetClassifier()).sweepFromSeed(
-                        seedBytes = seed,
-                        nonNativeResults = findings,   // foreign: all-funded incl. native
-                        destAddress = dest.address,
-                        destIsSelf = true,             // lands in THIS wallet -> receive
-                    )
+                val (moves, result) = withContext(Dispatchers.IO) {
+                    // foreign: all-funded incl. native; lands in THIS wallet -> receive
+                    runRecovery(seed, findings, dest.address, destIsSelf = true)
                 }
                 sweptFindings = findings
                 sweptForeign = true
-                _state.value = UiState.Done(result.outcomes)
+                _state.value = UiState.Done(result.outcomes, moves)
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -361,70 +424,4 @@ class RecoverFundsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Move the DigiAssets the sweep left behind into this wallet, paying with the DGB it
-     * reserved for exactly that.
-     *
-     * Separate from [sweep] because it is irreversible and deserves its own confirmation, and
-     * because it has to remain runnable after a sweep that already broadcast. Safe to run more
-     * than once: an asset that already moved is no longer in the old wallet's UTXO set, so the
-     * second attempt finds nothing to move rather than double-spending.
-     */
-    fun moveHeldAssets() {
-        val findings = sweptFindings.ifEmpty { lastFindings }
-        if (findings.isEmpty()) {
-            _assetMove.value = AssetMoveState.Error("Nothing to move — scan first.")
-            return
-        }
-        val dest = SweepDestination.Native.resolve(
-            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
-            validator = { NativeBridge.isValidAddress(it) },
-        )
-        if (dest !is DestResolution.Ok) {
-            _assetMove.value = AssetMoveState.Error("Could not get a destination address")
-            return
-        }
-
-        _assetMove.value = AssetMoveState.Moving
-        activeJob = viewModelScope.launch {
-            val foreignPhrase = pendingForeignMnemonic
-            val seed: ByteArray? = if (sweptForeign) {
-                if (foreignPhrase == null) null
-                else NativeBridge.mnemonicToSeed(foreignPhrase.toByteArray(), pendingForeignPassphrase)
-            } else {
-                seedProvider.loadSeed()
-            }
-            if (seed == null) {
-                _assetMove.value = AssetMoveState.Error(
-                    "The recovery phrase is no longer available — scan again to move the assets."
-                )
-                return@launch
-            }
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    io.digibyte.core.recovery.ForeignAssetTransferService(
-                        assetClassifier = assetClassifier(),
-                        outgoingTxStore = outgoingTxStore,
-                        walletTxPersister = walletTxPersister,
-                    ).moveAssets(
-                        seedBytes = seed,
-                        results = findings,
-                        destAddress = dest.address,
-                    )
-                }
-                _assetMove.value = AssetMoveState.Done(result.moves)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                _assetMove.value = AssetMoveState.Error(t.message ?: "Could not move the assets")
-            } finally {
-                seed.fill(0)
-                // The assets have been dealt with one way or the other; the phrase has no further
-                // use on this screen.
-                pendingForeignMnemonic = null
-                pendingForeignPassphrase?.fill(0)
-                pendingForeignPassphrase = null
-            }
-        }
-    }
 }

@@ -51,7 +51,6 @@ fun RecoverFundsScreen(
 ) {
     val passphraseVerdict by vm.passphraseVerdict.collectAsState()
     val state by vm.state.collectAsState()
-    val assetMove by vm.assetMove.collectAsState()
 
     var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
     // Not rememberSaveable: a foreign recovery phrase must not be written to
@@ -135,11 +134,11 @@ fun RecoverFundsScreen(
                         onSweepExternal = if (s.isForeign) null else { addr -> vm.sweep(SweepDestination.External(addr)) },
                         partialFailurePaths = s.partialFailurePaths,
                         verdict = passphraseVerdict,
+                        assetOutpointCount = s.assetOutpointCount,
                     )
                     is RecoverFundsViewModel.UiState.Done -> ResultBody(
                         outcomes = s.outcomes,
-                        assetMove = assetMove,
-                        onMoveAssets = { vm.moveHeldAssets() },
+                        assetMoves = s.assetMoves,
                     )
                     is RecoverFundsViewModel.UiState.Error ->
                         if (mode == RecoverMode.AnotherPhrase)
@@ -200,6 +199,9 @@ private fun FindingsBody(
     /** Paths the scan could not reach. Non-empty means these findings are incomplete. */
     partialFailurePaths: List<String> = emptyList(),
     verdict: io.digibyte.core.recovery.PassphraseScanVerdict.Outcome? = null,
+    /** Outpoints whose parent transaction carries a DigiAsset marker. Non-zero means the
+     *  recovery will move assets, which is irreversible — so it is said BEFORE the button. */
+    assetOutpointCount: Int = 0,
 ) {
     var externalExpanded by remember { mutableStateOf(false) }
     var externalAddress by remember { mutableStateOf("") }
@@ -541,6 +543,34 @@ private fun FindingsBody(
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
+                // Said BEFORE the button, not after. Recovering this wallet moves its DigiAssets
+                // first — and an asset transfer cannot be undone, so it must not be something the
+                // user discovers on the results screen.
+                if (assetOutpointCount > 0) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AMBER.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = AMBER,
+                            modifier = Modifier
+                                .size(15.dp)
+                                .padding(top = 1.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.rf_will_move_assets, assetOutpointCount),
+                            color = AMBER,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -635,8 +665,7 @@ private fun FindingCard(
 @Composable
 private fun ResultBody(
     outcomes: List<LegacySweepService.SweepOutcome>,
-    assetMove: RecoverFundsViewModel.AssetMoveState,
-    onMoveAssets: () -> Unit,
+    assetMoves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -676,8 +705,8 @@ private fun ResultBody(
         // Deliberately a separate press rather than a tail of the sweep: an asset transfer is
         // irreversible and spends the reserve, and the user has just been told in plain words
         // what was held back and why. Acting on that is their decision to make.
-        if (outcomes.any { it.heldBackAssets.isNotEmpty() }) {
-            item { AssetMoveSection(assetMove, onMoveAssets) }
+        if (assetMoves.isNotEmpty()) {
+            item { AssetMoveSection(assetMoves) }
         }
 
         item {
@@ -694,9 +723,9 @@ private fun ResultBody(
 
 @Composable
 private fun AssetMoveSection(
-    move: RecoverFundsViewModel.AssetMoveState,
-    onMoveAssets: () -> Unit,
+    moves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>,
 ) {
+    val moved = moves.count { it.moved }
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CARD)
@@ -705,69 +734,28 @@ private fun AssetMoveSection(
             .fillMaxWidth()
             .padding(16.dp)) {
             Text(
-                text = stringResource(R.string.rf_move_assets_body),
-                color = MUTED,
-                style = MaterialTheme.typography.bodySmall,
+                text = stringResource(R.string.rf_move_result, moved, moves.size),
+                color = if (moved == moves.size) SUCCESS_GREEN else Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.height(12.dp))
-
-            when (move) {
-                is RecoverFundsViewModel.AssetMoveState.Idle -> {
-                    Button(
-                        onClick = onMoveAssets,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(stringResource(R.string.rf_move_assets)) }
-                }
-
-                is RecoverFundsViewModel.AssetMoveState.Moving -> {
-                    Text(
-                        text = stringResource(R.string.rf_moving_assets),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-
-                is RecoverFundsViewModel.AssetMoveState.Done -> {
-                    val moved = move.moves.count { it.moved }
-                    Text(
-                        text = stringResource(R.string.rf_move_result, moved, move.moves.size),
-                        color = if (moved == move.moves.size) SUCCESS_GREEN else Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    // Every asset that did NOT move is named with its reason. A summary count
-                    // alone would let a partial failure read as a clean run.
-                    move.moves.filter { !it.moved }.forEach { failed ->
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = stringResource(
-                                R.string.rf_move_failed,
-                                failed.outpoint,
-                                failed.failureReason ?: "",
-                            ),
-                            color = WARNING_RED,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-
-                is RecoverFundsViewModel.AssetMoveState.Error -> {
-                    Text(
-                        text = move.reason,
-                        color = WARNING_RED,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Button(
-                        onClick = onMoveAssets,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(stringResource(R.string.rf_move_assets)) }
-                }
+            // Every asset that did NOT move is named with its reason. A summary count alone
+            // would let a partial failure read as a clean run.
+            moves.filter { !it.moved }.forEach { failed ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(
+                        R.string.rf_move_failed,
+                        failed.outpoint,
+                        failed.failureReason ?: "",
+                    ),
+                    color = WARNING_RED,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
 }
-
 @Composable
 private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
     // "succeeded" here means the broadcast was submitted (reached local relay),
@@ -863,32 +851,9 @@ private fun OutcomeCard(outcome: LegacySweepService.SweepOutcome) {
                     outpoints = outcome.heldBackAssets,
                 )
             }
-            if (outcome.heldBackFeeReserve.isNotEmpty()) {
-                HeldBackNote(
-                    title = stringResource(R.string.rf_held_reserve, outcome.heldBackFeeReserve.size),
-                    body = stringResource(R.string.rf_held_reserve_body),
-                    outpoints = outcome.heldBackFeeReserve,
-                )
-            }
-            if (outcome.feeReserveShortfall > 0L) {
-                // Said plainly because the user has to act on it: the assets are safe but cannot
-                // leave this wallet until it is funded.
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.rf_shortfall_title),
-                    color = WARNING_RED,
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = stringResource(
-                        R.string.rf_shortfall_body,
-                        formatSatToDgb(outcome.feeReserveShortfall),
-                    ),
-                    color = MUTED,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
+            // The fee-reserve and shortfall notes are gone with AssetFeeReserve. Assets now move
+            // BEFORE the sweep, so there is nothing to hold back in advance and nothing to be
+            // short of — an asset that could not be funded says so on its own row above.
             if (outcome.heldBackUnknown.isNotEmpty()) {
                 HeldBackNote(
                     title = stringResource(R.string.rf_held_unknown, outcome.heldBackUnknown.size),

@@ -348,10 +348,6 @@
     <string name="rf_pending">等待网络确认</string>
     <string name="rf_held_assets">%1$d 笔留在原处 — DigiAssets</string>
     <string name="rf_held_assets_body">这些币携带 DigiAssets。将它们当作普通 DGB 归集会销毁这些资产，因此它们被留在旧钱包中，并留下了足够的 DGB 供日后转移。</string>
-    <string name="rf_held_reserve">%1$d 笔已保留 — 用于转移资产</string>
-    <string name="rf_held_reserve_body">转移 DigiAsset 需要支付网络手续费，而它自身的币值远不足以支付。因此保留了这些 DGB，使上述资产可以被转移，而无需您再向旧钱包转账。</string>
-    <string name="rf_shortfall_title">DGB 不足以转移资产</string>
-    <string name="rf_shortfall_body">上述资产是安全的，但本钱包距离转移所需的手续费还差约 %1$s。没有归集任何资金，因此这里的余额仍可用于支付 — 向旧钱包发送少量 DGB 后重试。</string>
     <string name="rf_held_unknown">%1$d 笔留在原处 — 无法检查</string>
     <string name="rf_held_unknown_body">我们无法读取它们来源的交易，因此无法判断其是否携带 DigiAssets。为避免风险，它们被保留原处。稍后重试可能可以解决。</string>
     <string name="rf_and_more">…还有 %1$d 笔</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">使用密码短语继续</string>
     <string name="pass_screen_continue_without">不使用并继续</string>
     <string name="pass_screen_separate_note">请将它与您刚刚写下的助记词分开保管。</string>
+    <string name="rf_will_move_assets">恢复此钱包时会先将 %1$d 个 DigiAsset 输出点转入。资产转账不可撤销。</string>
 </resources>

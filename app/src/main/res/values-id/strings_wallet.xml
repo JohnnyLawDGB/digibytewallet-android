@@ -348,10 +348,6 @@
     <string name="rf_pending">Menunggu konfirmasi jaringan</string>
     <string name="rf_held_assets">%1$d ditinggalkan — DigiAssets</string>
     <string name="rf_held_assets_body">Koin ini membawa DigiAssets. Menyapunya sebagai DGB biasa akan menghancurkan asetnya, jadi koin itu ditinggal di dompet lama beserta DGB yang cukup untuk memindahkannya nanti.</string>
-    <string name="rf_held_reserve">%1$d disisihkan — untuk memindahkan aset</string>
-    <string name="rf_held_reserve_body">Memindahkan DigiAsset memerlukan biaya jaringan, dan koinnya sendiri jauh terlalu kecil untuk membayarnya. Sebanyak ini DGB ditinggal agar aset di atas bisa ditransfer tanpa Anda harus mengirim dana kembali ke dompet lama.</string>
-    <string name="rf_shortfall_title">DGB tidak cukup untuk memindahkan aset</string>
-    <string name="rf_shortfall_body">Aset di atas aman, tetapi dompet ini kurang sekitar %1$s dari biaya yang diperlukan untuk memindahkannya. Tidak ada yang disapu, jadi yang ada di sini masih bisa dipakai untuk itu — kirim sedikit DGB ke dompet lama lalu coba lagi.</string>
     <string name="rf_held_unknown">%1$d ditinggalkan — tidak dapat diperiksa</string>
     <string name="rf_held_unknown_body">Kami tidak dapat membaca transaksi asalnya, sehingga tidak bisa memastikan apakah koin itu membawa DigiAssets. Koin itu dibiarkan saja daripada dipertaruhkan. Mencoba lagi nanti mungkin menyelesaikannya.</string>
     <string name="rf_and_more">…dan %1$d lagi</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">Lanjutkan dengan frasa sandi</string>
     <string name="pass_screen_continue_without">Lanjutkan tanpa itu</string>
     <string name="pass_screen_separate_note">Simpan terpisah dari kata-kata yang baru saja Anda catat.</string>
+    <string name="rf_will_move_assets">Pemulihan akan lebih dulu memindahkan %1$d outpoint DigiAsset ke dompet ini. Transfer aset tidak dapat dibatalkan.</string>
 </resources>

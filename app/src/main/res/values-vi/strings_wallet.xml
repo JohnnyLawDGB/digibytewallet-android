@@ -348,10 +348,6 @@
     <string name="rf_pending">Chờ mạng xác nhận</string>
     <string name="rf_held_assets">%1$d khoản để lại — DigiAssets</string>
     <string name="rf_held_assets_body">Những đồng này mang DigiAssets. Gom chúng như DGB thông thường sẽ hủy tài sản, nên chúng được để lại trong ví cũ cùng đủ DGB để chuyển đi sau.</string>
-    <string name="rf_held_reserve">%1$d khoản giữ lại — để chuyển tài sản</string>
-    <string name="rf_held_reserve_body">Chuyển một DigiAsset tốn phí mạng, và chính đồng của nó quá nhỏ để trả phí. Số DGB này được giữ lại để các tài sản ở trên có thể chuyển đi mà bạn không phải gửi tiền lại vào ví cũ.</string>
-    <string name="rf_shortfall_title">Không đủ DGB để chuyển tài sản</string>
-    <string name="rf_shortfall_body">Các tài sản ở trên vẫn an toàn, nhưng ví này còn thiếu khoảng %1$s so với phí cần để chuyển chúng. Chưa gom gì cả, nên số hiện có vẫn dùng được cho việc đó — hãy gửi một ít DGB vào ví cũ rồi thử lại.</string>
     <string name="rf_held_unknown">%1$d khoản để lại — không kiểm tra được</string>
     <string name="rf_held_unknown_body">Chúng tôi không đọc được các giao dịch nguồn của chúng, nên không biết chúng có mang DigiAssets hay không. Chúng được để nguyên thay vì mạo hiểm. Thử lại sau có thể xử lý được.</string>
     <string name="rf_and_more">…và %1$d khoản nữa</string>
@@ -557,4 +553,5 @@
     <string name="pass_screen_continue_with">Tiếp tục với cụm mật khẩu</string>
     <string name="pass_screen_continue_without">Tiếp tục mà không dùng</string>
     <string name="pass_screen_separate_note">Hãy cất giữ nó tách riêng khỏi những từ bạn vừa ghi lại.</string>
+    <string name="rf_will_move_assets">Việc khôi phục sẽ chuyển %1$d outpoint DigiAsset về ví này trước. Chuyển tài sản là không thể hoàn tác.</string>
 </resources>
