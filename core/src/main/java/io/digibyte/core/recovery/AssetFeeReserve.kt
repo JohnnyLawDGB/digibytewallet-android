@@ -26,11 +26,20 @@ import io.digibyte.core.reconcile.UtxoEntry
 object AssetFeeReserve {
 
     /**
-     * Rough cost of one DigiAsset transfer: ~400 vbytes at DigiByte's 100 sat/byte minimum relay
-     * fee. Deliberately an over-estimate — reserving slightly too much costs a later sweep;
-     * reserving too little strands the asset, which is the failure this exists to prevent.
+     * Cost of moving one DigiAsset, derived from the transaction
+     * [ForeignAssetTransferPlan] actually builds rather than estimated in the abstract.
+     *
+     * That transaction is one asset input, one or two DGB inputs, and three outputs (marker,
+     * OP_RETURN, change). Priced through `AssetFeeEstimator` at DigiByte's 100 sat/byte minimum
+     * relay fee that is ~54,900 sats with one DGB input and ~70,100 with two, and the change
+     * output must clear dust on top. The asset's own marker contributes 6,000 of it.
+     *
+     * This was 40,000 — chosen before there was a transfer to price against, and documented as
+     * "deliberately an over-estimate" when it was in fact short. A reserve that holds coins back,
+     * tells the user they were kept so the assets could move, and then cannot move them is the
+     * failure this class exists to prevent, wearing its fix as a disguise.
      */
-    const val DEFAULT_FEE_PER_ASSET = 40_000L
+    const val DEFAULT_FEE_PER_ASSET = 80_000L
 
     data class Result(
         /** Still safe to sweep once the reserve is set aside. */
@@ -64,13 +73,41 @@ object AssetFeeReserve {
             return Result(emptyList(), sweepable, target - available)
         }
 
+        // ONE covering output per asset. Each asset moves in its own transaction
+        // ([ForeignAssetTransferBatch]), so two transfers cannot share a fee UTXO — reserving a
+        // single large output for three assets funds exactly one of them.
+        //
+        // Within that, prefer the SMALLEST output that covers an asset on its own: it withholds
+        // the least from the user and keeps each transfer to one fee input. Accumulating
+        // smallest-first — which this did — is wrong in a way that is not obvious: at 100
+        // sat/byte an input costs about 15,000 sats to spend, so paying a ~55,000-sat fee out of
+        // 10,000-sat pieces adds cost faster than it adds value and never converges. Fewer,
+        // larger inputs is not a preference here, it is the only thing that works.
+        val remaining = sweepable.toMutableList()
         val reserved = mutableListOf<UtxoEntry>()
-        var held = 0L
-        // Smallest first, so the least money is withheld from the user today.
-        for (utxo in sweepable.sortedBy { it.amountSatoshi }) {
-            if (held >= target) break
-            reserved += utxo
-            held += utxo.amountSatoshi
+        var unfunded = 0
+
+        repeat(assetCount) {
+            val single = remaining
+                .filter { it.amountSatoshi >= feePerAsset }
+                .minByOrNull { it.amountSatoshi }
+            if (single != null) {
+                reserved += single
+                remaining.remove(single)
+            } else {
+                unfunded++
+            }
+        }
+
+        // Assets with no single output big enough still get funded from what is left, largest
+        // first so the target is met in as few inputs as possible.
+        if (unfunded > 0) {
+            var need = unfunded * feePerAsset
+            for (utxo in remaining.sortedByDescending { it.amountSatoshi }) {
+                if (need <= 0) break
+                reserved += utxo
+                need -= utxo.amountSatoshi
+            }
         }
 
         val reservedSet = reserved.toSet()
