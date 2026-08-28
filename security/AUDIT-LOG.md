@@ -3,7 +3,7 @@
 Machine-read by `scripts/check-security-cycle.sh`. **Keep the marker line's format exactly** —
 the gate parses it, and a reformatted line reads as "never audited".
 
-<!-- LAST_AUDITED_VERSION_CODE: 40058 -->
+<!-- LAST_AUDITED_VERSION_CODE: 40066 -->
 
 The cycle runs **every 10 releases**. The gate fails a release build when the current
 `versionCode` is 10 or more beyond the marker above.
@@ -429,3 +429,57 @@ comparison shows: across 52 releases the score moved two points and neither poin
 wallet logic. The new SECURE is the `assets.digistamp.co` domain pin added in v4.0.51.
 
 Reports for both are in `security/reports/` (`mobsf-report-v4.0.58.json`, scorecard alongside).
+
+---
+
+## v4.0.66 — 2026-08-28
+
+Run early: the cycle was not due until 40068, but v4.0.63–v4.0.66 shipped a BIP39 passphrase
+touching the JNI boundary, seed derivation and secret persistence. Auditing that on the day it
+landed is cheaper than auditing it two releases later alongside whatever comes next.
+
+### Automated half (`scripts/security-cycle.sh` against the shipped APK)
+
+**Dependencies** — no known vulnerabilities across 227 packages.
+
+**Native hardening** (arm64 `libcore-lib.so`) — PIE yes, NX yes, RELRO FULL, stack canary yes,
+fortify 9 checked libc calls, symbols stripped.
+
+**Embedded secrets** — none found.
+
+**Hosts in the dex** — 15 distinct, all HTTPS, all accounted for (digiscope/digistamp infra, IPFS
+gateways, GitHub, and vendor documentation URLs from AndroidX).
+
+### Manual half — changed-surface review of v4.0.62..HEAD
+
+82 files, ~10k insertions. Surfaces touched: JNI boundary (passphrase parameters, plus the
+unwired `buildAndSignForeignTx`), crypto (BIP39 passphrase derivation), persistence (`encrypted_pass`,
+versioned seed fingerprint), and recovery/sweep. Localisation was the bulk of the diff and is inert:
+static string resources, no format-string or injection surface.
+
+**P0 — FIXED in this cycle (`dcce9125`).** `createWalletFromBytes` and `recoverWalletFromBytes`
+copied the passphrase to a stack buffer at function entry, leaving three `return JNI_FALSE` paths
+— null phrase, bad length, invalid BIP39 phrase — that returned without zeroing it. A mistyped
+recovery phrase left the plaintext passphrase on the native stack. Fixed structurally: the copy now
+happens after every validation, so no path exists between the buffer's creation and its zeroing.
+Also stopped logging a rejected passphrase's length.
+
+**P0 by invariant, P2 by exploitability — SCOPED, NOT FIXED.** The passphrase is an immutable JVM
+`String` at every hop, while `CLAUDE.md:51` records a deliberate CRITICAL-3 remediation making the
+mnemonic a `ByteArray` so it never becomes one. The two secrets together are the wallet. Deferred
+with reasoning, not forgotten: see `docs/superpowers/specs/2026-08-28-passphrase-string-invariant.md`.
+A complete fix is unreachable (Compose text entry and `java.text.Normalizer` both require a String),
+and the passphrase shares the mnemonic's Keystore envelope, so the String widens an in-memory window
+rather than opening a new door. Recommendation there is option (b): move storage and the JNI
+boundary to `ByteArray` and accept the transient UI copy.
+
+**P1 — noted.** `buildAndSignForeignTx` (263 lines, `jni_derive.c`) is declared in `NativeBridge`
+and present in the shipped `.so` with no call sites and no device coverage. Dead but reachable.
+Either wire it with tests or remove the declaration.
+
+**P2 — noted.** Nothing outstanding; the length-logging item was fixed above.
+
+### Still owed
+
+MobSF re-scan and a jadx pass checking whether the R8 keep rules over-kept — neither is automated
+here, and neither was run this cycle.
