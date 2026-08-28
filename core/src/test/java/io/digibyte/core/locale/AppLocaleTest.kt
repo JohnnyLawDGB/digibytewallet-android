@@ -94,6 +94,18 @@ class AppLocaleTest {
         assertEquals("de", AppLocale.resolve("de-CH")?.tag)
     }
 
+    /**
+     * French. Added alongside German for the same reason: the community's French-speaking share
+     * is not visible in a table of currency markets, which is where the original ten came from.
+     */
+    @Test fun `french is supported and names itself`() {
+        val fr = AppLocale.SUPPORTED.firstOrNull { it.tag == "fr" }
+        assertNotNull("French is missing from the supported set", fr)
+        assertEquals("Français", fr!!.endonym)
+        assertEquals("fr", AppLocale.resolve("fr-CA")?.tag)
+        assertEquals("fr", AppLocale.resolve("fr-BE")?.tag)
+    }
+
     @Test fun `tags are unique`() {
         val tags = AppLocale.SUPPORTED.map { it.tag }
         assertEquals(tags.size, tags.toSet().size)

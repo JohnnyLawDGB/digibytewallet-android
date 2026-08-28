@@ -59,6 +59,7 @@ object AppLocale {
         Entry("tr", "Türkçe", "Turkish"),
         Entry("ru", "Русский", "Russian"),
         Entry("de", "Deutsch", "German"),
+        Entry("fr", "Français", "French"),
         Entry("fil", "Filipino", "Filipino"),
     )
 
