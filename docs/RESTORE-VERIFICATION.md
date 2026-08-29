@@ -230,6 +230,25 @@ The refusal itself is correct. DigiDollar's consensus fee floor is 0.1 DGB, roug
 asset transfer, so a swept-clean wallet genuinely cannot move its dollars. The wallet's job is to
 say so, in the user's language, and to keep the dollar visible until it can.
 
+Then the same wallet, topped up and re-run — the refusal is a state, not a dead end:
+
+```
+funded    0.15 DGB → dgb1qmrllqjkkuxx9ul0p7g289vgd54uz83ct6z7wht
+          8d8a66be3ceff796…  height 24,119,699
+
+scan      $1.00 in DigiDollar found
+          Recoverable balance 0.15 DGB — BIP84 DGB, m/84'/20'/0'
+run       Sweep submitted
+          $1.00 in DigiDollar moved into this wallet
+          06389c00502ed392…  height 24,119,707
+
+source    dd_balance_cents 0, unspent_count 0
+```
+
+The whole 0.15 went to the transfer: the 0.1 floor plus its fee, with the remainder below the
+change dust threshold, so the BIP84 sweep that followed carried 0 DGB. That is the correct
+outcome, not a loss — moving the dollar is what the DGB was there to do.
+
 ---
 
 ## Why assets move before the sweep
