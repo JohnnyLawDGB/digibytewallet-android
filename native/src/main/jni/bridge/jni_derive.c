@@ -37,13 +37,7 @@
 #include "foreign_tx_fee_guard.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"
-
-/* Mirrored from BRWallet.c's DigiDollar builder — the same consensus constants, restated here
- * because that file keeps them private and a foreign-seed transfer must obey them identically. */
-#define DD_TX_VERSION_TRANSFER_JNI 0x02000770u  /* 0x0770 marker | type 2 = TRANSFER */
-#define DD_MIN_FEE_JNI             10000000ULL  /* 0.1 DGB floor, wire spec section 6 */
-#define DD_MIN_OUTPUT_CENTS_JNI    100LL        /* $1.00 consensus minimum per output */
-#define DD_MAX_OUTPUT_CENTS_JNI    10000000LL   /* $100,000 per-transfer-output maximum */
+#include "digidollar_transfer_layout.h"
 
 #define LOG_TAG "DGB-Derive"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -1043,7 +1037,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
         LOGW("foreignDD: need at least one DD input and one fee input");
         return NULL;
     }
-    if (cents < DD_MIN_OUTPUT_CENTS_JNI || cents > DD_MAX_OUTPUT_CENTS_JNI) {
+    if (!dd_cents_in_range((int64_t)cents)) {
         LOGW("foreignDD: %lld cents is outside the consensus per-output range",
              (long long)cents);
         return NULL;
@@ -1067,7 +1061,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
 
     BRTransaction *tx = BRTransactionNew();
     if (!tx) { seed_buffer_release(&seed); return NULL; }
-    tx->version = DD_TX_VERSION_TRANSFER_JNI;   /* 0x0770 marker | type 2 */
+    tx->version = DD_TX_VERSION_TRANSFER;   /* 0x0770 marker | type 2 */
 
     BRKey *keys = (BRKey *)calloc((size_t)(ddCount + feeCount), sizeof(BRKey));
     if (!keys) { BRTransactionFree(tx); seed_buffer_release(&seed); return NULL; }
@@ -1076,8 +1070,9 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
     uint64_t totalIn = 0;
 
     /* ── outputs FIRST: their order is consensus-significant and must not depend on inputs ── */
-    uint8_t rspk[34]; rspk[0] = 0x51; rspk[1] = 0x20; memcpy(rspk + 2, recipientKey, 32);
-    BRTransactionAddOutput(tx, 0, rspk, sizeof(rspk));      /* vout0 recipient, value 0 */
+    uint8_t rspk[34];
+    size_t rspkLen = dd_recipient_script(recipientKey, rspk);
+    BRTransactionAddOutput(tx, 0, rspk, rspkLen);           /* vout0 recipient, value 0 */
 
     uint64_t totalOut = 0;
     if (changeAddress && changeAmount > 0) {
@@ -1089,14 +1084,11 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
         else { BRTransactionAddOutput(tx, (uint64_t)changeAmount, cspk, cl); totalOut += (uint64_t)changeAmount; }
     }
 
-    if (ok) {   /* OP_RETURN LAST */
-        uint8_t orr[32]; size_t ol = 0;
-        orr[ol++] = 0x6a; orr[ol++] = 0x02; orr[ol++] = 0x44; orr[ol++] = 0x44;
-        orr[ol++] = 0x01; orr[ol++] = 0x02;
-        uint8_t enc[9];
-        size_t el = BRDigiDollarWriteScriptNum((int64_t)cents, enc);
-        orr[ol++] = (uint8_t)el; memcpy(orr + ol, enc, el); ol += el;
-        BRTransactionAddOutput(tx, 0, orr, ol);
+    if (ok) {   /* OP_RETURN LAST — recovery moves the whole balance, so no DD change push */
+        uint8_t orr[32];
+        size_t ol = dd_op_return_script((int64_t)cents, 0, orr, sizeof(orr));
+        if (ol == 0) { LOGW("foreignDD: OP_RETURN would not encode"); ok = 0; }
+        else BRTransactionAddOutput(tx, 0, orr, ol);
     }
 
     /* ── inputs: DD first at value 0, then the DGB fee inputs ── */
@@ -1182,9 +1174,9 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
              (unsigned long long)totalOut, (unsigned long long)totalIn);
         ok = 0;
     }
-    if (ok && (totalIn - totalOut) < DD_MIN_FEE_JNI) {
+    if (ok && (totalIn - totalOut) < DD_MIN_FEE_SATS) {
         LOGW("foreignDD: implied fee %llu is below the %llu DigiDollar floor",
-             (unsigned long long)(totalIn - totalOut), (unsigned long long)DD_MIN_FEE_JNI);
+             (unsigned long long)(totalIn - totalOut), (unsigned long long)DD_MIN_FEE_SATS);
         ok = 0;
     }
 
