@@ -201,6 +201,28 @@ class DgbNodeClient(
     }
 
     /**
+     * A transaction's raw bytes, for locating a DigiDollar token output inside it.
+     *
+     * The DigiDollar endpoint gives a balance and a txid; spending needs the vout and the
+     * scriptPubKey, which only the transaction itself carries.
+     *
+     * Null on any failure. The caller must treat that as "could not read" rather than "no such
+     * output" — a transaction we cannot fetch may well hold the dollars we are looking for.
+     */
+    suspend fun fetchRawTransaction(txid: String): ByteArray? = withContext(Dispatchers.IO) {
+        val root = httpGetJson("${endpoint()}/tx/raw/$txid") ?: return@withContext null
+        val hex = root.optString("hex").takeIf { it.isNotEmpty() }
+            ?: root.optString("rawtx").takeIf { it.isNotEmpty() }
+            ?: return@withContext null
+        runCatching {
+            if (hex.length % 2 != 0) return@withContext null
+            ByteArray(hex.length / 2) {
+                ((hex[it * 2].digitToInt(16) shl 4) or hex[it * 2 + 1].digitToInt(16)).toByte()
+            }
+        }.getOrNull()
+    }
+
+    /**
      * What a DigiDollar address holds, and which transactions it came from.
      *
      * A separate call because the ordinary UTXO path cannot see DigiDollar at all: the token

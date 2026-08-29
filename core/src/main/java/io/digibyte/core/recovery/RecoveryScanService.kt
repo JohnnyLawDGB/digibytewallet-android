@@ -29,7 +29,15 @@ class RecoveryScanService(
     sealed class State {
         object Idle : State()
         data class Scanning(val stage: String, val progress: Float = 0f) : State()
-        data class Done(val results: List<ProfileResult>) : State() {
+        data class Done(
+            val results: List<ProfileResult>,
+            /**
+             * What the wallet holds in DigiDollar, or null when the scan predates this and never
+             * looked. Carried at wallet level rather than per profile: DigiDollar always lives at
+             * m/86'/20'/0' regardless of which derivation the plain DGB sits on.
+             */
+            val digiDollar: DigiDollarScan.Result? = null,
+        ) : State() {
             val totalBalanceSat: Long = results.sumOf { it.totalSat }
             val nonNativeWithFunds: List<ProfileResult> =
                 results.filter { !it.profile.isNative && it.totalSat > 0 }
@@ -93,6 +101,34 @@ class RecoveryScanService(
         val reachableBackend: Boolean = true,
     ) {
         val totalSat: Long = utxos.sumOf { it.amountSatoshi }
+    }
+
+    /** One request per address, so these stay small. A wallet's DigiDollar sits on the first few
+     *  receive indices in practice; the long tail the plain-DGB scan needs would be wasted
+     *  round-trips here. */
+    private val ddGapExternal = 20
+    private val ddGapInternal = 10
+
+    /**
+     * What this seed holds in DigiDollar, at m/86'/20'/0'.
+     *
+     * A shorter gap than the DGB profiles use: DigiDollar receive addresses are handed out one at
+     * a time by a wallet that has only ever had one DD address per index, so the long tail the
+     * plain-DGB scan needs is wasted round-trips here — each address is its own request rather
+     * than part of a batch.
+     */
+    private suspend fun scanDigiDollar(seedBytes: ByteArray): DigiDollarScan.Result? {
+        val lines = io.digibyte.core.bridge.NativeBridge.deriveDigiDollarAddresses(
+            seedBytes, ddGapExternal, ddGapInternal,
+        ) ?: return null
+        val addresses = DigiDollarAddress.parseAll(lines)
+        if (addresses.isEmpty()) return null
+
+        return DigiDollarScan.assemble(
+            addresses = addresses,
+            holdingFor = { utxoSource.fetchDigiDollar(it.ddAddress) },
+            outputsFor = { utxoSource.fetchOutputs(it) },
+        )
     }
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -193,8 +229,16 @@ class RecoveryScanService(
             )
             val derivedByProfile = deriveAllProfiles(seedBytes)
             val done = classifyDerived(derivedByProfile)
-            _state.value = done
-            done
+
+            // DigiDollar is looked up separately because it is invisible to the UTXO path: a
+            // token output carries zero satoshis and reconcile filters those out of the set
+            // entirely. Without this the wallet is emptied of DGB and assets while its dollars
+            // sit untouched and unmentioned.
+            val dd = runCatching { scanDigiDollar(seedBytes) }.getOrNull()
+            val withDollars = done.copy(digiDollar = dd)
+
+            _state.value = withDollars
+            withDollars
         } catch (t: Throwable) {
             val failed = State.Failed(t.message ?: t.javaClass.simpleName)
             _state.value = failed
