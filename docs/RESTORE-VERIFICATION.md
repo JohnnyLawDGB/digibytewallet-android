@@ -17,13 +17,40 @@ value behind if it does not understand what is sitting on them.
 |---|---|---|---|
 | **Plain DGB** | any scanned profile | Swept into the destination in one transaction per profile. | **proven** |
 | **DigiAsset** | a specific UTXO + OP_RETURN marker | Held back from the sweep — spending it as DGB destroys it — then moved in its own transaction, before the sweep, while the fee money is still there. | **proven** |
-| **DigiDollar** | `m/86'/20'/0'`, zero-value P2TR | Nothing. The scan derives P2PKH, P2WPKH and P2SH-P2WPKH only, so these addresses are never asked about. | **not covered** |
+| **DigiDollar** | `m/86'/20'/0'`, zero-value P2TR | Found via a separate DD-aware lookup, then moved in its own Taproot transaction before the sweep. | **proven** |
 
-> **DigiDollar is a blind spot, not a destruction risk.** The sweep cannot spend what it never
-> derived, so those coins stay put. But a wallet emptied of its DGB and assets while its DigiDollar
-> sits untouched and unmentioned is "no funds found" about money that exists, one layer up. The
-> recovery screen now says so plainly. The BIP86 derivation and Schnorr signing both exist and are
-> mainnet-proven elsewhere in this wallet; wiring them into recovery is unstarted.
+### DigiDollar was invisible, not broken
+
+A DigiDollar token output carries **zero satoshis** — the cents live in the transaction's
+OP_RETURN — and the reconcile endpoint filters zero-value outputs out of the UTXO set entirely.
+Measured on mainnet: an address holding $1.00 answers `balance 0, utxo_count 0` through the
+ordinary lookup. The scan also derived P2PKH, P2WPKH and P2SH-P2WPKH only, so `m/86'` addresses
+were never asked about at all.
+
+So a wallet was emptied of its DGB and its assets and told nothing about its dollars — "no funds
+found" about money that exists, one layer up.
+
+Three things had to change: a Taproot address format in the derivation, a separate DD-aware lookup
+(the backend has one, keyed by the `DD…` encoding), and a transfer builder that a foreign seed can
+sign. The last needed no new cryptography — `BRTransactionSign` already matches P2TR inputs by
+their taproot output key and BIP341-signs them, and BIP86 is plain BIP32 under the standard HMAC.
+Both were pinned in a KAT *before* the flow was designed on top of them.
+
+```
+9194b9fe07c7864e…   version 0x02000770   19 confirmations
+
+vout0  witness_v1_taproot   the dollars
+vout1  0.16 DGB change
+vout2  nulldata 6a02444401020164
+
+the chain's own decoder: { type: TRANSFER, decoded: true, total_dd_cents: 100 }
+source wallet: 0 cents, 0 unspent
+```
+
+The fee is a **consensus floor of 0.1 DGB**, roughly twice a DigiAsset transfer — so a wallet can
+comfortably move its assets and still be unable to move its dollars. Recovery refuses early with
+the figure rather than letting the network reject a signed transaction, and reports the balance
+either way: dollars found and not moved are still dollars you should know about.
 
 ## Which derivation
 
