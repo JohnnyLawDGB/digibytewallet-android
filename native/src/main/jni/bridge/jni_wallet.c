@@ -1097,3 +1097,37 @@ Java_io_digibyte_core_bridge_NativeBridge_outpointSpentState(JNIEnv *env, jobjec
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
     return state;
 }
+
+/**
+ * This wallet's DigiDollar taproot output key X(Q), as hex.
+ *
+ * getDigiDollarReceiveAddress returns the same key in its "DD…" form, which is what a sender
+ * types. A transfer's recipient field takes the raw 32-byte key instead, so recovery needs it in
+ * this form to address dollars coming home from a foreign seed.
+ *
+ * Same key, same path (m/86'/20'/0'/0/0) — expressed the other way rather than derived again, so
+ * the two can never disagree about where this wallet's dollars land.
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getDigiDollarTaprootKeyHex(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_seedValid) {
+        LOGW("getDigiDollarTaprootKeyHex: session locked (no seed)");
+        return NULL;
+    }
+    BRKey key;
+    memset(&key, 0, sizeof(key));
+    BRBIP32PrivKeyBIP86(&key, g_seed, sizeof(g_seed), 0, 0); /* m/86'/20'/0'/0/0 owner key */
+
+    uint8_t outputKey[32];
+    int ok = BRKeyTaprootOutputKey(&key, outputKey); /* X(Q): BIP341 tap-tweaked output key */
+    BRKeyClean(&key);                                /* zero the private key immediately */
+    if (!ok) {
+        LOGW("getDigiDollarTaprootKeyHex: taproot output-key derivation failed");
+        return NULL;
+    }
+    char hex[65];
+    for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", outputKey[i]);
+    hex[64] = '\0';
+    return (*env)->NewStringUTF(env, hex);
+}

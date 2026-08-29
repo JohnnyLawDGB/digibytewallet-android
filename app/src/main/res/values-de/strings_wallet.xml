@@ -572,5 +572,7 @@
     <string name="send_fail_unknown">Die Transaktion konnte nicht gesendet werden.</string>
     <string name="send_fail_try_again">Erneut versuchen</string>
     <string name="rf_splitting_for_assets">Vorbereitung zum Verschieben von %1$d DigiAssets — Ihre DGB werden aufgeteilt, damit jedes seine eigene Übertragungsgebühr zahlen kann. Wartet auf eine Bestätigung, meist unter einer Minute.</string>
-    <string name="rf_digidollar_not_covered">DigiDollar ist nicht enthalten. Diese Version kann es noch nicht verschieben — vorhandene DigiDollar bleiben in der alten Wallet.</string>
+    <string name="rf_dd_moved">%1$s in DigiDollar in diese Wallet verschoben</string>
+    <string name="rf_dd_left_behind">%1$s in DigiDollar blieb zurück — es konnte nicht verschoben werden</string>
+    <string name="rf_dd_unreachable">DigiDollar konnte nicht geprüft werden; diese Wallet hält möglicherweise welche</string>
 </resources>

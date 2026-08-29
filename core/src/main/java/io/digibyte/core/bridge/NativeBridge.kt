@@ -61,6 +61,15 @@ object NativeBridge {
      *  first P2TR address, so received DigiDollar is watched and spendable. Null if session locked. */
     external fun getDigiDollarReceiveAddress(): String?
 
+    /** This wallet's DigiDollar taproot output key X(Q), as hex — the same key
+     *  [getDigiDollarReceiveAddress] returns in its "DD…" form.
+     *
+     *  A transfer's recipient field takes the raw 32-byte key rather than the address form, so
+     *  recovery needs it this way to address dollars coming home from a foreign seed. Expressed
+     *  from the same derivation rather than derived again, so the two cannot disagree about where
+     *  this wallet's dollars land. Null when the session is locked. */
+    external fun getDigiDollarTaprootKeyHex(): String?
+
     /** Get a change address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32(dgb1). */
     external fun getChangeAddress(index: Int, format: Int): String?
 

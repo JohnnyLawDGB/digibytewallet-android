@@ -79,6 +79,8 @@ class RecoverFundsViewModel @Inject constructor(
             val outcomes: List<LegacySweepService.SweepOutcome>,
             /** What happened to each DigiAsset, in the phase that ran BEFORE the sweep. */
             val assetMoves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move> = emptyList(),
+            /** What happened to the wallet's DigiDollar, or null when it holds none. */
+            val digiDollar: io.digibyte.core.recovery.DigiDollarTransferService.Result? = null,
         ) : UiState()
         data class Error(val reason: String) : UiState()
     }
@@ -95,6 +97,13 @@ class RecoverFundsViewModel @Inject constructor(
     private fun assetClassifier() = io.digibyte.core.recovery.ForeignUtxoAssetClassifier(
         fetchRawTx = { txid -> assetNetworkClient.getRawTransaction(txid) },
         isAssetTx = { raw -> io.digibyte.core.bridge.NativeBridge.isAssetTransaction(raw) },
+    )
+
+    /** Everything one recovery pass did: assets moved, DGB swept, dollars moved. */
+    data class RecoveryOutcome(
+        val assetMoves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>,
+        val swept: LegacySweepService.Result,
+        val digiDollar: io.digibyte.core.recovery.DigiDollarTransferService.Result?,
     )
 
     private val _state = MutableStateFlow<UiState>(UiState.Idle)
@@ -220,12 +229,14 @@ class RecoverFundsViewModel @Inject constructor(
                         return@launch
                     }
                     try {
-                        val (moves, result) = withContext(Dispatchers.IO) {
+                        val outcome = withContext(Dispatchers.IO) {
                             runRecovery(seed, findings, res.address, destIsSelf, isForeign = false)
                         }
                         sweptFindings = findings
                         sweptForeign = false
-                        _state.value = UiState.Done(result.outcomes, moves)
+                        _state.value = UiState.Done(
+                            outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar,
+                        )
                     } catch (e: CancellationException) {
                         throw e
                     } catch (t: Throwable) {
@@ -273,7 +284,7 @@ class RecoverFundsViewModel @Inject constructor(
         destAddress: String,
         destIsSelf: Boolean,
         isForeign: Boolean,
-    ): Pair<List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>, LegacySweepService.Result> {
+    ): RecoveryOutcome {
         val classifier = assetClassifier()
         var current = findings
 
@@ -311,13 +322,17 @@ class RecoverFundsViewModel @Inject constructor(
                     // The split is on the wire and will confirm; we simply could not see it in
                     // time. Nothing is lost — re-running recovery finds the new outputs, because
                     // the split paid the source wallet's own addresses.
-                    return emptyList<io.digibyte.core.recovery.ForeignAssetTransferService.Move>() to
-                        LegacySweepService.Result(emptyList())
+                    return RecoveryOutcome(emptyList(), LegacySweepService.Result(emptyList()), null)
                 }
                 current = if (isForeign) rescanned.allWithFunds else rescanned.nonNativeWithFunds
                 _state.value = UiState.Sweeping
                 return@repeat
             }
+
+            // DigiDollar moves alongside the assets and BEFORE the sweep, for the same reason:
+            // the DGB paying its consensus fee is exactly what the sweep would otherwise take.
+            // Its inputs join the same exclusion set.
+            val dd = moveDigiDollar(seed, current, destIsSelf)
 
             val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
                 moveResult.moves.map {
@@ -333,17 +348,64 @@ class RecoverFundsViewModel @Inject constructor(
                 seedBytes = seed,
                 nonNativeResults = current,
                 destAddress = destAddress,
-                excludeOutpoints = exclusions,
+                excludeOutpoints = exclusions + dd?.spentInputs.orEmpty().toSet(),
                 precomputedVerdicts = verdicts,
                 destIsSelf = destIsSelf,
             )
-            return moveResult.moves to swept
+            return RecoveryOutcome(moveResult.moves, swept, dd)
         }
 
         // Both rounds asked to split, which should be impossible: after one split there is an
         // output per asset. Reported rather than looped on.
-        return emptyList<io.digibyte.core.recovery.ForeignAssetTransferService.Move>() to
-            LegacySweepService.Result(emptyList())
+        return RecoveryOutcome(emptyList(), LegacySweepService.Result(emptyList()), null)
+    }
+
+    /**
+     * Move whatever DigiDollar this seed holds.
+     *
+     * Null when there is nothing to say — no dollars and a reachable lookup. Anything else is
+     * reported, including dollars we found and could not move: a recovery that empties a wallet
+     * of DGB while staying silent about its dollars is the failure this whole path exists to fix.
+     */
+    private suspend fun moveDigiDollar(
+        seed: ByteArray,
+        findings: List<RecoveryScanService.ProfileResult>,
+        destIsSelf: Boolean,
+    ): io.digibyte.core.recovery.DigiDollarTransferService.Result? {
+        if (!destIsSelf) return null   // DigiDollar always comes home; there is no external form
+        val scan = (scanService.state.value as? RecoveryScanService.State.Done)?.digiDollar
+            ?: return null
+        if (!scan.hasDollars && scan.reachable) return null
+
+        // The destination is THIS wallet's DigiDollar address — the BIP86 taproot key it already
+        // watches — so the dollars land somewhere the wallet can see and spend.
+        val recipient = NativeBridge.getDigiDollarTaprootKeyHex() ?: return null
+        val change = NativeBridge.getReceiveAddress(0, format = 2) ?: return null
+
+        // The fee comes from the plain DGB the scan found, wherever it lives. Asset-bearing
+        // outpoints are excluded by the same partition the sweep uses.
+        val profile = findings.firstOrNull { it.utxos.isNotEmpty() } ?: return null
+        val byAddress = profile.derivedAddresses.associateBy { it.address }
+        val feeInputs = profile.utxos.mapNotNull { u ->
+            val d = byAddress[u.address] ?: return@mapNotNull null
+            val script = u.scriptPubKeyHex ?: return@mapNotNull null
+            io.digibyte.core.recovery.ForeignAssetTransferPlan.Spend(
+                txid = u.txid, vout = u.vout, amountSat = u.amountSatoshi,
+                scriptPubKeyHex = script, chain = d.chain, index = d.index,
+            )
+        }
+
+        return io.digibyte.core.recovery.DigiDollarTransferService(
+            outgoingTxStore = outgoingTxStore,
+            walletTxPersister = walletTxPersister,
+        ).move(
+            seedBytes = seed,
+            scan = scan,
+            feeInputs = feeInputs,
+            feeProfile = profile.profile,
+            recipientKeyHex = recipient,
+            changeAddress = change,
+        )
     }
 
     /**
@@ -469,13 +531,15 @@ class RecoverFundsViewModel @Inject constructor(
                 return@launch
             }
             try {
-                val (moves, result) = withContext(Dispatchers.IO) {
+                val outcome = withContext(Dispatchers.IO) {
                     // foreign: all-funded incl. native; lands in THIS wallet -> receive
                     runRecovery(seed, findings, dest.address, destIsSelf = true, isForeign = true)
                 }
                 sweptFindings = findings
                 sweptForeign = true
-                _state.value = UiState.Done(result.outcomes, moves)
+                _state.value = UiState.Done(
+                    outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar,
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {

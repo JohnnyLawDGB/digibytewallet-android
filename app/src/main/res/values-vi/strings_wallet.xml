@@ -564,5 +564,7 @@
     <string name="send_fail_unknown">Không thể gửi giao dịch.</string>
     <string name="send_fail_try_again">Thử lại</string>
     <string name="rf_splitting_for_assets">Đang chuẩn bị chuyển %1$d DigiAssets — chia nhỏ số DGB của bạn để mỗi tài sản tự trả phí chuyển. Chờ một xác nhận, thường dưới một phút.</string>
-    <string name="rf_digidollar_not_covered">Không bao gồm DigiDollar. Phiên bản này chưa thể chuyển — mọi DigiDollar sẽ ở lại ví cũ.</string>
+    <string name="rf_dd_moved">Đã chuyển %1$s DigiDollar về ví này</string>
+    <string name="rf_dd_left_behind">Còn lại %1$s DigiDollar — không thể chuyển</string>
+    <string name="rf_dd_unreachable">Không thể kiểm tra DigiDollar; ví này có thể đang giữ một ít</string>
 </resources>

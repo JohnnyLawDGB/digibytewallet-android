@@ -145,6 +145,7 @@ fun RecoverFundsScreen(
                     is RecoverFundsViewModel.UiState.Done -> ResultBody(
                         outcomes = s.outcomes,
                         assetMoves = s.assetMoves,
+                        digiDollar = s.digiDollar,
                     )
                     is RecoverFundsViewModel.UiState.Error ->
                         if (mode == RecoverMode.AnotherPhrase)
@@ -549,20 +550,6 @@ private fun FindingsBody(
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
-                // DigiDollar is not covered at all: it lives at m/86'/20'/0' as a zero-value
-                // Taproot output, and the scan derives P2PKH, P2WPKH and P2SH-P2WPKH only, so
-                // those addresses are never asked about. Nothing is destroyed — the sweep cannot
-                // spend what it never derived — but a wallet emptied of DGB and assets while its
-                // DigiDollar sits untouched and unmentioned is "no funds found" about money that
-                // exists. Stated quietly and unconditionally, because the scan has no way to tell
-                // whether this particular wallet holds any.
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = stringResource(R.string.rf_digidollar_not_covered),
-                    color = MUTED,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
                 // Said BEFORE the button, not after. Recovering this wallet moves its DigiAssets
                 // first — and an asset transfer cannot be undone, so it must not be something the
                 // user discovers on the results screen.
@@ -686,6 +673,7 @@ private fun FindingCard(
 private fun ResultBody(
     outcomes: List<LegacySweepService.SweepOutcome>,
     assetMoves: List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>,
+    digiDollar: io.digibyte.core.recovery.DigiDollarTransferService.Result? = null,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -729,6 +717,13 @@ private fun ResultBody(
             item { AssetMoveSection(assetMoves) }
         }
 
+        // Reported whenever there is anything to say — including dollars we found and could not
+        // move. A recovery that empties a wallet of DGB while staying silent about its DigiDollar
+        // is "no funds found" about money that exists.
+        digiDollar?.let { dd ->
+            if (dd.hasDollars || !dd.reachable) item { DigiDollarSection(dd) }
+        }
+
         item {
             Spacer(Modifier.height(4.dp))
             Text(
@@ -737,6 +732,63 @@ private fun ResultBody(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
+        }
+    }
+}
+
+/**
+ * What became of the wallet's DigiDollar.
+ *
+ * Shown whenever there is anything true to say — moved, found-but-unmovable, or not askable.
+ * Silence was the original defect: DigiDollar was invisible to the scan, so a wallet was emptied
+ * of DGB and assets and told nothing about its dollars.
+ */
+@Composable
+private fun DigiDollarSection(
+    dd: io.digibyte.core.recovery.DigiDollarTransferService.Result,
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CARD)
+    ) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)) {
+            val amount = io.digibyte.core.recovery.DigiDollarHolding.formatCents(dd.cents)
+            when {
+                dd.moved -> {
+                    Text(
+                        text = stringResource(R.string.rf_dd_moved, amount),
+                        color = SUCCESS_GREEN,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                !dd.reachable && !dd.hasDollars -> {
+                    // Could not ask. Never reported as "holds none" — the wallet may hold plenty.
+                    Text(
+                        text = stringResource(R.string.rf_dd_unreachable),
+                        color = AMBER,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                else -> {
+                    Text(
+                        text = stringResource(R.string.rf_dd_left_behind, amount),
+                        color = AMBER,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    dd.failureReason?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = it,
+                            color = MUTED,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -544,5 +544,7 @@
     <string name="send_fail_unknown">La transaction n\'a pas pu être envoyée.</string>
     <string name="send_fail_try_again">Réessayer</string>
     <string name="rf_splitting_for_assets">Préparation du déplacement de %1$d DigiAssets — vos DGB sont répartis pour que chacun puisse payer ses propres frais de transfert. Attente d\'une confirmation, généralement moins d\'une minute.</string>
-    <string name="rf_digidollar_not_covered">Les DigiDollar ne sont pas inclus. Cette version ne peut pas encore les déplacer : ils restent dans l\'ancien portefeuille.</string>
+    <string name="rf_dd_moved">%1$s en DigiDollar déplacés vers ce portefeuille</string>
+    <string name="rf_dd_left_behind">%1$s en DigiDollar sont restés — ils n\'ont pas pu être déplacés</string>
+    <string name="rf_dd_unreachable">Impossible de vérifier les DigiDollar ; ce portefeuille en détient peut-être</string>
 </resources>
