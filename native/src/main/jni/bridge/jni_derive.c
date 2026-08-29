@@ -35,6 +35,14 @@
 #include "../digibytewallet-core/BRInt.h"
 #include "jni_seed_buffer.h"
 #include "foreign_tx_fee_guard.h"
+#include "BRDigiDollar.h"
+
+/* Mirrored from BRWallet.c's DigiDollar builder — the same consensus constants, restated here
+ * because that file keeps them private and a foreign-seed transfer must obey them identically. */
+#define DD_TX_VERSION_TRANSFER_JNI 0x02000770u  /* 0x0770 marker | type 2 = TRANSFER */
+#define DD_MIN_FEE_JNI             10000000ULL  /* 0.1 DGB floor, wire spec section 6 */
+#define DD_MIN_OUTPUT_CENTS_JNI    100LL        /* $1.00 consensus minimum per output */
+#define DD_MAX_OUTPUT_CENTS_JNI    10000000LL   /* $100,000 per-transfer-output maximum */
 
 #define LOG_TAG "DGB-Derive"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -951,6 +959,243 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignAssetTransfer(
 
     if (!ok || !signOk || !BRTransactionIsSigned(tx)) {
         LOGW("buildAndSignForeignAssetTransfer: signing failed or refused (ok=%d signOk=%d)", ok, signOk);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    size_t len = BRTransactionSerialize(tx, NULL, 0);
+    uint8_t *ser = (uint8_t *)malloc(len);
+    if (!ser) { BRTransactionFree(tx); return NULL; }
+    len = BRTransactionSerialize(tx, ser, len);
+    BRTransactionFree(tx);
+
+    char *hex = (char *)malloc(len * 2 + 1);
+    if (!hex) { free(ser); return NULL; }
+    for (size_t i = 0; i < len; i++) sprintf(hex + i * 2, "%02x", ser[i]);
+    hex[len * 2] = '\0';
+    free(ser);
+
+    jstring result = (*env)->NewStringUTF(env, hex);
+    free(hex);
+    return result;
+}
+
+/**
+ * Build and sign a DigiDollar TRANSFER from a FOREIGN seed.
+ *
+ * ## Why this cannot reuse buildAndSignForeignAssetTransfer
+ *
+ * Two reasons, both structural:
+ *
+ *  1. A DigiDollar token output is **zero-value by construction** — the cents live in the
+ *     OP_RETURN, not in the output's satoshi amount. The asset signer rejects any input with
+ *     `amount <= 0` outright, which is correct for it and fatal here.
+ *  2. A DD transaction is identified by its **nVersion**, `0x02000770` — the 0x0770 marker in the
+ *     low 16 bits and the type in the top byte. `BRTransactionNew()` cannot express that, and a
+ *     DD transfer without it is simply not a DD transfer.
+ *
+ * ## The layout is consensus-significant
+ *
+ * Mirrored from BRWalletCreateDigiDollarTransfer, which carries the comment
+ * "NO shuffle (output order is consensus-significant)":
+ *
+ *     inputs   DD outpoints at value 0, THEN the DGB fee inputs
+ *     outputs  vout0  recipient P2TR, value 0
+ *              [DGB change]
+ *              OP_RETURN LAST — 6a 02 'DD' 01 02 <push cents>
+ *
+ * Recovery always moves the WHOLE balance, so there is never DD change and never a second cent
+ * push. That is deliberate: a partial DD transfer would need a change output this wallet owns on
+ * the foreign seed's taproot chain, and leaving dollars behind is the thing recovery exists to
+ * avoid.
+ *
+ * ## Two derivation prefixes, on purpose
+ *
+ * The dollars sit at m/86'/20'/0'; the DGB paying their fee sits wherever the scan found it —
+ * BIP84, BIP44, the bread path. So the DD inputs and the fee inputs carry separate prefixes and
+ * separate HMAC keys. Assuming one prefix for both would sign the fee inputs with the wrong keys
+ * and produce a transaction no peer accepts.
+ *
+ * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
+    JNIEnv *env, jobject thiz,
+    jbyteArray seedBytes,
+    jobjectArray ddTxidsHex, jintArray ddVouts, jobjectArray ddScriptsHex,
+    jintArray ddChains, jintArray ddIndices,
+    jstring feeHmacKey, jintArray feePrefixPath,
+    jobjectArray feeTxidsHex, jintArray feeVouts, jlongArray feeAmounts,
+    jobjectArray feeScriptsHex, jintArray feeChains, jintArray feeIndices,
+    jstring recipientKeyHex,
+    jstring changeAddress, jlong changeAmount,
+    jlong cents)
+{
+    (void)thiz;
+    if (!seedBytes || !ddTxidsHex || !ddVouts || !ddScriptsHex || !ddChains || !ddIndices ||
+        !feeHmacKey || !feePrefixPath || !feeTxidsHex || !feeVouts || !feeAmounts ||
+        !feeScriptsHex || !feeChains || !feeIndices || !recipientKeyHex) return NULL;
+
+    const jsize ddCount  = (*env)->GetArrayLength(env, ddTxidsHex);
+    const jsize feeCount = (*env)->GetArrayLength(env, feeTxidsHex);
+    if (ddCount <= 0 || feeCount <= 0) {
+        LOGW("foreignDD: need at least one DD input and one fee input");
+        return NULL;
+    }
+    if (cents < DD_MIN_OUTPUT_CENTS_JNI || cents > DD_MAX_OUTPUT_CENTS_JNI) {
+        LOGW("foreignDD: %lld cents is outside the consensus per-output range",
+             (long long)cents);
+        return NULL;
+    }
+
+    const jsize seedLen = (*env)->GetArrayLength(env, seedBytes);
+    jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
+    if (!seedRaw) return NULL;
+    SeedBuffer seed;
+    const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
+    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    if (!seedOk) { LOGW("foreignDD: rejecting a seed of %d bytes", (int)seedLen); return NULL; }
+
+    /* Recipient taproot output key X(Q), 32 bytes. Used verbatim — no re-tweak, matching
+     * BRWalletCreateDigiDollarTransfer's "recipient (verbatim, no re-tweak)". */
+    const char *rkHex = (*env)->GetStringUTFChars(env, recipientKeyHex, NULL);
+    uint8_t recipientKey[32];
+    size_t rkLen = rkHex ? hex_to_bytes(rkHex, recipientKey, sizeof(recipientKey)) : 0;
+    if (rkHex) (*env)->ReleaseStringUTFChars(env, recipientKeyHex, rkHex);
+    if (rkLen != 32) { LOGW("foreignDD: recipient key must be 32 bytes"); seed_buffer_release(&seed); return NULL; }
+
+    BRTransaction *tx = BRTransactionNew();
+    if (!tx) { seed_buffer_release(&seed); return NULL; }
+    tx->version = DD_TX_VERSION_TRANSFER_JNI;   /* 0x0770 marker | type 2 */
+
+    BRKey *keys = (BRKey *)calloc((size_t)(ddCount + feeCount), sizeof(BRKey));
+    if (!keys) { BRTransactionFree(tx); seed_buffer_release(&seed); return NULL; }
+
+    int ok = 1;
+    uint64_t totalIn = 0;
+
+    /* ── outputs FIRST: their order is consensus-significant and must not depend on inputs ── */
+    uint8_t rspk[34]; rspk[0] = 0x51; rspk[1] = 0x20; memcpy(rspk + 2, recipientKey, 32);
+    BRTransactionAddOutput(tx, 0, rspk, sizeof(rspk));      /* vout0 recipient, value 0 */
+
+    uint64_t totalOut = 0;
+    if (changeAddress && changeAmount > 0) {
+        const char *ca = (*env)->GetStringUTFChars(env, changeAddress, NULL);
+        uint8_t cspk[42];
+        size_t cl = ca ? BRAddressScriptPubKey(cspk, sizeof(cspk), ca) : 0;
+        if (ca) (*env)->ReleaseStringUTFChars(env, changeAddress, ca);
+        if (cl == 0) { LOGW("foreignDD: change address did not encode"); ok = 0; }
+        else { BRTransactionAddOutput(tx, (uint64_t)changeAmount, cspk, cl); totalOut += (uint64_t)changeAmount; }
+    }
+
+    if (ok) {   /* OP_RETURN LAST */
+        uint8_t orr[32]; size_t ol = 0;
+        orr[ol++] = 0x6a; orr[ol++] = 0x02; orr[ol++] = 0x44; orr[ol++] = 0x44;
+        orr[ol++] = 0x01; orr[ol++] = 0x02;
+        uint8_t enc[9];
+        size_t el = BRDigiDollarWriteScriptNum((int64_t)cents, enc);
+        orr[ol++] = (uint8_t)el; memcpy(orr + ol, enc, el); ol += el;
+        BRTransactionAddOutput(tx, 0, orr, ol);
+    }
+
+    /* ── inputs: DD first at value 0, then the DGB fee inputs ── */
+    jint *ddV = (*env)->GetIntArrayElements(env, ddVouts, NULL);
+    jint *ddC = (*env)->GetIntArrayElements(env, ddChains, NULL);
+    jint *ddI = (*env)->GetIntArrayElements(env, ddIndices, NULL);
+
+    /* The dollars always live at m/86'/20'/0' under the standard HMAC. foreign_taproot_sign_kat
+     * pins that this generic derivation equals BRBIP32PrivKeyBIP86, so BRTransactionSign can
+     * match the input by its taproot output key and Schnorr-sign it. */
+    uint32_t ddPath[5] = { 86u | 0x80000000u, 20u | 0x80000000u, 0u | 0x80000000u, 0u, 0u };
+
+    for (jsize i = 0; ok && i < ddCount; i++) {
+        jstring tj = (jstring)(*env)->GetObjectArrayElement(env, ddTxidsHex, i);
+        jstring sj = (jstring)(*env)->GetObjectArrayElement(env, ddScriptsHex, i);
+        if (!tj || !sj) { ok = 0; break; }
+        const char *ts = (*env)->GetStringUTFChars(env, tj, NULL);
+        const char *ss = (*env)->GetStringUTFChars(env, sj, NULL);
+        uint8_t txid[32], spk[42];
+        size_t tl = ts ? hex_to_bytes(ts, txid, sizeof(txid)) : 0;
+        size_t sl = ss ? hex_to_bytes(ss, spk, sizeof(spk)) : 0;
+        if (ts) (*env)->ReleaseStringUTFChars(env, tj, ts);
+        if (ss) (*env)->ReleaseStringUTFChars(env, sj, ss);
+        (*env)->DeleteLocalRef(env, tj); (*env)->DeleteLocalRef(env, sj);
+        if (tl != 32 || sl == 0) { LOGW("foreignDD: bad DD input at %d", (int)i); ok = 0; break; }
+
+        UInt256 h; for (int b = 0; b < 32; b++) h.u8[b] = txid[31 - b];
+        ddPath[3] = (uint32_t)ddC[i]; ddPath[4] = (uint32_t)ddI[i];
+        BRBIP32PrivKeyArrayPath(&keys[i], seed.bytes, seed.len, "Bitcoin seed", ddPath, 5);
+        /* value 0 — the cents are in the OP_RETURN, not the output amount */
+        BRTransactionAddInput(tx, h, (uint32_t)ddV[i], 0, spk, sl, NULL, 0, NULL, 0, TXIN_SEQUENCE);
+    }
+    (*env)->ReleaseIntArrayElements(env, ddVouts, ddV, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, ddChains, ddC, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, ddIndices, ddI, JNI_ABORT);
+
+    const char *feeHmac = (*env)->GetStringUTFChars(env, feeHmacKey, NULL);
+    const jsize fpLen = (*env)->GetArrayLength(env, feePrefixPath);
+    jint *fp = (*env)->GetIntArrayElements(env, feePrefixPath, NULL);
+    jint *fV = (*env)->GetIntArrayElements(env, feeVouts, NULL);
+    jlong *fA = (*env)->GetLongArrayElements(env, feeAmounts, NULL);
+    jint *fC = (*env)->GetIntArrayElements(env, feeChains, NULL);
+    jint *fI = (*env)->GetIntArrayElements(env, feeIndices, NULL);
+    uint32_t *fullPath = (uint32_t *)calloc((size_t)fpLen + 2, sizeof(uint32_t));
+    if (!fullPath) ok = 0;
+
+    for (jsize i = 0; ok && i < feeCount; i++) {
+        jstring tj = (jstring)(*env)->GetObjectArrayElement(env, feeTxidsHex, i);
+        jstring sj = (jstring)(*env)->GetObjectArrayElement(env, feeScriptsHex, i);
+        if (!tj || !sj) { ok = 0; break; }
+        const char *ts = (*env)->GetStringUTFChars(env, tj, NULL);
+        const char *ss = (*env)->GetStringUTFChars(env, sj, NULL);
+        uint8_t txid[32], spk[42];
+        size_t tl = ts ? hex_to_bytes(ts, txid, sizeof(txid)) : 0;
+        size_t sl = ss ? hex_to_bytes(ss, spk, sizeof(spk)) : 0;
+        if (ts) (*env)->ReleaseStringUTFChars(env, tj, ts);
+        if (ss) (*env)->ReleaseStringUTFChars(env, sj, ss);
+        (*env)->DeleteLocalRef(env, tj); (*env)->DeleteLocalRef(env, sj);
+        if (tl != 32 || sl == 0 || fA[i] <= 0) { LOGW("foreignDD: bad fee input at %d", (int)i); ok = 0; break; }
+
+        UInt256 h; for (int b = 0; b < 32; b++) h.u8[b] = txid[31 - b];
+        for (jsize p = 0; p < fpLen; p++) fullPath[p] = (uint32_t)fp[p];
+        fullPath[fpLen] = (uint32_t)fC[i]; fullPath[fpLen + 1] = (uint32_t)fI[i];
+        BRBIP32PrivKeyArrayPath(&keys[ddCount + i], seed.bytes, seed.len, feeHmac,
+                                fullPath, (size_t)fpLen + 2);
+        BRTransactionAddInput(tx, h, (uint32_t)fV[i], (uint64_t)fA[i], spk, sl,
+                              NULL, 0, NULL, 0, TXIN_SEQUENCE);
+        totalIn += (uint64_t)fA[i];
+    }
+
+    if (fullPath) { secure_zero(fullPath, ((size_t)fpLen + 2) * sizeof(uint32_t)); free(fullPath); }
+    (*env)->ReleaseIntArrayElements(env, feePrefixPath, fp, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, feeVouts, fV, JNI_ABORT);
+    (*env)->ReleaseLongArrayElements(env, feeAmounts, fA, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, feeChains, fC, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, feeIndices, fI, JNI_ABORT);
+    (*env)->ReleaseStringUTFChars(env, feeHmacKey, feeHmac);
+
+    /* The DD fee floor is a consensus rule, not an estimate: DigiByte Core's own builder uses the
+     * same 0.1 DGB minimum. Below it the transfer will not be accepted however well-formed. */
+    if (ok && totalOut > totalIn) {
+        LOGW("foreignDD: change %llu exceeds fee inputs %llu",
+             (unsigned long long)totalOut, (unsigned long long)totalIn);
+        ok = 0;
+    }
+    if (ok && (totalIn - totalOut) < DD_MIN_FEE_JNI) {
+        LOGW("foreignDD: implied fee %llu is below the %llu DigiDollar floor",
+             (unsigned long long)(totalIn - totalOut), (unsigned long long)DD_MIN_FEE_JNI);
+        ok = 0;
+    }
+
+    int signOk = 0;
+    if (ok) signOk = BRTransactionSign(tx, 0, keys, (size_t)(ddCount + feeCount));
+
+    for (jsize i = 0; i < ddCount + feeCount; i++) BRKeyClean(&keys[i]);
+    free(keys);
+    seed_buffer_release(&seed);
+
+    if (!ok || !signOk || !BRTransactionIsSigned(tx)) {
+        LOGW("foreignDD: signing failed or refused (ok=%d signOk=%d)", ok, signOk);
         BRTransactionFree(tx);
         return NULL;
     }
