@@ -549,6 +549,20 @@ private fun FindingsBody(
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
+                // DigiDollar is not covered at all: it lives at m/86'/20'/0' as a zero-value
+                // Taproot output, and the scan derives P2PKH, P2WPKH and P2SH-P2WPKH only, so
+                // those addresses are never asked about. Nothing is destroyed — the sweep cannot
+                // spend what it never derived — but a wallet emptied of DGB and assets while its
+                // DigiDollar sits untouched and unmentioned is "no funds found" about money that
+                // exists. Stated quietly and unconditionally, because the scan has no way to tell
+                // whether this particular wallet holds any.
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.rf_digidollar_not_covered),
+                    color = MUTED,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
                 // Said BEFORE the button, not after. Recovering this wallet moves its DigiAssets
                 // first — and an asset transfer cannot be undone, so it must not be something the
                 // user discovers on the results screen.

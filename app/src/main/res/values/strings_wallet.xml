@@ -695,4 +695,5 @@
     <string name="send_fail_unknown">The transaction could not be sent.</string>
     <string name="send_fail_try_again">Try again</string>
     <string name="rf_splitting_for_assets">Preparing to move %1$d DigiAssets — splitting your DGB so each one can pay its own transfer fee. This waits for one confirmation, usually under a minute.</string>
+    <string name="rf_digidollar_not_covered">DigiDollar is not included. This version can\'t move it yet — any DigiDollar stays in the old wallet.</string>
 </resources>

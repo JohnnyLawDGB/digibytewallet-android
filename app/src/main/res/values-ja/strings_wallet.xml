@@ -564,4 +564,5 @@
     <string name="send_fail_unknown">取引を送信できませんでした。</string>
     <string name="send_fail_try_again">再試行</string>
     <string name="rf_splitting_for_assets">%1$d 件の DigiAssets を移す準備中です。各資産が自分の送信手数料を支払えるよう DGB を分割しています。確認を 1 回待ちます（通常 1 分未満）。</string>
+    <string name="rf_digidollar_not_covered">DigiDollar は対象外です。このバージョンではまだ移せません — DigiDollar は旧ウォレットに残ります。</string>
 </resources>

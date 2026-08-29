@@ -7,6 +7,26 @@ produces completely different addresses depending on which wallet wrote it — s
 different derivation path or HMAC key, different coins — so restore has to try all of them. Until
 2026-08-28, most of those probes had never been pointed at a wallet that held anything.
 
+## What kinds of value
+
+A DigiByte wallet holds three different things and they are not interchangeable. Getting the
+derivation right is only half the job — a scan that finds the right addresses can still leave
+value behind if it does not understand what is sitting on them.
+
+| Kind | Lives at | What recovery does | Status |
+|---|---|---|---|
+| **Plain DGB** | any scanned profile | Swept into the destination in one transaction per profile. | **proven** |
+| **DigiAsset** | a specific UTXO + OP_RETURN marker | Held back from the sweep — spending it as DGB destroys it — then moved in its own transaction, before the sweep, while the fee money is still there. | **proven** |
+| **DigiDollar** | `m/86'/20'/0'`, zero-value P2TR | Nothing. The scan derives P2PKH, P2WPKH and P2SH-P2WPKH only, so these addresses are never asked about. | **not covered** |
+
+> **DigiDollar is a blind spot, not a destruction risk.** The sweep cannot spend what it never
+> derived, so those coins stay put. But a wallet emptied of its DGB and assets while its DigiDollar
+> sits untouched and unmentioned is "no funds found" about money that exists, one layer up. The
+> recovery screen now says so plainly. The BIP86 derivation and Schnorr signing both exist and are
+> mainnet-proven elsewhere in this wallet; wiring them into recovery is unstarted.
+
+## Which derivation
+
 | Profile | Path | HMAC | Format | Status |
 |---|---|---|---|---|
 | BIP84 DGB *(this wallet)* | `m/84'/20'/0'` | Bitcoin seed | `dgb1q…` | **proven** |
@@ -43,6 +63,40 @@ be checked" is treated as its own outcome, distinct from both "no funds" and "ev
 — the rule in `PartialScanFailureTest`, written against an earlier bug, holding on live money.
 
 ---
+
+## Fifty assets, one output
+
+An asset moves in its own transaction and two transactions cannot spend the same UTXO, so moving
+*N* assets needs *N* spendable outputs — and a transfer's change goes to the destination, never
+back to fund the next. Holders with 50+ assets and a single UTXO are common. Until v4.0.71 such a
+wallet moved exactly one asset and stranded the rest.
+
+Combining assets into one transaction does not fix it: an instruction costs ~2 bytes and the
+80-byte OP_RETURN holds roughly 38 against 50 needed, and it would concentrate every asset onto
+one output where a single plain-DGB spend destroys all of them. Splitting the DGB first keeps each
+asset in its own transaction.
+
+```
+wallet             3 assets, 1 spendable output
+
+fan-out            1 input -> 3 fee outputs, fee 30,600
+                   c7c262159bfa5d17…   — then waited 19s and re-scanned
+moved              ec7deca10005f59b…
+                   cbb7064da98db061…
+                   d8c24c33d77b7e2b…
+swept              0.04785317 DGB
+source wallet      0 UTXOs
+
+before v4.0.71     1 asset moved, 2 stranded with no DGB behind them
+```
+
+The split waits for a confirmation rather than chaining — DigiByte inherits Bitcoin's
+`limitdescendantcount`, so dozens of unconfirmed children of one parent are rejected. It then
+re-scans rather than predicting the new UTXO set, and the loop is bounded at one split because
+after one there is an output per asset.
+
+Cost for fifty assets: 61,361 sats each plus a 190,400-sat split fee — about **0.033 DGB**.
+Verified with three; the arithmetic is linear from there.
 
 ## Run A — BIP44, and the change chain
 

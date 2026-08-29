@@ -564,4 +564,5 @@
     <string name="send_fail_unknown">İşlem gönderilemedi.</string>
     <string name="send_fail_try_again">Tekrar dene</string>
     <string name="rf_splitting_for_assets">%1$d DigiAssets taşınmaya hazırlanıyor — her biri kendi transfer ücretini ödeyebilsin diye DGB\'niz bölünüyor. Bir onay bekleniyor, genelde bir dakikadan kısa.</string>
+    <string name="rf_digidollar_not_covered">DigiDollar dahil değildir. Bu sürüm henüz taşıyamıyor — mevcut DigiDollar eski cüzdanda kalır.</string>
 </resources>

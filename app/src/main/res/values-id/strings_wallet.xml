@@ -564,4 +564,5 @@
     <string name="send_fail_unknown">Transaksi tidak dapat dikirim.</string>
     <string name="send_fail_try_again">Coba lagi</string>
     <string name="rf_splitting_for_assets">Menyiapkan pemindahan %1$d DigiAssets — DGB Anda dibagi agar masing-masing dapat membayar biaya transfernya sendiri. Menunggu satu konfirmasi, biasanya kurang dari satu menit.</string>
+    <string name="rf_digidollar_not_covered">DigiDollar tidak termasuk. Versi ini belum bisa memindahkannya — DigiDollar tetap di dompet lama.</string>
 </resources>

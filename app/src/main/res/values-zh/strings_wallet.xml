@@ -564,4 +564,5 @@
     <string name="send_fail_unknown">交易无法发送。</string>
     <string name="send_fail_try_again">重试</string>
     <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets——正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
+    <string name="rf_digidollar_not_covered">不包含 DigiDollar。此版本尚无法转移，任何 DigiDollar 都会留在旧钱包中。</string>
 </resources>
