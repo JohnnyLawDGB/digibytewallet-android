@@ -564,6 +564,9 @@
     <string name="send_fail_unknown">交易无法发送。</string>
     <string name="send_fail_try_again">重试</string>
     <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets——正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
+    <string name="rf_nothing_moved">没有转移任何资产</string>
+    <string name="rf_dd_fee_floor">需要 %1$s 网络手续费 — 此钱包只有 %2$s。</string>
+    <string name="rf_dd_found">找到 %1$s DigiDollar</string>
     <string name="rf_dd_moved">%1$s DigiDollar 已转入此钱包</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar 被留下——无法转移</string>
     <string name="rf_dd_unreachable">无法检查 DigiDollar，此钱包可能持有一些</string>

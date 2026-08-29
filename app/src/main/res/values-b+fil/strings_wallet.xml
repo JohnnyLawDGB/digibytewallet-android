@@ -564,6 +564,9 @@
     <string name="send_fail_unknown">Hindi naipadala ang transaksyon.</string>
     <string name="send_fail_try_again">Subukan ulit</string>
     <string name="rf_splitting_for_assets">Inihahanda ang paglipat ng %1$d DigiAssets — hinahati ang iyong DGB para makabayad ang bawat isa ng sarili nitong transfer fee. Naghihintay ng isang kumpirmasyon, karaniwang wala pang isang minuto.</string>
+    <string name="rf_nothing_moved">Walang nailipat</string>
+    <string name="rf_dd_fee_floor">Kailangan ng %1$s na bayad sa network — ang wallet na ito ay may %2$s.</string>
+    <string name="rf_dd_found">Nakita ang %1$s na DigiDollar</string>
     <string name="rf_dd_moved">%1$s na DigiDollar ang nailipat sa wallet na ito</string>
     <string name="rf_dd_left_behind">%1$s na DigiDollar ang naiwan — hindi ito nailipat</string>
     <string name="rf_dd_unreachable">Hindi masuri ang DigiDollar; maaaring may hawak ang wallet na ito</string>

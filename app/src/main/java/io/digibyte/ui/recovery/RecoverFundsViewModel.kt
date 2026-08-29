@@ -69,6 +69,15 @@ class RecoverFundsViewModel @Inject constructor(
              * asset that turns out to be plain change; under-counting would fail to warn at all.
              */
             val assetOutpointCount: Int = 0,
+            /**
+             * What the scan found in DigiDollar, BEFORE any move is attempted.
+             *
+             * Carried here because a DigiDollar token output holds ZERO satoshis: it never lands
+             * in [findings], so a wallet whose only value is dollars produced an empty findings
+             * list and the screen answered "no funds found" over real money — with no button to
+             * move it. Measured on mainnet against a wallet holding $1.00 and no DGB.
+             */
+            val digiDollar: io.digibyte.core.recovery.DigiDollarScan.Result? = null,
         ) : UiState()
         data object Sweeping : UiState()
 
@@ -188,6 +197,7 @@ class RecoverFundsViewModel @Inject constructor(
                                 backendUnreachable = false,
                                 partialFailurePaths = s.unreachableProfileLabels,
                                 assetOutpointCount = countAssetOutpoints(s.nonNativeWithFunds),
+                                digiDollar = s.digiDollar,
                             )
                         }
                     }
@@ -384,16 +394,11 @@ class RecoverFundsViewModel @Inject constructor(
 
         // The fee comes from the plain DGB the scan found, wherever it lives. Asset-bearing
         // outpoints are excluded by the same partition the sweep uses.
-        val profile = findings.firstOrNull { it.utxos.isNotEmpty() } ?: return null
-        val byAddress = profile.derivedAddresses.associateBy { it.address }
-        val feeInputs = profile.utxos.mapNotNull { u ->
-            val d = byAddress[u.address] ?: return@mapNotNull null
-            val script = u.scriptPubKeyHex ?: return@mapNotNull null
-            io.digibyte.core.recovery.ForeignAssetTransferPlan.Spend(
-                txid = u.txid, vout = u.vout, amountSat = u.amountSatoshi,
-                scriptPubKeyHex = script, chain = d.chain, index = d.index,
-            )
-        }
+        //
+        // An EMPTY selection is passed through rather than returned on: a wallet with dollars and
+        // no DGB used to bail out here, so its dollars went unmentioned — the silence this path
+        // exists to end. The transfer service refuses it honestly and reports the balance.
+        val fee = io.digibyte.core.recovery.DigiDollarFeeSelection.from(findings)
 
         return io.digibyte.core.recovery.DigiDollarTransferService(
             outgoingTxStore = outgoingTxStore,
@@ -401,8 +406,8 @@ class RecoverFundsViewModel @Inject constructor(
         ).move(
             seedBytes = seed,
             scan = scan,
-            feeInputs = feeInputs,
-            feeProfile = profile.profile,
+            feeInputs = fee.inputs,
+            feeProfile = fee.profile,
             recipientKeyHex = recipient,
             changeAddress = change,
         )
@@ -491,6 +496,7 @@ class RecoverFundsViewModel @Inject constructor(
                             backendUnreachable = false, isForeign = true,
                             partialFailurePaths = s.unreachableProfileLabels,
                             assetOutpointCount = countAssetOutpoints(set),
+                            digiDollar = s.digiDollar,
                         )
                     }
                     is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)
@@ -511,8 +517,14 @@ class RecoverFundsViewModel @Inject constructor(
         val phrase = pendingForeignMnemonic ?: run {
             _state.value = UiState.Error("Enter a recovery phrase and scan first."); return
         }
-        val findings = (_state.value as? UiState.Findings)?.findings ?: emptyList()
-        if (findings.isEmpty()) { _state.value = UiState.Error("Nothing to recover"); return }
+        val shown = _state.value as? UiState.Findings
+        val findings = shown?.findings ?: emptyList()
+        // Dollars alone are enough to run. A DigiDollar token output carries zero satoshis and so
+        // never lands in [findings]; gating on findings alone meant a wallet holding only dollars
+        // could not be recovered at all — there was nothing to press.
+        if (!io.digibyte.core.recovery.RecoverableValue.exists(findings.size, shown?.digiDollar)) {
+            _state.value = UiState.Error("Nothing to recover"); return
+        }
         val dest = SweepDestination.Native.resolve(
             nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
             validator = { NativeBridge.isValidAddress(it) },

@@ -564,6 +564,9 @@
     <string name="send_fail_unknown">取引を送信できませんでした。</string>
     <string name="send_fail_try_again">再試行</string>
     <string name="rf_splitting_for_assets">%1$d 件の DigiAssets を移す準備中です。各資産が自分の送信手数料を支払えるよう DGB を分割しています。確認を 1 回待ちます（通常 1 分未満）。</string>
+    <string name="rf_nothing_moved">何も移動されませんでした</string>
+    <string name="rf_dd_fee_floor">ネットワーク手数料に %1$s が必要です。このウォレットには %2$s しかありません。</string>
+    <string name="rf_dd_found">DigiDollar %1$s が見つかりました</string>
     <string name="rf_dd_moved">%1$s 相当の DigiDollar をこのウォレットへ移しました</string>
     <string name="rf_dd_left_behind">%1$s 相当の DigiDollar が残りました — 移せませんでした</string>
     <string name="rf_dd_unreachable">DigiDollar を確認できませんでした。このウォレットが保有している可能性があります</string>

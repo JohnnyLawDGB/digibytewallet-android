@@ -564,6 +564,9 @@
     <string name="send_fail_unknown">लेनदेन नहीं भेजा जा सका।</string>
     <string name="send_fail_try_again">पुनः प्रयास करें</string>
     <string name="rf_splitting_for_assets">%1$d DigiAssets भेजने की तैयारी — आपके DGB को बाँटा जा रहा है ताकि हर एक अपना स्थानांतरण शुल्क चुका सके। एक पुष्टि की प्रतीक्षा, आमतौर पर एक मिनट से कम।</string>
+    <string name="rf_nothing_moved">कुछ भी स्थानांतरित नहीं हुआ</string>
+    <string name="rf_dd_fee_floor">नेटवर्क शुल्क के लिए %1$s चाहिए — इस वॉलेट में %2$s है।</string>
+    <string name="rf_dd_found">%1$s DigiDollar मिले</string>
     <string name="rf_dd_moved">%1$s DigiDollar इस वॉलेट में आ गए</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar पीछे रह गए — उन्हें भेजा नहीं जा सका</string>
     <string name="rf_dd_unreachable">DigiDollar की जाँच नहीं हो सकी; इस वॉलेट में कुछ हो सकता है</string>

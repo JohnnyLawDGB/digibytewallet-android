@@ -63,6 +63,14 @@ class DigiDollarTransferService(
         val unlocatableCents: Long = 0L,
         /** False when a lookup could not be made. Not the same as holding nothing. */
         val reachable: Boolean = true,
+        /**
+         * Why the planner refused, as data. [failureReason] is an English sentence built for the
+         * log; a screen showing a user their own money needs the reason in their own language and
+         * in DGB, which only the structured form allows.
+         */
+        val refusalReason: DigiDollarTransferPlan.Reason? = null,
+        /** Satoshis short of the consensus fee, when [refusalReason] is BELOW_FEE_FLOOR. */
+        val shortfallSat: Long = 0L,
     ) {
         val moved: Boolean get() = txid != null
         val hasDollars: Boolean get() = cents > 0
@@ -112,6 +120,8 @@ class DigiDollarTransferService(
                     failureReason = "${planned.reason}: ${planned.detail}",
                     unlocatableCents = scan.unlocatableCents,
                     reachable = scan.reachable,
+                    refusalReason = planned.reason,
+                    shortfallSat = planned.shortfallSat,
                 )
             }
             is DigiDollarTransferPlan.Result.Ok -> planned.plan

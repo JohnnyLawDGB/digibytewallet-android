@@ -566,6 +566,9 @@
     <string name="send_fail_unknown">No se pudo enviar la transacción.</string>
     <string name="send_fail_try_again">Reintentar</string>
     <string name="rf_splitting_for_assets">Preparando el traslado de %1$d DigiAssets: se dividen tus DGB para que cada uno pueda pagar su propia comisión de transferencia. Espera una confirmación, normalmente menos de un minuto.</string>
+    <string name="rf_nothing_moved">No se movió nada</string>
+    <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red — esta cartera tiene %2$s.</string>
+    <string name="rf_dd_found">Se encontraron %1$s en DigiDollar</string>
     <string name="rf_dd_moved">%1$s en DigiDollar movidos a esta billetera</string>
     <string name="rf_dd_left_behind">%1$s en DigiDollar se quedaron: no se pudieron mover</string>
     <string name="rf_dd_unreachable">No se pudo comprobar DigiDollar; esta billetera podría tener algo</string>

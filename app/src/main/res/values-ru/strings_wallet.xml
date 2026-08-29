@@ -564,6 +564,9 @@
     <string name="send_fail_unknown">Не удалось отправить транзакцию.</string>
     <string name="send_fail_try_again">Повторить</string>
     <string name="rf_splitting_for_assets">Подготовка к перемещению %1$d DigiAssets — ваши DGB делятся, чтобы каждый актив мог оплатить свой перевод. Ожидание одного подтверждения, обычно меньше минуты.</string>
+    <string name="rf_nothing_moved">Ничего не перемещено</string>
+    <string name="rf_dd_fee_floor">Требуется %1$s на комиссию сети — в этом кошельке %2$s.</string>
+    <string name="rf_dd_found">Найдено %1$s в DigiDollar</string>
     <string name="rf_dd_moved">%1$s в DigiDollar перемещено в этот кошелёк</string>
     <string name="rf_dd_left_behind">%1$s в DigiDollar осталось — переместить не удалось</string>
     <string name="rf_dd_unreachable">Не удалось проверить DigiDollar; в этом кошельке они могут быть</string>

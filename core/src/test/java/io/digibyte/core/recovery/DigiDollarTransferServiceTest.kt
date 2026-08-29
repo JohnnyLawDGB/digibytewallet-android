@@ -96,6 +96,31 @@ class DigiDollarTransferServiceTest {
         assertTrue(r.failureReason!!.contains("BELOW_FEE_FLOOR"))
     }
 
+    /**
+     * A wallet swept clean of DGB that still holds dollars. The recovery UI used to return early
+     * here — no funded profile meant no fee inputs meant nothing was said — so the dollars went
+     * unmentioned entirely. Zero fee inputs must produce the same honest refusal as too-few.
+     */
+    @Test fun `dollars with no DGB at all are still reported, with the reason`() {
+        val r = run(service(), scanOf(100), fees = emptyList())
+        assertEquals("the balance is reported even with nothing to pay a fee with", 100L, r.cents)
+        assertFalse(r.moved)
+        assertTrue("a reason must be given", !r.failureReason.isNullOrBlank())
+    }
+
+    /**
+     * The refusal must survive as DATA, not only as an English sentence. The screen showed the
+     * raw detail string — "BELOW_FEE_FLOOR: a DigiDollar transfer needs 10000000 sats of DGB" —
+     * to a user looking at their own money, in one language, in satoshis. Carrying the reason and
+     * the shortfall lets the UI say it in the user's language and in DGB.
+     */
+    @Test fun `a fee-floor refusal carries the reason and the shortfall`() {
+        val r = run(service(), scanOf(100), fees = emptyList())
+        assertEquals(DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR, r.refusalReason)
+        assertEquals("the whole floor is missing when there is no DGB at all",
+            DigiDollarTransferPlan.DD_MIN_FEE_SATS, r.shortfallSat)
+    }
+
     @Test fun `a signing refusal still reports the balance`() {
         val r = run(service(sign = { _, _, _ -> null }), scanOf(250))
         assertEquals(250L, r.cents)

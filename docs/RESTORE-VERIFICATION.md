@@ -60,8 +60,8 @@ either way: dollars found and not moved are still dollars you should know about.
 | Legacy DigiByte mobile *(pre-BIP84 BreadWallet)* | `m/0'` | **DigiByte seed** | `D…` | **proven** |
 | BIP44 DGB *(Coinomi, Trezor, Ledger)* | `m/44'/20'/0'` | Bitcoin seed | `D…` | **proven** |
 | BIP84 key, legacy encoding *(Legacy receive tab)* | `m/84'/20'/0'` | Bitcoin seed | `D…` | **proven** |
-| Legacy `m/0'` standard HMAC *(early non-DGB forks)* | `m/0'` | Bitcoin seed | `D…` | untested |
-| BIP44 wrong-coin *(seed typed into a BTC wallet)* | `m/44'/0'/0'` | Bitcoin seed | `D…` | untested |
+| Legacy `m/0'` standard HMAC *(early non-DGB forks)* | `m/0'` | Bitcoin seed | `D…` | **proven** |
+| BIP44 wrong-coin *(seed typed into a BTC wallet)* | `m/44'/0'/0'` | Bitcoin seed | `D…` | **proven** |
 | BIP49 wrapped segwit | `m/49'/20'/0'` | Bitcoin seed | `S…` | **refuses — honestly** |
 
 ---
@@ -189,6 +189,47 @@ Log line that matters: `2 outpoint(s) already claimed by the DigiAsset move(s); 
 Nothing estimated — the plans are built first, so what they spend is a fact and the sweep is
 defined as everything else.
 
+## Run E — Legacy `m/0'` and the wrong-coin accident
+
+The two rarest paths, funded and swept together. Neither is produced by any current software; both
+are what a decade-old phrase actually decodes to.
+
+```
+Legacy m/0' standard HMAC   swept dec5560d815d73fd…   0.02 DGB → 0 UTXOs
+BIP44 wrong-coin m/44'/0'   swept 5adc7e613bb5ab76…   0.02 DGB → 0 UTXOs
+```
+
+## Run F — A wallet holding only DigiDollar
+
+The case a real user is most likely to hit, and the one that stayed broken longest. Wallet A was
+swept clean of DGB, then sent $1.00 in DigiDollar
+(`3ffcb1f3e4df97d777bb9e69c3bfaf6463a6168c5a233d5d0cfd9b65cc892215`, height 24,119,554). It now
+holds a dollar and not one satoshi.
+
+A DigiDollar token output carries zero satoshis, so it never lands in the UTXO findings — and the
+screen decided between "here is what we found" and "no funds found" from those findings alone.
+The wallet reported **"Couldn't finish checking"** over a real dollar, with no button to move it.
+The dollar was not merely unmovable; it was unreachable.
+
+Fixed, the same scan reads:
+
+```
+scan      $1.00 in DigiDollar found
+          (BIP49 caveat still shown — it is no longer swallowed by the findings branch)
+run       Nothing was moved
+          $1.00 in DigiDollar was left behind — it could not be moved
+          Needs 0.1 DGB for the network fee — this wallet has 0 DGB.
+```
+
+Three separate honesty failures, all on one screen: dollars invisible when they were the only
+value; a green "Sweep submitted" tick over a run that broadcast nothing; and the refusal shown as
+`BELOW_FEE_FLOOR: a DigiDollar transfer needs 10000000 sats of DGB` — machine wording, in
+satoshis, in English only, to someone looking at their own money.
+
+The refusal itself is correct. DigiDollar's consensus fee floor is 0.1 DGB, roughly twice an
+asset transfer, so a swept-clean wallet genuinely cannot move its dollars. The wallet's job is to
+say so, in the user's language, and to keep the dollar visible until it can.
+
 ---
 
 ## Why assets move before the sweep
@@ -239,8 +280,11 @@ that look correct and are not.
 
 ## Still unproven
 
-Two rare paths remain: `m/0'` under the standard HMAC (early non-DGB forks) and the wrong-coin
-`m/44'/0'/0'` accident. Both are real; neither is common.
+Every derivation in the table above has now been funded and swept on mainnet. What remains:
+
+**A DigiDollar spread across several outpoints.** Only the single-outpoint case has been moved on
+chain. The planner handles many, and its arithmetic is covered by tests, but it has not been run
+against a wallet holding two.
 
 **BIP49 funds stay stranded** even though the refusal is honest. The coins are recoverable — the
 phrase is a standard BIP49 mnemonic any wrapped-segwit wallet can restore — but not by this app.

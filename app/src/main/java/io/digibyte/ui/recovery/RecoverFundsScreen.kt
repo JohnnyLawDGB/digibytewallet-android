@@ -141,6 +141,7 @@ fun RecoverFundsScreen(
                         partialFailurePaths = s.partialFailurePaths,
                         verdict = passphraseVerdict,
                         assetOutpointCount = s.assetOutpointCount,
+                        digiDollar = s.digiDollar,
                     )
                     is RecoverFundsViewModel.UiState.Done -> ResultBody(
                         outcomes = s.outcomes,
@@ -209,6 +210,9 @@ private fun FindingsBody(
     /** Outpoints whose parent transaction carries a DigiAsset marker. Non-zero means the
      *  recovery will move assets, which is irreversible — so it is said BEFORE the button. */
     assetOutpointCount: Int = 0,
+    /** DigiDollar the scan found. A token output holds zero satoshis, so it is invisible to
+     *  [findings] — without this a dollars-only wallet reads as empty. */
+    digiDollar: io.digibyte.core.recovery.DigiDollarScan.Result? = null,
 ) {
     var externalExpanded by remember { mutableStateOf(false) }
     var externalAddress by remember { mutableStateOf("") }
@@ -222,7 +226,14 @@ private fun FindingsBody(
     }
 
     val sweepableFindings = findings.filter { it.profile.addressFormat != 2 }
-    val hasSweepable = sweepableFindings.isNotEmpty()
+    // Dollars count as something to move even with zero sweepable UTXOs — that is the whole
+    // point of RecoverableValue. The move itself may still be refused (the DigiDollar consensus
+    // fee floor needs DGB), and that refusal is reported on the results screen.
+    val hasSweepable = sweepableFindings.isNotEmpty() ||
+            io.digibyte.core.recovery.RecoverableValue.exists(0, digiDollar)
+    val hasValue = io.digibyte.core.recovery.RecoverableValue.exists(
+        sweepableFindings.size, digiDollar,
+    )
 
     LazyColumn(
         modifier = Modifier
@@ -231,7 +242,29 @@ private fun FindingsBody(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (findings.isEmpty()) {
+        // Said before anything else: a dollar found is a dollar the user needs to see, whether
+        // or not there is a single satoshi beside it.
+        if (digiDollar != null && (digiDollar.hasDollars || !digiDollar.reachable)) {
+            item { DigiDollarFoundCard(digiDollar) }
+        }
+
+        // The scan could not reach every path. With no findings this is the whole message (below);
+        // with findings it used to be dropped entirely, which read as a settled answer.
+        if (hasValue && partialFailurePaths.isNotEmpty()) {
+            item {
+                Text(
+                    text = stringResource(
+                        R.string.rf_partial_body,
+                        partialFailurePaths.joinToString(", "),
+                    ),
+                    color = AMBER,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+
+        if (findings.isEmpty() && !hasValue) {
             // Clean empty state — no balance header, no section header
             item {
                 Column(
@@ -285,7 +318,7 @@ private fun FindingsBody(
                     )
                 }
             }
-        } else {
+        } else if (findings.isNotEmpty()) {
             // Total header — only shown when there are findings
             item {
                 Card(
@@ -682,20 +715,27 @@ private fun ResultBody(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // A green tick over a run where nothing was broadcast is a success claim about a failure.
+        // A dollars-only wallet that could not meet the fee floor sweeps NOTHING — and used to be
+        // told "Sweep submitted" all the same.
+        val broadcastSomething = outcomes.any { it.txid != null } ||
+                assetMoves.any { it.moved } || digiDollar?.moved == true
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(bottom = 4.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.CheckCircle,
+                    imageVector = if (broadcastSomething) Icons.Default.CheckCircle
+                                  else Icons.Default.ErrorOutline,
                     contentDescription = null,
-                    tint = SUCCESS_GREEN,
+                    tint = if (broadcastSomething) SUCCESS_GREEN else AMBER,
                     modifier = Modifier.size(26.dp)
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    text = stringResource(R.string.rf_sweep_submitted),
+                    text = if (broadcastSomething) stringResource(R.string.rf_sweep_submitted)
+                           else stringResource(R.string.rf_nothing_moved),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
@@ -724,14 +764,60 @@ private fun ResultBody(
             if (dd.hasDollars || !dd.reachable) item { DigiDollarSection(dd) }
         }
 
-        item {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.rf_will_appear),
-                color = MUTED,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
+        // Only true if something is actually on the wire. Promising arriving funds after a run
+        // that broadcast nothing sends the user back to watch a balance that will never change.
+        if (broadcastSomething) {
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.rf_will_appear),
+                    color = MUTED,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * DigiDollar found by the scan, shown BEFORE any move is attempted.
+ *
+ * Separate from [DigiDollarSection], which reports what became of it afterwards. This one exists
+ * because a token output carries zero satoshis and so never appears among the UTXO findings: a
+ * wallet holding only dollars rendered as "no funds found", with no button to move them.
+ */
+@Composable
+private fun DigiDollarFoundCard(
+    dd: io.digibyte.core.recovery.DigiDollarScan.Result,
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CARD)
+    ) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)) {
+            if (dd.hasDollars) {
+                Text(
+                    text = stringResource(
+                        R.string.rf_dd_found,
+                        io.digibyte.core.recovery.DigiDollarHolding.formatCents(dd.cents),
+                    ),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            if (!dd.reachable) {
+                if (dd.hasDollars) Spacer(Modifier.height(6.dp))
+                // Could not ask about at least one address. Never reported as "holds none".
+                Text(
+                    text = stringResource(R.string.rf_dd_unreachable),
+                    color = AMBER,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }
@@ -779,7 +865,22 @@ private fun DigiDollarSection(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    dd.failureReason?.let {
+                    // The fee floor is the refusal a real user actually hits, so it gets a
+                    // sentence in their language and in DGB. Everything else falls back to the
+                    // planner's own words — imperfect, but never silent.
+                    val reason = if (dd.refusalReason ==
+                        io.digibyte.core.recovery.DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR
+                    ) {
+                        stringResource(
+                            R.string.rf_dd_fee_floor,
+                            formatSatToDgb(io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS),
+                            formatSatToDgb(
+                                (io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS -
+                                    dd.shortfallSat).coerceAtLeast(0L)
+                            ),
+                        )
+                    } else dd.failureReason
+                    reason?.let {
                         Spacer(Modifier.height(6.dp))
                         Text(
                             text = it,

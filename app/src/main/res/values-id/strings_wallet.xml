@@ -564,6 +564,9 @@
     <string name="send_fail_unknown">Transaksi tidak dapat dikirim.</string>
     <string name="send_fail_try_again">Coba lagi</string>
     <string name="rf_splitting_for_assets">Menyiapkan pemindahan %1$d DigiAssets — DGB Anda dibagi agar masing-masing dapat membayar biaya transfernya sendiri. Menunggu satu konfirmasi, biasanya kurang dari satu menit.</string>
+    <string name="rf_nothing_moved">Tidak ada yang dipindahkan</string>
+    <string name="rf_dd_fee_floor">Perlu %1$s untuk biaya jaringan — dompet ini punya %2$s.</string>
+    <string name="rf_dd_found">%1$s DigiDollar ditemukan</string>
     <string name="rf_dd_moved">%1$s DigiDollar dipindahkan ke dompet ini</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar tertinggal — tidak dapat dipindahkan</string>
     <string name="rf_dd_unreachable">DigiDollar tidak dapat diperiksa; dompet ini mungkin memilikinya</string>
