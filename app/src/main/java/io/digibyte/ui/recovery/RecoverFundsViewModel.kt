@@ -197,7 +197,10 @@ class RecoverFundsViewModel @Inject constructor(
                                 backendUnreachable = false,
                                 partialFailurePaths = s.unreachableProfileLabels,
                                 assetOutpointCount = countAssetOutpoints(s.nonNativeWithFunds),
-                                digiDollar = s.digiDollar,
+                                // Deliberately NOT carried on the own-wallet tab. DigiDollar
+                                // lives at m/86' of THIS seed, which this wallet already watches
+                                // — reporting it as a recovery finding claims money is missing
+                                // when it is in hand, and offers to move it to itself.
                             )
                         }
                     }
@@ -342,7 +345,10 @@ class RecoverFundsViewModel @Inject constructor(
             // DigiDollar moves alongside the assets and BEFORE the sweep, for the same reason:
             // the DGB paying its consensus fee is exactly what the sweep would otherwise take.
             // Its inputs join the same exclusion set.
-            val dd = moveDigiDollar(seed, current, destIsSelf)
+            // Foreign only. On the own-wallet path the source and destination m/86' keys are the
+            // same key, so a "move" would spend the 0.1 DGB consensus fee to send the dollars to
+            // where they already are.
+            val dd = if (isForeign) moveDigiDollar(seed, current, destIsSelf) else null
 
             val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
                 moveResult.moves.map {
