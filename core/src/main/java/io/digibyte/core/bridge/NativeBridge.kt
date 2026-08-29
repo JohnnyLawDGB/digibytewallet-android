@@ -539,6 +539,46 @@ object NativeBridge {
         feePerKb: Long,
     ): String?
 
+    /**
+     * Build and sign a DigiDollar TRANSFER from a FOREIGN seed.
+     *
+     * Separate from [buildAndSignForeignAssetTransfer] for two structural reasons. A DigiDollar
+     * token output is zero-value by construction — the cents live in the OP_RETURN, not the
+     * satoshi amount — and that signer rejects any input with amount <= 0. And a DD transaction
+     * is identified by its nVersion (0x02000770), which the asset builder cannot express.
+     *
+     * Two derivation prefixes on purpose: the dollars sit at m/86'/20'/0' while the DGB paying
+     * their fee sits wherever the scan found it. The DD prefix is fixed internally; the fee
+     * inputs carry their own [feeHmacKey] and [feePrefixPath].
+     *
+     * Moves the WHOLE balance — [cents] is everything the DD inputs hold, so there is no DD
+     * change. Consensus requires at least 0.1 DGB of fee; below that the transfer is refused
+     * here rather than rejected by the network.
+     *
+     * @param recipientKeyHex the destination's 32-byte taproot output key, hex. Used verbatim.
+     * @return signed transaction hex, or null on any refusal — reasons are logged natively.
+     */
+    external fun buildAndSignForeignDigiDollarTransfer(
+        seedBytes: ByteArray,
+        ddTxidsHex: Array<String>,
+        ddVouts: IntArray,
+        ddScriptsHex: Array<String>,
+        ddChains: IntArray,
+        ddIndices: IntArray,
+        feeHmacKey: String,
+        feePrefixPath: IntArray,
+        feeTxidsHex: Array<String>,
+        feeVouts: IntArray,
+        feeAmounts: LongArray,
+        feeScriptsHex: Array<String>,
+        feeChains: IntArray,
+        feeIndices: IntArray,
+        recipientKeyHex: String,
+        changeAddress: String?,
+        changeAmount: Long,
+        cents: Long,
+    ): String?
+
     external fun buildAndSignLegacySweep(
         seedBytes: ByteArray,
         hmacKey: String,
