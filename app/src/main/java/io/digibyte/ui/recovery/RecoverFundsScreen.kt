@@ -876,8 +876,13 @@ private fun OutcomeCard(
                 }
             }
 
-            if (succeeded) {
-                val txid = outcome.txid!!
+            // Gated on the txid EXISTING, not on "succeeded". A sweep can legitimately succeed
+            // with nothing to show: when every outpoint was claimed by the DigiAsset or
+            // DigiDollar moves that ran before it, the sweep has no inputs, reports PENDING and
+            // carries no txid. Asserting one here crashed the results screen on a real recovery
+            // whose DigiDollar transfer consumed both DGB outputs.
+            val txid = outcome.txid
+            if (succeeded && txid != null) {
                 Spacer(Modifier.height(10.dp))
                 HorizontalDivider(color = DIVIDER, thickness = 0.5.dp)
                 Spacer(Modifier.height(10.dp))
