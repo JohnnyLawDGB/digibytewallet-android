@@ -24,6 +24,7 @@
 #include "BRKey.h"
 #include "BRBIP39WordsEn.h"
 #include "BRBase58.h"
+#include "BRDigiDollar.h"
 #include <time.h>
 
 #define BIP32_HARD 0x80000000u
@@ -45,6 +46,8 @@ static const Profile PROFILES[] = {
       { 84|BIP32_HARD, 20|BIP32_HARD, 0|BIP32_HARD }, 3, 0 },
     { "bip49",  "BIP49 DGB (P2SH-wrapped segwit)", "Bitcoin seed",
       { 49|BIP32_HARD, 20|BIP32_HARD, 0|BIP32_HARD }, 3, 2 },
+    { "bip86",  "BIP86 Taproot (DigiDollar lives here)", "Bitcoin seed",
+      { 86|BIP32_HARD, 20|BIP32_HARD, 0|BIP32_HARD }, 3, 3 },
 };
 #define NPROFILES ((int)(sizeof(PROFILES)/sizeof(PROFILES[0])))
 
@@ -56,6 +59,7 @@ static int pubkey_to_address(BRKey *key, int addressFormat, char *out, size_t ou
     switch (addressFormat) {
         case 0: { size_t n = BRKeyAddress(key, out, outLen); return (n > 0 && n <= outLen); }
         case 1: { size_t n = BRKeySegwitAddress(key, out, outLen, OP_0); return (n > 0 && n <= outLen); }
+        case 3: { size_t n = BRKeyTaprootAddress(key, out, outLen); return (n > 0 && n <= outLen); }
         case 2: {
             UInt160 pkh = BRKeyHash160(key);
             uint8_t witness[22];
@@ -131,7 +135,8 @@ int main(int argc, char **argv) {
     printf("path    : m");
     for (int i = 0; i < prof->pathLen; i++) printf("/%u'", prof->path[i] & 0x7fffffffu);
     printf("   hmac \"%s\"   format %s\n\n", prof->hmac,
-           prof->fmt == 0 ? "P2PKH (D...)" : prof->fmt == 1 ? "P2WPKH (dgb1q...)" : "P2SH-P2WPKH (S...)");
+           prof->fmt == 0 ? "P2PKH (D...)" : prof->fmt == 1 ? "P2WPKH (dgb1q...)" :
+           prof->fmt == 2 ? "P2SH-P2WPKH (S...)" : "P2TR (dgb1p...)");
 
     uint8_t pub[33];
     BRKey key;
@@ -144,6 +149,19 @@ int main(int argc, char **argv) {
             char addr[91];
             int ok = pubkey_to_address(&key, prof->fmt, addr, sizeof(addr));
             printf("  .../%d/%-3d  %s\n", chain, i, ok ? addr : "<encode failed>");
+
+            /* A DigiDollar output is an ordinary P2TR script; the "DD..." form is just a
+             * different encoding of the SAME taproot output key. Printed alongside so a test
+             * wallet can be funded with DigiDollar, which only accepts the DD... form, while the
+             * scan looks the output up by its dgb1p address. */
+            if (prof->fmt == 3) {
+                uint8_t outKey[32];
+                if (BRKeyTaprootOutputKey(&key, outKey)) {
+                    char dd[128];
+                    size_t n = BRDigiDollarAddressEncode(dd, sizeof(dd), outKey, 0);
+                    if (n) printf("             %s   (DigiDollar form)\n", dd);
+                }
+            }
             BRKeyClean(&key);
         }
         printf("\n");

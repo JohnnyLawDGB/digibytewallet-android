@@ -187,10 +187,12 @@ wallet any more, and this app only creates BIP84. Test wallets are generated wit
 scan uses:
 
 ```
-native/src/test/host/bread_wallet_addresses/run.sh --generate 3 bip44
+native/tools/wallet-addresses/run.sh --generate 3 bip44
 ```
 
-Profiles: `bread`, `bread-std`, `bip44`, `bip44-btc`, `bip84`, `bip84-legacy`, `bip49`.
+Profiles: `bread`, `bread-std`, `bip44`, `bip44-btc`, `bip84`, `bip84-legacy`, `bip49`, `bip86`.
+The `bip86` profile prints both the `dgb1p…` and `DD…` encodings of the same taproot key —
+DigiDollar only accepts the latter, while a scan looks the output up by the former.
 
 `pubkey_to_address` is copied verbatim from `jni_derive.c` rather than reimplemented. If the tool
 disagreed with production, the addresses it prints would not be the addresses the scan looks for,

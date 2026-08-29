@@ -441,7 +441,12 @@ object NativeBridge {
      *  Returns external[0..gapExternal-1] followed by internal[0..gapInternal-1].
      *  Empty strings at positions where derivation failed (rare).
      *  [addressFormat]: 0=P2PKH (D-prefix), 1=P2WPKH bech32 (dgb1q...),
-     *  2=P2SH-P2WPKH (S-prefix wrapped segwit). */
+     *  2=P2SH-P2WPKH (S-prefix wrapped segwit), 3=P2TR bech32m (dgb1p..., BIP86).
+     *
+     *  Format 3 exists so recovery can see DigiDollar: a DD token output is an ordinary P2TR
+     *  script at m/86'/20'/0'. Until it was added this returned an empty string for every
+     *  format-3 position, so those addresses were never derived, never queried, and a wallet
+     *  holding DigiDollar reported nothing about it. */
     external fun deriveAddresses(
         seedBytes: ByteArray,
         hmacKey: String,

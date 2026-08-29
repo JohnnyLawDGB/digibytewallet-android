@@ -112,6 +112,14 @@ static int pubkey_to_address(BRKey *key, int addressFormat, char *out, size_t ou
             size_t n = BRBase58CheckEncode(out, outLen, data, sizeof(data));
             return (n > 0 && n <= outLen) ? 1 : 0;
         }
+        case 3: {
+            /* P2TR / BIP86. The scan needs this to see DigiDollar at all: a DD token output is
+             * an ordinary P2TR script at m/86'/20'/0', and without this branch deriveAddresses
+             * returned 0 for the format — so those addresses were never derived, never queried,
+             * and a wallet holding DigiDollar reported nothing about it. */
+            size_t n = BRKeyTaprootAddress(key, out, outLen);
+            return (n > 0 && n <= outLen) ? 1 : 0;
+        }
         default:
             return 0;
     }

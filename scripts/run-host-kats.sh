@@ -41,6 +41,13 @@ start=$SECONDS
 
 for dir in "$HOST_DIR"/*/; do
     name="$(basename "$dir")"
+
+    # Only *_kat directories. A tool once lived here and the runner executed it with no
+    # arguments, so its usage message failed CI as though a known-answer test had regressed.
+    # Filtering by name means anything dropped in here that is not a KAT is ignored rather than
+    # run — while a real KAT missing its runner is still surfaced below.
+    [[ "$name" != *_kat ]] && continue
+
     [ -n "$FILTER" ] && [[ "$name" != *"$FILTER"* ]] && continue
 
     if [ ! -f "$dir/run.sh" ]; then
