@@ -563,4 +563,5 @@
     <string name="send_fail_amount">Informe um valor maior que zero.</string>
     <string name="send_fail_unknown">Não foi possível enviar a transação.</string>
     <string name="send_fail_try_again">Tentar de novo</string>
+    <string name="rf_splitting_for_assets">Preparando para mover %1$d DigiAssets — seus DGB estão sendo divididos para que cada um pague sua própria taxa de transferência. Aguarda uma confirmação, normalmente menos de um minuto.</string>
 </resources>

@@ -13,6 +13,7 @@ import io.digibyte.core.recovery.resolve
 import io.digibyte.core.recovery.sweepSet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -70,6 +71,10 @@ class RecoverFundsViewModel @Inject constructor(
             val assetOutpointCount: Int = 0,
         ) : UiState()
         data object Sweeping : UiState()
+
+        /** Splitting the wallet's DGB so every asset has an output to pay its own transfer with.
+         *  Its own state because it is the one step that waits on a confirmation. */
+        data class SplittingForAssets(val feeOutputCount: Int) : UiState()
         data class Done(
             val outcomes: List<LegacySweepService.SweepOutcome>,
             /** What happened to each DigiAsset, in the phase that ran BEFORE the sweep. */
@@ -216,7 +221,7 @@ class RecoverFundsViewModel @Inject constructor(
                     }
                     try {
                         val (moves, result) = withContext(Dispatchers.IO) {
-                            runRecovery(seed, findings, res.address, destIsSelf)
+                            runRecovery(seed, findings, res.address, destIsSelf, isForeign = false)
                         }
                         sweptFindings = findings
                         sweptForeign = false
@@ -267,43 +272,107 @@ class RecoverFundsViewModel @Inject constructor(
         findings: List<RecoveryScanService.ProfileResult>,
         destAddress: String,
         destIsSelf: Boolean,
+        isForeign: Boolean,
     ): Pair<List<io.digibyte.core.recovery.ForeignAssetTransferService.Move>, LegacySweepService.Result> {
         val classifier = assetClassifier()
-        // Classified ONCE for both phases. Each pass fetches every parent transaction, so
-        // classifying twice for one recovery doubles the network work for the same answer.
-        val verdicts = classifier.classify(findings.flatMap { it.utxos })
+        var current = findings
 
-        val moves = io.digibyte.core.recovery.ForeignAssetTransferService(
-            assetClassifier = classifier,
-            outgoingTxStore = outgoingTxStore,
-            walletTxPersister = walletTxPersister,
-        ).moveAssets(
-            seedBytes = seed,
-            results = findings,
-            destAddress = destAddress,
-            precomputedVerdicts = verdicts,
-        ).moves
+        // At most one split. A wallet with more assets than spendable outputs needs its DGB
+        // divided before anything can move; after that round there is an output per asset, so a
+        // second split can never be required. Bounding it means a bug cannot loop on the user's
+        // money.
+        var fanOutTxid: String? = null
+        repeat(2) {
+            // Classified ONCE per round for both phases. Each pass fetches every parent
+            // transaction, so classifying twice for one round doubles the work for one answer.
+            val verdicts = classifier.classify(current.flatMap { it.utxos })
 
-        val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
-            moves.map {
-                io.digibyte.core.recovery.RecoverySequence.MoveRecord(
-                    outpoint = it.outpoint,
-                    spentInputs = it.spentInputs,
-                    broadcast = it.moved,
-                )
+            val moveResult = io.digibyte.core.recovery.ForeignAssetTransferService(
+                assetClassifier = classifier,
+                outgoingTxStore = outgoingTxStore,
+                walletTxPersister = walletTxPersister,
+            ).moveAssets(
+                seedBytes = seed,
+                results = current,
+                destAddress = destAddress,
+                precomputedVerdicts = verdicts,
+            )
+
+            val fan = moveResult.fanOut
+            if (fan is io.digibyte.core.recovery.ForeignAssetTransferService.FanOut.Broadcast) {
+                // Its outputs are unconfirmed, and DigiByte inherits Bitcoin's
+                // limitdescendantcount — dozens of unconfirmed children of one parent would be
+                // rejected outright. So wait for it, then re-scan rather than trying to predict
+                // the new UTXO set: the chain is the authority on what the split produced.
+                fanOutTxid = fan.txid
+                _state.value = UiState.SplittingForAssets(fan.feeOutputCount)
+                val rescanned = awaitFanOutThenRescan(seed, fan.txid)
+                if (rescanned == null) {
+                    // The split is on the wire and will confirm; we simply could not see it in
+                    // time. Nothing is lost — re-running recovery finds the new outputs, because
+                    // the split paid the source wallet's own addresses.
+                    return emptyList<io.digibyte.core.recovery.ForeignAssetTransferService.Move>() to
+                        LegacySweepService.Result(emptyList())
+                }
+                current = if (isForeign) rescanned.allWithFunds else rescanned.nonNativeWithFunds
+                _state.value = UiState.Sweeping
+                return@repeat
             }
-        )
 
-        val swept = LegacySweepService(outgoingTxStore, walletTxPersister, classifier).sweepFromSeed(
-            seedBytes = seed,
-            nonNativeResults = findings,
-            destAddress = destAddress,
-            excludeOutpoints = exclusions,
-            precomputedVerdicts = verdicts,
-            destIsSelf = destIsSelf,
-        )
-        return moves to swept
+            val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
+                moveResult.moves.map {
+                    io.digibyte.core.recovery.RecoverySequence.MoveRecord(
+                        outpoint = it.outpoint,
+                        spentInputs = it.spentInputs,
+                        broadcast = it.moved,
+                    )
+                }
+            )
+
+            val swept = LegacySweepService(outgoingTxStore, walletTxPersister, classifier).sweepFromSeed(
+                seedBytes = seed,
+                nonNativeResults = current,
+                destAddress = destAddress,
+                excludeOutpoints = exclusions,
+                precomputedVerdicts = verdicts,
+                destIsSelf = destIsSelf,
+            )
+            return moveResult.moves to swept
+        }
+
+        // Both rounds asked to split, which should be impossible: after one split there is an
+        // output per asset. Reported rather than looped on.
+        return emptyList<io.digibyte.core.recovery.ForeignAssetTransferService.Move>() to
+            LegacySweepService.Result(emptyList())
     }
+
+    /**
+     * Wait for the fee-output split to confirm, then re-scan.
+     *
+     * Re-scanning rather than predicting: the split spent inputs and created outputs, so the UTXO
+     * list held in memory is stale the moment it broadcasts. The chain is the authority on what it
+     * produced, and a re-scan is self-correcting if anything about the split differed from plan.
+     *
+     * Returns null on timeout — not a failure. The split is signed and on the wire; it pays the
+     * SOURCE wallet's own addresses, so re-running recovery later simply finds the new outputs.
+     * Nothing is stranded and nothing double-spends.
+     */
+    private suspend fun awaitFanOutThenRescan(
+        seed: ByteArray,
+        fanOutTxid: String,
+    ): RecoveryScanService.State.Done? {
+        repeat(FANOUT_CONFIRM_POLLS) {
+            delay(FANOUT_POLL_INTERVAL_MS)
+            val scanned = withContext(Dispatchers.IO) { scanService.scanFromSeed(seed) }
+            if (scanned is RecoveryScanService.State.Done) {
+                // The split has landed once its outputs are visible as spendable UTXOs.
+                val seen = scanned.results.any { r -> r.utxos.any { it.txid == fanOutTxid } }
+                if (seen) return scanned
+            }
+        }
+        return null
+    }
+
 
     /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
     fun classifyForeign(mnemonic: String, passphrase: String? = null) {
@@ -402,7 +471,7 @@ class RecoverFundsViewModel @Inject constructor(
             try {
                 val (moves, result) = withContext(Dispatchers.IO) {
                     // foreign: all-funded incl. native; lands in THIS wallet -> receive
-                    runRecovery(seed, findings, dest.address, destIsSelf = true)
+                    runRecovery(seed, findings, dest.address, destIsSelf = true, isForeign = true)
                 }
                 sweptFindings = findings
                 sweptForeign = true
@@ -424,4 +493,12 @@ class RecoverFundsViewModel @Inject constructor(
         }
     }
 
+
+    private companion object {
+        /** ~15s blocks on DigiByte, so this allows roughly three minutes for the split to land.
+         *  Timing out is not a failure — the split is signed, broadcast, and pays the source
+         *  wallet's own addresses, so a later run finds its outputs. */
+        const val FANOUT_CONFIRM_POLLS = 18
+        const val FANOUT_POLL_INTERVAL_MS = 10_000L
+    }
 }

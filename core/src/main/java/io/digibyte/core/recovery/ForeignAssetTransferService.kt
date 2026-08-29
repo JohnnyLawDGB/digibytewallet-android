@@ -83,7 +83,30 @@ class ForeignAssetTransferService(
         val moved: Boolean get() = txid != null
     }
 
-    data class Result(val moves: List<Move>) {
+    /**
+     * Whether the wallet's DGB had to be split before any asset could move.
+     *
+     * An asset moves in its own transaction and two transactions cannot spend the same UTXO, so a
+     * wallet with more assets than spendable outputs can only move one of them — and the transfer's
+     * change goes to the DESTINATION, so it never comes back to fund the next. See
+     * [ForeignAssetFanOut].
+     */
+    sealed class FanOut {
+        /** Already at least one spendable output per asset. */
+        data object NotNeeded : FanOut()
+        /** The split is on the wire. Nothing moved this round: its outputs must confirm before
+         *  they can be spent. The caller waits, re-scans, and calls again. */
+        data class Broadcast(val txid: String, val feeOutputCount: Int) : FanOut()
+        /** Not enough plain DGB to split. Reported before anything is signed. */
+        data class Refused(val shortfallSat: Long, val detail: String) : FanOut()
+        /** The split could not be built, signed or broadcast. */
+        data class Failed(val reason: String) : FanOut()
+    }
+
+    data class Result(
+        val moves: List<Move>,
+        val fanOut: FanOut = FanOut.NotNeeded,
+    ) {
         val movedCount: Int get() = moves.count { it.moved }
         /** True only when every asset found actually reached relay. Deliberately not "no
          *  failures": an empty batch has no failures and moved nothing. */
@@ -122,6 +145,40 @@ class ForeignAssetTransferService(
             )
 
             val byAddress = result.derivedAddresses.associateBy { it.address }
+
+            // More assets than spendable outputs: split the DGB before moving anything. Without
+            // this, exactly one asset moves and the rest are stranded with no DGB behind them,
+            // because a transfer's change goes to the destination and never returns.
+            val fan = ForeignAssetFanOut.plan(
+                assetCount = partition.assetBearing.size,
+                plainInputs = partition.sweepable.mapNotNull { toSpend(it, byAddress) },
+                // Pays the wallet being recovered — only its seed can sign these, and the asset
+                // transfers are what spend them.
+                sourceAddress = partition.sweepable.firstOrNull()?.address
+                    ?: partition.assetBearing.first().address,
+                feePerKb = feePerKb,
+            )
+            when (fan) {
+                is ForeignAssetFanOut.Result.NotNeeded -> Unit
+
+                is ForeignAssetFanOut.Result.Refused -> {
+                    log('w', "fan-out refused: ${fan.detail}")
+                    return@withContext Result(
+                        moves, FanOut.Refused(fan.shortfallSat, fan.detail),
+                    )
+                }
+
+                is ForeignAssetFanOut.Result.Ok -> {
+                    log('i', "fan-out: splitting ${fan.plan.inputs.size} input(s) into " +
+                        "${fan.plan.outputs.count { it.isFeeOutput }} fee output(s), " +
+                        "fee ${fan.plan.feeSat} sats")
+                    val outcome = broadcastFanOut(fan.plan, seedBytes, result.profile, feePerKb)
+                    // Its outputs are unconfirmed, so nothing can move this round. The caller
+                    // waits for confirmation, re-scans, and calls again — at which point there
+                    // is an output per asset and this branch is NotNeeded.
+                    return@withContext Result(moves, outcome)
+                }
+            }
 
             // The coarse classifier holds back EVERY output of an asset transaction, including
             // ordinary DGB change. Those read as zero units and are refused rather than moved —
@@ -222,6 +279,32 @@ class ForeignAssetTransferService(
 
     private fun ForeignAssetTransferPlan.Plan.outpoints(): List<String> =
         inputs.map { "${it.txid}:${it.vout}" }
+
+    /** Sign and broadcast the split. Reuses the foreign signer — a fan-out is an ordinary
+     *  DigiByte send that happens to have many outputs and no OP_RETURN. */
+    private fun broadcastFanOut(
+        plan: ForeignAssetFanOut.Plan,
+        seedBytes: ByteArray,
+        profile: DerivationProfile,
+        feePerKb: Long,
+    ): FanOut {
+        val asTransfer = ForeignAssetTransferPlan.Plan(
+            inputs = plan.inputs,
+            outputs = plan.outputs.map {
+                ForeignAssetTransferPlan.Out(it.address, it.amountSat, scriptHex = "")
+            },
+            feeSat = plan.feeSat,
+            assetUnits = 0L,
+        )
+        val signed = sign(asTransfer, seedBytes, profile, feePerKb)
+            ?: return FanOut.Failed("native refused to sign the split")
+        val bytes = runCatching { hexToBytes(signed) }.getOrNull()
+            ?: return FanOut.Failed("signed split hex malformed")
+        val txid = broadcast(bytes)
+            ?: return FanOut.Failed("could not broadcast the split — check peer connection")
+        log('i', "fan-out broadcast in $txid")
+        return FanOut.Broadcast(txid, plan.outputs.count { it.isFeeOutput })
+    }
 
     /** Units on this outpoint, read from the parent transaction the scan already fetched. */
     private fun unitsOn(

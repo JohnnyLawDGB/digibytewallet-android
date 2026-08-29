@@ -563,4 +563,5 @@
     <string name="send_fail_amount">请输入大于零的金额。</string>
     <string name="send_fail_unknown">交易无法发送。</string>
     <string name="send_fail_try_again">重试</string>
+    <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets——正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
 </resources>

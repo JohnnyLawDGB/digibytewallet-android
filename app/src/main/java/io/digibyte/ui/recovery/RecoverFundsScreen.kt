@@ -126,6 +126,12 @@ fun RecoverFundsScreen(
                         else stringResource(R.string.rf_scanning_phrase)
                     )
                     is RecoverFundsViewModel.UiState.Sweeping -> ScanningBody(stringResource(R.string.rf_sweeping))
+                    // Its own screen because it is the one step that waits on a confirmation —
+                    // up to a few minutes. Reusing "Sweeping…" would look frozen, and a user
+                    // watching a stalled spinner over their own coins force-quits.
+                    is RecoverFundsViewModel.UiState.SplittingForAssets -> ScanningBody(
+                        stringResource(R.string.rf_splitting_for_assets, s.feeOutputCount)
+                    )
                     is RecoverFundsViewModel.UiState.Findings -> FindingsBody(
                         findings = s.findings,
                         totalSat = s.totalSat,

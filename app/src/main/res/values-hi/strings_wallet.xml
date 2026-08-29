@@ -563,4 +563,5 @@
     <string name="send_fail_amount">शून्य से अधिक राशि दर्ज करें।</string>
     <string name="send_fail_unknown">लेनदेन नहीं भेजा जा सका।</string>
     <string name="send_fail_try_again">पुनः प्रयास करें</string>
+    <string name="rf_splitting_for_assets">%1$d DigiAssets भेजने की तैयारी — आपके DGB को बाँटा जा रहा है ताकि हर एक अपना स्थानांतरण शुल्क चुका सके। एक पुष्टि की प्रतीक्षा, आमतौर पर एक मिनट से कम।</string>
 </resources>

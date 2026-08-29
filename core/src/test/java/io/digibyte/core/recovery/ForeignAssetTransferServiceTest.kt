@@ -221,4 +221,72 @@ class ForeignAssetTransferServiceTest {
             rec.isSelfTransfer,
         )
     }
+
+    // ---- the fan-out: more assets than spendable outputs ---------------------------------------
+
+    /**
+     * Three assets, one plain output. Each asset moves in its own transaction and two transactions
+     * cannot spend the same UTXO, so without a fan-out exactly one asset moves and the other two
+     * are stranded with no DGB behind them — needing a deposit into a wallet the user is leaving.
+     *
+     * The service must split the output FIRST and move nothing this round, because the split has
+     * to confirm before its outputs can be spent.
+     */
+    @Test fun `more assets than outputs fans out instead of moving one and stranding the rest`() {
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 5_000_000L)
+        val svc = ForeignAssetTransferService(
+            assetClassifier = ForeignUtxoAssetClassifier(
+                fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
+                isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+            ),
+            parseOutputs = { parentOutputs },
+            sign = { _, _, _, _ -> "00ff" },
+            broadcast = { "fanout-txid" },
+            log = { _, _ -> },
+            recordOutgoing = { _, _, _, _, _ -> },
+        )
+        val r = runBlocking {
+            svc.moveAssets(ByteArray(64) { 7 }, listOf(profileResult(utxos = assets + plain)), dest)
+        }
+
+        val fan = r.fanOut as? ForeignAssetTransferService.FanOut.Broadcast
+        assertTrue("expected a fan-out, got ${r.fanOut}", fan != null)
+        assertEquals("one fee output per asset", 3, fan!!.feeOutputCount)
+        assertTrue("nothing moves until the split confirms", r.moves.isEmpty())
+    }
+
+    /** With an output per asset already, no fan-out — splitting would cost a fee and gain nothing. */
+    @Test fun `enough outputs already means no fan-out`() {
+        val r = run(service(), listOf(profileResult()))
+        assertEquals(ForeignAssetTransferService.FanOut.NotNeeded, r.fanOut)
+    }
+
+    /**
+     * A wallet too poor to fund the split must be told BEFORE anything is broadcast. Discovering
+     * it after two assets have moved and the money has run out is the worst version.
+     */
+    @Test fun `too little DGB to split is refused with its figure, and nothing is broadcast`() {
+        var broadcasts = 0
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 20_000L)
+        val svc = ForeignAssetTransferService(
+            assetClassifier = ForeignUtxoAssetClassifier(
+                fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
+                isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+            ),
+            parseOutputs = { parentOutputs },
+            sign = { _, _, _, _ -> "00ff" },
+            broadcast = { broadcasts++; "x" },
+            log = { _, _ -> },
+            recordOutgoing = { _, _, _, _, _ -> },
+        )
+        val r = runBlocking {
+            svc.moveAssets(ByteArray(64) { 7 }, listOf(profileResult(utxos = assets + plain)), dest)
+        }
+        val no = r.fanOut as? ForeignAssetTransferService.FanOut.Refused
+        assertTrue("expected a refusal, got ${r.fanOut}", no != null)
+        assertTrue("the shortfall must be stated", no!!.shortfallSat > 0)
+        assertEquals("nothing may be broadcast", 0, broadcasts)
+    }
 }

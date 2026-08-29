@@ -563,4 +563,5 @@
     <string name="send_fail_amount">Введите сумму больше нуля.</string>
     <string name="send_fail_unknown">Не удалось отправить транзакцию.</string>
     <string name="send_fail_try_again">Повторить</string>
+    <string name="rf_splitting_for_assets">Подготовка к перемещению %1$d DigiAssets — ваши DGB делятся, чтобы каждый актив мог оплатить свой перевод. Ожидание одного подтверждения, обычно меньше минуты.</string>
 </resources>

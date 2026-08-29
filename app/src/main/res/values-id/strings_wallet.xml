@@ -563,4 +563,5 @@
     <string name="send_fail_amount">Masukkan jumlah lebih besar dari nol.</string>
     <string name="send_fail_unknown">Transaksi tidak dapat dikirim.</string>
     <string name="send_fail_try_again">Coba lagi</string>
+    <string name="rf_splitting_for_assets">Menyiapkan pemindahan %1$d DigiAssets — DGB Anda dibagi agar masing-masing dapat membayar biaya transfernya sendiri. Menunggu satu konfirmasi, biasanya kurang dari satu menit.</string>
 </resources>

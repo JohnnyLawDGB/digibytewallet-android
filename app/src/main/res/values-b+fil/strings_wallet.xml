@@ -563,4 +563,5 @@
     <string name="send_fail_amount">Maglagay ng halagang mas malaki sa zero.</string>
     <string name="send_fail_unknown">Hindi naipadala ang transaksyon.</string>
     <string name="send_fail_try_again">Subukan ulit</string>
+    <string name="rf_splitting_for_assets">Inihahanda ang paglipat ng %1$d DigiAssets — hinahati ang iyong DGB para makabayad ang bawat isa ng sarili nitong transfer fee. Naghihintay ng isang kumpirmasyon, karaniwang wala pang isang minuto.</string>
 </resources>

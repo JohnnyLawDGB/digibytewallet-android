@@ -571,4 +571,5 @@
     <string name="send_fail_amount">Geben Sie einen Betrag größer als null ein.</string>
     <string name="send_fail_unknown">Die Transaktion konnte nicht gesendet werden.</string>
     <string name="send_fail_try_again">Erneut versuchen</string>
+    <string name="rf_splitting_for_assets">Vorbereitung zum Verschieben von %1$d DigiAssets — Ihre DGB werden aufgeteilt, damit jedes seine eigene Übertragungsgebühr zahlen kann. Wartet auf eine Bestätigung, meist unter einer Minute.</string>
 </resources>
