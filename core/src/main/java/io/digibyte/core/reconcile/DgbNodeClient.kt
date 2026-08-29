@@ -200,6 +200,43 @@ class DgbNodeClient(
         parseRawTxResponse(root, height)
     }
 
+    /**
+     * What a DigiDollar address holds, and which transactions it came from.
+     *
+     * A separate call because the ordinary UTXO path cannot see DigiDollar at all: the token
+     * output carries ZERO satoshis — the cents live in the transaction's OP_RETURN — and the
+     * reconcile endpoint filters zero-value outputs out of the UTXO set. Measured on mainnet, a
+     * taproot address holding $1.00 answers `balance 0, utxo_count 0` through reconcile while
+     * this endpoint reports its cents against the same key.
+     *
+     * @param ddAddress the "DD…" form of the taproot key. The endpoint is keyed by that encoding,
+     *                  not by the dgb1p form the scan derives — they are the same output key
+     *                  written two ways.
+     * @return null when the lookup could not be made at all. That is distinct from a confident
+     *         zero, and the caller must not read it as "holds no dollars" — the same rule the
+     *         reconcile path follows for an unreachable backend.
+     */
+    suspend fun digiDollarHolding(ddAddress: String): DigiDollarHoldingResult? =
+        withContext(Dispatchers.IO) {
+            val root = httpGetJson("${endpoint()}/explorer/address/$ddAddress")
+                ?: return@withContext null
+            if (root.optString("type") != "dd_address") return@withContext null
+            val r = root.optJSONObject("result") ?: return@withContext null
+
+            val txids = mutableListOf<String>()
+            r.optJSONArray("transactions")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.optString("txid")?.takeIf { it.isNotEmpty() }
+                        ?.let { txids += it }
+                }
+            }
+            DigiDollarHoldingResult(
+                cents = r.optLong("dd_balance_cents", 0L),
+                unspentCount = r.optInt("unspent_count", 0),
+                txids = txids,
+            )
+        }
+
     /** GET a URL and parse the body as a JSON object. Null on non-2xx, empty
      *  body, parse error, or network failure (logged). Uses the same cert-pinned
      *  client selection as the reconcile POST. */
@@ -324,6 +361,19 @@ data class UtxoEntry(
      *  tell BRTransaction how each input is locked. Null for older
      *  backend responses; falls back to null-safe paths. */
     val scriptPubKeyHex: String? = null,
+)
+
+/**
+ * A DigiDollar address's holdings, from the backend's DD-aware endpoint.
+ *
+ * [cents] is enough to TELL someone what they hold; moving it needs an outpoint, which means
+ * fetching each transaction and locating the zero-value P2TR output that pays the derived key —
+ * see [io.digibyte.core.recovery.DigiDollarHolding].
+ */
+data class DigiDollarHoldingResult(
+    val cents: Long,
+    val unspentCount: Int,
+    val txids: List<String>,
 )
 
 /** Raw parent-tx entry — hex + block metadata needed for registration. */

@@ -558,6 +558,24 @@ object NativeBridge {
      * @param recipientKeyHex the destination's 32-byte taproot output key, hex. Used verbatim.
      * @return signed transaction hex, or null on any refusal — reasons are logged natively.
      */
+    /**
+     * A foreign seed's DigiDollar addresses at m/86'/20'/0', in BOTH encodings.
+     *
+     * One entry per address: `"<ddAddress>|<taprootOutputKeyHex>|<chain>|<index>"`, external chain
+     * first then internal, matching [deriveAddresses].
+     *
+     * Both forms come back together deliberately. They are the same taproot output key written
+     * two ways and each half serves a different step — the "DD…" form is what the backend's
+     * DigiDollar endpoint is keyed by, while X(Q) locates the token output inside a transaction
+     * and fills the recipient field of a transfer. Deriving them separately would let them drift,
+     * and a mismatch means looking up one wallet's dollars while trying to spend another's.
+     */
+    external fun deriveDigiDollarAddresses(
+        seedBytes: ByteArray,
+        gapExternal: Int,
+        gapInternal: Int,
+    ): Array<String>?
+
     external fun buildAndSignForeignDigiDollarTransfer(
         seedBytes: ByteArray,
         ddTxidsHex: Array<String>,

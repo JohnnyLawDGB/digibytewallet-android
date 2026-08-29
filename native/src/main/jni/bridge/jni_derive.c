@@ -36,6 +36,7 @@
 #include "jni_seed_buffer.h"
 #include "foreign_tx_fee_guard.h"
 #include "BRDigiDollar.h"
+#include "BRNetwork.h"
 
 /* Mirrored from BRWallet.c's DigiDollar builder — the same consensus constants, restated here
  * because that file keeps them private and a foreign-seed transfer must obey them identically. */
@@ -1214,5 +1215,84 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
 
     jstring result = (*env)->NewStringUTF(env, hex);
     free(hex);
+    return result;
+}
+
+/**
+ * Derive a FOREIGN seed's DigiDollar addresses at m/86'/20'/0', in both encodings.
+ *
+ * Returns one entry per address, formatted:
+ *
+ *     "<ddAddress>|<taprootOutputKeyHex>|<chain>|<index>"
+ *
+ * Both forms come back together on purpose. They are the same taproot output key written two
+ * ways, and each half is needed for a different step: the "DD…" form is what the backend's
+ * DigiDollar endpoint is keyed by, and X(Q) is what locates the token output inside a transaction
+ * and what the recipient field of a transfer takes. Deriving them in separate calls would let
+ * them drift, and a mismatch means looking up one wallet's dollars while trying to spend
+ * another's.
+ *
+ * External chain first (chain 0), then internal (chain 1), matching deriveAddresses.
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_deriveDigiDollarAddresses(
+    JNIEnv *env, jobject thiz,
+    jbyteArray seedBytes,
+    jint gapExternal,
+    jint gapInternal)
+{
+    (void)thiz;
+    if (!seedBytes || gapExternal < 0 || gapInternal < 0) return NULL;
+
+    const jsize seedLen = (*env)->GetArrayLength(env, seedBytes);
+    jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
+    if (!seedRaw) return NULL;
+    SeedBuffer seed;
+    const int seedOk = seed_buffer_take(&seed, seedRaw, (size_t)seedLen);
+    (*env)->ReleaseByteArrayElements(env, seedBytes, seedRaw, JNI_ABORT);
+    if (!seedOk) {
+        LOGW("deriveDigiDollarAddresses: rejecting a seed of %d bytes", (int)seedLen);
+        return NULL;
+    }
+
+    const int total = gapExternal + gapInternal;
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    if (!stringClass) { seed_buffer_release(&seed); return NULL; }
+    jobjectArray result = (*env)->NewObjectArray(env, total, stringClass, NULL);
+    if (!result) { seed_buffer_release(&seed); return NULL; }
+
+    int outIdx = 0;
+    for (int chain = 0; chain < 2; chain++) {
+        const int gap = (chain == 0) ? gapExternal : gapInternal;
+        for (int index = 0; index < gap; index++, outIdx++) {
+            BRKey key;
+            /* m/86'/20'/0'/chain/index. foreign_taproot_sign_kat pins that this is the same key
+             * the BIP86 helper produces, so what is derived here is what BRTransactionSign will
+             * later match against the input's taproot output key. */
+            BRBIP32PrivKeyBIP86(&key, seed.bytes, seed.len, (uint32_t)chain, (uint32_t)index);
+
+            uint8_t xq[32];
+            if (!BRKeyTaprootOutputKey(&key, xq)) { BRKeyClean(&key); continue; }
+
+            char dd[128];
+            size_t n = BRDigiDollarAddressEncode(dd, sizeof(dd), xq, BRNetworkIsTestnet());
+            BRKeyClean(&key);
+            if (n == 0) continue;
+
+            char line[256];
+            int w = snprintf(line, sizeof(line), "%s|", dd);
+            if (w < 0 || (size_t)w >= sizeof(line)) continue;
+            for (int b = 0; b < 32; b++) w += sprintf(line + w, "%02x", xq[b]);
+            snprintf(line + w, sizeof(line) - (size_t)w, "|%d|%d", chain, index);
+
+            jstring js = (*env)->NewStringUTF(env, line);
+            if (js) {
+                (*env)->SetObjectArrayElement(env, result, outIdx, js);
+                (*env)->DeleteLocalRef(env, js);
+            }
+        }
+    }
+
+    seed_buffer_release(&seed);
     return result;
 }
