@@ -667,8 +667,16 @@ survive), and `CfRecoveryPolicy` was removed outright (`R8$$REMOVED$$CLASS$$701`
 Committing `mobsf-report-v4.0.76.json` tripped the Scan-for-secrets gate: 248 × `generic-api-key`,
 every one a decompiled string constant from the APK inside the report. `.gitleaks.toml` now
 allowlists `security/reports/mobsf-*.json` (path-scoped, default rules otherwise; verified locally
-— 0 leaks with the config, 248 without). Real embedded-secret coverage for the APK remains
-`security-cycle.sh`'s own sweep.
+with gitleaks 8.24.3 over `security/reports/`: **0 leaks with the config, 1,559 without** — the
+CI run's 248 was just the new report, the local negative control covers every archived report).
+Real embedded-secret coverage for the APK remains `security-cycle.sh`'s own sweep.
+
+**Dependabot (same date):** 57 open alerts (1 critical, 22 high, 32 medium, 2 low) — **every one
+in `settings.gradle.kts`**, i.e. the Gradle *build* classpath (netty, opentelemetry, jdom2, jose4j,
+bouncycastle — the critical is bcprov GOST-CTR keystream reuse, CVE-2025-14813). None of these ship
+in the APK: the runtime classpath's 227 packages were OSV-clean in this cycle's automated half, and
+the report's decompiled surface contains no bouncycastle. Build-tooling hygiene, not app exposure —
+worth a Gradle/AGP bump when convenient, not a release gate.
 
 ### Still owed
 
