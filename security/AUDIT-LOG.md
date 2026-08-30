@@ -674,8 +674,8 @@ Real embedded-secret coverage for the APK remains `security-cycle.sh`'s own swee
 **Dependabot (same date):** 57 open alerts (1 critical, 22 high, 32 medium, 2 low) — **every one
 in `settings.gradle.kts`**, i.e. the Gradle *build* classpath (netty, opentelemetry, jdom2, jose4j,
 bouncycastle — the critical is bcprov GOST-CTR keystream reuse, CVE-2025-14813). None of these ship
-in the APK: the runtime classpath's 227 packages were OSV-clean in this cycle's automated half, and
-the report's decompiled surface contains no bouncycastle. Build-tooling hygiene, not app exposure —
+in the APK: the runtime classpath's 227 packages were OSV-clean in this cycle's automated half, and the sole `org.bouncycastle` trace in the decompiled surface is OkHttp's reflective
+`BouncyCastleJsseProvider` probe string — a capability check, not the library. Build-tooling hygiene, not app exposure —
 worth a Gradle/AGP bump when convenient, not a release gate.
 
 ### Still owed
