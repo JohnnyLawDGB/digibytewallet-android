@@ -351,7 +351,7 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
 | 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & hardened through v4.0.46, bloom **removed** (v3.10.x), own-node pairing shipped, **`cfcheckpt` active rejection SHIPPED v4.0.41**. 🚧 Remainder: oracle-bootstrap (seeder demotion) |
 | 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
-| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation → Keystore binding → loud Tor fallback |
+| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); in-app spend gate + inactivity lock 🚧 (2026-08-30 follow-up branches `fix/audit-spendgate` / `fix/audit-autolock` — mark ✅ only when merged); Keystore hardware-backing **probed/logged, not enforced**; duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation → Keystore auth-binding → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
 | 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet; **Play Console account approved 2026-08-27 — Play first, F-Droid follows** |
 
@@ -471,7 +471,11 @@ not — but the coupling ran through the duress PIN, which was cancelled
      not *invisible* — a distinguishable output shape, documented in a
      public repo. Do not resurrect it under another name.
 
-3. **Keystore user-auth binding, per-API.** Revisit
+3. **Keystore user-auth binding, per-API.** Partial (2026-08-30):
+   hardware backing is now verified and logged at key creation
+   (`KeyInfo.isInsideSecureHardware`), and every spend-class action is
+   gated by the in-app PIN/biometric — but the key itself is still not
+   auth-bound, so a compromised app process can decrypt the seed. Revisit
    `setUserAuthenticationRequired` with per-API probing; enable on
    modern APIs if stable, keep the app-PIN as sole gate on older ones.
    `core/…/security/KeyStoreManager.kt:37`.

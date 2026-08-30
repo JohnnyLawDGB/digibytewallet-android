@@ -47,12 +47,26 @@ bug was found and fixed mid-cycle.**
 
 ### P2 — informational / already-mitigated
 `isValidMnemonic` / `MnemonicInputScreen` mnemonic `String` copies (existing
-onboarding pattern); SOCKS5 handshake response parse is memory-safe
+onboarding pattern) — the same class also covers `generateMnemonic`'s `jstring`
+return (`jni_wallet.c` `NewStringUTF`) on the creation path and
+`SeedViewScreen`'s `String(decrypted, UTF_8)` for display; the `ByteArray`
+guarantee in CRITICAL-3 is scoped to load/restore/sign, and these three sites
+are the recorded remainder (re-confirmed by the 2026-08-30 external audit,
+still accepted); SOCKS5 handshake response parse is memory-safe
 (`rem <= sizeof(buf)` guard); BIP158 cfheaders probe/re-anchor bounded (array
 writes guarded, re-anchor budget capped — worst case a malicious filter peer
-griefs a session to bloom fallback); `getTransactionDetails` newest-100 buffer
+griefs a session into the re-anchor budget and a stalled CF chain — there is no bloom fallback since v4.0.0, so the address set never leaves the device); `getTransactionDetails` newest-100 buffer
 over-sized + `snprintf`-bounded; `useLegacyPackaging=false` + exec→no-exec is
 security-**positive** (libs mmap'd read-only, no extracted executable).
+
+### Recorded decisions (2026-08-30)
+- **12-word default kept.** 128 bits of entropy is the BIP39 baseline and
+  what every other mainstream wallet defaults to; 24 words remain available via
+  the creation toggle. The external audit's "weak default" is not a security
+  finding.
+- **Digi-ID identity key is `m/0'/0/0`**, not `m/44'/20'/0'/0/0` (corrected
+  2026-08-19); the residual is linkability (one address for every site), not
+  key exposure.
 
 ### MobSF v3.6.6 (score 68/100, no drop from the 67 baseline)
 Exactly the catalogued false-positive set — zero new signal. 1 HIGH (debug-cert
@@ -96,7 +110,7 @@ The 512-bit derived seed is copied into the process-global `g_seed[64]` during `
 
 **Fix:** Change `loadSeed()` to return `ByteArray`, add `createWalletFromBytes` JNI variant, call `byteArray.fill(0)` immediately after JNI returns.
 
-**Status:** Remediated — `loadSeed()` returns `ByteArray` (zeroed after use via `fill(0)` in `finally` blocks). `createWalletFromBytes`/`recoverWalletFromBytes` JNI functions accept `jbyteArray` with `secure_zero()` on the C stack copy. The mnemonic never becomes an immutable Java `String` on the restore path. 42 security tests passing (8 new).
+**Status:** Remediated — `loadSeed()` returns `ByteArray` (zeroed after use via `fill(0)` in `finally` blocks). `createWalletFromBytes`/`recoverWalletFromBytes` JNI functions accept `jbyteArray` with `secure_zero()` on the C stack copy. The mnemonic never becomes an immutable Java `String` on the restore path (generation and display still do — see P2). Tests: `core/src/test/java/io/digibyte/core/security/`.
 
 ### CRITICAL-4: Digi-ID callback URL is attacker-controlled
 **File:** `DigiIdManager.kt:50-57`
@@ -176,14 +190,22 @@ The confirmation screen displays the raw callback URL but doesn't highlight that
 | `secure_zero` uses volatile pointer, `BRKeyClean` called after signing | PASS |
 | DigiScopeClient/HubWebSocket/DigiIdManager never reference seed material | PASS |
 
-## Automated Test Suite (42 tests, 42 passing)
+## Automated Test Suite
 
-| Test Class | Tests | Coverage |
-|------------|-------|----------|
-| `SeedIsolationTest` | 11 | NativeBridge API surface — no seed/key return methods, ByteArray variants |
-| `ManifestSecurityTest` | 8 | Backup, exports, permissions, network config |
-| `NetworkLeakTest` | 6 | HTTP/WS/JSON payloads contain no seed references |
-| `NativeMemorySecurityTest` | 17 | C code secure_zero, BRKeyClean, volatile, /dev/urandom, g_seed encapsulation |
+The host-JVM security suite lives in `core/src/test/java/io/digibyte/core/security/`
+and runs with `./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"`.
+The count is deliberately not written here — read it from the test-results XML
+of the run you are auditing (`core/build/test-results/testMainnetDebugUnitTest/`),
+because a number baked into this file drifted (it said 42 for months after
+`PinRateLimitTest` and further `SeedIsolationTest` cases landed).
+
+| Test Class | Coverage |
+|------------|----------|
+| `SeedIsolationTest` | NativeBridge API surface — no seed/key return methods, ByteArray variants |
+| `ManifestSecurityTest` | Backup, exports, permissions, network config |
+| `NetworkLeakTest` | HTTP/WS/JSON payloads contain no seed references |
+| `NativeMemorySecurityTest` | C code secure_zero, BRKeyClean, volatile, /dev/urandom, g_seed encapsulation |
+| `PinRateLimitTest` | PIN attempt counter / lockout schedule (v3.10.35) |
 
 ## MobSF Static Analysis
 
