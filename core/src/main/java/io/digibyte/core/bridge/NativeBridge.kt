@@ -237,6 +237,14 @@ object NativeBridge {
      */
     external fun signMessage(message: String, addressFormat: Int): String?
 
+    /** Digi-ID per-site identity signing. Derives the SLIP-0013 key
+     *  m/13'/A'/B'/C'/D' from SHA256(LE32(index) || siteUri) — [siteUri] must be the
+     *  site's canonical callback URL (scheme://host/path, NO query, so the per-login
+     *  nonce never changes the identity) — and signs [message] with the same
+     *  "\x19DigiByte Signed Message:\n" compact-recoverable scheme as [signMessage].
+     *  Returns "address|base64signature" (legacy P2PKH address) or null when locked. */
+    external fun signIdentityMessage(message: String, siteUri: String, index: Int): String?
+
     // === Wallet state ===
     /** Returns true if the C core wallet is initialized (g_wallet != NULL). */
     external fun isWalletLoaded(): Boolean

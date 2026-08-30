@@ -54,7 +54,85 @@ static size_t write_varint(uint8_t *buf, uint64_t val) {
     return 1;
 }
 
-/* ---- signMessage JNI ---- */
+/* ---- Shared signing core ----
+ *
+ * Signs msgChars with an ALREADY-DERIVED key using the Bitcoin-style
+ * "\x19DigiByte Signed Message:\n" scheme and returns "address|base64sig".
+ * Cleans the key before returning in every path. Both signMessage (legacy
+ * m/0\'/0/0 identity) and signIdentityMessage (per-site SLIP-0013 identity,
+ * docs/specs/digiid-key-isolation.md) funnel through here so the two cannot
+ * drift in message formatting.
+ */
+static jstring sign_with_key(JNIEnv *env, BRKey *key, const char *msgChars,
+                             size_t msgLen, jint addressFormat, const char *tag) {
+    key->compressed = 1;
+
+    /* Get the address for this key */
+    char addr[75];
+    memset(addr, 0, sizeof(addr));
+    if (addressFormat == 2) {
+        BRKeySegwitAddress(key, addr, sizeof(addr), 0);
+    } else {
+        BRKeyAddress(key, addr, sizeof(addr));
+    }
+
+    if (addr[0] == '\0') {
+        LOGW("%s: failed to derive address", tag);
+        BRKeyClean(key);
+        return NULL;
+    }
+
+    /*
+     * Construct Bitcoin-style signed message:
+     *   header = "\x19DigiByte Signed Message:\n"   (0x19 = 25 = strlen)
+     *   payload = header + varint(msgLen) + message
+     *   hash = SHA256(SHA256(payload))
+     */
+    static const char header[] = "\x19" "DigiByte Signed Message:\n";
+    size_t headerLen = sizeof(header) - 1; /* exclude null terminator */
+
+    uint8_t varint[9];
+    size_t varintLen = write_varint(varint, msgLen);
+
+    size_t totalLen = headerLen + varintLen + msgLen;
+    uint8_t *payload = malloc(totalLen);
+    if (!payload) {
+        BRKeyClean(key);
+        return NULL;
+    }
+
+    memcpy(payload, header, headerLen);
+    memcpy(payload + headerLen, varint, varintLen);
+    memcpy(payload + headerLen + varintLen, msgChars, msgLen);
+
+    /* Double SHA256 */
+    UInt256 md;
+    BRSHA256_2(&md, payload, totalLen);
+    free(payload);
+
+    /* Compact recoverable signature (65 bytes: 1 recovery + 32 r + 32 s) */
+    uint8_t compactSig[65];
+    size_t sigLen = BRKeyCompactSign(key, compactSig, sizeof(compactSig), md);
+    BRKeyClean(key);
+
+    if (sigLen == 0) {
+        LOGE("%s: BRKeyCompactSign failed", tag);
+        return NULL;
+    }
+
+    /* Base64 encode the 65-byte signature */
+    char sigB64[92]; /* ceil(65/3)*4 + 1 = 89 */
+    base64_encode(sigB64, sizeof(sigB64), compactSig, sigLen);
+
+    /* Return "address|base64signature" */
+    char result[256];
+    snprintf(result, sizeof(result), "%s|%s", addr, sigB64);
+
+    LOGD("%s: signed successfully (sigLen=%zu)", tag, sigLen);
+    return (*env)->NewStringUTF(env, result);
+}
+
+/* ---- signMessage JNI (legacy shared identity, m/0'/0/0) ---- */
 
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
@@ -87,73 +165,58 @@ Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
         (*env)->ReleaseStringUTFChars(env, message, msgChars);
         return NULL;
     }
-    key.compressed = 1;
 
-    /* Get the address for this key */
-    char addr[75];
-    memset(addr, 0, sizeof(addr));
-    if (addressFormat == 2) {
-        BRKeySegwitAddress(&key, addr, sizeof(addr), 0);
-    } else {
-        BRKeyAddress(&key, addr, sizeof(addr));
-    }
-
-    if (addr[0] == '\0') {
-        LOGW("signMessage: failed to derive address");
-        BRKeyClean(&key);
-        (*env)->ReleaseStringUTFChars(env, message, msgChars);
-        return NULL;
-    }
-
-    /*
-     * Construct Bitcoin-style signed message:
-     *   header = "\x19DigiByte Signed Message:\n"   (0x19 = 25 = strlen)
-     *   payload = header + varint(msgLen) + message
-     *   hash = SHA256(SHA256(payload))
-     */
-    static const char header[] = "\x19" "DigiByte Signed Message:\n";
-    size_t headerLen = sizeof(header) - 1; /* exclude null terminator */
-
-    uint8_t varint[9];
-    size_t varintLen = write_varint(varint, msgLen);
-
-    size_t totalLen = headerLen + varintLen + msgLen;
-    uint8_t *payload = malloc(totalLen);
-    if (!payload) {
-        BRKeyClean(&key);
-        (*env)->ReleaseStringUTFChars(env, message, msgChars);
-        return NULL;
-    }
-
-    memcpy(payload, header, headerLen);
-    memcpy(payload + headerLen, varint, varintLen);
-    memcpy(payload + headerLen + varintLen, msgChars, msgLen);
-
+    jstring out = sign_with_key(env, &key, msgChars, msgLen, addressFormat, "signMessage");
     (*env)->ReleaseStringUTFChars(env, message, msgChars);
+    return out;
+}
 
-    /* Double SHA256 */
-    UInt256 md;
-    BRSHA256_2(&md, payload, totalLen);
-    free(payload);
+/* ---- signIdentityMessage JNI (per-site SLIP-0013 identity, m/13'/A'/B'/C'/D') ----
+ *
+ * siteUri must be the site's canonical callback URL (scheme://host/path, no
+ * query) so the per-login nonce never perturbs the identity. Address format is
+ * fixed to legacy P2PKH — the format the Digi-ID ecosystem verifies against.
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
+                                                              jstring message, jstring siteUri,
+                                                              jint index) {
+    (void)thiz;
 
-    /* Compact recoverable signature (65 bytes: 1 recovery + 32 r + 32 s) */
-    uint8_t compactSig[65];
-    size_t sigLen = BRKeyCompactSign(&key, compactSig, sizeof(compactSig), md);
-    BRKeyClean(&key);
-
-    if (sigLen == 0) {
-        LOGE("signMessage: BRKeyCompactSign failed");
+    if (!g_wallet) {
+        LOGW("signIdentityMessage: wallet not initialized");
+        return NULL;
+    }
+    if (!seed_is_valid()) {
+        LOGW("signIdentityMessage: session locked — no seed available");
+        return NULL;
+    }
+    if (!message || !siteUri || index < 0) {
+        LOGW("signIdentityMessage: bad arguments");
         return NULL;
     }
 
-    /* Base64 encode the 65-byte signature */
-    char sigB64[92]; /* ceil(65/3)*4 + 1 = 89 */
-    base64_encode(sigB64, sizeof(sigB64), compactSig, sigLen);
+    const char *uriChars = (*env)->GetStringUTFChars(env, siteUri, NULL);
+    if (!uriChars) return NULL;
 
-    /* Return "address|base64signature" */
-    char result[256];
-    snprintf(result, sizeof(result), "%s|%s", addr, sigB64);
+    BRKey key;
+    memset(&key, 0, sizeof(key));
+    int derived = seed_derive_identity_key(&key, uriChars, (uint32_t)index);
+    (*env)->ReleaseStringUTFChars(env, siteUri, uriChars);
+    if (!derived) {
+        LOGW("signIdentityMessage: identity derivation failed");
+        return NULL;
+    }
 
-    LOGD("signMessage: signed successfully (sigLen=%zu)", sigLen);
-    return (*env)->NewStringUTF(env, result);
+    const char *msgChars = (*env)->GetStringUTFChars(env, message, NULL);
+    if (!msgChars) {
+        BRKeyClean(&key);
+        return NULL;
+    }
+    size_t msgLen = strlen(msgChars);
+
+    jstring out = sign_with_key(env, &key, msgChars, msgLen, /*addressFormat=*/0,
+                                "signIdentityMessage");
+    (*env)->ReleaseStringUTFChars(env, message, msgChars);
+    return out;
 }

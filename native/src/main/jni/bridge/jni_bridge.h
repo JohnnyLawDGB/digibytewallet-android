@@ -129,6 +129,9 @@ static inline int _peerGuardStamp(void) {
 int seed_is_valid(void);
 int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId);
 int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index);
+/* Digi-ID per-site identity key: SLIP-0013 path m/13'/A'/B'/C'/D' derived from
+ * SHA256(LE32(index) || uri). Same encapsulation contract as seed_derive_key. */
+int seed_derive_identity_key(BRKey *outKey, const char *uri, uint32_t index);
 void seed_zero(void);
 
 /* Master public key — derived once from seed */
