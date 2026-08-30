@@ -428,7 +428,6 @@
          back from. Keep "NOT" emphatic and "irreversible" literal. -->
     <string name="rf_not_in_wallet">This address is NOT in your wallet — sweeps are irreversible</string>
     <string name="rf_sweep">Sweep funds</string>
-    <string name="rf_bip49_note">Manual recovery for now — wrapped segwit (BIP49) won\'t be swept automatically</string>
     <string name="rf_sweep_submitted">Sweep submitted</string>
     <string name="rf_will_appear">Recovered funds will appear once confirmed.</string>
     <string name="rf_txid">TXID</string>

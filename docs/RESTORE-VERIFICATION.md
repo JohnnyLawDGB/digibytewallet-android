@@ -62,32 +62,46 @@ either way: dollars found and not moved are still dollars you should know about.
 | BIP84 key, legacy encoding *(Legacy receive tab)* | `m/84'/20'/0'` | Bitcoin seed | `D…` | **proven** |
 | Legacy `m/0'` standard HMAC *(early non-DGB forks)* | `m/0'` | Bitcoin seed | `D…` | **proven** |
 | BIP44 wrong-coin *(seed typed into a BTC wallet)* | `m/44'/0'/0'` | Bitcoin seed | `D…` | **proven** |
-| BIP49 wrapped segwit | `m/49'/20'/0'` | Bitcoin seed | `S…` | **refuses — honestly** |
+| BIP49 wrapped segwit | `m/49'/20'/0'` | Bitcoin seed | `S…` | **proven** |
+
+Two rows are easy to confuse, and both are DigiByte on the DigiByte chain. **BIP49** is coin type
+`20'` — DigiByte's own P2SH form, the `S…` addresses Coinomi and Trezor hand out for "wrapped
+segwit". **BIP44 wrong-coin** is coin type `0'`, Bitcoin's, which is what a DGB seed typed into a
+Bitcoin wallet derives. Neither is DGB sent to a Bitcoin address — `1…` and `bc1…` carry version
+bytes this wallet refuses, so those sends never leave. (`3…` is the exception, and not a safe one:
+DigiByte's legacy P2SH version byte is 5, the same as Bitcoin's, so the two encodings are
+byte-identical and `BRAddressIsValid` accepts a Bitcoin P2SH address. Tracked separately.) The
+"HMAC" column is the BIP32 master-key salt, not the coin — `"Bitcoin seed"` is the standard BIP32
+constant that nearly every wallet uses, DigiByte included.
 
 ---
 
-## The refusal that matters most
+## The message that matters most
 
-BIP49 is the one path this wallet cannot sweep. The lookup backend rejects `S…` addresses outright
-— `{"error":"invalid address"}` — and one bad address fails the whole request, so the profile
-cannot even be surveyed.
+"No recoverable funds found", reported about a wallet that visibly holds money, is the worst thing
+this feature could say. It is also the easiest mistake to make, because an unanswerable lookup
+reads exactly like an empty one.
 
-The question was never whether it recovers. It was what it *says*. "No recoverable funds found",
-reported about a wallet that visibly holds money, is the worst message this feature could produce,
-and it was entirely plausible: an unanswerable lookup is easy to read as an empty one.
+BIP49 was that case for a long time, and both halves of it are now fixed — the lookup answers, and
+the sweep signs (Run H). The rule it forced is what remains load-bearing: a scan that could not
+check every path has NOT established that there are no funds, and must say so as its own outcome,
+distinct from both "no funds" and "everything is down".
 
 ```
 wallet holds       0.01 DGB on m/49'/20'/0'/0/0  (confirmed, untouched)
 
-the app says       Couldn't finish checking
+the app said       Couldn't finish checking
                    "Some derivation paths could not be checked, so this is
                     not a final answer — there may be funds we haven't seen."
                    Unchecked: BIP49 DGB (P2SH-wrapped segwit)
 ```
 
-It names the path it could not check and refuses to call the answer final. "Some paths could not
-be checked" is treated as its own outcome, distinct from both "no funds" and "everything is down"
-— the rule in `PartialScanFailureTest`, written against an earlier bug, holding on live money.
+It names the path it could not check and refuses to call the answer final — the rule in
+`PartialScanFailureTest`, written against an earlier bug, holding on live money.
+
+The warning above is no longer reachable for BIP49, and that is the point of Run H's first half:
+while the backend rejected `S…` outright, this fired on **every** restore of **every** wallet. A
+caveat that is always on says nothing at all.
 
 ---
 
@@ -215,7 +229,8 @@ Fixed, the same scan reads:
 
 ```
 scan      $1.00 in DigiDollar found
-          (BIP49 caveat still shown — it is no longer swallowed by the findings branch)
+          (the BIP49 caveat, still fired at the time, is shown alongside rather
+           than swallowed by the findings branch — Run H later removed its cause)
 run       Nothing was moved
           $1.00 in DigiDollar was left behind — it could not be moved
           Needs 0.1 DGB for the network fee — this wallet has 0 DGB.
@@ -298,6 +313,75 @@ on chain   nVersion 0x2000770
 source     dd_balance_cents 0, unspent_count 0
 ```
 
+## Run H — BIP49, the last stranded derivation
+
+Wrapped segwit was the one path this wallet could see and not spend. Two separate things had to
+change, and the order mattered.
+
+**The lookup could not answer.** The reconcile backend's address allowlist covered `D…` and
+`dgb1…` but not DigiByte's P2SH `S…` form, so one such address failed the whole request — even
+though the node validates it (`digibyte-cli validateaddress` → `isvalid: true, isscript: true`)
+and the explorer route in the same backend already accepted it. That meant every restore, of every
+wallet, ended with `Unchecked: BIP49 DGB (P2SH-wrapped segwit)`. A caveat that is always on says
+nothing. The allowlist was aligned; it now fires only when a path genuinely could not be checked.
+
+**The signer had no branch for it.** `BRTransactionSign` matches keys with `BRScriptPKH`, which
+compares the scriptPubKey's hash160 against hash160(pubkey). A BIP49 scriptPubKey commits
+hash160(*redeemScript*), so no key ever matched and the input fell through unsigned. The new branch
+sits before that match and `continue`s after, mirroring the taproot one, and reuses the existing
+BIP143 path by pointing `input->script` at the redeemScript for the duration of the sighash call —
+BIP143 specifies the same scriptCode for P2SH-P2WPKH as for native P2WPKH, so a second sighash
+implementation would have been a second thing to get wrong.
+
+BIP49 is the only input type that carries **both** halves — P2PKH is scriptSig-only, P2WPKH and
+P2TR are witness-only:
+
+```
+fund       0.12 DGB -> SVGPj4Kt7NKqPk57ecL4Y7YqZXHRhHA6LN
+           d388ea96…  height 24,123,155
+
+scan       Recoverable balance 0.12 DGB
+           FOUND ON  BIP49 DGB (P2SH-wrapped segwit)  m/49'/20'/0'
+           (no warning, no "manual recovery" note — an ordinary finding)
+
+sweep      e2547c6be75b909136ef5eeab9947a0c7745425859d0ace81a54829e9289d36d
+
+on chain   scriptSig  16 0014 94afd11965cea8c67e9c757c7d5398a5981056d9
+                      └─ one 22-byte push of the redeemScript
+           witness    [0] 3044…01   DER signature + SIGHASH_ALL
+                      [1] 03cfec…   compressed pubkey
+           out        0.119796 DGB
+           vsize      133   (under the 160-byte/input estimate — fee sizing unchanged)
+
+source     0 UTXOs
+```
+
+The network verified that signature. No test beats consensus accepting the transaction.
+
+### Guarding the one function that signs everything
+
+`BRTransactionSign` signs every spend the wallet makes. "The new branch only fires on a shape
+nothing else produces" is an argument, not evidence, so `sign_regression_kat` pins the full
+serialized bytes of P2PKH, P2WPKH, P2TR and a mixed P2PKH+P2WPKH transaction against a baseline
+captured from the unmodified submodule. Byte-equality is legitimate only because both schemes are
+deterministic — ECDSA via RFC 6979, Schnorr via `sign32(..., NULL)`, i.e. zero auxiliary
+randomness — which was confirmed across three consecutive runs before anything was pinned. All
+four stayed byte-identical after the change.
+
+A gate that cannot go red proves nothing, so the signer itself was perturbed four ways (never the
+expected strings). Three were caught. The fourth was not, and is documented in the KAT rather than
+left implied: removing the taproot branch's `continue` changes nothing, because falling through
+reaches `BRScriptPKH`, which finds no hash160 in an `{OP_1, 32, X(Q)}` script. That `continue` is
+defensive for *that* shape — and load-bearing for P2SH, whose scriptPubKey does carry a hash160.
+Per-input shape assertions were added to cover the fall-through that actually overwrites something.
+
+`bip49_sign_kat` verifies the signature with `secp256k1_ecdsa_verify` against a BIP143 sighash it
+computes field by field from the spec. Recomputing with the signer's own helper would only prove
+the signer agrees with itself. It also checks the signature does **not** verify against a
+one-satoshi-different amount — proof that BIP143 committed to the amount, which makes a BIP49 input
+structurally immune to the stale-amount class that `LegacySweepService`'s provenance gate defends
+the legacy paths against.
+
 ---
 
 ## Why assets move before the sweep
@@ -350,10 +434,6 @@ that look correct and are not.
 
 Every derivation in the table above has been funded and swept on mainnet, and all three value
 types have moved. Nothing on this page is now an untested claim.
-
-**BIP49 funds stay stranded** even though the refusal is honest. The coins are recoverable — the
-phrase is a standard BIP49 mnemonic any wrapped-segwit wallet can restore — but not by this app.
-Supporting it needs both a sweep path and a lookup backend that accepts `S…` addresses.
 
 Every transaction identifier above is on DigiByte mainnet and can be checked independently. Test
 wallets were funded, drained and discarded.

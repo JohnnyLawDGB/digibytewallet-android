@@ -341,7 +341,6 @@
     <string name="rf_address_hint">Địa chỉ DigiByte (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Địa chỉ này KHÔNG thuộc ví của bạn — thao tác gom không thể hoàn tác</string>
     <string name="rf_sweep">Gom tiền</string>
-    <string name="rf_bip49_note">Hiện phải khôi phục thủ công — wrapped segwit (BIP49) sẽ không được gom tự động</string>
     <string name="rf_sweep_submitted">Đã gửi lệnh gom</string>
     <string name="rf_will_appear">Tiền khôi phục sẽ xuất hiện sau khi được xác nhận.</string>
     <string name="rf_txid">TXID</string>

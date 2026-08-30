@@ -349,7 +349,6 @@
     <string name="rf_address_hint">DigiByte-Adresse (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Diese Adresse ist NICHT in Ihrer Wallet — Sweeps sind unwiderruflich</string>
     <string name="rf_sweep">Guthaben übertragen</string>
-    <string name="rf_bip49_note">Vorerst manuelle Wiederherstellung — Wrapped SegWit (BIP49) wird nicht automatisch übertragen</string>
     <string name="rf_sweep_submitted">Sweep eingereicht</string>
     <string name="rf_will_appear">Wiederhergestelltes Guthaben erscheint nach der Bestätigung.</string>
     <string name="rf_txid">TXID</string>

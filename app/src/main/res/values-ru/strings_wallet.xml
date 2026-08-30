@@ -341,7 +341,6 @@
     <string name="rf_address_hint">Адрес DigiByte (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Этого адреса НЕТ в вашем кошельке — перевод необратим</string>
     <string name="rf_sweep">Перевести средства</string>
-    <string name="rf_bip49_note">Пока только ручное восстановление — обёрнутый segwit (BIP49) не переводится автоматически</string>
     <string name="rf_sweep_submitted">Перевод отправлен</string>
     <string name="rf_will_appear">Восстановленные средства появятся после подтверждения.</string>
     <string name="rf_txid">TXID</string>

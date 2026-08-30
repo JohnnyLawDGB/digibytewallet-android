@@ -341,7 +341,6 @@
     <string name="rf_address_hint">Alamat DigiByte (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Alamat ini TIDAK ada di dompet Anda — penyapuan tidak dapat dibatalkan</string>
     <string name="rf_sweep">Sapu dana</string>
-    <string name="rf_bip49_note">Pemulihan manual untuk saat ini — wrapped segwit (BIP49) tidak disapu otomatis</string>
     <string name="rf_sweep_submitted">Penyapuan dikirim</string>
     <string name="rf_will_appear">Dana yang dipulihkan akan muncul setelah dikonfirmasi.</string>
     <string name="rf_txid">TXID</string>

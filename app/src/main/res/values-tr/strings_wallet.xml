@@ -341,7 +341,6 @@
     <string name="rf_address_hint">DigiByte adresi (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Bu adres cüzdanınızda DEĞİL — aktarımlar geri alınamaz</string>
     <string name="rf_sweep">Bakiyeyi aktar</string>
-    <string name="rf_bip49_note">Şimdilik elle kurtarma — sarmalanmış segwit (BIP49) otomatik aktarılmaz</string>
     <string name="rf_sweep_submitted">Aktarım gönderildi</string>
     <string name="rf_will_appear">Kurtarılan bakiye onaylandığında görünecek.</string>
     <string name="rf_txid">TXID</string>

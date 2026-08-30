@@ -343,7 +343,6 @@
     <string name="rf_address_hint">Dirección DigiByte (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Esta dirección NO está en tu billetera — los barridos son irreversibles</string>
     <string name="rf_sweep">Barrer fondos</string>
-    <string name="rf_bip49_note">Recuperación manual por ahora — segwit envuelto (BIP49) no se barrerá automáticamente</string>
     <string name="rf_sweep_submitted">Barrido enviado</string>
     <string name="rf_will_appear">Los fondos recuperados aparecerán una vez confirmados.</string>
     <string name="rf_txid">TXID</string>

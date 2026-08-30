@@ -341,7 +341,6 @@
     <string name="rf_address_hint">DigiByte アドレス（D…、S…、dgb1q…）</string>
     <string name="rf_not_in_wallet">このアドレスはあなたのウォレットにありません — 集約は取り消せません</string>
     <string name="rf_sweep">資金を集約</string>
-    <string name="rf_bip49_note">現時点では手動での復元です — ラップド SegWit（BIP49）は自動的に集約されません</string>
     <string name="rf_sweep_submitted">集約を送信しました</string>
     <string name="rf_will_appear">復元された資金は承認後に表示されます。</string>
     <string name="rf_txid">TXID</string>

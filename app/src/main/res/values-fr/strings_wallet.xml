@@ -330,7 +330,6 @@
     <string name="rf_address_hint">Adresse DigiByte (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Cette adresse n\'est PAS dans votre portefeuille — les balayages sont irréversibles</string>
     <string name="rf_sweep">Balayer les fonds</string>
-    <string name="rf_bip49_note">Récupération manuelle pour l\'instant — le segwit encapsulé (BIP49) ne sera pas balayé automatiquement</string>
     <string name="rf_sweep_submitted">Balayage soumis</string>
     <string name="rf_will_appear">Les fonds récupérés apparaîtront une fois confirmés.</string>
     <string name="rf_txid">TXID</string>

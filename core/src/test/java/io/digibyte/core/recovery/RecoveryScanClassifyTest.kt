@@ -156,7 +156,7 @@ class RecoveryScanClassifyTest {
     }
 
     @Test
-    fun bip49Profile_isNotSweepable() = runBlocking {
+    fun bip49Profile_isDetectedAndNoLongerRefused() = runBlocking {
         // A BIP49 (P2SH-P2WPKH, addressFormat==2) profile that DOES hold funds.
         val bip49 = DerivationProfile.BUILT_INS.first { it.addressFormat == 2 }
         val addr = "SXBip49TestKeyDoNotSendRealFunds123"
@@ -175,29 +175,36 @@ class RecoveryScanClassifyTest {
         assertEquals(1, done.nonNativeWithFunds.size)
         assertEquals(2, done.nonNativeWithFunds[0].profile.addressFormat)
 
-        // sweep: BIP49 is deferred to manual recovery -> no tx built, no txid,
-        // nothing swept, and the reason names manual recovery. It is NEVER a
-        // silent skip or a success. Durability collaborators (outgoingTxStore,
-        // walletTxPersister) are relaxed mocks -- the BIP49 branch
-        // short-circuits before ever touching them, and seedBytes is unused
-        // too (short-circuits before any JNI), so a zero buffer is fine.
-        val result = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true), ForeignUtxoAssetClassifier(
+        // sweep: BIP49 used to be short-circuited into "manual recovery required" BEFORE any
+        // signing was attempted — it never touched JNI, which is the only reason this test
+        // could drive sweepFromSeed on a JVM at all. BRTransactionSign has since grown a
+        // P2SH-P2WPKH branch (proven in bip49_sign_kat, where the bytes are), so the profile
+        // now takes the ORDINARY path.
+        //
+        // The seam that proves it: reaching the native signer without a library loaded raises
+        // UnsatisfiedLinkError. Getting that error is the positive observation — it can only
+        // happen if the pre-JNI refusal is gone. A returned "manual recovery" outcome, or any
+        // outcome at all, would mean the short-circuit is still there.
+        val sweeper = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true), ForeignUtxoAssetClassifier(
             // These tests are not about assets; a classifier that answers "plain, and I
             // could tell" keeps them testing what they test rather than the new guard.
             fetchRawTx = { byteArrayOf(1) },
             isAssetTx = { false },
-        )).sweepFromSeed(
-            seedBytes = ByteArray(64),
-            nonNativeResults = done.nonNativeWithFunds,
-            destAddress = "dgb1qdummydestinationplaceholderaddr",
+        ))
+        var reachedNative = false
+        try {
+            sweeper.sweepFromSeed(
+                seedBytes = ByteArray(64),
+                nonNativeResults = done.nonNativeWithFunds,
+                destAddress = "dgb1qdummydestinationplaceholderaddr",
+            )
+        } catch (e: UnsatisfiedLinkError) {
+            reachedNative = true
+        }
+        assertTrue(
+            "BIP49 must reach the signer instead of being turned away before it is attempted",
+            reachedNative,
         )
-        assertEquals(1, result.outcomes.size)
-        val outcome = result.outcomes[0]
-        assertNull(outcome.txHex)
-        assertNull(outcome.txid)
-        assertEquals(0L, outcome.sweptSat)
-        assertTrue(outcome.failureReason!!.contains("manual recovery", ignoreCase = true))
-        assertFalse(result.allSubmitted)
     }
 
     @Test

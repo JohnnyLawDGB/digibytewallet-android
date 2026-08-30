@@ -341,7 +341,6 @@
     <string name="rf_address_hint">DigiByte address (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">WALA ang address na ito sa wallet mo — hindi na maibabalik ang sweep</string>
     <string name="rf_sweep">I-sweep ang pondo</string>
-    <string name="rf_bip49_note">Manual muna ang pagbawi — hindi awtomatikong nasi-sweep ang wrapped segwit (BIP49)</string>
     <string name="rf_sweep_submitted">Naisumite ang sweep</string>
     <string name="rf_will_appear">Lilitaw ang nabawing pondo kapag nakumpirma na.</string>
     <string name="rf_txid">TXID</string>

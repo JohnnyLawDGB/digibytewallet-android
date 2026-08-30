@@ -134,20 +134,19 @@ class LegacySweepService(
         val verdicts = precomputedVerdicts
             ?: assetClassifier.classify(nonNativeResults.flatMap { it.utxos })
 
+        // BIP49 is no longer special-cased. BRTransactionSign grew a P2SH-P2WPKH branch, so a
+        // wrapped-segwit profile signs and sweeps like any other. Its inputs are in fact SAFER
+        // than the legacy ones the provenance gate below defends: BIP143 commits to the input
+        // amount, so a stale or under-reported value produces an invalid signature rather than
+        // a valid one that silently burns the difference to fee.
         val outcomes = nonNativeResults.map { result ->
-            if (result.profile.addressFormat == 2 /* P2SH-P2WPKH / BIP49 */) {
-                SweepOutcome(result.profile, null, null, 0L, 0,
-                    "BIP49 P2SH-P2WPKH sweep not yet supported — manual recovery required",
+            val refusal = amountProvenanceGate(result)
+            if (refusal != null) {
+                SweepOutcome(result.profile, null, null, 0L, 0, refusal,
                     broadcastState = BroadcastState.FAILED)
             } else {
-                val refusal = amountProvenanceGate(result)
-                if (refusal != null) {
-                    SweepOutcome(result.profile, null, null, 0L, 0, refusal,
-                        broadcastState = BroadcastState.FAILED)
-                } else {
-                    sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf, verdicts,
-                        excludeOutpoints)
-                }
+                sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf, verdicts,
+                    excludeOutpoints)
             }
         }
         return Result(outcomes)

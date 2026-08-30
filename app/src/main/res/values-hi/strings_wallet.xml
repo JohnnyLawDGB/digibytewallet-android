@@ -341,7 +341,6 @@
     <string name="rf_address_hint">DigiByte पता (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">यह पता आपके वॉलेट में नहीं है — स्वीप अपरिवर्तनीय हैं</string>
     <string name="rf_sweep">फंड स्वीप करें</string>
-    <string name="rf_bip49_note">फ़िलहाल मैन्युअल पुनर्प्राप्ति — रैप्ड सेगविट (BIP49) स्वतः स्वीप नहीं होगा</string>
     <string name="rf_sweep_submitted">स्वीप सबमिट हुआ</string>
     <string name="rf_will_appear">पुनर्प्राप्त फंड पुष्टि के बाद दिखाई देंगे।</string>
     <string name="rf_txid">TXID</string>

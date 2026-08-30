@@ -341,7 +341,6 @@
     <string name="rf_address_hint">Endereço DigiByte (D…, S…, dgb1q…)</string>
     <string name="rf_not_in_wallet">Este endereço NÃO está na sua carteira — varreduras são irreversíveis</string>
     <string name="rf_sweep">Varrer fundos</string>
-    <string name="rf_bip49_note">Recuperação manual por enquanto — segwit encapsulado (BIP49) não será varrido automaticamente</string>
     <string name="rf_sweep_submitted">Varredura enviada</string>
     <string name="rf_will_appear">Os fundos recuperados aparecerão após a confirmação.</string>
     <string name="rf_txid">TXID</string>

@@ -225,7 +225,9 @@ private fun FindingsBody(
         else NativeBridge.isValidAddress(trimmedAddr)
     }
 
-    val sweepableFindings = findings.filter { it.profile.addressFormat != 2 }
+    // Every found profile is sweepable — the BIP49 exclusion went when BRTransactionSign
+    // learned the P2SH-P2WPKH branch.
+    val sweepableFindings = findings
     // Dollars count as something to move even with zero sweepable UTXOs — that is the whole
     // point of RecoverableValue. The move itself may still be refused (the DigiDollar consensus
     // fee floor needs DGB), and that refusal is reported on the results screen.
@@ -375,8 +377,7 @@ private fun FindingsBody(
 
             // Individual finding rows
             items(findings) { finding ->
-                val isBip49 = finding.profile.addressFormat == 2
-                FindingCard(finding = finding, isBip49 = isBip49)
+                FindingCard(finding = finding)
             }
         }
 
@@ -620,7 +621,6 @@ private fun FindingsBody(
 @Composable
 private fun FindingCard(
     finding: RecoveryScanService.ProfileResult,
-    isBip49: Boolean,
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -634,15 +634,15 @@ private fun FindingCard(
                     modifier = Modifier
                         .size(36.dp)
                         .background(
-                            (if (isBip49) AMBER else ACCENT).copy(alpha = 0.15f),
+                            ACCENT.copy(alpha = 0.15f),
                             RoundedCornerShape(8.dp)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isBip49) Icons.Default.ErrorOutline else Icons.Default.Savings,
+                        imageVector = Icons.Default.Savings,
                         contentDescription = null,
-                        tint = if (isBip49) AMBER else ACCENT,
+                        tint = ACCENT,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -669,33 +669,6 @@ private fun FindingCard(
                 )
             }
 
-            if (isBip49) {
-                Spacer(Modifier.height(10.dp))
-                HorizontalDivider(color = DIVIDER, thickness = 0.5.dp)
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(AMBER.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = AMBER,
-                        modifier = Modifier
-                            .size(15.dp)
-                            .padding(top = 1.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.rf_bip49_note),
-                        color = AMBER,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
         }
     }
 }

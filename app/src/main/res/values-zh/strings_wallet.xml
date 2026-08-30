@@ -341,7 +341,6 @@
     <string name="rf_address_hint">DigiByte 地址（D…、S…、dgb1q…）</string>
     <string name="rf_not_in_wallet">此地址不在您的钱包中 — 归集不可撤销</string>
     <string name="rf_sweep">归集资金</string>
-    <string name="rf_bip49_note">暂需手动恢复 — 不会自动归集包装 SegWit（BIP49）</string>
     <string name="rf_sweep_submitted">已提交归集</string>
     <string name="rf_will_appear">恢复的资金将在确认后显示。</string>
     <string name="rf_txid">TXID</string>
