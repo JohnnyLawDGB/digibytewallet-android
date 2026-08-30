@@ -79,7 +79,7 @@ exposure. Bold entries are known residual risks.
 | T6 compromised DigiScope backend | — | Can correlate Digi-ID login events with IP address | — |
 | T7 unlocked device | Seed in memory while app is alive, accessible to a sophisticated attacker | Same | Full access |
 | T8 locked device | Sealed with Keystore-wrapped AES-GCM key; Keystore key is hardware-backed where supported | Same | Room DB encrypted with SQLCipher |
-| T9 locked device + PIN guesses | PIN hashed with Argon2id (t=3, m=64MiB, p=4); **no rate-limit on failed guesses** | Same | Same |
+| T9 locked device + PIN guesses | PIN hashed with Argon2id (t=3, m=64MiB, p=4); rate-limited since v3.10.35 (3 free, then 1/5/30/60-minute cooldowns) | Same | Same |
 | T10 sandboxed-bypass app | Keystore key is app-scoped; a full sandbox bypass reading `/data/data/io.digibyte/` can still lift the encrypted seed but not decrypt without the PIN | Same | Same |
 | T11 author coercion | Signed releases + lineage means a forged APK can't trivially impersonate the existing install (Android refuses the update). Source is MIT-licensed and auditable | Same | Same |
 
@@ -172,10 +172,11 @@ Named explicitly so they don't go unfixed by being unspoken.
    see risk 1). Scope is narrow: the seeder serves only peer addresses,
    not chain data. Reducing this to one of several optional bootstrap
    sources (oracle-node bootstrap, own-node fallback) is roadmapped.
-3. **PIN has no rate-limit.** An attacker with APK access and
-   sustained compute can brute-force the PIN against the encrypted
-   seed blob. Argon2id makes this expensive; exponential backoff
-   would make it infeasible. Phase 2.
+3. **PIN rate-limit — SHIPPED v3.10.35** (`PinManager`: 3 free
+   attempts, then 1/5/30/60-minute cooldowns, backward-clock guard).
+   Kept as a numbered item so the CRITICAL-1 split stays legible: this
+   half is closed, item 4 (auth-binding) is the open half. An offline
+   attacker with the encrypted blob is still bounded only by Argon2id.
 4. **Biometric is cosmetic.** Biometric unlock does not bind the
    Keystore key's user-authentication requirement, because
    `setUserAuthenticationRequired=true` crashes on API 28/33/35 in
@@ -185,10 +186,12 @@ Named explicitly so they don't go unfixed by being unspoken.
 5. **Tor silent fallback.** If Tor fails to start or the daemon dies,
    the wallet silently uses clearnet. Phase 2 changes this to a loud
    warning banner.
-6. **Digi-ID key is the main wallet's first address.** Digi-ID signs
-   with `m/44'/20'/0'/0/0`. A Digi-ID signature produced in response
-   to a malicious callback exposes the first address's signing
-   capability; isolation to a separate subtree is Phase 2.
+6. **Digi-ID key is shared across every site.** Digi-ID signs with
+   `m/0'/0/0` (the legacy bread-wallet tree; corrected 2026-08-19 — the
+   path is hardcoded in the JNI, not `m/44'/20'/0'/0/0`). The residual
+   is linkability, not key exposure: the `\x19DigiByte Signed
+   Message:\n` prefix blocks sighash confusion, and an app-created
+   wallet never funds `m/0'`. Per-site isolation is Phase 2.
 7. **Block-request correlation.** In compact-filter mode (the only
    sync path) the wallet still fetches full blocks on filter match. A
    surveillant

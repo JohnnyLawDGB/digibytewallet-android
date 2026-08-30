@@ -47,12 +47,26 @@ bug was found and fixed mid-cycle.**
 
 ### P2 — informational / already-mitigated
 `isValidMnemonic` / `MnemonicInputScreen` mnemonic `String` copies (existing
-onboarding pattern); SOCKS5 handshake response parse is memory-safe
+onboarding pattern) — the same class also covers `generateMnemonic`'s `jstring`
+return (`jni_wallet.c` `NewStringUTF`) on the creation path and
+`SeedViewScreen`'s `String(decrypted, UTF_8)` for display; the `ByteArray`
+guarantee in CRITICAL-3 is scoped to load/restore/sign, and these three sites
+are the recorded remainder (re-confirmed by the 2026-08-30 external audit,
+still accepted); SOCKS5 handshake response parse is memory-safe
 (`rem <= sizeof(buf)` guard); BIP158 cfheaders probe/re-anchor bounded (array
 writes guarded, re-anchor budget capped — worst case a malicious filter peer
 griefs a session to bloom fallback); `getTransactionDetails` newest-100 buffer
 over-sized + `snprintf`-bounded; `useLegacyPackaging=false` + exec→no-exec is
 security-**positive** (libs mmap'd read-only, no extracted executable).
+
+### Recorded decisions (2026-08-30)
+- **12-word default kept.** 128 bits of entropy is the BIP39 baseline and
+  what every other mainstream wallet defaults to; 24 words remain available via
+  the creation toggle. The external audit's "weak default" is not a security
+  finding.
+- **Digi-ID identity key is `m/0'/0/0`**, not `m/44'/20'/0'/0/0` (corrected
+  2026-08-19); the residual is linkability (one address for every site), not
+  key exposure.
 
 ### MobSF v3.6.6 (score 68/100, no drop from the 67 baseline)
 Exactly the catalogued false-positive set — zero new signal. 1 HIGH (debug-cert
@@ -96,7 +110,7 @@ The 512-bit derived seed is copied into the process-global `g_seed[64]` during `
 
 **Fix:** Change `loadSeed()` to return `ByteArray`, add `createWalletFromBytes` JNI variant, call `byteArray.fill(0)` immediately after JNI returns.
 
-**Status:** Remediated — `loadSeed()` returns `ByteArray` (zeroed after use via `fill(0)` in `finally` blocks). `createWalletFromBytes`/`recoverWalletFromBytes` JNI functions accept `jbyteArray` with `secure_zero()` on the C stack copy. The mnemonic never becomes an immutable Java `String` on the restore path. 42 security tests passing (8 new).
+**Status:** Remediated — `loadSeed()` returns `ByteArray` (zeroed after use via `fill(0)` in `finally` blocks). `createWalletFromBytes`/`recoverWalletFromBytes` JNI functions accept `jbyteArray` with `secure_zero()` on the C stack copy. The mnemonic never becomes an immutable Java `String` on the restore path (generation and display still do — see P2). Tests: `core/src/test/java/io/digibyte/core/security/`.
 
 ### CRITICAL-4: Digi-ID callback URL is attacker-controlled
 **File:** `DigiIdManager.kt:50-57`

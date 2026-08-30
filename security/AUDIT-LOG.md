@@ -519,3 +519,20 @@ String JNI entries, no production caller); raw Digi-ID URI logging (fixed 2026-0
 as a security issue. Keystore auth-binding / CryptoObject / immutable-String mnemonic are the recorded
 CRITICAL-1 / P2 residuals; new there: hardware backing is asserted (`THREAT_MODEL.md:12`) but never
 checked, and `THREAT_MODEL.md:16` (enrollment invalidation) is false for a non-auth-bound key.
+
+**Follow-ups (2026-08-30, six branches off `fix/warm-resume-lock-gate`).** `fix/audit-spendgate` —
+closes P1: in-app PIN or biometric now gates DGB/DD/asset sends, Digi-ID approve, foreign-seed sweeps,
+Hub quickLogin and node pairing; the false `SendScreen.kt:150` comment is gone. `fix/audit-autolock` —
+closes the rest of P1: an in-foreground inactivity lock honouring the Security-settings timeout
+(background still locks immediately). `fix/audit-logs` — P2: the JWT is no longer logged and moves to
+EncryptedSharedPreferences; addresses are no longer logged; the legacy String JNI `createWallet` /
+`recoverWallet` and dead `unlockSession` are deleted; `KeyStoreManager` logs `KeyInfo.isInsideSecureHardware`
+at key creation (probe, not enforcement). `fix/audit-input` — P2: `FLAG_SECURE` + password-type IME on
+mnemonic/passphrase entry. `fix/audit-backup` — P2: `dataExtractionRules`. `fix/audit-docs` — hygiene:
+THREAT_MODEL / CLAUDE.md / AUDIT-SUMMARY / ROADMAP reconciled to the controls that exist, the 12-word
+default and the lost-PIN branch recorded as decisions, CRITICAL-1 split into its closed (rate-limit) and
+open (Keystore binding) halves.
+
+The marker stays at 40066. The next release, v4.0.76 (40076), is exactly 10 past it, so
+`scripts/check-security-cycle.sh` will fail the release build: run `scripts/security-cycle.sh <release.apk>`
+and record the cycle, or record a deferral with a reason and move the marker deliberately, before tagging.

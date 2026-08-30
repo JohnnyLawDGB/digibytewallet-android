@@ -48,11 +48,12 @@ adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 ### Seed Security (CRITICAL-2/3 Remediated)
 - Seed encrypted with AES-256-GCM via Android Keystore (hardware-backed)
 - **No `setUserAuthenticationRequired`** — removed to prevent crashes across API levels (28/33/35). App enforces its own PIN lock.
-- `loadSeed()` returns `ByteArray` (not String) — mnemonic never becomes immutable JVM heap object
+- `loadSeed()` returns `ByteArray` (not String) — on the load/restore/sign path the mnemonic never becomes an immutable JVM heap object. Scope is that path only: generation (`generateMnemonic` returns a `jstring`), onboarding display and the seed-view screen still hold Strings — recorded as AUDIT-SUMMARY P2
 - `createWalletFromBytes` / `recoverWalletFromBytes` JNI accept `jbyteArray` with `secure_zero()` on C stack
 - `g_seed` is `static` to `jni_wallet.c` — accessor API (`seed_sign_transaction`, `seed_derive_key`) prevents direct access from other compilation units
 - `ByteArray.fill(0)` in `finally` blocks on all seed paths
-- 42 security tests verify these properties
+- Security tests under `core/src/test/java/io/digibyte/core/security/` verify these properties (count from the test-results XML, not from here)
+- **Lock + spend gate (2026-08-30 follow-ups):** `MainActivity.onStop()` locks immediately; `AppNavigation` re-routes to `unlock` whenever `LockGatePolicy.shouldRouteToUnlock` says the state is Locked with a PIN present (the warm-resume bypass fix); an in-foreground inactivity timer honours the Security-settings timeout. Separately, every spend-class action (DGB/DD/asset send, Digi-ID approve, sweep, Hub quickLogin, node pairing) requires the in-app PIN or biometric at the moment of action
 
 - **Compact-filters-only sync (`NativeBridge.SyncMode`, `syncModeFor` in `CustomNode.kt`):** the wallet ALWAYS runs BIP157/158 compact filters. `syncModeFor(...)` unconditionally returns `COMPACT_FILTERS_ONLY` and ignores the stored `dgb_settings/sync_mode` pref; the old Sync Mode toggle/screen (`SyncModeScreen.kt`) is removed. Bloom (BIP37) is gone as a data path — no `filterload` ever goes on the wire, so the wallet's address set never leaves the device. **Bloom (BIP37) was fully EXCISED in v4.0.0 — BIP157/158 compact filters are the ONLY sync path.** `BRBloomFilter.c/.h`, the filterload/filteradd/merkleblock-message handlers, the bloom filter loader, and the `fallbackToBloom` path are all deleted; the `SyncMode` enum keeps its 3 values as an ABI constant but `COMPACT_FILTERS_ONLY` is the only reachable mode. The address set can never leave the device under any condition. The sovereign fallback is the user's own node (own-node CF pairing), not bloom.
 - **BIP157/158 compact filters (shipped v3.5.39):** native GCS decoder + `cfheaders`/`cfilter` wire handlers + filter-header chain persistence. `cf_birth_height` (`dgb_settings`) bounds the scan.
@@ -195,10 +196,10 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - **CRITICAL:** Frontend deploys wipe `/var/www/digiscope/downloads/` — symlinks must be recreated
 
 ## Security Audit
-- 42 security tests in `core/src/test/java/io/digibyte/core/security/`
+- Security tests live in `core/src/test/java/io/digibyte/core/security/` (run `./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"` for the current count)
 - MobSF report at `security/reports/mobsf-report.json`
 - Audit summary at `security/AUDIT-SUMMARY.md`
-- CRITICAL-1: Resolved as designed (auth not required — app uses own PIN). RESIDUAL (ROADMAP Phase 2): no Keystore user-auth binding + no PIN rate-limit — a compromised app process can decrypt the seed without device unlock.
+- CRITICAL-1: Resolved as designed (auth not required — app uses own PIN). Two halves: the PIN-rate-limit half is CLOSED (v3.10.35, `PinManager`; see security/AUDIT-LOG.md); the Keystore user-auth-binding half is OPEN (ROADMAP Phase 2) — a compromised app process can still decrypt the seed without device unlock. Hardware backing is probed and logged (`KeyInfo.isInsideSecureHardware`) at key creation, not enforced.
 - CRITICAL-2: Resolved (g_seed static, accessor API)
 - CRITICAL-3: Resolved (ByteArray path, zeroed after use)
 - CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): Digi-ID has no dedicated identity path. **Corrected 2026-08-19 — the old text here was wrong twice.** The path is `m/0'/0/0` (the legacy bread-wallet tree), not `m/44'/20'/0'/0/0`: `signMessage`'s second arg is the address FORMAT, and the JNI hardcodes `seed_derive_key(&key, 0, 0)`. And the residual is **linkability, not key exposure** — signing emits a signature not a key, the `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion, `m/0'` is hardened so it cannot be correlated to the BIP84/BIP86 trees, and `m/0'` is only watched for bread-wallet compat (`BRWalletReceiveAddress` hands out BIP84/86 only), so for an app-created wallet that address holds nothing. What remains: every site sees the same identity address (BitID derives per-site from the URI), and a restored bread-wallet seed could have funded that address.
