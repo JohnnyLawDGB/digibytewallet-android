@@ -15,7 +15,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import io.digibyte.core.AppUpdate
 import io.digibyte.core.UpdateChecker
@@ -34,8 +36,11 @@ import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import io.digibyte.service.SyncService
 import io.digibyte.ui.navigation.AppNavigation
+import io.digibyte.ui.navigation.autoLockTimeoutOrDefault
+import io.digibyte.ui.navigation.shouldAutoLock
 import io.digibyte.ui.theme.DigiByteTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -44,6 +49,12 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    private companion object {
+        /** Poll interval for the inactivity lock. Bounds the overshoot past the configured
+         *  timeout (shortest option is 60 s, so at most ~8%) without waking every second. */
+        const val AUTO_LOCK_TICK_MS = 5_000L
+    }
 
     /**
      * Applies the chosen language before anything else exists.
@@ -70,6 +81,19 @@ class MainActivity : FragmentActivity() {
 
     /** Pending Digi-ID URI from a deep link — processed after PIN unlock. */
     var pendingDigiIdUri: String? = null
+
+    /**
+     * Last touch/key, in `SystemClock.elapsedRealtime()` ms. Monotonic on purpose: wall time
+     * moves under NTP/user edits and a jump would either lock instantly or never.
+     * @Volatile because onUserInteraction stamps on the main thread and the tick reads it
+     * after a Dispatchers.IO hop.
+     */
+    @Volatile private var lastInteractionMs: Long = android.os.SystemClock.elapsedRealtime()
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        lastInteractionMs = android.os.SystemClock.elapsedRealtime()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,6 +142,39 @@ class MainActivity : FragmentActivity() {
                 .filterIsInstance<WalletState.Unlocked>()
                 .first()
             PostUpgradeReconciler.runIfNeeded(applicationContext, assetManager)
+        }
+
+        // In-foreground inactivity lock. Settings → Security's auto-lock timeout was stored
+        // in WalletConfigEntity and read by nothing (2026-08-30 external audit): onStop()
+        // covers backgrounding, but a phone left unlocked face-up stayed on the wallet
+        // graph indefinitely. RESUMED-scoped so the loop is suspended while backgrounded
+        // (onStop already locked) and cannot fire during the PIN screen's own lifecycle
+        // churn. The timeout is read from the DAO on every tick, on IO, so a change in
+        // Settings takes effect without a restart and the main thread never touches Room.
+        // lockUi() is state-only — the existing LaunchedEffect(walletState) in AppNavigation
+        // routes Locked → "unlock"; nothing here navigates and nothing here touches native.
+        // A missing wallet_config row (nothing seeds it) means the entity default, not
+        // "no lock"; a DAO failure is the only thing that skips a tick.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(AUTO_LOCK_TICK_MS)
+                    if (walletManager.walletState.value !is WalletState.Unlocked) continue
+                    val (timeoutMs, hasPin) = withContext(Dispatchers.IO) {
+                        runCatching {
+                            autoLockTimeoutOrDefault(walletConfigDao.get()?.autoLockTimeoutMs) to pinManager.hasPin()
+                        }
+                            .onFailure { android.util.Log.w("MainActivity", "auto-lock: config read failed, skipping tick", it) }
+                            .getOrNull()
+                    } ?: continue
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val last = lastInteractionMs
+                    if (shouldAutoLock(walletManager.walletState.value, hasPin, last, now, timeoutMs)) {
+                        android.util.Log.i("MainActivity", "auto-lock: idle ${(now - last) / 1000}s >= ${timeoutMs / 1000}s — locking UI")
+                        walletManager.lockUi()
+                    }
+                }
+            }
         }
 
         setContent {
@@ -296,6 +353,10 @@ class MainActivity : FragmentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        // Returning to the foreground is the interaction: without this, an unlock after a
+        // long background sits on a stale stamp and the very first tick locks the wallet
+        // the user just opened.
+        lastInteractionMs = android.os.SystemClock.elapsedRealtime()
         if (walletManager.walletState.value !is WalletState.Unlocked) return
         // getPeerCount() takes the native peer-manager lock (PEER_GUARD), which the
         // keepalive sweep can hold for up to ~K×10s while pinging half-dead peer
