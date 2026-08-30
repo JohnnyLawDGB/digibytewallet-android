@@ -60,13 +60,16 @@ class SensitiveInputHardeningTest {
         Regex(Regex.escape(needle)).findAll(haystack).count()
 
     @Test
-    fun `SecureWindow helper sets FLAG_SECURE for its lifetime and clears it on dispose`() {
+    fun `SecureWindow helper holds FLAG_SECURE through a counted holder, never a per-screen clear`() {
         val helper = source(File(components, "SecureWindow.kt"))
         assertTrue(helper.contains("fun SecureWindow("))
         assertTrue(helper.contains("DisposableEffect"))
         assertTrue(helper.contains("WindowManager.LayoutParams.FLAG_SECURE"))
-        assertTrue(helper.contains("onDispose"))
         assertTrue(helper.contains("clearFlags(WindowManager.LayoutParams.FLAG_SECURE)"))
+        // The composable must route through SecureWindowFlag (see SecureWindowFlagTest): a direct
+        // clearFlags in onDispose is the secure->secure navigation regression.
+        assertTrue(helper.contains("onDispose { processFlag.release() }"))
+        assertFalse(helper.contains("onDispose {\n            window?.clearFlags"))
     }
 
     @Test
