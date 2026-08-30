@@ -97,4 +97,33 @@ class ManifestSecurityTest {
         assertFalse("usesCleartextTraffic must not be true — all traffic should be HTTPS/TLS",
             manifest.contains("android:usesCleartextTraffic=\"true\""))
     }
+
+    /**
+     * F7 (2026-08-30 audit): on API 31+ the OS consults android:dataExtractionRules for
+     * cloud backup AND device-to-device transfer; allowBackup="false" alone can be bypassed
+     * by OEM D2D migration tools, which would copy the encrypted-seed prefs, the SQLCipher
+     * DB and the Keystore-wrapped key blobs to another device.
+     */
+    @Test
+    fun `dataExtractionRules excludes every wallet data domain for cloud backup and device transfer`() {
+        assertTrue("android:dataExtractionRules must reference @xml/data_extraction_rules",
+            manifest.contains("android:dataExtractionRules=\"@xml/data_extraction_rules\""))
+
+        val rulesFile = File(manifestFile.parentFile, "res/xml/data_extraction_rules.xml")
+        assertTrue("res/xml/data_extraction_rules.xml must exist", rulesFile.exists())
+        val rules = rulesFile.readText()
+
+        val domains = listOf("root", "sharedpref", "database", "file", "external")
+        for (section in listOf("cloud-backup", "device-transfer")) {
+            val body = Regex("<$section[^>]*>(.*?)</$section>", RegexOption.DOT_MATCHES_ALL)
+                .find(rules)?.groupValues?.get(1)
+            assertNotNull("<$section> section must be present", body)
+            for (d in domains) {
+                assertTrue("<$section> must exclude domain=\"$d\"",
+                    Regex("<exclude\\s+domain=\"$d\"").containsMatchIn(body!!))
+            }
+        }
+        assertTrue("<cloud-backup> must set disableIfNoEncryptionCapabilities=\"true\"",
+            Regex("<cloud-backup[^>]*disableIfNoEncryptionCapabilities=\"true\"").containsMatchIn(rules))
+    }
 }
