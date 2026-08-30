@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import io.digibyte.R
+import io.digibyte.ui.components.SecureWindow
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteNavy
 
@@ -52,6 +53,8 @@ fun PassphraseScreen(
     navController: NavController,
     viewModel: OnboardingViewModel,
 ) {
+    SecureWindow()
+
     // Never rememberSaveable: a passphrase must not be written into Android's saved-instance
     // state bundle, which is the same rule the recovery-phrase inputs follow.
     var passphrase by remember { mutableStateOf("") }
