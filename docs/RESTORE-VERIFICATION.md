@@ -249,6 +249,55 @@ The whole 0.15 went to the transfer: the 0.1 floor plus its fee, with the remain
 change dust threshold, so the BIP84 sweep that followed carried 0 DGB. That is the correct
 outcome, not a loss — moving the dollar is what the DGB was there to do.
 
+## Run G — Two dollars, and the outpoint that was already gone
+
+Setting up the multi-outpoint case exposed a bug that had shipped since v4.0.72.
+
+The DigiDollar endpoint lists **every** transaction that touched an address — the spends as well
+as the receives — and reports only the live balance beside them. `DigiDollarScan` located a token
+output in each listed transaction that paid the address's key, with nothing to tell a live receive
+from one already consumed. Measured on the same wallet:
+
+```
+dd_balance_cents 200   unspent_count 2   tx_count 4
+
+3ffcb1f3…  pays wallet A's taproot key   ← already spent by 06389c00…
+06389c00…  does not
+3c04fb1d…  pays wallet A's taproot key   ← live
+83e20313…  pays wallet A's taproot key   ← live
+```
+
+Three located outpoints for two dollars. The transfer built from them would spend an input that no
+longer exists, and the network would reject the entire recovery.
+
+It survived until now on the shape of the data: with a single receive, the spend pays the
+*recipient's* key and its DGB change goes to a BIP84 address, so nothing in it matches and the
+stale outpoint never appears. Reuse the DigiDollar address — receive twice, spend once — and it
+breaks. That is ordinary use.
+
+The scan now reads the **inputs** of the same listed transactions and drops any located output
+another one spends. That works precisely because the spend is always in the list: being on the
+address is the only reason it is listed. No new backend call — the raw transactions were already
+being fetched, and `getRawTransactionInputs` parses them through `BRTransactionParse`, the same
+hardened parser every other raw-tx path uses. An unreadable transaction proves nothing and so
+drops nothing; the worst case is the old behaviour, reported rather than silent.
+
+With the fix, both dollars moved in one transaction:
+
+```
+found $2.00 in DigiDollar across 2 outpoint(s); 0 cents unlocatable
+planned: 200 cents, 2 DD input(s), 1 fee input(s), fee 10000000 sats
+MOVED in cb9ffcecf9008479725d0265ee2fb6c351e9509d57976d72c2fac8ce967d4663
+
+on chain   nVersion 0x2000770
+  input    83e20313… vout 0     live dollar
+  input    3c04fb1d… vout 0     live dollar
+  input    8f288238… vout 1     the 0.2 DGB fee
+           3ffcb1f3… vout 0     ABSENT — the spent one
+
+source     dd_balance_cents 0, unspent_count 0
+```
+
 ---
 
 ## Why assets move before the sweep
@@ -299,11 +348,8 @@ that look correct and are not.
 
 ## Still unproven
 
-Every derivation in the table above has now been funded and swept on mainnet. What remains:
-
-**A DigiDollar spread across several outpoints.** Only the single-outpoint case has been moved on
-chain. The planner handles many, and its arithmetic is covered by tests, but it has not been run
-against a wallet holding two.
+Every derivation in the table above has been funded and swept on mainnet, and all three value
+types have moved. Nothing on this page is now an untested claim.
 
 **BIP49 funds stay stranded** even though the refusal is honest. The coins are recoverable — the
 phrase is a standard BIP49 mnemonic any wrapped-segwit wallet can restore — but not by this app.

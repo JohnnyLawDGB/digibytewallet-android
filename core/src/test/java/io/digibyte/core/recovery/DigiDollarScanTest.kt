@@ -40,7 +40,47 @@ class DigiDollarScanTest {
         addresses: List<DigiDollarAddress>,
         holding: (DigiDollarAddress) -> DigiDollarHoldingResult?,
         outs: (String) -> List<DigiDollarHolding.Output>? = { outputs() },
-    ) = runBlocking { DigiDollarScan.assemble(addresses, holding, outs) }
+        ins: (String) -> List<DigiDollarHolding.PrevOut>? = { emptyList() },
+    ) = runBlocking { DigiDollarScan.assemble(addresses, holding, outs, ins) }
+
+    // ---- spent outpoints ----------------------------------------------------------------------
+
+    /**
+     * The endpoint lists EVERY transaction touching an address, spent receives included, and
+     * reports only the live balance beside them. Measured on mainnet: address
+     * DD1XZWMK52wFNWUeP9LnTn6v7SX77YxXgkwYjisAkjK9aAUTHDiV answered `dd_balance_cents 200,
+     * unspent_count 2` while listing FOUR transactions, THREE of which pay its taproot key —
+     * 3ffcb1f3… was already consumed by 06389c00…. Locating an outpoint in each of those three
+     * claims three spendable dollars where two exist, and the transfer built from them spends an
+     * input that no longer exists, so the network rejects the whole recovery.
+     */
+    @Test fun `an outpoint spent by another listed transaction is not spendable`() {
+        val spentReceive = "aa".repeat(32)
+        val liveReceive = "bb".repeat(32)
+        val theSpend = "cc".repeat(32)
+        val r = scan(
+            addresses = listOf(addr()),
+            holding = { DigiDollarHoldingResult(100, 1, listOf(spentReceive, liveReceive, theSpend)) },
+            // The spend pays the RECIPIENT's key, not ours, so nothing in it locates — the same
+            // shape 06389c00… has on chain.
+            outs = { txid -> if (txid == theSpend) emptyList() else outputs() },
+            ins = { txid -> if (txid == theSpend) listOf(DigiDollarHolding.PrevOut(spentReceive, 0)) else emptyList() },
+        )
+        assertEquals("the balance is what the endpoint says", 100L, r.cents)
+        assertEquals("only the unspent receive is spendable", 1, r.holdings.size)
+        assertEquals(liveReceive, r.holdings.single().txid)
+        assertEquals("nothing is unlocatable — the dollar was found", 0L, r.unlocatableCents)
+    }
+
+    /** An input we cannot read cannot prove anything spent, so nothing is dropped on its word. */
+    @Test fun `unreadable inputs never drop a located outpoint`() {
+        val r = scan(
+            addresses = listOf(addr()),
+            holding = { DigiDollarHoldingResult(100, 1, listOf(txid)) },
+            ins = { null },
+        )
+        assertEquals(1, r.holdings.size)
+    }
 
     // ---- the ordinary case --------------------------------------------------------------------
 

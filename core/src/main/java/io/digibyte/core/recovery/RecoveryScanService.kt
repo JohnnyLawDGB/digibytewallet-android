@@ -128,6 +128,7 @@ class RecoveryScanService(
             addresses = addresses,
             holdingFor = { utxoSource.fetchDigiDollar(it.ddAddress) },
             outputsFor = { utxoSource.fetchOutputs(it) },
+            inputsFor = { utxoSource.fetchInputs(it) },
         )
     }
 

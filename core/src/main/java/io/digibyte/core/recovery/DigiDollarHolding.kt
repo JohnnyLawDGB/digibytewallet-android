@@ -30,6 +30,14 @@ object DigiDollarHolding {
     /** A spendable DigiDollar outpoint. */
     data class Outpoint(val vout: Int, val scriptPubKeyHex: String)
 
+    /**
+     * A reference to a previous output, i.e. one transaction input.
+     *
+     * Distinct from [Outpoint], which identifies an output WITHIN the transaction being read.
+     * This one points OUT of it, and is what proves a located output has already been spent.
+     */
+    data class PrevOut(val txid: String, val vout: Int)
+
     /** A P2TR scriptPubKey is `OP_1 <push32> X(Q)` — 0x51 0x20 then the 32-byte output key. */
     private const val P2TR_PREFIX = "5120"
 

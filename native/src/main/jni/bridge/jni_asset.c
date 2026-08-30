@@ -236,6 +236,89 @@ Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionOutputs(JNIEnv *env, 
     return result;
 }
 
+/* ---------- getRawTransactionInputs ---------- */
+
+/*
+ * public static native String[] getRawTransactionInputs(byte[] rawTx);
+ *
+ * Lists what a transaction SPENDS, one entry per input:
+ *
+ *     "<prevTxidHexDisplayOrder>|<prevVout>"
+ *
+ * The DigiDollar endpoint lists every transaction that touched an address —
+ * the spends as well as the receives — and reports only the live balance
+ * beside them. A receive whose token output is already gone is still listed,
+ * so locating an output in it claims a spendable dollar that no longer
+ * exists. Reading the inputs of those same transactions is what tells the
+ * two apart, and the spend is always among them: it is the reason the
+ * transaction appears on the address at all.
+ *
+ * txHash is stored in internal byte order; it is reversed here so the hex
+ * matches the display-order txid the lookup keys everything else by.
+ *
+ * These bytes come from a remote lookup and are attacker-influenced, so they
+ * go through BRTransactionParse — the same hardened parser every other raw-tx
+ * entry point uses. Returns NULL on a null/empty array or a parse failure.
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionInputs(JNIEnv *env, jobject thiz,
+                                                                    jbyteArray rawTx) {
+    (void)thiz;
+
+    if (!rawTx) {
+        LOGW("getRawTransactionInputs: rawTx is null");
+        return NULL;
+    }
+
+    jsize txLen = (*env)->GetArrayLength(env, rawTx);
+    if (txLen <= 0) {
+        LOGW("getRawTransactionInputs: empty rawTx");
+        return NULL;
+    }
+
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, rawTx, NULL);
+    if (!txBytes) {
+        LOGE("getRawTransactionInputs: failed to pin rawTx byte array");
+        return NULL;
+    }
+
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
+
+    if (!tx) {
+        LOGW("getRawTransactionInputs: BRTransactionParse returned NULL");
+        return NULL;
+    }
+
+    jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    if (!stringClass) { BRTransactionFree(tx); return NULL; }
+
+    jobjectArray result = (*env)->NewObjectArray(env, (jsize)tx->inCount, stringClass, NULL);
+    if (!result) { BRTransactionFree(tx); return NULL; }
+
+    for (size_t i = 0; i < tx->inCount; i++) {
+        const BRTxInput *in = &tx->inputs[i];
+        char buf[64 + 16];
+        char *p = buf;
+        /* Display order is the reverse of internal storage. */
+        for (int j = (int)sizeof(in->txHash.u8) - 1; j >= 0; j--) {
+            snprintf(p, 3, "%02x", in->txHash.u8[j]);
+            p += 2;
+        }
+        snprintf(p, sizeof(buf) - (size_t)(p - buf), "|%u", (unsigned)in->index);
+
+        jstring s = (*env)->NewStringUTF(env, buf);
+        if (s) {
+            (*env)->SetObjectArrayElement(env, result, (jsize)i, s);
+            (*env)->DeleteLocalRef(env, s);
+        }
+    }
+
+    LOGD("getRawTransactionInputs: returned %zu inputs", tx->inCount);
+    BRTransactionFree(tx);
+    return result;
+}
+
 /* ---------- getTransactionOutputsForHash ---------- */
 
 /*

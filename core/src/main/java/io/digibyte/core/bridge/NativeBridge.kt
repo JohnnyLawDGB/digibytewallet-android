@@ -316,6 +316,17 @@ object NativeBridge {
      *  Null on a parse failure or an empty array — never partial output. */
     external fun getRawTransactionOutputs(rawTx: ByteArray): Array<String>?
 
+    /** What a transaction SPENDS, one `"prevTxidHex|prevVout"` per input, prev txid in display
+     *  order.
+     *
+     *  The DigiDollar endpoint lists every transaction that touched an address — spends as well
+     *  as receives — beside a single live balance, so a receive whose token output is already
+     *  gone is still listed and still locates. Reading these inputs is what proves it spent. The
+     *  spend is always in the same list; it is why the transaction is on the address at all.
+     *
+     *  Null on a parse failure or an empty array — never partial output. */
+    external fun getRawTransactionInputs(rawTx: ByteArray): Array<String>?
+
     /** The wallet's spendable NATIVE DigiByte UTXOs (excludes asset/DD dust) as
      *  newline-separated "txidHex|vout|amountSats|scriptPubKeyHex" lines, "" if none.
      *  Sovereign source for the DigiAsset-send DGB fee — the Room is_asset=0 partition

@@ -29,6 +29,16 @@ interface UtxoSource {
 
     /** A transaction's outputs, for locating the DigiDollar token output. Null when unreadable. */
     suspend fun fetchOutputs(txid: String): List<DigiDollarHolding.Output>? = null
+
+    /**
+     * What a transaction SPENDS. Null when unreadable — which proves nothing, and must never be
+     * read as "spends nothing".
+     *
+     * Needed because the DigiDollar endpoint lists spends alongside receives under one live
+     * balance: without this, a receive whose token output is already gone still locates, and the
+     * transfer built from it spends an input that no longer exists.
+     */
+    suspend fun fetchInputs(txid: String): List<DigiDollarHolding.PrevOut>? = null
 }
 
 /** First implementation: the existing reconcile backend (api.digiscope.me). */
@@ -55,6 +65,18 @@ class ReconcileBackendUtxoSource(
                 val vout = parts[0].toIntOrNull() ?: return@mapNotNull null
                 val sats = parts[1].toLongOrNull() ?: return@mapNotNull null
                 DigiDollarHolding.Output(vout, sats, parts[2])
+            }
+    }
+
+    /** Same native parser, reading the other end of the transaction. */
+    override suspend fun fetchInputs(txid: String): List<DigiDollarHolding.PrevOut>? {
+        val raw = nodeClient.fetchRawTransaction(txid) ?: return null
+        return io.digibyte.core.bridge.NativeBridge.getRawTransactionInputs(raw)
+            ?.mapNotNull { line ->
+                val parts = line.split("|", limit = 2)
+                if (parts.size < 2) return@mapNotNull null
+                val vout = parts[1].toIntOrNull() ?: return@mapNotNull null
+                DigiDollarHolding.PrevOut(parts[0], vout)
             }
     }
 }

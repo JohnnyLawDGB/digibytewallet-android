@@ -6,7 +6,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
 **Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
-**Version:** v4.0.74 (versionCode 40074)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.0.75 (versionCode 40075)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
