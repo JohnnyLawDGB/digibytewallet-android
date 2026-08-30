@@ -67,6 +67,7 @@
     <string name="pin_err_save">Hindi na-save ang PIN. Pakisubukan ulit.</string>
     <string name="pin_err_wallet">Hindi nagawa ang wallet. Pakisubukan ulit.</string>
     <string name="unlock_err_failed">Hindi na-unlock. Pakisubukan ulit.</string>
+    <string name="unlock_device_lock_removed">Inalis ang screen lock ng iyong device, kaya nawala ang protektadong susi ng wallet. I-restore ang wallet gamit ang iyong recovery phrase.</string>
     <string name="unlock_wiping">Masyadong maraming maling subok — binubura ang wallet</string>
     <string name="unlock_attempts_left">Maling PIN. Natitirang subok: %1$d</string>
     <string name="battery_title">Panatilihing tumatakbo ang sync sa background</string>

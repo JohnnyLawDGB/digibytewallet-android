@@ -85,6 +85,7 @@
 
     <!-- ── Unlock failures ──────────────────────────────────────────────────────── -->
     <string name="unlock_err_failed">Unlock failed. Please try again.</string>
+    <string name="unlock_device_lock_removed">Your device’s screen lock was removed, so the wallet’s protected key is gone. Restore the wallet with your recovery phrase.</string>
     <!-- WARNING: this is the last thing shown before the wallet is erased. -->
     <string name="unlock_wiping">Too many failed attempts — wiping wallet</string>
     <!-- Deliberately NOT a plural. The English original read "N attempts before lockout", which

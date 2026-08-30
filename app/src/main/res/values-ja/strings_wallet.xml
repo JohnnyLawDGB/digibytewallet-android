@@ -67,6 +67,7 @@
     <string name="pin_err_save">PIN を保存できませんでした。もう一度お試しください。</string>
     <string name="pin_err_wallet">ウォレットを作成できませんでした。もう一度お試しください。</string>
     <string name="unlock_err_failed">ロック解除に失敗しました。もう一度お試しください。</string>
+    <string name="unlock_device_lock_removed">端末の画面ロックが解除されたため、ウォレットの保護キーが失われました。リカバリーフレーズでウォレットを復元してください。</string>
     <string name="unlock_wiping">失敗回数が上限に達しました — ウォレットを消去しています</string>
     <string name="unlock_attempts_left">PIN が正しくありません。残りの試行回数: %1$d</string>
     <string name="battery_title">バックグラウンドで同期を続ける</string>

@@ -13,6 +13,8 @@ import io.digibyte.core.sync.FilterHeaderStore
 import io.digibyte.core.sync.SavedBlockStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
+import io.digibyte.core.security.KeystoreKeyInvalidatedException
+import io.digibyte.core.security.KeystoreUserAuthRequiredException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -103,7 +105,7 @@ class WalletManager(
     }
 
     /** Check if an encrypted seed exists on disk. */
-    fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed")
+    fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed") || prefs.contains("encrypted_seed_v2")
 
     /**
      * Create a new wallet from a mnemonic phrase.
@@ -671,12 +673,86 @@ class WalletManager(
     // ── Seed persistence ────────────────────────────────────────
 
     private fun persistSeed(mnemonicBytes: ByteArray) {
+        // Auth-bound key first (docs/specs/keystore-auth-binding.md). ANY failure —
+        // keygen refused (no lock screen), lapsed auth window at onboarding, vendor
+        // quirk — falls back to the legacy unbound key: wallet creation never blocks
+        // on binding (the API 28 lesson from 256522c2).
+        if (keyStoreManager.createAuthBoundKey()) {
+            try {
+                val enc = keyStoreManager.encryptAuthBound(mnemonicBytes)
+                prefs.edit()
+                    .putString("encrypted_seed_v2", bytesToHex(enc.ciphertext))
+                    .putString("encrypted_seed_iv_v2", bytesToHex(enc.iv))
+                    .remove("encrypted_seed")
+                    .remove("encrypted_seed_iv")
+                    .apply()
+                return
+            } catch (e: Exception) {
+                android.util.Log.w("WalletManager", "auth-bound blob write failed (${e::class.java.simpleName}) — using legacy key")
+            }
+        }
         keyStoreManager.createKey()
         val encrypted = keyStoreManager.encrypt(mnemonicBytes)
         prefs.edit()
             .putString("encrypted_seed", bytesToHex(encrypted.ciphertext))
             .putString("encrypted_seed_iv", bytesToHex(encrypted.iv))
             .apply()
+    }
+
+    /** True when the seed blob lives under the auth-bound key. */
+    private fun seedIsAuthBound(): Boolean = prefs.contains("encrypted_seed_v2")
+
+    /**
+     * Re-wrap an existing wallet's blobs onto the auth-bound key. Runs on the
+     * foreground legacy-decrypt path (loadSeed), where the mnemonic is in hand
+     * anyway. Verified before destructive: the v2 blob must round-trip decrypt
+     * equal BEFORE the legacy blob and key are removed. Every failure aborts
+     * quietly and is retried on a later unlock.
+     */
+    private fun migrateSeedKeyIfNeeded(mnemonicBytes: ByteArray) {
+        if (seedIsAuthBound()) return
+        try {
+            if (!keyStoreManager.createAuthBoundKey()) return
+            val enc = keyStoreManager.encryptAuthBound(mnemonicBytes)
+            val check = keyStoreManager.decryptAuthBound(enc)
+            val ok = check.contentEquals(mnemonicBytes)
+            check.fill(0)
+            if (!ok) {
+                android.util.Log.e("WalletManager", "key-wrap migration verify failed — keeping legacy key")
+                return
+            }
+            // Passphrase blob moves through the same door as the mnemonic.
+            var passCt: String? = null; var passIv: String? = null
+            val pass = loadLegacyPassphrase()
+            if (pass != null) {
+                try {
+                    val pEnc = keyStoreManager.encryptAuthBound(pass)
+                    val pCheck = keyStoreManager.decryptAuthBound(pEnc)
+                    val pOk = pCheck.contentEquals(pass)
+                    pCheck.fill(0)
+                    if (!pOk) return
+                    passCt = bytesToHex(pEnc.ciphertext); passIv = bytesToHex(pEnc.iv)
+                } finally {
+                    pass.fill(0)
+                }
+            }
+            val edit = prefs.edit()
+                .putString("encrypted_seed_v2", bytesToHex(enc.ciphertext))
+                .putString("encrypted_seed_iv_v2", bytesToHex(enc.iv))
+            if (passCt != null) edit.putString("encrypted_pass_v2", passCt).putString("encrypted_pass_iv_v2", passIv)
+            // commit(): the v2 blob must be ON DISK before anything legacy is removed.
+            if (!edit.commit()) return
+            prefs.edit()
+                .remove("encrypted_seed").remove("encrypted_seed_iv")
+                .remove("encrypted_pass").remove("encrypted_pass_iv")
+                .apply()
+            keyStoreManager.deleteLegacyKey()
+            android.util.Log.i("WalletManager", "wallet blob re-wrapped onto auth-bound key")
+        } catch (e: Exception) {
+            // Includes KeystoreUserAuthRequiredException (window lapsed mid-migration):
+            // quiet abort, wallet stays on the legacy key until a later unlock.
+            android.util.Log.w("WalletManager", "key-wrap migration deferred (${e::class.java.simpleName})")
+        }
     }
 
     /**
@@ -694,8 +770,21 @@ class WalletManager(
     /** @param passphrase NFKD UTF-8 bytes, or null. The caller still owns and must zero them. */
     private fun persistPassphrase(passphrase: ByteArray?) {
         if (passphrase == null || passphrase.isEmpty()) {
-            prefs.edit().remove("encrypted_pass").remove("encrypted_pass_iv").apply()
+            prefs.edit().remove("encrypted_pass").remove("encrypted_pass_iv").remove("encrypted_pass_v2").remove("encrypted_pass_iv_v2").apply()
             return
+        }
+        if (seedIsAuthBound()) {
+            try {
+                val enc = keyStoreManager.encryptAuthBound(passphrase)
+                prefs.edit()
+                    .putString("encrypted_pass_v2", bytesToHex(enc.ciphertext))
+                    .putString("encrypted_pass_iv_v2", bytesToHex(enc.iv))
+                    .remove("encrypted_pass").remove("encrypted_pass_iv")
+                    .apply()
+                return
+            } catch (e: Exception) {
+                android.util.Log.w("WalletManager", "auth-bound pass-blob write failed (${e::class.java.simpleName}) — using legacy key")
+            }
         }
         keyStoreManager.createKey()
         val encrypted = keyStoreManager.encrypt(passphrase)
@@ -712,7 +801,25 @@ class WalletManager(
      * String from the decrypted bytes, which then could not be zeroed and outlived every use.
      * **The caller owns the result and must `fill(0)` it.**
      */
-    private fun loadPassphrase(): ByteArray? = try {
+    private fun loadPassphrase(): ByteArray? {
+        val ctV2 = prefs.getString("encrypted_pass_v2", null)
+        val ivV2 = prefs.getString("encrypted_pass_iv_v2", null)
+        if (ctV2 != null && ivV2 != null) {
+            return try {
+                keyStoreManager.decryptAuthBound(EncryptedData(hexToBytes(ctV2), hexToBytes(ivV2)))
+                    ?.takeIf { it.isNotEmpty() }
+            } catch (e: KeystoreUserAuthRequiredException) {
+                throw e
+            } catch (e: KeystoreKeyInvalidatedException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        }
+        return loadLegacyPassphrase()
+    }
+
+    private fun loadLegacyPassphrase(): ByteArray? = try {
         val ct = prefs.getString("encrypted_pass", null)
         val iv = prefs.getString("encrypted_pass_iv", null)
         if (ct == null || iv == null) null
@@ -722,7 +829,27 @@ class WalletManager(
         null
     }
 
+    /**
+     * @throws KeystoreUserAuthRequiredException when the auth-bound key needs a fresh
+     *   device unlock — foreground callers prompt (DEVICE_CREDENTIAL|BIOMETRIC_STRONG)
+     *   and retry; swallowing it to null made the case indistinguishable from corruption.
+     * @throws KeystoreKeyInvalidatedException when the device lock screen was removed —
+     *   only the written recovery phrase recovers the wallet, and the UI says exactly that.
+     */
     private fun loadSeed(): ByteArray? {
+        val ctV2 = prefs.getString("encrypted_seed_v2", null)
+        val ivV2 = prefs.getString("encrypted_seed_iv_v2", null)
+        if (ctV2 != null && ivV2 != null) {
+            return try {
+                keyStoreManager.decryptAuthBound(EncryptedData(hexToBytes(ctV2), hexToBytes(ivV2)))
+            } catch (e: KeystoreUserAuthRequiredException) {
+                throw e
+            } catch (e: KeystoreKeyInvalidatedException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        }
         val ciphertextHex = prefs.getString("encrypted_seed", null) ?: return null
         val ivHex = prefs.getString("encrypted_seed_iv", null) ?: return null
         return try {
@@ -730,11 +857,18 @@ class WalletManager(
                 ciphertext = hexToBytes(ciphertextHex),
                 iv = hexToBytes(ivHex)
             )
-            keyStoreManager.decrypt(encrypted)
+            keyStoreManager.decrypt(encrypted)?.also { migrateSeedKeyIfNeeded(it) }
         } catch (e: Exception) {
             null
         }
     }
+
+    /** SeedViewScreen's decrypt path — v2-aware, replacing its raw prefs reads.
+     *  Caller owns the bytes and must fill(0). Throws like [loadSeed]. */
+    fun decryptStoredMnemonic(): ByteArray? = loadSeed()
+
+    /** See [decryptStoredMnemonic]. */
+    fun decryptStoredPassphrase(): ByteArray? = loadPassphrase()
 
     /**
      * Load the wallet's **64-byte BIP39 seed** for re-runnable recovery flows

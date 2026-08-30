@@ -177,12 +177,18 @@ Named explicitly so they don't go unfixed by being unspoken.
    Kept as a numbered item so the CRITICAL-1 split stays legible: this
    half is closed, item 4 (auth-binding) is the open half. An offline
    attacker with the encrypted blob is still bounded only by Argon2id.
-4. **Biometric is cosmetic.** Biometric unlock does not bind the
-   Keystore key's user-authentication requirement, because
-   `setUserAuthenticationRequired=true` crashes on API 28/33/35 in
-   inconsistent ways. As a result, a compromised app process can
-   decrypt the seed without the device being unlocked. Phase 2
-   revisits with per-API-level probing.
+4. **Seed key is auth-bound where the device allows it**
+   (docs/specs/keystore-auth-binding.md). On devices with a secure lock
+   screen the seed migrates onto a Keystore key requiring a device
+   unlock within the last 300s (`setUserAuthenticationParameters` on
+   API 30+, validity-duration on 26–29); a lapsed window surfaces a
+   DEVICE_CREDENTIAL|BIOMETRIC_STRONG prompt-and-retry instead of the
+   crashes that killed the first attempt. Residuals: a device with no
+   lock screen keeps the unbound key (binding would throw at keygen);
+   a compromised app process on an UNLOCKED-within-5-min device can
+   still decrypt; and removing the device lock screen permanently
+   invalidates the bound key — the wallet is then recoverable only
+   from the written phrase, and says so explicitly.
 5. **Tor silent fallback.** If Tor fails to start or the daemon dies,
    the wallet silently uses clearnet. Phase 2 changes this to a loud
    warning banner.

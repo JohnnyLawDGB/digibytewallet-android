@@ -75,6 +75,7 @@
     <string name="pin_err_save">PIN konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.</string>
     <string name="pin_err_wallet">Wallet konnte nicht erstellt werden. Bitte versuchen Sie es erneut.</string>
     <string name="unlock_err_failed">Entsperren fehlgeschlagen. Bitte versuchen Sie es erneut.</string>
+    <string name="unlock_device_lock_removed">Die Bildschirmsperre Ihres Geräts wurde entfernt, daher ist der geschützte Schlüssel der Wallet verloren. Stellen Sie die Wallet mit Ihrer Wiederherstellungsphrase wieder her.</string>
     <string name="unlock_wiping">Zu viele Fehlversuche — Wallet wird gelöscht</string>
     <string name="unlock_attempts_left">Falsche PIN. Verbleibende Versuche: %1$d</string>
     <string name="battery_title">Synchronisierung im Hintergrund fortsetzen</string>

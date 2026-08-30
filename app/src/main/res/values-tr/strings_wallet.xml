@@ -67,6 +67,7 @@
     <string name="pin_err_save">PIN kaydedilemedi. Lütfen tekrar deneyin.</string>
     <string name="pin_err_wallet">Cüzdan oluşturulamadı. Lütfen tekrar deneyin.</string>
     <string name="unlock_err_failed">Kilit açılamadı. Lütfen tekrar deneyin.</string>
+    <string name="unlock_device_lock_removed">Cihazınızın ekran kilidi kaldırıldığı için cüzdanın korunan anahtarı yok oldu. Cüzdanı kurtarma ifadenizle geri yükleyin.</string>
     <string name="unlock_wiping">Çok fazla başarısız deneme — cüzdan siliniyor</string>
     <string name="unlock_attempts_left">Yanlış PIN. Kalan deneme: %1$d</string>
     <string name="battery_title">Eşitlemeyi arka planda çalışır durumda tut</string>

@@ -67,6 +67,7 @@
     <string name="pin_err_save">Не удалось сохранить PIN-код. Попробуйте снова.</string>
     <string name="pin_err_wallet">Не удалось создать кошелёк. Попробуйте снова.</string>
     <string name="unlock_err_failed">Не удалось разблокировать. Попробуйте снова.</string>
+    <string name="unlock_device_lock_removed">Блокировка экрана устройства была удалена, поэтому защищённый ключ кошелька утерян. Восстановите кошелёк с помощью фразы восстановления.</string>
     <string name="unlock_wiping">Слишком много неудачных попыток — кошелёк удаляется</string>
     <string name="unlock_attempts_left">Неверный PIN-код. Осталось попыток: %1$d</string>
     <string name="battery_title">Продолжать синхронизацию в фоне</string>
