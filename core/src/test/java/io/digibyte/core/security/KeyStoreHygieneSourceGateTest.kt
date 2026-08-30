@@ -24,7 +24,14 @@ class KeyStoreHygieneSourceGateTest {
         assertFalse("instrumented test must not name the production alias", test.contains("dgb_wallet_master"))
         assertFalse("instrumented test must not construct KeyStoreManager on the default alias",
             Regex("""KeyStoreManager\(\s*\)""").containsMatchIn(test))
-        assertTrue("instrumented test must pass a test alias", test.contains("alias ="))
+        // A bare `alias = TEST_ALIAS` satisfied the earlier version of this gate while the symbol
+        // was defined nowhere — the androidTest source set did not compile and nobody noticed,
+        // because androidTest has no CI runner. The alias must be a literal defined in this file.
+        val alias = Regex("""const val TEST_ALIAS\s*=\s*"([^"]+)"""").find(test)?.groupValues?.get(1)
+        assertTrue("instrumented test must define a TEST_ALIAS literal", alias != null)
+        assertTrue("test alias must differ from the production one", alias != "dgb_wallet_master")
+        assertTrue("instrumented test must construct the manager on TEST_ALIAS",
+            test.contains("KeyStoreManager(alias = TEST_ALIAS)"))
     }
 
     @Test
@@ -42,10 +49,16 @@ class KeyStoreHygieneSourceGateTest {
     @Test
     fun `createKey probes KeyInfo hardware backing without a throwing path`() {
         val src = findSource("core/src/main/java/io/digibyte/core/security/KeyStoreManager.kt").readText()
-        val createKey = src.substringAfter("fun createKey(").substringBefore("fun encrypt(")
-        assertTrue("createKey must query KeyInfo", createKey.contains("KeyInfo::class.java"))
-        assertTrue("createKey must log isInsideSecureHardware", createKey.contains("isInsideSecureHardware"))
-        assertTrue("the probe must be wrapped in runCatching", createKey.contains("runCatching"))
+        // Slice each function to the next `fun` so a reordering of methods cannot turn this
+        // gate red (or green) for a reason unrelated to the probe.
+        fun bodyOf(name: String) = src.substringAfter("fun $name(").substringBefore("\n    fun ")
+        val createKey = bodyOf("createKey")
+        assertTrue("createKey must invoke the probe after generateKey",
+            createKey.indexOf("logHardwareBacking(key)") > createKey.indexOf("generateKey()"))
+        val probe = bodyOf("logHardwareBacking")
+        assertTrue("probe must query KeyInfo", probe.contains("KeyInfo::class.java"))
+        assertTrue("probe must log isInsideSecureHardware", probe.contains("isInsideSecureHardware"))
+        assertTrue("the probe must be wrapped in runCatching", probe.contains("runCatching"))
     }
 
     private fun findSource(path: String): File {

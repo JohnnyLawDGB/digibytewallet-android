@@ -14,6 +14,10 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class KeyStoreManagerTest {
+    private companion object {
+        const val TEST_ALIAS = "dgb_keystore_manager_test"
+    }
+
     private lateinit var ksm: KeyStoreManager
 
     @Before

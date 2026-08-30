@@ -43,12 +43,15 @@ class LogRedactionSourceGateTest {
     }
 
     /** The asset clients log the failing `$url` on every non-2xx / throw, and the history
-     *  endpoint URL is `.../history/<wallet address>` — the same address leak by another door. */
+     *  endpoint URL is `.../history/<wallet address>` — the same address leak by another door.
+     *  `DigistampClient` carries no address in its routes today; it is gated so a future
+     *  address-bearing route cannot re-open the leak silently. */
     @Test
     fun `asset network clients never log a URL that carries a wallet address`() {
         listOf(
             "core/src/main/java/io/digibyte/core/asset/network/DigiScopeAssetClient.kt",
             "core/src/main/java/io/digibyte/core/asset/network/DigistampAssetClient.kt",
+            "core/src/main/java/io/digibyte/core/digistamp/DigistampClient.kt",
         ).forEach { path ->
             val offenders = logLinesOf(path).filter { it.contains("\$url") || it.contains("\${url") }
             assertTrue("$path must log a redacted endpoint, not the raw URL: $offenders", offenders.isEmpty())
