@@ -640,7 +640,37 @@ ProfileInstaller, permission-guarded by the platform).
 Nothing in this scan changes the accepted residuals: Keystore auth-binding (CRITICAL-1 open half)
 remains ROADMAP Phase 2; the mnemonic-as-String outside load/restore/sign remains P2.
 
+### R8 keep-rule pass — v4.0.76 (2026-08-30, closes the last "still owed" item)
+
+Ground truth taken from the release build's own R8 outputs (CI artifact `mapping-v4.0.76`:
+`seeds.txt` + `mapping.txt`) rather than decompiling — the seeds file IS the kept set.
+
+**Verdict: no over-keep. 1,077 `io.digibyte` classes in the mapping; 1,054 renamed; 23 kept by
+name, and all 23 trace to an annotated rule:**
+
+| Kept by name | Rule that demands it |
+|---|---|
+| `core.bridge.NativeBridge`, `NativeCallback` (+ `SyncService$syncCallback$1` implementor) | JNI resolves by name |
+| 11 × `core.db.entity.*`, `WalletDatabase`, `WalletDatabase_Impl` | Room columns / generated DAO |
+| `DigiByteApp`, `MainActivity`, `SyncService`, `SyncWorker` | manifest / WorkManager components |
+| `core.model.SyncStage`, `WalletViewModel$DisplayCurrency` | the two documented enum keeps (v4.0.58 finding 2 narrowing) |
+| `ui.wallet.WalletViewModel` | side-effect: keeping inner `DisplayCurrency` by name pins the outer name. Cosmetic; hoisting the enum to top level would re-obfuscate the ViewModel name. Not worth a change on its own. |
+
+Spot-checks confirm the narrowed enum rule behaves: `TxKind`, `HubTab`, `ThemeChoice`, `PinStep`,
+`AuthMethod`, `SendFailure`, `AssetOperation` are all **renamed** (only `values()/valueOf` members
+survive), and `CfRecoveryPolicy` was removed outright (`R8$$REMOVED$$CLASS$$701`). The 62
+`io.digibyte` entries in seeds.txt beyond the 23 are member-only keeps (enum members, Hilt
+`_GeneratedInjector` interfaces) — their class names are still obfuscated.
+
+### Gitleaks note (same date)
+
+Committing `mobsf-report-v4.0.76.json` tripped the Scan-for-secrets gate: 248 × `generic-api-key`,
+every one a decompiled string constant from the APK inside the report. `.gitleaks.toml` now
+allowlists `security/reports/mobsf-*.json` (path-scoped, default rules otherwise; verified locally
+— 0 leaks with the config, 248 without). Real embedded-secret coverage for the APK remains
+`security-cycle.sh`'s own sweep.
+
 ### Still owed
 
-The jadx keep-rule pass — not automated, not run this cycle (same as the 40066 cycle). MobSF is
-now done for 40076 (entry above).
+Nothing — this cycle's automated half, manual half, MobSF re-scan, and R8 keep-rule pass are all
+recorded. Next cycle owes the same four.

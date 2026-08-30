@@ -1,0 +1,20 @@
+# Gitleaks config — extends the default ruleset.
+#
+# The only exemption: MobSF static-analysis reports under security/reports/.
+# They embed decompiled string constants from the shipped APK (cert hashes,
+# third-party library literals, MobSF's own "hardcoded" candidate strings),
+# which trip generic-api-key by construction — 248 hits on the v4.0.76 report,
+# every one a decompiled literal, none a credential of ours.
+#
+# This does NOT weaken the control that matters: real embedded secrets in the
+# APK are checked by the security cycle's own sweep (scripts/security-cycle.sh
+# "Embedded secrets: none found"), and source/CI secrets are still scanned —
+# the allowlist is path-scoped to the generated reports only.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated security-scan reports (decompiled APK strings, not credentials)"
+paths = [
+  '''security/reports/mobsf-.*\.json''',
+]
