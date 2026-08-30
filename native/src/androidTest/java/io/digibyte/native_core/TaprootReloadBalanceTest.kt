@@ -67,7 +67,7 @@ class TaprootReloadBalanceTest {
 
     @Test
     fun p2trReceive_survivesReload_inBalance() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val taproot = NativeBridge.getReceiveAddress(0, 3)
         assertNotNull("format 3 receive address should not be null", taproot)

@@ -9,9 +9,6 @@ object NativeBridge {
 
     external fun setNetwork(isTestnet: Boolean)
     external fun generateMnemonic(entropyBits: Int): String?
-    external fun createWallet(phrase: String): Boolean
-    external fun recoverWallet(phrase: String, creationTimestamp: Long): Boolean
-    external fun unlockSession(authToken: ByteArray): Boolean
     external fun lockSession()
     /** Get a receive address. format: 0=legacy(D), 1=p2sh-segwit(S), 2=bech32/P2WPKH(dgb1q),
      *  3=Taproot/P2TR(dgb1p) — BIP86 (m/86'/20'/0'). */
@@ -45,8 +42,10 @@ object NativeBridge {
     external fun loadSavedPeers(data: ByteArray): Int
     external fun getSerializedTransactions(): ByteArray?
     external fun loadSerializedTransactions(data: ByteArray): Int
-    external fun createWalletFromBytes(phraseBytes: ByteArray): Boolean
-    external fun recoverWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long): Boolean
+    /** Signatures must match the production declaration (phrase + passphrase ByteArray?) or the
+     *  JNI lookup fails with UnsatisfiedLinkError — the same silent drift noted on mnemonicToSeed. */
+    external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: ByteArray?): Boolean
+    external fun recoverWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long, passphrase: ByteArray?): Boolean
     external fun getWalletBirthCheckpointHeight(): Long
     external fun isWalletLoaded(): Boolean
     external fun dumpAllAddresses(): String

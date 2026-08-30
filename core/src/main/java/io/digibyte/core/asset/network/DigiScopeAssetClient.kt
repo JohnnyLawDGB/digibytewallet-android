@@ -99,13 +99,13 @@ class DigiScopeAssetClient(
             if (!resp.isSuccessful) {
                 android.util.Log.w(
                     "DigiScopeAssetClient",
-                    "POST $url returned HTTP ${resp.code} ${resp.message}"
+                    "POST ${endpointOf(url)} returned HTTP ${resp.code} ${resp.message}"
                 )
                 return null
             }
             val body = resp.body?.string()
             if (body == null) {
-                android.util.Log.w("DigiScopeAssetClient", "POST $url empty body")
+                android.util.Log.w("DigiScopeAssetClient", "POST ${endpointOf(url)} empty body")
                 return null
             }
             if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
@@ -113,7 +113,7 @@ class DigiScopeAssetClient(
     } catch (t: Throwable) {
         android.util.Log.w(
             "DigiScopeAssetClient",
-            "POST $url threw ${t::class.java.simpleName}: ${t.message}",
+            "POST ${endpointOf(url)} threw ${t::class.java.simpleName}: ${t.message}",
             t
         )
         null
@@ -126,13 +126,13 @@ class DigiScopeAssetClient(
             if (!resp.isSuccessful) {
                 android.util.Log.w(
                     "DigiScopeAssetClient",
-                    "GET $url returned HTTP ${resp.code} ${resp.message}"
+                    "GET ${endpointOf(url)} returned HTTP ${resp.code} ${resp.message}"
                 )
                 return null
             }
             val body = resp.body?.string()
             if (body == null) {
-                android.util.Log.w("DigiScopeAssetClient", "GET $url empty body")
+                android.util.Log.w("DigiScopeAssetClient", "GET ${endpointOf(url)} empty body")
                 return null
             }
             if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
@@ -140,7 +140,7 @@ class DigiScopeAssetClient(
     } catch (t: Throwable) {
         android.util.Log.w(
             "DigiScopeAssetClient",
-            "GET $url threw ${t::class.java.simpleName}: ${t.message}",
+            "GET ${endpointOf(url)} threw ${t::class.java.simpleName}: ${t.message}",
             t
         )
         null

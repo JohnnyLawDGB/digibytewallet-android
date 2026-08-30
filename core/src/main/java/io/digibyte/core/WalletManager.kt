@@ -319,28 +319,6 @@ class WalletManager(
     }
 
     /**
-     * Unlock the wallet session (after biometric/PIN auth).
-     * On app restart, this restores the C core wallet from disk.
-     */
-    fun unlock(authToken: ByteArray): Boolean {
-        // If wallet is already loaded in native memory (UI-only lock from onStop),
-        // just flip the state — no need to re-derive the seed.
-        if (NativeBridge.isWalletLoaded() && _walletState.value is WalletState.Locked) {
-            _walletState.value = WalletState.Unlocked
-            return true
-        }
-        // Fresh process — restore wallet from encrypted seed on disk
-        if (!NativeBridge.isWalletLoaded() && hasSavedWallet()) {
-            restoreFromDisk()
-        }
-        val success = NativeBridge.unlockSession(authToken)
-        if (success) {
-            _walletState.value = WalletState.Unlocked
-        }
-        return success
-    }
-
-    /**
      * Lock the wallet — zeros keys from C core memory.
      */
     fun lock() {

@@ -44,7 +44,7 @@ class TaprootSignTransactionTest {
 
     @Test
     fun p2trUtxo_signsWithSingle64ByteWitness() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val taproot = NativeBridge.getReceiveAddress(0, 3)
         assertEquals("sanity: receive addr is the KAT P2TR", expectedTaproot, taproot)
@@ -90,7 +90,7 @@ class TaprootSignTransactionTest {
 
     @Test
     fun bip84Utxo_stillSigns_noRegression() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val p2wpkh = NativeBridge.getReceiveAddress(0, 2)
         assertNotNull(p2wpkh)
