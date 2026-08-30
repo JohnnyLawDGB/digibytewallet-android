@@ -121,6 +121,7 @@ add_library(
         src/main/jni/bridge/jni_peer.c
         src/main/jni/bridge/jni_asset.c
         src/main/jni/bridge/jni_wallet_sign.c
+        src/main/jni/bridge/slip13.c
         src/main/jni/bridge/jni_transaction_persist.c
         src/main/jni/bridge/jni_derive.c
         src/main/jni/bridge/jni_asset_send.c

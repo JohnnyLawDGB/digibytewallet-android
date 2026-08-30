@@ -177,6 +177,55 @@ class MigrationTest {
         assertEquals("example.com", history[1].domain)
     }
 
+    // -------------------------------------------------------------------------
+    // Migration path: v8 → v9 (Digi-ID key isolation — derivation column)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate8To9_backfillsLegacyDerivation() {
+        val v8Db = helper.createDatabase(TEST_DB_NAME, 8)
+        v8Db.execSQL(
+            """INSERT INTO digiid_history (domain, callbackUrl, address, timestamp, success)
+               VALUES ('example.com', 'https://example.com/cb', 'DExample', 1000, 1)"""
+        )
+        v8Db.close()
+
+        val v9Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 9, true, MIGRATION_8_9)
+        v9Db.query("SELECT derivation FROM digiid_history WHERE domain = 'example.com'").use { c ->
+            assertTrue(c.moveToFirst())
+            // Every pre-migration login was signed with the shared m/0'/0/0 key — the
+            // backfill records that fact, and IdentityKeyPolicy grandfathers on it.
+            assertEquals("legacy", c.getString(0))
+        }
+        v9Db.close()
+    }
+
+    @Test
+    fun digiIdHistoryDao_countSuccessfulLegacy_ignoresFailuresAndSiteRows() = runTest {
+        val dao: DigiIdHistoryDao = db.digiIdHistoryDao()
+        // Successful legacy login → grandfathers the domain
+        dao.insert(DigiIdHistoryEntity(
+            domain = "old-site.com", callbackUrl = "https://old-site.com/cb",
+            address = "DLegacy", timestamp = 100L, success = true, derivation = "legacy"
+        ))
+        // Failed legacy attempt → must NOT grandfather
+        dao.insert(DigiIdHistoryEntity(
+            domain = "failed.com", callbackUrl = "https://failed.com/cb",
+            address = "DLegacy", timestamp = 100L, success = false, derivation = "legacy"
+        ))
+        // Successful per-site login → must NOT count as legacy
+        dao.insert(DigiIdHistoryEntity(
+            domain = "new-site.com", callbackUrl = "https://new-site.com/cb",
+            address = "DSite", timestamp = 100L, success = true, derivation = "site"
+        ))
+
+        assertEquals(1, dao.countSuccessfulLegacy("old-site.com"))
+        assertEquals(0, dao.countSuccessfulLegacy("failed.com"))
+        assertEquals(0, dao.countSuccessfulLegacy("new-site.com"))
+        assertEquals(0, dao.countSuccessfulLegacy("never-seen.com"))
+    }
+
     @Test
     fun digiIdHistoryDao_pruneOlderThan_removesOldEntries() = runTest {
         val dao: DigiIdHistoryDao = db.digiIdHistoryDao()

@@ -8,6 +8,7 @@
  */
 
 #include "jni_bridge.h"
+#include "slip13.h"
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
 #include "BRWalletFilterElements.h"
@@ -421,6 +422,21 @@ int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId) {
 int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index) {
     if (!g_seedValid) return 0;
     BRBIP32PrivKey(outKey, g_seed, sizeof(g_seed), chain, index);
+    return 1;
+}
+
+int seed_derive_identity_key(BRKey *outKey, const char *uri, uint32_t index) {
+    if (!g_seedValid || !outKey || !uri) return 0;
+
+    uint32_t idx[4];
+    if (!slip13_indexes(idx, uri, strlen(uri), index)) return 0;
+
+    BRBIP32PrivKeyPath(outKey, g_seed, sizeof(g_seed), 5,
+                       13 | BIP32_HARD,
+                       idx[0] | BIP32_HARD,
+                       idx[1] | BIP32_HARD,
+                       idx[2] | BIP32_HARD,
+                       idx[3] | BIP32_HARD);
     return 1;
 }
 

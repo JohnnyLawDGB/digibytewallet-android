@@ -186,12 +186,17 @@ Named explicitly so they don't go unfixed by being unspoken.
 5. **Tor silent fallback.** If Tor fails to start or the daemon dies,
    the wallet silently uses clearnet. Phase 2 changes this to a loud
    warning banner.
-6. **Digi-ID key is shared across every site.** Digi-ID signs with
-   `m/0'/0/0` (the legacy bread-wallet tree; corrected 2026-08-19 — the
-   path is hardcoded in the JNI, not `m/44'/20'/0'/0/0`). The residual
-   is linkability, not key exposure: the `\x19DigiByte Signed
-   Message:\n` prefix blocks sighash confusion, and an app-created
-   wallet never funds `m/0'`. Per-site isolation is Phase 2.
+6. **Digi-ID identity: per-site since the key-isolation change**
+   (docs/specs/digiid-key-isolation.md). New domains get an unlinkable
+   SLIP-0013 identity (`m/13'/A'/B'/C'/D'` from the site's canonical
+   callback URI). The legacy shared `m/0'/0/0` key remains in use for
+   DigiScope domains (the Hub account is bound to it) and for domains
+   with a successful pre-change login (switching keys would lock the
+   user out of the site account bound to the old address). Residuals:
+   those grandfathered domains stay mutually linkable, and signatures
+   already published cannot be unpublished. Not key exposure: the
+   `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion,
+   and an app-created wallet never funds `m/0'` or `m/13'`.
 7. **Block-request correlation.** In compact-filter mode (the only
    sync path) the wallet still fetches full blocks on filter match. A
    surveillant

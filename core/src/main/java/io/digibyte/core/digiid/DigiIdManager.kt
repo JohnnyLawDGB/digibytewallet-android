@@ -45,8 +45,19 @@ class DigiIdManager(
                 return@withContext DigiIdResult.Error(1, "Insecure (HTTP) authentication not allowed")
             }
 
-            // Sign the original digiid:// URI (includes nonce) with the wallet's first BIP32 key.
-            val signResult = NativeBridge.signMessage(request.rawUri, 0)
+            // Pick the identity: legacy m/0'/0/0 for DigiScope + grandfathered domains,
+            // per-site SLIP-0013 (m/13'/...) for new ones — docs/specs/digiid-key-isolation.md.
+            val hasLegacyHistory = historyDao.countSuccessfulLegacy(request.domain) > 0
+            val keyKind = IdentityKeyPolicy.choose(request.domain, hasLegacyHistory)
+
+            // Sign the original digiid:// URI (includes nonce) with the chosen identity key.
+            val signResult = when (keyKind) {
+                IdentityKeyKind.LEGACY -> NativeBridge.signMessage(request.rawUri, 0)
+                // Derivation input is the canonical callback URL (no query, so no nonce):
+                // stable per site, unlinkable across sites.
+                IdentityKeyKind.PER_SITE ->
+                    NativeBridge.signIdentityMessage(request.rawUri, request.callbackUrl, 0)
+            }
             if (signResult == null) {
                 Log.e(TAG, "signMessage returned null — wallet locked or not initialized")
                 return@withContext DigiIdResult.Error(1, "Wallet is locked — cannot sign")
@@ -89,7 +100,8 @@ class DigiIdManager(
                     callbackUrl = request.callbackUrl,
                     address = address,
                     timestamp = System.currentTimeMillis() / 1000,
-                    success = success
+                    success = success,
+                    derivation = if (keyKind == IdentityKeyKind.LEGACY) "legacy" else "site"
                 )
             )
 
@@ -117,9 +129,6 @@ class DigiIdManager(
         }
     }
 
-    private fun isDigiScopeDomain(domain: String): Boolean {
-        return domain == "digiscope.me" ||
-               domain == "api.digiscope.me" ||
-               domain.endsWith(".digiscope.me")
-    }
+    private fun isDigiScopeDomain(domain: String): Boolean =
+        IdentityKeyPolicy.isDigiScopeDomain(domain)
 }
