@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 31+ backup/transfer policy (audit F7, 2026-08-30). allowBackup="false" is the API < 31
+  control; on 31+ the platform (and OEM device-to-device migration tools) consult this file
+  instead, so without it the encrypted-seed prefs, SQLCipher DB and Keystore-wrapped key blobs
+  could be copied to another device where the hardware-bound key does not exist.
+  Every domain is excluded for both cloud backup and device transfer.
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <exclude domain="root" />
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
