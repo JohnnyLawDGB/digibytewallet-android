@@ -445,6 +445,8 @@
     <string name="sec_confirm_pin">PIN की पुष्टि करें</string>
     <string name="sec_confirm_pin_wipe_sub">वॉलेट मिटाने के लिए अपना PIN दर्ज करें</string>
     <string name="sec_incorrect_pin">गलत PIN</string>
+    <string name="auth_node_pair_title">नोड पेयरिंग की पुष्टि करें</string>
+    <string name="auth_node_pair_subtitle">इस नोड को पेयर करने के लिए प्रमाणित करें</string>
     <string name="sec_enable">सक्षम करें</string>
     <string name="dsp_currency">मुद्रा</string>
     <string name="dsp_fiat_currency">फ़िएट मुद्रा</string>

@@ -31,8 +31,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.isTestnet
-import io.digibyte.core.security.BiometricAuth
-import io.digibyte.core.security.BiometricResult
+import io.digibyte.ui.components.rememberSpendAuth
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
@@ -42,7 +41,6 @@ import io.digibyte.R
 
 @Composable
 fun SendScreen(
-    biometricAuth: BiometricAuth,
     onNavigateBack: () -> Unit,
     prefillAddress: String = "",
     onScanQr: ((String) -> Unit) -> Unit = {},
@@ -57,6 +55,8 @@ fun SendScreen(
     }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
     // DigiDollar address prefix follows the running network (TD… testnet / DD… mainnet).
     val onTestnet = remember { isTestnet(context) }
 
@@ -135,20 +135,10 @@ fun SendScreen(
             onConfirm = {
                 coroutineScope.launch {
                     val activity = context as? androidx.fragment.app.FragmentActivity
-                    if (activity != null && biometricAuth.canAuthenticate(activity)) {
-                        val result = biometricAuth.authenticate(
-                            activity,
-                            title = bioConfirmTitle,
-                            subtitle = bioAuthSubtitle
-                        )
-                        if (result is BiometricResult.Success) {
-                            viewModel.send()
-                        } else if (result is BiometricResult.Error) {
-                            viewModel.cancelConfirm()
-                        }
-                    } else {
-                        // No biometric — proceed directly (PIN fallback handled by system)
+                    if (spendAuth.authorize(activity, bioConfirmTitle, bioAuthSubtitle)) {
                         viewModel.send()
+                    } else {
+                        viewModel.cancelConfirm()
                     }
                 }
             },
@@ -157,7 +147,7 @@ fun SendScreen(
     }
 
     // ── DigiDollar confirmation dialog ────────────────────────────────────
-    // DD sends get the same confirm + biometric gate as DGB — a real-value
+    // DD sends get the same confirm + credential gate as DGB — a real-value
     // transfer must not broadcast straight from a button tap (finality parity).
     if (ddConfirming) {
         DigiDollarConfirmationDialog(
@@ -172,16 +162,7 @@ fun SendScreen(
                     ddConfirming = false
                     coroutineScope.launch {
                         val activity = context as? androidx.fragment.app.FragmentActivity
-                        val authed = if (activity != null && biometricAuth.canAuthenticate(activity)) {
-                            biometricAuth.authenticate(
-                                activity,
-                                title = bioConfirmDdTitle,
-                                subtitle = bioAuthSubtitle
-                            ) is BiometricResult.Success
-                        } else {
-                            // No biometric hardware — the confirmation dialog is the gate (matches DGB).
-                            true
-                        }
+                        val authed = spendAuth.authorize(activity, bioConfirmDdTitle, bioAuthSubtitle)
                         if (!authed) return@launch   // dialog already dismissed; back to the form
                         ddSending = true
                         viewModel.sendDigiDollar(address, amountFiat) { txid ->

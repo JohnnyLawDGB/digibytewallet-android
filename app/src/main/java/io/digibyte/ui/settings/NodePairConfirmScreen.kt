@@ -26,6 +26,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import io.digibyte.core.isTestnet
 import io.digibyte.core.settings.CustomNode
 import io.digibyte.core.settings.OwnNodeUri
+import io.digibyte.ui.components.rememberSpendAuth
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
+import kotlinx.coroutines.launch
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteNavy
 import io.digibyte.ui.theme.DigiByteRed
@@ -58,6 +62,13 @@ fun NodePairConfirmScreen(
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var pairing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    // Pairing re-points every peer connection at one host — a credential check keeps a
+    // scanned QR from silently redirecting the wallet's whole data path.
+    val authTitle = stringResource(R.string.auth_node_pair_title)
+    val authSubtitle = stringResource(R.string.auth_node_pair_subtitle)
 
     Scaffold(
         topBar = {
@@ -208,16 +219,20 @@ fun NodePairConfirmScreen(
             } else {
                 Button(
                     onClick = {
-                        pairing = true
-                        when (viewModel.pairFromUri(rawUri)) {
-                            SettingsViewModel.PairResult.OK,
-                            SettingsViewModel.PairResult.NET_MISMATCH -> {
-                                viewModel.applyOwnNodeNow()
-                                onDone()
-                            }
-                            SettingsViewModel.PairResult.INVALID -> {
-                                errorMessage = "This QR code isn't a valid node pairing code."
-                                pairing = false
+                        scope.launch {
+                            // Denied: the confirm screen stays up with its Cancel button.
+                            if (!spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, authTitle, authSubtitle)) return@launch
+                            pairing = true
+                            when (viewModel.pairFromUri(rawUri)) {
+                                SettingsViewModel.PairResult.OK,
+                                SettingsViewModel.PairResult.NET_MISMATCH -> {
+                                    viewModel.applyOwnNodeNow()
+                                    onDone()
+                                }
+                                SettingsViewModel.PairResult.INVALID -> {
+                                    errorMessage = "This QR code isn't a valid node pairing code."
+                                    pairing = false
+                                }
                             }
                         }
                     },

@@ -445,6 +445,8 @@
     <string name="sec_confirm_pin">Konfirmasi PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Masukkan PIN Anda untuk menghapus dompet</string>
     <string name="sec_incorrect_pin">PIN salah</string>
+    <string name="auth_node_pair_title">Konfirmasi Penyandingan Node</string>
+    <string name="auth_node_pair_subtitle">Autentikasi untuk menyandingkan node ini</string>
     <string name="sec_enable">Aktifkan</string>
     <string name="dsp_currency">Mata Uang</string>
     <string name="dsp_fiat_currency">Mata Uang Fiat</string>

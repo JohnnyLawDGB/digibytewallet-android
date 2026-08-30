@@ -29,6 +29,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.model.OwnedAsset
+import io.digibyte.ui.components.rememberSpendAuth
+import kotlinx.coroutines.launch
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
@@ -48,6 +50,12 @@ fun AssetSendScreen(
     viewModel: AssetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    // Hoisted: used inside the confirm lambda, which is not composable.
+    val authTitle = stringResource(R.string.send_confirm_title)
+    val authSubtitle = stringResource(R.string.send_auth_subtitle)
 
     LaunchedEffect(assetId) {
         viewModel.selectAsset(assetId)
@@ -108,11 +116,19 @@ fun AssetSendScreen(
             feeSats = estimatedFeeSat,
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
-                viewModel.sendAssetTransfer(
-                    toAddress = recipientAddress,
-                    quantityInput = quantityInput,
-                    feePerKb = feeRatePerKb,
-                )
+                coroutineScope.launch {
+                    val activity = context as? androidx.fragment.app.FragmentActivity
+                    if (spendAuth.authorize(activity, authTitle, authSubtitle)) {
+                        viewModel.sendAssetTransfer(
+                            toAddress = recipientAddress,
+                            quantityInput = quantityInput,
+                            feePerKb = feeRatePerKb,
+                        )
+                    } else {
+                        showConfirmDialog = false
+                        viewModel.resetSendState()
+                    }
+                }
             },
             onCancel = {
                 showConfirmDialog = false

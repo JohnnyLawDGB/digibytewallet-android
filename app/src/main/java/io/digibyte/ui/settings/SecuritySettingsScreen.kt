@@ -34,6 +34,8 @@ import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.security.PinVerifyResult
+import io.digibyte.ui.components.PinVerifyDialog
+import io.digibyte.ui.components.pinLockedCountdownMessage
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
@@ -42,19 +44,6 @@ import androidx.compose.ui.res.stringResource
 import io.digibyte.R
 
 private const val SEC_PIN_LENGTH = 6
-
-/** Format a re-auth lockout deadline as a localised "locked, try again in M:SS" at press time.
- *  (The dialog gates re-render per keystroke; a live tick isn't needed here — the
- *  enforcement lives in PinManager regardless of what this string says.)
- *  Takes Resources because it is not composable. */
-private fun securityLockedMessage(res: android.content.res.Resources, until: Long): String {
-    val remainingMs = (until - System.currentTimeMillis()).coerceAtLeast(0L)
-    val totalSec = (remainingMs + 999L) / 1000L
-    // The M:SS clock itself is a number format, not prose — only the sentence around it is
-    // translated, so the digits read the same in every language.
-    val clock = "%d:%02d".format(totalSec / 60, totalSec % 60)
-    return res.getString(R.string.sec_locked_countdown, clock)
-}
 
 // ── Internal step state for security actions ──────────────────────────────────
 private enum class SecurityDialog { None, ChangePinVerify, ChangePinNew, ChangePinConfirm, ViewSeedWarning, ViewSeedPinVerify, WipePinVerify, WipeConfirmDialog, WipeAfterNConfirm }
@@ -292,7 +281,7 @@ fun SecuritySettingsScreen(
                                         activeDialog = SecurityDialog.ChangePinNew
                                     }
                                     is PinVerifyResult.LockedOut -> {
-                                        pinError = securityLockedMessage(appResources, r.until); pinInput = ""
+                                        pinError = pinLockedCountdownMessage(appResources, r.until); pinInput = ""
                                     }
                                     is PinVerifyResult.ShouldWipe -> {
                                         pinInput = ""; resetDialogState(); viewModel.wipeWallet()
@@ -435,7 +424,7 @@ fun SecuritySettingsScreen(
                                         }
                                     }
                                     is PinVerifyResult.LockedOut -> {
-                                        pinError = securityLockedMessage(appResources, r.until); pinInput = ""
+                                        pinError = pinLockedCountdownMessage(appResources, r.until); pinInput = ""
                                     }
                                     is PinVerifyResult.ShouldWipe -> {
                                         pinInput = ""; resetDialogState(); viewModel.wipeWallet()
@@ -469,7 +458,7 @@ fun SecuritySettingsScreen(
                                         activeDialog = SecurityDialog.WipeConfirmDialog
                                     }
                                     is PinVerifyResult.LockedOut -> {
-                                        pinError = securityLockedMessage(appResources, r.until); pinInput = ""
+                                        pinError = pinLockedCountdownMessage(appResources, r.until); pinInput = ""
                                     }
                                     is PinVerifyResult.ShouldWipe -> {
                                         pinInput = ""; resetDialogState(); viewModel.wipeWallet()
@@ -577,128 +566,4 @@ fun SecuritySettingsScreen(
             SecurityDialog.None -> { /* no dialog */ }
         }
     }
-}
-
-// ── Shared PIN entry dialog ───────────────────────────────────────────────────
-@Composable
-private fun PinVerifyDialog(
-    title: String,
-    subtitle: String,
-    pinInput: String,
-    pinError: String?,
-    onDigit: (String) -> Unit,
-    onBackspace: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A2742),
-        title = {
-            Text(title, color = Color.White, fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    subtitle,
-                    color = Color(0xFF8899AA),
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(Modifier.height(20.dp))
-
-                // PIN dot indicators
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    repeat(SEC_PIN_LENGTH) { idx ->
-                        val filled = idx < pinInput.length
-                        Box(
-                            modifier = Modifier
-                                .size(16.dp)
-                                .clip(CircleShape)
-                                .background(if (filled) DigiByteAccent else Color.Transparent)
-                                .border(2.dp, if (filled) DigiByteAccent else Color(0xFF243352), CircleShape)
-                        )
-                    }
-                }
-
-                pinError?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text(it, color = DigiByteRed, style = MaterialTheme.typography.bodySmall)
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                // Compact keypad
-                val rows = listOf(
-                    listOf("1", "2", "3"),
-                    listOf("4", "5", "6"),
-                    listOf("7", "8", "9"),
-                    listOf("", "0", "⌫")
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    rows.forEach { row ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            row.forEach { key ->
-                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                    when (key) {
-                                        "" -> Spacer(Modifier.size(52.dp))
-                                        "⌫" -> {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(52.dp)
-                                                    .clip(CircleShape)
-                                                    .clickable { onBackspace() },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Backspace,
-                                                    contentDescription = stringResource(R.string.pin_backspace),
-                                                    tint = Color(0xFF8899AA),
-                                                    modifier = Modifier.size(22.dp)
-                                                )
-                                            }
-                                        }
-                                        else -> {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(52.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF243352))
-                                                    .border(1.dp, Color(0xFF3A4F6A), CircleShape)
-                                                    .clickable { onDigit(key) },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    key,
-                                                    fontSize = 20.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color.White
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
-            }
-        }
-    )
 }

@@ -21,6 +21,11 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.digiscope.DigiScopeProfile
+import io.digibyte.ui.components.rememberSpendAuth
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
@@ -40,6 +45,14 @@ fun ProfileScreen(
     val isCheckingHandle by viewModel.isCheckingHandle.collectAsStateWithLifecycle()
     val isRegistering by viewModel.isRegistering.collectAsStateWithLifecycle()
     val registrationError by viewModel.registrationError.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    // Quick-login signs a Digi-ID challenge with the wallet key: the same identity
+    // action the in-app Digi-ID approve gates, so it carries the same credential check.
+    val authTitle = stringResource(R.string.did_auth_title)
+    val authSubtitle = stringResource(R.string.did_auth_subtitle, "DigiScope")
 
     Box(
         modifier = Modifier
@@ -55,7 +68,14 @@ fun ProfileScreen(
             }
 
             is ProfileState.NotLoggedIn -> {
-                NotLoggedInContent(onQuickLogin = { viewModel.quickLogin() })
+                NotLoggedInContent(onQuickLogin = {
+                    scope.launch {
+                        // Denied: nothing happens — the login card stays as it was.
+                        if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, authTitle, authSubtitle)) {
+                            viewModel.quickLogin()
+                        }
+                    }
+                })
             }
 
             is ProfileState.NoHandle -> {

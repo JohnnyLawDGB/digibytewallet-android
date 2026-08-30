@@ -432,6 +432,8 @@
     <string name="sec_confirm_pin">Confirmer le code PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Saisissez votre code PIN pour effacer le portefeuille</string>
     <string name="sec_incorrect_pin">Code PIN incorrect</string>
+    <string name="auth_node_pair_title">Confirmer l\'appairage du nœud</string>
+    <string name="auth_node_pair_subtitle">Authentifiez-vous pour appairer ce nœud</string>
     <string name="sec_enable">Activer</string>
     <string name="dsp_currency">Devise</string>
     <string name="dsp_fiat_currency">Devise fiduciaire</string>

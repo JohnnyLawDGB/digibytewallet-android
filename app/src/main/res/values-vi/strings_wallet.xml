@@ -445,6 +445,8 @@
     <string name="sec_confirm_pin">Xác nhận mã PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Nhập mã PIN để xóa ví</string>
     <string name="sec_incorrect_pin">Mã PIN không đúng</string>
+    <string name="auth_node_pair_title">Xác nhận ghép nối nút</string>
+    <string name="auth_node_pair_subtitle">Xác thực để ghép nối nút này</string>
     <string name="sec_enable">Bật</string>
     <string name="dsp_currency">Tiền tệ</string>
     <string name="dsp_fiat_currency">Tiền pháp định</string>
