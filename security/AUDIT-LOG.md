@@ -3,7 +3,7 @@
 Machine-read by `scripts/check-security-cycle.sh`. **Keep the marker line's format exactly** —
 the gate parses it, and a reformatted line reads as "never audited".
 
-<!-- LAST_AUDITED_VERSION_CODE: 40066 -->
+<!-- LAST_AUDITED_VERSION_CODE: 40076 -->
 
 The cycle runs **every 10 releases**. The gate fails a release build when the current
 `versionCode` is 10 or more beyond the marker above.
@@ -533,6 +533,79 @@ THREAT_MODEL / CLAUDE.md / AUDIT-SUMMARY / ROADMAP reconciled to the controls th
 default and the lost-PIN branch recorded as decisions, CRITICAL-1 split into its closed (rate-limit) and
 open (Keystore binding) halves.
 
-The marker stays at 40066. The next release, v4.0.76 (40076), is exactly 10 past it, so
-`scripts/check-security-cycle.sh` will fail the release build: run `scripts/security-cycle.sh <release.apk>`
-and record the cycle, or record a deferral with a reason and move the marker deliberately, before tagging.
+## Cycle at v4.0.76 (40076) — 2026-08-30
+
+Marker moved 40066 → 40076. This cycle is the 2026-08-30 external audit above plus its verification
+and follow-ups: the changed surface since 40066 (v4.0.67..v4.0.75 — BIP39 passphrase, DigiDollar
+recovery, BIP49 sweep signing, i18n) was covered by that audit's own reading, by the eleven-finding
+adversarial verification recorded in `docs/superpowers/audits/2026-08-30-external-security-audit-triage.md`,
+and by the review of every follow-up branch before merge. The BIP49 `BRTransactionSign` branch the
+resume map said to fold findings into before tagging drew no finding (the audit's "no signer firewall"
+claim was refuted by the signed-message magic at `jni_wallet_sign.c:114`).
+
+### v4.0.76 — 2026-08-30 (automated half)
+
+**Dependencies**
+    Resolving mainnetReleaseRuntimeClasspath ...
+    Querying OSV for 227 package(s) ...
+    ok: no known vulnerabilities across 227 package(s)
+
+**Native hardening** (arm64 `libcore-lib.so`)
+    - PIE: yes
+    - NX: yes
+    - RELRO: FULL
+    - stack canary: yes
+    - fortify: 9 checked libc call(s)
+    - symbols: stripped
+
+**Embedded secrets**
+    - none found
+
+**Hosts in the dex**
+         19 https://api.digiscope.me
+          4 https://github.com
+          4 https://assets.digistamp.co
+          3 https://issuetracker.google.com
+          3 https://digiscope.me
+          2 https://api.github.com
+          1 https://youtrack.jetbrains.com
+          1 https://trustless-gateway.link
+          1 https://ipfs.io
+          1 https://goo.gle
+          1 https://dweb.link
+          1 https://digibyte.org
+          1 https://developer.android.com
+          1 https://chainz.cryptoid.info
+          1 https://api.digiassets.net
+
+The APK scanned is `:app:assembleMainnetRelease` of `develop` @ `1bd25881` (the v4.0.76 content,
+signed with a throwaway scan-only keystore — never installed anywhere). Verified in the same bytes:
+the `login callback` log is the redacted `HTTP code bodyLength=` form, `dgb_hub_session` (the
+encrypted JWT store) is present, and `libcore-lib.so` no longer contains the `addr[%zu]` dump loops,
+the `unlockSession` symbol or its log string. Host KATs 66/66 after the JNI deletions.
+
+### Manual half — what changed hands this cycle
+
+**P0 — FIXED (#46).** Warm-resume lock bypass, device-confirmed on the Note 8. See the out-of-cycle entry above.
+
+**P1 — FIXED (#61, #62).** In-app PIN / biometric gate on every value-moving and identity action; the
+Security-settings auto-lock timeout now locks on foreground inactivity. Device-gated on the Note 8:
+Confirm → Send opens "Enter PIN — Authenticate to broadcast transaction", a wrong PIN is refused with
+nothing sent; idle on the wallet screen locked at 61 s and re-routed to the PIN screen.
+
+**P2 — FIXED (#59, #60, #63).** JWT and wallet-address logging removed and the JWT moved to
+EncryptedSharedPreferences with a one-time migration; legacy String JNI seed entry points and dead
+`unlockSession` deleted; `KeyStoreManager` probes `KeyInfo.isInsideSecureHardware`; FLAG_SECURE and a
+password-type IME on mnemonic/passphrase entry (Note 8: screencap of the recovery screen returns 0
+bytes); `dataExtractionRules` excluding all wallet data.
+
+**Hygiene (#64).** THREAT_MODEL / CLAUDE.md / AUDIT-SUMMARY / TESTING / ROADMAP reconciled to the
+controls that exist; the 12-word default and the lost-PIN branch recorded as decisions.
+
+**Accepted residuals, unchanged.** Keystore auth-binding / CryptoObject (CRITICAL-1's open half,
+ROADMAP Phase 2); the mnemonic as an immutable String outside the load/restore/sign path (P2).
+
+### Still owed
+
+MobSF re-scan and the jadx keep-rule pass — neither automated, neither run this cycle (same as the
+40066 cycle).
