@@ -30,6 +30,8 @@ import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.recovery.LegacySweepService
 import io.digibyte.core.recovery.RecoveryScanService
 import io.digibyte.core.recovery.SweepDestination
+import io.digibyte.ui.components.rememberSpendAuth
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import io.digibyte.R
@@ -51,6 +53,20 @@ fun RecoverFundsScreen(
 ) {
     val passphraseVerdict by vm.passphraseVerdict.collectAsState()
     val state by vm.state.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    // Hoisted: used inside the sweep lambdas, which are not composable.
+    val authTitle = stringResource(R.string.send_confirm_title)
+    val authSubtitle = stringResource(R.string.send_auth_subtitle)
+    // A sweep is a broadcast of every coin the scan found; denied means the findings stay
+    // on screen untouched and the button can be pressed again.
+    fun gated(action: () -> Unit) {
+        scope.launch {
+            if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, authTitle, authSubtitle)) action()
+        }
+    }
 
     var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
     // Not rememberSaveable: a foreign recovery phrase must not be written to
@@ -136,8 +152,8 @@ fun RecoverFundsScreen(
                         findings = s.findings,
                         totalSat = s.totalSat,
                         // Foreign: sweep to THIS wallet only (no external option shown).
-                        onSweepNative = { if (s.isForeign) vm.sweepForeign() else vm.sweep(SweepDestination.Native) },
-                        onSweepExternal = if (s.isForeign) null else { addr -> vm.sweep(SweepDestination.External(addr)) },
+                        onSweepNative = { gated { if (s.isForeign) vm.sweepForeign() else vm.sweep(SweepDestination.Native) } },
+                        onSweepExternal = if (s.isForeign) null else { addr -> gated { vm.sweep(SweepDestination.External(addr)) } },
                         partialFailurePaths = s.partialFailurePaths,
                         verdict = passphraseVerdict,
                         assetOutpointCount = s.assetOutpointCount,

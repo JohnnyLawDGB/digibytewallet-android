@@ -77,3 +77,35 @@ class LockGatePolicyTest {
         }
     }
 }
+
+/**
+ * The wipe-after-N backstop reached through the spend gate: a wrong-PIN streak inside the
+ * Send / sweep / Digi-ID PIN dialog wipes the wallet exactly as the unlock screen does, but
+ * those screens hold no NavController — so the navigation to onboarding is driven from the
+ * wallet state instead.
+ */
+class WipeRouteGatePolicyTest {
+
+    @Test
+    fun `a wiped wallet on any wallet route routes to onboarding`() {
+        for (route in listOf("wallet", "send", "asset_send/abc", "recover_funds", "hub",
+                "digiid_confirm/x", "node_pair_confirm/x", "settings_security")) {
+            assertTrue(route, shouldRouteToOnboardingAfterWipe(WalletState.NoWallet, route))
+        }
+    }
+
+    @Test
+    fun `the onboarding graph itself is NoWallet by definition and never bounces`() {
+        for (route in listOf("onboarding", "seed_display/12", "seed_verify", "seed_passphrase",
+                "mnemonic_input", "recovery_scan", "recovery_date", "pin_setup", "unlock")) {
+            assertFalse(route, shouldRouteToOnboardingAfterWipe(WalletState.NoWallet, route))
+        }
+    }
+
+    @Test
+    fun `no graph yet and non-NoWallet states never route`() {
+        assertFalse(shouldRouteToOnboardingAfterWipe(WalletState.NoWallet, null))
+        assertFalse(shouldRouteToOnboardingAfterWipe(WalletState.Locked, "wallet"))
+        assertFalse(shouldRouteToOnboardingAfterWipe(WalletState.Unlocked, "wallet"))
+    }
+}

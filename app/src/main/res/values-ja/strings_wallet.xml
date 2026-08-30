@@ -445,6 +445,8 @@
     <string name="sec_confirm_pin">PIN の確認</string>
     <string name="sec_confirm_pin_wipe_sub">ウォレットを消去するには PIN を入力してください</string>
     <string name="sec_incorrect_pin">PIN が正しくありません</string>
+    <string name="auth_node_pair_title">ノードのペアリングを確認</string>
+    <string name="auth_node_pair_subtitle">このノードをペアリングするには認証してください</string>
     <string name="sec_enable">有効にする</string>
     <string name="dsp_currency">通貨</string>
     <string name="dsp_fiat_currency">法定通貨</string>

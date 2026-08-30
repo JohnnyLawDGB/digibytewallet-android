@@ -135,6 +135,9 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":native"))
     implementation(project(":game"))
+    // BiometricPrompt error codes: the spend gate decides which biometric outcomes fall
+    // through to the in-app PIN dialog, and the constants live in androidx.biometric.
+    implementation(libs.androidx.biometric)
 
     // Compose BOM
     val composeBom = platform(libs.androidx.compose.bom)

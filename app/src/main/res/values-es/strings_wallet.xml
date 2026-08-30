@@ -447,6 +447,8 @@
     <string name="sec_confirm_pin">Confirmar PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Introduce tu PIN para borrar la billetera</string>
     <string name="sec_incorrect_pin">PIN incorrecto</string>
+    <string name="auth_node_pair_title">Confirmar emparejamiento de nodo</string>
+    <string name="auth_node_pair_subtitle">Autentícate para emparejar este nodo</string>
     <string name="sec_enable">Activar</string>
     <string name="dsp_currency">Moneda</string>
     <string name="dsp_fiat_currency">Moneda fiat</string>

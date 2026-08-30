@@ -37,3 +37,19 @@ fun shouldRouteToUnlock(state: WalletState, hasPin: Boolean, currentRoute: Strin
     val base = currentRoute.substringBefore("?").substringBefore("/")
     return base !in PRE_WALLET_ROUTES
 }
+
+/**
+ * Should a wallet that has just been wiped be navigated to "onboarding" right now?
+ *
+ * Wipe-after-N can trip inside the spend gate's PIN dialog (Send, sweep, Digi-ID, …), and
+ * those screens hold no NavController — UnlockScreen and Security settings navigate
+ * themselves, everything else relies on this. Only [WalletState.NoWallet] on a wallet route
+ * qualifies: the onboarding graph is NoWallet by definition and must never be bounced, and a
+ * null route means the start destination is still authoritative.
+ */
+fun shouldRouteToOnboardingAfterWipe(state: WalletState, currentRoute: String?): Boolean {
+    if (state !is WalletState.NoWallet) return false
+    if (currentRoute == null) return false
+    val base = currentRoute.substringBefore("?").substringBefore("/")
+    return base !in PRE_WALLET_ROUTES
+}

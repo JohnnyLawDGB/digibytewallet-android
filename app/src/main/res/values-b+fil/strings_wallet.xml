@@ -445,6 +445,8 @@
     <string name="sec_confirm_pin">Kumpirmahin ang PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Ilagay ang PIN mo para burahin ang wallet</string>
     <string name="sec_incorrect_pin">Maling PIN</string>
+    <string name="auth_node_pair_title">Kumpirmahin ang Pagpapares ng Node</string>
+    <string name="auth_node_pair_subtitle">Mag-authenticate para ipares ang node na ito</string>
     <string name="sec_enable">I-enable</string>
     <string name="dsp_currency">Pera</string>
     <string name="dsp_fiat_currency">Fiat Currency</string>

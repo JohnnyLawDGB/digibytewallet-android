@@ -27,8 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.model.DigiIdRequest
 import io.digibyte.core.model.DigiIdResult
-import io.digibyte.core.security.BiometricAuth
-import io.digibyte.core.security.BiometricResult
+import io.digibyte.ui.components.rememberSpendAuth
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
@@ -51,16 +50,16 @@ import io.digibyte.R
 @Composable
 fun DigiIdConfirmScreen(
     request: DigiIdRequest,
-    biometricAuth: BiometricAuth,
     onNavigateBack: () -> Unit,
     viewModel: DigiIdViewModel = hiltViewModel()
 ) {
-    // Hoisted: used inside the biometric coroutine lambda, which is not composable.
+    // Hoisted: used inside the auth coroutine lambda, which is not composable.
     val bioTitle = stringResource(R.string.did_auth_title)
     val bioSubtitleFmt = stringResource(R.string.did_auth_subtitle)
-    val cancelLabel = stringResource(R.string.common_cancel)
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
 
     val authResult by viewModel.authResult.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
@@ -111,20 +110,9 @@ fun DigiIdConfirmScreen(
                             onApprove = {
                                 coroutineScope.launch {
                                     val fragmentActivity = context as? androidx.fragment.app.FragmentActivity
-                                    if (fragmentActivity != null && biometricAuth.canAuthenticate(
-                                            fragmentActivity
-                                        )) {
-                                        val bioResult = biometricAuth.authenticate(
-                                            activity = fragmentActivity,
-                                            title = bioTitle,
-                                            subtitle = bioSubtitleFmt.format(request.domain),
-                                            negativeButtonText = cancelLabel
-                                        )
-                                        if (bioResult is BiometricResult.Success) {
-                                            viewModel.authenticate(request)
-                                        }
-                                    } else {
-                                        // No biometric available — proceed directly
+                                    // Denied: stay on the confirm screen — Deny remains the
+                                    // explicit way out, and nothing has been signed.
+                                    if (spendAuth.authorize(fragmentActivity, bioTitle, bioSubtitleFmt.format(request.domain))) {
                                         viewModel.authenticate(request)
                                     }
                                 }

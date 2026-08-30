@@ -541,6 +541,8 @@
     <string name="sec_confirm_pin">Confirm PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Enter your PIN to wipe the wallet</string>
     <string name="sec_incorrect_pin">Incorrect PIN</string>
+    <string name="auth_node_pair_title">Confirm Node Pairing</string>
+    <string name="auth_node_pair_subtitle">Authenticate to pair this node</string>
     <string name="sec_enable">Enable</string>
 
     <!-- ── Display settings ─────────────────────────────────────────────────────── -->

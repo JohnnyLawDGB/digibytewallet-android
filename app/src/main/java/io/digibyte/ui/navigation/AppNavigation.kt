@@ -137,6 +137,15 @@ fun AppNavigation(
                 launchSingleTop = true
             }
         }
+        // The spend gate's wipe-after-N has no NavController of its own; see
+        // shouldRouteToOnboardingAfterWipe.
+        if (shouldRouteToOnboardingAfterWipe(walletState, currentRoute)) {
+            android.util.Log.w("AppNavigation", "wallet wiped on route=$currentRoute — routing to onboarding")
+            navController.navigate("onboarding") {
+                popUpTo(0) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
     }
 
     // Set (once, below) when the lost-PIN branch is taken: wallet exists on
@@ -560,7 +569,6 @@ fun AppNavigation(
                 }
                 val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
                 SendScreen(
-                    biometricAuth = biometricAuth,
                     onNavigateBack = { navController.popBackStack() },
                     prefillAddress = prefillAddress,
                     onScanQr = { callback ->
@@ -707,7 +715,6 @@ fun AppNavigation(
                 } else {
                     DigiIdConfirmScreen(
                         request = request,
-                        biometricAuth = biometricAuth,
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }

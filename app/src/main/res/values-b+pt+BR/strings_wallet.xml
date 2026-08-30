@@ -445,6 +445,8 @@
     <string name="sec_confirm_pin">Confirmar PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Digite seu PIN para apagar a carteira</string>
     <string name="sec_incorrect_pin">PIN incorreto</string>
+    <string name="auth_node_pair_title">Confirmar pareamento do nó</string>
+    <string name="auth_node_pair_subtitle">Autentique-se para parear este nó</string>
     <string name="sec_enable">Ativar</string>
     <string name="dsp_currency">Moeda</string>
     <string name="dsp_fiat_currency">Moeda fiduciária</string>
