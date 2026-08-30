@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.password
+import androidx.compose.ui.semantics.semantics
 import io.digibyte.R
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -29,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.ui.components.SecureWindow
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteRed
@@ -39,6 +42,8 @@ fun MnemonicInputScreen(
     navController: NavController,
     viewModel: OnboardingViewModel = hiltViewModel()
 ) {
+    SecureWindow()
+
     var wordCount by remember { mutableIntStateOf(12) }
 
     // Build a stable MutableStateList of strings for the current wordCount
@@ -259,6 +264,7 @@ private fun WordInputField(
             label = { Text("${index + 1}", fontSize = 11.sp) },
             modifier = Modifier
                 .fillMaxWidth()
+                .semantics { password() }
                 .bringIntoViewRequester(bringIntoView)
                 .onFocusChanged { state ->
                     if (state.isFocused) {
@@ -269,8 +275,12 @@ private fun WordInputField(
                     }
                 },
             singleLine = true,
+            // Password is the IME hint that stops the keyboard learning the word, syncing it
+            // to a personal dictionary, or offering it back as a suggestion elsewhere. There is
+            // deliberately no visualTransformation: the user must see what they typed, and the
+            // in-app BIP39 suggestions below key off `value`, not the IME.
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Text,
+                keyboardType = KeyboardType.Password,
                 imeAction = imeAction,
                 autoCorrect = false
             ),

@@ -17,6 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.password
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -33,6 +35,7 @@ import io.digibyte.core.recovery.SweepDestination
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import io.digibyte.R
+import io.digibyte.ui.components.SecureWindow
 
 private val BG = Color(0xFF0A1628)
 private val CARD = Color(0xFF1A2742)
@@ -49,6 +52,8 @@ fun RecoverFundsScreen(
     navController: NavController,
     vm: RecoverFundsViewModel = hiltViewModel(),
 ) {
+    SecureWindow()
+
     val passphraseVerdict by vm.passphraseVerdict.collectAsState()
     val state by vm.state.collectAsState()
 
@@ -1204,12 +1209,14 @@ private fun PhraseEntry(
             // WordInputField normalization so IME auto-capitalization/autocorrect
             // can never smuggle uppercase into a case-sensitive BIP39 check.
             onValueChange = { onPhrase(it.lowercase()) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().semantics { password() },
             minLines = 3,
             label = { Text(stringResource(R.string.rf_phrase_hint)) },
             isError = error != null,
+            // Password keyboard type, no visualTransformation: the IME must not learn a foreign
+            // recovery phrase, but the user must be able to read what they pasted or typed.
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Text,
+                keyboardType = KeyboardType.Password,
                 autoCorrect = false,
                 capitalization = KeyboardCapitalization.None
             ),
