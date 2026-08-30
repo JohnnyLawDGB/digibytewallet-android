@@ -47,12 +47,21 @@ fun authMethodFor(biometricAvailable: Boolean, hasPin: Boolean): AuthMethod = wh
 
 /**
  * The prompt's negative button reads "Use PIN" (BiometricAuth), and a swipe-away is the
- * same intent on devices that surface it as USER_CANCELED. Everything else — lockout, HW
- * failure, timeout — is a refusal, not a request for the other credential.
+ * same intent on devices that surface it as USER_CANCELED. A sensor that cannot serve —
+ * locked out after failed attempts (canAuthenticate() still reports SUCCESS during a
+ * lockout, so the prompt opens and fails at once), no enrolment, hardware missing or busy,
+ * timed out — also falls through: the in-app PIN is a strictly in-app credential, so
+ * reaching it costs nothing, and without this a locked-out user could not send at all.
+ * ERROR_CANCELED is the OS abandoning the prompt (screen off, backgrounded): the action is
+ * being abandoned, not re-credentialed, so it and every unclassified failure deny.
  */
-fun biometricErrorFallsThroughToPin(errorCode: Int): Boolean =
-    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
-        errorCode == BiometricPrompt.ERROR_USER_CANCELED
+fun biometricErrorFallsThroughToPin(errorCode: Int): Boolean = when (errorCode) {
+    BiometricPrompt.ERROR_NEGATIVE_BUTTON, BiometricPrompt.ERROR_USER_CANCELED,
+    BiometricPrompt.ERROR_LOCKOUT, BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
+    BiometricPrompt.ERROR_NO_BIOMETRICS, BiometricPrompt.ERROR_HW_UNAVAILABLE,
+    BiometricPrompt.ERROR_HW_NOT_PRESENT, BiometricPrompt.ERROR_TIMEOUT -> true
+    else -> false
+}
 
 /**
  * Resolved with hiltViewModel() from inside [rememberSpendAuth] so screens get the gate

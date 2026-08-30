@@ -45,11 +45,27 @@ class SpendAuthPolicyTest {
     }
 
     @Test
-    fun `every other biometric error denies`() {
+    fun `a sensor that cannot serve falls through to the PIN instead of denying`() {
+        // canAuthenticate() still reports SUCCESS during a lockout, so the prompt opens and
+        // fails immediately. The in-app PIN is a strictly in-app credential — letting these
+        // reach it costs nothing and is the only way a locked-out user can complete a send.
         for (code in listOf(
             BiometricPrompt.ERROR_LOCKOUT, BiometricPrompt.ERROR_LOCKOUT_PERMANENT,
-            BiometricPrompt.ERROR_HW_UNAVAILABLE, BiometricPrompt.ERROR_TIMEOUT,
-            BiometricPrompt.ERROR_CANCELED, BiometricPrompt.ERROR_NO_BIOMETRICS,
+            BiometricPrompt.ERROR_NO_BIOMETRICS, BiometricPrompt.ERROR_HW_UNAVAILABLE,
+            BiometricPrompt.ERROR_HW_NOT_PRESENT, BiometricPrompt.ERROR_TIMEOUT,
+        )) {
+            assertTrue("code $code", biometricErrorFallsThroughToPin(code))
+        }
+    }
+
+    @Test
+    fun `a system cancel or an unclassified failure denies`() {
+        // ERROR_CANCELED is the OS abandoning the prompt (screen off, app backgrounded) — the
+        // action is being abandoned, not re-credentialed.
+        for (code in listOf(
+            BiometricPrompt.ERROR_CANCELED, BiometricPrompt.ERROR_UNABLE_TO_PROCESS,
+            BiometricPrompt.ERROR_VENDOR, BiometricPrompt.ERROR_NO_SPACE,
+            BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL, BiometricPrompt.ERROR_SECURITY_UPDATE_REQUIRED,
         )) {
             assertFalse("code $code", biometricErrorFallsThroughToPin(code))
         }
