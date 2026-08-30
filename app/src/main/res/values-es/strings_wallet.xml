@@ -69,6 +69,7 @@
     <string name="pin_err_save">No se pudo guardar el PIN. Inténtalo de nuevo.</string>
     <string name="pin_err_wallet">No se pudo crear la billetera. Inténtalo de nuevo.</string>
     <string name="unlock_err_failed">No se pudo desbloquear. Inténtalo de nuevo.</string>
+    <string name="unlock_device_lock_removed">Se quitó el bloqueo de pantalla del dispositivo, por lo que la clave protegida de la billetera se perdió. Restaura la billetera con tu frase de recuperación.</string>
     <string name="unlock_wiping">Demasiados intentos fallidos — borrando la billetera</string>
     <string name="unlock_attempts_left">PIN incorrecto. Intentos restantes: %1$d</string>
     <string name="battery_title">Mantener la sincronización en segundo plano</string>

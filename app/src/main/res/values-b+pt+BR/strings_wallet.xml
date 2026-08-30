@@ -67,6 +67,7 @@
     <string name="pin_err_save">Não foi possível salvar o PIN. Tente novamente.</string>
     <string name="pin_err_wallet">Não foi possível criar a carteira. Tente novamente.</string>
     <string name="unlock_err_failed">Não foi possível desbloquear. Tente novamente.</string>
+    <string name="unlock_device_lock_removed">O bloqueio de tela do seu dispositivo foi removido, então a chave protegida da carteira foi perdida. Restaure a carteira com sua frase de recuperação.</string>
     <string name="unlock_wiping">Tentativas malsucedidas demais — apagando a carteira</string>
     <string name="unlock_attempts_left">PIN incorreto. Tentativas restantes: %1$d</string>
     <string name="battery_title">Manter a sincronização em segundo plano</string>

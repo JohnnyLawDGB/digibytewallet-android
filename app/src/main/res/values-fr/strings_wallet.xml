@@ -65,6 +65,7 @@
     <string name="pin_err_save">Échec de l\'enregistrement du code PIN. Veuillez réessayer.</string>
     <string name="pin_err_wallet">Échec de la création du portefeuille. Veuillez réessayer.</string>
     <string name="unlock_err_failed">Échec du déverrouillage. Veuillez réessayer.</string>
+    <string name="unlock_device_lock_removed">Le verrouillage d’écran de votre appareil a été supprimé, la clé protégée du portefeuille est donc perdue. Restaurez le portefeuille avec votre phrase de récupération.</string>
     <string name="unlock_wiping">Trop de tentatives échouées — effacement du portefeuille</string>
     <string name="unlock_attempts_left">Code PIN incorrect. Tentatives restantes : %1$d</string>
     <string name="battery_title">Maintenir la synchronisation en arrière-plan</string>

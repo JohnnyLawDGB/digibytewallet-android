@@ -67,6 +67,7 @@
     <string name="pin_err_save">Gagal menyimpan PIN. Silakan coba lagi.</string>
     <string name="pin_err_wallet">Gagal membuat dompet. Silakan coba lagi.</string>
     <string name="unlock_err_failed">Gagal membuka kunci. Silakan coba lagi.</string>
+    <string name="unlock_device_lock_removed">Kunci layar perangkat Anda dihapus, sehingga kunci terlindungi dompet hilang. Pulihkan dompet dengan frasa pemulihan Anda.</string>
     <string name="unlock_wiping">Terlalu banyak percobaan gagal — menghapus dompet</string>
     <string name="unlock_attempts_left">PIN salah. Sisa percobaan: %1$d</string>
     <string name="battery_title">Jaga sinkronisasi tetap berjalan di latar belakang</string>

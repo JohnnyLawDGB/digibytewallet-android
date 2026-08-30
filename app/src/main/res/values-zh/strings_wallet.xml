@@ -67,6 +67,7 @@
     <string name="pin_err_save">PIN 码保存失败，请重试。</string>
     <string name="pin_err_wallet">钱包创建失败，请重试。</string>
     <string name="unlock_err_failed">解锁失败，请重试。</string>
+    <string name="unlock_device_lock_removed">设备的屏幕锁已被移除，钱包的受保护密钥已丢失。请使用恢复短语恢复钱包。</string>
     <string name="unlock_wiping">失败次数过多 — 正在清除钱包</string>
     <string name="unlock_attempts_left">PIN 码错误。剩余尝试次数：%1$d</string>
     <string name="battery_title">保持后台同步</string>

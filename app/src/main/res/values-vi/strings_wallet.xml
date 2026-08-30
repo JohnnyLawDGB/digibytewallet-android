@@ -67,6 +67,7 @@
     <string name="pin_err_save">Không lưu được mã PIN. Vui lòng thử lại.</string>
     <string name="pin_err_wallet">Không tạo được ví. Vui lòng thử lại.</string>
     <string name="unlock_err_failed">Mở khóa không thành công. Vui lòng thử lại.</string>
+    <string name="unlock_device_lock_removed">Khóa màn hình của thiết bị đã bị gỡ, nên khóa bảo vệ của ví đã mất. Hãy khôi phục ví bằng cụm từ khôi phục của bạn.</string>
     <string name="unlock_wiping">Quá nhiều lần thử sai — đang xóa ví</string>
     <string name="unlock_attempts_left">Mã PIN không đúng. Số lần thử còn lại: %1$d</string>
     <string name="battery_title">Giữ đồng bộ chạy ở nền</string>
