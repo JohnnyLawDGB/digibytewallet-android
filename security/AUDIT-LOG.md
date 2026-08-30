@@ -605,7 +605,80 @@ controls that exist; the 12-word default and the lost-PIN branch recorded as dec
 **Accepted residuals, unchanged.** Keystore auth-binding / CryptoObject (CRITICAL-1's open half,
 ROADMAP Phase 2); the mnemonic as an immutable String outside the load/restore/sign path (P2).
 
+### MobSF re-scan — v4.0.76 release APK (2026-08-30, closes the "still owed" item below)
+
+Scanned the **shipped GitHub release asset** `digibyte-wallet-v4.0.76.apk`
+(SHA256 `457d451bc63e34a2213fee8aee802dab9d91d30991cefd56fa3829f13d349d7d`, 75,002,954 bytes) with
+MobSF v4.5.2 static analyzer. Reports: `reports/mobsf-report-v4.0.76.json`,
+`reports/mobsf-scorecard-v4.0.76.json`.
+
+**Score 66/100 — identical finding set to the v4.0.58 baseline. Zero new signal.**
+Set-diff of scorecard titles v4.0.58 → v4.0.76: nothing added, nothing removed. Against v3.6.6 (68)
+the two-point drop is the same three items catalogued at v4.0.58 (below), not anything from this
+cycle's security PRs (#46, #59–#64).
+
+| Sev | Finding | Triage |
+|---|---|---|
+| HIGH | Signed with debug certificate | **Expected.** The release APK carries the v3 signing **lineage** (debug → release, `release.yml` "Re-sign APK with debug→release signing lineage"); MobSF reports the first signer in the lineage. Not a debug build. |
+| HIGH | `AES/CBC/PKCS7Padding` padding-oracle | **False positive.** De-obfuscated `a/AbstractC0483a.java` → `androidx.biometric.CryptoObjectUtils.createFakeCryptoObject` (log tag `CryptoObjectUtils`, alias `androidxBiometric`). Library-internal placeholder cipher used to force the biometric prompt; encrypts nothing of ours. Newly visible because #61 added `BiometricPrompt` (`SpendAuth.kt`). |
+| WARN | Insecure RNG (8 files) | **Third-party.** `java.util.Random` in ProfileInstaller's install-delay jitter (`A5/G.java`) and OkHttp's WebSocket client (`k5/f.java` → `U6/h.java`); `G/b.java` is the platform `SecureRandom` factory. No wallet entropy path touches `java.util.Random` (seed/mnemonic use `SecureRandom`, v3.5.31). |
+| WARN | Base config trusts system certs | Known/accepted — pins are set (`network_security_config.xml` pin-set, two SHA-256 pins, MobSF marks pinning SECURE). |
+| WARN | hardcoded / IP disclosure / temp file / raw SQL / minSdk 26 / exported androidx receivers | Same catalogued set as v3.6.6 + v4.0.58: SQLCipher internals (`net/zetetic/*`), Coil, kmp-tor `IPAddress`/`TorOption`, `SyncService` seed-peer literals, derivation paths / pref keys. No secret. |
+| SECURE | no cleartext, pin-set without expiry, tapjacking protection, **0 / 432 trackers** | — |
+| GONE vs v3.6.6 | "may have root detection" (SECURE) | Heuristic string match no longer fires after R8; the wallet never had a root-detection control, so nothing was lost. |
+
+**Native hardening (MobSF checksec, all 4 ABIs × 8 libs):** NX yes, PIE yes, stack canary yes on
+every `.so`; `libcore-lib.so` / `libsqlcipher.so` / `libtor.so` fortified. ⚠️ MobSF prints
+`relro: None` for every lib — including ones our own `security-cycle.sh` reports as **RELRO FULL**
+via readelf. Treat MobSF's RELRO column as unreliable for these NDK builds; the readelf result above
+stands.
+
+**Manifest:** 2 dangerous permissions (`CAMERA` for QR, `POST_NOTIFICATIONS`), no exported
+components of ours (the flagged exported receivers/services are androidx WorkManager /
+ProfileInstaller, permission-guarded by the platform).
+
+Nothing in this scan changes the accepted residuals: Keystore auth-binding (CRITICAL-1 open half)
+remains ROADMAP Phase 2; the mnemonic-as-String outside load/restore/sign remains P2.
+
+### R8 keep-rule pass — v4.0.76 (2026-08-30, closes the last "still owed" item)
+
+Ground truth taken from the release build's own R8 outputs (CI artifact `mapping-v4.0.76`:
+`seeds.txt` + `mapping.txt`) rather than decompiling — the seeds file IS the kept set.
+
+**Verdict: no over-keep. 1,077 `io.digibyte` classes in the mapping; 1,054 renamed; 23 kept by
+name, and all 23 trace to an annotated rule:**
+
+| Kept by name | Rule that demands it |
+|---|---|
+| `core.bridge.NativeBridge`, `NativeCallback` (+ `SyncService$syncCallback$1` implementor) | JNI resolves by name |
+| 11 × `core.db.entity.*`, `WalletDatabase`, `WalletDatabase_Impl` | Room columns / generated DAO |
+| `DigiByteApp`, `MainActivity`, `SyncService`, `SyncWorker` | manifest / WorkManager components |
+| `core.model.SyncStage`, `WalletViewModel$DisplayCurrency` | the two documented enum keeps (v4.0.58 finding 2 narrowing) |
+| `ui.wallet.WalletViewModel` | side-effect: keeping inner `DisplayCurrency` by name pins the outer name. Cosmetic; hoisting the enum to top level would re-obfuscate the ViewModel name. Not worth a change on its own. |
+
+Spot-checks confirm the narrowed enum rule behaves: `TxKind`, `HubTab`, `ThemeChoice`, `PinStep`,
+`AuthMethod`, `SendFailure`, `AssetOperation` are all **renamed** (only `values()/valueOf` members
+survive), and `CfRecoveryPolicy` was removed outright (`R8$$REMOVED$$CLASS$$701`). The 62
+`io.digibyte` entries in seeds.txt beyond the 23 are member-only keeps (enum members, Hilt
+`_GeneratedInjector` interfaces) — their class names are still obfuscated.
+
+### Gitleaks note (same date)
+
+Committing `mobsf-report-v4.0.76.json` tripped the Scan-for-secrets gate: 248 × `generic-api-key`,
+every one a decompiled string constant from the APK inside the report. `.gitleaks.toml` now
+allowlists `security/reports/mobsf-*.json` (path-scoped, default rules otherwise; verified locally
+with gitleaks 8.24.3 over `security/reports/`: **0 leaks with the config, 1,559 without** — the
+CI run's 248 was just the new report, the local negative control covers every archived report).
+Real embedded-secret coverage for the APK remains `security-cycle.sh`'s own sweep.
+
+**Dependabot (same date):** 57 open alerts (1 critical, 22 high, 32 medium, 2 low) — **every one
+in `settings.gradle.kts`**, i.e. the Gradle *build* classpath (netty, opentelemetry, jdom2, jose4j,
+bouncycastle — the critical is bcprov GOST-CTR keystream reuse, CVE-2025-14813). None of these ship
+in the APK: the runtime classpath's 227 packages were OSV-clean in this cycle's automated half, and the sole `org.bouncycastle` trace in the decompiled surface is OkHttp's reflective
+`BouncyCastleJsseProvider` probe string — a capability check, not the library. Build-tooling hygiene, not app exposure —
+worth a Gradle/AGP bump when convenient, not a release gate.
+
 ### Still owed
 
-MobSF re-scan and the jadx keep-rule pass — neither automated, neither run this cycle (same as the
-40066 cycle).
+Nothing — this cycle's automated half, manual half, MobSF re-scan, and R8 keep-rule pass are all
+recorded. Next cycle owes the same four.
