@@ -339,7 +339,29 @@ fun AppNavigation(
                         // (app module) isn't importable from core. This IS the start of
                         // the post-unlock (lost-PIN) restore.
                         BootGuard.beginRestore(context)
-                        withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
+                        try {
+                            withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
+                        } catch (e: io.digibyte.core.security.KeystoreUserAuthRequiredException) {
+                            // Auth-bound seed key outside its window (docs/specs/
+                            // keystore-auth-binding.md): device-credential prompt, one retry.
+                            val act = context as? androidx.fragment.app.FragmentActivity
+                            if (act != null &&
+                                biometricAuth.authenticateDeviceCredential(act)
+                                    is io.digibyte.core.security.BiometricResult.Success
+                            ) {
+                                try {
+                                    withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
+                                } catch (e2: Exception) {
+                                    android.util.Log.e("AppNavigation", "lost-PIN restore retry failed", e2)
+                                }
+                            } else {
+                                android.util.Log.e("AppNavigation", "lost-PIN restore needs device auth", e)
+                            }
+                        } catch (e: io.digibyte.core.security.KeystoreKeyInvalidatedException) {
+                            // Device lock removed — only the recovery phrase recovers this
+                            // wallet. PinSetupScreen's no-wallet branch offers exactly that.
+                            android.util.Log.e("AppNavigation", "wallet key permanently invalidated", e)
+                        }
                         lostPinRestorePending.value = false
                         restoring = false
                     }

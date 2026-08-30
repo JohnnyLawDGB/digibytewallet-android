@@ -31,6 +31,40 @@ class KeyStoreManagerTest {
         ksm.deleteKey()
     }
 
+    // ── Auth-bound key (docs/specs/keystore-auth-binding.md) ─────────────────
+    // Only meaningful on a device with a secure lock screen; assumption-skipped
+    // elsewhere so CI emulators without a lock screen stay green.
+
+    @Test
+    fun authBoundKey_roundTrip_whenDeviceSecure() {
+        org.junit.Assume.assumeTrue("needs a secure lock screen", ksm.isDeviceSecure())
+        org.junit.Assume.assumeTrue("auth-bound keygen unavailable", ksm.createAuthBoundKey())
+        val original = ByteArray(64) { (it * 3).toByte() }
+        // Right after `adb`-driven test start the device was recently unlocked, so the
+        // 300s window is open; if not, the typed exception is still the CORRECT outcome.
+        try {
+            val enc = ksm.encryptAuthBound(original)
+            assertArrayEquals(original, ksm.decryptAuthBound(enc))
+        } catch (e: KeystoreUserAuthRequiredException) {
+            // Acceptable: binding is enforced — that IS the feature.
+        }
+    }
+
+    @Test
+    fun createAuthBoundKey_neverThrows_evenWithoutLockScreen() {
+        // Returns false (fallback) or true; the one forbidden outcome is a crash.
+        ksm.createAuthBoundKey()
+    }
+
+    @Test
+    fun deleteKey_removesAuthBoundAliasToo() {
+        ksm.createKey()
+        ksm.createAuthBoundKey() // may be false without lock screen — delete must still be safe
+        ksm.deleteKey()
+        assertFalse(ksm.isKeyValid())
+        assertFalse(ksm.hasAuthBoundKey())
+    }
+
     @Test
     fun createKey_thenIsValid() {
         ksm.createKey()

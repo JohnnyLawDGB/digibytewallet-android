@@ -48,6 +48,40 @@ class BiometricAuth {
 
         prompt.authenticate(info)
     }
+
+    /**
+     * Device-credential prompt for refreshing the auth-bound Keystore key's window
+     * (docs/specs/keystore-auth-binding.md): DEVICE_CREDENTIAL | BIOMETRIC_STRONG,
+     * and NO negative button — the API forbids one when DEVICE_CREDENTIAL is allowed.
+     * A success from EITHER method counts as a device auth event, which is exactly
+     * what a timeout-bound key needs to become usable again.
+     */
+    suspend fun authenticateDeviceCredential(
+        activity: FragmentActivity,
+        title: String = "DigiByte Wallet",
+        subtitle: String = "Confirm your device lock to unlock the wallet key",
+    ): BiometricResult = suspendCancellableCoroutine { cont ->
+        val executor = ContextCompat.getMainExecutor(activity)
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                if (cont.isActive) cont.resume(BiometricResult.Success)
+            }
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                if (cont.isActive) cont.resume(BiometricResult.Error(errorCode, errString.toString()))
+            }
+            override fun onAuthenticationFailed() { /* prompt retries internally */ }
+        }
+        val prompt = BiometricPrompt(activity, executor, callback)
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setSubtitle(subtitle)
+            .setAllowedAuthenticators(
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL or
+                BiometricManager.Authenticators.BIOMETRIC_STRONG
+            )
+            .build()
+        prompt.authenticate(info)
+    }
 }
 
 sealed class BiometricResult {

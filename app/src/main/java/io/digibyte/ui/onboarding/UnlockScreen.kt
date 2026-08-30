@@ -63,6 +63,7 @@ fun UnlockScreen(
 
     // Hoisted: these are assigned inside event lambdas, which are not composable.
     val unlockFailedMsg = stringResource(R.string.unlock_err_failed)
+    val deviceLockRemovedMsg = stringResource(R.string.unlock_device_lock_removed)
     val wipingMsg = stringResource(R.string.unlock_wiping)
     val attemptsLeftFmt = stringResource(R.string.unlock_attempts_left)
     var currentInput by remember { mutableStateOf("") }
@@ -98,7 +99,7 @@ fun UnlockScreen(
     //    the existing error UX instead of crashing the process.
     //  - isUnlocking is always reset in `finally` so the keypad/biometric
     //    button never get stuck disabled if navigation is skipped.
-    suspend fun performUnlockAndNavigate() {
+    suspend fun performUnlockAndNavigate(isAuthRetry: Boolean = false) {
         isUnlocking = true
         // Any successful unlock — PIN or BIOMETRIC — clears the PIN rate-limit
         // counter. Critical for the biometric path: a legit user who unlocks with a
@@ -127,6 +128,25 @@ fun UnlockScreen(
             }
         } catch (e: CancellationException) {
             throw e
+        } catch (e: io.digibyte.core.security.KeystoreUserAuthRequiredException) {
+            // Auth-bound seed key outside its device-unlock window
+            // (docs/specs/keystore-auth-binding.md): refresh with a
+            // DEVICE_CREDENTIAL|BIOMETRIC_STRONG prompt and retry ONCE.
+            // This path replaces the crash that reverted the first binding attempt.
+            if (!isAuthRetry && activity != null) {
+                isUnlocking = false
+                val r = biometricAuth.authenticateDeviceCredential(activity)
+                if (r is io.digibyte.core.security.BiometricResult.Success) {
+                    performUnlockAndNavigate(isAuthRetry = true)
+                    return
+                }
+            }
+            errorMessage = unlockFailedMsg
+        } catch (e: io.digibyte.core.security.KeystoreKeyInvalidatedException) {
+            // Device lock screen was removed - the bound key is permanently gone.
+            // Only the written recovery phrase recovers this wallet; say exactly that.
+            android.util.Log.e("UnlockScreen", "wallet key permanently invalidated", e)
+            errorMessage = deviceLockRemovedMsg
         } catch (t: Throwable) {
             android.util.Log.e("UnlockScreen", "unlock failed: ${t.message}", t)
             errorMessage = unlockFailedMsg

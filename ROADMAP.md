@@ -268,10 +268,16 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   verifies with no backoff, no attempt counter, no wipe policy. This is
   now the single cheapest high-value hardening item in the repo.
   **Shipped v3.10.35.**
-- **Key sealing is PIN-gated at the application layer, not at the
-  Keystore.** `setUserAuthenticationRequired` remains deliberately off
+- **Keystore auth-binding implemented 2026-08-30** (branch
+  `feat/keystore-auth-binding`, docs/specs/keystore-auth-binding.md; mark ✅ only when
+  merged): the seed re-wraps onto an auth-bound key (300s device-unlock window,
+  per-API probing, typed prompt-and-retry instead of the API 28/33/35 crashes that
+  reverted the first attempt in 256522c2). Devices without a lock screen keep the
+  unbound key. The entry below records the pre-change state it fixed.
+- **Key sealing WAS PIN-gated at the application layer, not at the
+  Keystore.** `setUserAuthenticationRequired` remained deliberately off
   (`core/…/security/KeyStoreManager.kt:37`) for API-level crash reasons.
-  Right call at the time; still means a compromised app process can
+  Right call at the time; meant a compromised app process could
   decrypt the seed without the device being unlocked.
 - **Digi-ID key isolation — per-site SLIP-0013 derivation implemented 2026-08-30**
   (branch `feat/digiid-key-isolation`, docs/specs/digiid-key-isolation.md; mark ✅ only
@@ -358,7 +364,7 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
 | 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & hardened through v4.0.46, bloom **removed** (v3.10.x), own-node pairing shipped, **`cfcheckpt` active rejection SHIPPED v4.0.41**. 🚧 Remainder: oracle-bootstrap (seeder demotion) |
 | 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
-| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); in-app spend gate + inactivity lock 🚧 (2026-08-30 follow-up branches `fix/audit-spendgate` / `fix/audit-autolock` — mark ✅ only when merged); Keystore hardware-backing **probed/logged, not enforced**; duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation 🚧 (branch `feat/digiid-key-isolation`) → Keystore auth-binding → loud Tor fallback |
+| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); in-app spend gate + inactivity lock 🚧 (2026-08-30 follow-up branches `fix/audit-spendgate` / `fix/audit-autolock` — mark ✅ only when merged); Keystore hardware-backing **probed/logged, not enforced**; duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation ✅ (PR #66, device-verified) → Keystore auth-binding 🚧 (branch `feat/keystore-auth-binding`; mark ✅ only when merged) → loud Tor fallback |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
 | 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet; **Play Console account approved 2026-08-27 — Play first, F-Droid follows** |
 

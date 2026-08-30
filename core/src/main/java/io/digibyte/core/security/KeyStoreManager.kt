@@ -1,10 +1,13 @@
 package io.digibyte.core.security
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
+import android.security.keystore.UserNotAuthenticatedException
 import android.util.Log
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -42,6 +45,8 @@ class KeyStoreManager(
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         const val KEY_ALIAS = "dgb_wallet_master"
         private const val GCM_TAG_LENGTH = 128
+        /** Suffix of the AUTH-BOUND seed key's alias (docs/specs/keystore-auth-binding.md). */
+        const val AUTH_ALIAS_SUFFIX = "_v2"
     }
 
     private val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
@@ -107,6 +112,112 @@ class KeyStoreManager(
         if (keyStore.containsAlias(alias)) {
             keyStore.deleteEntry(alias)
         }
+        if (keyStore.containsAlias(authAlias)) {
+            keyStore.deleteEntry(authAlias)
+        }
+    }
+
+    // ── Auth-bound seed key (docs/specs/keystore-auth-binding.md) ──────────────
+    //
+    // A SECOND alias, bound to a recent device unlock, that the seed blob migrates
+    // onto (WalletManager.migrateSeedKeyIfNeeded). The legacy unbound key above
+    // remains only until migration completes; the DB key (dgb_db_passphrase) is a
+    // different alias and is deliberately never bound — Room opens in background.
+
+    private val authAlias: String get() = alias + AUTH_ALIAS_SUFFIX
+
+    /** True when the device has a secure lock screen — binding is only possible then;
+     *  keygen with auth required on an unsecured device throws (the API 33 crash). */
+    fun isDeviceSecure(): Boolean = try {
+        (context?.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)
+            ?.isDeviceSecure == true
+    } catch (e: Exception) {
+        false
+    }
+
+    fun hasAuthBoundKey(): Boolean = try {
+        keyStore.containsAlias(authAlias)
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Create the auth-bound key per [seedKeyBindingFor]. Returns true when the key
+     * exists (created now or before). NEVER throws — a device where binding cannot
+     * work keeps the legacy behavior (returns false), it does not crash onboarding.
+     */
+    fun createAuthBoundKey(): Boolean {
+        if (hasAuthBoundKey()) return true
+        val binding = seedKeyBindingFor(Build.VERSION.SDK_INT, isDeviceSecure())
+        if (binding == SeedKeyBinding.NONE) {
+            // Silent zeros hide broken detectors: say WHY binding is off, once per attempt.
+            Log.i(TAG, "auth binding unavailable (no device lock screen) — legacy key retained")
+            return false
+        }
+        return try {
+            val builder = KeyGenParameterSpec.Builder(
+                authAlias,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setUserAuthenticationRequired(true)
+            if (binding == SeedKeyBinding.TIMEOUT_PARAMS && Build.VERSION.SDK_INT >= 30) {
+                builder.setUserAuthenticationParameters(
+                    SEED_KEY_AUTH_WINDOW_SECS,
+                    KeyProperties.AUTH_DEVICE_CREDENTIAL or KeyProperties.AUTH_BIOMETRIC_STRONG
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                builder.setUserAuthenticationValidityDurationSeconds(SEED_KEY_AUTH_WINDOW_SECS)
+            }
+            val key = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
+                .apply { init(builder.build()) }
+                .generateKey()
+            logHardwareBacking(key)
+            val windowSecs = SEED_KEY_AUTH_WINDOW_SECS
+            Log.i(TAG, "auth-bound wallet key created (binding=$binding, window=${windowSecs}s)")
+            true
+        } catch (e: Exception) {
+            // The whole point of the probe-and-fallback design: any keygen failure
+            // (vendor quirks included) degrades to the legacy key, never a crash.
+            Log.w(TAG, "auth-bound keygen failed (${e::class.java.simpleName}) — staying on legacy key")
+            false
+        }
+    }
+
+    /** @throws KeystoreUserAuthRequiredException when the auth window has lapsed
+     *  @throws KeystoreKeyInvalidatedException when the device lock was removed */
+    fun encryptAuthBound(data: ByteArray): EncryptedData = mapAuthErrors {
+        val key = keyStore.getKey(authAlias, null)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        EncryptedData(cipher.doFinal(data), cipher.iv)
+    }
+
+    /** @throws KeystoreUserAuthRequiredException / [KeystoreKeyInvalidatedException] — see [encryptAuthBound] */
+    fun decryptAuthBound(encryptedData: EncryptedData): ByteArray = mapAuthErrors {
+        val key = keyStore.getKey(authAlias, null)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val spec = GCMParameterSpec(GCM_TAG_LENGTH, encryptedData.iv)
+        cipher.init(Cipher.DECRYPT_MODE, key, spec)
+        cipher.doFinal(encryptedData.ciphertext)
+    }
+
+    /** Delete ONLY the legacy unbound key — the last step of a verified migration. */
+    fun deleteLegacyKey() {
+        if (keyStore.containsAlias(alias)) {
+            keyStore.deleteEntry(alias)
+        }
+    }
+
+    private inline fun <T> mapAuthErrors(block: () -> T): T = try {
+        block()
+    } catch (e: UserNotAuthenticatedException) {
+        throw KeystoreUserAuthRequiredException(e)
+    } catch (e: KeyPermanentlyInvalidatedException) {
+        throw KeystoreKeyInvalidatedException(e)
     }
 
     fun isKeyValid(): Boolean {

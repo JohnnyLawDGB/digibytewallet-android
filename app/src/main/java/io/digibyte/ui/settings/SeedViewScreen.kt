@@ -63,19 +63,11 @@ fun SeedViewScreen(
      * Behind the same PIN + biometric gate as the phrase, because it is the same secret material.
      */
     val storedPassphrase: String? = remember {
+        // v2-aware decrypt lives in WalletManager (auth-bound key migration,
+        // docs/specs/keystore-auth-binding.md) — no more raw prefs reads here.
         try {
-            val prefs = view.context.getSharedPreferences("dgb_wallet_seed", android.content.Context.MODE_PRIVATE)
-            val ct = prefs.getString("encrypted_pass", null)
-            val iv = prefs.getString("encrypted_pass_iv", null)
-            if (ct != null && iv != null) {
-                val decrypted = keyStoreManager.decrypt(
-                    io.digibyte.core.security.EncryptedData(
-                        ct.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
-                        iv.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
-                    )
-                )
-                decrypted?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
-            } else null
+            walletManager.decryptStoredPassphrase()
+                ?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
         } catch (e: Exception) {
             null
         }
@@ -84,15 +76,8 @@ fun SeedViewScreen(
     // Decrypt the seed from SharedPreferences via KeyStoreManager
     val words: List<String> = remember {
         try {
-            val prefs = view.context.getSharedPreferences("dgb_wallet_seed", android.content.Context.MODE_PRIVATE)
-            val ciphertextHex = prefs.getString("encrypted_seed", null)
-            val ivHex = prefs.getString("encrypted_seed_iv", null)
-            if (ciphertextHex != null && ivHex != null) {
-                val ciphertext = ciphertextHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-                val iv = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-                val decrypted = keyStoreManager.decrypt(
-                    io.digibyte.core.security.EncryptedData(ciphertext, iv)
-                )
+            val decrypted = walletManager.decryptStoredMnemonic()
+            if (decrypted != null) {
                 val phrase = String(decrypted, Charsets.UTF_8)
                 decrypted.fill(0) // zero the ByteArray after use
                 phrase.trim().split(" ")
