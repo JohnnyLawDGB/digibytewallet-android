@@ -76,3 +76,11 @@ data class SyncStateResponse(
     /** Blocks-behind; 0 == at tip, negative == behind. */
     val sync: Long,
 )
+
+/**
+ * The URL to name in a failure log. The address-history route embeds the wallet's own address
+ * in the path, and every non-2xx / thrown request used to log the raw URL — so a flaky endpoint
+ * wrote the user's address to logcat on each retry. Only the route survives.
+ */
+internal fun endpointOf(url: String): String =
+    url.replace(Regex("""/history/[^/?]+"""), "/history/<addr>")

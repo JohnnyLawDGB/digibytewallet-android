@@ -39,7 +39,7 @@ class TaprootReceiveAddressTest {
 
     @Test
     fun getReceiveAddress_format3_returnsBip86TaprootAddress() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val taproot = NativeBridge.getReceiveAddress(0, 3)
         assertNotNull("format 3 receive address should not be null", taproot)
@@ -57,7 +57,7 @@ class TaprootReceiveAddressTest {
 
     @Test
     fun getReceiveAddress_format2_bip84Unchanged() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val segwit = NativeBridge.getReceiveAddress(0, 2)
         assertNotNull("format 2 receive address should not be null", segwit)

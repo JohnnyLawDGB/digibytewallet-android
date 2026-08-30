@@ -48,7 +48,7 @@ class JniBridgeTest {
         // Generate a mnemonic and create a wallet to get a real valid address
         val mnemonic = NativeBridge.generateMnemonic(128)
         assertNotNull(mnemonic)
-        val created = NativeBridge.createWallet(mnemonic!!)
+        val created = NativeBridge.createWalletFromBytes(mnemonic!!.toByteArray(), null)
         assertTrue("Wallet should be created", created)
 
         val addr = NativeBridge.getReceiveAddress(0, 0)

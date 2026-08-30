@@ -20,7 +20,8 @@ import android.content.Context
  *
  * Left shared / NEVER suffixed: `dgb_wallet_seed`, `dgb_pin_store`,
  * `dgb_db_key`, `dgb_settings` (holds the network selection itself),
- * `dgb_digiscope` (Hub account JWT — user account, not chain state).
+ * `dgb_hub_session` (Hub account JWT, encrypted — user account, not chain state; the
+ * legacy plaintext `dgb_digiscope` copy exists only until HubTokenStore migrates it).
  *
  * Default (pref absent, or explicitly false = mainnet) yields `""` — every
  * suffixed name is IDENTICAL to its pre-toggle name, so existing mainnet

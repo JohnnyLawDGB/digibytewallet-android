@@ -85,12 +85,12 @@ class DigistampAssetClient(
             if (!resp.isSuccessful) {
                 // Never swallow silently — a nameless asset with no log line is undebuggable,
                 // which is exactly how the broken digiscope route went unnoticed.
-                android.util.Log.w("DigistampAssetClient", "GET $url → HTTP ${resp.code}")
+                android.util.Log.w("DigistampAssetClient", "GET ${endpointOf(url)} → HTTP ${resp.code}")
                 null
             } else resp.body?.string()
         }
     } catch (e: Exception) {
-        android.util.Log.w("DigistampAssetClient", "GET $url failed", e)
+        android.util.Log.w("DigistampAssetClient", "GET ${endpointOf(url)} failed", e)
         null
     }
 

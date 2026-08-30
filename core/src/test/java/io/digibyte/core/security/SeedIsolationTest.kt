@@ -55,18 +55,19 @@ class SeedIsolationTest {
             String::class.java, method.returnType)
     }
 
+    /**
+     * The String-typed `createWallet(String)` / `recoverWallet(String, Long)` entry points were
+     * the legacy pre-CRITICAL-3 path: the mnemonic crossed JNI as an immutable JVM String, and
+     * their C bodies were the only place the wallet's whole address pool was written to logcat.
+     * They had no production caller after `WalletManager` moved to the `FromBytes` variants and
+     * were deleted in the 2026-08-30 audit follow-up. Their absence is the invariant.
+     */
     @Test
-    fun `NativeBridge createWallet accepts seed but does not return it`() {
-        val method = NativeBridge::class.java.getDeclaredMethod("createWallet", String::class.java)
-        assertEquals("createWallet must return Boolean, not the seed",
-            Boolean::class.javaPrimitiveType, method.returnType)
-    }
-
-    @Test
-    fun `NativeBridge recoverWallet accepts seed but does not return it`() {
-        val method = NativeBridge::class.java.getDeclaredMethod("recoverWallet", String::class.java, Long::class.javaPrimitiveType)
-        assertEquals("recoverWallet must return Boolean, not the seed",
-            Boolean::class.javaPrimitiveType, method.returnType)
+    fun `NativeBridge has no String-typed createWallet or recoverWallet entry point`() {
+        val stringy = NativeBridge::class.java.declaredMethods.filter { m ->
+            m.name in setOf("createWallet", "recoverWallet")
+        }
+        assertTrue("legacy String seed entry points must stay deleted: $stringy", stringy.isEmpty())
     }
 
     @Test
@@ -126,12 +127,17 @@ class SeedIsolationTest {
         assertEquals("getReceiveAddress should take 2 int params, no seed", 2, method.parameterCount)
     }
 
+    /**
+     * `unlockSession(ByteArray)` was documented as taking an "opaque token" but its C body
+     * memcpy'd any 64-byte argument straight into `g_seed` — a raw-seed injection door with no
+     * production caller (`WalletManager.unlock(authToken)` was itself dead). The earlier test
+     * here asserted the method's return type, which is not what made it safe. Deleted 2026-08-30;
+     * this asserts it stays gone.
+     */
     @Test
-    fun `NativeBridge unlockSession accepts opaque token not raw seed`() {
-        // The auth token is a Keystore-decrypted blob, not the mnemonic
-        val method = NativeBridge::class.java.getDeclaredMethod("unlockSession", ByteArray::class.java)
-        assertEquals("unlockSession must return Boolean",
-            Boolean::class.javaPrimitiveType, method.returnType)
+    fun `NativeBridge has no unlockSession entry point`() {
+        val present = NativeBridge::class.java.declaredMethods.filter { it.name == "unlockSession" }
+        assertTrue("unlockSession must stay deleted (raw-seed injection door): $present", present.isEmpty())
     }
 
     @Test

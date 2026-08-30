@@ -22,6 +22,22 @@ class NativeMemorySecurityTest {
             content.contains("secure_zero(seed,"))
     }
 
+    /**
+     * The legacy String entry points (`createWallet`, `recoverWallet`, `unlockSession`) are
+     * deleted, and with them the only loops that wrote every wallet address to logcat
+     * (`addr[%zu] = %s`). A JNI symbol for any of them coming back means the String seed path
+     * or the address dump is back.
+     */
+    @Test
+    fun `jni_wallet_c has no legacy String seed entry points or address-pool dump`() {
+        val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
+        listOf("NativeBridge_createWallet(", "NativeBridge_recoverWallet(", "NativeBridge_unlockSession(")
+            .forEach { sym ->
+                assertFalse("$sym must stay deleted", content.contains(sym))
+            }
+        assertFalse("address pool must never be logged", content.contains("addr[%zu] = %s"))
+    }
+
     @Test
     fun `jni_wallet_c zeros phrase after createWallet`() {
         val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
@@ -112,7 +128,7 @@ class NativeMemorySecurityTest {
     @Test
     fun `recoverWalletFromBytes zeros phraseChars after seed derivation`() {
         val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
-        val section = content.substringAfter("recoverWalletFromBytes").substringBefore("unlockSession")
+        val section = content.substringAfter("recoverWalletFromBytes").substringBefore("lockSession")
         assertTrue("recoverWalletFromBytes must zero phraseChars after use",
             section.contains("secure_zero(phraseChars,"))
     }

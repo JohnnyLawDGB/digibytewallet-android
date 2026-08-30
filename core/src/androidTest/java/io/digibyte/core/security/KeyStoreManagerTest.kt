@@ -7,13 +7,22 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/**
+ * Runs against a dedicated test alias. The earlier version built the manager on the production
+ * alias and deleted it in setup/teardown — on a device holding a real wallet that destroys the
+ * key wrapping the seed, and the wallet with it.
+ */
 @RunWith(AndroidJUnit4::class)
 class KeyStoreManagerTest {
+    private companion object {
+        const val TEST_ALIAS = "dgb_keystore_manager_test"
+    }
+
     private lateinit var ksm: KeyStoreManager
 
     @Before
     fun setup() {
-        ksm = KeyStoreManager()
+        ksm = KeyStoreManager(alias = TEST_ALIAS)
         ksm.deleteKey() // clean slate
     }
 

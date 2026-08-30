@@ -25,12 +25,6 @@ object NativeBridge {
      *  checksum doesn't match — i.e. a typo'd/invalid seed. Touches no wallet state. */
     external fun isValidMnemonic(phrase: String): Boolean
 
-    /** Create wallet from mnemonic phrase. Returns true on success. */
-    external fun createWallet(phrase: String): Boolean
-
-    /** Recover wallet from mnemonic, syncing from creationTimestamp (Unix epoch seconds). */
-    external fun recoverWallet(phrase: String, creationTimestamp: Long): Boolean
-
     /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
     external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: ByteArray?): Boolean
 
@@ -40,9 +34,6 @@ object NativeBridge {
         creationTimestamp: Long,
         passphrase: ByteArray?,
     ): Boolean
-
-    /** Authorize a session (called after biometric unlock). Token is Keystore-decrypted auth blob. */
-    external fun unlockSession(authToken: ByteArray): Boolean
 
     /** Lock the session — zeros all derived keys from C core memory. */
     external fun lockSession()
@@ -254,7 +245,7 @@ object NativeBridge {
     /** Serialize all wallet transactions to a byte array for persistence. */
     external fun getSerializedTransactions(): ByteArray?
 
-    /** Load previously saved transactions before recoverWallet/createWallet. */
+    /** Load previously saved transactions before recoverWalletFromBytes/createWalletFromBytes. */
     external fun loadSerializedTransactions(data: ByteArray): Int
 
     // === Validation ===

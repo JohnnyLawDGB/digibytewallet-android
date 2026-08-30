@@ -34,7 +34,7 @@ class TaprootWatchSetTest {
     /** Taproot receive address is emitted into BRWalletAllAddrs (the filter source). */
     @Test
     fun taprootReceiveAddress_isInWatchSet() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val taproot = NativeBridge.getReceiveAddress(0, 3)
         assertNotNull("format 3 receive address should not be null", taproot)
@@ -65,7 +65,7 @@ class TaprootWatchSetTest {
      */
     @Test
     fun taprootWindow_survivesChainRealloc() {
-        assertTrue("wallet should be created", NativeBridge.createWallet(mnemonic))
+        assertTrue("wallet should be created", NativeBridge.createWalletFromBytes(mnemonic.toByteArray(), null))
 
         val addr0 = NativeBridge.getReceiveAddress(0, 3)
         assertNotNull(addr0)

@@ -1,7 +1,6 @@
 package io.digibyte.core.digiscope
 
 import android.content.Context
-import android.content.SharedPreferences
 import io.digibyte.core.hub.Channel
 import io.digibyte.core.hub.ChatMessage
 import io.digibyte.core.hub.DigiRunnerStats
@@ -31,8 +30,6 @@ class DigiScopeClient(
 ) {
     companion object {
         const val BASE_URL = "https://api.digiscope.me/api"
-        private const val PREFS_NAME = "dgb_digiscope"
-        private const val KEY_JWT = "dgb_jwt"
     }
 
     // Certificate pinning for api.digiscope.me — prevents MITM via rogue CA.
@@ -42,8 +39,7 @@ class DigiScopeClient(
         .certificatePinner(io.digibyte.core.network.DigiScopePins.certificatePinner())
         .build()
 
-    private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val tokenStore = HubTokenStore(context)
 
     private var jwtToken: String? = null
 
@@ -54,12 +50,12 @@ class DigiScopeClient(
     // ── JWT persistence ───────────────────────────────────────────────────────
 
     fun persistToken(token: String) {
-        prefs.edit().putString(KEY_JWT, token).apply()
+        tokenStore.save(token)
         jwtToken = token
     }
 
     fun loadToken() {
-        jwtToken = prefs.getString(KEY_JWT, null)
+        jwtToken = tokenStore.load()
     }
 
     // ── Auth ──────────────────────────────────────────────────────────────────
@@ -97,7 +93,7 @@ class DigiScopeClient(
             if (parts.size != 2) return@withContext false
             val address = parts[0]
             val signature = parts[1]
-            android.util.Log.i("DigiScope", "quickLogin: signed with $address, submitting callback")
+            android.util.Log.i("DigiScope", "quickLogin: signed, submitting callback")
 
             // 3. Submit to callback
             val token = login(address, signature, uri)
@@ -128,7 +124,8 @@ class DigiScopeClient(
 
             val response = client.newCall(request).execute()
             val responseBody = response.body?.string()
-            android.util.Log.i("DigiScope", "login callback: HTTP ${response.code} body=${responseBody?.take(300)}")
+            // The callback body IS the session JWT — never log it, only the shape of the reply.
+            android.util.Log.i("DigiScope", "login callback: HTTP ${response.code} bodyLength=${responseBody?.length ?: -1}")
             if (!response.isSuccessful || responseBody == null) return@withContext null
 
             val responseJson = JSONObject(responseBody)
@@ -555,7 +552,7 @@ class DigiScopeClient(
         if (response.code == 401) {
             // Session expired — clear stale token so isLoggedIn() returns false
             jwtToken = null
-            prefs.edit().remove(KEY_JWT).apply()
+            tokenStore.clear()
             return false
         }
         return response.isSuccessful
@@ -568,7 +565,7 @@ class DigiScopeClient(
 
     fun logout() {
         jwtToken = null
-        prefs.edit().remove(KEY_JWT).apply()
+        tokenStore.clear()
     }
 
     // ── JSON helpers ──────────────────────────────────────────────────────────

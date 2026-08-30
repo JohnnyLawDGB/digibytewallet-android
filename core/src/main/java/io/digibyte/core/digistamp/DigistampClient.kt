@@ -1,5 +1,6 @@
 package io.digibyte.core.digistamp
 
+import io.digibyte.core.asset.network.endpointOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -41,7 +42,7 @@ class DigistampClient(
     private fun getBody(url: String): String? = try {
         client.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
             if (!resp.isSuccessful) {
-                android.util.Log.w("DigistampClient", "GET $url → HTTP ${resp.code}")
+                android.util.Log.w("DigistampClient", "GET ${endpointOf(url)} → HTTP ${resp.code}")
                 null
             } else {
                 resp.body?.string()
@@ -49,7 +50,7 @@ class DigistampClient(
         }
     } catch (e: Exception) {
         // Never swallow silently — a blank digistamp screen with no log line is undebuggable.
-        android.util.Log.w("DigistampClient", "GET $url failed", e)
+        android.util.Log.w("DigistampClient", "GET ${endpointOf(url)} failed", e)
         null
     }
 }

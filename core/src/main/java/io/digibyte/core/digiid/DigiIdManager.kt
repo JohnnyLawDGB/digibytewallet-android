@@ -102,7 +102,7 @@ class DigiIdManager(
                     Log.i(TAG, "DigiScope domain — authenticating wallet identity for Hub")
                     val jwt = digiScopeClient.login(address, signature, request.rawUri)
                     if (jwt != null) {
-                        Log.i(TAG, "Hub JWT obtained for wallet address $address")
+                        Log.i(TAG, "Hub JWT obtained for wallet identity")
                     } else {
                         Log.w(TAG, "Hub JWT login failed — Hub will be disconnected")
                     }
