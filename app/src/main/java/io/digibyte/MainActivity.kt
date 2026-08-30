@@ -36,6 +36,7 @@ import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import io.digibyte.service.SyncService
 import io.digibyte.ui.navigation.AppNavigation
+import io.digibyte.ui.navigation.autoLockTimeoutOrDefault
 import io.digibyte.ui.navigation.shouldAutoLock
 import io.digibyte.ui.theme.DigiByteTheme
 import kotlinx.coroutines.Dispatchers
@@ -152,17 +153,23 @@ class MainActivity : FragmentActivity() {
         // Settings takes effect without a restart and the main thread never touches Room.
         // lockUi() is state-only — the existing LaunchedEffect(walletState) in AppNavigation
         // routes Locked → "unlock"; nothing here navigates and nothing here touches native.
+        // A missing wallet_config row (nothing seeds it) means the entity default, not
+        // "no lock"; a DAO failure is the only thing that skips a tick.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
                     delay(AUTO_LOCK_TICK_MS)
                     if (walletManager.walletState.value !is WalletState.Unlocked) continue
-                    val timeoutMs = withContext(Dispatchers.IO) {
-                        runCatching { walletConfigDao.get()?.autoLockTimeoutMs }.getOrNull()
+                    val (timeoutMs, hasPin) = withContext(Dispatchers.IO) {
+                        runCatching {
+                            autoLockTimeoutOrDefault(walletConfigDao.get()?.autoLockTimeoutMs) to pinManager.hasPin()
+                        }
+                            .onFailure { android.util.Log.w("MainActivity", "auto-lock: config read failed, skipping tick", it) }
+                            .getOrNull()
                     } ?: continue
                     val now = android.os.SystemClock.elapsedRealtime()
                     val last = lastInteractionMs
-                    if (shouldAutoLock(walletManager.walletState.value, last, now, timeoutMs)) {
+                    if (shouldAutoLock(walletManager.walletState.value, hasPin, last, now, timeoutMs)) {
                         android.util.Log.i("MainActivity", "auto-lock: idle ${(now - last) / 1000}s >= ${timeoutMs / 1000}s — locking UI")
                         walletManager.lockUi()
                     }
