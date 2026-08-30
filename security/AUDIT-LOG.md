@@ -483,3 +483,39 @@ Either wire it with tests or remove the declaration.
 
 MobSF re-scan and a jadx pass checking whether the R8 keep rules over-kept — neither is automated
 here, and neither was run this cycle.
+
+## Out of cycle — external audit, 2026-08-30 (v4.0.75 → fix branch `fix/warm-resume-lock-gate`)
+
+An independent-model audit returned four "release blockers". Every claim was re-verified against
+the shipped tree and the Note 8; the full triage is `docs/superpowers/audits/2026-08-30-external-security-audit-triage.md`.
+The marker above is deliberately NOT moved — this was not a cycle (the automatable half was not run).
+
+**P0 — FIXED on the branch.** Warm-resume lock bypass. `MainActivity.onStop()` → `lockUi()` set
+the state to Locked, but `AppNavigation` computed its start destination once, so a warm resume of the
+same Activity instance (launcher tap / Recents / return from an external browser) came back on the
+live wallet graph. Measured on the Note 8: HOME → 6 s → launcher tap → full Wallet screen → Send →
+"Confirm Transaction" with a live Send button, no PIN; with no fingerprint enrolled, `SendScreen`'s
+"proceed directly" branch would have broadcast. With no PIN and no biometric on ANY device: DigiAsset
+send, foreign-seed sweep to an external address, Hub quickLogin, own-node pairing. A fresh instance
+(`am start -n`) prompted correctly, which is why it was never seen. Fix: `LockGatePolicy.shouldRouteToUnlock`
+(6 JVM tests) + `LaunchedEffect(walletState)` in `AppNavigation` navigating to `unlock` with `popUpTo(0)`;
+device-gated on the Note 8 (cold start prompts once; warm resume prompts; BACK leaves the app).
+
+**P1 — OPEN, decision owed.** The no-biometric branches (`SendScreen.kt:150/:178`,
+`DigiIdConfirmScreen.kt:127`) and the never-gated AssetSend / sweep / quickLogin / node-pair confirms
+need an in-app PIN (recommended) or DEVICE_CREDENTIAL gate. The `SendScreen.kt:150` comment
+"(PIN fallback handled by system)" is false. `WalletConfigEntity.autoLockTimeoutMs` has no consumer —
+the Security-settings auto-lock is inert and `THREAT_MODEL.md:15` overclaims.
+
+**P2 — OPEN, trivial.** `DigiScopeClient.kt:131` logs the login body (Hub JWT) — same class as
+findings 3 and 7 above; `DigiScopeClient.kt:100` / `DigiIdManager.kt:105` log the full address against
+CLAUDE.md:100. No `dataExtractionRules` (seed/PIN/DB-key blobs are Keystore-wrapped; the migratable
+value is the plaintext JWT and the address/tx set). Mnemonic/passphrase entry has no FLAG_SECURE and a
+learnable IME.
+
+**Refuted.** "No signer firewall" (message signing prepends `\x19DigiByte Signed Message:\n` +
+varint + double-SHA256 — a challenge can never be a sighash); native address-pool logging (legacy
+String JNI entries, no production caller); raw Digi-ID URI logging (fixed 2026-08-26); 12-word default
+as a security issue. Keystore auth-binding / CryptoObject / immutable-String mnemonic are the recorded
+CRITICAL-1 / P2 residuals; new there: hardware backing is asserted (`THREAT_MODEL.md:12`) but never
+checked, and `THREAT_MODEL.md:16` (enrollment invalidation) is false for a non-auth-bound key.

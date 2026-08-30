@@ -200,6 +200,16 @@ class RecoveryScanClassifyTest {
             )
         } catch (e: UnsatisfiedLinkError) {
             reachedNative = true
+        } catch (e: NoClassDefFoundError) {
+            // Same seam, later in the JVM: once any earlier test has tripped NativeBridge's
+            // static initializer (System.loadLibrary with no library), the class is marked
+            // erroneous and every later touch throws NoClassDefFoundError with
+            // ExceptionInInitializerError as its cause — not UnsatisfiedLinkError. Test order
+            // differs between Gradle workers, which is why this passed locally and failed on
+            // CI (develop @ 01e6c9a5). Either error is the native signer being reached.
+            reachedNative = true
+        } catch (e: ExceptionInInitializerError) {
+            reachedNative = true
         }
         assertTrue(
             "BIP49 must reach the signer instead of being turned away before it is attempted",

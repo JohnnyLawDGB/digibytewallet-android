@@ -118,6 +118,27 @@ fun AppNavigation(
     // Observe wallet state to gate navigation
     val walletState by walletManager.walletState.collectAsStateWithLifecycle()
 
+    // Reactive lock. MainActivity.onStop() → lockUi() flips the state to Locked, but the
+    // start destination below is computed once, so on a warm resume of the same Activity
+    // instance the NavHost was still on the wallet graph — balance, Send, Assets, the
+    // foreign-seed sweep and Hub login all reachable with no PIN (Note 8, v4.0.75). Keyed on
+    // walletState only: it fires on the Unlocked→Locked transition and never recomputes the
+    // start destination, so the "double PIN prompt" the remember{} guards against cannot
+    // recur. popUpTo(0) clears the wallet graph so BACK from the PIN screen leaves the app
+    // instead of revealing the screen underneath; UnlockScreen's existing success path then
+    // navigates to "wallet" exactly as on a cold start. See shouldRouteToUnlock for the
+    // flows deliberately left alone (lost-PIN → pin_setup, onboarding graph, cold start).
+    LaunchedEffect(walletState) {
+        val hasPin = try { pinManager.hasPin() } catch (e: Exception) { false }
+        if (shouldRouteToUnlock(walletState, hasPin, currentRoute)) {
+            android.util.Log.i("AppNavigation", "wallet locked on route=$currentRoute — routing to unlock")
+            navController.navigate("unlock") {
+                popUpTo(0) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
     // Set (once, below) when the lost-PIN branch is taken: wallet exists on
     // disk but PIN was lost. Consumed by the pin_setup composable, which
     // performs the actual restoreFromDisk() call off the main thread — see
