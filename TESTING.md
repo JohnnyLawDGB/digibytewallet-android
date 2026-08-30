@@ -42,16 +42,17 @@ Total Kotlin `*Test.kt` files: **62** (348 unit + 73 instrumented `@Test` method
 ./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"
 ```
 
-**42 security tests** across 4 files in `core/src/test/java/io/digibyte/core/security/`:
+The host-JVM security suite lives in `core/src/test/java/io/digibyte/core/security/`. Its size is not recorded here — take the count from `core/build/test-results/testMainnetDebugUnitTest/` after a run (a hard-coded number in this file drifted for months).
 
-| Test class | `@Test` | Coverage |
-|------------|---------|----------|
-| `NativeMemorySecurityTest` | 17 | C `secure_zero`, `BRKeyClean`, volatile + compiler barrier, `/dev/urandom`, `g_seed` encapsulation |
-| `SeedIsolationTest` | 11 | JNI API surface — no method returns seed/key material; accessor-only `g_seed` |
-| `ManifestSecurityTest` | 8 | `allowBackup=false`, no exported components, minimal permissions |
-| `NetworkLeakTest` | 6 | No seed references in HTTP / WebSocket / JSON code paths |
+| Test class | Coverage |
+|------------|---------|
+| `NativeMemorySecurityTest` | C `secure_zero`, `BRKeyClean`, volatile + compiler barrier, `/dev/urandom`, `g_seed` encapsulation |
+| `SeedIsolationTest` | JNI API surface — no method returns seed/key material; accessor-only `g_seed` |
+| `ManifestSecurityTest` | `allowBackup=false`, no exported components, minimal permissions |
+| `NetworkLeakTest` | No seed references in HTTP / WebSocket / JSON code paths |
+| `PinRateLimitTest` | PIN attempt counter / lockout schedule |
 
-(Instrumented security tests — `KeyStoreManagerTest`, `PinManagerTest` — live under `core/src/androidTest/.../security` and are counted in the instrumented tier, not the 42.)
+(Instrumented security tests — `KeyStoreManagerTest`, `PinManagerTest` — live under `core/src/androidTest/.../security` and are counted in the instrumented tier, not the host suite.)
 
 ## Instrumented Tests (device / emulator)
 
@@ -113,9 +114,9 @@ Baseline expectations (see the MobSF false-positive baseline notes): 0 trackers;
 
 Authoritative audit: **`security/AUDIT-SUMMARY.md`** (do not maintain a second copy of the finding statuses here). Current CRITICAL dispositions:
 
-- **CRITICAL-1** — Resolved as designed: KeyStore key is *not* bound to user authentication (`setUserAuthenticationRequired` removed to avoid cross-API crashes); the app enforces its own PIN lock. **Residual (Phase 2):** no Keystore user-auth binding and no PIN rate-limit — a compromised app process can decrypt the seed without a device unlock.
+- **CRITICAL-1** — Resolved as designed: KeyStore key is *not* bound to user authentication (`setUserAuthenticationRequired` removed to avoid cross-API crashes); the app enforces its own PIN lock. PIN rate-limit shipped v3.10.35 (closes that half). **Residual (Phase 2):** no Keystore user-auth binding — a compromised app process can decrypt the seed without a device unlock.
 - **CRITICAL-2** — Resolved: `g_seed` is `static` to `jni_wallet.c` with an accessor-only API (`seed_sign_transaction`, `seed_derive_key`, `seed_is_valid`, `seed_zero`).
-- **CRITICAL-3** — Resolved: `loadSeed()` returns a `ByteArray` zeroed after use; `createWalletFromBytes` / `recoverWalletFromBytes` accept `jbyteArray` with `secure_zero()` on the C stack. The mnemonic never becomes an immutable JVM `String` on the restore path.
-- **CRITICAL-4** — Resolved: Digi-ID callback domain validated against the URI host; HTTP (`u=1`) callbacks blocked. **Residual (Phase 2):** Digi-ID still signs with the first wallet address (`m/44'/20'/0'/0/0`) rather than an isolated subtree.
+- **CRITICAL-3** — Resolved: `loadSeed()` returns a `ByteArray` zeroed after use; `createWalletFromBytes` / `recoverWalletFromBytes` accept `jbyteArray` with `secure_zero()` on the C stack. The mnemonic never becomes an immutable JVM `String` on the load/restore/sign path; generation (`generateMnemonic` returns a `jstring`), onboarding display and the seed-view screen still hold `String`s — recorded in `security/AUDIT-SUMMARY.md` P2 as accepted.
+- **CRITICAL-4** — Resolved: Digi-ID callback domain validated against the URI host; HTTP (`u=1`) callbacks blocked. **Residual (Phase 2):** Digi-ID signs with the legacy bread-wallet key `m/0'/0/0` (hardcoded in the JNI — not `m/44'/20'/0'/0/0`, corrected 2026-08-19); the residual is linkability (one identity address for every site), not key exposure.
 
 A bug bounty program (up to 100K DGB) covers v3.5.31+; report to `security@digiscope.me`.

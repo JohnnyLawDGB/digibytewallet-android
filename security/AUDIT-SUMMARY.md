@@ -55,7 +55,7 @@ are the recorded remainder (re-confirmed by the 2026-08-30 external audit,
 still accepted); SOCKS5 handshake response parse is memory-safe
 (`rem <= sizeof(buf)` guard); BIP158 cfheaders probe/re-anchor bounded (array
 writes guarded, re-anchor budget capped — worst case a malicious filter peer
-griefs a session to bloom fallback); `getTransactionDetails` newest-100 buffer
+griefs a session into the re-anchor budget and a stalled CF chain — there is no bloom fallback since v4.0.0, so the address set never leaves the device); `getTransactionDetails` newest-100 buffer
 over-sized + `snprintf`-bounded; `useLegacyPackaging=false` + exec→no-exec is
 security-**positive** (libs mmap'd read-only, no extracted executable).
 
@@ -190,14 +190,22 @@ The confirmation screen displays the raw callback URL but doesn't highlight that
 | `secure_zero` uses volatile pointer, `BRKeyClean` called after signing | PASS |
 | DigiScopeClient/HubWebSocket/DigiIdManager never reference seed material | PASS |
 
-## Automated Test Suite (42 tests, 42 passing)
+## Automated Test Suite
 
-| Test Class | Tests | Coverage |
-|------------|-------|----------|
-| `SeedIsolationTest` | 11 | NativeBridge API surface — no seed/key return methods, ByteArray variants |
-| `ManifestSecurityTest` | 8 | Backup, exports, permissions, network config |
-| `NetworkLeakTest` | 6 | HTTP/WS/JSON payloads contain no seed references |
-| `NativeMemorySecurityTest` | 17 | C code secure_zero, BRKeyClean, volatile, /dev/urandom, g_seed encapsulation |
+The host-JVM security suite lives in `core/src/test/java/io/digibyte/core/security/`
+and runs with `./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"`.
+The count is deliberately not written here — read it from the test-results XML
+of the run you are auditing (`core/build/test-results/testMainnetDebugUnitTest/`),
+because a number baked into this file drifted (it said 42 for months after
+`PinRateLimitTest` and further `SeedIsolationTest` cases landed).
+
+| Test Class | Coverage |
+|------------|----------|
+| `SeedIsolationTest` | NativeBridge API surface — no seed/key return methods, ByteArray variants |
+| `ManifestSecurityTest` | Backup, exports, permissions, network config |
+| `NetworkLeakTest` | HTTP/WS/JSON payloads contain no seed references |
+| `NativeMemorySecurityTest` | C code secure_zero, BRKeyClean, volatile, /dev/urandom, g_seed encapsulation |
+| `PinRateLimitTest` | PIN attempt counter / lockout schedule (v3.10.35) |
 
 ## MobSF Static Analysis
 
