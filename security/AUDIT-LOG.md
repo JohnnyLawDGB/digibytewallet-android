@@ -605,7 +605,42 @@ controls that exist; the 12-word default and the lost-PIN branch recorded as dec
 **Accepted residuals, unchanged.** Keystore auth-binding / CryptoObject (CRITICAL-1's open half,
 ROADMAP Phase 2); the mnemonic as an immutable String outside the load/restore/sign path (P2).
 
+### MobSF re-scan — v4.0.76 release APK (2026-08-30, closes the "still owed" item below)
+
+Scanned the **shipped GitHub release asset** `digibyte-wallet-v4.0.76.apk`
+(SHA256 `457d451bc63e34a2213fee8aee802dab9d91d30991cefd56fa3829f13d349d7d`, 75,002,954 bytes) with
+MobSF v4.5.2 static analyzer. Reports: `reports/mobsf-report-v4.0.76.json`,
+`reports/mobsf-scorecard-v4.0.76.json`.
+
+**Score 66/100 — identical finding set to the v4.0.58 baseline. Zero new signal.**
+Set-diff of scorecard titles v4.0.58 → v4.0.76: nothing added, nothing removed. Against v3.6.6 (68)
+the two-point drop is the same three items catalogued at v4.0.58 (below), not anything from this
+cycle's security PRs (#46, #59–#64).
+
+| Sev | Finding | Triage |
+|---|---|---|
+| HIGH | Signed with debug certificate | **Expected.** The release APK carries the v3 signing **lineage** (debug → release, `release.yml` "Re-sign APK with debug→release signing lineage"); MobSF reports the first signer in the lineage. Not a debug build. |
+| HIGH | `AES/CBC/PKCS7Padding` padding-oracle | **False positive.** De-obfuscated `a/AbstractC0483a.java` → `androidx.biometric.CryptoObjectUtils.createFakeCryptoObject` (log tag `CryptoObjectUtils`, alias `androidxBiometric`). Library-internal placeholder cipher used to force the biometric prompt; encrypts nothing of ours. Newly visible because #61 added `BiometricPrompt` (`SpendAuth.kt`). |
+| WARN | Insecure RNG (8 files) | **Third-party.** `java.util.Random` in ProfileInstaller's install-delay jitter (`A5/G.java`) and OkHttp's WebSocket client (`k5/f.java` → `U6/h.java`); `G/b.java` is the platform `SecureRandom` factory. No wallet entropy path touches `java.util.Random` (seed/mnemonic use `SecureRandom`, v3.5.31). |
+| WARN | Base config trusts system certs | Known/accepted — pins are set (`network_security_config.xml` pin-set, two SHA-256 pins, MobSF marks pinning SECURE). |
+| WARN | hardcoded / IP disclosure / temp file / raw SQL / minSdk 26 / exported androidx receivers | Same catalogued set as v3.6.6 + v4.0.58: SQLCipher internals (`net/zetetic/*`), Coil, kmp-tor `IPAddress`/`TorOption`, `SyncService` seed-peer literals, derivation paths / pref keys. No secret. |
+| SECURE | no cleartext, pin-set without expiry, tapjacking protection, **0 / 432 trackers** | — |
+| GONE vs v3.6.6 | "may have root detection" (SECURE) | Heuristic string match no longer fires after R8; the wallet never had a root-detection control, so nothing was lost. |
+
+**Native hardening (MobSF checksec, all 4 ABIs × 8 libs):** NX yes, PIE yes, stack canary yes on
+every `.so`; `libcore-lib.so` / `libsqlcipher.so` / `libtor.so` fortified. ⚠️ MobSF prints
+`relro: None` for every lib — including ones our own `security-cycle.sh` reports as **RELRO FULL**
+via readelf. Treat MobSF's RELRO column as unreliable for these NDK builds; the readelf result above
+stands.
+
+**Manifest:** 2 dangerous permissions (`CAMERA` for QR, `POST_NOTIFICATIONS`), no exported
+components of ours (the flagged exported receivers/services are androidx WorkManager /
+ProfileInstaller, permission-guarded by the platform).
+
+Nothing in this scan changes the accepted residuals: Keystore auth-binding (CRITICAL-1 open half)
+remains ROADMAP Phase 2; the mnemonic-as-String outside load/restore/sign remains P2.
+
 ### Still owed
 
-MobSF re-scan and the jadx keep-rule pass — neither automated, neither run this cycle (same as the
-40066 cycle).
+The jadx keep-rule pass — not automated, not run this cycle (same as the 40066 cycle). MobSF is
+now done for 40076 (entry above).
