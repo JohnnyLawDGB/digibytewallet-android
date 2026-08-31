@@ -1,5 +1,6 @@
 package io.digibyte.core.security
 
+import android.os.Build
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -71,16 +72,33 @@ class BiometricAuth {
             }
             override fun onAuthenticationFailed() { /* prompt retries internally */ }
         }
-        val prompt = BiometricPrompt(activity, executor, callback)
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.DEVICE_CREDENTIAL or
+        // androidx.biometric rejects BIOMETRIC_STRONG|DEVICE_CREDENTIAL on API
+        // 28-29 with an IllegalArgumentException (crash-looped the Note 8 at
+        // unlock, 2026-08-31). On those levels WEAK|DEVICE_CREDENTIAL is the
+        // supported combo; the keyguard (device-credential) path is what
+        // refreshes a validity-duration Keystore key either way. A weak-
+        // biometric success that does NOT open the key window falls out as one
+        // more KeystoreUserAuthRequired retry, never a crash.
+        val authenticators = if (Build.VERSION.SDK_INT >= 30) {
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL or
                 BiometricManager.Authenticators.BIOMETRIC_STRONG
-            )
-            .build()
-        prompt.authenticate(info)
+        } else {
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL or
+                BiometricManager.Authenticators.BIOMETRIC_WEAK
+        }
+        try {
+            val prompt = BiometricPrompt(activity, executor, callback)
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setAllowedAuthenticators(authenticators)
+                .build()
+            prompt.authenticate(info)
+        } catch (t: Throwable) {
+            // A credential prompt must never be able to crash the wallet - the
+            // caller treats this like any other prompt failure.
+            if (cont.isActive) cont.resume(BiometricResult.Error(-1, t.message ?: "prompt failed"))
+        }
     }
 }
 
