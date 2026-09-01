@@ -181,9 +181,13 @@ class ForeignAssetTransferService(
             }
 
             // The coarse classifier holds back EVERY output of an asset transaction, including
-            // ordinary DGB change. Those read as zero units and are refused rather than moved —
-            // and must never be promoted into the plain sweep on the strength of that zero,
-            // because an under-read there destroys an asset. See ForeignAssetQuantity.
+            // ordinary DGB change. Those read as zero units — but a zero here is "asset present,
+            // count unknown", not "not an asset", so it is MOVED via the remainder rule
+            // (ForeignAssetTransferPlan encodes a minimal 1-unit instruction and the whole layout
+            // pays the destination) rather than refused, or the real assets that sit on a
+            // transfer's remainder output — old V1/V2 holdings especially — get stranded
+            // (DGB-1007). A zero-read outpoint must still never be promoted into the plain sweep,
+            // because an under-read THERE destroys an asset. See ForeignAssetQuantity.
             val assets = mutableListOf<ForeignAssetTransferBatch.AssetItem>()
             for (utxo in partition.assetBearing) {
                 val spend = toSpend(utxo, byAddress)

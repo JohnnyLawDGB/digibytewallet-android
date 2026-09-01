@@ -148,20 +148,67 @@ class ForeignAssetTransferPlanTest {
     }
 
     /**
-     * A quantity of zero cannot be encoded — the transfer payload requires at least one
-     * instruction — and it also means we do not actually know what is on this outpoint. Building
-     * a transfer around a number we do not have is the one thing that could destroy the asset.
+     * A NEGATIVE quantity is corrupt input — units cannot be negative — and is refused. It is not
+     * the same as "unknown"; see the zero case below.
      */
-    @Test fun `a zero or unknown quantity is refused rather than guessed`() {
-        listOf(0L, -1L).forEach { units ->
-            val r = ForeignAssetTransferPlan.build(
-                assetInput = assetUtxo, assetUnits = units,
-                feeInputs = listOf(feeUtxo), destAddress = dest, feePerKb = feePerKb,
-            )
-            val refused = r as? ForeignAssetTransferPlan.Result.Refused
-            assertNotNull("units=$units must refuse, got $r", refused)
-            assertEquals(ForeignAssetTransferPlan.Reason.UNKNOWN_QUANTITY, refused!!.reason)
-        }
+    @Test fun `a negative quantity is refused as corrupt`() {
+        val r = ForeignAssetTransferPlan.build(
+            assetInput = assetUtxo, assetUnits = -1L,
+            feeInputs = listOf(feeUtxo), destAddress = dest, feePerKb = feePerKb,
+        )
+        val refused = r as? ForeignAssetTransferPlan.Result.Refused
+        assertNotNull("units=-1 must refuse, got $r", refused)
+        assertEquals(ForeignAssetTransferPlan.Reason.UNKNOWN_QUANTITY, refused!!.reason)
+    }
+
+    /**
+     * Zero means "this outpoint carries an asset we could not count" — the foreign decoder credits
+     * a transfer's implicit remainder to the last output, which we cannot resolve offline
+     * ([ForeignAssetQuantity] passes inputUnits=null). Old V1/V2 assets sit on exactly such
+     * remainder outputs, so refusing zero stranded them (DGB-1007). Instead of refusing, encode a
+     * minimal 1-unit instruction to vout 0: whatever the real holding is, 1 unit rides to vout 0
+     * (dest) and the rest is credited by the last-output rule to vout 2 (dest). Every unit lands
+     * with the user, and no number was invented — 1 is a valid split of any holding >= 1.
+     */
+    @Test fun `an unknown (zero) quantity moves via the remainder rule instead of refusing`() {
+        val r = ForeignAssetTransferPlan.build(
+            assetInput = assetUtxo, assetUnits = 0L,
+            feeInputs = listOf(feeUtxo), destAddress = dest, feePerKb = feePerKb,
+        )
+        val plan = (r as? ForeignAssetTransferPlan.Result.Ok)?.plan
+        assertNotNull("units=0 must build a move, got $r", plan)
+
+        // Same safety layout as the known path: every value output belongs to the destination,
+        // and the last output is ours so the remainder is credited to the user.
+        val valueOutputs = plan!!.outputs.filter { it.address.isNotEmpty() }
+        assertTrue("every value output is the destination", valueOutputs.all { it.address == dest })
+        assertEquals("last output is ours", dest, plan.outputs.last().address)
+
+        // The encoded instruction assigns a single unit to the marker; the rest rides the remainder.
+        val script = plan.outputs[1].scriptHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val header = DigiAssetDecoder().decode(script)
+        assertNotNull("the marker must decode as a DigiAsset transfer", header)
+        val inst = header!!.transferInstructions.single()
+        assertEquals("units land on the recipient marker at vout 0", 0, inst.outputIndex)
+        assertEquals("minimal 1-unit split — the remainder rule delivers the rest", 1L, inst.amount)
+        assertTrue("an absolute amount, never a percentage", !inst.percent)
+        assertTrue("not a range instruction", !inst.range)
+        assertTrue("not a burn", !inst.isBurn)
+    }
+
+    /**
+     * The relaxed zero-quantity path does NOT relax the other guards: an unknown-quantity move
+     * with too little DGB to leave a change output must still refuse (dropping the change output
+     * would put the OP_RETURN last and burn the residual units).
+     */
+    @Test fun `an unknown (zero) quantity still refuses when there is no change room`() {
+        val r = ForeignAssetTransferPlan.build(
+            assetInput = assetUtxo, assetUnits = 0L,
+            feeInputs = listOf(spend("sma11", 45_000L)), destAddress = dest, feePerKb = feePerKb,
+        )
+        val refused = r as? ForeignAssetTransferPlan.Result.Refused
+        assertNotNull("expected a refusal, got $r", refused)
+        assertEquals(ForeignAssetTransferPlan.Reason.INSUFFICIENT_FEE_FUNDS, refused!!.reason)
     }
 
     @Test fun `an empty destination address is refused`() {

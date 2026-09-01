@@ -179,11 +179,55 @@ class ForeignAssetTransferServiceTest {
         assertFalse(r.moves.single().moved)
     }
 
-    /** A quantity we could not read is refused — never moved on a guessed number. */
-    @Test fun `an unreadable quantity is refused`() {
-        val r = run(service(parse = { null }), listOf(profileResult()))
-        assertFalse(r.moves.single().moved)
-        assertTrue(r.moves.single().failureReason!!.contains("UNKNOWN_QUANTITY"))
+    /**
+     * A classifier-confirmed asset whose exact quantity we could not read (parent tx unparseable)
+     * is no longer refused — it is moved via the remainder rule, with the units reported as the
+     * honest 0 (unknown). The whole layout still pays the destination, so every unit lands with
+     * the user (DGB-1007 fix).
+     */
+    @Test fun `an asset with an unreadable quantity is moved via the remainder rule`() {
+        var seen: ForeignAssetTransferPlan.Plan? = null
+        val r = run(
+            service(parse = { null }, sign = { p, _, _, _ -> seen = p; "00ff" }),
+            listOf(profileResult()),
+        )
+        val move = r.moves.single()
+        assertTrue("the asset was moved, not refused", move.moved)
+        assertEquals("units are honestly reported as unknown (0)", 0L, move.units)
+        // The signed plan encodes a minimal 1-unit instruction; the remainder rides to the last
+        // output, which is the destination.
+        val opReturn = seen!!.outputs[1].scriptHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val inst = io.digibyte.core.asset.DigiAssetDecoder().decode(opReturn)!!.transferInstructions.single()
+        assertEquals(1L, inst.amount)
+        assertEquals(dest, seen!!.outputs.last().address)
+    }
+
+    /**
+     * The real DGB-1007 shape: the held asset sits on a transfer's IMPLICIT-REMAINDER output. The
+     * parent's only instruction pays a DIFFERENT output, so [ForeignAssetQuantity] reads 0 units
+     * on the held vout — yet the asset is real and must move. Before the fix this outpoint was
+     * stranded; now it moves.
+     */
+    @Test fun `an asset held on a remainder output is moved, not stranded`() {
+        // Held UTXO is vout 0; the parent's single instruction assigns to vout 1, so vout 0 reads 0.
+        val remainderShaped = listOf(
+            ForeignAssetQuantity.Output(0, DA_MARKER_SATS, ByteArray(25) { 0x11 }),
+            ForeignAssetQuantity.Output(
+                1, 0L,
+                DigiAssetEncoder.encodeTransferScript(
+                    version = 3,
+                    instructions = listOf(
+                        DigiAssetEncoder.TransferInstruction(
+                            skip = false, range = false, percent = false, outputIndex = 1, amount = 7L,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val r = run(service(parse = { remainderShaped }), listOf(profileResult()))
+        val move = r.moves.single()
+        assertTrue("a remainder-held asset must move, not strand", move.moved)
+        assertEquals(0L, move.units)
     }
 
     @Test fun `a profile with no assets produces no moves`() {
