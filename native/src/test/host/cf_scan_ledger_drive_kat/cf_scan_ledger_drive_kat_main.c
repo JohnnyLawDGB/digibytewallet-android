@@ -4372,7 +4372,7 @@ static void test_reorg_mid_descent(void)
     // block is proven for real, at production scale, by test_clearmemory_descent_frees; this
     // case only needs the BOUNDARY, which it constructs DIRECTLY (remove main(FLOOR-1), the
     // exact effect the pruner has) on a SHORT chain, so the reorg above it is O(W_hdr).
-    const uint32_t BASE  = 24000000u;
+    const uint32_t BASE  = BRMainNetParams.checkpoints[BRMainNetParams.checkpointsCount - 1].height + 100000u; /* above the highest block checkpoint, whatever a refresh moves it to (was hardcoded 24000000u; the reorg-veto at BRPeerManager.c:3057 discards forks <= the last checkpoint) */
     const uint32_t COUNT = 400u;                  // short resident chain (fork below is ~W_hdr blocks)
     const uint32_t MAIN_TIP = BASE + COUNT - 1u;
 
@@ -4594,7 +4594,7 @@ static void test_reorg_below_window_no_crash(void)
     // Same BASE as the sibling case and for the same reason: ABOVE the highest
     // mainnet checkpoint (23,660,000), or _peerRelayedBlock discards the fork
     // outright at :1797 and this case would silently test nothing.
-    const uint32_t BASE = 24000000u;
+    const uint32_t BASE = BRMainNetParams.checkpoints[BRMainNetParams.checkpointsCount - 1].height + 100000u; /* above the highest block checkpoint (was hardcoded 24000000u; BRPeerManager.c:3057 discards forks <= the last checkpoint) */
 
     // BOUNDED, DETERMINISTIC construction (Task-5.2 harden). The ORIGINAL fixture built a
     // chain > CLEAR_MEM_BLOCKS_COUNT_TRIGGER and drove the REAL _BRPeerManagerClearMemory to
