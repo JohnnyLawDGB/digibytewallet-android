@@ -379,6 +379,22 @@ class WalletViewModel @Inject constructor(
         }
     }
 
+    /** Tor banner "Retry now" - one user-initiated Tor restart, routed through
+     *  SyncService (mirrors temporarilyUsePublicPeers: the VM never touches
+     *  TorManager or native directly). Success clears the banner via the
+     *  service's Tor-state observer. */
+    fun retryTor() {
+        try {
+            val intent = android.content.Intent(
+                application,
+                io.digibyte.service.SyncService::class.java
+            ).setAction(io.digibyte.service.SyncService.ACTION_RETRY_TOR)
+            androidx.core.content.ContextCompat.startForegroundService(application, intent)
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletVM", "retryTor: startForegroundService threw", t)
+        }
+    }
+
     /** Manually retry the post-upgrade reconcile from the banner's button.
      *  Same code path as the auto trigger — if it succeeds, the flag clears
      *  and the banner disappears. */

@@ -318,9 +318,12 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
 - **Tor is opt-in, OFF by default** (product decision 2026-07-02, stands).
   Routing works (`SafeSocks=0`, v3.7.5); in-app privacy is carried by
   BIP158 (address privacy, default) + Dandelion++ (tx-origin, opt-in);
-  Orbot / system VPN remain the recommended IP-anonymity path. Residual
-  open bug: no automatic clearnet fallback when a user-enabled Tor
-  bootstrap fails — loud-fallback fix scheduled in Phase 2.
+  Orbot / system VPN remain the recommended IP-anonymity path. The
+  "no clearnet fallback" residual recorded here was STALE — code
+  archaeology (2026-08-30) found the loud fallback shipped in
+  v3.5.42–v3.6.6 (bootstrap-failure degrade + dead-SOCKS watchdog +
+  wallet-screen banner); only the banner's retry action was missing,
+  added on `feat/tor-loud-fallback`.
 
 The gap the June roadmap was built around — "sovereign for signing but
 not for data" — is closed. The gap this revision is built around is
@@ -364,7 +367,7 @@ for. Restated so they don't sneak back in during the DigiDollar sprint:
 | 0 | Legibility prerequisite | M | ✅ **Done** — `ARCHITECTURE.md`, `THREAT_MODEL.md`, `BIP_COMPLIANCE.md`, `PROCESS_FLOWS.md` in `docs/` |
 | 1 | Sovereign data layer | L | ✅ Client shipped (v3.5.39) & hardened through v4.0.46, bloom **removed** (v3.10.x), own-node pairing shipped, **`cfcheckpt` active rejection SHIPPED v4.0.41**. 🚧 Remainder: oracle-bootstrap (seeder demotion) |
 | 1.5 | **v4.0.0** | S | ✅ **Shipped** (bloom major) — cut on the bloom trigger *ahead* of the never-stranded remainder; now at **v4.0.35** |
-| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); in-app spend gate + inactivity lock 🚧 (2026-08-30 follow-up branches `fix/audit-spendgate` / `fix/audit-autolock` — mark ✅ only when merged); Keystore hardware-backing **probed/logged, not enforced**; duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation ✅ (PR #66, device-verified) → Keystore auth-binding 🚧 (branch `feat/keystore-auth-binding`; mark ✅ only when merged) → loud Tor fallback |
+| 2 | Key & trust hardening | S–M | 🚧 PIN rate-limit ✅ **shipped** (v3.10.35); in-app spend gate + inactivity lock 🚧 (2026-08-30 follow-up branches `fix/audit-spendgate` / `fix/audit-autolock` — mark ✅ only when merged); Keystore hardware-backing **probed/logged, not enforced**; duress PIN **cancelled** (2026-08-16); next: Digi-ID key isolation ✅ (PR #66, device-verified) → Keystore auth-binding ✅ (PR #67, merged + Note 8 device-verified) → loud Tor fallback 🚧 (this branch) |
 | 3 | Feature velocity on the sovereign layer | L | 🚧 PSBT pulled forward as the **DigiDollar vault enabler**; security dashboard added; multisig stays last |
 | 4 | Audit, distribution + hardware | M | 🚧 Third-party audit **gates** DigiDollar-mainnet-in-wallet; **Play Console account approved 2026-08-27 — Play first, F-Droid follows** |
 
@@ -505,9 +508,11 @@ not — but the coupling ran through the duress PIN, which was cancelled
    `docs/derivation/` before it ships.
    `core/…/digiid/DigiIdManager.kt:49`.
 5. **Loud Tor fallback.** Tor stays opt-in/OFF by default (2026-07-02
-   decision stands), but a user-enabled Tor that fails bootstrap must
-   fall back to clearnet *loudly* — main-screen banner + retry — never
-   sit at 0 peers, never fall back silently.
+   decision stands). 2026-08-30 finding: the loud fallback ALREADY
+   SHIPPED (v3.5.42 dead-proxy watchdog, v3.6.6 banner + bootstrap
+   degrade + never-dial-direct-while-starting guard) — this item was
+   stale. The one missing piece, the banner's "Retry now" action, is on
+   `feat/tor-loud-fallback` (mark ✅ only when merged).
 
 **Effort:** S–M, reduced by the duress cancellation. Item 1 is shipped;
 5 is days; 3 is the riskiest (device-matrix testing); 4 is

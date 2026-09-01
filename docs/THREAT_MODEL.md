@@ -189,9 +189,14 @@ Named explicitly so they don't go unfixed by being unspoken.
    still decrypt; and removing the device lock screen permanently
    invalidates the bound key — the wallet is then recoverable only
    from the written phrase, and says so explicitly.
-5. **Tor silent fallback.** If Tor fails to start or the daemon dies,
-   the wallet silently uses clearnet. Phase 2 changes this to a loud
-   warning banner.
+5. **Tor fallback is loud, not silent** (shipped v3.5.42–v3.6.6; retry
+   completed on `feat/tor-loud-fallback`). A user-enabled Tor that fails
+   bootstrap, or whose daemon dies mid-session (dead-SOCKS watchdog),
+   degrades to clearnet with an amber wallet-screen banner naming the IP
+   exposure, plus a "Retry now" action; recovery re-wires the proxy and
+   drops the clearnet peers so already-open direct connections cannot
+   keep leaking. Residual: the fallback is still clearnet by design —
+   a "Tor or nothing" mode does not exist.
 6. **Digi-ID identity: per-site since the key-isolation change**
    (docs/specs/digiid-key-isolation.md). New domains get an unlinkable
    SLIP-0013 identity (`m/13'/A'/B'/C'/D'` from the site's canonical

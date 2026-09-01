@@ -183,7 +183,7 @@ fun WalletScreen(
         // launch so each app start retries Tor before degrading.
         if (torFailure) {
             item {
-                TorFailureBanner()
+                TorFailureBanner(onRetry = { viewModel.retryTor() })
             }
         }
 
@@ -967,7 +967,7 @@ private fun ReconcileFailedBanner(
 }
 
 @androidx.compose.runtime.Composable
-private fun TorFailureBanner() {
+private fun TorFailureBanner(onRetry: () -> Unit) {
     androidx.compose.material3.Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1002,6 +1002,19 @@ private fun TorFailureBanner() {
                 style = MaterialTheme.typography.bodySmall,
                 color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
             )
+            // ROADMAP Phase 2 item 5's "banner + retry": the missing half. One
+            // tap = one Tor start attempt; the banner clears itself only when
+            // Tor actually reaches Connected (SyncService's state observer).
+            androidx.compose.material3.TextButton(
+                onClick = onRetry,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(
+                    text = stringResource(R.string.common_retry_now),
+                    color = androidx.compose.ui.graphics.Color(0xFFFFCC66),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
         }
     }
 }

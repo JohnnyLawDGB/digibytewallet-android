@@ -321,6 +321,18 @@ class SyncService : Service() {
         // Reuses the exact keepalive reconnect triple (forceReconnect → re-inject →
         // startSync) that already recovers a stalled peer pool elsewhere in this
         // service (see the 0-peer branch of runPeerKeepalive).
+        // Wallet-screen Tor banner "Retry now": one user-initiated Tor start.
+        // On success the Tor-state observer re-wires the SOCKS proxy, drops the
+        // clearnet peers (IP-leak guard) and clears the banner; on another
+        // failure the banner simply stays up. No state to clean here.
+        if (intent?.action == ACTION_RETRY_TOR) {
+            if (torManager.isEnabled) {
+                android.util.Log.i("SyncService", "banner retry — restarting Tor")
+                serviceScope.launch { torManager.start() }
+            }
+            return START_STICKY
+        }
+
         if (intent?.action == ACTION_APPLY_OWN_NODE) {
             // A deliberate re-apply from Settings re-honors the persisted
             // exclusive choice — clear any session escape left over from a
@@ -479,6 +491,21 @@ class SyncService : Service() {
                         android.util.Log.i("SyncService",
                             "Tor reconnected — re-wired SOCKS proxy, cleared degradation banner")
                     }
+                }
+                // Mid-session enable that FAILS (Settings toggle -> startAsync ->
+                // bootstrap timeout/daemon death with no network, etc.). Without
+                // this branch nothing flips the failure flag on that path, so the
+                // keepalive's torComingUp guard defers peer dials FOREVER and the
+                // wallet sits at 0 peers with no banner - the exact silent state
+                // ROADMAP Phase 2 item 5 forbids. Degrade loudly: clear any stale
+                // proxy, release the guard, raise the banner. Idempotent with
+                // startSyncWithTor's own failure path.
+                if (st is TorState.Failed && torManager.isEnabled) {
+                    android.util.Log.w("SyncService",
+                        "Tor failed (" + st.reason + ") — degrading to clearnet, raising banner")
+                    NativeBridge.clearSocksProxy()
+                    torProxyActive = false
+                    _torFailureActive.value = true
                 }
             }
         }
@@ -3641,6 +3668,10 @@ class SyncService : Service() {
          *  session without touching prefs — the persisted exclusive setting still
          *  applies on the next launch. See [OwnNodeHealth.DARK]. */
         const val ACTION_OWN_NODE_ADDITIVE_SESSION = "io.digibyte.service.OWN_NODE_ADDITIVE_SESSION"
+        /** Wallet-screen Tor banner "Retry now": user-initiated Tor restart after a
+         *  degradation. Deliberately manual - the watchdog decision NOT to auto-restart
+         *  (it would kill working direct connections) stands; this only runs on a tap. */
+        const val ACTION_RETRY_TOR = "io.digibyte.service.RETRY_TOR"
         /** Debounce for the post-sync confirmation-reconcile (5 min): a flaky
          *  network firing onSyncComplete repeatedly must not hammer the node. */
         private const val CONFIRM_RECONCILE_DEBOUNCE_MS = 5 * 60 * 1000L
