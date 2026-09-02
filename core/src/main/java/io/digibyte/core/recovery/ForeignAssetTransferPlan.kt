@@ -78,7 +78,8 @@ object ForeignAssetTransferPlan {
     enum class Reason {
         /** The reserved DGB cannot pay the fee and still leave a spendable change output. */
         INSUFFICIENT_FEE_FUNDS,
-        /** No usable quantity for this outpoint. Never guessed — see the class note. */
+        /** A corrupt (negative) quantity. A zero is NOT refused — it means "asset present, count
+         *  unknown" and is moved via the remainder rule; see [build]. */
         UNKNOWN_QUANTITY,
         /** No destination to send to. */
         NO_DESTINATION,
@@ -109,14 +110,23 @@ object ForeignAssetTransferPlan {
         if (dest.isEmpty()) {
             return Result.Refused(Reason.NO_DESTINATION, "no destination address")
         }
-        if (assetUnits <= 0L) {
-            // Zero is not "an asset worth nothing" — it is "we could not work out what is here".
-            // The encoder cannot express it either: a transfer payload needs one instruction.
+        if (assetUnits < 0L) {
+            // Negative is corrupt input — units cannot be negative. Refuse rather than encode it.
             return Result.Refused(
                 Reason.UNKNOWN_QUANTITY,
                 "quantity on ${assetInput.txid}:${assetInput.vout} is $assetUnits",
             )
         }
+        // Zero means "this outpoint carries an asset we could not count", not "an asset worth
+        // nothing": the foreign decoder credits a transfer's implicit remainder to the last
+        // output, which we cannot resolve offline (see ForeignAssetQuantity — inputUnits=null).
+        // Old V1/V2 assets sit on exactly such remainder outputs, so refusing zero stranded them
+        // (DGB-1007). Encode a minimal 1-unit instruction to vout 0 instead: 1 unit rides to vout
+        // 0 (dest) and the rest is credited by the protocol's last-output rule to vout 2 (dest).
+        // Both value outputs are the user's, so every unit lands with them — 1 is a valid split of
+        // any real holding >= 1, not an invented number. It is the extreme case of the same
+        // under-count-safe remainder rule the known path already relies on.
+        val markerUnits = if (assetUnits == 0L) 1L else assetUnits
         if (feeInputs.isEmpty()) {
             return Result.Refused(
                 Reason.INSUFFICIENT_FEE_FUNDS,
@@ -133,7 +143,7 @@ object ForeignAssetTransferPlan {
                         range = false,
                         percent = false,
                         outputIndex = 0,   // the marker at vout 0
-                        amount = assetUnits,
+                        amount = markerUnits,
                     ),
                 ),
             )
