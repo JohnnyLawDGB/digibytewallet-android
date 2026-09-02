@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdatomic.h>
 
 #include "BRPeer.c"
 
@@ -60,7 +61,7 @@ static void _katCb3(void *info, int success) { (void)info; (void)success; }
 static void (*const KAT_CBS[4])(void *, int) = { _katCb0, _katCb1, _katCb2, _katCb3 };
 
 static BRPeerContext *g_ctx;
-static volatile int   g_pushDone;
+static atomic_int     g_pushDone;
 static long           g_popped;
 static long           g_mismatched;
 
@@ -74,7 +75,8 @@ static void *_pusher(void *arg)
         _BRPeerPongPush(g_ctx, (void *)(uintptr_t)i, KAT_CBS[i % 4]);
     }
 
-    g_pushDone = 1;
+    /* Release: every push above is visible to a popper that observes done == 1. */
+    atomic_store_explicit(&g_pushDone, 1, memory_order_release);
     return NULL;
 }
 
@@ -85,6 +87,12 @@ static void *_popper(void *arg)
     for (;;) {
         void (*cb)(void *, int) = NULL;
         void *info = NULL;
+        /* Snapshot BEFORE the pop. Reading it after an empty pop is a TOCTOU: the pusher can
+         * push its last entries and set done in the gap, and the popper then exits with those
+         * entries still queued -- the FIXED arm failed in CI exactly so (popped 199851 of
+         * 200000, residual 149) on code that was correct. With the snapshot taken first, an
+         * empty pop after observing done == 1 means every push really has been drained. */
+        int done = atomic_load_explicit(&g_pushDone, memory_order_acquire);
 
         if (_BRPeerPongPop(g_ctx, &cb, &info)) {
             long seq = (long)(uintptr_t)info;
@@ -92,7 +100,7 @@ static void *_popper(void *arg)
             g_popped++;
             if (cb != KAT_CBS[seq % 4]) g_mismatched++;
         }
-        else if (g_pushDone) {
+        else if (done) {
             break;
         }
     }
