@@ -190,8 +190,16 @@ fun AppNavigation(
 
     // Helper: start SPV sync foreground service whenever the wallet is unlocked.
     val startSyncService: () -> Unit = {
-        val intent = Intent(context, SyncService::class.java)
-        ContextCompat.startForegroundService(context, intent)
+        // Same crash class as DGB-1006: startForegroundService can throw
+        // ForegroundServiceStartNotAllowedException on Android 12+ (dataSync budget spent),
+        // crashing the app on unlock. Swallow it — the service is START_STICKY and onResume / the
+        // keepalive watchdog re-kick it once the budget resets.
+        try {
+            val intent = Intent(context, SyncService::class.java)
+            ContextCompat.startForegroundService(context, intent)
+        } catch (t: Throwable) {
+            android.util.Log.e("AppNavigation", "startSyncService: startForegroundService threw", t)
+        }
     }
 
     val showBottomNav = currentRoute !in fullScreenRoutes
