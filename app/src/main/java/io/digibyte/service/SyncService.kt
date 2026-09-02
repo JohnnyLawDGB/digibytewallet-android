@@ -2093,6 +2093,9 @@ class SyncService : Service() {
             hasTransactionCheckpoint,
         )
         if (cfResetReason != null) {
+            // Capture the tip we are resetting FROM before the removes below clear it — the
+            // breadcrumb below records how far back the reset threw the chain.
+            val savedTipAtReset = prefs.getLong("saved_blocks_tip", 0L)
             android.util.Log.w(
                 "SyncService",
                 "CF restore preflight requires a header/filter rebuild ($cfResetReason); " +
@@ -2115,6 +2118,17 @@ class SyncService : Service() {
             getSharedPreferences("dgb_settings", MODE_PRIVATE).edit().apply {
                 if (birth > 0L) putLong("cf_birth_height", birth) else remove("cf_birth_height")
             }.commit()
+            // Durable diagnostic breadcrumb (DGB-1005): the reset reason is otherwise only in
+            // Logcat, which is gone on reboot and unreachable for a report filed without device
+            // access. Persist WHICH preflight condition fired, WHEN, and how far back it threw the
+            // chain (from savedTip → birth), so a returning user's report — or a future
+            // diagnostics view — can pinpoint the cause without a live logcat capture.
+            getSharedPreferences("dgb_diag", MODE_PRIVATE).edit()
+                .putString("last_cf_reset_reason", cfResetReason.name)
+                .putLong("last_cf_reset_at_ms", System.currentTimeMillis())
+                .putLong("last_cf_reset_birth", birth)
+                .putLong("last_cf_reset_from_tip", savedTipAtReset)
+                .apply()
             hasReachedSynced = false
             savedLedger = null
             blockBytes = null
@@ -3486,6 +3500,28 @@ class SyncService : Service() {
 
     private fun persistSyncCompletionState(): Boolean {
         if (!persistWalletTransactionsCheckpoint()) return false
+        // DGB-1005: the cold-start CF restore preflight floors the chain to the birth checkpoint
+        // (~1.25M-block re-sync) if `has_synced` is set but the CF scan ledger is absent
+        // (MISSING_LEDGER). The ledger reaches disk only via the debounced coalesced writer or the
+        // onDestroy flush, and an OS kill of a backgrounded app — common on low-RAM devices —
+        // never reaches onDestroy. So flush the latest filter headers + CF ledger NOW, and refuse
+        // to commit `has_synced` while we still hold un-durable ledger state. Deferring costs a
+        // re-mark on the next completion tick; a `has_synced` that outlives its ledger costs the
+        // user a full re-sync on the next launch.
+        runCatching { flushFilterHeaders() }
+            .onFailure { android.util.Log.w("SyncService", "completion CF-ledger flush failed", it) }
+        if (!shouldMarkSynced(
+                hasPendingLedger = pendingCfLedger != null,
+                ledgerDurable = CfScanLedgerStore.load(this) != null,
+            )
+        ) {
+            android.util.Log.w(
+                "SyncService",
+                "sync completion deferred: CF ledger not durable yet — avoiding a birth-checkpoint " +
+                    "reset on next launch; will re-mark on the next completion tick",
+            )
+            return false
+        }
         val synced = getSharedPreferences(
             "dgb_sync_data" + networkSuffix(this),
             MODE_PRIVATE,
