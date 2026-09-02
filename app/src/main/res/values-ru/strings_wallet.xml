@@ -87,6 +87,8 @@
     <string name="common_retry_now">Повторить сейчас</string>
     <string name="wallet_send">Отправить</string>
     <string name="wallet_receive">Получить</string>
+    <string name="wallet_hide_balances">Скрыть балансы</string>
+    <string name="wallet_show_balances">Показать балансы</string>
     <string name="wallet_scan">Сканировать</string>
     <string name="wallet_assets">Активы</string>
     <string name="wallet_recent_activity">Последние операции</string>

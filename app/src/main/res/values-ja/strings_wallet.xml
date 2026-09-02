@@ -87,6 +87,8 @@
     <string name="common_retry_now">今すぐ再試行</string>
     <string name="wallet_send">送金</string>
     <string name="wallet_receive">受取</string>
+    <string name="wallet_hide_balances">残高を非表示</string>
+    <string name="wallet_show_balances">残高を表示</string>
     <string name="wallet_scan">スキャン</string>
     <string name="wallet_assets">アセット</string>
     <string name="wallet_recent_activity">最近のアクティビティ</string>

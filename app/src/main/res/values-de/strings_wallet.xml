@@ -95,6 +95,8 @@
     <string name="common_retry_now">Jetzt erneut versuchen</string>
     <string name="wallet_send">Senden</string>
     <string name="wallet_receive">Empfangen</string>
+    <string name="wallet_hide_balances">Guthaben ausblenden</string>
+    <string name="wallet_show_balances">Guthaben anzeigen</string>
     <string name="wallet_scan">Scannen</string>
     <string name="wallet_assets">Assets</string>
     <string name="wallet_recent_activity">Letzte Aktivität</string>

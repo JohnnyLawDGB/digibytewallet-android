@@ -148,7 +148,9 @@ fun WalletScreen(
                 ) {
                     Icon(
                         imageVector = if (balanceHidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = if (balanceHidden) "Show balances" else "Hide balances",
+                        contentDescription = stringResource(
+                            if (balanceHidden) R.string.wallet_show_balances else R.string.wallet_hide_balances
+                        ),
                         tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                     )
                 }
