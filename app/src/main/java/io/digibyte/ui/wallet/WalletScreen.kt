@@ -56,6 +56,7 @@ fun WalletScreen(
 ) {
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
+    val balanceHidden by viewModel.balanceHidden.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
@@ -123,6 +124,7 @@ fun WalletScreen(
                         // CF-gated — matches the sync card/overlay, never "synced"
                         // while cfheaders is still catching up.
                         isSynced = syncProgressInfo.stage == SyncStage.Synced,
+                        hidden = balanceHidden,
                         onFiatTap = { showCurrencyPicker = true }
                     )
 
@@ -135,6 +137,20 @@ fun WalletScreen(
 
                     // Tor indicator — only visible when Tor is connected
                     TorIndicator(torState)
+                }
+
+                // Privacy toggle — masks/reveals every figure on the hero card.
+                // Persisted per-device (WalletViewModel.toggleBalanceHidden), so the
+                // choice holds across restarts.
+                IconButton(
+                    onClick = { viewModel.toggleBalanceHidden() },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Icon(
+                        imageVector = if (balanceHidden) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (balanceHidden) "Show balances" else "Hide balances",
+                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                    )
                 }
             }
         }
