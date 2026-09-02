@@ -418,8 +418,16 @@ class MainActivity : FragmentActivity() {
      * service ignores once already running.
      */
     internal fun startSyncService() {
-        val intent = Intent(this, SyncService::class.java)
-        ContextCompat.startForegroundService(this, intent)
+        // Same crash class as DGB-1006: a caller-side FGS start can be denied with
+        // ForegroundServiceStartNotAllowedException on Android 12+ (dataSync budget spent), which
+        // here would crash the app on launch. Swallow it — the service is START_STICKY and
+        // onResume / the keepalive watchdog re-kick it once the budget resets.
+        try {
+            val intent = Intent(this, SyncService::class.java)
+            ContextCompat.startForegroundService(this, intent)
+        } catch (t: Throwable) {
+            android.util.Log.e("MainActivity", "startSyncService: startForegroundService threw", t)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

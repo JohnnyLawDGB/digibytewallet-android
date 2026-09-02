@@ -276,8 +276,19 @@ class SettingsViewModel @Inject constructor(
      *  ACTION_APPLY_OWN_NODE — the same forceReconnect → re-inject → startSync triple
      *  the keepalive coroutine uses to recover a stalled peer pool. */
     fun applyOwnNodeNow() {
-        val intent = Intent(context, SyncService::class.java).setAction(SyncService.ACTION_APPLY_OWN_NODE)
-        ContextCompat.startForegroundService(context, intent)
+        // Caller-side FGS starts can throw ForegroundServiceStartNotAllowedException on Android
+        // 12+ — e.g. the dataSync 6h/24h budget is spent on a long-syncing device — which crashed
+        // the app when the user flicked "Use my own node" (DGB-1006, Pixel 10 / Android 17). The
+        // service's own startForeground() try/catch never runs because the throw is caller-side,
+        // before onStartCommand. Swallow it: the own-node pref is already persisted, so it applies
+        // on the next service kick (onResume / the keepalive watchdog) — the same recovery
+        // WalletViewModel's guarded starts rely on. Better a delayed apply than a crash.
+        try {
+            val intent = Intent(context, SyncService::class.java).setAction(SyncService.ACTION_APPLY_OWN_NODE)
+            ContextCompat.startForegroundService(context, intent)
+        } catch (t: Throwable) {
+            android.util.Log.e("SettingsVM", "applyOwnNodeNow: startForegroundService threw", t)
+        }
     }
 
     // ── Action results ────────────────────────────────────────────────────────
