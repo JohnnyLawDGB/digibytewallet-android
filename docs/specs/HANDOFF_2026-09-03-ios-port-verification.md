@@ -3,9 +3,9 @@
 > | Item | Status |
 > |---|---|
 > | Part A — commit + push the four core headers from the Mac | ✅ **Done.** core `develop` → `f191590`, android `develop` → `297ee49a`, `check-submodule-pin.sh` passed |
-> | Part B — Linux pre-flight | ⏳ **Start here.** |
-> | Part C — build, host-JVM tests, parity tests on a device | ⏳ Not started |
-> | Peer-canon extraction (`jni_peer.c` → core) | ⛔ **Deliberately deferred** until Part C is green. Do not start. |
+> | Part B — Linux pre-flight | ✅ **Done.** Clone clean, no stranded core commits, submodule `f191590`, pin check OK |
+> | Part C — build, host-JVM tests, parity tests on a device | ✅ **Green.** C1 4/4 KATs · C2 25/25 host-JVM, no device · C3 build OK, 11/11 JNI exports on all 3 ABIs · C4 **23/23 on the Note 8** (SM-N950U, Android 9) · C5 pin + full KAT sweep. One finding: the parity tests could not compile in `:native` (see below) and were moved to `core/src/androidTest` |
+> | Peer-canon extraction (`jni_peer.c` → core) | 🟢 **Unblocked** — Part C is green. Still a fresh-session job with the triage open. |
 >
 > Sibling docs: [`../ios-port/push-down-recipe.md`](../ios-port/push-down-recipe.md) (how each
 > port was done, and the gotchas) and [`../ios-port/full-triage.md`](../ios-port/full-triage.md)
@@ -43,7 +43,12 @@ Android, new:
 `native/src/main/jni/bridge/jni_{cf_recovery_policy,publish_outcome,recreate_sequence,peer_penalty_persist}.c`;
 `native/src/test/host/{cf_recovery_policy,publish_outcome,recreate_sequence,peer_penalty_persist}_kat/`
 (each `_main.c` + `run.sh`);
-`native/src/androidTest/java/io/digibyte/native_core/{CfRecoveryPolicy,PublishOutcome,RecreateSequence,PeerPenaltyPersist}ParityTest.kt`
+`core/src/androidTest/java/io/digibyte/core/sync/{CfRecoveryPolicy,PublishOutcome,RecreateSequence,PeerPenaltyPersist}ParityTest.kt`
+(**moved from `native/src/androidTest/.../native_core/` during Part C** — `:core` depends on
+`:native`, not the reverse, so `:native`'s androidTest resolves neither `NativeBridge` nor the
+`io.digibyte.core.sync` mirrors; the four files failed to compile there with `Unresolved
+reference`. The handoff's own `runBlocking` remedy — move to `core/src/androidTest` — was the
+fix for all four. Package is now `io.digibyte.core.sync`, next to the host-JVM unit tests.)
 
 Android, modified: `native/CMakeLists.txt` (four source lines) and
 `core/src/main/java/io/digibyte/core/bridge/NativeBridge.kt` (ten `external fun`s, all

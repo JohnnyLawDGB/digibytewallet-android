@@ -1,8 +1,7 @@
-package io.digibyte.native_core
+package io.digibyte.core.sync
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.digibyte.core.bridge.NativeBridge
-import io.digibyte.core.sync.CfRecoveryPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

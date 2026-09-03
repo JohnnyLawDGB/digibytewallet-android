@@ -41,7 +41,12 @@ platform executor's observed behaviour against the C spec. `RecreateSequence`.
 3. **`native/src/main/jni/bridge/jni_<name>.c`** — test-support accessor only. Pack results
    into a `jint` so the boundary stays scalar.
 4. **One line in `native/CMakeLists.txt`** — the list is explicit, no globbing.
-5. **`native/src/androidTest/.../{Name}ParityTest.kt`** — binds the Kotlin mirror to C.
+5. **`core/src/androidTest/java/io/digibyte/core/sync/{Name}ParityTest.kt`** — binds the
+   Kotlin mirror to C. It lives in `:core`, not `:native`: the dependency runs
+   `:core` → `:native`, so `:native`'s androidTest can see neither `NativeBridge` nor the
+   Kotlin mirror. Run with
+   `./gradlew :core:connectedMainnetDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=io.digibyte.core.sync.{Name}ParityTest`
+   (the connected task rejects `--tests`).
 
 ## Why the Kotlin survives
 
