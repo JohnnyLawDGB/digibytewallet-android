@@ -93,7 +93,7 @@ git submodule status                       # expect f191590
 
 Report as you go, not at the end.
 
-### C1. Host KATs — fastest, platform-neutral C
+### C1. Host KATs — fastest, but NOT fully platform-neutral
 
 ```bash
 ./scripts/run-host-kats.sh cf_recovery
@@ -104,6 +104,32 @@ Report as you go, not at the end.
 
 All four should pass. `publish_outcome` prints `SKIP RED gate: ETIMEDOUT is 110 here` — that
 is correct and deliberate on Linux; the gate fires on macOS and did.
+
+**The full suite is not portable, and an earlier draft of this section wrongly called it
+"platform-neutral C".** Measured 2026-09-03 at pin `32f17d7`:
+
+| | Linux | macOS (Xcode 26.6, Apple clang, arm64) |
+|---|---|---|
+| `./scripts/run-host-kats.sh` | 72/72 | **65/72** |
+
+The 7 macOS failures are toolchain gaps, not code defects. Do not chase them from Linux, and
+do not "fix" a KAT because macOS reports it red:
+
+* **5 × `ld --wrap=`** (`cf_block_completion_gate`, `cf_checkpoint_enforce`,
+  `cf_checkpoint_quorum`, `cf_checkpoint_veto`, `cf_scan_ledger_drive`) — symbol
+  interposition is a GNU ld feature; Apple's ld64 has no equivalent. Structurally
+  **Linux-only** until reworked around a seam ld64 can express.
+* **1 × LeakSanitizer** (`peer_free_live_thread`) — `detect_leaks=1` is unsupported on
+  macOS/arm64, so only the GREEN arm's leak assertion cannot run. Its RED arm works and
+  still catches the use-after-free at `BRPeerManager.c:3542`.
+* **1 × `ulimit -v`** (`saved_blocks`) — not settable on macOS.
+
+Before core `32f17d7`, macOS scored **26/72**. `TARGET_OS_MAC` is defined transitively by
+`<string.h>` on every Apple platform, so `BRWallet.h` / `BRPeer.h` / `BRMerkleBlock.h` pulled
+`<Foundation/Foundation.h>` into C translation units and 46 KATs died on `@class`. Guarding
+those arms with `__OBJC__` is a **core** fix rather than a KAT-runner one for the same reason
+it mattered here: a shared header that drags Foundation into C is equally unbuildable from
+the iOS XCFramework the port needs.
 
 ### C2. Host-JVM unit tests — WITH NO DEVICE ATTACHED
 
