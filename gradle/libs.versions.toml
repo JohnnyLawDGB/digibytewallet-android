@@ -11,7 +11,7 @@
 [versions]
 
 # --- Build tooling / plugins -------------------------------------------------
-agp = "8.7.3"
+agp = "9.3.2"
 # KSP versions are Kotlin-derived (<kotlin>-<ksp>) and MUST be bumped together
 # with `kotlin`; the Compose compiler plugin ships in the Kotlin release.
 kotlin = "2.2.21"
