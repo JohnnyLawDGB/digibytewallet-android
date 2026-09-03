@@ -87,6 +87,8 @@
     <string name="common_retry_now">Subukan ulit ngayon</string>
     <string name="wallet_send">Magpadala</string>
     <string name="wallet_receive">Tumanggap</string>
+    <string name="wallet_hide_balances">Itago ang mga balanse</string>
+    <string name="wallet_show_balances">Ipakita ang mga balanse</string>
     <string name="wallet_scan">I-scan</string>
     <string name="wallet_assets">Mga Asset</string>
     <string name="wallet_recent_activity">Kamakailang Aktibidad</string>

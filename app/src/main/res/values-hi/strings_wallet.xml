@@ -87,6 +87,8 @@
     <string name="common_retry_now">अभी पुनः प्रयास करें</string>
     <string name="wallet_send">भेजें</string>
     <string name="wallet_receive">प्राप्त करें</string>
+    <string name="wallet_hide_balances">बैलेंस छिपाएँ</string>
+    <string name="wallet_show_balances">बैलेंस दिखाएँ</string>
     <string name="wallet_scan">स्कैन</string>
     <string name="wallet_assets">एसेट</string>
     <string name="wallet_recent_activity">हाल की गतिविधि</string>

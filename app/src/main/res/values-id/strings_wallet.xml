@@ -87,6 +87,8 @@
     <string name="common_retry_now">Coba lagi sekarang</string>
     <string name="wallet_send">Kirim</string>
     <string name="wallet_receive">Terima</string>
+    <string name="wallet_hide_balances">Sembunyikan saldo</string>
+    <string name="wallet_show_balances">Tampilkan saldo</string>
     <string name="wallet_scan">Pindai</string>
     <string name="wallet_assets">Aset</string>
     <string name="wallet_recent_activity">Aktivitas Terbaru</string>
