@@ -811,7 +811,7 @@ Java_io_digibyte_core_bridge_NativeBridge_dumpAllAddresses(JNIEnv *env, jobject 
  * Takes NO lock (the underlying accessor uses a private leaf mutex), so it must not be
  * given PEER_GUARD: it touches neither g_peerManager nor g_wallet internals, and taking
  * that guard would add contention plus a future deadlock foothold against
- * BRPeerManagerFree's peer-thread join. */
+ * BRPeerManagerDisconnect's bounded wait on peer threads. */
 JNIEXPORT jstring JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getFilterElementStats(JNIEnv *env, jobject thiz)
 {
