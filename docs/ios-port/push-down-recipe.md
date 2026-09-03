@@ -80,6 +80,12 @@ in §1 of the triage has no such constraint and moves outright.
 - **Never hardcode platform constants; include the platform header.**
 - **Do not run git inside a Claude-bridged folder.** Even read-only `git status` leaves an
   `index.lock` it cannot unlink, blocking native git.
+- **Core `develop`'s tip must EQUAL the android pin.** CI's "Submodule pin is durable" step
+  clones the submodule `--depth=1`, so a pin that is merely an *ancestor* of the tip fails the
+  check even though it is durable. Pushing a core commit to core `develop` without bumping
+  android's pin in the same push turns every android branch red (bit twice: 2026-08-31 and
+  2026-09-03, the `__OBJC__` guard). Push core, then immediately commit the pin bump on
+  android; never push core ahead and leave it.
 
 ## The four pilots
 
