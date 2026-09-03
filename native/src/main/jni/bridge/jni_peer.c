@@ -55,8 +55,8 @@ static int64_t _nowMonotonicMs(void) {
  * and stamp the monotonic ms.
  *
  * SAFE to call ONLY from: (a) a BRPeerManager callback (runs on a live manager's
- * peer thread — BRPeerManagerFree joins that thread, so the manager can't be
- * freed underneath it), or (b) the tail of a PEER_GUARD-holding JNI call. NEVER
+ * peer thread — BRPeerManagerFree defers to the last such thread, so the manager
+ * can't be freed underneath it), or (b) the tail of a PEER_GUARD-holding JNI call. NEVER
  * from an unguarded, non-callback context. Reads the global with a null-check
  * exactly as the existing callbacks already do (bridge_syncStarted/txStatusUpdate
  * read g_peerManager unguarded on peer threads) — never dereferences a freed
@@ -841,8 +841,18 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * Only do this ONCE — clear the flag immediately. */
         g_peerManagerNeedsRecreate = 0;
         LOGI("startSync: recreating peer manager (wallet changed since last init)");
-        BRPeerManagerDisconnect(g_peerManager);
-        BRPeerManagerFree(g_peerManager);
+        /* Disconnect's wait is BOUNDED (PEER_DISCONNECT_WAIT_SECS) and peer threads are
+         * detached, so it can return with threads still in dispatch. Free then PARKS the
+         * manager instead of destroying it under them -- the last thread out frees it
+         * (core: BRPeerManagerFree). Freeing regardless was the 2026-09-01 Ultra SIGABRT
+         * ("pthread_mutex_lock called on a destroyed mutex" in the peer's own pong drain).
+         * Either way the old pointer is dead to us after this line. */
+        if (! BRPeerManagerDisconnect(g_peerManager)) {
+            LOGW("startSync: disconnect gave up with peer threads still running");
+        }
+        if (! BRPeerManagerFree(g_peerManager)) {
+            LOGW("startSync: old peer manager parked; its last thread will free it");
+        }
         g_peerManager = NULL;
     }
 
