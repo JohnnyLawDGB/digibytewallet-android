@@ -229,6 +229,88 @@ object NativeBridge {
     /** Register callback handler for native events. */
     external fun setCallbackHandler(handler: NativeCallback)
 
+    // === Peer penalty persistence (test-support only) ===
+    /**
+     * The C Keep/Clear/Store decision from [BRPeerPenaltyPersist.h]: 0 = Keep, 1 = Clear,
+     * 2 = Store.
+     *
+     * **Not for production use — call [io.digibyte.core.sync.PeerPenaltyPersist] instead.**
+     */
+    external fun peerPenaltyDecide(blob: ByteArray?): Int
+
+    /** The same decision from a length alone. */
+    external fun peerPenaltyDecideLength(length: Int): Int
+
+    /**
+     * `BR_PEER_PENALTY_HEADER_BYTES` — the bytes an EMPTY penalty set still serializes to.
+     *
+     * Exists so `PeerPenaltyPersistParityTest` can assert
+     * [io.digibyte.core.sync.PeerPenaltyPersist]'s `HEADER_BYTES` against the real wire
+     * format. It is not a policy choice; it is a fact about `BRPeerPenaltySerialize`.
+     */
+    external fun peerPenaltyHeaderBytes(): Int
+
+    /** `BR_PEER_PENALTY_ENTRY_BYTES` — the per-entry stride (16 addr + 2 port + 8 time). */
+    external fun peerPenaltyEntryBytes(): Int
+
+    // === Recreate sequence (test-support only) ===
+    /**
+     * The mid-session peer-manager recreate order, from [BRRecreateSequence.h].
+     *
+     * **Not for production use — call [io.digibyte.core.sync.RecreateSequence] instead.**
+     * Unlike the other push-downs the C side is a *specification*, not an executor: the five
+     * steps are `suspend` lambdas and cannot be driven from a C callback without blocking a
+     * coroutine thread inside JNI. C owns the order; each platform keeps its own executor.
+     * `RecreateSequenceParityTest` asserts the Kotlin executor visits them in this order.
+     */
+    external fun recreateStepCount(): Int
+
+    /** The step at an ordinal position, or -1 out of range. */
+    external fun recreateStepAt(index: Int): Int
+
+    /** Stable label for a step, or null for an unknown one. */
+    external fun recreateStepName(step: Int): String?
+
+    /** Whether the executor must continue after this step fails. */
+    external fun recreateContinuesAfterFailure(step: Int): Boolean
+
+    // === Publish outcome (test-support only) ===
+    /**
+     * The C publish errno mapping ([BRPublishOutcome.h]) packed into an int:
+     * bits 0-1 = kind ordinal, bit 2 = shouldRetry, bit 3 = isTerminal.
+     *
+     * **Not for production use — call [io.digibyte.core.sync.PublishOutcome] instead.**
+     */
+    external fun publishOutcomeOf(error: Int): Int
+
+    /**
+     * This platform's errno value: 0 = EINVAL, 1 = ENOTCONN, 2 = ETIMEDOUT. 0 if out of range.
+     *
+     * Exists so `PublishOutcomeParityTest` can assert [io.digibyte.core.sync.PublishOutcome]'s
+     * hardcoded constants against the platform rather than against a comment. They are Linux
+     * values, which are correct on Android and wrong on Darwin (57/60) — the C header switches
+     * on `<errno.h>` symbols so iOS needs no second table.
+     */
+    external fun publishErrnoValue(index: Int): Int
+
+    // === CF recovery policy (test-support only) ===
+    /**
+     * The C compact-filter recovery table ([BRCFRecoveryPolicy.h]) as a bitmask:
+     * bit 0 = dropFilterChain, bit 1 = dropScanLedger.
+     *
+     * **Not for production use — call [io.digibyte.core.sync.CfRecoveryPolicy] instead.**
+     * This exists so `CfRecoveryPolicyParityTest` can compare the two tables on a device.
+     * The C header is the source of truth (iOS imports it directly, so Swift adds no third
+     * copy); the Kotlin object is a mirror kept because it is covered by a host-JVM unit
+     * test and NativeBridge cannot load on a host JVM. Routing production through here
+     * would move that suite onto a device for no behavioural gain.
+     *
+     * Pure function of its argument: no wallet state, no lock, safe before a wallet exists.
+     * Out-of-range values are passed through deliberately so the header's default case
+     * stays observable.
+     */
+    external fun cfRecoveryDecide(reason: Int): Int
+
     // === Message signing ===
     /**
      * Sign an arbitrary message with the wallet's key at the given address index.
