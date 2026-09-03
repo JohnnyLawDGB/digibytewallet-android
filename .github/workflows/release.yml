@@ -55,9 +55,16 @@ jobs:
 
       # Rotate from the Android debug key (which signed every previously
       # distributed APK through v3.5.7) to the release key, using APK Signing
-      # Scheme v3 lineage. Existing installs upgrade cleanly on API 28+; API
-      # 26/27 devices with the debug signature also accept the update via
-      # the v1/v2 signature written by the first signer.
+      # Scheme v3 lineage. What actually lands in the APK (verified with
+      # `apksigner verify --verbose --print-certs` on the v4.0.77 and v4.0.78
+      # release assets, 2026-09-03):
+      #   v1 (JAR):  NOT present -- apksigner drops it once minSdk >= 24
+      #   v2:        debug signer
+      #   v3 / v3.1: debug signer for API 24-32, release signer for API 33+,
+      #              lineage debug -> release with all capabilities
+      # So existing installs upgrade in place everywhere we run: API 33+
+      # sees the release cert, API 26-32 (minSdk 26) sees the debug cert it
+      # was installed with, via v2/v3 -- there is no v1 signature involved.
       - name: Re-sign APK with debug→release signing lineage
         env:
           RELEASE_KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
