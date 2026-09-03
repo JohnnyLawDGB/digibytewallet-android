@@ -120,6 +120,8 @@
     <!-- ── Wallet home ──────────────────────────────────────────────────────────── -->
     <string name="wallet_send">Send</string>
     <string name="wallet_receive">Receive</string>
+    <string name="wallet_hide_balances">Hide balances</string>
+    <string name="wallet_show_balances">Show balances</string>
     <string name="wallet_scan">Scan</string>
     <string name="wallet_assets">Assets</string>
     <string name="wallet_recent_activity">Recent Activity</string>

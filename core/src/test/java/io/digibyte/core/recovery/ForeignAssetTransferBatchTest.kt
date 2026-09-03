@@ -134,15 +134,31 @@ class ForeignAssetTransferBatchTest {
         assertTrue("more than one fee input was needed", inputs.size >= 3)
     }
 
-    /** An asset whose quantity we could not read is refused before it reaches the pool, so it
-     *  cannot spend fee money on a transfer that would be built around a guess. */
-    @Test fun `an unknown quantity is refused without touching the pool`() {
+    /**
+     * An asset whose quantity we could not read (0) is no longer refused — it is funded and moved
+     * like any other, encoding a minimal 1-unit instruction so the remainder rule delivers the
+     * rest to the destination (DGB-1007 fix). It draws from the pool exactly like a known asset.
+     */
+    @Test fun `an unknown (zero) quantity is funded and moved, drawing from the pool`() {
         val out = plan(
-            listOf(asset("unknown", 0L), asset("asset2", 5L)),
+            listOf(asset("unknown", 0L)),
             listOf(spend("f1", 100_000L)),
         )
-        val first = out[0].result as ForeignAssetTransferPlan.Result.Refused
-        assertEquals(ForeignAssetTransferPlan.Reason.UNKNOWN_QUANTITY, first.reason)
-        assertTrue("the funded asset still got its money", out[1].result is ForeignAssetTransferPlan.Result.Ok)
+        val plan = (out.single().result as ForeignAssetTransferPlan.Result.Ok).plan
+        assertTrue("the unknown asset consumed fee money", plan.inputs.any { it.txid == "f1" })
+        assertEquals("the whole layout is the destination's", dest, plan.outputs.last().address)
+    }
+
+    /**
+     * With enough pool for both, an unknown-quantity asset and a known-quantity asset both move —
+     * the unknown one is not special-cased out of the batch.
+     */
+    @Test fun `an unknown and a known quantity both move when the pool covers both`() {
+        val out = plan(
+            listOf(asset("unknown", 0L), asset("asset2", 5L)),
+            listOf(spend("f1", 100_000L), spend("f2", 100_000L)),
+        )
+        assertEquals(2, out.size)
+        assertTrue("both planned, got $out", out.all { it.result is ForeignAssetTransferPlan.Result.Ok })
     }
 }

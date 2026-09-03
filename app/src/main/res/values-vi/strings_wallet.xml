@@ -87,6 +87,8 @@
     <string name="common_retry_now">Thử lại ngay</string>
     <string name="wallet_send">Gửi</string>
     <string name="wallet_receive">Nhận</string>
+    <string name="wallet_hide_balances">Ẩn số dư</string>
+    <string name="wallet_show_balances">Hiện số dư</string>
     <string name="wallet_scan">Quét</string>
     <string name="wallet_assets">Tài sản</string>
     <string name="wallet_recent_activity">Hoạt động gần đây</string>

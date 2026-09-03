@@ -87,6 +87,8 @@
     <string name="common_retry_now">Şimdi tekrar dene</string>
     <string name="wallet_send">Gönder</string>
     <string name="wallet_receive">Al</string>
+    <string name="wallet_hide_balances">Bakiyeleri gizle</string>
+    <string name="wallet_show_balances">Bakiyeleri göster</string>
     <string name="wallet_scan">Tara</string>
     <string name="wallet_assets">Varlıklar</string>
     <string name="wallet_recent_activity">Son Etkinlikler</string>

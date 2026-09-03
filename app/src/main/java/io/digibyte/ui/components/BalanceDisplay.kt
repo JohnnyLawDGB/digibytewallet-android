@@ -41,9 +41,16 @@ fun BalanceDisplay(
     dgbAmount: String,
     ddAmount: String? = null,
     isSynced: Boolean = true,
+    hidden: Boolean = false,
     onFiatTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    // Privacy toggle: when hidden, every figure is replaced by a mask, but the layout —
+    // the DGB row, the equivalent line, the DigiDollar pill — stays exactly the same, so
+    // toggling never reflows the hero card. See BalancePrivacyPrefs / maskedAmount.
+    val dgbText = io.digibyte.core.settings.maskedAmount(hidden, dgbAmount)
+    val fiatText = io.digibyte.core.settings.maskedAmount(hidden, fiatAmount)
+
     val alpha = if (isSynced) 1f else 0.4f
     val primaryColor = MaterialTheme.colorScheme.onBackground.copy(alpha = alpha)
     val equivColor = MaterialTheme.colorScheme.onBackground.copy(alpha = alpha * 0.7f)
@@ -60,7 +67,7 @@ fun BalanceDisplay(
             horizontalArrangement = Arrangement.Center
         ) {
             Text(
-                text = dgbAmount,
+                text = dgbText,
                 style = MaterialTheme.typography.displaySmall.copy(
                     fontWeight = FontWeight.Bold,
                     fontSize = 40.sp
@@ -87,7 +94,7 @@ fun BalanceDisplay(
 
         // Secondary: chosen equivalent (tap to cycle USD / BTC / PHP)
         Text(
-            text = "≈ $fiatAmount",
+            text = "≈ $fiatText",
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.Medium,
                 fontSize = 18.sp
@@ -126,7 +133,7 @@ fun BalanceDisplay(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = ddAmount,
+                        text = io.digibyte.core.settings.maskedAmount(hidden, ddAmount),
                         // Two-thirds of the hero's 40sp. The mark beside it is two-thirds of the
                         // hero's 30dp, so the pill is a true scaled copy of the DGB section
                         // rather than a differently-proportioned one: both keep the same 0.75

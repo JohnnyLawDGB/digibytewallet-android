@@ -87,6 +87,8 @@
     <string name="common_retry_now">立即重试</string>
     <string name="wallet_send">发送</string>
     <string name="wallet_receive">接收</string>
+    <string name="wallet_hide_balances">隐藏余额</string>
+    <string name="wallet_show_balances">显示余额</string>
     <string name="wallet_scan">扫描</string>
     <string name="wallet_assets">资产</string>
     <string name="wallet_recent_activity">近期活动</string>

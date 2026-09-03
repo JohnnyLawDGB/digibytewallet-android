@@ -59,6 +59,19 @@ class WalletViewModel @Inject constructor(
     private val _ddBalance = MutableStateFlow(prefs.getLong("last_dd_balance", 0L))
     val ddBalance: StateFlow<Long> = _ddBalance.asStateFlow()
 
+    // Privacy toggle: hide the hero balances behind a mask. Persisted per-device
+    // (BalancePrivacyPrefs), so the choice survives an app restart.
+    private val _balanceHidden = MutableStateFlow(
+        io.digibyte.core.settings.BalancePrivacyPrefs.isHidden(application)
+    )
+    val balanceHidden: StateFlow<Boolean> = _balanceHidden.asStateFlow()
+
+    fun toggleBalanceHidden() {
+        val next = !_balanceHidden.value
+        io.digibyte.core.settings.BalancePrivacyPrefs.setHidden(application, next)
+        _balanceHidden.value = next
+    }
+
     /** Live transaction list from C core, most-recent first. */
     private val _transactions = MutableStateFlow<List<TransactionEntity>>(emptyList())
     val transactions: StateFlow<List<TransactionEntity>> = _transactions.asStateFlow()

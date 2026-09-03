@@ -89,6 +89,8 @@
     <string name="common_retry_now">Reintentar ahora</string>
     <string name="wallet_send">Enviar</string>
     <string name="wallet_receive">Recibir</string>
+    <string name="wallet_hide_balances">Ocultar saldos</string>
+    <string name="wallet_show_balances">Mostrar saldos</string>
     <string name="wallet_scan">Escanear</string>
     <string name="wallet_assets">Activos</string>
     <string name="wallet_recent_activity">Actividad reciente</string>
