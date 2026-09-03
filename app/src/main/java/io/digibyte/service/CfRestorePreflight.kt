@@ -30,6 +30,24 @@ internal fun cfRestoreResetReason(
     return if (lowestNeeded < blockFloor) CfRestoreResetReason.HEADER_WINDOW_MISSING else null
 }
 
+/**
+ * Whether it is safe to commit `has_synced = true` right now.
+ *
+ * DGB-1005 root cause: `persistSyncCompletionState` commits `has_synced` the instant sync
+ * completes, but the CF scan ledger reaches disk only via a debounced coalesced writer or the
+ * `onDestroy` flush — and an OS kill of a backgrounded app (common on low-RAM devices) never
+ * reaches `onDestroy`. If `has_synced` outlives the ledger, the next cold start's
+ * [cfRestoreResetReason] returns `MISSING_LEDGER` and the wallet is floored to its birth
+ * checkpoint (~1.25M blocks of re-sync). This gate makes `has_synced` imply a durable ledger.
+ *
+ * It defers ONLY when there is un-durable ledger state to lose ([hasPendingLedger] &&
+ * ![ledgerDurable]). A wallet with no pending ledger — a fresh or already-at-tip wallet with
+ * nothing scanned — has no divergence to guard and must not be blocked, or it would hang in
+ * "syncing" forever waiting for a ledger that will never be produced.
+ */
+internal fun shouldMarkSynced(hasPendingLedger: Boolean, ledgerDurable: Boolean): Boolean =
+    !(hasPendingLedger && !ledgerDurable)
+
 internal fun compactFilterBirthHeight(
     wasSynced: Boolean,
     savedTip: Long,

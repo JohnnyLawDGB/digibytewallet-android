@@ -161,6 +161,32 @@ class CfRestorePreflightTest {
         )
     }
 
+    // DGB-1005: `has_synced` is committed the instant sync completes, but the CF scan ledger is
+    // only flushed by a debounced writer / onDestroy — and an OS kill of a backgrounded app never
+    // reaches onDestroy. If has_synced outlives the ledger, the next cold start's preflight sees
+    // MISSING_LEDGER and floors the chain to the birth checkpoint. shouldMarkSynced gates the
+    // has_synced commit on the ledger being durable, but ONLY when there is ledger state to lose.
+
+    @Test
+    fun `defer marking synced when a pending ledger has not reached disk`() {
+        // The exact divergence: we hold ledger state that is not yet durable. Marking synced now
+        // would set has_synced without a ledger on disk → birth reset on next launch.
+        assertEquals(false, shouldMarkSynced(hasPendingLedger = true, ledgerDurable = false))
+    }
+
+    @Test
+    fun `mark synced once the pending ledger is durable`() {
+        assertEquals(true, shouldMarkSynced(hasPendingLedger = true, ledgerDurable = true))
+    }
+
+    @Test
+    fun `mark synced when there is no pending ledger to lose`() {
+        // A fresh / at-tip wallet with nothing scanned must NOT hang in "syncing" forever waiting
+        // for a ledger that will never exist. No pending ledger means no divergence to guard.
+        assertEquals(true, shouldMarkSynced(hasPendingLedger = false, ledgerDurable = false))
+        assertEquals(true, shouldMarkSynced(hasPendingLedger = false, ledgerDurable = true))
+    }
+
     private fun ledger(
         scannedThrough: Int,
         requestedThrough: Int,
