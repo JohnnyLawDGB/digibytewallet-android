@@ -123,6 +123,62 @@ fun NetworkInfoScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
+            // ── Privacy — Tor + Dandelion (top of the tab) ──────────────────────────────────────────────────
+            item {
+                SettingsCategory(title = stringResource(R.string.ni_privacy)) {
+                    val torSubtitle = when (val ts = torState) {
+                        is TorState.Disabled -> stringResource(R.string.ni_tor_disabled)
+                        is TorState.Starting -> stringResource(R.string.ni_tor_starting)
+                        is TorState.Connecting -> stringResource(R.string.ni_tor_connecting)
+                        is TorState.Connected -> stringResource(R.string.ni_tor_connected, ts.socksPort)
+                        is TorState.Failed -> stringResource(R.string.ni_tor_failed, ts.reason)
+                    }
+                    val torSubtitleColor = when (torState) {
+                        is TorState.Connected -> DigiByteGreen
+                        is TorState.Failed -> DigiByteRed
+                        is TorState.Starting, is TorState.Connecting -> DigiByteAccent
+                        else -> Color(0xFF8899AA)
+                    }
+
+                    SettingsRow(
+                        icon = Icons.Default.VpnLock,
+                        iconTint = Color(0xFF7C4DFF),
+                        title = stringResource(R.string.ni_tor),
+                        subtitle = torSubtitle,
+                        subtitleColor = torSubtitleColor,
+                        onClick = { viewModel.setTorEnabled(!torEnabled) },
+                        trailing = {
+                            Switch(
+                                checked = torEnabled,
+                                onCheckedChange = { viewModel.setTorEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF7C4DFF)
+                                )
+                            )
+                        }
+                    )
+
+                    SettingsRow(
+                        icon = Icons.Default.AltRoute,
+                        iconTint = Color(0xFF26A69A),
+                        title = stringResource(R.string.ni_dandelion),
+                        subtitle = stringResource(R.string.ni_dandelion_sub),
+                        onClick = { viewModel.setDandelionEnabled(!dandelionEnabled) },
+                        trailing = {
+                            Switch(
+                                checked = dandelionEnabled,
+                                onCheckedChange = { viewModel.setDandelionEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF26A69A)
+                                )
+                            )
+                        }
+                    )
+                }
+            }
+
             // ── Sync status card ─────────────────────────────────────────────
             item {
                 Card(
@@ -327,62 +383,6 @@ fun NetworkInfoScreen(
                             }
                         }
                     }
-                }
-            }
-
-            // ── Tor Privacy ──────────────────────────────────────────────────
-            item {
-                SettingsCategory(title = stringResource(R.string.ni_privacy)) {
-                    val torSubtitle = when (val ts = torState) {
-                        is TorState.Disabled -> stringResource(R.string.ni_tor_disabled)
-                        is TorState.Starting -> stringResource(R.string.ni_tor_starting)
-                        is TorState.Connecting -> stringResource(R.string.ni_tor_connecting)
-                        is TorState.Connected -> stringResource(R.string.ni_tor_connected, ts.socksPort)
-                        is TorState.Failed -> stringResource(R.string.ni_tor_failed, ts.reason)
-                    }
-                    val torSubtitleColor = when (torState) {
-                        is TorState.Connected -> DigiByteGreen
-                        is TorState.Failed -> DigiByteRed
-                        is TorState.Starting, is TorState.Connecting -> DigiByteAccent
-                        else -> Color(0xFF8899AA)
-                    }
-
-                    SettingsRow(
-                        icon = Icons.Default.VpnLock,
-                        iconTint = Color(0xFF7C4DFF),
-                        title = stringResource(R.string.ni_tor),
-                        subtitle = torSubtitle,
-                        subtitleColor = torSubtitleColor,
-                        onClick = { viewModel.setTorEnabled(!torEnabled) },
-                        trailing = {
-                            Switch(
-                                checked = torEnabled,
-                                onCheckedChange = { viewModel.setTorEnabled(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFF7C4DFF)
-                                )
-                            )
-                        }
-                    )
-
-                    SettingsRow(
-                        icon = Icons.Default.AltRoute,
-                        iconTint = Color(0xFF26A69A),
-                        title = stringResource(R.string.ni_dandelion),
-                        subtitle = stringResource(R.string.ni_dandelion_sub),
-                        onClick = { viewModel.setDandelionEnabled(!dandelionEnabled) },
-                        trailing = {
-                            Switch(
-                                checked = dandelionEnabled,
-                                onCheckedChange = { viewModel.setDandelionEnabled(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFF26A69A)
-                                )
-                            )
-                        }
-                    )
                 }
             }
 
