@@ -49,7 +49,7 @@
 // filterHeader. Constructing that from scratch would be a SHA256d preimage
 // break (same problem cf_candidate_header_kat and cf_checkpoint_enforce_kat's
 // test_matching_batch_wiring document). Scoped exactly like those: GNU ld's
-// -Wl,--wrap=BRCompactFilterChainHeader intercepts ONLY the one accessor call
+// The -D rename intercepts ONLY the one accessor call
 // _BRPeerManagerCheckpointConfirmsOurChainLocked makes to read our chain's
 // header at the pinned checkpoint height, forcing it to return the real pin
 // value (read directly out of the real BRMainNetCFCheckpoints table, never a
@@ -162,7 +162,18 @@ static const BRCompactFilterChain *g_forceHeaderChain = NULL;
 static uint32_t                    g_forceHeaderHeight = 0;
 static UInt256                     g_forceHeaderValue;
 
-extern UInt256 __real_BRCompactFilterChainHeader(const BRCompactFilterChain *chain, uint32_t height);
+// Portable stand-in for GNU ld's __real_ symbol. The call sites (in the
+// #include-d BRPeerManager.c) are renamed to __wrap_ by a per-TU -D, so this
+// declaration must still reach the genuine definition in another TU. An asm
+// label does that on both ld64 and GNU ld: string literals are not
+// macro-expanded, so the -D cannot rewrite the symbol name.
+#if defined(__APPLE__)
+#  define KAT_REAL_SYM(s) __asm__("_" s)
+#else
+#  define KAT_REAL_SYM(s) __asm__(s)
+#endif
+extern UInt256 __real_BRCompactFilterChainHeader(const BRCompactFilterChain *chain, uint32_t height)
+    KAT_REAL_SYM("BRCompactFilterChainHeader");
 
 UInt256 __wrap_BRCompactFilterChainHeader(const BRCompactFilterChain *chain, uint32_t height)
 {

@@ -14,7 +14,8 @@
 # functions (BRPeerSendGetCFilters / BRPeerSendGetdataBlocks) and status/socket
 # queries (BRPeerConnectStatus / BRPeerIsSocketOpen) -- real BRPeer.c is still
 # linked in, but these four calls are intercepted at link time and redirected to
-# the __wrap_ shims in the main.c. Requires GNU ld's `--wrap` (Linux/clang CI).
+# the __wrap_ shims in the main.c. Portable seam: no linker support needed -- see the build() comment.
+# (This replaced GNU ld's `--wrap`, which Apple's ld64 does not implement.)
 #
 # ASan is compiled in WITH LeakSanitizer LIVE (no detect_leaks=0 override): every
 # case ends by calling BRPeerManagerFree(m) so LSan proves the buffer + manager
@@ -192,13 +193,35 @@ shopt -u nullglob
 # build <output> <extra -D flags...>
 build() {
     local out="$1"; shift
-    clang -w -include stdint.h \
+
+        # Portable stand-in for GNU ld --wrap (Apple ld64 has no equivalent).
+        # Each wrapped symbol is DEFINED in its own core TU and CALLED from the
+        # BRPeerManager.c that this main.c #include-s, so renaming the call sites
+        # is a per-TU concern: only this object gets the -D. The core TUs below
+        # keep the real definitions, and `__wrap_<sym>` is a distinct token the
+        # macro never rewrites.
+        clang -w -include stdint.h \
         -DCF_LEDGER_DRIVE_REREQUEST=1 \
         "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
-        "$SCRIPT_DIR/cf_scan_ledger_drive_kat_main.c" \
+        -DBRPeerConnectStatus=__wrap_BRPeerConnectStatus \
+        -DBRPeerIsSocketOpen=__wrap_BRPeerIsSocketOpen \
+        -DBRPeerSendGetCFilters=__wrap_BRPeerSendGetCFilters \
+        -DBRPeerSendGetdataBlocks=__wrap_BRPeerSendGetdataBlocks \
+        -DBRPeerSendGetCFHeaders=__wrap_BRPeerSendGetCFHeaders \
+        -DBRPeerSendGetheaders=__wrap_BRPeerSendGetheaders \
+        -DBRPeerSetConvoyHdrGated=__wrap_BRPeerSetConvoyHdrGated \
+        -c "$SCRIPT_DIR/cf_scan_ledger_drive_kat_main.c" -o "$BUILD_DIR/kat_main.o"
+
+        clang -w -include stdint.h \
+        -DCF_LEDGER_DRIVE_REREQUEST=1 \
+        "$@" \
+        -fsanitize=address -fno-omit-frame-pointer -g \
+        -I "$CORE_DIR" \
+        -I "$CORE_DIR/secp256k1/include" \
+        "$BUILD_DIR/kat_main.o" \
         "$CORE_DIR/BRPeer.c" \
         "$CORE_DIR/BRWallet.c" \
         "$CORE_DIR/BRTransaction.c" \
@@ -223,13 +246,6 @@ build() {
         "$CORE_DIR/crypto/qubit.c" \
         "$CORE_DIR/crypto/odocrypt.c" \
         "${SHA3_SRCS[@]}" \
-        -Wl,--wrap=BRPeerConnectStatus \
-        -Wl,--wrap=BRPeerIsSocketOpen \
-        -Wl,--wrap=BRPeerSendGetCFilters \
-        -Wl,--wrap=BRPeerSendGetdataBlocks \
-        -Wl,--wrap=BRPeerSendGetCFHeaders \
-        -Wl,--wrap=BRPeerSendGetheaders \
-        -Wl,--wrap=BRPeerSetConvoyHdrGated \
         -lm -lpthread \
         -o "$out"
 }

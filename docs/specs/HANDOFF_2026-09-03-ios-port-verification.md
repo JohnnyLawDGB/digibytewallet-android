@@ -106,23 +106,37 @@ All four should pass. `publish_outcome` prints `SKIP RED gate: ETIMEDOUT is 110 
 is correct and deliberate on Linux; the gate fires on macOS and did.
 
 **The full suite is not portable, and an earlier draft of this section wrongly called it
-"platform-neutral C".** Measured 2026-09-03 at pin `32f17d7`:
+"platform-neutral C".** Measured 2026-09-04 at pin `32f17d7`:
 
 | | Linux | macOS (Xcode 26.6, Apple clang, arm64) |
 |---|---|---|
-| `./scripts/run-host-kats.sh` | 72/72 | **65/72** |
+| `./scripts/run-host-kats.sh` | 72/72 | **69-70/72** |
 
-The 7 macOS failures are toolchain gaps, not code defects. Do not chase them from Linux, and
-do not "fix" a KAT because macOS reports it red:
+Two deterministic macOS gaps remain, both toolchain, neither a code defect — do not chase
+them from Linux, and do not "fix" a KAT because macOS reports it red:
 
-* **5 × `ld --wrap=`** (`cf_block_completion_gate`, `cf_checkpoint_enforce`,
-  `cf_checkpoint_quorum`, `cf_checkpoint_veto`, `cf_scan_ledger_drive`) — symbol
-  interposition is a GNU ld feature; Apple's ld64 has no equivalent. Structurally
-  **Linux-only** until reworked around a seam ld64 can express.
-* **1 × LeakSanitizer** (`peer_free_live_thread`) — `detect_leaks=1` is unsupported on
-  macOS/arm64, so only the GREEN arm's leak assertion cannot run. Its RED arm works and
-  still catches the use-after-free at `BRPeerManager.c:3542`.
-* **1 × `ulimit -v`** (`saved_blocks`) — not settable on macOS.
+* **`peer_free_live_thread`** — the GREEN arm needs `detect_leaks=1`, and LeakSanitizer is
+  unsupported on macOS/arm64. Its RED arm works and still catches the use-after-free at
+  `BRPeerManager.c:3542`.
+* **`saved_blocks`** — needs `ulimit -v`, not settable on macOS.
+
+And one **flaky** on macOS, which is neither a toolchain gap nor a defect:
+
+* **`saveblocks_race`** — measured 1 pass / 2 fail over three consecutive runs. Its RED arm
+  requires a genuine data race to manifest inside 2000 iterations; on arm64 it often does
+  not, and the gate then reports `unfixed pattern did NOT fault`. A red result here on macOS
+  means "did not reproduce this time", not "the gate is broken". Re-run before investigating.
+  Deterministic on Linux.
+
+**The 5 `ld --wrap` KATs are no longer Linux-only** (`cf_block_completion_gate`,
+`cf_checkpoint_enforce`, `cf_checkpoint_quorum`, `cf_checkpoint_veto`,
+`cf_scan_ledger_drive`). Apple's ld64 has no `--wrap`, so the seam moved from the linker to
+the preprocessor: each wrapped symbol is defined in its own core TU but called from the
+`BRPeerManager.c` that each KAT's `main.c` `#include`s, so compiling **only that main.c
+object** with `-D<sym>=__wrap_<sym>` renames the call sites while the real definition keeps
+its name. Where a wrapper delegates, `__real_<sym>` is declared with an `__asm__` label —
+string literals are not macro-expanded, so the `-D` cannot rewrite it. `--wrap` is gone
+entirely rather than `#ifdef`-ed, so both platforms build one way. No core source changed.
 
 Before core `32f17d7`, macOS scored **26/72**. `TARGET_OS_MAC` is defined transitively by
 `<string.h>` on every Apple platform, so `BRWallet.h` / `BRPeer.h` / `BRMerkleBlock.h` pulled
