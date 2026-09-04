@@ -122,11 +122,13 @@ them from Linux, and do not "fix" a KAT because macOS reports it red:
 
 And one **flaky** on macOS, which is neither a toolchain gap nor a defect:
 
-* **`saveblocks_race`** — measured 1 pass / 2 fail over three consecutive runs. Its RED arm
-  requires a genuine data race to manifest inside 2000 iterations; on arm64 it often does
-  not, and the gate then reports `unfixed pattern did NOT fault`. A red result here on macOS
-  means "did not reproduce this time", not "the gate is broken". Re-run before investigating.
-  Deterministic on Linux.
+* **`saveblocks_race`** — **5 failures in 15 consecutive runs (~1 in 3)** on macOS/arm64.
+  Its RED arm requires a genuine data race to manifest inside 2000 iterations; when it does
+  not, the gate reports `unfixed pattern did NOT fault`. A red result here means "did not
+  reproduce this time", not "the gate is broken" — re-run before investigating. Believed
+  deterministic on Linux, but **worth measuring there**: a gate that only fires 2 times in 3
+  is weaker than its output suggests, and the same race may simply be more reliably
+  reproduced by x86_64's memory model than by arm64's.
 
 **The 5 `ld --wrap` KATs are no longer Linux-only** (`cf_block_completion_gate`,
 `cf_checkpoint_enforce`, `cf_checkpoint_quorum`, `cf_checkpoint_veto`,
