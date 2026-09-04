@@ -85,7 +85,9 @@ in §1 of the triage has no such constraint and moves outright.
   check even though it is durable. Pushing a core commit to core `develop` without bumping
   android's pin in the same push turns every android branch red (bit twice: 2026-08-31 and
   2026-09-03, the `__OBJC__` guard). Push core, then immediately commit the pin bump on
-  android; never push core ahead and leave it.
+  android; never push core ahead and leave it. `./scripts/check-submodule-pin.sh` now
+  requires equality too (it used to pass on a full clone in exactly this case), so run it
+  locally before pushing — a "BEHIND" failure means bump the pin, not fix core.
 
 ## The four pilots
 

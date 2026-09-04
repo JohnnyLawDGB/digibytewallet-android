@@ -32,15 +32,45 @@ echo "pin at $REF: $PIN"
 cd "$SUB_PATH"
 git fetch -q "$CORE_REMOTE" $DURABLE 2>/dev/null || true
 
+# EQUALITY, not containment. CI checks out the submodule with actions/checkout
+# (`submodules: recursive`, depth 1), so the only core commit in its store is the
+# pin itself; a fetch of `develop` into that shallow store brings the tip but none
+# of the history behind it, and `merge-base --is-ancestor` can only succeed when
+# pin == tip. A local full clone answers "contained" for a pin one commit behind —
+# exactly the case that reddens CI (bit 2026-08-31 and 2026-09-03). So: pass only
+# on equality; report "behind" separately so the fix is obvious.
+BEHIND=""
 for b in $DURABLE; do
     tip="$(git ls-remote "$CORE_REMOTE" "refs/heads/$b" 2>/dev/null | awk '{print $1}')"
     [ -z "$tip" ] && continue
-    git fetch -q "$CORE_REMOTE" "$b" 2>/dev/null || true
-    if git merge-base --is-ancestor "$PIN" "$tip" 2>/dev/null; then
-        echo "OK: pin is contained in core '$b' ($tip)"
+    if [ "$PIN" = "$tip" ]; then
+        echo "OK: pin equals the tip of core '$b' ($tip)"
         exit 0
     fi
+    git fetch -q "$CORE_REMOTE" "$b" 2>/dev/null || true
+    if [ -z "$BEHIND" ] && git merge-base --is-ancestor "$PIN" "$tip" 2>/dev/null; then
+        BEHIND="$b $tip"
+    fi
 done
+
+if [ -n "$BEHIND" ]; then
+    set -- $BEHIND
+    cat <<MSG
+FAIL: the submodule pin is BEHIND the tip of core '$1'.
+
+  pin: $PIN
+  tip: $2
+
+The pin is reachable from '$1' on a full clone, but CI clones the submodule at
+depth 1 and cannot see the history between pin and tip — it will fail this same
+check. Core's durable tip must EQUAL the android pin.
+
+Fix: bump the pin forward and commit it here, e.g.
+  cd $SUB_PATH && git checkout -q $2 && cd - >/dev/null
+  git add $SUB_PATH && git commit -m "chore(core): bump submodule pin to ${2:0:7}"
+MSG
+    exit 1
+fi
 
 cat <<MSG
 FAIL: the submodule pin is NOT contained in any durable core branch ($DURABLE).
