@@ -22,7 +22,8 @@
 // Send-capture seam: the driver reaches out to peers through BRPeer.c's
 // public API. Real BRPeer.c is linked in (every other BRPeer symbol used by
 // the manager -- BRPeerNew, BRPeerSetCallbacks, etc. -- is the real one), but
-// these four calls are intercepted at link time via GNU ld's `-Wl,--wrap=`
+// these four calls are intercepted at COMPILE time by a per-TU -D rename
+// (was GNU ld's `-Wl,--wrap=`, which Apple's ld64 does not implement)
 // (run.sh) and redirected here instead of touching a real socket:
 //   - BRPeerConnectStatus  -> always reports BRPeerStatusConnected
 //   - BRPeerIsSocketOpen   -> always reports an open (live) socket

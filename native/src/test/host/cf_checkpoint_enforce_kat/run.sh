@@ -27,7 +27,7 @@
 # needs the identical dependency closure: a real BRPeerManager + BRWallet
 # built through the same public constructors).
 #
-# --wrap seam: -Wl,--wrap=BRCompactFilterChainBatchViolatesCheckpoint lets
+# Call-interception seam (was --wrap): -Wl,--wrap=BRCompactFilterChainBatchViolatesCheckpoint lets
 # ONE test (test_matching_batch_wiring) force the validator's verdict to
 # "no violation" for a batch that genuinely spans a real mainnet checkpoint
 # height -- simulating what a genuine cryptographic match would report,
@@ -36,8 +36,9 @@
 # and this KAT's own file header comment). The wrap in main.c defaults to
 # calling through to the REAL __real_ function for every other test --
 # test_mismatch_rejected exercises the genuine, unforced validator against
-# the real BRMainNetCFCheckpoints table end to end. Requires GNU ld's
-# `--wrap` (Linux/clang CI, same as cf_scan_ledger_drive_kat/run.sh).
+# the real BRMainNetCFCheckpoints table end to end. Portable seam: no linker
+# support needed -- see the build() comment. (This replaced GNU ld's `--wrap`,
+# which Apple's ld64 does not implement.)
 #
 # Compiler: clang, NOT gcc, and `-include stdint.h` -- same crypto/odocrypt.h
 # reasons documented in bip340_kat/run.sh (file-scope `const static int`
@@ -75,10 +76,22 @@ shopt -u nullglob
 
 build() {
     local out="$1"; shift
+    # Portable stand-in for GNU ld --wrap (Apple ld64 has no equivalent).
+    # Each wrapped symbol is DEFINED in its own core TU and CALLED from the
+    # BRPeerManager.c that this main.c #include-s, so renaming the call sites
+    # is a per-TU concern: only this object gets the -D. The core TUs below
+    # keep the real definitions, and `__wrap_<sym>` is a distinct token the
+    # macro never rewrites.
     clang -w -include stdint.h "$@" \
     -I "$CORE_DIR" \
     -I "$CORE_DIR/secp256k1/include" \
-    "$SCRIPT_DIR/cf_checkpoint_enforce_kat_main.c" \
+    -DBRCompactFilterChainBatchViolatesCheckpoint=__wrap_BRCompactFilterChainBatchViolatesCheckpoint \
+    -c "$SCRIPT_DIR/cf_checkpoint_enforce_kat_main.c" -o "$BUILD_DIR/kat_main.o"
+
+    clang -w -include stdint.h "$@" \
+    -I "$CORE_DIR" \
+    -I "$CORE_DIR/secp256k1/include" \
+    "$BUILD_DIR/kat_main.o" \
     "$CORE_DIR/BRPeer.c" \
     "$CORE_DIR/BRWallet.c" \
     "$CORE_DIR/BRTransaction.c" \
@@ -103,7 +116,6 @@ build() {
     "$CORE_DIR/crypto/qubit.c" \
     "$CORE_DIR/crypto/odocrypt.c" \
     "${SHA3_SRCS[@]}" \
-    -Wl,--wrap=BRCompactFilterChainBatchViolatesCheckpoint \
     -lm -lpthread \
     -o "$out"
 }

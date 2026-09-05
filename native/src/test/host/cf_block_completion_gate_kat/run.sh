@@ -28,10 +28,11 @@
 # it defines would be defined twice and the link would fail). Every OTHER dependency IS compiled
 # and linked separately.
 #
-# --wrap seam: CRUX-D drives the real _peerRelayedCFilter, which dispatches through BRPeer.c's
+# Call-interception seam (was --wrap): CRUX-D drives the real _peerRelayedCFilter, which dispatches through BRPeer.c's
 # public BRPeerSendGetdataBlocks. That one call is intercepted at link time and redirected to
 # the __wrap_ shim in main.c, so the KAT touches no socket and "a getdata really was put on the
-# wire for this hash" is directly observable. Requires GNU ld's `--wrap` (Linux/clang CI).
+# wire for this hash" is directly observable. Portable seam: no linker support needed -- see the build() comment.
+# (This replaced GNU ld's `--wrap`, which Apple's ld64 does not implement.)
 #
 # ASan is compiled in with LeakSanitizer LIVE (no detect_leaks=0): every case ends by calling
 # BRPeerManagerFree(m), so the fixtures must be leak-clean too.
@@ -68,12 +69,27 @@ shopt -u nullglob
 # build <output> <extra -D flags...>
 build() {
     local out="$1"; shift
-    clang -w -include stdint.h \
+
+        # Portable stand-in for GNU ld --wrap (Apple ld64 has no equivalent).
+        # Each wrapped symbol is DEFINED in its own core TU and CALLED from the
+        # BRPeerManager.c that this main.c #include-s, so renaming the call sites
+        # is a per-TU concern: only this object gets the -D. The core TUs below
+        # keep the real definitions, and `__wrap_<sym>` is a distinct token the
+        # macro never rewrites.
+        clang -w -include stdint.h \
         "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
-        "$SCRIPT_DIR/cf_block_completion_gate_kat_main.c" \
+        -DBRPeerSendGetdataBlocks=__wrap_BRPeerSendGetdataBlocks \
+        -c "$SCRIPT_DIR/cf_block_completion_gate_kat_main.c" -o "$BUILD_DIR/kat_main.o"
+
+        clang -w -include stdint.h \
+        "$@" \
+        -fsanitize=address -fno-omit-frame-pointer -g \
+        -I "$CORE_DIR" \
+        -I "$CORE_DIR/secp256k1/include" \
+        "$BUILD_DIR/kat_main.o" \
         "$CORE_DIR/BRPeer.c" \
         "$CORE_DIR/BRWallet.c" \
         "$CORE_DIR/BRTransaction.c" \
@@ -98,7 +114,6 @@ build() {
         "$CORE_DIR/crypto/qubit.c" \
         "$CORE_DIR/crypto/odocrypt.c" \
         "${SHA3_SRCS[@]}" \
-        -Wl,--wrap=BRPeerSendGetdataBlocks \
         -lm -lpthread \
         -o "$out"
 }

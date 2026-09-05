@@ -142,8 +142,19 @@ static int    g_forceViolatesResult = -1;
 static uint32_t g_forceHeight = 0;
 static UInt256 g_forceComputed;
 
+// Portable stand-in for GNU ld's __real_ symbol. The call sites (in the
+// #include-d BRPeerManager.c) are renamed to __wrap_ by a per-TU -D, so this
+// declaration must still reach the genuine definition in another TU. An asm
+// label does that on both ld64 and GNU ld: string literals are not
+// macro-expanded, so the -D cannot rewrite the symbol name.
+#if defined(__APPLE__)
+#  define KAT_REAL_SYM(s) __asm__("_" s)
+#else
+#  define KAT_REAL_SYM(s) __asm__(s)
+#endif
 extern int __real_BRCompactFilterChainBatchViolatesCheckpoint(const BRCompactFilterChain *chain,
-        const UInt256 *filterHashes, size_t count, uint32_t *outHeight, UInt256 *outComputed);
+        const UInt256 *filterHashes, size_t count, uint32_t *outHeight, UInt256 *outComputed)
+    KAT_REAL_SYM("BRCompactFilterChainBatchViolatesCheckpoint");
 
 int __wrap_BRCompactFilterChainBatchViolatesCheckpoint(const BRCompactFilterChain *chain,
         const UInt256 *filterHashes, size_t count, uint32_t *outHeight, UInt256 *outComputed)

@@ -27,7 +27,7 @@
 # BRPeer.c (this KAT needs the same dependency closure: a real
 # BRPeerManager + BRWallet built through the same public constructors).
 #
-# --wrap seam: -Wl,--wrap=BRCompactFilterChainHeader lets ONE test
+# Call-interception seam (was --wrap): -Wl,--wrap=BRCompactFilterChainHeader lets ONE test
 # (test_quorum_veto_checkpoint_confirmed) force the ONE accessor call
 # _BRPeerManagerCheckpointConfirmsOurChainLocked makes -- reading our
 # chain's header at the pinned checkpoint height -- to return the real
@@ -107,10 +107,22 @@ shopt -u nullglob
 
 build() {
     local out="$1"; shift
+    # Portable stand-in for GNU ld --wrap (Apple ld64 has no equivalent).
+    # Each wrapped symbol is DEFINED in its own core TU and CALLED from the
+    # BRPeerManager.c that this main.c #include-s, so renaming the call sites
+    # is a per-TU concern: only this object gets the -D. The core TUs below
+    # keep the real definitions, and `__wrap_<sym>` is a distinct token the
+    # macro never rewrites.
     clang -w -include stdint.h "$@" \
     -I "$CORE_DIR" \
     -I "$CORE_DIR/secp256k1/include" \
-    "$SCRIPT_DIR/cf_checkpoint_quorum_kat_main.c" \
+    -DBRCompactFilterChainHeader=__wrap_BRCompactFilterChainHeader \
+    -c "$SCRIPT_DIR/cf_checkpoint_quorum_kat_main.c" -o "$BUILD_DIR/kat_main.o"
+
+    clang -w -include stdint.h "$@" \
+    -I "$CORE_DIR" \
+    -I "$CORE_DIR/secp256k1/include" \
+    "$BUILD_DIR/kat_main.o" \
     "$CORE_DIR/BRWallet.c" \
     "$CORE_DIR/BRTransaction.c" \
     "$CORE_DIR/BRMerkleBlock.c" \
@@ -134,7 +146,6 @@ build() {
     "$CORE_DIR/crypto/qubit.c" \
     "$CORE_DIR/crypto/odocrypt.c" \
     "${SHA3_SRCS[@]}" \
-    -Wl,--wrap=BRCompactFilterChainHeader \
     -lm -lpthread \
     -o "$out"
 }
