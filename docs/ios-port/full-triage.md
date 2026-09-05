@@ -85,7 +85,7 @@ raw errno. `strerror()` is also not thread-safe and its text is being sent to th
 | `CfRecoveryPolicy` | → C | ✅ `BRCFRecoveryPolicy.h` |
 | `PublishOutcome` | → C | ✅ `BRPublishOutcome.h` |
 | `PeerPenaltyPersist` | → C | ✅ `BRPeerPenaltyPersist.h` |
-| `CfAbandonmentStore` pure predicates (`nextAbandonedBand`, `bandIsRetired`, `coverageIsProven`) | → C | ⏳ |
+| `CfAbandonmentStore` pure predicates (`nextAbandonedBand`, `bandIsRetired`, `coverageIsProven`) | → C | ✅ `BRCFAbandonment.h` (2026-09-05) |
 | `ChainTipPolicy` | Swift + carry tests — DISPLAY ONLY by design | — |
 | `KeepaliveHealth` | Swift, rewritten — Kotlin `Job`/dispatcher semantics | — |
 | The five stores | Swift — `Context`/SharedPreferences → `FileManager`/Keychain | — |

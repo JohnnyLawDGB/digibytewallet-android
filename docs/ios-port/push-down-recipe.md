@@ -148,3 +148,27 @@ What the move taught, beyond the four pilots:
 - **One behaviour change, deliberate:** the persisted-penalty exemption used to exempt the
   MAINNET set unconditionally, so on testnet26 the three canon nodes were never exempt. It now
   exempts the active network's canon.
+
+## The sixth: `CfAbandonmentStore`'s predicates → `BRCFAbandonment.h` (2026-09-05)
+
+Kind A, and the last ⏳ row in the `core/sync/` table. `nextAbandonedBand`, `bandIsRetired` and
+`coverageIsProven` moved; the band record, the recovered flag and the two-phase
+"saw the frontier inside the band" witness stay in Kotlin, because the witness compares
+against a frontier that no longer exists once the peer manager is recreated.
+
+- **The scalars are the real ledger fields.** `start`, `scannedThrough`, `abandonedBelow`,
+  `gaveUpCount` — and a `...ByLedger` overload reads them off a `BRCFScanLedger *` so a caller
+  cannot pass them in the wrong order. Including `BRCFScanLedger.h` from a policy header is
+  fine: unlike `BRChainParams.h` it compiles clean under the strict flags.
+- **The KAT drives the real `BRCFScanLedger.c`**, the way `peer_penalty_persist_kat` linked the
+  real serializer: a scan that climbs through a band, a hole that pins `scannedThrough`, a
+  ledger re-`Init`'d above the band, a live `AbandonUnscannableBelow` folded into a band and
+  then retired through `RetireAbandonedTo`. The pre-existing module is compiled with its own
+  KAT's `-w` and linked; the KAT main stays under `-Wall -Wextra -Werror`.
+- **RED gate is the fund-safety direction:** `-DCF_ABANDONMENT_START_UNQUALIFIED_UNFIXED`
+  drops the ledger-start qualifier from the coverage claim, and the KAT must fail at "a ledger
+  started above the band proves nothing". The other historical defect (the unknown-low `0`
+  read literally, Note 8 v4.0.44) is covered by a GREEN case rather than a second gate.
+- **Multi-value results cross JNI as `long[4]`** (`{changed, low, high, lowKnown}`), not a
+  struct. The parity test decodes `changed == 0` back into Kotlin's "return the existing
+  object" convention.

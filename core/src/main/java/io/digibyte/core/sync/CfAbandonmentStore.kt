@@ -44,6 +44,10 @@ data class AbandonedBand(
  *
  * A later abandonment EXTENDS the existing band upward and keeps the original
  * bottom, so one banner covers everything still un-recovered.
+ *
+ * **Mirror of `BRCFAbandonedBandNext` in the core's `BRCFAbandonment.h`.** The C header is
+ * the source of truth (iOS imports it); this survives because its tests run on the host JVM.
+ * `CfAbandonmentParityTest` binds the two — see `docs/ios-port/push-down-recipe.md`.
  */
 internal fun nextAbandonedBand(
     existing: AbandonedBand?,
@@ -244,6 +248,7 @@ object CfAbandonmentStore {
      * DEEPER band says nothing about this one. Testing for 0 would leave the user staring at
      * a warning about a range that has already been recovered.
      */
+    /** Mirror of `BRCFAbandonedBandIsRetired` (`BRCFAbandonment.h`); bound by `CfAbandonmentParityTest`. */
     fun bandIsRetired(bandLow: Long, abandonedBelow: Long): Boolean = abandonedBelow <= bandLow
 
     /**
@@ -267,6 +272,10 @@ object CfAbandonmentStore {
      * "all clear" that actually costs someone money, so it is checked explicitly.
      *
      * Every zero is treated as a failed read, never as evidence.
+     *
+     * Mirror of `BRCFAbandonedBandCoverageIsProven` (`BRCFAbandonment.h`), whose KAT
+     * cross-checks it against a ledger driven by the real `BRCFScanLedger.c`; bound by
+     * `CfAbandonmentParityTest`.
      */
     fun coverageIsProven(
         bandLow: Long,

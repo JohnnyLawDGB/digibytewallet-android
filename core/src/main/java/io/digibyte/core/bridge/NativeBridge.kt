@@ -253,6 +253,30 @@ object NativeBridge {
     /** `BR_PEER_PENALTY_ENTRY_BYTES` — the per-entry stride (16 addr + 2 port + 8 time). */
     external fun peerPenaltyEntryBytes(): Int
 
+    // === CF abandonment band (test-support only) ===
+    /**
+     * The C fold of a polled `abandonedBelow` into the recorded band ([BRCFAbandonment.h]),
+     * packed as `long[4] = { changed, low, high, lowKnown }`.
+     *
+     * **Not for production use — call [io.digibyte.core.sync.nextAbandonedBand] instead.**
+     */
+    external fun cfAbandonedBandNext(
+        hasExisting: Boolean, existingLow: Long, existingHigh: Long, existingLowKnown: Boolean,
+        abandonedBelow: Long, lowHint: Long,
+    ): LongArray?
+
+    /** `BRCFAbandonedBandIsRetired`: is every height in the band requestable again? */
+    external fun cfAbandonedBandIsRetired(bandLow: Long, abandonedBelow: Long): Boolean
+
+    /**
+     * `BRCFAbandonedBandCoverageIsProven`: was the band demonstrably evaluated? The parameter
+     * order is the ledger's own: start, scannedThrough, abandonedBelow, gaveUpCount.
+     */
+    external fun cfAbandonedBandCoverageIsProven(
+        bandLow: Long, bandHigh: Long, lowKnown: Boolean,
+        ledgerStart: Long, scannedThrough: Long, abandonedBelow: Long, gaveUp: Long,
+    ): Boolean
+
     // === Peer canon (BRPeerCanon.h) ===
     /**
      * The hardcoded compact-filter peer canon, read from the shared C core. The tables used
