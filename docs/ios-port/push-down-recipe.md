@@ -121,12 +121,30 @@ All four: clean under `-Wall -Wextra -Wpedantic -Werror` across c99/c11/c17; the
 libc-only headers clean under `clang++ -std=c++17`; multi-TU link; and all
 **cross-compile for `iphoneos` and `iphonesimulator`**. All four RED gates fire.
 
-## Next — and a deliberate stop
+## The fifth: the peer canon (done 2026-09-05)
 
-The **peer canon** (15 mainnet CF oracle IPs + 3 testnet, `jni_peer.c:405–464`) is the
-highest-value single move: it is the wallet's only reliable filter source and it lives in an
-Android-only compilation unit that the XCFramework will not contain.
+The **peer canon** (15 mainnet CF oracle IPs + 3 testnet) was the highest-value single move:
+the wallet's only reliable filter source, living in an Android-only compilation unit the
+XCFramework would not contain. Deferred until one green Android build confirmed the JNI and
+CMake conventions (Part C of the 2026-09-03 handoff), then moved as **`BRPeerCanon.h`**.
 
-It has **deliberately not been started**, because unlike the four pilots it is not additive —
-it requires editing a 1,985-line shipping file, and creating a second copy of the canon would
-be worse than leaving it where it is. **Get one green Android build first.**
+What the move taught, beyond the four pilots:
+
+- **Not additive.** `jni_peer.c` lost 134 lines and gained 32; `SyncService.kt` lost its own
+  copy of the testnet set (three IPs, the port, `0x41`). The accessors in `jni_peer_canon.c`
+  are therefore **production**, not test-support — Kotlin reads the canon through them.
+- **Function-local tables.** The IP arrays live inside `BRPeerCanonIPs()` rather than at file
+  scope, so a TU that includes the header and never asks for the table carries no unused copy.
+- **The port is NOT in the header.** It is `BRChainParams.h`'s `standardPort`. Including
+  `BRChainParams.h` from a policy header drags `odocrypt.h` in, which does not compile under
+  the KATs' `-Wall -Wextra -Werror`; restating `12024`/`12033` would be a second copy. So the
+  header says nothing about ports and callers dial the canon on the active chain's port.
+- **`BRPeer.h` needs `-Wno-gnu-folding-constant`** under `-std=c99` for the same `odocrypt.h`
+  reason. Suppressed as exactly that class in `peer_canon_kat/run.sh`, with the rationale.
+- **A resolver-free parser is the enforcement.** `BRPeerCanonParseIPv4` accepts only a
+  dotted quad, so a hostname in the table fails the KAT on every machine instead of resolving
+  on a developer's network and stranding a user's. The RED gate puts `digiscope.me` in slot 0
+  — the pre-oracle-bootstrap shape — and the KAT must fail there.
+- **One behaviour change, deliberate:** the persisted-penalty exemption used to exempt the
+  MAINNET set unconditionally, so on testnet26 the three canon nodes were never exempt. It now
+  exempts the active network's canon.

@@ -20,9 +20,12 @@ This is worse than logic sitting in Kotlin, because it *looks* like it is alread
 that says "wrap `digibytewallet-core` as an XCFramework and write SwiftUI over it" silently
 loses all of it. 117 JNI entry points across ~7,483 lines. Stranded there:
 
-- **The 15 hardcoded mainnet CF oracle IPs** (`jni_peer.c:405–464`) plus the testnet set,
-  `INJECT_DEFAULT_SERVICES`, and the penalty-restore exemption for canon peers. CLAUDE.md
-  calls this peer set "the CANON" — the wallet's only reliable CF source.
+- ~~**The 15 hardcoded mainnet CF oracle IPs** (`jni_peer.c:405–464`) plus the testnet set~~
+  **✅ moved 2026-09-05 → `BRPeerCanon.h`** (`peer_canon_kat`; `jni_peer.c` and
+  `SyncService.kt`'s testnet copy now read it). Still in the bridge: `INJECT_DEFAULT_SERVICES`
+  (the untagged-injection default, not the canon) and the penalty-restore exemption's
+  *call site* — the exemption's *set* is now `BRPeerCanonContains`/`BRPeerCanonAddrs`.
+  CLAUDE.md calls this peer set "the CANON" — the wallet's only reliable CF source.
 - **`startSync`** (`jni_peer.c:784–1001`) — ~215 lines: rescan-defer heuristic, saved-blocks
   creation gate, priority-peer resolve-and-prepend, saved-block ownership transfer, BIP158
   re-apply, penalty restore, pin re-apply.
