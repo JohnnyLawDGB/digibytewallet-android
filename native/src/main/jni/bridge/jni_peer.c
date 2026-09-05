@@ -14,6 +14,7 @@
 #include "saved_blocks_deserialize.h"
 #include "bridge_status_stale.h"
 #include "BRPeerPenalty.h"
+#include "BRPeerCanon.h"
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
@@ -383,86 +384,12 @@ static size_t g_savedPeersCount = 0;
  * selection would deprioritize/evict it while dialing for filter peers. */
 #define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
 
-/* testnet26 priority peers serve compact filters, not bloom — tag them
- * compact-filter-capable (no bloom) so filter-first selection dials them and
- * the relaxed testnet accept gate keeps them. */
-#define TESTNET_PRIORITY_PEER_SERVICES (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
-
-/* testnet26 has no mainnet-shaped seeder infra (api.digiscope.me only knows
- * mainnet peers), so on testnet these two hardcoded public testnet26 nodes
- * stand in for the digiscope.me priority peer below — same mechanism, same
- * reliability guarantee (always in the pool even if DNS seeds are sparse).
- * testnet26 nodes serve BIP157/158 compact filters (NODE_COMPACT_FILTERS)
- * rather than bloom — bloom is deprecated/off by default on modern Core, so
- * the SPV core only keeps a testnet peer that serves compact filters (see the
- * relaxed accept gate in BRPeerManager.c). 95.111.238.51 is a verified
- * compact-filter testnet26 node (the testnet analog of the mainnet digiscope
- * filter peer); it is listed first. The other two are kept as connectivity
- * fallbacks. They are tagged compact-filter-capable so filter-first selection
- * dials them; the real service bits from each peer's version message govern
- * retention. */
-#define TESTNET_PRIORITY_PEER_PORT  12033
-static const char *TESTNET_PRIORITY_PEER_IPS[] = {
-    "95.111.238.51",
-    "164.68.98.125",
-    "129.212.182.152",
-};
-#define TESTNET_PRIORITY_PEER_COUNT \
-    (sizeof(TESTNET_PRIORITY_PEER_IPS) / sizeof(TESTNET_PRIORITY_PEER_IPS[0]))
-
-/* MAINNET compact-filter priority peers — the DigiDollar oracle set (oracle-
- * bootstrap, ROADMAP Phase 1 "peer diversity beyond author infrastructure").
- * These are the persistent filter-serving nodes the capability-aware seeder
- * advertises (api.digiscope.me/api/peers?capability=filter); the oracle
- * operators run mainnet Core 9.26 nodes with blockfilterindex +
- * peerblockfilters on. Hardcoding them makes the wallet self-bootstrapping: a
- * reliable, diverse set of BIP157/158 filter nodes is ALWAYS in the pool even
- * if the seeder is unreachable or churns — so a fresh install is never stranded
- * on one seeder or one peer. This DEMOTES digiscope.me from THE single priority
- * peer to just one-of-N (134.199.198.90, listed first), removing the author's
- * node as a single point of dependence on the data path.
- *
- * Raw IP literals (not hostnames) match TESTNET_PRIORITY_PEER_IPS and avoid a
- * DNS dependency on the sovereignty-critical bootstrap path. The live seeder
- * (refreshed hourly via injectFilterPeers) remains the source of FRESH peers
- * when this baked set ages, so a stale IP degrades to "use the seeder", never
- * to "stranded".
- *
- * The set is MIXED: some serve bloom+CF (services 0x44d), some are CF-only
- * (0x449, bloom off by default on modern Core). All 15 are tagged
- * compact-filter-capable (no bloom) so BRPeerManager's filter-first selection
- * dials them and the sync-mode-gated mainnet accept gate (admits CF-only,
- * BRPeerManager.c) keeps them; the real service bits from each peer's version
- * message govern retention afterward. The 15 span distinct /16 subnets, but
- * that is only a ROUGH diversity signal — NOT a guarantee of operator/ASN
- * independence (several fall in shared-hosting ranges, e.g. DigitalOcean /
- * Linode, and some may be co-located or author-run). So the cfheaders
- * continuity quorum's (CF_CONTINUITY_REANCHOR_K) real independence is bounded
- * by the actual operator diversity of the seeder set, which this comment
- * cannot vouch for — this is a curated multi-operator bootstrap, strictly
- * better than the single-seeder/single-peer it replaces, not a trustless one.
- * SNAPSHOT 2026-07-15 — re-pull from the seeder when operators rotate. */
-#define MAINNET_PRIORITY_PEER_SERVICES (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
-#define MAINNET_PRIORITY_PEER_PORT  12024
-static const char *MAINNET_PRIORITY_PEER_IPS[] = {
-    "134.199.198.90",   /* digiscope.me (author node — now one-of-N, not THE peer) */
-    "129.212.182.152",
-    "134.56.44.241",
-    "174.131.163.123",
-    "64.182.71.26",
-    "66.64.43.14",
-    "172.104.191.6",
-    "103.230.156.247",
-    "216.250.127.199",
-    "112.213.39.221",
-    "101.103.12.129",
-    "95.111.238.51",
-    "84.30.137.73",
-    "109.123.231.205",
-    "147.93.171.46",
-};
-#define MAINNET_PRIORITY_PEER_COUNT \
-    (sizeof(MAINNET_PRIORITY_PEER_IPS) / sizeof(MAINNET_PRIORITY_PEER_IPS[0]))
+/* The hardcoded compact-filter peer canon (15 mainnet oracle nodes, 3
+ * testnet26 nodes), their tagging and the IPv4-literal rule now live in the
+ * shared core: BRPeerCanon.h. They used to be tables in this file, which is an
+ * Android-only compilation unit -- so the iOS XCFramework would not have had
+ * them and each platform would have carried its own copy of the wallet's only
+ * reliable filter source. The port is the chain params' standardPort. */
 
 /* Restore persisted penalties, MINUS any against the hardcoded CF oracle peers.
  *
@@ -480,8 +407,8 @@ static size_t _loadPenaltiesExceptPriority(BRPeerManager *manager, const uint8_t
     UInt128 addrs[PEER_PENALTY_RESTORE_MAX];
     uint16_t ports[PEER_PENALTY_RESTORE_MAX];
     time_t until[PEER_PENALTY_RESTORE_MAX];
-    UInt128 exempt[MAINNET_PRIORITY_PEER_COUNT];
-    size_t exemptCount = 0, count, kept;
+    UInt128 exempt[BR_PEER_CANON_MAX_COUNT];
+    size_t exemptCount, count, kept;
     uint8_t filtered[4 + PEER_PENALTY_RESTORE_MAX * BR_PEER_PENALTY_ENTRY_BYTES];
     size_t written;
 
@@ -489,15 +416,10 @@ static size_t _loadPenaltiesExceptPriority(BRPeerManager *manager, const uint8_t
                                      PEER_PENALTY_RESTORE_MAX);
     if (count == 0) return 0;
 
-    for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
-        struct in_addr ip4;
-
-        if (inet_pton(AF_INET, MAINNET_PRIORITY_PEER_IPS[i], &ip4) != 1) continue;
-        exempt[exemptCount] = UINT128_ZERO;
-        exempt[exemptCount].u16[5] = 0xffff;
-        exempt[exemptCount].u32[3] = ip4.s_addr;
-        exemptCount++;
-    }
+    /* The active network's canon. This used to exempt the MAINNET set
+     * unconditionally, so on testnet26 the three canon nodes were never
+     * exempt; the core header knows both sets. */
+    exemptCount = BRPeerCanonAddrs(BRNetworkIsTestnet(), exempt, BR_PEER_CANON_MAX_COUNT);
 
     kept = BRPeerPenaltyDropExempt(addrs, ports, until, count, exempt, exemptCount);
     if (kept < count) {
@@ -551,8 +473,7 @@ static int _resolveHostToAddr(const char *hostname, UInt128 *out) {
  * MUST hold g_peerManagerMutex. Fast (no DNS).
  *
  * `services` carries the peer's advertised capabilities (from the seeder's
- * services_hex, or MAINNET/TESTNET_PRIORITY_PEER_SERVICES for a hardcoded
- * priority peer). We OR it into an
+ * services_hex, or BR_PEER_CANON_SERVICES for a canon peer). We OR it into an
  * existing entry so a previously handshake-upgraded / filter-tagged peer is
  * never downgraded by a later injection that happens to lack the bit. */
 static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services) {
@@ -791,30 +712,17 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         return;
     }
 
-    /* Resolve the priority peer(s) BEFORE taking the lock.
-     * getaddrinfo can block for the DNS resolver timeout on a flaky network —
-     * exactly when reconnect fires — and the peer lock is contended by reads
-     * such as getPeerCount() that run on the main thread. Holding the lock
-     * across DNS would turn a brief read into an ANR. Resolution touches no
-     * shared state, so it is safe unlocked; the prepend below is under the lock.
-     *
-     * Both networks now resolve a hardcoded IP-literal priority-peer set
-     * (mainnet = the DigiDollar oracle set, testnet = the testnet26 nodes) —
-     * IP literals are instant (no real DNS lookup), so no seeder/hostname sits
-     * on the bootstrap path for either network. */
-    UInt128 mainnetPrioAddr[MAINNET_PRIORITY_PEER_COUNT];
-    int haveMainnetPrio[MAINNET_PRIORITY_PEER_COUNT];
-    UInt128 testnetPrioAddr[TESTNET_PRIORITY_PEER_COUNT];
-    int haveTestnetPrio[TESTNET_PRIORITY_PEER_COUNT];
-    if (BRNetworkIsTestnet()) {
-        for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
-            haveTestnetPrio[i] = _resolveHostToAddr(TESTNET_PRIORITY_PEER_IPS[i], &testnetPrioAddr[i]);
-        }
-    } else {
-        for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
-            haveMainnetPrio[i] = _resolveHostToAddr(MAINNET_PRIORITY_PEER_IPS[i], &mainnetPrioAddr[i]);
-        }
-    }
+    /* The canon peers for the active network, parsed BEFORE taking the lock.
+     * The canon is IPv4 literals by construction (BRPeerCanon.h's KAT
+     * enforces it), so this is a pure parse with no resolver behind it: no
+     * getaddrinfo, no DNS timeout, nothing that could stall lock-contending
+     * main-thread reads such as getPeerCount(). Nothing on the bootstrap path
+     * depends on a hostname for either network. The prepend is under the lock. */
+    const int canonTestnet = BRNetworkIsTestnet();
+    UInt128 canonAddr[BR_PEER_CANON_MAX_COUNT];
+    const size_t canonCount = BRPeerCanonAddrs(canonTestnet, canonAddr, BR_PEER_CANON_MAX_COUNT);
+    const uint16_t canonPort = canonTestnet ? BRTestNetParams.standardPort
+                                            : BRMainNetParams.standardPort;
 
     PEER_GUARD();
 
@@ -880,27 +788,16 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             return;
         }
 
-        /* Prepend the priority peer(s) (resolved above, before the lock) so a
-         * reliable node is always in the pool, even if DNS seeds aren't
-         * re-queried.
+        /* Prepend the canon (parsed above, before the lock) so reliable filter
+         * nodes are always in the pool, even if DNS seeds aren't re-queried.
          * Mainnet: the DigiDollar oracle set (15 filter nodes incl. digiscope.me,
-         * now one-of-N) — all tagged compact-filter-capable so filter-first
-         * selection dials them and the wallet always holds several filter peers,
-         * never stranded on one seeder or one peer.
-         * Testnet: the hardcoded testnet26 peers in place of the oracle set. */
+         * now one-of-N). Testnet: the three testnet26 nodes. All tagged
+         * compact-filter-capable (BR_PEER_CANON_SERVICES) so filter-first
+         * selection dials them and the wallet always holds several filter
+         * peers, never stranded on one seeder or one peer. */
         if (! g_ownNodeExclusive) {
-            if (BRNetworkIsTestnet()) {
-                for (size_t i = 0; i < TESTNET_PRIORITY_PEER_COUNT; i++) {
-                    if (haveTestnetPrio[i]) {
-                        _prependSavedPeerAddr(testnetPrioAddr[i], TESTNET_PRIORITY_PEER_PORT, TESTNET_PRIORITY_PEER_SERVICES);
-                    }
-                }
-            } else {
-                for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
-                    if (haveMainnetPrio[i]) {
-                        _prependSavedPeerAddr(mainnetPrioAddr[i], MAINNET_PRIORITY_PEER_PORT, MAINNET_PRIORITY_PEER_SERVICES);
-                    }
-                }
+            for (size_t i = 0; i < canonCount; i++) {
+                _prependSavedPeerAddr(canonAddr[i], canonPort, BR_PEER_CANON_SERVICES);
             }
         } else {
             LOGI("startSync: own-node exclusive mode — suppressing priority-peer prepend");

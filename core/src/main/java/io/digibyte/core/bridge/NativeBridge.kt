@@ -253,6 +253,56 @@ object NativeBridge {
     /** `BR_PEER_PENALTY_ENTRY_BYTES` — the per-entry stride (16 addr + 2 port + 8 time). */
     external fun peerPenaltyEntryBytes(): Int
 
+    // === CF abandonment band (test-support only) ===
+    /**
+     * The C fold of a polled `abandonedBelow` into the recorded band ([BRCFAbandonment.h]),
+     * packed as `long[4] = { changed, low, high, lowKnown }`.
+     *
+     * **Not for production use — call [io.digibyte.core.sync.nextAbandonedBand] instead.**
+     */
+    external fun cfAbandonedBandNext(
+        hasExisting: Boolean, existingLow: Long, existingHigh: Long, existingLowKnown: Boolean,
+        abandonedBelow: Long, lowHint: Long,
+    ): LongArray?
+
+    /** `BRCFAbandonedBandIsRetired`: is every height in the band requestable again? */
+    external fun cfAbandonedBandIsRetired(bandLow: Long, abandonedBelow: Long): Boolean
+
+    /**
+     * `BRCFAbandonedBandCoverageIsProven`: was the band demonstrably evaluated? The parameter
+     * order is the ledger's own: start, scannedThrough, abandonedBelow, gaveUpCount.
+     */
+    external fun cfAbandonedBandCoverageIsProven(
+        bandLow: Long, bandHigh: Long, lowKnown: Boolean,
+        ledgerStart: Long, scannedThrough: Long, abandonedBelow: Long, gaveUp: Long,
+    ): Boolean
+
+    // === Peer canon (BRPeerCanon.h) ===
+    /**
+     * The hardcoded compact-filter peer canon, read from the shared C core. The tables used
+     * to live in `jni_peer.c` (Android-only) with a second copy of the testnet26 set in
+     * `SyncService`; now the core holds them once and both platforms ask.
+     *
+     * `testnet = true` selects the testnet26 set, otherwise mainnet.
+     */
+    external fun peerCanonCount(testnet: Boolean): Int
+
+    /** Entry [index] as a dotted-quad, or null past the end. */
+    external fun peerCanonIp(testnet: Boolean, index: Int): String?
+
+    /** The P2P port the canon is dialled on — the chain params' `standardPort`. */
+    external fun peerCanonPort(testnet: Boolean): Int
+
+    /** `BR_PEER_CANON_SERVICES` — NODE_NETWORK | NODE_COMPACT_FILTERS, never bloom. */
+    external fun peerCanonServices(): Long
+
+    /** Is [ip] one of the network's canon peers? False for anything that is not an IPv4 literal. */
+    external fun peerCanonContains(testnet: Boolean, ip: String?): Boolean
+
+    /** The whole set for a network, in injection order. */
+    fun peerCanonIps(testnet: Boolean): List<String> =
+        (0 until peerCanonCount(testnet)).mapNotNull { peerCanonIp(testnet, it) }
+
     // === Recreate sequence (test-support only) ===
     /**
      * The mid-session peer-manager recreate order, from [BRRecreateSequence.h].
