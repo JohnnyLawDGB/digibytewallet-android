@@ -102,15 +102,18 @@ after a rules block do not affect crediting. Documented in the KAT.
 ### 5. Composition in `AssetManager`
 
 ```kotlin
-suspend fun transferRuleState(assetId: String): TransferRuleState   // reads only, no network
-suspend fun verifyTransferRules(assetId: String): TransferRuleState // may walk + may fetch
+suspend fun transferRuleState(assetId: String): TransferRuleState          // reads only, no network
+suspend fun verifyTransferRulesForTx(txid: String): TransferRuleState     // force-walk + fetch
+suspend fun verifyTransferRules(assetId: String): TransferRuleState       // picks a held UTXO, delegates
 ```
 
 `transferRuleState` combines `issuanceFactsFor(assetId)` and `rulesJsonFor(assetId)` through the
-gate. `verifyTransferRules` is called when the state is `UNKNOWN`: it picks one held UTXO of the
-asset, runs `resolve(txid, forceToIssuance = true)`, refreshes metadata (which persists `rulesJson`),
-and returns the recomputed state. `OwnedAsset` gains `transferRules: TransferRuleState`, filled from
-`transferRuleState` in `getOwnedAssets`.
+gate. `verifyTransferRulesForTx` runs `resolve(txid, forceToIssuance = true)`; if the walk reaches
+an issuance it refreshes metadata for the resolved assetId (which persists `rulesJson`) and returns
+the gate's verdict on (opcode, locked, apiRulesPresent); if the walk does not reach an issuance it
+returns `UNKNOWN`. `verifyTransferRules(assetId)` picks one held UTXO of the asset and delegates
+to the txid form; it is what the screens call when the read-only state is `UNKNOWN`. `OwnedAsset`
+gains `transferRules: TransferRuleState`, filled from `transferRuleState` in `getOwnedAssets`.
 
 ### 6. Send-path gates
 
@@ -129,9 +132,10 @@ and returns the recomputed state. `OwnedAsset` gains `transferRules: TransferRul
 ### 7. Recovery gate
 
 - `ForeignUtxoAssetClassifier` takes an injected
-  `resolveRuleState: suspend (txid: String) -> TransferRuleState` (default: force-walk through
-  `AssetManager.verifyTransferRules` for the outpoint's txid) and its asset verdict carries the
-  state.
+  `resolveRuleState: suspend (txid: String) -> TransferRuleState` (default:
+  `AssetManager.verifyTransferRulesForTx` for the outpoint's txid; foreign transactions are not in
+  the native wallet, so the walk fetches them through the asset network client as the M3 walk
+  already does) and its asset verdict carries the state.
 - `ForeignAssetTransferService.moveAssets` moves an outpoint only when the state is `NONE`;
   otherwise it records `Move(refusal = MoveRefusal.RULE_BOUND | RULES_UNKNOWN, txid = null)` and
   leaves the outpoint where it is. `Move` gains `refusal: MoveRefusal?`; existing
