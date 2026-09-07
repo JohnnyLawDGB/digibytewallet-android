@@ -16,9 +16,7 @@ class RoomProvenanceStore(
 ) : ProvenanceStore {
 
     override suspend fun assetFor(txid: String): ResolvedAssetFacts? =
-        dao.provenanceFor(txid)?.let {
-            ResolvedAssetFacts(it.assetId, it.totalSupply, it.divisibility, it.metadataCid)
-        }
+        dao.provenanceFor(txid)?.toFacts()
 
     override suspend fun putAssets(txids: List<String>, facts: ResolvedAssetFacts) {
         if (txids.isEmpty()) return
@@ -30,13 +28,19 @@ class RoomProvenanceStore(
                     totalSupply = facts.totalSupply,
                     divisibility = facts.divisibility,
                     metadataCid = facts.metadataCid,
+                    issuanceOpcode = facts.issuanceOpcode,
+                    issuanceLocked = facts.issuanceLocked,
                 )
             }
         )
     }
 
-    // TODO(Task 4): replace with a real Room query once the opcode/locked columns exist.
-    override suspend fun issuanceFactsFor(assetId: String): ResolvedAssetFacts? = null
+    override suspend fun issuanceFactsFor(assetId: String): ResolvedAssetFacts? =
+        dao.issuanceFactsFor(assetId)?.toFacts()
+
+    private fun AssetProvenanceEntity.toFacts() = ResolvedAssetFacts(
+        assetId, totalSupply, divisibility, metadataCid, issuanceOpcode, issuanceLocked,
+    )
 
     override suspend fun frontierFor(startTxid: String): WalkFrontier? =
         dao.frontierFor(startTxid)?.let { WalkFrontier(it.startTxid, it.resumeTxid, it.hopsWalked) }

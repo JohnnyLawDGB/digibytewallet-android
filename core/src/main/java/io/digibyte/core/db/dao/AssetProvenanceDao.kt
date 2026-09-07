@@ -16,6 +16,11 @@ interface AssetProvenanceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putProvenance(rows: List<AssetProvenanceEntity>)
 
+    /** Any row for [assetId] that recorded the issuance opcode. All rows on one walked path share
+     *  the same facts, so the first is as good as any; rows without the opcode are pre-upgrade. */
+    @Query("SELECT * FROM asset_provenance WHERE assetId = :assetId AND issuanceOpcode IS NOT NULL LIMIT 1")
+    suspend fun issuanceFactsFor(assetId: String): AssetProvenanceEntity?
+
     @Query("SELECT * FROM asset_walk_frontier WHERE startTxid = :startTxid LIMIT 1")
     suspend fun frontierFor(startTxid: String): AssetWalkFrontierEntity?
 
