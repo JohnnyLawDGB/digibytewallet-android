@@ -37,6 +37,16 @@ class DigiByteUriTest {
         assertEquals(100_000_005L, DigiByteUri.parse("digibyte:DTest123?amount=1.00000005")?.amount)
     }
 
+    /** The receive-side twin: what this wallet's QR says must be what any wallet parses. */
+    @Test fun encode_writes_a_plain_exact_amount_and_round_trips() {
+        assertEquals("digibyte:DTest123?amount=5.00001234", DigiByteUri.encode("DTest123", 500_001_234L))
+        assertEquals("digibyte:DTest123?amount=10000000", DigiByteUri.encode("DTest123", 1_000_000_000_000_000L))
+        assertEquals("digibyte:DTest123?amount=0.29", DigiByteUri.encode("DTest123", 29_000_000L))
+        for (sats in listOf(1L, 29_000_000L, 500_001_234L, 1_000_000_000_000_000L)) {
+            assertEquals(sats, DigiByteUri.parse(DigiByteUri.encode("DTest123", sats))?.amount)
+        }
+    }
+
     @Test fun an_unrepresentable_amount_is_dropped_not_truncated() {
         val u = DigiByteUri.parse("digibyte:DTest123?amount=1.123456789")
         assertEquals("DTest123", u?.address)

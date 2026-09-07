@@ -94,7 +94,8 @@ data class DigiByteUri(
         fun encode(address: String, amountSats: Long? = null, label: String? = null): String {
             val sb = StringBuilder("digibyte:$address")
             val params = mutableListOf<String>()
-            amountSats?.let { params.add("amount=${it.toDouble() / 100_000_000}") }
+            // Exact and plain: the double path wrote "1.0E7" for ten million DGB.
+            amountSats?.let { params.add("amount=${DgbAmount.format(it)}") }
             label?.let { params.add("label=${encodeComponent(it)}") }
             if (params.isNotEmpty()) sb.append("?${params.joinToString("&")}")
             return sb.toString()

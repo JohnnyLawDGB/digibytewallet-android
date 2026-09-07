@@ -116,7 +116,8 @@ class AssetViewModel @Inject constructor(
         val wasCustom = isCustomFee.value
         isCustomFee.value = !wasCustom
         if (!wasCustom) {
-            customFeeInput.value = String.format("%.8f", defaultFeeSat / 100_000_000.0)
+            // Locale-free: String.format under a decimal-comma locale wrote "0,00014100".
+            customFeeInput.value = DgbAmount.format(defaultFeeSat)
         }
     }
 

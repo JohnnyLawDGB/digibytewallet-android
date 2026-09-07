@@ -171,6 +171,12 @@ class SendViewModel @Inject constructor(
 
     /** Put a payment request's amount into the DGB field, as the user would have typed it. */
     fun applyPrefillAmountSats(sats: Long) {
+        // A DigiDollar destination sends dollars; a DGB amount means nothing there and would
+        // otherwise be mirrored into the dollar field at the current price.
+        if (_ddAddressValid.value == true) return
+        // Activity recreation re-runs the screen's prefill effect; an amount the user already
+        // typed or edited wins over what the QR said.
+        if (amountDgb.value.isNotBlank()) return
         onAmountDgbChanged(DgbAmount.format(sats))
     }
 
@@ -270,7 +276,8 @@ class SendViewModel @Inject constructor(
         val wasCustom = isCustomFee.value
         isCustomFee.value = !wasCustom
         if (!wasCustom) {
-            customFeeInput.value = String.format("%.8f", defaultFeeSat / 100_000_000.0)
+            // Locale-free: String.format under a decimal-comma locale wrote "0,00014100".
+            customFeeInput.value = DgbAmount.format(defaultFeeSat)
         }
     }
 

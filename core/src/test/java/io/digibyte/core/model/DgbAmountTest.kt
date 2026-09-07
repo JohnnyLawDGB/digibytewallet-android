@@ -38,7 +38,37 @@ class DgbAmountTest {
 
     @Test fun `grouping commas and surrounding whitespace are tolerated`() {
         assertEquals(123_450_000_000L, DgbAmount.toSats("1,234.5"))
+        assertEquals(123_456_750_000_000L, DgbAmount.toSats("1,234,567.5"))
         assertEquals(29_000_000L, DgbAmount.toSats("  0.29 "))
+    }
+
+    /**
+     * Seven of the app's languages write the decimal separator as a comma, and the amount field
+     * uses the platform decimal keyboard. Stripping every comma read "0,29" as 29 DGB — a hundred
+     * times what the confirmation row showed. A lone comma with no dot IS the decimal point; a
+     * string with several commas and no dot is ambiguous and is refused rather than guessed.
+     */
+    @Test fun `a lone decimal comma is a decimal point, never a grouping separator`() {
+        assertEquals(29_000_000L, DgbAmount.toSats("0,29"))
+        assertEquals(14_100L, DgbAmount.toSats("0,00014100"))
+        assertEquals(123_400_000L, DgbAmount.toSats("1,234"))
+        assertNull(DgbAmount.toSats("1,2,3"))
+        assertNull(DgbAmount.toSats("1,234,567"))
+    }
+
+    /** A QR is untrusted input and is parsed on the main thread; a huge exponent must not stall. */
+    @Test(timeout = 2_000) fun `an absurd magnitude is rejected without materialising it`() {
+        assertNull(DgbAmount.toSats("1e50000000"))
+        assertNull(DgbAmount.toSats("1e999999999"))
+        assertNull(DgbAmount.toSats("1e2147483647"))
+        assertNull(DgbAmount.toSats("1e-50000000"))
+    }
+
+    @Test fun `long overflow is rejected and the exact ceiling is accepted`() {
+        assertNull(DgbAmount.toSats("99999999999999999"))
+        assertNull(DgbAmount.toSats("92233720368.54775808"))
+        assertEquals(Long.MAX_VALUE, DgbAmount.toSats("92233720368.54775807"))
+        assertEquals(10_000_000_000L, DgbAmount.toSats("1e2"))
     }
 
     @Test fun `more than eight decimals is rejected, trailing zeros are not`() {
