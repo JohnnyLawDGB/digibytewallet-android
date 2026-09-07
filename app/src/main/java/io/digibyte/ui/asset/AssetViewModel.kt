@@ -9,6 +9,7 @@ import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.asset.send.AssetFeeEstimator
 import io.digibyte.core.model.OwnedAsset
+import io.digibyte.core.model.DgbAmount
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -85,8 +86,7 @@ class AssetViewModel @Inject constructor(
         if (!custom) {
             DEFAULT_FEE_PER_KB
         } else {
-            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
-            val feeSat = (feeDgb * 100_000_000).toLong()
+            val feeSat = DgbAmount.toSats(input) ?: 0L
             if (feeSat <= 0 || ASSET_TYPICAL_VSIZE <= 0) return@combine DEFAULT_FEE_PER_KB
             (feeSat * 1000) / ASSET_TYPICAL_VSIZE
         }
@@ -97,16 +97,14 @@ class AssetViewModel @Inject constructor(
         if (!custom) {
             defaultFeeSat
         } else {
-            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
-            (feeDgb * 100_000_000).toLong()
+            DgbAmount.toSats(input) ?: 0L
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, defaultFeeSat)
 
     /** Warning state for the custom fee (amber below relay, red on zero). */
     val feeWarning: StateFlow<AssetFeeWarning> = combine(isCustomFee, customFeeInput) { custom, input ->
         if (!custom) return@combine AssetFeeWarning.None
-        val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
-        val feeSat = (feeDgb * 100_000_000).toLong()
+        val feeSat = DgbAmount.toSats(input) ?: 0L
         if (feeSat <= 0) return@combine AssetFeeWarning.ZeroFee
         val satPerVbyte = feeSat.toDouble() / ASSET_TYPICAL_VSIZE
         if (satPerVbyte < 100.0) AssetFeeWarning.BelowRelay else AssetFeeWarning.None

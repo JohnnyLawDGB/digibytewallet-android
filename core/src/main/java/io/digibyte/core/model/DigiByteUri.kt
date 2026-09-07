@@ -77,9 +77,9 @@ data class DigiByteUri(
             if ((assetId == null) != (assetAmount == null)) return null
             if (assetAmount != null && assetAmount <= 0L) return null
 
-            val amountSats = params["amount"]?.toDoubleOrNull()?.let {
-                (it * 100_000_000).toLong()
-            }
+            // Exact decimal conversion: a double would turn 5.00001234 into 500001233 sats and
+            // change a dust code. An amount that cannot be represented is dropped, not rounded.
+            val amountSats = params["amount"]?.let { DgbAmount.toSats(it) }
 
             return DigiByteUri(
                 address = address,

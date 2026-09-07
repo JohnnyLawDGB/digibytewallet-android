@@ -9,6 +9,7 @@ import io.digibyte.core.TxResult
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.DigiByteUri
+import io.digibyte.core.model.DgbAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -77,8 +78,7 @@ class SendViewModel @Inject constructor(
         if (!custom) {
             DEFAULT_FEE_PER_KB
         } else {
-            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
-            val feeSat = (feeDgb * 100_000_000).toLong()
+            val feeSat = DgbAmount.toSats(input) ?: 0L
             if (feeSat <= 0 || TYPICAL_TX_VSIZE <= 0) return@combine DEFAULT_FEE_PER_KB
             (feeSat * 1000) / TYPICAL_TX_VSIZE
         }
@@ -89,16 +89,14 @@ class SendViewModel @Inject constructor(
         if (!custom) {
             defaultFeeSat
         } else {
-            val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
-            (feeDgb * 100_000_000).toLong()
+            DgbAmount.toSats(input) ?: 0L
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, defaultFeeSat)
 
     /** Warning state for the custom fee. */
     val feeWarning: StateFlow<FeeWarning> = combine(isCustomFee, customFeeInput) { custom, input ->
         if (!custom) return@combine FeeWarning.None
-        val feeDgb = input.replace(",", "").toDoubleOrNull() ?: 0.0
-        val feeSat = (feeDgb * 100_000_000).toLong()
+        val feeSat = DgbAmount.toSats(input) ?: 0L
         if (feeSat <= 0) return@combine FeeWarning.ZeroFee
         val satPerVbyte = feeSat.toDouble() / TYPICAL_TX_VSIZE
         if (satPerVbyte < 100.0) FeeWarning.BelowRelay else FeeWarning.None
@@ -173,22 +171,17 @@ class SendViewModel @Inject constructor(
 
     /** Put a payment request's amount into the DGB field, as the user would have typed it. */
     fun applyPrefillAmountSats(sats: Long) {
-        val dgb = sats / 100_000_000.0
-        onAmountDgbChanged(
-            NumberFormat.getNumberInstance(Locale.US).apply {
-                minimumFractionDigits = 0
-                maximumFractionDigits = 8
-            }.format(dgb)
-        )
+        onAmountDgbChanged(DgbAmount.format(sats))
     }
 
     // ── Amount conversion helpers ─────────────────────────────────────────
 
     /** Convert current DGB input to satoshis. Returns null if invalid. */
     fun amountSatoshis(): Long? {
-        val dgb = amountDgb.value.replace(",", "").toDoubleOrNull() ?: return null
-        if (dgb <= 0.0) return null
-        return (dgb * 100_000_000).toLong()
+        // Exact: the double path sent 0.29 DGB as 28,999,999 sats.
+        val sats = DgbAmount.toSats(amountDgb.value) ?: return null
+        if (sats <= 0L) return null
+        return sats
     }
 
     // ── Send flow ─────────────────────────────────────────────────────────

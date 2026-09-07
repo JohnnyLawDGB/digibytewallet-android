@@ -30,6 +30,15 @@ class ScanDestinationTest {
         )
     }
 
+    /** The whole report in one line: the real tip-wallet string, parsed, routed, exact. */
+    @Test fun `the tip-wallet deposit QR yields the exact dust-coded amount`() {
+        val uri = DigiByteUri.parse("digibyte:DTest123?amount=5.00001234")!!
+        assertEquals(
+            "send?address=DTest123&amount=500001234",
+            ScanDestination.forDigiByteUri(uri, returnTo = "", encode = enc),
+        )
+    }
+
     @Test fun `a zero amount is treated as no amount`() {
         val uri = DigiByteUri(address = "DTest123", amount = 0L)
         assertEquals("send?address=DTest123", ScanDestination.forDigiByteUri(uri, returnTo = "", encode = enc))

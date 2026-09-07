@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.digibyte.core.isTestnet
 import io.digibyte.core.model.DigiByteUri
+import io.digibyte.core.model.DgbAmount
 import io.digibyte.ui.components.QrCodeDisplay
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,7 +86,7 @@ fun ReceiveScreen(
     val qrContent by remember(address, amountInput, isDigiDollar) {
         derivedStateOf {
             // DigiDollar addresses are not DGB-URI targets — QR carries the raw TD… address.
-            val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
+            val sats = DgbAmount.toSats(amountInput)
             if (!isDigiDollar && sats != null && sats > 0) {
                 DigiByteUri.encode(address = address, amountSats = sats)
             } else {
@@ -284,7 +285,7 @@ fun ReceiveScreen(
                             append(shareDd.format(address))
                         } else {
                             append(shareDgb.format(address))
-                            val sats = amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() }
+                            val sats = DgbAmount.toSats(amountInput)
                             if (sats != null && sats > 0) {
                                 append("\n${DigiByteUri.encode(address, sats)}")
                             }
@@ -349,7 +350,7 @@ fun ReceiveScreen(
                         R.string.receive_qr_encodes,
                         DigiByteUri.encode(
                             address,
-                            amountInput.toDoubleOrNull()?.let { (it * 100_000_000).toLong() },
+                            DgbAmount.toSats(amountInput),
                         ),
                     ),
                     style = MaterialTheme.typography.labelSmall,

@@ -30,6 +30,19 @@ class DigiByteUriTest {
         assertEquals(150_000_000L, u?.amount)
     }
 
+    /** The digiscope tip wallet encodes `N.0000CCCC`; a one-satoshi error changes the dust code. */
+    @Test fun amount_with_eight_decimals_is_exact() {
+        assertEquals(500_001_234L, DigiByteUri.parse("digibyte:DTest123?amount=5.00001234")?.amount)
+        assertEquals(29_000_000L, DigiByteUri.parse("digibyte:DTest123?amount=0.29")?.amount)
+        assertEquals(100_000_005L, DigiByteUri.parse("digibyte:DTest123?amount=1.00000005")?.amount)
+    }
+
+    @Test fun an_unrepresentable_amount_is_dropped_not_truncated() {
+        val u = DigiByteUri.parse("digibyte:DTest123?amount=1.123456789")
+        assertEquals("DTest123", u?.address)
+        assertNull(u?.amount)
+    }
+
     @Test fun label_and_message_are_percent_decoded() {
         val u = DigiByteUri.parse("digibyte:DTest123?label=Coffee%20Shop&message=Order%20%231")
         assertEquals("Coffee Shop", u?.label)

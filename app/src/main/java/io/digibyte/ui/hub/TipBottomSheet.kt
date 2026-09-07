@@ -128,14 +128,13 @@ fun TipBottomSheet(
             // ── Send button ───────────────────────────────────────────────
             Button(
                 onClick = {
-                    val dgb = amountText.toDoubleOrNull()
-                    if (dgb == null || dgb <= 0.0) {
+                    // Exact decimal conversion — the double path under-paid by a satoshi.
+                    val satoshis = io.digibyte.core.model.DgbAmount.toSats(amountText)
+                    if (satoshis == null || satoshis <= 0L) {
                         resultMessage = "Enter a valid DGB amount"
                         isSuccess = false
                         return@Button
                     }
-                    // Convert DGB to satoshis
-                    val satoshis = (dgb * 100_000_000).toLong()
                     val toHandle = target.handle ?: target.address
                     isSending = true
                     resultMessage = null
