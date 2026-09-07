@@ -203,6 +203,26 @@ class AssetMetadataService(
         }
     }
 
+    /**
+     * Ask the asset proxy whether [assetId] carries transfer rules and remember the answer.
+     *
+     * @return true when the proxy returned a non-empty `rules` object, false when it answered
+     *   without one, null when no endpoint answered. The row is created if missing so the answer
+     *   has somewhere to live; `"{}"` is stored for "answered, none" so a later reader can tell it
+     *   from "never asked" (NULL). Never throws: the gate treats null as unknown.
+     */
+    suspend fun refreshRules(assetId: String): Boolean? {
+        val client = assetNetworkClient ?: return null
+        val remote = runCatching { client.getAssetData(assetId) }.getOrNull() ?: return null
+        val present = !remote.rules.isNullOrEmpty()
+        val json = if (present) JSONObject(remote.rules!!).toString() else "{}"
+        runCatching {
+            assetMetadataDao.insertChainFacts(AssetMetadataEntity(assetId = assetId))
+            assetMetadataDao.updateRulesJson(assetId, json)
+        }
+        return present
+    }
+
     private suspend fun storeFromJson(
         assetId: String,
         cid: String?,

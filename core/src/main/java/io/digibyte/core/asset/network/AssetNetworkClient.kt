@@ -68,6 +68,10 @@ data class AssetDataResponse(
      *  or the CID isn't pinned. Kept as a nullable map rather than parsed
      *  eagerly so new fields surface automatically. */
     val ipfs: Map<String, Any?>?,
+    /** DigiAsset Core's `rules` object (royalty/deflation/expiry/geofence/vote/signers/…),
+     *  which it emits only when the asset actually has rules. Null when absent from the
+     *  response. Consumed by the transfer-rule gate as a signal that can only tighten. */
+    val rules: Map<String, Any?>? = null,
 )
 
 data class SyncStateResponse(

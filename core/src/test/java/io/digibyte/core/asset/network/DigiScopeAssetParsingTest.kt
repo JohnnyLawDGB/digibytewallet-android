@@ -54,4 +54,24 @@ class DigiScopeAssetParsingTest {
 
 
     /** `mediaUrl` is present and deliberately unused — this pins that it stays that way. */
+
+    /** Captured from api.digiscope.me/api/digiassets/asset/5401 on 2026-09-06 (trimmed). */
+    @Test
+    fun `asset data keeps the rules object when the proxy sends one`() {
+        val json = JSONObject(
+            """{"assetId":"La8UJyF13C2VG1EbxvkWmDf3gu5y2W4Worg9rn","cid":"bafkreia2gq62","count":5,"decimals":0,
+                "rules":{"changeable":false,"royalty":{"addresses":{"DFPBRuSBW5k9aDHTq8ixu294dhZkREUwRK":10000000}}}}"""
+        )
+
+        val data = DigiScopeAssetParsing.assetData(json, fallbackAssetId = "ignored")!!
+
+        assertEquals(setOf("changeable", "royalty"), data.rules!!.keys)
+        assertEquals(false, data.rules!!["changeable"])
+    }
+
+    @Test
+    fun `asset data has null rules when the proxy sends none`() {
+        val json = JSONObject("""{"assetId":"La3t7Jdv","cid":"bafy","count":10,"decimals":0}""")
+        assertNull(DigiScopeAssetParsing.assetData(json, fallbackAssetId = "ignored")!!.rules)
+    }
 }

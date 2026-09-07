@@ -26,4 +26,12 @@ interface AssetMetadataDao {
      *  IGNORE conflict so we don't overwrite a richer existing entry. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertChainFacts(metadata: AssetMetadataEntity)
+
+    /** The proxy's rules object as JSON text; `"{}"` when the proxy answered without one, NULL
+     *  when it was never learned. Written by AssetMetadataService.refreshRules only. */
+    @Query("UPDATE asset_metadata SET rulesJson = :rulesJson WHERE assetId = :assetId")
+    suspend fun updateRulesJson(assetId: String, rulesJson: String?)
+
+    @Query("SELECT rulesJson FROM asset_metadata WHERE assetId = :assetId")
+    suspend fun rulesJsonFor(assetId: String): String?
 }

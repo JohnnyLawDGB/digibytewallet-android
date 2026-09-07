@@ -26,6 +26,17 @@ internal object DigiScopeAssetParsing {
             count = json.optLong("count", 0L),
             decimals = json.optInt("decimals", 0),
             ipfs = null,
+            rules = json.optJSONObject("rules")?.let { toMap(it) },
         )
+    }
+
+    private fun toMap(obj: JSONObject): Map<String, Any?> {
+        val out = mutableMapOf<String, Any?>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            out[k] = obj.opt(k)
+        }
+        return out
     }
 }
