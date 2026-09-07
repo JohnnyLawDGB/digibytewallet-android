@@ -82,3 +82,13 @@ Fix direction is your coarse gate, made fail-closed: refuse to send or recover a
 Yes please on the live case. What we need from you: the txid of the 5383 send that burned (for the Core-side vector), and a fresh throwaway royalty-ruled asset issued directly to a test-phone address we will send you. We will run the unfixed build first to capture the burn (indexer count and the wallet's phantom, per-row logs), then the fixed build to prove the refusal, and both go into the report. One caveat we will be watching for: our decoder does not skip the rules block on a 0x03/0x04 issuance, so the phone may credit a directly-issued ruled asset incorrectly; if it does, that is a second finding, not a reason to stop.
 
 Timing: the repo is under a founder security review right now, so the fix lands on a branch immediately and the release decision is separate; we will tell you the version when it ships. Credit under BUG-BOUNTY.md applies.
+
+## Fix built (branch `fix/ruled-asset-send-gate`)
+
+Implemented per `docs/superpowers/plans/2026-09-06-ruled-asset-transfer-gate.md`:
+- `AssetTransferRuleGate` (pure, decision table tested) — NONE only for a locked issuance with opcode 1/2/5 and no proxy rules object; RULE_BOUND for opcode 3/4 or a proxy rules object; UNKNOWN otherwise.
+- Decoder `hasRules`; provenance walk records `issuanceOpcode`/`issuanceLocked` (Room migration 10→11) and can be forced to the issuance for pre-upgrade rows; proxy `rules` object persisted to `rulesJson`.
+- `AssetManager.sendAsset` returns `TxResult.Refused` before reading a UTXO; `ForeignAssetTransferService` leaves RULE_BOUND/UNKNOWN outpoints on the old seed with a typed `MoveRefusal`.
+- Detail and send screens show `TransferRuleCard` and remove/disable Send for anything but NONE; recovery screen names refused outpoints. Strings in 13 languages.
+
+Still open: the live protocol with the reporter (unfixed build first, then this build), and the release decision under the founder-review hold.
