@@ -326,6 +326,15 @@ data class DecodedAssetHeader(
     val transferInstructions: List<TransferInstruction>
 ) {
     /**
+     * True for issuance opcodes 0x03 (rewritable rules) and 0x04 (immutable rules) — the only
+     * two that carry a rules block. The decoder does not parse that block: issuance supply is
+     * credited to the first non-OP_RETURN output without reading instructions
+     * (AssetTxQuantity.forOutput), so the bytes after the amount do not affect crediting; what
+     * matters is that this asset must never be moved by a transfer that satisfies no rule.
+     */
+    val hasRules: Boolean get() = opcode == 3 || opcode == 4
+
+    /**
      * Convert to [AssetData] model for the wallet layer.
      * Uses the first non-burn transfer instruction's amount, or totalQuantity for issuance.
      */

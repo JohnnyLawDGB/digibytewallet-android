@@ -65,6 +65,14 @@ class DigiAssetDecoderTest {
     // Non-DA OP_RETURN (SegWit commitment)
     private val NON_DA_OP_RETURN = "6a24aa21a9ed6fb29ce476d46dce43e21190d6c2"
 
+    // Real mainnet issuance of asset 5401 "Brasa Royalty Refusal Test 003", txid
+    // de8969169a38241fe520f461c06f9222934d325c640b83b40172aa3f751a00c6 (height 24,164,934):
+    // DA + v3 + opcode 0x04 (immutable rules) + sha256(metadata) + amount 5 + rules block +
+    // issuance flags 0x10 (div 0, locked, aggregatable). Its royalty rule is 0.1 DGB to
+    // DFPBRuSBW5k9aDHTq8ixu294dhZkREUwRK. Sending it without that output destroys it.
+    private val ISSUANCE_V3_RULED_5401 =
+        "6a2b444103041a343da7c7a2b6d25667e63e24980cb56ddf65970bbd8315e99e97c0ec847d9e0510101f000510"
+
     // ---- Real mainnet transaction data ----
     // txid: 1af59aea7181f4f3aeec2c03b8bd48952a06e61051fb76750fb74ed1fd5651e3
     // block 11000208, DigiAsset v2 transfer, 600-sat marker output
@@ -380,5 +388,40 @@ class DigiAssetDecoderTest {
             "bafkreif6jztw2ph4rjcu7tbyzffrsk4o7elpxpepbeb4kwcwrmq4v7jkmi",
             header.metadataCid
         )
+    }
+
+    // ================================================================
+    // Rule-bearing issuance tests
+    // ================================================================
+
+    @Test
+    fun `an opcode 4 issuance reports hasRules and its chain facts`() {
+        val h = decoder.decode(hexToBytes(ISSUANCE_V3_RULED_5401))
+        assertNotNull(h)
+        assertEquals(3, h!!.version)
+        assertEquals(4, h.opcode)
+        assertEquals(AssetOperation.ISSUANCE, h.operation)
+        assertTrue(h.hasRules)
+        assertTrue(h.locked)
+        assertEquals(5L, h.totalQuantity)
+        assertEquals(0, h.divisibility)
+    }
+
+    @Test
+    fun `an opcode 3 issuance reports hasRules`() {
+        // Same bytes with the opcode byte flipped to 0x03 (rewritable rules).
+        val rewritable = ISSUANCE_V3_RULED_5401.replaceFirst("44410304", "44410303")
+        val h = decoder.decode(hexToBytes(rewritable))
+        assertNotNull(h)
+        assertEquals(3, h!!.opcode)
+        assertTrue(h.hasRules)
+    }
+
+    @Test
+    fun `rule-free issuances and transfers do not report hasRules`() {
+        assertFalse(decoder.decode(hexToBytes(ISSUANCE_V3_LOCKED))!!.hasRules)
+        assertFalse(decoder.decode(hexToBytes(ISSUANCE_V3_UNLOCKED_DISPERSED))!!.hasRules)
+        assertFalse(decoder.decode(hexToBytes(TRANSFER_V3))!!.hasRules)
+        assertFalse(decoder.decode(hexToBytes(BURN_V3))!!.hasRules)
     }
 }
