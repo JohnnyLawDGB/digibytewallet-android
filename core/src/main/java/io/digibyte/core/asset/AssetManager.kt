@@ -1,6 +1,9 @@
 package io.digibyte.core.asset
 
+import io.digibyte.core.SendRefusal
 import io.digibyte.core.TxResult
+import io.digibyte.core.asset.rules.AssetTransferRuleGate
+import io.digibyte.core.asset.rules.TransferRuleState
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.dandelion.Broadcaster
 import io.digibyte.core.db.dao.AssetBalance
@@ -178,6 +181,42 @@ class AssetManager(
         AssetProvenanceWalker(hop = ::classifyProvenanceHop, store = provenanceStore)
     }
 
+    // ── Transfer-rule gate (spec 2026-09-06-ruled-asset-transfer-gate-design §5) ─────────────
+
+    /**
+     * What the wallet already knows, without touching the network: the issuance opcode the
+     * provenance walk recorded and the rules object the proxy last reported. UNKNOWN until both
+     * a walk has reached this asset's issuance since the column existed and, for unlocked
+     * assets, forever — a reissuance can still add rules to those.
+     */
+    suspend fun transferRuleState(assetId: String): TransferRuleState {
+        val facts = provenanceStore.issuanceFactsFor(assetId)
+        val apiRulesPresent = metadataDao.rulesJsonFor(assetId)?.let { json ->
+            runCatching { org.json.JSONObject(json).length() > 0 }.getOrNull()
+        }
+        return AssetTransferRuleGate.stateOf(facts?.issuanceOpcode, facts?.issuanceLocked, apiRulesPresent)
+    }
+
+    /**
+     * Establish the state for the asset created by the transaction [txid] belongs to: walk to
+     * the issuance ignoring the cache (so pre-upgrade rows learn the opcode), then ask the proxy.
+     * Used by the screens when [transferRuleState] is UNKNOWN and by the recovery classifier,
+     * whose outpoints are unnamed until walked. UNKNOWN when the walk cannot reach an issuance.
+     */
+    suspend fun verifyTransferRulesForTx(txid: String): TransferRuleState {
+        val facts = runCatching { provenanceWalker.resolve(txid, forceToIssuance = true) }.getOrNull()
+            ?: return TransferRuleState.UNKNOWN
+        val apiRulesPresent = runCatching { metadataService.refreshRules(facts.assetId) }.getOrNull()
+        return AssetTransferRuleGate.stateOf(facts.issuanceOpcode, facts.issuanceLocked, apiRulesPresent)
+    }
+
+    /** [verifyTransferRulesForTx] from one of the asset's held outputs. */
+    suspend fun verifyTransferRules(assetId: String): TransferRuleState {
+        val utxo = utxoDao.getAssetUtxosByIdNow(assetId).firstOrNull()
+            ?: return TransferRuleState.UNKNOWN
+        return verifyTransferRulesForTx(utxo.txid)
+    }
+
     /**
      * Flow of owned assets grouped by asset_id, with quantities and metadata.
      *
@@ -229,7 +268,8 @@ class AssetManager(
                             metadataCid = it.metadataCid,
                         )
                     },
-                    utxoCount = utxoCount
+                    utxoCount = utxoCount,
+                    transferRules = transferRuleState(assetId),
                 )
             }
         }.flowOn(kotlinx.coroutines.Dispatchers.IO)
@@ -875,6 +915,8 @@ class AssetManager(
                         totalSupply = header.totalQuantity ?: 0L,
                         divisibility = header.divisibility,
                         metadataCid = header.metadataCid,
+                        issuanceOpcode = header.opcode,
+                        issuanceLocked = header.locked,
                     )
                 )
             }
@@ -1383,6 +1425,15 @@ class AssetManager(
         toAddress: String,
         feePerKb: Long,
     ): TxResult {
+        // Refuse before reading a UTXO or touching native. DigiAsset Core clears every output of
+        // a transfer that breaks a rule; this wallet builds no rule outputs, so a rule-bearing
+        // asset must never leave through here, and "don't know" is not "no rules".
+        when (transferRuleState(assetId)) {
+            TransferRuleState.RULE_BOUND -> return TxResult.Refused(SendRefusal.RULE_BOUND_ASSET)
+            TransferRuleState.UNKNOWN -> return TxResult.Refused(SendRefusal.RULES_UNKNOWN)
+            TransferRuleState.NONE -> Unit
+        }
+
         if (!NativeBridge.isValidAddress(toAddress)) return TxResult.Error("Invalid DigiByte address")
         if (quantity <= 0) return TxResult.Error("Quantity must be positive")
         if (feePerKb < 0) return TxResult.Error("Fee rate must be non-negative")

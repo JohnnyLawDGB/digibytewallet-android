@@ -250,6 +250,11 @@ class SendViewModel @Inject constructor(
                         android.util.Log.w(TAG, "send refused: ${result.message}")
                         SendState.Error(result.message)
                     }
+                    is TxResult.Refused -> {
+                        // Unreachable for a plain DGB send today; typed refusals are asset-only.
+                        android.util.Log.w(TAG, "send refused by policy: ${result.reason}")
+                        SendState.Error(result.reason.name)
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // The screen went away mid-send. Nothing to show — but say so, because the

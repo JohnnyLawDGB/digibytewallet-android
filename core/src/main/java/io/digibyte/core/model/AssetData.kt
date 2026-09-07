@@ -43,7 +43,11 @@ data class OwnedAsset(
     val assetId: String,
     val quantity: Long,
     val metadata: AssetMetadata?,
-    val utxoCount: Int
+    val utxoCount: Int,
+    /** Whether this asset may carry transfer rules. Defaults to UNKNOWN — the fail-closed
+     *  value — so a caller that forgets to fill it cannot enable Send by accident. */
+    val transferRules: io.digibyte.core.asset.rules.TransferRuleState =
+        io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN,
 )
 
 /**

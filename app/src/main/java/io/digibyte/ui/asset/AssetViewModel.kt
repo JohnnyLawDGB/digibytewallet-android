@@ -175,6 +175,8 @@ class AssetViewModel @Inject constructor(
             _sendState.value = when (result) {
                 is TxResult.Success -> SendState.Success(result.txid)
                 is TxResult.Error -> SendState.Failure(result.message)
+                // TEMPORARY: Task 8 replaces this with the typed SendState.Refused.
+                is TxResult.Refused -> SendState.Failure(result.reason.name)
             }
         }
     }

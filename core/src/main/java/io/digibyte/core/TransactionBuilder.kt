@@ -6,9 +6,20 @@ import io.digibyte.core.db.entity.UtxoEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Why a spend-class action was refused before anything was built or signed. */
+enum class SendRefusal {
+    /** The asset carries transfer rules this wallet cannot satisfy; sending would destroy it. */
+    RULE_BOUND_ASSET,
+    /** The asset's rules could not be established; refused rather than guessed. */
+    RULES_UNKNOWN,
+}
+
 sealed class TxResult {
     data class Success(val txid: String) : TxResult()
     data class Error(val message: String) : TxResult()
+    /** Refused by policy, not by failure: nothing was selected, built, signed or broadcast.
+     *  Typed so the screen can say why in the user's language. */
+    data class Refused(val reason: SendRefusal) : TxResult()
 }
 
 class TransactionBuilder(
