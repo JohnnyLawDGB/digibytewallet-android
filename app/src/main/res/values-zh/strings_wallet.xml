@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s DigiDollar 已转入此钱包</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar 被留下——无法转移</string>
     <string name="rf_dd_unreachable">无法检查 DigiDollar，此钱包可能持有一些</string>
+    <string name="as_rules_checking">正在检查此资产的转账规则…</string>
+    <string name="as_rules_bound_title">此资产带有转账规则</string>
+    <string name="as_rules_bound_body">它在发行时附带了本钱包尚无法满足的规则（例如版税）。现在发送会将其销毁，因此已禁用发送。您的资产安全地保留在本钱包中。</string>
+    <string name="as_rules_unverified_body">无法验证此资产的转账规则。为保护资产，在验证完成前发送将保持禁用。</string>
+    <string name="as_rules_retry">重新检查</string>
+    <string name="as_refused_rule_bound">已阻止：此资产带有本钱包尚无法满足的转账规则。未发送任何内容。</string>
+    <string name="as_refused_rules_unknown">已阻止：无法验证此资产的转账规则。未发送任何内容。</string>
+    <string name="rf_move_refused_rule_bound">%1$s 留在原处：此资产带有本钱包尚无法满足的转账规则</string>
+    <string name="rf_move_refused_unknown">%1$s 留在原处：无法验证其转账规则</string>
 </resources>

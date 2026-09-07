@@ -576,4 +576,13 @@
     <string name="rf_dd_moved">%1$s en DigiDollar movidos a esta billetera</string>
     <string name="rf_dd_left_behind">%1$s en DigiDollar se quedaron: no se pudieron mover</string>
     <string name="rf_dd_unreachable">No se pudo comprobar DigiDollar; esta billetera podría tener algo</string>
+    <string name="as_rules_checking">Comprobando las reglas de transferencia de este activo…</string>
+    <string name="as_rules_bound_title">Este activo tiene reglas de transferencia</string>
+    <string name="as_rules_bound_body">Se emitió con reglas (como regalías) que esta billetera aún no puede cumplir. Enviarlo ahora lo destruiría, por lo que el envío está desactivado. Tu activo permanece seguro en esta billetera.</string>
+    <string name="as_rules_unverified_body">No se pudieron verificar las reglas de transferencia de este activo. El envío permanece desactivado hasta verificarlas, para proteger el activo.</string>
+    <string name="as_rules_retry">Comprobar de nuevo</string>
+    <string name="as_refused_rule_bound">Bloqueado: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir. No se envió nada.</string>
+    <string name="as_refused_rules_unknown">Bloqueado: no se pudieron verificar las reglas de transferencia de este activo. No se envió nada.</string>
+    <string name="rf_move_refused_rule_bound">%1$s se quedó donde estaba: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir</string>
+    <string name="rf_move_refused_unknown">%1$s se quedó donde estaba: no se pudieron verificar sus reglas de transferencia</string>
 </resources>

@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s DigiDollar bu cüzdana taşındı</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar geride kaldı — taşınamadı</string>
     <string name="rf_dd_unreachable">DigiDollar kontrol edilemedi; bu cüzdanda bir miktar olabilir</string>
+    <string name="as_rules_checking">Bu varlığın transfer kuralları kontrol ediliyor…</string>
+    <string name="as_rules_bound_title">Bu varlığın transfer kuralları var</string>
+    <string name="as_rules_bound_body">Bu cüzdanın henüz karşılayamadığı kurallarla (telif ücreti gibi) ihraç edilmiş. Şimdi göndermek onu yok edeceğinden gönderme devre dışı bırakıldı. Varlığınız bu cüzdanda güvende kalır.</string>
+    <string name="as_rules_unverified_body">Bu varlığın transfer kuralları doğrulanamadı. Varlığı korumak için, doğrulanana kadar gönderme devre dışı kalır.</string>
+    <string name="as_rules_retry">Yeniden kontrol et</string>
+    <string name="as_refused_rule_bound">Engellendi: bu varlığın, bu cüzdanın henüz karşılayamadığı transfer kuralları var. Hiçbir şey gönderilmedi.</string>
+    <string name="as_refused_rules_unknown">Engellendi: bu varlığın transfer kuralları doğrulanamadı. Hiçbir şey gönderilmedi.</string>
+    <string name="rf_move_refused_rule_bound">%1$s olduğu yerde kaldı: bu varlığın, bu cüzdanın henüz karşılayamadığı transfer kuralları var</string>
+    <string name="rf_move_refused_unknown">%1$s olduğu yerde kaldı: transfer kuralları doğrulanamadı</string>
 </resources>

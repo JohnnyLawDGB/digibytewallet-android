@@ -705,4 +705,15 @@
     <string name="rf_dd_moved">%1$s in DigiDollar moved into this wallet</string>
     <string name="rf_dd_left_behind">%1$s in DigiDollar was left behind — it could not be moved</string>
     <string name="rf_dd_unreachable">DigiDollar could not be checked, so this wallet may hold some</string>
+    <!-- Transfer-rule gate: assets issued with rules (royalty, deflation, …) must not be sent by
+         a plain transfer, which every DigiAsset Core indexer treats as a burn. -->
+    <string name="as_rules_checking">Checking this asset\'s transfer rules…</string>
+    <string name="as_rules_bound_title">This asset has transfer rules</string>
+    <string name="as_rules_bound_body">It was issued with rules (such as royalties) that this wallet cannot satisfy yet. Sending it now would destroy it, so sending is disabled. Your asset stays safe in this wallet.</string>
+    <string name="as_rules_unverified_body">This asset\'s transfer rules could not be verified. Sending stays disabled until they are, to protect the asset.</string>
+    <string name="as_rules_retry">Check again</string>
+    <string name="as_refused_rule_bound">Blocked: this asset has transfer rules this wallet cannot satisfy yet. Nothing was sent.</string>
+    <string name="as_refused_rules_unknown">Blocked: this asset\'s transfer rules could not be verified. Nothing was sent.</string>
+    <string name="rf_move_refused_rule_bound">%1$s stayed where it is: this asset has transfer rules this wallet cannot satisfy yet</string>
+    <string name="rf_move_refused_unknown">%1$s stayed where it is: its transfer rules could not be verified</string>
 </resources>

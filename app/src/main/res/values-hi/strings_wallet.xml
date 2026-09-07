@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s DigiDollar इस वॉलेट में आ गए</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar पीछे रह गए — उन्हें भेजा नहीं जा सका</string>
     <string name="rf_dd_unreachable">DigiDollar की जाँच नहीं हो सकी; इस वॉलेट में कुछ हो सकता है</string>
+    <string name="as_rules_checking">इस एसेट के ट्रांसफ़र नियम जाँचे जा रहे हैं…</string>
+    <string name="as_rules_bound_title">इस एसेट के ट्रांसफ़र नियम हैं</string>
+    <string name="as_rules_bound_body">इसे ऐसे नियमों (जैसे रॉयल्टी) के साथ जारी किया गया था जिन्हें यह वॉलेट अभी पूरा नहीं कर सकता। इसे अभी भेजने से यह नष्ट हो जाएगा, इसलिए भेजना बंद है। आपका एसेट इस वॉलेट में सुरक्षित रहता है।</string>
+    <string name="as_rules_unverified_body">इस एसेट के ट्रांसफ़र नियमों की पुष्टि नहीं हो सकी। एसेट की सुरक्षा के लिए, पुष्टि होने तक भेजना बंद रहेगा।</string>
+    <string name="as_rules_retry">फिर से जाँचें</string>
+    <string name="as_refused_rule_bound">रोका गया: इस एसेट के ऐसे ट्रांसफ़र नियम हैं जिन्हें यह वॉलेट अभी पूरा नहीं कर सकता। कुछ भी नहीं भेजा गया।</string>
+    <string name="as_refused_rules_unknown">रोका गया: इस एसेट के ट्रांसफ़र नियमों की पुष्टि नहीं हो सकी। कुछ भी नहीं भेजा गया।</string>
+    <string name="rf_move_refused_rule_bound">%1$s वहीं रहा: इस एसेट के ऐसे ट्रांसफ़र नियम हैं जिन्हें यह वॉलेट अभी पूरा नहीं कर सकता</string>
+    <string name="rf_move_refused_unknown">%1$s वहीं रहा: इसके ट्रांसफ़र नियमों की पुष्टि नहीं हो सकी</string>
 </resources>

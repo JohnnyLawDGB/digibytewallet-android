@@ -554,4 +554,13 @@
     <string name="rf_dd_moved">%1$s en DigiDollar déplacés vers ce portefeuille</string>
     <string name="rf_dd_left_behind">%1$s en DigiDollar sont restés — ils n\'ont pas pu être déplacés</string>
     <string name="rf_dd_unreachable">Impossible de vérifier les DigiDollar ; ce portefeuille en détient peut-être</string>
+    <string name="as_rules_checking">Vérification des règles de transfert de cet actif…</string>
+    <string name="as_rules_bound_title">Cet actif a des règles de transfert</string>
+    <string name="as_rules_bound_body">Il a été émis avec des règles (comme des redevances) que ce portefeuille ne peut pas encore respecter. L\'envoyer maintenant le détruirait, l\'envoi est donc désactivé. Votre actif reste en sécurité dans ce portefeuille.</string>
+    <string name="as_rules_unverified_body">Les règles de transfert de cet actif n\'ont pas pu être vérifiées. L\'envoi reste désactivé jusqu\'à leur vérification, pour protéger l\'actif.</string>
+    <string name="as_rules_retry">Vérifier à nouveau</string>
+    <string name="as_refused_rule_bound">Bloqué : cet actif a des règles de transfert que ce portefeuille ne peut pas encore respecter. Rien n\'a été envoyé.</string>
+    <string name="as_refused_rules_unknown">Bloqué : les règles de transfert de cet actif n\'ont pas pu être vérifiées. Rien n\'a été envoyé.</string>
+    <string name="rf_move_refused_rule_bound">%1$s est resté en place : cet actif a des règles de transfert que ce portefeuille ne peut pas encore respecter</string>
+    <string name="rf_move_refused_unknown">%1$s est resté en place : ses règles de transfert n\'ont pas pu être vérifiées</string>
 </resources>

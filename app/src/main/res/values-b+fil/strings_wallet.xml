@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s na DigiDollar ang nailipat sa wallet na ito</string>
     <string name="rf_dd_left_behind">%1$s na DigiDollar ang naiwan — hindi ito nailipat</string>
     <string name="rf_dd_unreachable">Hindi masuri ang DigiDollar; maaaring may hawak ang wallet na ito</string>
+    <string name="as_rules_checking">Sinusuri ang mga panuntunan sa paglilipat ng asset na ito…</string>
+    <string name="as_rules_bound_title">May mga panuntunan sa paglilipat ang asset na ito</string>
+    <string name="as_rules_bound_body">Inilabas ito na may mga panuntunan (tulad ng royalty) na hindi pa kayang tuparin ng wallet na ito. Masisira ito kung ipapadala ngayon, kaya naka-disable ang pagpapadala. Nananatiling ligtas ang iyong asset sa wallet na ito.</string>
+    <string name="as_rules_unverified_body">Hindi ma-verify ang mga panuntunan sa paglilipat ng asset na ito. Mananatiling naka-disable ang pagpapadala hanggang ma-verify ang mga ito, para protektahan ang asset.</string>
+    <string name="as_rules_retry">Suriin muli</string>
+    <string name="as_refused_rule_bound">Na-block: may mga panuntunan sa paglilipat ang asset na ito na hindi pa kayang tuparin ng wallet na ito. Walang naipadala.</string>
+    <string name="as_refused_rules_unknown">Na-block: hindi ma-verify ang mga panuntunan sa paglilipat ng asset na ito. Walang naipadala.</string>
+    <string name="rf_move_refused_rule_bound">%1$s ay nanatili sa kinaroroonan nito: may mga panuntunan sa paglilipat ang asset na ito na hindi pa kayang tuparin ng wallet na ito</string>
+    <string name="rf_move_refused_unknown">%1$s ay nanatili sa kinaroroonan nito: hindi ma-verify ang mga panuntunan sa paglilipat nito</string>
 </resources>

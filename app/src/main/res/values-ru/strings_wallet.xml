@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s в DigiDollar перемещено в этот кошелёк</string>
     <string name="rf_dd_left_behind">%1$s в DigiDollar осталось — переместить не удалось</string>
     <string name="rf_dd_unreachable">Не удалось проверить DigiDollar; в этом кошельке они могут быть</string>
+    <string name="as_rules_checking">Проверяем правила передачи этого актива…</string>
+    <string name="as_rules_bound_title">У этого актива есть правила передачи</string>
+    <string name="as_rules_bound_body">Он выпущен с правилами (например, роялти), которые этот кошелёк пока не может выполнить. Отправка сейчас уничтожила бы его, поэтому отправка отключена. Ваш актив остаётся в безопасности в этом кошельке.</string>
+    <string name="as_rules_unverified_body">Не удалось проверить правила передачи этого актива. Чтобы защитить актив, отправка остаётся отключённой до их проверки.</string>
+    <string name="as_rules_retry">Проверить снова</string>
+    <string name="as_refused_rule_bound">Заблокировано: у этого актива есть правила передачи, которые этот кошелёк пока не может выполнить. Ничего не отправлено.</string>
+    <string name="as_refused_rules_unknown">Заблокировано: не удалось проверить правила передачи этого актива. Ничего не отправлено.</string>
+    <string name="rf_move_refused_rule_bound">%1$s остался на месте: у этого актива есть правила передачи, которые этот кошелёк пока не может выполнить</string>
+    <string name="rf_move_refused_unknown">%1$s остался на месте: не удалось проверить его правила передачи</string>
 </resources>

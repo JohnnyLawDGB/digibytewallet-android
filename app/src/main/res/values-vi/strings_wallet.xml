@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">Đã chuyển %1$s DigiDollar về ví này</string>
     <string name="rf_dd_left_behind">Còn lại %1$s DigiDollar — không thể chuyển</string>
     <string name="rf_dd_unreachable">Không thể kiểm tra DigiDollar; ví này có thể đang giữ một ít</string>
+    <string name="as_rules_checking">Đang kiểm tra quy tắc chuyển của tài sản này…</string>
+    <string name="as_rules_bound_title">Tài sản này có quy tắc chuyển</string>
+    <string name="as_rules_bound_body">Tài sản được phát hành kèm các quy tắc (như tiền bản quyền) mà ví này chưa thể đáp ứng. Gửi ngay bây giờ sẽ phá hủy nó, nên tính năng gửi đã bị tắt. Tài sản của bạn vẫn an toàn trong ví này.</string>
+    <string name="as_rules_unverified_body">Không thể xác minh quy tắc chuyển của tài sản này. Để bảo vệ tài sản, tính năng gửi sẽ bị tắt cho đến khi xác minh xong.</string>
+    <string name="as_rules_retry">Kiểm tra lại</string>
+    <string name="as_refused_rule_bound">Đã chặn: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng. Chưa gửi gì cả.</string>
+    <string name="as_refused_rules_unknown">Đã chặn: không thể xác minh quy tắc chuyển của tài sản này. Chưa gửi gì cả.</string>
+    <string name="rf_move_refused_rule_bound">%1$s vẫn ở nguyên chỗ cũ: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng</string>
+    <string name="rf_move_refused_unknown">%1$s vẫn ở nguyên chỗ cũ: không thể xác minh quy tắc chuyển của nó</string>
 </resources>

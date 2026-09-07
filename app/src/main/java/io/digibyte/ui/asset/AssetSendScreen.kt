@@ -63,6 +63,9 @@ fun AssetSendScreen(
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
+    val ruleCheck by viewModel.ruleCheck.collectAsStateWithLifecycle()
+    val refusedRuleBound = stringResource(R.string.as_refused_rule_bound)
+    val refusedUnknown = stringResource(R.string.as_refused_rules_unknown)
     // Hoisted: used inside onClick lambdas and non-composable string fallbacks.
     val tokensLabel = stringResource(R.string.as_tokens)
     val errRecipient = stringResource(R.string.as_err_recipient)
@@ -102,7 +105,8 @@ fun AssetSendScreen(
     // user sees the terminal state banner rendered below the form.
     LaunchedEffect(sendState) {
         if (sendState is AssetViewModel.SendState.Success ||
-            sendState is AssetViewModel.SendState.Failure) {
+            sendState is AssetViewModel.SendState.Failure ||
+            sendState is AssetViewModel.SendState.Refused) {
             showConfirmDialog = false
         }
     }
@@ -179,6 +183,12 @@ fun AssetSendScreen(
                 success = false,
                 title = stringResource(R.string.as_send_failed),
                 detail = s.message,
+                onDismiss = { viewModel.resetSendState() }
+            )
+            is AssetViewModel.SendState.Refused -> SendResultBanner(
+                success = false,
+                title = stringResource(R.string.as_send_failed),
+                detail = if (s.reason == io.digibyte.core.SendRefusal.RULE_BOUND_ASSET) refusedRuleBound else refusedUnknown,
                 onDismiss = { viewModel.resetSendState() }
             )
             else -> {}
@@ -452,6 +462,12 @@ fun AssetSendScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // ── Transfer rules ────────────────────────────────────────────
+            TransferRuleCard(state = ruleCheck, onRetry = { viewModel.retryRuleCheck() })
+            if (ruleCheck != io.digibyte.core.asset.rules.RuleCheckState.NONE) {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // ── DGB cost preview ─────────────────────────────────────────
             // Updates as the user types quantity / edits the fee so the DGB
             // outflow is visible before the confirm dialog ever opens.
@@ -478,6 +494,7 @@ fun AssetSendScreen(
                     }
                     if (valid) showConfirmDialog = true
                 },
+                enabled = ruleCheck.allowsSend,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),

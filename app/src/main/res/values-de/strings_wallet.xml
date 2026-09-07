@@ -582,4 +582,13 @@
     <string name="rf_dd_moved">%1$s in DigiDollar in diese Wallet verschoben</string>
     <string name="rf_dd_left_behind">%1$s in DigiDollar blieb zurück — es konnte nicht verschoben werden</string>
     <string name="rf_dd_unreachable">DigiDollar konnte nicht geprüft werden; diese Wallet hält möglicherweise welche</string>
+    <string name="as_rules_checking">Übertragungsregeln dieses Assets werden geprüft…</string>
+    <string name="as_rules_bound_title">Dieses Asset hat Übertragungsregeln</string>
+    <string name="as_rules_bound_body">Es wurde mit Regeln (z. B. Lizenzgebühren) ausgegeben, die diese Wallet noch nicht erfüllen kann. Ein Senden würde es jetzt zerstören, daher ist das Senden deaktiviert. Dein Asset bleibt sicher in dieser Wallet.</string>
+    <string name="as_rules_unverified_body">Die Übertragungsregeln dieses Assets konnten nicht überprüft werden. Zum Schutz des Assets bleibt das Senden deaktiviert, bis sie überprüft sind.</string>
+    <string name="as_rules_retry">Erneut prüfen</string>
+    <string name="as_refused_rule_bound">Blockiert: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann. Es wurde nichts gesendet.</string>
+    <string name="as_refused_rules_unknown">Blockiert: Die Übertragungsregeln dieses Assets konnten nicht überprüft werden. Es wurde nichts gesendet.</string>
+    <string name="rf_move_refused_rule_bound">%1$s bleibt, wo es ist: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann</string>
+    <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
 </resources>

@@ -911,11 +911,17 @@ private fun AssetMoveSection(
             moves.filter { !it.moved }.forEach { failed ->
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = stringResource(
-                        R.string.rf_move_failed,
-                        failed.outpoint,
-                        failed.failureReason ?: "",
-                    ),
+                    text = when (failed.refusal) {
+                        io.digibyte.core.recovery.MoveRefusal.RULE_BOUND ->
+                            stringResource(R.string.rf_move_refused_rule_bound, failed.outpoint)
+                        io.digibyte.core.recovery.MoveRefusal.RULES_UNKNOWN ->
+                            stringResource(R.string.rf_move_refused_unknown, failed.outpoint)
+                        null -> stringResource(
+                            R.string.rf_move_failed,
+                            failed.outpoint,
+                            failed.failureReason ?: "",
+                        )
+                    },
                     color = WARNING_RED,
                     style = MaterialTheme.typography.bodySmall,
                 )

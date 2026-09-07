@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s em DigiDollar movidos para esta carteira</string>
     <string name="rf_dd_left_behind">%1$s em DigiDollar ficaram para trás — não foi possível movê-los</string>
     <string name="rf_dd_unreachable">Não foi possível verificar DigiDollar; esta carteira pode ter algum</string>
+    <string name="as_rules_checking">Verificando as regras de transferência deste ativo…</string>
+    <string name="as_rules_bound_title">Este ativo tem regras de transferência</string>
+    <string name="as_rules_bound_body">Ele foi emitido com regras (como royalties) que esta carteira ainda não consegue cumprir. Enviá-lo agora o destruiria, por isso o envio está desativado. Seu ativo permanece seguro nesta carteira.</string>
+    <string name="as_rules_unverified_body">Não foi possível verificar as regras de transferência deste ativo. O envio continua desativado até que sejam verificadas, para proteger o ativo.</string>
+    <string name="as_rules_retry">Verificar novamente</string>
+    <string name="as_refused_rule_bound">Bloqueado: este ativo tem regras de transferência que esta carteira ainda não consegue cumprir. Nada foi enviado.</string>
+    <string name="as_refused_rules_unknown">Bloqueado: não foi possível verificar as regras de transferência deste ativo. Nada foi enviado.</string>
+    <string name="rf_move_refused_rule_bound">%1$s ficou onde estava: este ativo tem regras de transferência que esta carteira ainda não consegue cumprir</string>
+    <string name="rf_move_refused_unknown">%1$s ficou onde estava: não foi possível verificar suas regras de transferência</string>
 </resources>

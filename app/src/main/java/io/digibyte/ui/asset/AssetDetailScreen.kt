@@ -69,6 +69,7 @@ fun AssetDetailScreen(
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val history by viewModel.assetHistory.collectAsStateWithLifecycle()
     val owned by viewModel.ownedAssets.collectAsStateWithLifecycle()
+    val ruleCheck by viewModel.ruleCheck.collectAsStateWithLifecycle()
 
     var showMediaViewer by remember { mutableStateOf(false) }
 
@@ -305,6 +306,17 @@ fun AssetDetailScreen(
             }
         }
 
+        // ── Transfer rules ────────────────────────────────────────────────
+        if (ruleCheck != io.digibyte.core.asset.rules.RuleCheckState.NONE) {
+            item {
+                TransferRuleCard(
+                    state = ruleCheck,
+                    onRetry = { viewModel.retryRuleCheck() },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+        }
+
         // ── Action buttons ────────────────────────────────────────────────
         item {
             Row(
@@ -332,21 +344,23 @@ fun AssetDetailScreen(
                 }
 
                 // Send button
-                Button(
-                    onClick = { onNavigateSend(ownedAsset.assetId) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DigiByteBlue
-                    )
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.wallet_send), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                if (ruleCheck.allowsSend) {
+                    Button(
+                        onClick = { onNavigateSend(ownedAsset.assetId) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DigiByteBlue
+                        )
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.wallet_send), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
                 }
             }
         }

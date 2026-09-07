@@ -62,6 +62,7 @@ class OnboardingHardcodedStringTest {
         "ui/asset/AssetSendScreen.kt",
         "ui/asset/AssetDetailScreen.kt",
         "ui/asset/AssetListScreen.kt",
+        "ui/asset/TransferRuleCard.kt",
         "ui/recovery/RecoverFundsScreen.kt",
         "ui/settings/NetworkInfoScreen.kt",
         "ui/settings/AboutScreen.kt",

@@ -3,8 +3,11 @@ package io.digibyte.ui.asset
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.digibyte.core.SendRefusal
 import io.digibyte.core.TxResult
 import io.digibyte.core.asset.AssetManager
+import io.digibyte.core.asset.rules.RuleCheckState
+import io.digibyte.core.asset.rules.TransferRuleState
 import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.asset.send.AssetFeeEstimator
@@ -61,6 +64,30 @@ class AssetViewModel @Inject constructor(
 
     private val _sendState = MutableStateFlow<SendState>(SendState.Idle)
     val sendState: StateFlow<SendState> = _sendState.asStateFlow()
+
+    // ── Transfer-rule check ─────────────────────────────────────────────
+    //
+    // Resolved once per selected asset. Reads the stores first; only if that is UNKNOWN does it
+    // walk the asset to its issuance and ask the proxy (verifyTransferRules). CHECKING is the only
+    // transient value, and nothing but NONE enables Send — see RuleCheckState.allowsSend.
+    private val _ruleCheck = MutableStateFlow(RuleCheckState.CHECKING)
+    val ruleCheck: StateFlow<RuleCheckState> = _ruleCheck.asStateFlow()
+
+    private fun checkRules(assetId: String) {
+        _ruleCheck.value = RuleCheckState.CHECKING
+        viewModelScope.launch {
+            val read = runCatching { assetManager.transferRuleState(assetId) }
+                .getOrDefault(TransferRuleState.UNKNOWN)
+            val state = if (read != TransferRuleState.UNKNOWN) read
+            else runCatching { assetManager.verifyTransferRules(assetId) }
+                .getOrDefault(TransferRuleState.UNKNOWN)
+            _ruleCheck.value = RuleCheckState.of(state)
+        }
+    }
+
+    fun retryRuleCheck() {
+        _selectedAssetId.value?.let { checkRules(it) }
+    }
 
     // ── Fee state (mirrors SendViewModel) ──────────────────────────────
     //
@@ -122,6 +149,9 @@ class AssetViewModel @Inject constructor(
     }
 
     fun selectAsset(assetId: String) {
+        if (_selectedAssetId.value != assetId || _ruleCheck.value == RuleCheckState.UNVERIFIED) {
+            checkRules(assetId)
+        }
         _selectedAssetId.value = assetId
     }
 
@@ -164,6 +194,14 @@ class AssetViewModel @Inject constructor(
             return
         }
 
+        if (!_ruleCheck.value.allowsSend) {
+            _sendState.value = SendState.Refused(
+                if (_ruleCheck.value == RuleCheckState.RULE_BOUND) SendRefusal.RULE_BOUND_ASSET
+                else SendRefusal.RULES_UNKNOWN
+            )
+            return
+        }
+
         _sendState.value = SendState.Sending
         viewModelScope.launch {
             val result = assetManager.sendAsset(
@@ -175,8 +213,7 @@ class AssetViewModel @Inject constructor(
             _sendState.value = when (result) {
                 is TxResult.Success -> SendState.Success(result.txid)
                 is TxResult.Error -> SendState.Failure(result.message)
-                // TEMPORARY: Task 8 replaces this with the typed SendState.Refused.
-                is TxResult.Refused -> SendState.Failure(result.reason.name)
+                is TxResult.Refused -> SendState.Refused(result.reason)
             }
         }
     }
@@ -186,6 +223,7 @@ class AssetViewModel @Inject constructor(
         object Sending : SendState()
         data class Success(val txid: String) : SendState()
         data class Failure(val message: String) : SendState()
+        data class Refused(val reason: SendRefusal) : SendState()
     }
 
     /**

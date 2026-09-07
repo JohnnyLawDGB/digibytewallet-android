@@ -574,4 +574,13 @@
     <string name="rf_dd_moved">%1$s 相当の DigiDollar をこのウォレットへ移しました</string>
     <string name="rf_dd_left_behind">%1$s 相当の DigiDollar が残りました — 移せませんでした</string>
     <string name="rf_dd_unreachable">DigiDollar を確認できませんでした。このウォレットが保有している可能性があります</string>
+    <string name="as_rules_checking">このアセットの転送ルールを確認しています…</string>
+    <string name="as_rules_bound_title">このアセットには転送ルールがあります</string>
+    <string name="as_rules_bound_body">このウォレットがまだ満たせないルール（ロイヤリティなど）付きで発行されています。今送信すると破壊されるため、送信は無効になっています。アセットはこのウォレットに安全に保管されます。</string>
+    <string name="as_rules_unverified_body">このアセットの転送ルールを確認できませんでした。アセットを保護するため、確認できるまで送信は無効のままです。</string>
+    <string name="as_rules_retry">再確認</string>
+    <string name="as_refused_rule_bound">ブロックされました：このアセットには、このウォレットがまだ満たせない転送ルールがあります。何も送信されていません。</string>
+    <string name="as_refused_rules_unknown">ブロックされました：このアセットの転送ルールを確認できませんでした。何も送信されていません。</string>
+    <string name="rf_move_refused_rule_bound">%1$s はそのまま残りました：このアセットには、このウォレットがまだ満たせない転送ルールがあります</string>
+    <string name="rf_move_refused_unknown">%1$s はそのまま残りました：転送ルールを確認できませんでした</string>
 </resources>
