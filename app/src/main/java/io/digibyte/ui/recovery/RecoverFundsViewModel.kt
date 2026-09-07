@@ -46,6 +46,7 @@ class RecoverFundsViewModel @Inject constructor(
     private val outgoingTxStore: io.digibyte.core.OutgoingTxStore,
     private val walletTxPersister: io.digibyte.core.WalletTxPersister,
     private val assetNetworkClient: io.digibyte.core.asset.network.AssetNetworkClient,
+    private val assetManager: io.digibyte.core.asset.AssetManager,
 ) : ViewModel() {
 
     sealed class UiState {
@@ -106,6 +107,9 @@ class RecoverFundsViewModel @Inject constructor(
     private fun assetClassifier() = io.digibyte.core.recovery.ForeignUtxoAssetClassifier(
         fetchRawTx = { txid -> assetNetworkClient.getRawTransaction(txid) },
         isAssetTx = { raw -> io.digibyte.core.bridge.NativeBridge.isAssetTransaction(raw) },
+        // Walks the foreign transaction to its issuance and asks the proxy. Anything that does
+        // not come back NONE stays on the old seed (see ForeignAssetTransferService.moveAssets).
+        resolveRuleState = { txid -> assetManager.verifyTransferRulesForTx(txid) },
     )
 
     /** Everything one recovery pass did: assets moved, DGB swept, dollars moved. */

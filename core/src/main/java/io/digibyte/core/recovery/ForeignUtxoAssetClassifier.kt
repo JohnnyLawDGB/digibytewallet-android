@@ -31,12 +31,23 @@ class ForeignUtxoAssetClassifier(
     /** Whether raw transaction bytes carry a DigiAsset marker. `NativeBridge::isAssetTransaction`
      *  in production; a lambda in tests. */
     private val isAssetTx: (ByteArray) -> Boolean,
+    /**
+     * Transfer-rule state of the asset the transaction [txid] carries. Production wires
+     * `AssetManager.verifyTransferRulesForTx`, which walks to the issuance and asks the proxy.
+     * The default is UNKNOWN — the fail-closed value — so a caller that does not wire it cannot
+     * move an asset at all. A rule-bound asset moved by a plain transfer is destroyed by every
+     * DigiAsset Core indexer; leaving it on the old seed costs nothing.
+     */
+    private val resolveRuleState: suspend (txid: String) -> io.digibyte.core.asset.rules.TransferRuleState =
+        { io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN },
 ) {
 
     /** What was learned about one outpoint. */
     data class Verdict(
         val classified: Boolean,
         val carriesAsset: Boolean,
+        /** Only meaningful when [carriesAsset]; null otherwise. */
+        val ruleState: io.digibyte.core.asset.rules.TransferRuleState? = null,
     ) {
         companion object {
             val PLAIN = Verdict(classified = true, carriesAsset = false)
@@ -52,7 +63,8 @@ class ForeignUtxoAssetClassifier(
      *
      * A fetch failure or a parser throw yields [Verdict.UNKNOWN] for that outpoint rather than
      * aborting the scan: one unreachable transaction must not strand a whole wallet's recovery,
-     * and the unknown outpoints are reported to the user rather than silently dropped.
+     * and the unknown outpoints are reported to the user rather than silently dropped. A resolver
+     * failure yields an ASSET verdict with rule state UNKNOWN: the outpoint is held AND not moved.
      */
     suspend fun classify(utxos: List<UtxoEntry>): Map<UtxoEntry, Verdict> {
         val byTxid = mutableMapOf<String, Verdict>()
@@ -64,7 +76,7 @@ class ForeignUtxoAssetClassifier(
                     val raw = fetchRawTx(utxo.txid)
                     when {
                         raw == null || raw.isEmpty() -> Verdict.UNKNOWN
-                        isAssetTx(raw) -> Verdict.ASSET
+                        isAssetTx(raw) -> Verdict.ASSET.copy(ruleState = ruleStateOf(utxo.txid))
                         else -> Verdict.PLAIN
                     }
                 } catch (_: Throwable) {
@@ -77,4 +89,11 @@ class ForeignUtxoAssetClassifier(
         }
         return out
     }
+
+    private suspend fun ruleStateOf(txid: String): io.digibyte.core.asset.rules.TransferRuleState =
+        try {
+            resolveRuleState(txid)
+        } catch (_: Throwable) {
+            io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN
+        }
 }

@@ -71,9 +71,13 @@ class ForeignAssetTransferServiceTest {
     )
 
     /** Only the asset UTXO's parent carries a marker; the fee UTXO's parent is plain. */
-    private fun classifier() = ForeignUtxoAssetClassifier(
+    private fun classifier(
+        ruleState: io.digibyte.core.asset.rules.TransferRuleState =
+            io.digibyte.core.asset.rules.TransferRuleState.NONE,
+    ) = ForeignUtxoAssetClassifier(
         fetchRawTx = { txid -> if (txid == "a55e7") byteArrayOf(1) else byteArrayOf(2) },
         isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+        resolveRuleState = { ruleState },
     )
 
     /** Everything handed to OutgoingTxStore, so the self-transfer flag can be asserted. */
@@ -89,8 +93,9 @@ class ForeignAssetTransferServiceTest {
             { _, _, _, _ -> "00ff" },
         broadcast: (ByteArray) -> String? = { "txid-moved" },
         parse: (ByteArray) -> List<ForeignAssetQuantity.Output>? = { parentOutputs },
+        assetClassifier: ForeignUtxoAssetClassifier = classifier(),
     ) = ForeignAssetTransferService(
-        assetClassifier = classifier(),
+        assetClassifier = assetClassifier,
         parseOutputs = parse,
         sign = sign,
         broadcast = broadcast,
@@ -332,5 +337,38 @@ class ForeignAssetTransferServiceTest {
         assertTrue("expected a refusal, got ${r.fanOut}", no != null)
         assertTrue("the shortfall must be stated", no!!.shortfallSat > 0)
         assertEquals("nothing may be broadcast", 0, broadcasts)
+    }
+
+    // ---- transfer rules ------------------------------------------------------------------------
+
+    @Test fun `a rule-bound asset is not signed, not broadcast, and reported as refused`() {
+        var signed = 0
+        var broadcastCount = 0
+        val svc = service(
+            sign = { _, _, _, _ -> signed++; "00ff" },
+            broadcast = { broadcastCount++; "txid-moved" },
+            assetClassifier = classifier(io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND),
+        )
+        val r = run(svc, listOf(profileResult()))
+        val move = r.moves.single()
+        assertEquals("a55e7:0", move.outpoint)
+        assertFalse(move.moved)
+        assertEquals(MoveRefusal.RULE_BOUND, move.refusal)
+        assertEquals(0, signed)
+        assertEquals(0, broadcastCount)
+        assertTrue(move.spentInputs.isEmpty())
+    }
+
+    @Test fun `an asset whose rules are unknown is refused as unknown`() {
+        val svc = service(assetClassifier = classifier(io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN))
+        val move = run(svc, listOf(profileResult())).moves.single()
+        assertFalse(move.moved)
+        assertEquals(MoveRefusal.RULES_UNKNOWN, move.refusal)
+    }
+
+    @Test fun `a rule-free asset still moves`() {
+        val move = run(service(), listOf(profileResult())).moves.single()
+        assertTrue(move.moved)
+        assertNull(move.refusal)
     }
 }

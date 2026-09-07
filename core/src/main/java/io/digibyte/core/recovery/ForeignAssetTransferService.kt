@@ -8,6 +8,10 @@ import io.digibyte.core.dandelion.Broadcaster
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Why an asset was deliberately left on the old seed. Typed so the screen can say it in the
+ *  user's language; [ForeignAssetTransferService.Move.failureReason] stays for genuine failures. */
+enum class MoveRefusal { RULE_BOUND, RULES_UNKNOWN }
+
 /**
  * Moves the DigiAssets a sweep deliberately left behind into the user's current wallet.
  *
@@ -79,6 +83,8 @@ class ForeignAssetTransferService(
         /** Every outpoint this move's plan spends. Empty when no plan was built. The sweep is
          *  the complement of these — see [RecoverySequence.sweepExclusions]. */
         val spentInputs: List<String> = emptyList(),
+        /** Set when the asset was refused by policy (transfer rules), never attempted. */
+        val refusal: MoveRefusal? = null,
     ) {
         val moved: Boolean get() = txid != null
     }
@@ -190,6 +196,20 @@ class ForeignAssetTransferService(
             // because an under-read THERE destroys an asset. See ForeignAssetQuantity.
             val assets = mutableListOf<ForeignAssetTransferBatch.AssetItem>()
             for (utxo in partition.assetBearing) {
+                // Rule-bound or unverified assets stay where they are. A plain transfer of a
+                // rule-bearing asset is cleared by every DigiAsset Core indexer — the whole input
+                // holding gone — and this path builds no rule outputs. Nothing is lost by leaving
+                // it on the old seed; the user is told which outpoint and why.
+                val ruleState = verdicts[utxo]?.ruleState
+                    ?: io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN
+                if (ruleState != io.digibyte.core.asset.rules.TransferRuleState.NONE) {
+                    val refusal = if (ruleState == io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND)
+                        MoveRefusal.RULE_BOUND else MoveRefusal.RULES_UNKNOWN
+                    log('w', "${utxo.txid}:${utxo.vout}: not moved — transfer rules $ruleState")
+                    moves += Move("${utxo.txid}:${utxo.vout}", 0L, null, null, refusal = refusal)
+                    continue
+                }
+
                 val spend = toSpend(utxo, byAddress)
                 if (spend == null) {
                     // No derivation position, or no scriptPubKey — we cannot sign for it. Report

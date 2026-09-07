@@ -28,7 +28,9 @@ class ForeignUtxoAssetClassifierTest {
     private fun classifier(
         fetch: suspend (String) -> ByteArray? = { plainTx },
         isAsset: (ByteArray) -> Boolean = { it.contentEquals(assetTx) },
-    ) = ForeignUtxoAssetClassifier(fetch, isAsset)
+        resolve: suspend (String) -> io.digibyte.core.asset.rules.TransferRuleState =
+            { io.digibyte.core.asset.rules.TransferRuleState.NONE },
+    ) = ForeignUtxoAssetClassifier(fetch, isAsset, resolve)
 
     // ---- the straightforward answers --------------------------------------------------------
 
@@ -105,5 +107,30 @@ class ForeignUtxoAssetClassifierTest {
 
     @Test fun `an empty wallet classifies to nothing`() = runBlocking {
         assertTrue(classifier().classify(emptyList()).isEmpty())
+    }
+
+    // ---- transfer rules ----------------------------------------------------------------------
+
+    @Test fun `an asset transaction carries the resolved rule state`() = runBlocking {
+        val u = utxo("cccc")
+        val v = classifier(
+            fetch = { assetTx },
+            resolve = { io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND },
+        ).classify(listOf(u))[u]!!
+        assertTrue(v.carriesAsset)
+        assertEquals(io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND, v.ruleState)
+    }
+
+    @Test fun `a resolver that throws yields UNKNOWN rule state, not a crash and not NONE`() = runBlocking {
+        val u = utxo("dddd")
+        val v = classifier(fetch = { assetTx }, resolve = { error("proxy down") }).classify(listOf(u))[u]!!
+        assertTrue(v.carriesAsset)
+        assertEquals(io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN, v.ruleState)
+    }
+
+    @Test fun `without a resolver the default rule state is UNKNOWN`() = runBlocking {
+        val u = utxo("eeee")
+        val v = ForeignUtxoAssetClassifier({ assetTx }, { true }).classify(listOf(u))[u]!!
+        assertEquals(io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN, v.ruleState)
     }
 }
