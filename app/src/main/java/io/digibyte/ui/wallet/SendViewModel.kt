@@ -168,15 +168,18 @@ class SendViewModel @Inject constructor(
     fun applyScannedUri(raw: String) {
         val uri = DigiByteUri.parse(raw) ?: return
         onAddressChanged(uri.address)
-        uri.amount?.let { sats ->
-            val dgb = sats / 100_000_000.0
-            onAmountDgbChanged(
-                NumberFormat.getNumberInstance(Locale.US).apply {
-                    minimumFractionDigits = 0
-                    maximumFractionDigits = 8
-                }.format(dgb)
-            )
-        }
+        uri.amount?.let { applyPrefillAmountSats(it) }
+    }
+
+    /** Put a payment request's amount into the DGB field, as the user would have typed it. */
+    fun applyPrefillAmountSats(sats: Long) {
+        val dgb = sats / 100_000_000.0
+        onAmountDgbChanged(
+            NumberFormat.getNumberInstance(Locale.US).apply {
+                minimumFractionDigits = 0
+                maximumFractionDigits = 8
+            }.format(dgb)
+        )
     }
 
     // ── Amount conversion helpers ─────────────────────────────────────────

@@ -589,10 +589,16 @@ fun AppNavigation(
             // are live on entry — preventing the "not connected" banner from
             // flashing while a fresh VM's 5s poll catches up.
             composable(
-                "send?address={address}",
-                arguments = listOf(navArgument("address") { defaultValue = "" })
+                "send?address={address}&amount={amount}",
+                arguments = listOf(
+                    navArgument("address") { defaultValue = "" },
+                    // Satoshis, as text. Carried from the QR scanner so a payment request's
+                    // amount survives the hop — it used to be dropped here (2026-09-07 report).
+                    navArgument("amount") { defaultValue = "" },
+                )
             ) { backStackEntry ->
                 val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
+                val prefillAmountSats = backStackEntry.arguments?.getString("amount") ?: ""
                 val walletEntry = remember(backStackEntry) {
                     runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
                         .getOrDefault(backStackEntry)
@@ -601,6 +607,7 @@ fun AppNavigation(
                 SendScreen(
                     onNavigateBack = { navController.popBackStack() },
                     prefillAddress = prefillAddress,
+                    prefillAmountSats = prefillAmountSats,
                     onScanQr = { callback ->
                         navController.navigate("qr_scanner")
                     },
@@ -704,19 +711,11 @@ fun AppNavigation(
                         }
                     },
                     onDigiByteUri = { uri ->
-                        // Route the scanned address back to the caller: the asset
-                        // send screen when returnTo is set, else the DGB send flow.
-                        val encoded = Uri.encode(uri.address)
-                        // An asset transfer request names what to send, so it goes to that
-                        // asset's send screen rather than the DGB flow — which would
-                        // otherwise silently drop the asset and prompt for a coin payment.
-                        val assetId = uri.assetId
-                        val dest = when {
-                            assetId != null -> "asset_send/${Uri.encode(assetId)}" +
-                                "?address=$encoded&quantity=${uri.assetAmount}"
-                            returnTo.isNotBlank() -> "$returnTo?address=$encoded"
-                            else -> "send?address=$encoded"
-                        }
+                        // Route the scan back to the caller: the asset send screen when
+                        // returnTo is set, else the DGB send flow — WITH the amount, which
+                        // this hand-off used to drop. The rule lives in ScanDestination so
+                        // the JVM can prove it.
+                        val dest = ScanDestination.forDigiByteUri(uri, returnTo) { Uri.encode(it) }
                         navController.navigate(dest) {
                             popUpTo("qr_scanner") { inclusive = true }
                         }

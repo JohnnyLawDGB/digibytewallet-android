@@ -43,6 +43,8 @@ import io.digibyte.R
 fun SendScreen(
     onNavigateBack: () -> Unit,
     prefillAddress: String = "",
+    /** Satoshis as text, from a scanned payment request. Blank when the QR carried no amount. */
+    prefillAmountSats: String = "",
     onScanQr: ((String) -> Unit) -> Unit = {},
     viewModel: SendViewModel = hiltViewModel(),
     walletViewModel: WalletViewModel = hiltViewModel()
@@ -52,6 +54,11 @@ fun SendScreen(
         if (prefillAddress.isNotBlank()) {
             viewModel.onAddressChanged(prefillAddress)
         }
+    }
+    // Pre-fill amount from QR scan. Pre-filled, NOT locked: the request is untrusted input,
+    // so the user must still see and be able to change what leaves the wallet.
+    LaunchedEffect(prefillAmountSats) {
+        prefillAmountSats.toLongOrNull()?.takeIf { it > 0 }?.let { viewModel.applyPrefillAmountSats(it) }
     }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
