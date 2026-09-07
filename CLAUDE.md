@@ -127,6 +127,16 @@ Two accounting rules the parser must apply, both fund-safety-critical:
 balance *totals*. It was found in minutes once the per-row COUNT/drop decision was logged.
 When an asset count is wrong, **log the rows first** — do not reason from the total.
 
+**Transfer-rule gate (2026-09-07 — do NOT loosen):** only `TransferRuleState.NONE` may move an
+asset. NONE requires a chain-proven **LOCKED** issuance with opcode **1/2/5** and **no** proxy
+`rules` object; opcode **3/4** or a proxy rules object is RULE_BOUND; anything else — including
+an issuance the walk has not reached — is UNKNOWN, and both RULE_BOUND and UNKNOWN refuse. Both
+`AssetManager.sendAsset` and the recovery move (`ForeignAssetTransferService`) are gated. The
+asymmetry is the whole point: DigiAsset Core clears **every output** of a rule-breaking transfer,
+so a wrong NONE destroys the entire input holding — silently, on a DigiByte transaction that is
+itself valid and confirms — while a wrong RULE_BOUND merely leaves an asset where it already sits.
+`core/asset/rules/AssetTransferRuleGate`.
+
 ### The handoff specs (`docs/specs/`)
 The 2026-08-16 handoff and its three specs live here, each with a **disposition banner**
 recording what shipped and which premises the code refuted. All three were

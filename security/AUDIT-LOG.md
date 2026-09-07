@@ -682,3 +682,25 @@ worth a Gradle/AGP bump when convenient, not a release gate.
 
 Nothing — this cycle's automated half, manual half, MobSF re-scan, and R8 keep-rule pass are all
 recorded. Next cycle owes the same four.
+
+### Bug bounty — 2026-09-07 (HIGH): rule-bearing DigiAsset transfer silently destroyed by DigiAsset Core (send + recovery paths)
+
+**Severity:** HIGH · **Reporter:** Brasa Studios · **Status:** FIXED on branch
+`fix/ruled-asset-send-gate` · **Report:**
+`security/reports/bounty/2026-09-06-ruled-asset-send-burns-holding.md`
+
+The wallet built a plain DigiAsset transfer for an asset whose issuance carries transfer rules.
+Every DigiAsset Core indexer clears **every output** of a rule-breaking transfer, so the loss is
+not the amount sent — it is the entire input holding, and it is silent: the DigiByte transaction
+itself is valid and confirms. Both the ordinary send and the foreign-seed recovery move were
+affected.
+
+Fixed by a gate that refuses anything but a chain-proven rule-free asset:
+`core/asset/rules/AssetTransferRuleGate` returns NONE only for a LOCKED issuance with opcode
+1/2/5 and no proxy `rules` object; opcode 3/4 or a proxy rules object is RULE_BOUND; everything
+else is UNKNOWN. `AssetManager.sendAsset` refuses before it reads a UTXO;
+`ForeignAssetTransferService` leaves refused outpoints on the old seed with a typed
+`MoveRefusal` rather than moving them. See CLAUDE.md → "Transfer-rule gate" for the pinned rule.
+
+**Residual (recorded by the final review):** an outpoint carrying more than one asset is outside
+the gate — see the report's "Residual" bullet. Rare; follow-up.

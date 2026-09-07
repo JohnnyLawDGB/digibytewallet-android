@@ -94,9 +94,11 @@ after a rules block do not affect crediting. Documented in the KAT.
 - `AssetDataResponse` gains `rules: Map<String, Any?>?`.
 - `DigiScopeAssetParsing` (and `DigistampAssetClient` if the response shape carries it) parse
   `rules`; `DigiAssetsNetClient` is untouched.
-- `AssetMetadataService` writes the object as a JSON string into `AssetMetadataEntity.rulesJson`
-  when it stores metadata for an asset; `null` when absent from a successful response. A failed
-  fetch leaves the column untouched.
+- `AssetMetadataService.refreshRules(assetId)` asks the proxy and persists the answer;
+  `AssetManager` calls it once when a walk resolves an asset and again from
+  `verifyTransferRulesForTx`. The object is stored as a JSON string in
+  `AssetMetadataEntity.rulesJson` (`"{}"` for "answered, none", so a reader can tell it from
+  NULL = never asked). A failed fetch leaves the column untouched.
 - `AssetMetadataDao` exposes `rulesJsonFor(assetId)`.
 
 ### 5. Composition in `AssetManager`

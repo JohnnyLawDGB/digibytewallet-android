@@ -13,7 +13,9 @@ import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.asset.send.AssetFeeEstimator
 import io.digibyte.core.model.OwnedAsset
 import io.digibyte.core.model.DgbAmount
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -73,15 +75,34 @@ class AssetViewModel @Inject constructor(
     private val _ruleCheck = MutableStateFlow(RuleCheckState.CHECKING)
     val ruleCheck: StateFlow<RuleCheckState> = _ruleCheck.asStateFlow()
 
+    /** The in-flight check. Cancelled when a new asset is selected: a slow check for the asset
+     *  the user just navigated away from must not land on the one they are looking at. */
+    private var ruleJob: Job? = null
+
     private fun checkRules(assetId: String) {
         _ruleCheck.value = RuleCheckState.CHECKING
-        viewModelScope.launch {
-            val read = runCatching { assetManager.transferRuleState(assetId) }
-                .getOrDefault(TransferRuleState.UNKNOWN)
-            val state = if (read != TransferRuleState.UNKNOWN) read
-            else runCatching { assetManager.verifyTransferRules(assetId) }
-                .getOrDefault(TransferRuleState.UNKNOWN)
-            _ruleCheck.value = RuleCheckState.of(state)
+        ruleJob?.cancel()
+        ruleJob = viewModelScope.launch {
+            val read = try {
+                assetManager.transferRuleState(assetId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.w("AssetViewModel", "rule check failed for $assetId", t)
+                TransferRuleState.UNKNOWN
+            }
+            val state = if (read != TransferRuleState.UNKNOWN) read else try {
+                assetManager.verifyTransferRules(assetId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.w("AssetViewModel", "rule verify failed for $assetId", t)
+                TransferRuleState.UNKNOWN
+            }
+            // Cancellation is not instantaneous — a job already past its last suspension point
+            // still runs to here. Writing only for the asset still selected is what makes the
+            // guarantee: asset A's verdict can never enable Send for asset B.
+            if (_selectedAssetId.value == assetId) _ruleCheck.value = RuleCheckState.of(state)
         }
     }
 
@@ -149,10 +170,12 @@ class AssetViewModel @Inject constructor(
     }
 
     fun selectAsset(assetId: String) {
-        if (_selectedAssetId.value != assetId || _ruleCheck.value == RuleCheckState.UNVERIFIED) {
-            checkRules(assetId)
-        }
+        val needsCheck = _selectedAssetId.value != assetId ||
+            _ruleCheck.value == RuleCheckState.UNVERIFIED
+        // Set BEFORE launching: checkRules writes its result only while this asset is still the
+        // selected one, and that guard is meaningless if the selection lands after the launch.
         _selectedAssetId.value = assetId
+        if (needsCheck) checkRules(assetId)
     }
 
     /** Reset the send flow state — call on confirm dialog dismiss, screen

@@ -91,4 +91,11 @@ Implemented per `docs/superpowers/plans/2026-09-06-ruled-asset-transfer-gate.md`
 - `AssetManager.sendAsset` returns `TxResult.Refused` before reading a UTXO; `ForeignAssetTransferService` leaves RULE_BOUND/UNKNOWN outpoints on the old seed with a typed `MoveRefusal`.
 - Detail and send screens show `TransferRuleCard` and remove/disable Send for anything but NONE; recovery screen names refused outpoints. Strings in 13 languages.
 
+**Residual (recorded by the final review):** an outpoint carrying MORE THAN ONE asset is outside
+the gate. `UtxoEntity` keys a single `asset_id` per outpoint and the provenance walk follows
+`input[0]` only, so the wallet can name at most one asset on an outpoint. A NONE verdict for the
+named asset therefore permits a send that spends an outpoint which may also carry a ruled asset
+the wallet cannot see — and that second asset would be cleared with the rest. Rare in practice
+(it needs an aggregated or multi-asset outpoint); recorded as a follow-up, not fixed here.
+
 Still open: the live protocol with the reporter (unfixed build first, then this build), and the release decision under the founder-review hold.

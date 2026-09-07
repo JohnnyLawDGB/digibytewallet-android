@@ -213,13 +213,18 @@ class AssetMetadataService(
      */
     suspend fun refreshRules(assetId: String): Boolean? {
         val client = assetNetworkClient ?: return null
-        val remote = runCatching { client.getAssetData(assetId) }.getOrNull() ?: return null
+        // A silent failure here reads downstream as "rules unknown", which refuses the send with
+        // no recorded reason — so the reason gets recorded. No JVM test executes this method
+        // (the callers mock this service), so android.util.Log is safe to call directly.
+        val remote = runCatching { client.getAssetData(assetId) }
+            .onFailure { android.util.Log.w("AssetMetadataService", "rules lookup failed for $assetId", it) }
+            .getOrNull() ?: return null
         val present = !remote.rules.isNullOrEmpty()
         val json = if (present) JSONObject(remote.rules!!).toString() else "{}"
         runCatching {
             assetMetadataDao.insertChainFacts(AssetMetadataEntity(assetId = assetId))
             assetMetadataDao.updateRulesJson(assetId, json)
-        }
+        }.onFailure { android.util.Log.w("AssetMetadataService", "rules persist failed for $assetId", it) }
         return present
     }
 

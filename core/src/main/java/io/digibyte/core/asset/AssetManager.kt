@@ -203,18 +203,61 @@ class AssetManager(
      * Used by the screens when [transferRuleState] is UNKNOWN and by the recovery classifier,
      * whose outpoints are unnamed until walked. UNKNOWN when the walk cannot reach an issuance.
      */
-    suspend fun verifyTransferRulesForTx(txid: String): TransferRuleState {
-        val facts = runCatching { provenanceWalker.resolve(txid, forceToIssuance = true) }.getOrNull()
-            ?: return TransferRuleState.UNKNOWN
-        val apiRulesPresent = runCatching { metadataService.refreshRules(facts.assetId) }.getOrNull()
-        return AssetTransferRuleGate.stateOf(facts.issuanceOpcode, facts.issuanceLocked, apiRulesPresent)
+    suspend fun verifyTransferRulesForTx(txid: String): TransferRuleState =
+        verifyFactsForTx(txid).second
+
+    /**
+     * The walk's verdict together with WHAT it was a verdict about.
+     *
+     * The identity half is not incidental: the walk resolves the derived asset id, which need not
+     * be the id the caller named. Returns `null to UNKNOWN` when the walk cannot reach an issuance.
+     *
+     * The catches log rather than swallow (a silent catch here reads on-device as "rules unknown"
+     * with no reason recorded) and re-throw cancellation, which is control flow, not a failure.
+     * The Log calls are themselves wrapped: android.util.Log is an unmocked stub that throws on
+     * the JVM, and this catch IS reached from a JVM test — the walk's first act is a NativeBridge
+     * call with no library behind it.
+     */
+    private suspend fun verifyFactsForTx(txid: String): Pair<ResolvedAssetFacts?, TransferRuleState> {
+        val facts = try {
+            provenanceWalker.resolve(txid, forceToIssuance = true)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            runCatching { android.util.Log.w("AssetManager", "rule walk failed for $txid", t) }
+            null
+        } ?: return null to TransferRuleState.UNKNOWN
+
+        val apiRulesPresent = try {
+            metadataService.refreshRules(facts.assetId)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            runCatching {
+                android.util.Log.w("AssetManager", "rules lookup failed for ${facts.assetId}", t)
+            }
+            null
+        }
+        return facts to AssetTransferRuleGate.stateOf(
+            facts.issuanceOpcode, facts.issuanceLocked, apiRulesPresent,
+        )
     }
 
-    /** [verifyTransferRulesForTx] from one of the asset's held outputs. */
+    /**
+     * [verifyTransferRulesForTx] from one of the asset's held outputs.
+     *
+     * The verdict must be about the asset that was ASKED about. A UTXO the walk has not yet named
+     * carries an `unresolved:<txid>` placeholder asset_id that [getOwnedAssets] groups by, so the
+     * screen can ask under the placeholder while the walk resolves the DERIVED id. Handing back
+     * that walk's verdict let the screen read NONE and offer Send, while [sendAsset]'s own
+     * `transferRuleState("unresolved:...")` read UNKNOWN and refused — the user paid a PIN prompt
+     * to be told "Blocked". A verdict for another asset is no verdict for this one.
+     */
     suspend fun verifyTransferRules(assetId: String): TransferRuleState {
         val utxo = utxoDao.getAssetUtxosByIdNow(assetId).firstOrNull()
             ?: return TransferRuleState.UNKNOWN
-        return verifyTransferRulesForTx(utxo.txid)
+        val (facts, state) = verifyFactsForTx(utxo.txid)
+        return if (facts?.assetId == assetId) state else TransferRuleState.UNKNOWN
     }
 
     /**
@@ -685,6 +728,19 @@ class AssetManager(
                     runCatching {
                         metadataService.getMetadata(resolved.assetId, resolved.metadataCid)
                     }
+
+                    // Transfer-rule signal for the asset this walk just named. Without it the
+                    // rules column is only ever written by verifyTransferRulesForTx, so the
+                    // common path — an asset that arrives and is walked in the background —
+                    // reached the send screen with nothing stored and had to walk again.
+                    // Inside the once-per-walk branch, so at most one proxy call per newly
+                    // resolved asset.
+                    runCatching { metadataService.refreshRules(resolved.assetId) }
+                        .onFailure {
+                            android.util.Log.w(
+                                "AssetManager", "refreshRules failed for ${resolved.assetId}", it,
+                            )
+                        }
                     android.util.Log.i("AssetManager",
                         "M3 resolved $txHashHex → ${resolved.assetId} " +
                         "(supply=${resolved.totalSupply} div=${resolved.divisibility}; placeholder rewritten)")

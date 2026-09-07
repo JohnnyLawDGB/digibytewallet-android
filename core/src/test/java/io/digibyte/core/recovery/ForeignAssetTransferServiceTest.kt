@@ -288,6 +288,11 @@ class ForeignAssetTransferServiceTest {
             assetClassifier = ForeignUtxoAssetClassifier(
                 fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
                 isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+                // These assets MOVE. The classifier's default rule state is UNKNOWN, which the
+                // gate refuses — and a fan-out for assets that are all going to be refused is
+                // exactly the waste the movable-only count removes, so leaving it defaulted
+                // would make this test assert the opposite of what it is named for.
+                resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             ),
             parseOutputs = { parentOutputs },
             sign = { _, _, _, _ -> "00ff" },
@@ -323,6 +328,11 @@ class ForeignAssetTransferServiceTest {
             assetClassifier = ForeignUtxoAssetClassifier(
                 fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
                 isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+                // These assets MOVE. The classifier's default rule state is UNKNOWN, which the
+                // gate refuses — and a fan-out for assets that are all going to be refused is
+                // exactly the waste the movable-only count removes, so leaving it defaulted
+                // would make this test assert the opposite of what it is named for.
+                resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             ),
             parseOutputs = { parentOutputs },
             sign = { _, _, _, _ -> "00ff" },
@@ -357,6 +367,35 @@ class ForeignAssetTransferServiceTest {
         assertEquals(0, signed)
         assertEquals(0, broadcastCount)
         assertTrue(move.spentInputs.isEmpty())
+    }
+
+    /**
+     * The fan-out exists to give every MOVABLE asset its own output, so it must count only the
+     * assets that are actually going to move. Counting every asset-bearing outpoint counts ones
+     * the rule gate has already refused — and a wallet whose only asset is rule-bound was then
+     * told "not enough DGB to split" and shown ZERO rows, because the fan-out refusal returns
+     * before the loop that records refusals. The one thing the user needed to read — WHICH asset
+     * stayed behind and WHY — was exactly what went missing.
+     *
+     * Here the asset marker is the wallet's only output, so the fee pool is empty: the old code
+     * could not afford a split it never needed.
+     */
+    @Test fun `a refused asset is not counted into the fan-out, so its refusal is reported`() {
+        val r = run(
+            service(assetClassifier = classifier(io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND)),
+            listOf(profileResult(
+                utxos = listOf(assetUtxo),
+                derived = listOf(DerivedAddress(assetAddr, chain = 0, index = 4)),
+            )),
+        )
+        assertEquals(
+            "nothing movable, so there is nothing to split",
+            ForeignAssetTransferService.FanOut.NotNeeded, r.fanOut,
+        )
+        val move = r.moves.single()
+        assertEquals("a55e7:0", move.outpoint)
+        assertEquals(MoveRefusal.RULE_BOUND, move.refusal)
+        assertFalse(move.moved)
     }
 
     @Test fun `an asset whose rules are unknown is refused as unknown`() {

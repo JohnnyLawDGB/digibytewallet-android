@@ -156,7 +156,15 @@ class ForeignAssetTransferService(
             // this, exactly one asset moves and the rest are stranded with no DGB behind them,
             // because a transfer's change goes to the destination and never returns.
             val fan = ForeignAssetFanOut.plan(
-                assetCount = partition.assetBearing.size,
+                // Only the assets that are actually going to MOVE need an output of their own.
+                // Counting every asset-bearing outpoint counted ones the rule gate has already
+                // refused, and a wallet whose assets are all rule-bound was then told "not
+                // enough DGB to split" — a refusal that returns before the loop below, so the
+                // user got a shortfall figure and ZERO rows instead of being told which asset
+                // stayed behind and why.
+                assetCount = partition.assetBearing.count {
+                    verdicts[it]?.ruleState == io.digibyte.core.asset.rules.TransferRuleState.NONE
+                },
                 plainInputs = partition.sweepable.mapNotNull { toSpend(it, byAddress) },
                 // Pays the wallet being recovered — only its seed can sign these, and the asset
                 // transfers are what spend them.

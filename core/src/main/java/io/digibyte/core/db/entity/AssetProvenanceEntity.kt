@@ -17,7 +17,8 @@ data class AssetProvenanceEntity(
     val totalSupply: Long,
     val divisibility: Int,
     val metadataCid: String?,
-    /** Opcode byte of the issuance this path walks back to; NULL on rows from before v4.0.79. */
+    /** Opcode byte of the issuance this path walks back to; NULL on rows written before
+     *  migration 10→11 added the column. */
     val issuanceOpcode: Int? = null,
     /** Locked flag of that issuance; NULL when [issuanceOpcode] is. */
     val issuanceLocked: Boolean? = null,
