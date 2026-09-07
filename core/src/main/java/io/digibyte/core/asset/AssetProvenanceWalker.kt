@@ -6,6 +6,11 @@ data class ResolvedAssetFacts(
     val totalSupply: Long,
     val divisibility: Int,
     val metadataCid: String?,
+    /** The issuance's opcode byte (1..5). Null on rows written before the wallet kept it, and
+     *  the reason a pre-upgrade asset reads as "rules unknown" until re-walked. */
+    val issuanceOpcode: Int? = null,
+    /** The issuance's locked flag. Null when [issuanceOpcode] is. */
+    val issuanceLocked: Boolean? = null,
 )
 
 /** How far a walk from [startTxid] got before it ran out of budget or reachable data. */
@@ -24,6 +29,9 @@ data class WalkFrontier(
 interface ProvenanceStore {
     suspend fun assetFor(txid: String): ResolvedAssetFacts?
     suspend fun putAssets(txids: List<String>, facts: ResolvedAssetFacts)
+    /** Facts for [assetId] from any row that recorded the issuance opcode, or null when no
+     *  walk has reached that asset's issuance since the wallet started keeping it. */
+    suspend fun issuanceFactsFor(assetId: String): ResolvedAssetFacts?
     suspend fun frontierFor(startTxid: String): WalkFrontier?
     suspend fun putFrontier(frontier: WalkFrontier)
     suspend fun clearFrontier(startTxid: String)
@@ -57,8 +65,14 @@ class AssetProvenanceWalker(
         data object DeadEnd : Hop
     }
 
-    suspend fun resolve(startTxid: String): ResolvedAssetFacts? {
-        store.assetFor(startTxid)?.let { return it }
+    /**
+     * @param forceToIssuance ignore what the store already knows about the txids on the path and
+     *   walk until the issuance is reached, then memoise the whole path with what it says. This is
+     *   how a row written before the wallet kept the issuance opcode learns it. Frontier resume is
+     *   honoured either way — a frontier only exists for a walk that never finished.
+     */
+    suspend fun resolve(startTxid: String, forceToIssuance: Boolean = false): ResolvedAssetFacts? {
+        if (!forceToIssuance) store.assetFor(startTxid)?.let { return it }
 
         // Pick up where the last attempt stopped rather than starting over. This is the whole
         // fix: without it a chain longer than one budget is unreachable no matter how often the
@@ -82,10 +96,12 @@ class AssetProvenanceWalker(
 
             // An ancestor we already resolved answers the whole question — this is what makes
             // receiving back an asset we previously sent cost one hop instead of the chain.
-            store.assetFor(current)?.let { known ->
-                store.putAssets(proven.toList(), known)
-                store.clearFrontier(startTxid)
-                return known
+            if (!forceToIssuance) {
+                store.assetFor(current)?.let { known ->
+                    store.putAssets(proven.toList(), known)
+                    store.clearFrontier(startTxid)
+                    return known
+                }
             }
 
             when (val step2 = hop(current)) {
@@ -140,6 +156,8 @@ class InMemoryProvenanceStore : ProvenanceStore {
     override suspend fun putAssets(txids: List<String>, facts: ResolvedAssetFacts) {
         txids.forEach { assets[it] = facts }
     }
+    override suspend fun issuanceFactsFor(assetId: String): ResolvedAssetFacts? =
+        assets.values.firstOrNull { it.assetId == assetId && it.issuanceOpcode != null }
     override suspend fun frontierFor(startTxid: String): WalkFrontier? = frontiers[startTxid]
     override suspend fun putFrontier(frontier: WalkFrontier) {
         frontiers[frontier.startTxid] = frontier

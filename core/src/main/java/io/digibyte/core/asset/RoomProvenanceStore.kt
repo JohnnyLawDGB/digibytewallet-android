@@ -35,6 +35,9 @@ class RoomProvenanceStore(
         )
     }
 
+    // TODO(Task 4): replace with a real Room query once the opcode/locked columns exist.
+    override suspend fun issuanceFactsFor(assetId: String): ResolvedAssetFacts? = null
+
     override suspend fun frontierFor(startTxid: String): WalkFrontier? =
         dao.frontierFor(startTxid)?.let { WalkFrontier(it.startTxid, it.resumeTxid, it.hopsWalked) }
 

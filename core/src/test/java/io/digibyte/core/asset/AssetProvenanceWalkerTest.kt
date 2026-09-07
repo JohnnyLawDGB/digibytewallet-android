@@ -46,6 +46,8 @@ class AssetProvenanceWalkerTest {
         override suspend fun putAssets(txids: List<String>, facts: ResolvedAssetFacts) {
             txids.forEach { assets[it] = facts }
         }
+        override suspend fun issuanceFactsFor(assetId: String): ResolvedAssetFacts? =
+            assets.values.firstOrNull { it.assetId == assetId && it.issuanceOpcode != null }
         override suspend fun frontierFor(startTxid: String) = frontiers[startTxid]
         override suspend fun putFrontier(frontier: WalkFrontier) {
             frontiers[frontier.startTxid] = frontier
@@ -203,5 +205,65 @@ class AssetProvenanceWalkerTest {
 
         assertNull(walker.resolve("tx0"))
         assertEquals("stops at the repeat rather than burning the budget", 2, src.fetches)
+    }
+
+    // ---- forceToIssuance: upgrading rows that predate the opcode column ---------------------
+
+    private val ruledFacts = facts.copy(issuanceOpcode = 4, issuanceLocked = true)
+
+    @Test fun `default mode answers from the cache without fetching`() = runTest {
+        val store = FakeStore().apply { assets["tx0"] = facts }   // legacy row: no opcode
+        val net = Counting(chain(3))
+        val out = AssetProvenanceWalker(net.hop, store).resolve("tx0")
+        assertEquals(facts, out)
+        assertEquals(0, net.fetches)
+    }
+
+    @Test fun `forceToIssuance walks past a cached start txid to the issuance`() = runTest {
+        val store = FakeStore().apply { assets["tx0"] = facts }   // legacy row: no opcode
+        val hops = chain(3).toMutableMap()
+        hops["tx3"] = AssetProvenanceWalker.Hop.Issuance(ruledFacts)
+        val net = Counting(hops)
+
+        val out = AssetProvenanceWalker(net.hop, store).resolve("tx0", forceToIssuance = true)
+
+        assertEquals(ruledFacts, out)
+        assertEquals(4, net.fetches)                       // tx0, tx1, tx2, tx3
+        assertEquals(4, store.assets["tx0"]?.issuanceOpcode)
+        assertEquals(4, store.assets["tx3"]?.issuanceOpcode)
+        assertEquals(ruledFacts, store.issuanceFactsFor(facts.assetId))
+    }
+
+    @Test fun `forceToIssuance walks past a cached ancestor too`() = runTest {
+        val store = FakeStore().apply { assets["tx2"] = facts }   // an ancestor known without opcode
+        val hops = chain(3).toMutableMap()
+        hops["tx3"] = AssetProvenanceWalker.Hop.Issuance(ruledFacts)
+        val net = Counting(hops)
+
+        val out = AssetProvenanceWalker(net.hop, store).resolve("tx0", forceToIssuance = true)
+
+        assertEquals(ruledFacts, out)
+        assertEquals(4, net.fetches)
+        assertEquals(4, store.assets["tx2"]?.issuanceOpcode)
+    }
+
+    @Test fun `forceToIssuance still returns null and keeps a frontier when the chain is unreachable`() = runTest {
+        val store = FakeStore().apply { assets["tx0"] = facts }
+        val hops = chain(3).toMutableMap()
+        hops.remove("tx2")                                  // Unavailable from here
+        val net = Counting(hops)
+
+        val out = AssetProvenanceWalker(net.hop, store).resolve("tx0", forceToIssuance = true)
+
+        assertNull(out)
+        assertEquals("tx2", store.frontiers["tx0"]?.resumeTxid)
+        assertNull(store.issuanceFactsFor(facts.assetId))
+    }
+
+    @Test fun `issuanceFactsFor ignores rows that carry no opcode`() = runTest {
+        val store = FakeStore().apply { assets["tx0"] = facts }
+        assertNull(store.issuanceFactsFor(facts.assetId))
+        store.assets["tx9"] = ruledFacts
+        assertEquals(ruledFacts, store.issuanceFactsFor(facts.assetId))
     }
 }
