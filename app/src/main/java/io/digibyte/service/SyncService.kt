@@ -3076,18 +3076,27 @@ class SyncService : Service() {
     }
 
     /** Inject the hardcoded testnet26 peers (no seeder involved — testnet26
-     *  has no mainnet-shaped seeder infra). testnet26 nodes serve BIP157/158
-     *  compact filters, not bloom, so tag them NODE_NETWORK|NODE_COMPACT_FILTERS
-     *  (0x41) — filter-first selection dials them and the relaxed testnet accept
-     *  gate keeps a compact-filter peer even without bloom. 95.111.238.51 is a
-     *  verified compact-filter node (listed first). */
+     *  has no mainnet-shaped seeder infra). The set, its port and its service
+     *  tagging come from the shared C core (`BRPeerCanon.h` via
+     *  [NativeBridge.peerCanonIps]); this file used to carry its own copy of
+     *  the three IPs, which was a second statement of the wallet's only
+     *  reliable filter source. testnet26 nodes serve BIP157/158 compact
+     *  filters, not bloom, so they are tagged NODE_NETWORK|NODE_COMPACT_FILTERS
+     *  — filter-first selection dials them and the relaxed testnet accept gate
+     *  keeps a compact-filter peer even without bloom. The native startSync()
+     *  path also prepends the same canon as the cold-start priority peers;
+     *  re-injecting here on every reconnect additionally adds them to an
+     *  already-live peer manager's candidate pool. */
     private fun injectTestnetPeers() {
-        for (ip in TESTNET_PRIORITY_PEERS) {
-            NativeBridge.injectPeerByIp(ip, TESTNET_PRIORITY_PEER_PORT, TESTNET_PEER_SERVICES)
+        val peers = NativeBridge.peerCanonIps(testnet = true)
+        val port = NativeBridge.peerCanonPort(testnet = true)
+        val services = NativeBridge.peerCanonServices()
+        for (ip in peers) {
+            NativeBridge.injectPeerByIp(ip, port, services)
         }
         android.util.Log.i(
             "SyncService",
-            "Testnet26: injected ${TESTNET_PRIORITY_PEERS.size} hardcoded peer(s)"
+            "Testnet26: injected ${peers.size} canon peer(s) from BRPeerCanon.h"
         )
     }
 
@@ -3721,18 +3730,9 @@ class SyncService : Service() {
          *  Never fetched when [io.digibyte.core.isTestnet] is true; see
          *  [injectPeers]. */
         private const val SEEDER_URL = "https://api.digiscope.me/api/peers"
-        /** Hardcoded testnet26 public peers injected in place of the mainnet
-         *  digiscope seeder pool when the wallet is running on testnet. The
-         *  native startSync() path also prepends these as the cold-start
-         *  priority peer(s) (mirroring digiscope.me on mainnet); re-injecting
-         *  them here on every reconnect attempt additionally adds them to an
-         *  already-live peer manager's candidate pool (see
-         *  NativeBridge.injectPeerByIp), same as the mainnet bloom pool does. */
-        private val TESTNET_PRIORITY_PEERS = listOf("95.111.238.51", "164.68.98.125", "129.212.182.152")
-        private const val TESTNET_PRIORITY_PEER_PORT = 12033
-        /** NODE_NETWORK (0x01) | NODE_COMPACT_FILTERS (0x40) — testnet26 nodes
-         *  serve BIP157/158 filters, not bloom. */
-        private const val TESTNET_PEER_SERVICES = 0x41L
+        // The testnet26 peer set used to be listed here as TESTNET_PRIORITY_PEERS
+        // (+ port 12033, services 0x41). It is now read from the core's
+        // BRPeerCanon.h in injectTestnetPeers() so there is exactly one copy.
         /** Refresh bloom peer list every 60 minutes. */
         private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** How many peers to inject per call. The C peer manager caps its

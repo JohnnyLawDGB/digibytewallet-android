@@ -86,8 +86,8 @@ or native.
 Android foreground service (SyncService.kt)
     └─ starts Tor (if enabled) and wires SOCKS5 into C core
     └─ fetches capability-aware peer list from api.digiscope.me/api/peers
-       (filter-tagged) + the 16 hardcoded canon CF oracle nodes
-       (MAINNET_PRIORITY_PEER_IPS, jni_peer.c)
+       (filter-tagged) + the 15 hardcoded canon CF oracle nodes
+       (BRPeerCanon.h in the shared core; consumed by jni_peer.c)
     └─ calls NativeBridge.startSync()
           └─ JNI → jni_peer.c startSync
                 └─ _injectPriorityPeer(digiscope.me + canon oracles + fetched filter peers)
@@ -254,7 +254,7 @@ roadmap.
 | Endpoint | Purpose | Trust model |
 |----------|---------|-----------|
 | DigiByte P2P peers (port 12024) | Blockchain data (headers, blocks, filters, tx) | SPV — trust verified cryptographically via block-header chain and (Phase 1) filter-header quorum |
-| `api.digiscope.me/api/peers` | Capability-aware peer discovery bootstrap (filter\|bloom tagged; wallet uses the filter-tagged set) | Soft-trust: wallet author operates; the 16 hardcoded canon CF oracle nodes are primary, this is the fallback. Compromise delays peer discovery but doesn't forge chain data |
+| `api.digiscope.me/api/peers` | Capability-aware peer discovery bootstrap (filter\|bloom tagged; wallet uses the filter-tagged set) | Soft-trust: wallet author operates; the 15 hardcoded canon CF oracle nodes (`BRPeerCanon.h`) are primary, this is the fallback. Compromise delays peer discovery but doesn't forge chain data |
 | `api.digiscope.me/api/hub/*` | DigiScope community forum + chat | Pseudonymous; certificate-pinned; no tx data sent |
 | `api.coingecko.com`, `api.binance.com` | DGB/USD and DGB/PHP rates | Cosmetic; price is display-only, not used for signing |
 | `trustless-gateway.link`, `dweb.link`, `ipfs.io` | DigiAsset metadata (IPFS) | CID-verified cryptographically; gateway compromise cannot inject wrong content |

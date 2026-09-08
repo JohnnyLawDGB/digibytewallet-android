@@ -129,6 +129,8 @@ add_library(
         src/main/jni/bridge/jni_publish_outcome.c
         src/main/jni/bridge/jni_recreate_sequence.c
         src/main/jni/bridge/jni_peer_penalty_persist.c
+        src/main/jni/bridge/jni_peer_canon.c
+        src/main/jni/bridge/jni_cf_abandonment.c
 )
 
 # ── Test-only JNI, Debug builds ONLY ────────────────────────────────────────

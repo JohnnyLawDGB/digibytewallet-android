@@ -160,8 +160,8 @@ int main(void)
     }
 
     // ---- the canon fleet must never be skipped on a cold start -------------------
-    // Only the pinned own-node is exempt from being penalized, so the 16 hardcoded CF
-    // oracle peers CAN land in the set — and a wallet whose fleet is refusing it (44% of
+    // Only the pinned own-node is exempt from being penalized, so the 15 hardcoded CF
+    // oracle peers (BRPeerCanon.h) CAN land in the set — and a wallet whose fleet is refusing it (44% of
     // canon closes are refused at the door) will penalize most of them. That was harmless
     // while the set died with the process: every launch got a clean slate. Persisting it
     // changes that, and a wallet that comes back up skipping its whole usable fleet is on
