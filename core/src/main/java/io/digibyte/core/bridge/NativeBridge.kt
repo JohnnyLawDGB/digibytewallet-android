@@ -277,6 +277,95 @@ object NativeBridge {
         ledgerStart: Long, scannedThrough: Long, abandonedBelow: Long, gaveUp: Long,
     ): Boolean
 
+    // === DigiAsset per-output quantity (BRAssetQuantity.h, test-support only) ===
+    /**
+     * Instructions cross as a flat `LongArray`, six longs per row, in the same field order
+     * as `BRAssetTransferInstruction`:
+     *
+     *     { skip, range, percent, isBurn, outputIndex, amount }
+     *
+     * A length that is not a multiple of six is UNSOUND, not "no instructions" — reading a
+     * malformed header as an empty transfer would credit the whole input balance as change.
+     */
+    const val ASSET_INST_ROW_LONGS = 6
+
+    /** `BRAssetQuantityStatus`: the units are exact. */
+    const val ASSET_QUANTITY_OK = 0
+
+    /**
+     * `BRAssetQuantityStatus`: not computable here — a percent instruction, or input units
+     * that are unresolved. Kotlin's mirror spells this `null`. Credit NOTHING; it is not a
+     * zero balance.
+     */
+    const val ASSET_QUANTITY_UNKNOWN = 1
+
+    /**
+     * `BRAssetQuantityStatus`: the decoded instructions cannot be trusted — a negative
+     * amount or index, or arithmetic that would overflow. Distinct from
+     * [ASSET_QUANTITY_UNKNOWN] so a malformed OP_RETURN can be logged rather than filed
+     * under the routine "not resolved yet".
+     */
+    const val ASSET_QUANTITY_UNSOUND = 2
+
+    /**
+     * The `op` values below are **`BRAssetData.h`'s**, which have been in the core since
+     * 2019: 1-based, with a `DA_UNDEFINED` at 0. They are NOT
+     * [io.digibyte.core.model.AssetOperation]'s ordinals (0/1/2).
+     *
+     * A caller that maps the two with `.ordinal` silently reads every TRANSFER as an
+     * ISSUANCE, which credits an entire issuance supply to one output. Map by NAME, through
+     * these constants. The bridge deliberately does not take `AssetOperation` itself — that
+     * would couple the JNI surface to the asset model to save one `when`.
+     */
+    const val ASSET_OP_UNDEFINED = 0
+    const val ASSET_OP_ISSUANCE = 1
+    const val ASSET_OP_TRANSFER = 2
+    const val ASSET_OP_BURN = 3
+
+    /**
+     * `BRAssetQuantityForOutput` — what the explicit instructions assign to `vout`, packed
+     * as `long[2] = { status, units }`. `firstNonOpReturnVout` < 0 means there is none.
+     *
+     * **Not for production use — call [io.digibyte.core.asset.AssetTxQuantity.forOutput]
+     * instead.** Exists so `AssetQuantityParityTest` can bind the Kotlin mirror to the C.
+     */
+    external fun assetQuantityForOutput(
+        op: Int, totalQuantity: Long, vout: Int, firstNonOpReturnVout: Int,
+        instRows: LongArray?,
+    ): LongArray?
+
+    /**
+     * `BRAssetImplicitChange` — the units the instructions leave unassigned, which the
+     * protocol credits to the transaction's LAST output. `long[2] = { status, units }`.
+     */
+    external fun assetImplicitChange(
+        op: Int, hasInputUnits: Boolean, inputUnits: Long, instRows: LongArray?,
+    ): LongArray?
+
+    /** `BRAssetImplicitChangeVout` — the last output, verbatim; -1 for an empty output list. */
+    external fun assetImplicitChangeVout(outputCount: Int): Int
+
+    /**
+     * `BRAssetQuantityForOutputTotal` — explicit units plus the implicit remainder when
+     * `vout` IS the last output. `long[2] = { status, units }`. An UNKNOWN remainder
+     * contributes 0 and the status stays OK: the balance under-states rather than invents.
+     */
+    external fun assetQuantityForOutputTotal(
+        op: Int, totalQuantity: Long, vout: Int, firstNonOpReturnVout: Int,
+        hasInputUnits: Boolean, inputUnits: Long, outputCount: Int, instRows: LongArray?,
+    ): LongArray?
+
+    /**
+     * `BRAssetOutpointMustBeExcluded` — the FAIL-CLOSED decision to hold an outpoint out of
+     * the spendable plain-DGB set. True on a positive remainder AND on every answer that is
+     * not a confident zero, because wrongly excluding costs some spendable DGB while
+     * wrongly spending destroys an asset.
+     */
+    external fun assetOutpointMustBeExcluded(
+        op: Int, vout: Int, outputCount: Int,
+        hasInputUnits: Boolean, inputUnits: Long, instRows: LongArray?,
+    ): Boolean
+
     // === Peer canon (BRPeerCanon.h) ===
     /**
      * The hardcoded compact-filter peer canon, read from the shared C core. The tables used

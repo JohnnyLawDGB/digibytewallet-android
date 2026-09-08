@@ -96,9 +96,12 @@ persistence is platform; the predicates are pure.
 
 ### `core/asset/` — mostly C, and the largest single block of work
 
-`AssetTxQuantity`, `BitReader`, `BitWriter`, `DigiAssetDecoder`, `DigiAssetEncoder`,
-`AssetSpentState`, `AssetCoinSelector`, `AssetFeeEstimator`, `DeadSendPredicate`,
-`OrphanSendPredicate` → **all C**. The encoder produces the OP_RETURN that gets *signed*;
+~~`AssetTxQuantity`~~ **✅ moved 2026-09-08 → `BRAssetQuantity.h`** (`asset_quantity_kat`;
+the header also carries `BRAssetOutpointMustBeExcluded`, the fail-closed spending rule that
+existed only as prose above `BRWalletRegisterAssetOutpoint`). Still Kotlin-only:
+`BitReader`, `BitWriter`, `DigiAssetDecoder`, `DigiAssetEncoder`, `AssetSpentState`,
+`AssetCoinSelector`, `AssetFeeEstimator`, `DeadSendPredicate`, `OrphanSendPredicate` →
+**all C**. The encoder produces the OP_RETURN that gets *signed*;
 encoder and decoder cannot be two codebases.
 
 `AssetManager` (2,035 lines) must **split**: the counting core (`isHeldForDisplay`,
@@ -106,6 +109,21 @@ encoder and decoder cannot be two codebases.
 `buildTransferInstructions`, sendAsset's layout) → C; Flow/debounce/Room orchestration → Swift.
 
 Networking (`asset/network/`, `reconcile/DgbNodeClient`) → Swift (OkHttp → URLSession).
+
+### Two more for §2's list, found while moving `AssetTxQuantity` (2026-09-08)
+
+- **`BitReader.readFixedPrecision` can overflow `Long` — VERIFIED by inspection.** It
+  returns `mantissa * 10^exponent` with up to a 42-bit mantissa and an exponent up to 7
+  (`BitReader.kt:100-138`), so a crafted OP_RETURN yields an `amount` that is any 64-bit
+  value, negative included. `AssetTxQuantity.implicitChange` then computes
+  `(outputIndex + 1) * amount` over a 13-bit range index and subtracts the total from
+  `inputUnits`, unguarded: the sum wraps negative and the remainder becomes a credit for
+  units that do not exist. `BRAssetQuantity.h` refuses this (`UNSOUND`); the **Kotlin mirror
+  still has no guard** and needs it as a post-freeze PR.
+- **`AssetSpentState`'s four values are magic integers in four places.** `BRWallet.c:2342`
+  returns bare `0/-1/-2/1`, `BRWallet.h` and `jni_wallet.c` restate them in comments, and
+  `AssetSpentState.kt` names them. Nothing binds the four. Naming them belongs with the
+  `AssetSpentState` push-down; it touches an existing `.c`, so it waits for the audit.
 
 ## 5. Tor on iOS is harder than the Android design implies
 

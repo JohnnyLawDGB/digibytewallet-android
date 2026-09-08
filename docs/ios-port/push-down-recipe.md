@@ -172,3 +172,64 @@ against a frontier that no longer exists once the peer manager is recreated.
 - **Multi-value results cross JNI as `long[4]`** (`{changed, low, high, lowKnown}`), not a
   struct. The parity test decodes `changed == 0` back into Kotlin's "return the existing
   object" convention.
+
+## The seventh: `AssetTxQuantity` → `BRAssetQuantity.h` (2026-09-08)
+
+Kind A, and the first move out of `core/asset/` — the triage's largest remaining block.
+`forOutput`, `forOutputTotal`, `implicitChange` and `implicitChangeVout` moved, plus one
+decision that existed only as prose: `BRAssetOutpointMustBeExcluded`.
+
+- **Step zero paid for itself again, and this time the compiler caught it.**
+  `BRAssetData.h` has defined `BRAssetOperation` since 2019 — and its values are
+  `DA_UNDEFINED=0, DA_ISSUANCE=1, DA_TRANSFER=2, DA_BURN=3`, **1-based**, while Kotlin's
+  `AssetOperation` is `ISSUANCE/TRANSFER/BURN` at 0/1/2. The first draft declared its own
+  `BRAssetOp*` enum with the Kotlin values and the Android build would have died on a
+  typedef redefinition. The header now includes and reuses the core's. **The parity test
+  must map by NAME**: `.ordinal` reads every TRANSFER as an ISSUANCE, which credits a whole
+  issuance supply to one output. Pinned as `test13b` so that fails on the Mac, not on a
+  device.
+- **`BRAssetOutpointMustBeExcluded` is new code, not a port.** The rule — register the
+  outpoint whenever the implicit remainder is positive OR unknown — was written in prose in
+  `BRWallet.h` above `BRWalletRegisterAssetOutpoint`, and executed in Kotlin. Prose is not a
+  source of truth for a decision whose wrong direction destroys an asset. It now fails
+  closed on UNSOUND too: a hostile OP_RETURN is not waved through as "not an asset".
+- **UNKNOWN and UNSOUND are separate statuses.** Kotlin has one `null` for both. UNKNOWN
+  (percent instruction, unresolved input units) is routine; UNSOUND means the decoded
+  instructions cannot be trusted at all. Folding them together loses the signal that an
+  OP_RETURN is malformed, which is the one worth logging.
+- **Two RED gates, because two decisions are load-bearing in opposite directions.**
+  `-DASSET_QUANTITY_RANGE_DROPPED_UNFIXED` restores the shipped shape that dropped range
+  instructions (every range receive counted 0) and must fail at test3;
+  `-DASSET_QUANTITY_OVERFLOW_UNGUARDED` removes the overflow checks and must fail at
+  test11. `run.sh` runs each through one `gate` helper that also greps for the *specific*
+  checkpoint, so a build failing for an unrelated reason cannot pass as a gate firing.
+- **The overflow guard is a deliberate divergence from the Kotlin mirror, not a port of
+  it.** `amount` comes off an attacker-chosen OP_RETURN through `BitReader.readFixedPrecision`,
+  which computes `mantissa * 10^exponent` over a 42-bit mantissa and an exponent up to 7 —
+  that product **already overflows `Long`**, so an amount can be any 64-bit value including
+  a negative one, before a 13-bit range index multiplies it by up to 8192. Unguarded, the
+  assigned total wraps negative and `inputUnits - assigned` becomes a credit for units that
+  do not exist. Following `PublishOutcome`'s precedent (Kotlin's Linux errnos were not
+  copied into C), the C is correct and **`AssetTxQuantity.implicitChange` needs the matching
+  guard as its own post-freeze Android PR** — the parity test's overflow vectors will be red
+  until it lands. Hand this to the auditor rather than letting them find it.
+- The RED build needs its arithmetic to be *defined* to be observable: the final
+  `inputUnits - assigned` is written through `uint64_t`, bit-identical in the guarded build
+  (where `assigned` is non-negative) and a defined wrap in the gate, rather than signed
+  overflow UB the sanitizer would be entitled to eat.
+
+**Verified on macOS:** both RED gates fire at their own checkpoint and GREEN passes all 35
+checks; clean under `-Wall -Wextra -Wpedantic -Werror` for c99/c11/c17, `clang++ -std=c++11`
+and `-std=c++17`; double-include and multi-TU link; cross-compiles for `iphoneos` and
+`iphonesimulator`; a Swift TU imports it and calls it through a module map.
+`jni_asset_quantity.c` is `-fsyntax-only` clean against a JNI shim (this Mac has no JDK and
+no NDK — see the gotcha below). **Not verified here:** the Android build, and the parity
+test, which needs the Linux box and a device.
+
+- **New gotcha: there is no JDK on the Mac**, so `jni_*.c` cannot be checked against a real
+  `jni.h`. A hand-written shim declaring only the entries a file uses catches arity, type
+  and typo errors and nothing else — it cannot catch a signature that is wrong in the same
+  way on both sides. Treat it as a smoke test; the NDK build on the Linux box is the check.
+  The core headers force `-Wno-gnu-folding-constant` (odocrypt.h), `-Wno-unused-parameter`
+  (BRChainParams.h) and `-Wno-#pragma-messages` (BRAddress.h's "mainnet build") on any
+  bridge TU, suppressed as exactly those classes.
