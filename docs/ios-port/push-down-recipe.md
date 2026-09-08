@@ -233,3 +233,33 @@ test, which needs the Linux box and a device.
   The core headers force `-Wno-gnu-folding-constant` (odocrypt.h), `-Wno-unused-parameter`
   (BRChainParams.h) and `-Wno-#pragma-messages` (BRAddress.h's "mainnet build") on any
   bridge TU, suppressed as exactly those classes.
+
+## The eighth: `saved_blocks_deserialize.h` → `BRSavedBlocks.h` (2026-09-08)
+
+Kind A, and the first push-down driven by a *measured* iOS symptom rather than by the
+triage: the port re-synced ~126,000 blocks and about eight minutes on every launch, because
+the parser that reads the persisted block window back was Android-only. With it moved, the
+iPhone 11 restores 32,768 blocks and is at tip in under 45 seconds.
+
+- **It was already pure, so this was a move.** No JNI, no locking, no I/O — it only ever
+  lived in `native/src/main/jni/bridge/` by accident of where it was extracted from.
+  `jni_peer.c` and the three existing host KATs still compile against the old name through a
+  20-line forwarding shim, which is the smallest Android-side diff a core addition can have.
+- **The KAT replaced a Linux-only one, and got stronger doing it.** `saved_blocks_kat` proved
+  the absurd-count guard by running the binary under `ulimit -v` so a huge allocation would
+  fail — macOS has no virtual-memory ceiling, which is the sole reason that KAT has been RED
+  on the Mac. The new one intercepts `malloc` through the per-TU `-D` seam (68abf333) and
+  asserts the ~34 GB size is **never requested**, which is both portable and a stronger
+  claim than "requesting it fails".
+- **Write the ownership contract into the header.** The parser returns an array the caller
+  owns AND blocks the caller owns; `BRPeerManagerNew` then ADOPTS the block pointers. The
+  success path frees only the array, the construction-failure path frees both. Android got
+  this wrong once and ASan on-device reported 21 heap-buffer-overflows and 4 use-after-frees,
+  every one on a 192-byte region — `sizeof(BRMerkleBlock)`. Prose in a bridge file was not
+  enough to prevent that; a banner in the shared header at least reaches both platforms.
+
+- **New gotcha, and it cost a confusing link failure:** `crypto/groestl.c` and
+  `crypto/sha3/groestl.c` share a basename, as do the two `skein.c`. A KAT that names objects
+  with `basename` silently drops one of each and then fails to link on `groestl_hash` /
+  `skein_hash` with nothing pointing at the cause. Path-mangle object names
+  (`tr '/' '_'`), the way `build-core-xcframework.sh` already does.
