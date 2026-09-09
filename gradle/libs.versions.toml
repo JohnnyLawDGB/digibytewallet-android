@@ -48,7 +48,7 @@ zxingEmbedded = "4.3.0"
 sqlcipher = "4.6.1"
 argon2 = "13.1"
 # kmp-tor runtime and its resource bundle version independently of each other.
-kmpTorRuntime = "2.4.0"
+kmpTorRuntime = "2.6.0"
 kmpTorResource = "408.16.4"
 
 # --- Test --------------------------------------------------------------------
