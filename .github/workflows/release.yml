@@ -294,6 +294,29 @@ jobs:
             printf '{"version":"%s","file":"%s","sha256":"%s","released":"%s"}\n' \
               "${TAG#v}" "$FILENAME" "$HASH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               > latest.json
+
+            # Regenerate the published checksum file from the bytes on disk.
+            #
+            # SHA256SUMS had NO writer in this workflow at all. It was last
+            # hand-edited at v4.0.78, so v4.0.79 and v4.0.80 were absent and its
+            # digibyte-wallet-latest.apk line still carried v4.0.78's hash while the
+            # symlink pointed at v4.0.80. `sha256sum -c SHA256SUMS` — the verification
+            # step the download page tells people to run — therefore FAILED on the
+            # current release. That is the same failure the prerelease comment above
+            # calls the worst of the three: a user checking the download is told it
+            # does not match, and reasonably concludes it was tampered with.
+            #
+            # Generated from the files themselves rather than from $HASH, so the file
+            # can never disagree with what is actually being served, and so it
+            # self-heals any drift left by earlier releases.
+            {
+              for f in $(ls -1v digibyte-wallet-v*.apk); do sha256sum "$f"; done
+              printf '%s  digibyte-wallet-latest.apk\n' \
+                "$(sha256sum "$(readlink -f digibyte-wallet-latest.apk)" | cut -d' ' -f1)"
+            } > SHA256SUMS.new
+            mv SHA256SUMS.new SHA256SUMS
+            chmod 644 SHA256SUMS
+            sha256sum -c SHA256SUMS >/dev/null || { echo "SHA256SUMS does not verify"; exit 1; }
             fi
 
             # Re-expose everything via the public downloads dir
