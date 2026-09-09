@@ -1,7 +1,7 @@
 # 2026-09-06-ruled-asset-send-burns-holding — Sending a rule-bearing DigiAsset builds a rule-less transfer; DigiAsset Core invalidates it and the sender's entire holding is destroyed
 **Received:** 2026-09-06 (forwarded by Johnny)
 **Source:** direct (message to Johnny; reporter is a DigiAsset Core contributor working the royalty-rules bug on the Core side; handle not given in the forward)
-**Reporter:** unnamed — holds royalty-ruled test asset 5401; reproduced the Core-side mechanism with asset 5383 on mainnet 2026-08-27; tested chopperbriano's Core-side fix (assertTransferableAsset) on 2026-09-06; planning the "Elements of War" ruled collection for phone wallets
+**Reporter:** Medina (Brasa Studios) — holds royalty-ruled test asset 5401; reproduced the Core-side mechanism with asset 5383 on mainnet 2026-08-27; tested chopperbriano's Core-side fix (assertTransferableAsset) on 2026-09-06; planning the "Elements of War" ruled collection for phone wallets
 
 ## Raw report
 Johnny, heads-up on something I'd rather you hear from me first, since Jared's audit is going to hit it.
@@ -99,3 +99,214 @@ the wallet cannot see — and that second asset would be cleared with the rest. 
 (it needs an aggregated or multi-asset outpoint); recorded as a follow-up, not fixed here.
 
 Still open: the live protocol with the reporter (unfixed build first, then this build), and the release decision under the founder-review hold.
+
+## Reply to Medina — 2026-09-07 (supersedes the draft above; sent by the user with the Note 8 SegWit receive address)
+
+Medina — thank you for bringing this to us first, and for the precision of it. Severity: High. We confirmed every point from source on both sides the same day: the wallet builds a plain v3 transfer with no rule outputs and nothing on the path checks rules (the rules class is exactly the uncalled stub you described), and DigiAsset Core's replay clears every output and spends the inputs when a rule fails. Your 5401 issuance decodes to version 3, opcode 0x04, and the proxy returns its immutable 0.1 DGB royalty; 5383 reads count 0 on the same API, matching your 5 to 0.
+
+Two things beyond your report, so you have the full picture. The recovery flow ("Recover funds from another wallet") builds the same plain transfer to move assets off an old seed, including to external addresses, so it had the same door. And after such a send the wallet not only reports success but keeps counting its own change output as held, because our balance rule is "count iff the native wallet still holds the output" and the indexer's verdict never reaches it. The sender sees a phantom, and the recipient's wallet credits one too.
+
+The fix is built and reviewed, not yet released. It is your coarse gate, made fail-closed and applied on both paths: an asset may move only when the wallet has walked it to a locked issuance with opcode 1, 2 or 5 and the proxy reports no rules object. Opcode 3 or 4, or a rules object, refuses; anything the wallet cannot prove refuses too, and unlocked assets stay refused because Core lets a later reissuance add rules to them. Refusals are explained on screen in the wallet's thirteen languages and nothing is signed or broadcast; in recovery the asset simply stays where it was. The known-answer test uses the real bytes of your 5401 issuance.
+
+Yes please on the live case; it is the evidence we want before release and it goes into the report. What we need from you:
+1. The txid of the 5383 send that burned, for the Core-side vector.
+2. A fresh throwaway royalty-ruled asset issued directly to this address on our test phone, with that address as the first output of the issuance: dgb1q9phqevg8r492dy3n5rma9zk0nyxwaz3xpl5v2y
+
+We will run it twice: first on the current release, v4.0.79, which does not contain the gate, to capture the burn end to end with per-output logging (that is the one time we spend one of your assets on purpose), then on the fixed build to prove the refusal on send and on recovery.
+
+Timing: the repo is under an independent security review right now, so the release with the gate will follow the live case as its own small version. Credit under BUG-BOUNTY.md applies. Separately, v4.0.79 went out today with an unrelated fix you may care about on the DigiScope side: scanned payment amounts were being dropped and every DGB amount was converted through floating point one satoshi short, which was breaking tip-wallet dust codes.
+
+## Live case, part 1 of 2 — burn captured on the shipped release (2026-09-09)
+
+Medina issued two throwaway royalty-ruled assets directly to the Note 8's SegWit receive
+address `dgb1q9phqevg8r492dy3n5rma9zk0nyxwaz3xpl5v2y`, each as **vout 0** of its issuance,
+so the burn capture and the refusal run each have their own holding:
+
+| | asset | index | issuance txid | block |
+|---|---|---|---|---|
+| Test 004 | `LaAHVShJDdfsJcAxceouMjktdLVYyGrfuvhzj6` | 5403 | `07ff360968e14b630e4cae05a9b3551efec5875f344a93d649db667d796f6152` | 24,179,111 |
+| Test 005 | `La8L1QQkZESDaRLARQELU9ijhv3q69UaTme2dB` | 5404 | `7b45d310065e68cf30d18c09cf98d5e63a22edc49cce0c9a5b84641b5f5b6a31` | 24,179,152 |
+
+Both read off our own node (not an indexer): OP_RETURN `4441 03 04 …` = DigiAssets v3
+**opcode 0x04**, 5 units, locked, with the royalty output of 0.1 DGB to
+`DFPBRuSBW5k9aDHTq8ixu294dhZkREUwRK` at vout 1. The proxy returns
+`{"changeable": false, "royalty": {"addresses": {"DFPBRuSBW5k9aDHTq8ixu294dhZkREUwRK": 10000000}}}`.
+The gate is therefore double-covered on these: opcode 0x04 alone forces RULE_BOUND, and the
+proxy rules object forces it independently.
+
+**Core-side vector, now chain-proven end to end.** Medina supplied the 5383 burn txid, which
+closes the last gap in the mechanism — previously we had Core's source and a `count: 0`, but not
+the transaction between them. Issuance `8adb12ad7f4b1f979a91a53475a6a9fc5610ed7541e3fa7cbadb4bf53484f73e`
+(block 24,106,262) is opcode `04` with the 0.1 DGB royalty at vout 1. The burn
+`f385d004eca95a52b415a21d3e8c01c2a5431f41849f7de01c17dfb2a9fdfdc0` (block 24,106,276) spends that
+holding and carries OP_RETURN `6a08 4441 03 15 00010104` — a plain v3 transfer — with outputs
+`0.0001 / 0.0001 / OP_RETURN / change` and **no royalty output anywhere**. Asset 5383: 5 → 0.
+
+### The run
+
+Build: **v4.0.79, tag `v4.0.79` (worktree `7adb41be`), mainnet debug**, installed over the prior
+40078 as an upgrade so wallet state was preserved. The tag was built specifically so the capture
+names the shipped release. Verified pre-gate: `core/.../asset/rules/` does not exist at that tag.
+The 78→79 diff touches this path in exactly one place — `AssetViewModel`'s **custom-fee** parsing
+moving to `DgbAmount` — so with the fee left on default the send path is identical between the two.
+
+Device state before the send: synced to tip, `cf-ledger: outstanding=0 gaveUp=0`, and both assets
+credited correctly — `row 07ff360968e1:0 qty=5 … -> COUNT`, `row 7b45d310065e:0 qty=5 … -> COUNT`.
+
+Sent **2 of the 5 units** of Test 004 to Medina's issuer address
+`dgb1q6njlsdcrrqqecu497jmcx67gy63l90ll2l5jnt`. Two units rather than all five deliberately: sending
+the whole holding leaves no asset-change output, and the change output is what becomes the phantom.
+An external destination avoids any consolidation-exemption ambiguity.
+
+What the wallet showed on the way — no warning at any point:
+- Asset Details carries **no rules indication of any kind**; Send is enabled.
+- The DGB cost preview itemises `Recipient marker 6,000 sats`, `Asset-change marker 6,000 sats`,
+  `Network fee ≈61,300 sats` — **and no royalty line**.
+- It states **"3 units stays in your wallet"**.
+- The confirm dialog warns only "Asset transfers are irreversible."
+- The spend gate correctly demanded the PIN before broadcast.
+
+Broadcast txid **`f14051bfe7f3c2722431df3a99e400fdc10244940e5b8ac4dcab59949486b80d`**, confirmed in
+block 24,180,727. Decoded on our node:
+
+```
+in  0  07ff360968e1…:0     the entire 5-unit holding
+in  1  8d8a66be3cef…:0     funding
+out 0  6,000 sats          dgb1q6njlsdcrrqqecu497jmcx67gy63l90ll2l5jnt   recipient, 2 units
+out 1  0                   OP_RETURN 6a08 4441 03 15 00020203            v3 TRANSFER
+out 2  6,000 sats          dgb1ql4rmzydpzvd0fhsy3hnqgcwwlsz9q263yfh6t6   asset change, 3 units
+out 3  1.82640383 DGB      dgb1ql4rmzydpzvd0fhsy3hnqgcwwlsz9q263yfh6t6   DGB change
+```
+
+**No royalty output. Not one P2PKH output in the transaction** — the rule demanded 0.1 DGB to
+`DFPBRuSBW5k9aDHTq8ixu294dhZkREUwRK` and the wallet paid nothing. Byte-for-byte the same shape as
+the 5383 burn.
+
+### Outcome — both halves of the bug, observed
+
+**Chain: all 5 units destroyed.** The recipient received nothing; our own change address holds
+nothing. Using the holders view, with 5404 as an in-query control proving the view is current and
+not merely empty:
+
+| asset | `/api/digiassets/holders/<idx>` | |
+|---|---|---|
+| 5383 | `{"holders":[],"total":0}` | Medina's known burn |
+| **5403** | **`{"holders":[],"total":0}`** | **our send — all 5 gone** |
+| 5404 | `{"holders":[{"address":"dgb1q9phq…","quantity":5}],"total":1}` | untouched control |
+
+(The asset endpoint's `count` field still read 5 for some time afterwards while every address
+holding was already gone — it is a lagging aggregate. 5383's reached 0 eventually. The holders
+view is the current one, and the indexer reported itself synced to 24,180,794, well past the
+burn block.)
+
+**Wallet: phantom balance.** The wallet credits its own change output and reports three units
+that no longer exist anywhere:
+
+```
+row f14051bfe7f3:2 qty=3 h=0 src=NATIVE state=1 owned=true -> COUNT
+heldBalances: … LaAHVShJ=3(2u) …
+```
+
+The DigiAssets screen shows **Brasa Royalty Refusal Test 004 — 3**, with nothing to indicate
+anything went wrong. This is the count-iff-native-holds rule behaving exactly as designed: the
+native wallet does hold that outpoint, and the indexer's verdict never reaches it.
+
+Net: the user asked to send 2 units, kept 3 by the wallet's own statement, and in fact lost all 5
+while the app reported success and still displays 3.
+
+### Notes for the fix
+
+- The feared 0x04 rules-block decode garbage **did not** materialise: both issuances credited at
+  the correct quantity 5. This case cannot distinguish "parsed the placement instructions" from
+  "credited the whole supply to the first non-OP_RETURN output by the naive rule", since vout 0 is
+  the recipient and receives the whole supply either way. The issuance-crediting gap is untested by it.
+- `row f14051bfe7f3:3 qty=0 … -> COUNT` — the DGB change output is also counted as a zero-quantity
+  row. Harmless to the totals here, but it is the same zero-value blind spot recorded elsewhere.
+
+**Part 2 (refusal on the fixed build, using Test 005 / 5404) is still to run.**
+
+## Live case, part 2 of 2 — refusal proven on the gated build (2026-09-09)
+
+Build: local `develop` @ `86bbc37b` (the merged gate), mainnet debug, installed over the
+v4.0.79 build from part 1 so the wallet state — including the phantom — carried across.
+
+**Caveat on what this build is.** Local develop carries the gate *and* the 18 held
+media-playback/debug-bypass commits, and those also touch `AssetDetailScreen` and
+`AssetViewModel`. So this proves the gate's behaviour, not the shipping candidate. The
+v4.0.80 candidate is the 13 gate commits cherry-picked onto `origin/develop`, and that
+tree has not been built or tested yet.
+
+### Red / green on the same screen
+
+| | asset | issuance bytes (read off our node) | gated build |
+|---|---|---|---|
+| **Refuses** | Test 005 / 5404 | `4441 03 04` — v3, opcode **0x04**, royalty rules | rule card shown, **Send button removed** |
+| **Permits** | DigiScope Test v4 / `La8T4Rwy…` | `6a3e 4441 01 01` — v1, opcode **0x01**, no rules block | no card, **Send present and enabled** |
+
+The permit row is the positive control, and it matters: without it the refusal only shows the
+gate blocks *something*, not that it still lets legitimate assets move. Its opcode was read
+from the issuance transaction `c09f2f2d9e67a39cebd7d3d8349f81e706cc02695ac93a53920ae0e480a8b8d6`
+on our own node — **not** taken from the gate's own verdict, so this is independent of the code
+under test. (It also means no plain rule-free control needs to be requested from the reporter;
+the wallet already held one.)
+
+On Test 005 the wallet says, in place of the Send button:
+
+> **This asset has transfer rules**
+> It was issued with rules (such as royalties) that this wallet cannot satisfy yet. Sending it
+> now would destroy it, so sending is disabled. Your asset stays safe in this wallet.
+
+Directly comparable to part 1, where the same screen for the same class of asset offered Send
+with no warning of any kind and destroyed the holding.
+
+### Two things this run does NOT show
+
+- **The phantom is not repaired.** The gated build still displays `Test 004 — 3`. The gate stops
+  a burn from happening; it has no path to correct the accounting of one that already did. A
+  wallet that burned an asset before upgrading keeps its phantom. Whether that needs its own fix
+  is open.
+- **The recovery path (`ForeignAssetTransferService`) was not exercised here** — only the
+  send path. It is gated in the same commit and unit-tested, but it has no live case.
+
+### Reproduction record
+
+- Unfixed: v4.0.79 tag build → txid `f14051bf…86b80d`, block 24,180,727, asset 5403 → 0 holders.
+- Fixed: develop `86bbc37b` → refusal on 5404, permit on `La8T4Rwy…`, nothing signed or broadcast.
+- Device: Note 8 (SM-N950U), API 28, mainnet, synced to tip throughout.
+
+## v4.0.80 release candidate — built, gated, device-verified (2026-09-09)
+
+Branch `release/v4.0.80-gate` = `origin/develop` (`8c20c7cd`) + the 13 gate commits
+cherry-picked + the version bump. This closes the gap left by part 2, which ran on local
+develop and therefore also carried the held media commits.
+
+**Cherry-picking surfaced a real dependency, not a mechanical conflict.** The gate's Room
+migration was numbered **10→11**, which silently assumed the held media commits' 9→10
+migration. On `origin/develop` the database is at version **9**, so the gate had to be
+renumbered to **9→10** (`Migration_9_10.kt`, `version = 10`). Its ALTERs are guarded and
+idempotent, so the renumber is safe on its own.
+
+> **Obligation this creates — do not lose it.** When the media-playback commits land on top
+> of v4.0.80, **their** migration must be renumbered **9→10 → 10→11** (schema version 11).
+> Leaving them at 9→10 means a wallet that came through v4.0.80 is already at version 10, so
+> the media migration never runs and its columns are silently absent. The renumber is recorded
+> in the body of commit `e6f208d8` as well as here.
+
+Two other conflicts, both resolved narrowly:
+- `OnboardingHardcodedStringTest.COVERED` — the gate commit added both `TransferRuleCard.kt`
+  and `AssetMediaPlayer.kt`; only the former exists here. The gate asserts
+  `missing.isEmpty()`, so keeping the media entry would have failed the build rather than
+  passing blind — the locale gate did its job.
+- `AssetViewModel` imports — `DgbAmount` (v4.0.79's fee fix) and `CancellationException`
+  (the gate's final-review wave) are both needed; kept both.
+
+**Verification on the candidate:**
+- `:core:` + `:app:` unit tests: **1,225 tests, 0 failures, 0 skipped** — including the
+  renumbered `Migration_9_10Test` (4) and the gate's decision tables (`AssetTransferRuleGateTest` 9,
+  `AssetSendRuleGateTest` 6).
+- `scripts/check-security-cycle.sh`: versionCode 40080, last cycle 40076, delta 4 — next due 40086.
+- `scripts/check-submodule-pin.sh`: pin `e1a7b82` equals the tip of core `develop` — durable.
+- On the Note 8 as **40080**: Test 005 shows the rule card with **Send removed**; DigiScope Test
+  v4 (opcode 0x01) still shows **Send enabled**. Same red/green as part 2, now on the shipping tree.
+
+Not yet done: tagging, pushing, and release notes — held pending the founder review.
