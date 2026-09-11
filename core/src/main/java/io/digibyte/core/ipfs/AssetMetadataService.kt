@@ -228,7 +228,7 @@ class AssetMetadataService(
         return present
     }
 
-    private suspend fun storeFromJson(
+    internal suspend fun storeFromJson(
         assetId: String,
         cid: String?,
         jsonRaw: JSONObject,
@@ -296,13 +296,18 @@ class AssetMetadataService(
             description = sanitizeLongText(
                 json.optString("description").takeIf { it.isNotEmpty() }
             ),
-            // Protocol caps divisibility at 0..7. Anything else is either
-            // a buggy issuer or an attack — clamp to 0 rather than letting
-            // negative or huge values flow into pow(10, decimals) downstream
-            // (CostPreviewCard does this and would produce Infinity).
-            decimals = json.optInt("decimals", 0).coerceIn(0, 7),
-            // Negative totalSupply is meaningless and would break UI math.
-            totalSupply = json.optLong("totalSupply", 0L).coerceAtLeast(0L),
+            // decimals and totalSupply are DELIBERATELY LEFT AT THEIR DEFAULTS here.
+            //
+            // They are chain data — cryptographically tied to the issuance tx — and this document
+            // is written by whoever minted the asset and authenticated by nothing. Canonical
+            // DigiAsset metadata carries no `totalSupply` key at all, so reading it with a default
+            // of 0 and writing the whole row through `insert` (REPLACE) stamped 0 over the
+            // chain-derived value: a device showed `Total Supply 5`, then `Unknown` eight minutes
+            // later once the metadata fetch supplied the name. AssetManager already guards the
+            // other direction via updateChainFacts; this is the missing mirror.
+            //
+            // This row is only ever a SEED for an asset we have no chain facts for yet, written
+            // INSERT-OR-IGNORE, so these zeros can never overwrite a real value.
             issuerAddress = provenIssuerOnly(proven = provenIssuer, claimed = null),
             metadataCid = cid,
             // imageUrl is bounds-checked at render time by AssetImageResolver
@@ -311,8 +316,23 @@ class AssetMetadataService(
             imageUrl = imageUrl?.takeIf { it.length <= MAX_IMAGE_URL_LEN },
             cachedAt = System.currentTimeMillis(),
         )
-        assetMetadataDao.insert(entity)
-        return entity.toModel()
+        // Seed the row if this asset has none yet (IGNORE: never clobbers a richer one), then
+        // merge only the columns this document is the source of.
+        assetMetadataDao.insertChainFacts(entity)
+        assetMetadataDao.updateIpfsFacts(
+            assetId = entity.assetId,
+            name = entity.name,
+            symbol = entity.symbol,
+            description = entity.description,
+            issuerAddress = entity.issuerAddress,
+            metadataCid = entity.metadataCid,
+            imageUrl = entity.imageUrl,
+            cachedAt = entity.cachedAt,
+        )
+        // Re-read so the caller sees the merged row rather than this document's view of it — the
+        // entity above deliberately carries no supply or divisibility, and returning it would
+        // report 0 for an asset whose chain facts are already known.
+        return (assetMetadataDao.getMetadata(assetId) ?: entity).toModel()
     }
 
     private fun sanitizeShortText(input: String?): String? = sanitize(input, MAX_SHORT_TEXT_LEN, allowNewlines = false)
