@@ -119,4 +119,4 @@ Authoritative audit: **`security/AUDIT-SUMMARY.md`** (do not maintain a second c
 - **CRITICAL-3** — Resolved: `loadSeed()` returns a `ByteArray` zeroed after use; `createWalletFromBytes` / `recoverWalletFromBytes` accept `jbyteArray` with `secure_zero()` on the C stack. The mnemonic never becomes an immutable JVM `String` on the load/restore/sign path; generation (`generateMnemonic` returns a `jstring`), onboarding display and the seed-view screen still hold `String`s — recorded in `security/AUDIT-SUMMARY.md` P2 as accepted.
 - **CRITICAL-4** — Resolved: Digi-ID callback domain validated against the URI host; HTTP (`u=1`) callbacks blocked. **Residual (Phase 2):** Digi-ID signs with the legacy bread-wallet key `m/0'/0/0` (hardcoded in the JNI — not `m/44'/20'/0'/0/0`, corrected 2026-08-19); the residual is linkability (one identity address for every site), not key exposure.
 
-A bug bounty program (up to 100K DGB) covers v3.5.31+; report to `security@digiscope.me`.
+A bug bounty program (up to 100K DGB) covers v3.5.31+; report to `security@aroundtheblock.us`.
