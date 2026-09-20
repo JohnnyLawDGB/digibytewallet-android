@@ -10,7 +10,7 @@ issues are visible to everyone, including users who haven't yet upgraded.
 
 Instead, choose one of:
 
-1. **Email** `security@digiscope.me` with the subject prefix `[BOUNTY]`
+1. **Email** `security@aroundtheblock.us` with the subject prefix `[BOUNTY]`
    if you're reporting under the bounty program, or `[SECURITY]` for
    non-bounty disclosures.
 
