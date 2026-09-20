@@ -1,5 +1,9 @@
 package io.digibyte.core.model
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * One approved send: what the confirmation shows, and what the send then receives.
  *
@@ -10,8 +14,8 @@ package io.digibyte.core.model
  * that changes a field afterwards (a price lookup finishing late, a pre-fill running again) changes
  * a field, not the send.
  *
- * Instances come only from [dgb] and [digiDollar]: there is no way to hold one whose amount did
- * not come through the exact parsers.
+ * Instances come only from [dgb], [digiDollar] and [asset]: there is no way to hold one whose
+ * amount did not come through the exact parsers.
  */
 sealed class ApprovedSend {
     abstract val address: String
@@ -51,6 +55,25 @@ sealed class ApprovedSend {
         override val amountText: String get() = UsdCents.format(cents)
     }
 
+    class Asset internal constructor(
+        override val address: String,
+        /** The asset to move. */
+        val assetId: String,
+        /** Whole units to send — the integer the transfer is built from. */
+        val units: Long,
+        /**
+         * Decimals of this asset, as its issuance fixes them: the scale [units] were read at and
+         * the scale they are shown at. Held here so that the two are one scale by construction.
+         */
+        val divisibility: Int,
+        /** Fee rate handed to the asset send, in satoshis per kilobyte. */
+        val feePerKb: Long,
+        /** The fee estimate the confirmation shows, in satoshis. */
+        val feeEstimateSats: Long,
+    ) : ApprovedSend() {
+        override val amountText: String get() = AssetQuantity.format(units, divisibility)
+    }
+
     companion object {
         /**
          * An approval for [typedAmount] DGB, or null when the text is not a positive amount.
@@ -74,5 +97,63 @@ sealed class ApprovedSend {
             val cents = UsdCents.parse(typedUsd)?.takeIf { it > 0L } ?: return null
             return DigiDollar(address, cents)
         }
+
+        /**
+         * An approval for [typedQuantity] of the asset [assetId], which has [divisibility]
+         * decimals, or null when the text is not a positive quantity of such an asset.
+         */
+        fun asset(
+            address: String,
+            assetId: String,
+            typedQuantity: String,
+            divisibility: Int,
+            feePerKb: Long,
+            feeEstimateSats: Long,
+        ): Asset? {
+            val units = AssetQuantity.parse(typedQuantity, divisibility) ?: return null
+            return Asset(address, assetId, units, divisibility, feePerKb, feeEstimateSats)
+        }
+    }
+}
+
+/**
+ * The confirmation on screen, and with it the one approval a send may be made for.
+ *
+ * A send names its approval. It goes ahead only when that is the very object on screen here — not
+ * one that reads the same, not one that was replaced, not one whose confirmation was closed — and
+ * only once. Identity, not equality: two approvals that read the same are still two approvals, and
+ * only one of them is what the user is looking at.
+ *
+ * A claimed approval stays on screen while its send is out, and nothing can be opened over it;
+ * [close] ends it, whatever the outcome.
+ */
+class SendConfirmation<T : ApprovedSend> {
+    private val onScreen = MutableStateFlow<T?>(null)
+    private var claimed = false
+
+    /** The approval the confirmation shows, or null when no confirmation is up. */
+    val approval: StateFlow<T?> = onScreen.asStateFlow()
+
+    /** Put [approval] on screen in place of an unclaimed one. False while a claimed one is still up. */
+    @Synchronized
+    fun open(approval: T): Boolean {
+        if (claimed) return false
+        onScreen.value = approval
+        return true
+    }
+
+    /** True exactly once, and only for the object that is on screen. */
+    @Synchronized
+    fun claim(approval: T): Boolean {
+        if (claimed || onScreen.value !== approval) return false
+        claimed = true
+        return true
+    }
+
+    /** The confirmation is gone — dismissed, or its send has ended. Nothing is on screen. */
+    @Synchronized
+    fun close() {
+        onScreen.value = null
+        claimed = false
     }
 }

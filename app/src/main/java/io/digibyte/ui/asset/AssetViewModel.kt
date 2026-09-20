@@ -11,8 +11,10 @@ import io.digibyte.core.asset.rules.TransferRuleState
 import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.asset.send.AssetFeeEstimator
+import io.digibyte.core.model.ApprovedSend
 import io.digibyte.core.model.OwnedAsset
 import io.digibyte.core.model.DgbAmount
+import io.digibyte.core.model.SendConfirmation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -25,8 +27,6 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.math.BigDecimal
-import java.math.RoundingMode
 import javax.inject.Inject
 
 /** Fee warning surfaced under the custom-fee field — mirrors the regular
@@ -66,6 +66,12 @@ class AssetViewModel @Inject constructor(
 
     private val _sendState = MutableStateFlow<SendState>(SendState.Idle)
     val sendState: StateFlow<SendState> = _sendState.asStateFlow()
+
+    /** The confirmation on screen. It holds the one approval [sendAssetTransfer] accepts. */
+    private val confirmation = SendConfirmation<ApprovedSend.Asset>()
+
+    /** The approval the confirmation is drawn from, or null when no confirmation is up. */
+    val approval: StateFlow<ApprovedSend.Asset?> = confirmation.approval
 
     // ── Transfer-rule check ─────────────────────────────────────────────
     //
@@ -172,6 +178,8 @@ class AssetViewModel @Inject constructor(
     fun selectAsset(assetId: String) {
         val needsCheck = _selectedAssetId.value != assetId ||
             _ruleCheck.value == RuleCheckState.UNVERIFIED
+        // An approval is for one asset: it does not outlive the selection it was made under.
+        if (_selectedAssetId.value != assetId) confirmation.close()
         // Set BEFORE launching: checkRules writes its result only while this asset is still the
         // selected one, and that guard is meaningless if the selection lands after the launch.
         _selectedAssetId.value = assetId
@@ -185,59 +193,99 @@ class AssetViewModel @Inject constructor(
     }
 
     /**
-     * Broadcast a DigiAsset transfer. Caller passes the raw user input
-     * (decimal string, e.g. "0.50"); this method scales by the asset's
-     * divisibility to the internal integer amount before handing off to
-     * [AssetManager.sendAsset].
+     * Review. This is the one place the quantity text is read for a send: it becomes an
+     * [ApprovedSend.Asset] here, at the asset's divisibility. The confirmation is drawn from that
+     * object and [sendAssetTransfer] receives it, so nothing typed, pre-filled or loaded afterwards
+     * can change what is sent.
+     *
+     * Returns false when the text is not a positive quantity of the selected asset. A quantity
+     * with no recipient is accepted and opens nothing: a confirmation names where it goes.
+     */
+    fun requestConfirm(toAddress: String, quantityInput: String): Boolean {
+        val asset = selectedAsset.value ?: return false
+        val approved = ApprovedSend.asset(
+            address = toAddress,
+            assetId = asset.assetId,
+            typedQuantity = quantityInput,
+            divisibility = divisibilityOf(asset),
+            feePerKb = feeRatePerKb.value,
+            feeEstimateSats = estimatedFeeSat.value,
+        ) ?: return false
+        if (toAddress.isNotBlank()) confirmation.open(approved)
+        return true
+    }
+
+    /** Decimals of [asset] as the wallet holds them: the scale its quantities are typed and shown at. */
+    private fun divisibilityOf(asset: OwnedAsset): Int = asset.metadata?.decimals ?: 0
+
+    /** The confirmation was dismissed, or the credential prompt was: nothing is on screen to send. */
+    fun cancelConfirm() {
+        confirmation.close()
+        _sendState.value = SendState.Idle
+    }
+
+    /** A result is in. It takes the confirmation's place on screen. */
+    private fun finish(result: SendState) {
+        confirmation.close()
+        _sendState.value = result
+    }
+
+    /**
+     * Broadcast the DigiAsset transfer the user approved. The asset, the destination, the whole
+     * units and the fee rate all come from [approved]; no field is read again.
      *
      * Result is surfaced via [sendState] so the UI can show progress,
      * success (txid), or typed errors.
      */
-    fun sendAssetTransfer(
-        toAddress: String,
-        quantityInput: String,
-        feePerKb: Long,
-    ) {
-        val asset = selectedAsset.value
-        if (asset == null) {
-            _sendState.value = SendState.Failure("No asset selected")
+    fun sendAssetTransfer(approved: ApprovedSend.Asset) {
+        // Only the approval that is on screen may be sent, and only once: a second tap, or an
+        // approval replaced or cancelled while the credential prompt was up, finds nothing to send.
+        if (!confirmation.claim(approved)) {
+            android.util.Log.w("AssetViewModel", "send ignored: not the approval being confirmed")
             return
         }
 
-        val divisibility = asset.metadata?.decimals ?: 0
-        val internalQty = scaleToInternalUnits(quantityInput, divisibility)
-        if (internalQty == null || internalQty <= 0L) {
-            _sendState.value = SendState.Failure("Invalid quantity")
+        val asset = selectedAsset.value
+        if (asset == null || asset.assetId != approved.assetId) {
+            finish(SendState.Failure("No asset selected"))
             return
         }
-        if (internalQty > asset.quantity) {
-            _sendState.value = SendState.Failure(
-                "Insufficient balance: have ${asset.quantity}, need $internalQty"
-            )
+
+        // The approval was read, and is shown, at one divisibility. If that is no longer the
+        // asset's, the text on screen and the units held here are not one quantity: nothing is sent.
+        if (divisibilityOf(asset) != approved.divisibility) {
+            finish(SendState.Failure("Invalid quantity"))
+            return
+        }
+
+        if (approved.units > asset.quantity) {
+            finish(SendState.Failure(
+                "Insufficient balance: have ${asset.quantity}, need ${approved.units}"
+            ))
             return
         }
 
         if (!_ruleCheck.value.allowsSend) {
-            _sendState.value = SendState.Refused(
+            finish(SendState.Refused(
                 if (_ruleCheck.value == RuleCheckState.RULE_BOUND) SendRefusal.RULE_BOUND_ASSET
                 else SendRefusal.RULES_UNKNOWN
-            )
+            ))
             return
         }
 
         _sendState.value = SendState.Sending
         viewModelScope.launch {
             val result = assetManager.sendAsset(
-                assetId = asset.assetId,
-                quantity = internalQty,
-                toAddress = toAddress,
-                feePerKb = feePerKb,
+                assetId = approved.assetId,
+                quantity = approved.units,
+                toAddress = approved.address,
+                feePerKb = approved.feePerKb,
             )
-            _sendState.value = when (result) {
+            finish(when (result) {
                 is TxResult.Success -> SendState.Success(result.txid)
                 is TxResult.Error -> SendState.Failure(result.message)
                 is TxResult.Refused -> SendState.Refused(result.reason)
-            }
+            })
         }
     }
 
@@ -248,27 +296,6 @@ class AssetViewModel @Inject constructor(
         data class Failure(val message: String) : SendState()
         data class Refused(val reason: SendRefusal) : SendState()
     }
-
-    /**
-     * Convert a user-entered decimal string (e.g. "1.25") to the asset's
-     * internal integer representation given its divisibility. Rejects
-     * values with more decimal places than the asset supports rather than
-     * silently truncating — an asset with divisibility=2 can't represent
-     * 1.234, so we refuse instead of sending the user-surprising 1.23.
-     */
-    private fun scaleToInternalUnits(input: String, divisibility: Int): Long? {
-        val trimmed = input.trim()
-        if (trimmed.isEmpty()) return null
-        val decimal = trimmed.toBigDecimalOrNull() ?: return null
-        if (decimal.signum() < 0) return null
-        // Disallow more fractional digits than the asset allows.
-        if (decimal.scale() > divisibility) return null
-        val scaled = decimal.movePointRight(divisibility).setScale(0, RoundingMode.UNNECESSARY)
-        return scaled.toLongOrNull()
-    }
-
-    private fun BigDecimal.toLongOrNull(): Long? =
-        try { longValueExact() } catch (_: ArithmeticException) { null }
 
     companion object {
         /** DGB min relay / default fee rate — reuse the exact estimator
