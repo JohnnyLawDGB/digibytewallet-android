@@ -47,6 +47,13 @@ class DigiByteUriTest {
         }
     }
 
+    /** The smallest amount is where a plain decimal and a scientific one part ways. */
+    @Test fun one_satoshi_is_encoded_as_a_plain_decimal() {
+        assertEquals("digibyte:DTest123?amount=0.00000001", DigiByteUri.encode("DTest123", 1L))
+        assertEquals("digibyte:DTest123?amount=0.0000001", DigiByteUri.encode("DTest123", 10L))
+        assertEquals(1L, DigiByteUri.parse("digibyte:DTest123?amount=0.00000001")?.amount)
+    }
+
     @Test fun an_unrepresentable_amount_is_dropped_not_truncated() {
         val u = DigiByteUri.parse("digibyte:DTest123?amount=1.123456789")
         assertEquals("DTest123", u?.address)

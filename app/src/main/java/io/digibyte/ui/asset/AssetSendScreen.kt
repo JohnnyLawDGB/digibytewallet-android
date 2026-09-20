@@ -487,8 +487,10 @@ fun AssetSendScreen(
                         addressError = errRecipient
                         valid = false
                     }
-                    if (quantityInput.isBlank() || quantityInput.toDoubleOrNull() == null ||
-                        quantityInput.toDouble() <= 0) {
+                    // The exact parse the cost preview and the send apply, so a quantity that
+                    // reaches the confirmation is one the send accepts.
+                    val reviewQty = parseQuantityToInternal(quantityInput, decimals)
+                    if (reviewQty == null || reviewQty <= 0L) {
                         quantityError = errQuantity
                         valid = false
                     }

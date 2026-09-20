@@ -154,8 +154,8 @@ class AssetViewModel @Inject constructor(
         if (!custom) return@combine AssetFeeWarning.None
         val feeSat = DgbAmount.toSats(input) ?: 0L
         if (feeSat <= 0) return@combine AssetFeeWarning.ZeroFee
-        val satPerVbyte = feeSat.toDouble() / ASSET_TYPICAL_VSIZE
-        if (satPerVbyte < 100.0) AssetFeeWarning.BelowRelay else AssetFeeWarning.None
+        // Whole satoshis on both sides: under 100 sat/vB across the asset-typical size.
+        if (feeSat < 100L * ASSET_TYPICAL_VSIZE) AssetFeeWarning.BelowRelay else AssetFeeWarning.None
     }.stateIn(viewModelScope, SharingStarted.Eagerly, AssetFeeWarning.None)
 
     /** Toggle between default and custom fee mode. Seeds the custom field
