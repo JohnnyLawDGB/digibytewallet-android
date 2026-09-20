@@ -1,6 +1,7 @@
 package io.digibyte.core.asset
 
 import io.digibyte.core.SendRefusal
+import io.digibyte.core.SpendPreflight
 import io.digibyte.core.TxResult
 import io.digibyte.core.asset.rules.AssetTransferRuleGate
 import io.digibyte.core.asset.rules.TransferRuleState
@@ -16,12 +17,18 @@ import io.digibyte.core.ipfs.AssetMetadataService
 import io.digibyte.core.model.AssetData
 import io.digibyte.core.model.AssetMetadata
 import io.digibyte.core.model.OwnedAsset
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Pure per-row parse of a [io.digibyte.core.bridge.NativeBridge.getTransactionDetails]
@@ -184,7 +191,17 @@ class AssetManager(
      *  replay re-reads the transaction through the bridge ([defaultResolveRowTargets]); a test
      *  injects a fake so the replay can be exercised without the native library. */
     private val resolveRowTargets: (suspend (String, Int) -> Boolean?)? = null,
+    /** Seam for the pass [sendAsset] runs before it reads a coin. Null in production, where it is
+     *  [holdAssetOutputsBeforeSpend]; a test injects a recording fake. */
+    private val beforeSpend: (suspend () -> Unit)? = null,
 ) {
+
+    init {
+        // Whatever builds a spend from the plain-coin set runs this first; see [SpendPreflight].
+        // Only stored here, and it touches the bridge only when run, so constructing an
+        // AssetManager still loads nothing.
+        SpendPreflight.install { holdAssetOutputsBeforeSpend() }
+    }
 
     /** Walks a transfer back to its issuance, resuming rather than restarting. The hop
      *  function below is the only part that touches the network or JNI. */
@@ -1157,6 +1174,164 @@ class AssetManager(
     }
 
     /**
+     * The pass that runs before a spend is built from the plain-coin set: by the time it returns,
+     * every owned output the targeting rule names — in every transaction the wallet holds — is
+     * held out of that set. It returns normally only if it looked at all of them; anything it
+     * could not list, read or register is thrown, and the caller builds nothing
+     * ([io.digibyte.core.SpendPreflight.completed]).
+     *
+     * It is the holding-out half of [processIncomingAssetTx] and nothing else — the same header
+     * decode, the same [resolveInputAssetUnits], the same [AssetTxQuantity.targetsOutput] — with no
+     * row written, no metadata fetched and no parent walked, so it touches neither the network
+     * nor the asset tables' contents and can sit in front of a send. Rows, names and ids remain
+     * the periodic sweep's work.
+     *
+     * What a pass costs. A transaction shown to carry no asset payload is remembered and never
+     * read again: that is a fact about its bytes and cannot change. So the first pass of a process
+     * reads every transaction once, and a later pass reads only what has arrived since, plus the
+     * asset transactions. Those are read on every pass, deliberately: whether an output is
+     * targeted depends on the rows held for its inputs and on the owned-address set, both of which
+     * move, and registering an outpoint again is free (native ignores one it already holds). It
+     * also means the pass needs no signal when the native wallet is rebuilt and its registrations
+     * start again from empty.
+     *
+     * Before the rows are there. The pass writes no rows, so where the periodic sweep has not yet
+     * written the rows for a transaction's inputs (a first send made before the first sweep after
+     * a restore), what those inputs carried is unknown, and the targeting rule then names the last
+     * owned output as well. That output can be ordinary DGB change of one of the wallet's own
+     * earlier asset sends; it stays out of the balance until the native wallet is next rebuilt.
+     * This is the rule's conservative side, and nothing is lost by it.
+     *
+     * Off the caller's thread: the first pass reads every transaction through the bridge, and a
+     * caller may be on the main thread ([sendAsset] is launched there).
+     *
+     * Returns the number of outpoints newly held out.
+     */
+    suspend fun holdAssetOutputsBeforeSpend(): Int = withContext(Dispatchers.IO) {
+        holdAssetOutputsBeforeSpendImpl(
+            txHashes = { NativeBridge.getAllTransactionHashes() },
+            outputsOf = { NativeBridge.getTransactionOutputsForHash(it) },
+            inputsOf = { NativeBridge.getTransactionInputsForHash(it) },
+            ownedScriptHexes = { buildOwnedScriptHexes() },
+        )
+    }
+
+    /**
+     * Testable core of [holdAssetOutputsBeforeSpend]; same host-JVM constraint as the other seams
+     * in this file. The arrays are typed as the bridge really fills them: a slot it could not
+     * fill is null.
+     */
+    internal suspend fun holdAssetOutputsBeforeSpendImpl(
+        txHashes: () -> Array<out String?>?,
+        outputsOf: (String) -> Array<out String?>?,
+        inputsOf: (String) -> Array<out String?>?,
+        ownedScriptHexes: () -> Set<String>,
+    ): Int = preSpendPass.withLock {
+        val startedAt = System.nanoTime()
+        var heldOut = 0
+        var read = 0
+        var owned: Set<String>? = null              // built once, and only if an asset transaction is met
+        val assetTxsThisPass = HashSet<String>()
+        var listings = 0
+        // Listed again after every round: the pass ends on a listing that shows nothing it has not
+        // looked at, so what it returns is true of the wallet as it stands then.
+        while (true) {
+            val listed = txHashes()
+                ?: throw IllegalStateException("the wallet's transactions could not be listed")
+            val current = HashSet<String>(listed.size * 2)
+            val pending = ArrayList<String>()
+            for (hash in listed) {
+                if (hash.isNullOrBlank()) throw IllegalStateException("a listed transaction has no id")
+                if (current.add(hash) && hash !in plainTxs && hash !in assetTxsThisPass) pending.add(hash)
+            }
+            plainTxs.retainAll(current)             // memory only: a transaction native dropped
+            if (pending.isEmpty()) break
+            if (++listings > MAX_PRE_SPEND_LISTINGS) {
+                throw IllegalStateException("the wallet's transaction set did not settle")
+            }
+
+            for (txHash in pending) {
+                currentCoroutineContext().ensureActive()
+                read++
+                val outputLines = outputsOf(txHash)
+                    ?: throw IllegalStateException("a listed transaction could not be read")
+                val outputs = outputLines.map { parsePreSpendOutput(it) }
+                val header = outputs.firstOrNull { it.isOpReturn }?.let { opReturn ->
+                    val script = opReturn.scriptHex.hexToByteArray()
+                        ?: throw IllegalStateException("an output script is not hex")
+                    decoder.decode(script)
+                }
+                if (header == null) {
+                    plainTxs.add(txHash)
+                    continue
+                }
+                assetTxsThisPass.add(txHash)
+
+                // Units the inputs carried. A line that does not parse is an input we know nothing
+                // about, and "unknown" is an answer the targeting rule already has a side for.
+                val inputLines = inputsOf(txHash)
+                    ?: throw IllegalStateException("a listed transaction's inputs could not be read")
+                val inputs = inputLines.map { line ->
+                    val p = line?.split("|", limit = 2)
+                    val prevVout = p?.getOrNull(1)?.toIntOrNull()
+                    if (p == null || p[0].length != 64 || prevVout == null || prevVout < 0) null else p[0] to prevVout
+                }
+                val inputUnits = if (inputs.any { it == null }) null else resolveInputAssetUnits(
+                    inputs = inputs.filterNotNull(),
+                    rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
+                    isAssetTx = { txid -> if (txid in plainTxs) false else hasAssetPayload(outputsOf(txid)) },
+                )
+
+                // The same ownership rule detection applies: with an owned set, only what is ours;
+                // with none (the lookup failed), every output, which registers some that are inert.
+                val ownedNow = owned ?: ownedScriptHexes().also { owned = it }
+                val firstNonOpReturn = outputs.firstOrNull { !it.isOpReturn }?.vout
+                for (out in outputs) {
+                    if (out.isOpReturn) continue
+                    if (ownedNow.isNotEmpty() && out.scriptHex !in ownedNow) continue
+                    if (!AssetTxQuantity.targetsOutput(header, out.vout, firstNonOpReturn, inputUnits, outputLines.size)) continue
+                    // Not wrapped: a registration that did not happen is a pass that did not finish.
+                    if (registerAssetOutpoint(txHash, out.vout)) heldOut++
+                }
+            }
+        }
+        if (read > 0) {
+            android.util.Log.i("AssetManager",
+                "pre-spend pass: read $read transaction(s) in ${(System.nanoTime() - startedAt) / 1_000_000} ms, " +
+                    "${plainTxs.size} remembered as carrying no asset, $heldOut outpoint(s) newly held out")
+        }
+        heldOut
+    }
+
+    private class PreSpendOutput(val vout: Int, val scriptHex: String) {
+        val isOpReturn: Boolean get() = scriptHex.startsWith("6a")
+    }
+
+    /** One `"<vout>|<satoshis>|<scriptHex>"` line. A line that does not parse is thrown, not
+     *  skipped: an output the pass could not read is an output it did not look at. Only the index
+     *  and the script decide what is held out, so only they are read; the amount, which the
+     *  bridge prints unsigned, is not judged here. */
+    private fun parsePreSpendOutput(line: String?): PreSpendOutput {
+        val parts = line?.split("|", limit = 3)
+        val vout = parts?.getOrNull(0)?.toIntOrNull()
+        val scriptHex = parts?.getOrNull(2)
+        if (vout == null || vout < 0 || scriptHex == null) {
+            throw IllegalStateException("an output line could not be parsed")
+        }
+        return PreSpendOutput(vout, scriptHex.lowercase())
+    }
+
+    /** [txHasAssetPayload] over lines already fetched: null when there is nothing to judge from. */
+    private fun hasAssetPayload(outputLines: Array<out String?>?): Boolean? {
+        if (outputLines == null || outputLines.isEmpty()) return null
+        val opReturn = outputLines.asSequence()
+            .mapNotNull { line -> line?.split("|", limit = 3)?.getOrNull(2)?.hexToByteArray() }
+            .firstOrNull { it.isNotEmpty() && it[0] == 0x6A.toByte() }
+            ?: return false
+        return decoder.decode(opReturn) != null
+    }
+
+    /**
      * Ask again about held assets that still have no metadata.
      *
      * Every other getMetadata call sits on a DETECTION path — a new incoming transaction, or the
@@ -1625,6 +1800,12 @@ class AssetManager(
             TransferRuleState.NONE -> Unit
         }
 
+        // Detection first, to completion: the network fee below is paid from the plain-coin set,
+        // and that set is right to select from once every transaction the wallet holds has been
+        // looked at. A pass that did not finish means no coin is read and nothing is built.
+        val pass: suspend () -> Unit = beforeSpend ?: { holdAssetOutputsBeforeSpend() }
+        if (!SpendPreflight.completed(pass)) return TxResult.Error(SpendPreflight.NOT_SENT)
+
         if (!NativeBridge.isValidAddress(toAddress)) return TxResult.Error("Invalid DigiByte address")
         if (quantity <= 0) return TxResult.Error("Quantity must be positive")
         if (feePerKb < 0) return TxResult.Error("Fee rate must be non-negative")
@@ -1911,6 +2092,14 @@ class AssetManager(
      *  process restart; the walk then runs exactly once per session to
      *  refresh chain facts in case they ever go stale. */
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Transactions [holdAssetOutputsBeforeSpend] has shown to carry no asset payload — a fact
+     *  about their bytes, so it outlives rows, rescans and a rebuilt native wallet. Touched only
+     *  under [preSpendPass]. One 64-character id per plain transaction the wallet holds. */
+    private val plainTxs = HashSet<String>()
+
+    /** One pre-spend pass at a time: a second caller waits, then finds little left to read. */
+    private val preSpendPass = Mutex()
 
     /** Last set of unnamed assets logged, so a permanently-unnamed asset is reported once
      *  rather than on every sweep. See [retryMissingAssetMetadata]. */
@@ -2238,6 +2427,11 @@ class AssetManager(
          *  O(all-addresses) enumeration + BRWallet-lock contention during sync churn;
          *  short enough that a freshly-derived receive address surfaces promptly. */
         const val OWNED_SCRIPTS_TTL_MS = 30_000L
+
+        /** Listings one pre-spend pass may take before it gives up on the transaction set
+         *  settling. Each listing after the first exists only because something arrived during
+         *  the round before it, so two or three is the most a real wallet shows. */
+        const val MAX_PRE_SPEND_LISTINGS = 8
     }
 }
 

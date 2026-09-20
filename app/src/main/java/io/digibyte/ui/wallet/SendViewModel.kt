@@ -346,9 +346,16 @@ class SendViewModel @Inject constructor(
     fun sendDigiDollar(approved: ApprovedSend.DigiDollar, onResult: (txid: String?) -> Unit) {
         if (!NativeBridge.isValidDigiDollarAddress(approved.address)) { onResult(null); return }
         viewModelScope.launch(Dispatchers.IO) {
-            val txid = runCatching { NativeBridge.sendDigiDollar(approved.address, approved.cents) }
-                .onFailure { android.util.Log.w("SendViewModel", "sendDigiDollar failed", it) }
-                .getOrNull()
+            // Through the builder, never the bridge: it runs asset detection to completion before
+            // the native transfer takes its network fee from the plain-coin set.
+            val txid = try {
+                transactionBuilder.sendDigiDollar(approved.address, approved.cents)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.w("SendViewModel", "sendDigiDollar failed", t)
+                null
+            }
             onResult(txid)
         }
     }
