@@ -22,8 +22,14 @@
 //     BRSetNew calls BRPeerManagerNewEx makes): 100,000 parentless headers with recent
 //     timestamps, half of them sharing one parent, none chained to another;
 //   * the "relay" and "connect" scenarios drive the real _peerRelayedBlock on a real
-//     BRPeerManager, so both call sites of the store and every way a header leaves the set
-//     are the production code, not a copy of it.
+//     BRPeerManager, so the store's first call site (a header whose parent is not resident)
+//     and every way a header leaves the set are the production code, not a copy of it;
+//   * the "rescan" scenario drives the store's SECOND call site the same way: a header whose
+//     parent is resident above the tip, relayed while the tip is below the best height its
+//     peer announced. The announcement reaches the peer through the real version-message
+//     handler (orphan_set_limits_kat_peer.c). What holds at the first call site is asserted
+//     there too: exact total, lastOrphan resident, a displaced header released exactly once,
+//     the count limit, and the header connecting once the tip reaches its parent.
 // Single-threaded apart from one fixed-stack worker: the ...Locked helpers need only mutual
 // exclusion, which one caller at a time provides.
 //
@@ -39,8 +45,9 @@
 // LEAK DETECTION IS ON for this gate: single ownership is what it proves, so the fixed arm
 // must finish clean under LeakSanitizer.
 //
-// SCENARIO SELECTION. argv[1] = "limits" | "relay" | "connect"; none runs all three. run.sh
-// runs the reference arm once per scenario so that each one is reported for its own reason.
+// SCENARIO SELECTION. argv[1] = "limits" | "relay" | "connect" | "rescan"; none runs them
+// all. run.sh runs the reference arm once per scenario so that each one is reported for its
+// own reason.
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +55,9 @@
 #include <time.h>
 
 #include "BRPeerManager.c"
+
+// orphan_set_limits_kat_peer.c: a version message announcing `bestHeight`, through the real handler.
+int kat_peer_accept_version(BRPeer *peer, uint32_t bestHeight);
 
 #define N_ORPHANS 100000
 
@@ -474,6 +484,130 @@ static void scenario_connect(BRWallet *wallet)
     rig_close(&r);
 }
 
+// =======================================================================================
+// SCENARIO "rescan": the store's second call site, through the real _peerRelayedBlock.
+// =======================================================================================
+// The state a rescan leaves behind: manager->lastBlock has moved back while the headers above
+// it stay resident in manager->blocks, and the peer has announced a best height above the tip.
+// A header relayed on top of that resident chain has a known parent and a known height, is
+// not the next header after the tip, and is held in the parentless-header set until the tip
+// reaches its parent. The chain is built through the real relay path; the move back itself is
+// by hand (BRPeerManagerRescan needs a connected manager, and moving the tip pointer is all it
+// does to these two sets).
+typedef struct { Rig rig; BRMerkleBlock *tip0, *top; int ok; } RescanRig;
+
+#define RESCAN_ANNOUNCED_AHEAD 1000u   // how far above the chain's top the announced best height sits
+
+static void rig_move_tip(Rig *r, BRMerkleBlock *to) {
+    r->m->lastBlock = to;
+    r->m->floorMemoValid = 0;   // the floor memo is keyed by the tip
+}
+
+// members (optional) receives the chainLen headers of the resident chain, lowest first.
+static int rescan_rig_open(RescanRig *rr, BRWallet *wallet, uint32_t tagBase, uint32_t chainLen,
+                           uint32_t now, BRMerkleBlock **members)
+{
+    if (! rig_open(&rr->rig, wallet, newest_checkpoint_height() + 100)) return 0;
+    Rig *r = &rr->rig;
+
+    rr->tip0 = r->m->lastBlock;
+    for (uint32_t i = 0; i < chainLen; i++) {
+        BRMerkleBlock *h = make_header(tagBase + i, r->m->lastBlock->blockHash, now, 0);
+        _peerRelayedBlock(&r->info, h);
+        if (members) members[i] = h;
+    }
+    rr->top = r->m->lastBlock;
+    rr->ok  = (rr->top->height == rr->tip0->height + chainLen) && BRSetCount(r->m->orphans) == 0;
+
+    uint32_t announced = rr->top->height + RESCAN_ANNOUNCED_AHEAD;
+    rr->ok = rr->ok && kat_peer_accept_version(r->peer, announced) && BRPeerLastBlock(r->peer) == announced;
+
+    rig_move_tip(r, rr->tip0);   // the tip moves back; the chain above it stays resident
+    return 1;
+}
+
+static void scenario_rescan(BRWallet *wallet)
+{
+    uint32_t now = (uint32_t)time(NULL);
+
+    printf("\n=== rescan: two headers above the tip sharing one resident parent, then the tip catches up ===\n");
+    {
+        const uint32_t tagBase = 0x16000000u, chainLen = 3;
+        RescanRig rr;
+        if (! rescan_rig_open(&rr, wallet, tagBase, chainLen, now, NULL)) { check(0, "(G)", "setup: manager allocated"); return; }
+        Rig *r = &rr.rig;
+        check(rr.ok, "(G)", "setup: resident chain built through the relay path, best height announced above it, tip moved back");
+
+        const uint32_t topHeight  = rr.top->height;
+        const UInt256  topParent  = rr.top->prevBlock;   // copied now: the top is delivered again below
+        const UInt256  topHash    = rr.top->blockHash;
+
+        BRMerkleBlock *first = make_header(0x16100001u, topHash, now, 0);
+        _peerRelayedBlock(&r->info, first);
+        check(BRSetCount(r->m->orphans) == 1 && r->m->lastOrphan == first, "(G)", "setup: the header is held in the set");
+        check(first->height == topHeight + 1, "(G)",
+              "setup: it is held with its height known (the second call site; the first holds a header of unknown height)");
+        check(r->m->lastBlock == rr.tip0 && ! BRSetContains(r->m->blocks, first), "(G)",
+              "setup: it neither moved the tip nor joined the chain set");
+        check(total_is_exact(r->m), "(R)", "byte total equals the resident sum after an insert at the second call site");
+
+        BRMerkleBlock *second = make_header(0x16100002u, topHash, now, 0);   // another identity, same parent
+        _peerRelayedBlock(&r->info, second);
+        check(BRSetCount(r->m->orphans) == 1, "(G)", "two headers sharing a resident parent hold one resident entry");
+        check(r->m->lastOrphan == second && BRSetGet(r->m->orphans, second) == second, "(G)", "lastOrphan names the resident header");
+        check(total_is_exact(r->m), "(R)", "byte total equals the resident sum after a displacement at the second call site");
+        if (r->m->lastOrphan) g_sink += r->m->lastOrphan->timestamp;   // read through lastOrphan under ASan
+        // `first` has its one owner already: a second release is an AddressSanitizer report
+        // right here, and no release at all is a LeakSanitizer report at exit.
+
+        // The tip returns to the top of the resident chain (the counterpart of the move back),
+        // and the top is delivered again: the held header connects behind it.
+        rig_move_tip(r, rr.top);
+        _peerRelayedBlock(&r->info, make_header(tagBase + chainLen - 1, topParent, now, 0));
+        check(r->m->lastBlock == second && second->height == topHeight + 1, "(G)",
+              "the held header connected once the tip reached its parent");
+        check(BRSetCount(r->m->orphans) == 0 && r->m->orphanBytes == 0, "(G)", "the set and its byte total are empty afterwards");
+        check(r->m->lastOrphan == NULL, "(R)", "lastOrphan names nothing once its header has left the set");
+        rig_close(r);
+    }
+
+    printf("\n=== rescan: more such headers than the count limit ===\n");
+    {
+        enum { CHAIN = ORPHAN_SET_COUNT_MAX + 50 };
+        BRMerkleBlock **members = calloc(CHAIN, sizeof(*members));
+        RescanRig rr;
+        if (! members || ! rescan_rig_open(&rr, wallet, 0x17000000u, CHAIN, now, members)) {
+            free(members);
+            check(0, "(G)", "setup: manager allocated");
+            return;
+        }
+        Rig *r = &rr.rig;
+        check(rr.ok, "(G)", "setup: resident chain built through the relay path, best height announced above it, tip moved back");
+
+        // One header on top of each member of the resident chain, newest last: each has its own
+        // resident parent and a known height above the one after the tip.
+        size_t worstCount = 0, notResident = 0, inexact = 0, heightUnknown = 0;
+        for (uint32_t i = 0; i < CHAIN; i++) {
+            BRMerkleBlock *o = make_header(0x17100000u + i, members[i]->blockHash, now - (CHAIN - i), 0);
+            _peerRelayedBlock(&r->info, o);
+            size_t c = BRSetCount(r->m->orphans);
+            if (c > worstCount) worstCount = c;
+            if (r->m->lastOrphan != o || BRSetGet(r->m->orphans, o) != o) notResident++;
+            else if (o->height != members[i]->height + 1) heightUnknown++;
+            if (! total_is_exact(r->m)) inexact++;
+        }
+        printf("after %d headers above the tip: resident=%zu worst_resident=%zu running_total=%zu inexact=%zu (count limit=%u)\n",
+               (int)CHAIN, BRSetCount(r->m->orphans), worstCount, r->m->orphanBytes, inexact, (unsigned)ORPHAN_SET_COUNT_MAX);
+        check(r->m->lastBlock == rr.tip0 && heightUnknown == 0, "(G)", "setup: every one was held with its height known, and none moved the tip");
+        check(worstCount <= ORPHAN_SET_COUNT_MAX, "(R)", "count stays within the fixed upper limit at the second call site");
+        check(inexact == 0, "(R)", "byte total equals the resident sum after every store and eviction at the second call site");
+        check(notResident == 0, "(G)", "the header just stored is resident, and named by lastOrphan, after every eviction pass");
+        if (r->m->lastOrphan) g_sink += r->m->lastOrphan->timestamp;
+        free(members);
+        rig_close(r);
+    }
+}
+
 int main(int argc, char **argv)
 {
     // Unbuffered: a sanitizer ends the process without flushing stdio, and the captured
@@ -495,6 +629,7 @@ int main(int argc, char **argv)
     if (! *only || strcmp(only, "limits") == 0)  scenario_limits();
     if (! *only || strcmp(only, "relay") == 0)   scenario_relay(wallet);
     if (! *only || strcmp(only, "connect") == 0) scenario_connect(wallet);
+    if (! *only || strcmp(only, "rescan") == 0)  scenario_rescan(wallet);
 
     BRWalletFree(wallet);
 

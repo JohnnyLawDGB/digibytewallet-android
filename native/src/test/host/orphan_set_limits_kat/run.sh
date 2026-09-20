@@ -12,11 +12,16 @@
 #       limits   -> this KAT's own count-limit check fails, AND LeakSanitizer reports
 #       relay    -> LeakSanitizer reports (the store's real call site)
 #       connect  -> AddressSanitizer reports (lastOrphan after its header left the set)
+#       rescan   -> this KAT's own exact-total check at the store's SECOND call site fails,
+#                   AND LeakSanitizer reports (a header displaced there)
 #   * ORPHAN_SET_LIMITS_UNFIXED=0 (fixed arm): every check passes, exit 0, and the run is
 #     clean under AddressSanitizer and LeakSanitizer.
 #
 # A reference arm that is not reported proves nothing, so that is a failure of this gate; a
 # non-zero exit alone does not count (a kill or a stop in setup also exits non-zero).
+#
+# BRPeer.c is compiled through orphan_set_limits_kat_peer.c, which #includes it so that the
+# rig's peer can be handed a version message (its announced best height) by the real handler.
 #
 # LEAK DETECTION IS ON here: single ownership is what this gate proves.
 # Value-macro convention: -D...=1 / -D...=0, tested with #if.
@@ -38,7 +43,7 @@ build() {
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/orphan_set_limits_kat_main.c" \
-        "$CORE_DIR/BRPeer.c" \
+        "$SCRIPT_DIR/orphan_set_limits_kat_peer.c" \
         "$CORE_DIR/BRWallet.c" \
         "$CORE_DIR/BRTransaction.c" \
         "$CORE_DIR/BRMerkleBlock.c" \
@@ -65,6 +70,13 @@ build() {
         -lm -lpthread \
         -o "$out"
 }
+
+# Seam: the reference arm is selected by a macro INSIDE BRPeerManager.c. If that macro were
+# gone, -D...=1 would select nothing and both arms would be the same code.
+if ! grep -q 'ORPHAN_SET_LIMITS_UNFIXED' "$CORE_DIR/BRPeerManager.c"; then
+    echo "GATE FAILURE: BRPeerManager.c no longer tests ORPHAN_SET_LIMITS_UNFIXED — the reference arm has no seam."
+    exit 1
+fi
 
 # Leak detection ON. symbolize=0 for speed: the gate detects a report, it does not name frames.
 export ASAN_OPTIONS="detect_leaks=1 symbolize=0"
@@ -107,6 +119,7 @@ require_reference_reported() {
 require_reference_reported limits  "\[FAIL\] \(R\) parentless-header count stays within the fixed upper limit" "ERROR: LeakSanitizer"
 require_reference_reported relay   "ERROR: LeakSanitizer"
 require_reference_reported connect "ERROR: AddressSanitizer"
+require_reference_reported rescan  "\[FAIL\] \(R\) byte total equals the resident sum after an insert at the second call site" "ERROR: LeakSanitizer"
 
 echo
 echo "---- FIXED ARM: every scenario must pass, clean under both sanitizers ----"
@@ -123,5 +136,5 @@ grep -E "^after |orphan_set_limits_kat: PASS" "$FIXED_OUT" | sed 's/^/  fixed: /
 echo "  fixed: $(grep -c '\[PASS\]' "$FIXED_OUT") checks passed, $(grep -c '\[FAIL\]' "$FIXED_OUT") failed"
 
 echo
-echo "orphan_set_limits_kat: PASS (reference arm reported in all three scenarios, fixed arm clean)"
+echo "orphan_set_limits_kat: PASS (reference arm reported in every scenario, fixed arm clean)"
 exit 0

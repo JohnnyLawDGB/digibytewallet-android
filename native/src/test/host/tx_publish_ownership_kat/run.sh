@@ -25,9 +25,12 @@
 #
 # ==== SOURCE GATE ===========================================================
 # The arms above only MIRROR the JNI function's shape: jni_transaction.c includes Android headers
-# and cannot be compiled on the host. So this runner also greps the real sendDigiDollar and fails
+# and cannot be compiled on the host. So this runner also scans the real sendDigiDollar and fails
 # unless it copies the transaction, registers the copy, publishes the original — in that order —
-# and never registers the original into the wallet.
+# never registers anything but the copy into the wallet, does not release the copy around its
+# registration, and does not name the original again once the publisher has it. The scan reads
+# the function's CODE (comments dropped, literals emptied, calls counted one by one) and takes
+# the two names from the function itself; section [3] states the rules.
 set -uo pipefail   # deliberately NOT -e: the red arm's non-zero exit is expected
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -136,60 +139,196 @@ if [ ! -f "$JNI" ]; then
     exit 1
 fi
 
-# Slice out just the sendDigiDollar function body (signature line through its column-0 close).
-FN="$(awk '/_sendDigiDollar\(/{f=1} f{print} f&&/^}/{exit}' "$JNI")"
+# Everything below matches the CODE of the function, never its text: comments are dropped and
+# string and character literals are emptied first, calls are counted one by one (grep -o, not
+# lines), and white space is allowed wherever C allows it. Names are taken from the function
+# itself — ORIG is whatever the publish call is handed, COPY is whatever BRTransactionCopy(ORIG)
+# is assigned to — so the rule is checked, not one spelling of it:
+#   (a) a copy of ORIG is made, into a variable that holds nothing else and has no alias;
+#   (b) every wallet registration in the function registers COPY, and there is at least one;
+#   (c) COPY is not released on the way to being registered, nor unconditionally after it;
+#   (d) copy, then register, then publish ORIG — and every publish call is handed ORIG;
+#   (e) ORIG is not named again once it has been handed to the publisher.
+# (a)-(c) may live in one file-static helper that the function calls with ORIG before it
+# publishes; the same checks are then applied to that helper.
+# A text scan cannot follow control flow. Where it has to guess ((c), and a function that holds
+# conditional compilation) it fails closed, and the message says what it looked for.
+export LC_ALL=C   # offsets below are bytes
 
-# First line (within the slice) matching an extended regex; empty when there is none.
-first_line() { grep -nE "$1" <<<"$FN" | head -n 1 | cut -d: -f1; }
+ID='[A-Za-z_][A-Za-z0-9_]*'
+SP='[[:space:]]*'
+
+# Drops /* */ and // comments; keeps the quotes of string and character literals, not their contents.
+strip_c() {
+    awk 'BEGIN { st = 0 }
+    {
+        line = $0; out = ""; n = length(line); i = 1
+        while (i <= n) {
+            c = substr(line, i, 1); d = substr(line, i, 2)
+            if (st == 1) { if (d == "*/") { st = 0; out = out " "; i += 2 } else i++; continue }
+            if (st == 2 || st == 3) {
+                if (c == "\\") { i += 2; continue }
+                if ((st == 2 && c == "\"") || (st == 3 && c == "\047")) { st = 0; out = out c }
+                i++; continue
+            }
+            if (d == "/*") { st = 1; i += 2; continue }
+            if (d == "//") break
+            if (c == "\"") st = 2; else if (c == "\047") st = 3
+            out = out c; i++
+        }
+        if (st != 1) st = 0
+        print out
+    }'
+}
+flatten()      { tr '\n\t' '  ' | sed -E 's/ +/ /g'; }
+count()        { grep -oE -- "$1" <<<"$2" | wc -l | tr -d ' '; }            # $1 regex, $2 text: matches, not lines
+offsets()      { grep -obE -- "$1" <<<"$2" | cut -d: -f1; }                 # byte offset of every match
+# Brace depth at byte offset $2 of $1, and the last non-blank character before that offset.
+stmt_context() {
+    awk -v off="$2" '{ d = 0; p = ""
+        for (i = 1; i <= off; i++) { c = substr($0, i, 1); if (c == "{") d++; else if (c == "}") d--; if (c != " ") p = c }
+        print d, p }' <<<"$1"
+}
 
 gate_fail=0
-# The scanner is not blind: the slice must actually contain the function.
-if ! grep -q '_sendDigiDollar(' <<<"$FN"; then
-    echo "  gate: could not locate sendDigiDollar — the scanner is blind"; gate_fail=1
-fi
-# It must take a copy of the transaction.
-COPY_LINE="$(first_line 'walletCopy[[:space:]]*=[[:space:]]*BRTransactionCopy\([[:space:]]*tx[[:space:]]*\)')"
-if [ -z "$COPY_LINE" ]; then
-    echo "  gate: sendDigiDollar does not copy the transaction"; gate_fail=1
-fi
-# It must register the COPY (named walletCopy, as the plain-DGB paths do).
-REGISTER_LINE="$(first_line 'BRWalletRegisterTransaction\(g_wallet,[[:space:]]*walletCopy\)')"
-if [ -z "$REGISTER_LINE" ]; then
-    echo "  gate: sendDigiDollar does not register the copy into the wallet"; gate_fail=1
-fi
-# It must publish the ORIGINAL.
-PUBLISH_LINE="$(first_line 'BRPeerManagerPublishTx\(g_peerManager,[[:space:]]*tx,')"
-if [ -z "$PUBLISH_LINE" ]; then
-    echo "  gate: sendDigiDollar does not publish the original transaction"; gate_fail=1
-fi
-# Order: copy, then register the copy, then publish. Once the original has been handed over it
-# belongs to the publisher, so the copy must already exist and already be registered.
-if [ -n "$COPY_LINE" ] && [ -n "$REGISTER_LINE" ] && [ -n "$PUBLISH_LINE" ]; then
-    if ! { [ "$COPY_LINE" -le "$REGISTER_LINE" ] && [ "$REGISTER_LINE" -lt "$PUBLISH_LINE" ]; }; then
-        echo "  gate: sendDigiDollar must copy (line +$COPY_LINE), register the copy (line" \
-             "+$REGISTER_LINE) and only then publish (line +$PUBLISH_LINE) — the order is wrong"
-        gate_fail=1
+say() { echo "  gate: $*"; gate_fail=1; }
+
+# $1 = flattened code of one function, $2 = the name ORIG goes by in it, $3 = label for messages.
+# Checks (a), (b), (c). Returns 2, silently, when the function makes no copy of ORIG at all.
+# On return CR_FIRST_REG / CR_LAST_REG hold the offsets of the first and last registration.
+check_copy_register() {
+    local code="$1" orig="$2" label="$3"
+    local copy_of="BRTransactionCopy$SP\\($SP$orig$SP\\)"
+    local copy
+    copy="$(grep -oE -- "\\<$ID$SP=$SP$copy_of" <<<"$code" | head -n 1 | sed -E "s/^($ID).*/\\1/")"
+    [ -n "$copy" ] || return 2
+    if [ "$copy" = "$orig" ]; then say "$label: the copy is assigned over the original ($orig)"; return 1; fi
+
+    # (a) COPY holds a copy of ORIG, or NULL, and nothing else; its value is given to no other name.
+    local n_assign n_assign_ok
+    n_assign="$(count "\\<$copy$SP=([^=]|\$)" "$code")"
+    n_assign_ok="$(count "\\<$copy$SP=$SP($copy_of|NULL\\>)" "$code")"
+    if [ "$n_assign" != "$n_assign_ok" ]; then
+        say "$label: $copy is assigned something other than BRTransactionCopy($orig) or NULL" \
+            "($n_assign_ok of $n_assign assignments)"
     fi
+    if grep -Eq -- "[^=!<>]=$SP\\<$copy$SP[;,]" <<<"$code"; then
+        say "$label: the value of $copy is given to another name"
+    fi
+
+    # (b) every registration registers COPY. Every mention of the registering function counts as
+    # a registration, whatever follows it, so nothing is registered by a spelling this misses.
+    local reg_copy="\\<BRWalletRegisterTransaction$SP\\([^,()]*,$SP$copy$SP\\)"
+    local n_reg n_reg_copy
+    n_reg="$(count "BRWalletRegisterTransaction" "$code")"
+    n_reg_copy="$(count "$reg_copy" "$code")"
+    if [ "$n_reg_copy" -eq 0 ]; then say "$label: does not register the copy ($copy) into the wallet"; return 1; fi
+    if [ "$n_reg" != "$n_reg_copy" ]; then
+        say "$label: registers something other than $copy into the wallet" \
+            "($n_reg_copy of $n_reg registrations name the copy)"
+    fi
+
+    local copy_at
+    copy_at="$(offsets "\\<$copy$SP=$SP$copy_of" "$code" | head -n 1)"
+    CR_FIRST_REG="$(offsets "$reg_copy" "$code" | head -n 1)"
+    CR_LAST_REG="$(offsets "$reg_copy" "$code" | tail -n 1)"
+    if [ "$copy_at" -ge "$CR_FIRST_REG" ]; then
+        say "$label: registers $copy (offset $CR_FIRST_REG) before it holds the copy (offset $copy_at)"
+    fi
+
+    # (c) releases of COPY.
+    local at between reg_before reg_depth free_depth prev
+    for at in $(offsets "\\<BRTransactionFree$SP\\($SP$copy$SP\\)" "$code"); do
+        if [ "$at" -lt "$CR_FIRST_REG" ]; then
+            # Before the registration: only on a path that does not go on to register it.
+            between="${code:$at:$((CR_FIRST_REG - at))}"
+            if ! grep -Eq -- "\\<(else|return|goto)\\>|\\<$copy$SP=${SP}NULL\\>" <<<"$between"; then
+                say "$label: $copy must reach its registration unreleased (released at offset $at," \
+                    "registered at offset $CR_FIRST_REG)"
+            fi
+        else
+            # After it: only under a condition. A release that starts a statement at the brace
+            # depth of the registration before it (or shallower) is under none.
+            reg_before="$(offsets "$reg_copy" "$code" | awk -v a="$at" '$1 < a { r = $1 } END { print r }')"
+            read -r reg_depth _ <<<"$(stmt_context "$code" "$reg_before")"
+            read -r free_depth prev <<<"$(stmt_context "$code" "$at")"
+            case "$prev" in
+                ';'|'{'|'}')
+                    if [ "$free_depth" -le "$reg_depth" ]; then
+                        say "$label: once registered (offset $reg_before) $copy belongs to the wallet;" \
+                            "an unconditional release follows it (offset $at)"
+                    fi ;;
+            esac
+        fi
+    done
+    return 0
+}
+
+STRIPPED="$(strip_c < "$JNI")"
+# $1 = awk regex for the definition line. Prints that line through the function's column-0 close.
+fn_slice() { awk -v re="$1" '! f && $0 ~ re && $0 !~ /;/ { f = 1 } f { print } f && /^}/ { exit }' <<<"$STRIPPED"; }
+
+FN_LINES="$(fn_slice '_sendDigiDollar[[:space:]]*[(]')"
+FN="$(flatten <<<"$FN_LINES")"
+
+# The scanner is not blind: the slice is the function's definition, body included.
+if ! grep -Eq -- "_sendDigiDollar$SP\\([^;{]*\\)$SP\\{.*\\}" <<<"$FN"; then
+    say "could not locate the definition of sendDigiDollar — the scanner is blind"
 fi
-# It must NOT register the original into the wallet — that is the single-object shape.
-if grep -Eq 'BRWalletRegisterTransaction\(g_wallet,[[:space:]]*tx\)' <<<"$FN"; then
-    echo "  gate: sendDigiDollar registers the original into the wallet — the wallet and the"
-    echo "        publisher would hold one object"; gate_fail=1
+if grep -Eq '^[[:space:]]*#' <<<"$FN_LINES"; then
+    say "sendDigiDollar holds a preprocessor directive — a text scan cannot tell which branch is compiled"
 fi
-# Nor anything else: every register call in the function registers walletCopy. (A mention of the
-# call in a comment counts too — that fails safe.)
-REG_ALL="$(grep -cE 'BRWalletRegisterTransaction\(' <<<"$FN")"
-REG_COPY="$(grep -cE 'BRWalletRegisterTransaction\(g_wallet,[[:space:]]*walletCopy\)' <<<"$FN")"
-if [ "$REG_ALL" != "$REG_COPY" ]; then
-    echo "  gate: sendDigiDollar registers something other than walletCopy into the wallet" \
-         "($REG_COPY of $REG_ALL register calls name the copy)"; gate_fail=1
+
+# (d) the publish call names ORIG; every publish call is handed that same object.
+PUB_ANY='\<BRPeerManagerPublish[A-Za-z0-9_]*'
+ORIG="$(grep -oE -- "$PUB_ANY$SP\\([^,()]*,$SP$ID$SP[,)]" <<<"$FN" | head -n 1 | sed -E "s/.*,$SP($ID)$SP[,)]\$/\\1/")"
+if [ -z "$ORIG" ]; then
+    say "sendDigiDollar does not hand a transaction to the publisher"
+else
+    PUB_ORIG="$PUB_ANY$SP\\([^,()]*,$SP$ORIG$SP[,)]"
+    N_PUB="$(count "$PUB_ANY" "$FN")"; N_PUB_ORIG="$(count "$PUB_ORIG" "$FN")"
+    if [ "$N_PUB" != "$N_PUB_ORIG" ]; then
+        say "sendDigiDollar publishes something other than $ORIG ($N_PUB_ORIG of $N_PUB publish calls name it)"
+    fi
+    FIRST_PUB="$(offsets "$PUB_ORIG" "$FN" | head -n 1)"
+
+    check_copy_register "$FN" "$ORIG" "sendDigiDollar"; cr=$?
+    if [ "$cr" -eq 0 ]; then
+        if [ "$CR_LAST_REG" -ge "$FIRST_PUB" ]; then
+            say "sendDigiDollar must register the copy (offset $CR_LAST_REG) before it publishes" \
+                "the original (offset $FIRST_PUB) — the order is wrong"
+        fi
+    elif [ "$cr" -eq 2 ]; then
+        # No copy here: (a)-(c) may live in a file-static helper called with ORIG before the publish.
+        helper_ok=0
+        for h in $(grep -oE -- "\\<$ID$SP\\([^()]*\\<$ORIG\\>[^()]*\\)" <<<"${FN:0:$FIRST_PUB}" | sed -E "s/^($ID).*/\\1/" | sort -u); do
+            H="$(fn_slice "^static[^(]*[^A-Za-z0-9_]$h[[:space:]]*[(]" | flatten)"
+            [ -n "$H" ] || continue
+            H_ORIG="$(grep -oE -- "\\<BRTransaction$SP\\*$SP$ID" <<<"${H%%\{*}" | head -n 1 | sed -E "s/.*\\*$SP//")"
+            [ -n "$H_ORIG" ] || continue
+            check_copy_register "$H" "$H_ORIG" "$h (called by sendDigiDollar)"; hcr=$?
+            if [ "$hcr" -ne 2 ]; then helper_ok=1; echo "  gate: copy and registration found in helper $h"; fi
+        done
+        if [ "$helper_ok" -eq 0 ]; then say "sendDigiDollar does not copy the transaction ($ORIG) before publishing it"; fi
+        if [ "$(count "BRWalletRegisterTransaction" "$FN")" -ne 0 ]; then
+            say "sendDigiDollar registers a transaction it did not copy"
+        fi
+    fi
+
+    # (e) once handed over, ORIG belongs to the publisher: the function does not name it again
+    # (other than to hand the same object to a publish call on another branch).
+    AFTER="$(sed -E "s/$PUB_ORIG/ /g" <<<"${FN:$FIRST_PUB}")"
+    if grep -Eq -- "\\<$ORIG\\>" <<<"$AFTER"; then
+        say "once handed to the publisher, $ORIG is not sendDigiDollar's to name again; found:" \
+            "$(grep -oE -- ".{0,30}\\<$ORIG\\>.{0,20}" <<<"$AFTER" | head -n 1)"
+    fi
 fi
 
 if [ "$gate_fail" -ne 0 ]; then
     echo "SOURCE GATE FAILED"
     exit 1
 fi
-echo "SOURCE GATE confirmed: sendDigiDollar copies, registers the copy, then publishes the original."
+echo "SOURCE GATE confirmed: sendDigiDollar copies ($ORIG), registers the copy, publishes the original, and leaves it alone."
 
 echo
 echo "tx_publish_ownership_kat: RED-BEFORE-GREEN OK (4/4 arms), source gate OK"
