@@ -173,6 +173,17 @@ class AssetManager(
     /** Where the parent-walk keeps what it proves. Defaults to process-lifetime memory so
      *  callers without a database behave identically, just without persistence. */
     private val provenanceStore: ProvenanceStore = InMemoryProvenanceStore(),
+    /** Seam for "hold this outpoint out of the plain-DGB spendable set". Defaults to the native
+     *  bridge in production; a test supplies a recording fake so the protection decision can be
+     *  asserted without loading the native library. The default lambda does not touch
+     *  [NativeBridge] until it is invoked, so merely constructing an AssetManager never does. */
+    private val registerAssetOutpoint: (String, Int) -> Boolean =
+        { txid, vout -> NativeBridge.registerAssetOutpoint(txid, vout) },
+    /** Seam the startup replay uses to decide whether a stored row with a zero quantity is a
+     *  targeted asset carrier (as opposed to ordinary DGB change). Null in production, where the
+     *  replay re-reads the transaction through the bridge ([defaultResolveRowTargets]); a test
+     *  injects a fake so the replay can be exercised without the native library. */
+    private val resolveRowTargets: (suspend (String, Int) -> Boolean?)? = null,
 ) {
 
     /** Walks a transfer back to its issuance, resuming rather than restarting. The hop
@@ -617,15 +628,6 @@ class AssetManager(
             isAssetTx = { txid -> txHasAssetPayload(txid) },
         )
         val outputCount = outputLines.size
-        val implicitVout = AssetTxQuantity.implicitChangeVout(outputCount)
-        val implicit = AssetTxQuantity.implicitChange(header, inputUnits, outputCount)
-
-        // FAIL CLOSED, independent of whether we can display the amount: if a remainder
-        // exists — or we simply cannot tell — the last output is held out of the
-        // spendable DGB set so a plain DGB send can never consume it. An unswept output
-        // is recoverable; a destroyed asset is not. Only for outputs we own; native
-        // tracks nothing else.
-        val excludeImplicitChange = implicit == null || implicit > 0L
 
         // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
         // which returns ALL of the tx's outputs unfiltered — NOT just the ones
@@ -646,17 +648,31 @@ class AssetManager(
         // and passed in, so we don't recompute it per tx.
         val owned = ownedScriptHexes ?: buildOwnedScriptHexes()
 
+        // The wallet-owned, non-OP_RETURN outputs of this transaction. Outputs we don't own are
+        // skipped (see ownership-gate note above) only when we actually have an owned set — an
+        // empty set means the lookup failed, in which case we defer to the prune.
+        val ownedOutputs = outputs.filter { out ->
+            !(out.script.isNotEmpty() && out.script[0] == 0x6A.toByte()) &&
+                (owned.isEmpty() || out.script.toHex() in owned)
+        }
+
+        // FAIL CLOSED, independent of whether we can display an amount: every owned output an
+        // instruction targets — explicit target, range, percent, and the implicit-change
+        // remainder — is held out of the spendable DGB set at once, so a detected asset output
+        // can never be consumed by a plain DGB send before the next restart. An owned output no
+        // instruction targets is ordinary DGB change and stays spendable. An unswept output is
+        // recoverable; a destroyed asset is not.
+        protectTargetedOutputs(
+            txHashHex = txHashHex,
+            header = header,
+            ownedVouts = ownedOutputs.map { it.vout },
+            firstNonOpReturnVout = firstNonOpReturn,
+            inputUnits = inputUnits,
+            outputCount = outputCount,
+        )
+
         var anyStillUnresolved = false
-        for (out in outputs) {
-            if (out.script.isNotEmpty() && out.script[0] == 0x6A.toByte()) continue
-            // Skip outputs we don't own (see ownership-gate note above). Only
-            // enforce when we actually have an owned set — an empty set means
-            // the lookup failed, in which case we defer to the prune.
-            if (owned.isNotEmpty() && out.script.toHex() !in owned) continue
-            if (out.vout == implicitVout && excludeImplicitChange) {
-                runCatching { NativeBridge.registerAssetOutpoint(txHashHex, out.vout) }
-                    .onFailure { android.util.Log.d("AssetManager", "registerAssetOutpoint threw", it) }
-            }
+        for (out in ownedOutputs) {
             val stillUnresolved = persistDetectedAssetOutput(
                 txHashHex = txHashHex,
                 vout = out.vout,
@@ -773,6 +789,35 @@ class AssetManager(
      */
     internal fun maybePersistAfterDetect(persistAfterDetect: Boolean, detected: IncomingAssetInfo?) {
         if (persistAfterDetect && detected != null) runCatching { walletTxPersister?.persist() }
+    }
+
+    /**
+     * The protection decision, extracted as its own seam so it is testable without
+     * `NativeBridge` — the same constraint the other seams in this file are shaped around. Holds
+     * every owned output an instruction targets out of the plain-DGB spendable set through the
+     * injected [registerAssetOutpoint]. Targets are, via [AssetTxQuantity.targetsOutput], the
+     * explicit instruction outputs, every output a range names, percent targets, and the
+     * implicit-change remainder; an owned output nothing targets is ordinary DGB change and is
+     * left spendable — protecting every `is_asset` row instead would lock ordinary change out of
+     * spending. Returns the number of outpoints newly protected.
+     */
+    internal fun protectTargetedOutputs(
+        txHashHex: String,
+        header: DecodedAssetHeader,
+        ownedVouts: List<Int>,
+        firstNonOpReturnVout: Int?,
+        inputUnits: Long?,
+        outputCount: Int,
+    ): Int {
+        var protectedCount = 0
+        for (vout in ownedVouts) {
+            if (!AssetTxQuantity.targetsOutput(header, vout, firstNonOpReturnVout, inputUnits, outputCount)) continue
+            val added = runCatching { registerAssetOutpoint(txHashHex, vout) }
+                .onFailure { android.util.Log.d("AssetManager", "registerAssetOutpoint threw", it) }
+                .getOrDefault(false)
+            if (added) protectedCount++
+        }
+        return protectedCount
     }
 
     /**
@@ -1314,18 +1359,52 @@ class AssetManager(
      * wallet spends the first minutes after each restart with asset-bearing outputs
      * looking like ordinary DGB.
      *
-     * Covers rows whose quantity we resolved. Rows excluded fail-closed on an UNKNOWN
-     * remainder carry no quantity to key on and are re-registered by the next
-     * [sweepKnownTransactionsForAssets] pass instead (~30s), which recomputes the same
-     * decision from the transaction itself.
+     * Covers every unspent row an instruction targets. A row with a positive quantity is a
+     * resolved carrier. A row with a zero quantity is either ordinary DGB change or a carrier
+     * whose units this layer cannot total (a percent target, an unknown remainder), so it is
+     * put to the same targeting rule detection uses ([AssetTxQuantity.targetsOutput]) and held
+     * out when targeted. `is_asset` alone is never the test: it is set on every owned output of
+     * an asset transaction, plain change included.
+     *
+     * When the targeting question has no answer — the transaction is held but cannot be decoded,
+     * or the resolver fails — the row is held out: that is recoverable, an asset spent as plain
+     * DGB is not. A row whose transaction native positively does not hold is a different case and
+     * is left alone ([replayAnswerForAbsentTransaction]): if the local rows outlive native's
+     * transaction set (a sync-state reset), holding such rows out would keep the plain change of
+     * an asset send out of the DGB balance until the first start after the transaction is back,
+     * because an outpoint registered ahead of its transaction is never released.
      *
      * Returns the number of outpoints newly excluded.
      */
     suspend fun replayAssetOutpointExclusions(): Int {
         var registered = 0
         for (row in utxoDao.getAllAssetUtxosNow()) {
-            if (row.spent || row.assetQuantity <= 0L) continue
-            val added = runCatching { NativeBridge.registerAssetOutpoint(row.txid, row.vout) }
+            if (row.spent) continue
+            val protect = if (row.assetQuantity > 0L) {
+                // A resolved carrier: hold it out, as before.
+                true
+            } else {
+                // A stored quantity of zero is ambiguous: ordinary DGB change (nothing targets
+                // it) or a carrier whose units this layer cannot total (a percent target, or an
+                // implicit remainder left unknown). Ask the same targeting rule detection uses.
+                // A row with no answer — its transaction is held but cannot be decoded, or the
+                // resolver failed — is held out: keeping an output out of a spend can be undone,
+                // spending an asset cannot. A row whose transaction native positively does not
+                // hold gets `false` instead (see replayAnswerForAbsentTransaction). The question
+                // is asked per row: one row without an answer is held out and the replay goes on
+                // to the next, so it never ends before the last row.
+                val targeted = try {
+                    (resolveRowTargets ?: ::defaultResolveRowTargets)(row.txid, row.vout)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.d("AssetManager", "replay: no targeting answer for a row; holding it out", e)
+                    null
+                }
+                targeted ?: true
+            }
+            if (!protect) continue
+            val added = runCatching { registerAssetOutpoint(row.txid, row.vout) }
                 .getOrDefault(false)
             if (added) registered++
         }
@@ -1334,6 +1413,62 @@ class AssetManager(
                 "replayAssetOutpointExclusions: $registered outpoint(s) held out of the spendable set")
         }
         return registered
+    }
+
+    /**
+     * Production targeting resolver for the startup replay: re-read the transaction through the
+     * bridge, decode its OP_RETURN, resolve its input units, and apply
+     * [AssetTxQuantity.targetsOutput]. Returns null — no answer, which the replay treats as "hold
+     * it out" — when the transaction is held but cannot be decoded, or when the bridge gave no clean
+     * reply. When native positively holds no such transaction the answer is `false`
+     * ([replayAnswerForAbsentTransaction] says why). Never reached when a test injects
+     * [resolveRowTargets], so the replay stays testable without the native library.
+     */
+    private suspend fun defaultResolveRowTargets(txHashHex: String, vout: Int): Boolean? {
+        var bridgeAnsweredCleanly = true
+        val outputLines = try {
+            NativeBridge.getTransactionOutputsForHash(txHashHex)
+        } catch (t: Throwable) {   // Throwable: a missing native library is an Error, not an Exception
+            bridgeAnsweredCleanly = false
+            null
+        }
+        if (outputLines == null) {
+            return replayAnswerForAbsentTransaction(
+                walletLoaded = bridgeAnsweredCleanly && runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false),
+                txidWellFormed = txHashHex.length == 64 && txHashHex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' },
+                bridgeAnsweredCleanly = bridgeAnsweredCleanly,
+            )
+        }
+        if (outputLines.isEmpty()) return null
+        val scripts = outputLines.mapNotNull { line ->
+            val p = line.split("|", limit = 3)
+            val v = p.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+            val s = p.getOrNull(2)?.hexToByteArray() ?: return@mapNotNull null
+            v to s
+        }
+        val opReturn = scripts.firstOrNull { it.second.isNotEmpty() && it.second[0] == 0x6A.toByte() }?.second
+            ?: return null
+        val header = decoder.decode(opReturn) ?: return null
+        val firstNonOpReturn = scripts.firstOrNull { it.second.isEmpty() || it.second[0] != 0x6A.toByte() }?.first
+        // try/catch rather than runCatching: this is a suspend call, and a cancellation raised
+        // inside it has to reach the replay loop, which rethrows it.
+        val inputUnits = try {
+            resolveInputAssetUnits(
+                inputs = (NativeBridge.getTransactionInputsForHash(txHashHex) ?: emptyArray())
+                    .mapNotNull { line ->
+                        val p = line.split("|", limit = 2)
+                        val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+                        if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
+                    },
+                rowQuantity = { txid, v -> utxoDao.getAssetUtxoAt(txid, v)?.assetQuantity },
+                isAssetTx = { txid -> txHasAssetPayload(txid) },
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        return AssetTxQuantity.targetsOutput(header, vout, firstNonOpReturn, inputUnits, outputLines.size)
     }
 
     /** Distinct txids the wallet tracks an asset output for (spent + unspent) —
@@ -2140,3 +2275,30 @@ internal fun decideAssetSpent(state: Int): Boolean? = when (state) {
     1 -> false
     else -> null
 }
+
+/**
+ * The startup replay's answer for a zero-quantity row when the bridge returned no outputs for the
+ * row's transaction. See [AssetManager.replayAssetOutpointExclusions].
+ *
+ * `false` — leave the row alone — only on a POSITIVE statement that native holds no such
+ * transaction: the wallet is loaded, the txid is 64 hex characters, and the bridge replied without
+ * throwing. There is then nothing to hold out yet: native cannot select an output of a transaction
+ * it does not have. When the transaction arrives, the next detection sweep registers every owned
+ * output an instruction targets — the same path, and the same timing, as any fresh receive.
+ * Holding the row out anyway would keep what may be ordinary DGB change out of the balance until
+ * the next start, because an outpoint registered ahead of its transaction has no path back.
+ *
+ * The two bridge reads behind this answer ("no outputs", then "wallet loaded") are separate calls.
+ * If the native wallet is torn down and rebuilt between them, a row can be given `false` for a
+ * transaction the rebuilt wallet does hold; the next detection sweep then registers it. Closing
+ * that gap needs one bridge call that reports held / absent / no wallet from a single read.
+ *
+ * Every other reason for "no outputs" — wallet not loaded, a malformed txid, a bridge call that
+ * threw — is not a statement about the transaction at all. Those stay `null`, no answer, and the
+ * replay holds such a row out.
+ */
+internal fun replayAnswerForAbsentTransaction(
+    walletLoaded: Boolean,
+    txidWellFormed: Boolean,
+    bridgeAnsweredCleanly: Boolean,
+): Boolean? = if (walletLoaded && txidWellFormed && bridgeAnsweredCleanly) false else null

@@ -2,6 +2,7 @@ package io.digibyte.core.asset
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -248,6 +249,70 @@ class DigiAssetEncoderTest {
     @Test(expected = IllegalArgumentException::class)
     fun `rejects empty instruction list`() {
         DigiAssetEncoder.encodeTransferPayload(version = 3, instructions = emptyList())
+    }
+
+    // ── Push framing across the single-push boundary ──────────────────
+    //
+    // Up to 75 payload bytes the canonical framing is a direct single-byte push; at 76 bytes
+    // and above the only valid framing is OP_PUSHDATA1. The encoder must switch framings at the
+    // boundary so its own scripts decode: every payload length on either side of it, and the
+    // boundary itself, must round-trip through the decoder.
+
+    private fun simpleInstrs(n: Int) = List(n) {
+        DigiAssetEncoder.TransferInstruction(
+            skip = false, range = false, percent = false, outputIndex = 0, amount = 1L,
+        )
+    }
+
+    @Test
+    fun `74-byte payload stays single-push and round-trips`() {
+        val instrs = simpleInstrs(35)
+        assertEquals(74, DigiAssetEncoder.encodeTransferPayload(3, instrs).size)
+        val script = DigiAssetEncoder.encodeTransferScript(3, instrs)
+        assertEquals("a 74-byte payload is framed with a direct single-byte push", 74, script[1].toInt() and 0xFF)
+        val decoded = DigiAssetDecoder().decode(script)
+        assertNotNull("74-byte script must decode", decoded)
+        assertEquals(35, decoded!!.transferInstructions.size)
+    }
+
+    @Test
+    fun `75-byte payload stays single-push and round-trips`() {
+        // 34 two-byte instructions + one three-byte instruction (amount 500) = 75-byte payload.
+        val instrs = simpleInstrs(34) + DigiAssetEncoder.TransferInstruction(
+            skip = false, range = false, percent = false, outputIndex = 0, amount = 500L,
+        )
+        assertEquals(75, DigiAssetEncoder.encodeTransferPayload(3, instrs).size)
+        val script = DigiAssetEncoder.encodeTransferScript(3, instrs)
+        assertEquals("a 75-byte payload is framed with a direct single-byte push", 75, script[1].toInt() and 0xFF)
+        val decoded = DigiAssetDecoder().decode(script)
+        assertNotNull("75-byte script must decode", decoded)
+        assertEquals(35, decoded!!.transferInstructions.size)
+    }
+
+    @Test
+    fun `76-byte payload uses PUSHDATA1 and round-trips`() {
+        val instrs = simpleInstrs(36)
+        assertEquals(76, DigiAssetEncoder.encodeTransferPayload(3, instrs).size)
+        val script = DigiAssetEncoder.encodeTransferScript(3, instrs)
+        assertEquals("a 76-byte payload is framed with OP_PUSHDATA1", 0x4c, script[1].toInt() and 0xFF)
+        assertEquals("the byte after OP_PUSHDATA1 is the payload length", 76, script[2].toInt() and 0xFF)
+        assertEquals("the script is OP_RETURN + OP_PUSHDATA1 + length + payload", 3 + 76, script.size)
+        val decoded = DigiAssetDecoder().decode(script)
+        assertNotNull("76-byte script must decode (PUSHDATA1 framing)", decoded)
+        assertEquals(36, decoded!!.transferInstructions.size)
+    }
+
+    @Test
+    fun `80-byte payload uses PUSHDATA1 and round-trips`() {
+        val instrs = simpleInstrs(38)
+        assertEquals(80, DigiAssetEncoder.encodeTransferPayload(3, instrs).size)
+        val script = DigiAssetEncoder.encodeTransferScript(3, instrs)
+        assertEquals("an 80-byte payload is framed with OP_PUSHDATA1", 0x4c, script[1].toInt() and 0xFF)
+        assertEquals("the byte after OP_PUSHDATA1 is the payload length", 80, script[2].toInt() and 0xFF)
+        assertEquals("the script is OP_RETURN + OP_PUSHDATA1 + length + payload", 3 + 80, script.size)
+        val decoded = DigiAssetDecoder().decode(script)
+        assertNotNull("80-byte script must decode (PUSHDATA1 framing)", decoded)
+        assertEquals(38, decoded!!.transferInstructions.size)
     }
 
     @Suppress("UNUSED_VARIABLE")
