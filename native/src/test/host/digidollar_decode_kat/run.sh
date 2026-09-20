@@ -19,8 +19,18 @@
 # `const static int` array bounds GCC rejects; missing <stdint.h> include).
 # The real Android build uses the NDK's clang, so this stays representative.
 #
+# Built with AddressSanitizer: BRTransactionAddOutput stores every script in a
+# heap buffer of exactly scriptLen bytes, so the tool itself checks that the
+# reader stays inside each script -- the "(bounded)" assertions are then more
+# than a -1 return. Leak detection is off (this KAT is not about leaks);
+# symbol resolution is off for speed.
+#
+# This is a single-arm functional KAT: main.c labels each extended group as
+# RED-THEN-GREEN or GUARD.
+#
 # Exit code 0 = all checks passed, 1 = at least one check failed (or build
-# error -- expected before BRDigiDollar.h/.c exist).
+# error -- expected before BRDigiDollar.h/.c exist); a sanitizer report aborts
+# the run, which is a non-zero exit too.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,7 +43,10 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+
 clang -w -include stdint.h \
+    -g -fsanitize=address -fno-omit-frame-pointer \
     -I "$CORE_DIR" \
     -I "$CORE_DIR/secp256k1/include" \
     "$SCRIPT_DIR/digidollar_decode_kat_main.c" \
