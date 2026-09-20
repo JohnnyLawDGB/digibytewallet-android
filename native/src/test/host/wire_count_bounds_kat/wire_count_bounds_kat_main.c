@@ -10,12 +10,14 @@
 // could wrap. Where the comparison is the length guard for a variable-length
 // field, the guard is rewritten so the wrapping addition never happens.
 //
-// MACRO CONVENTION. This KAT uses the PRESENCE convention: the red arm is built
-// with -DWIRE_COUNT_BOUNDS_UNFIXED and the green arm is built with no -D at all
-// (matching the other file-static BRPeer.c host KATs in this tree). The
-// seams in BRArray.h, BRTransaction.c, BRPeer.c, BRGCSFilter.c and
+// MACRO CONVENTION. This KAT uses the PRESENCE convention: the comparison (red)
+// arm is built with a -D<...>_UNFIXED flag and the shipped (green) arm is built
+// with no -D at all (matching the other file-static BRPeer.c host KATs in this
+// tree). The seams in BRArray.h, BRTransaction.c, BRPeer.c, BRGCSFilter.c and
 // BRMerkleBlock.c are therefore all `#ifdef WIRE_COUNT_BOUNDS_UNFIXED`, never
-// `#if`, so the flag's ABSENCE selects the shipped (bounded) code.
+// `#if`, so the flag's ABSENCE selects the shipped (bounded) code. The per-input
+// witness bound (see the third invariant below) has its own presence flag,
+// WIRE_WITNESS_COUNT_UNFIXED, on the same convention.
 //
 // The parsers under test are reached as follows:
 //   * BRTransactionParse and BRGCSFilterParse are public API, called directly.
@@ -40,6 +42,18 @@
 // -DWIRE_STORE_CHECK_UNFIXED (presence convention, as above). tx_store_ctl sends the
 // same message with the hook idle and must be ACCEPTED, so the rejection in the
 // other two is attributable to the store check and to nothing else.
+//
+// THIRD INVARIANT -- THE PER-INPUT WITNESS COUNT IS BOUNDED BY THE BYTES THAT
+// REMAIN. A segwit input's witness stack begins with an item count read from the
+// message, and the parser walks that many items. The count is bounded by the bytes left
+// (each item needs at least a one-byte length prefix) before the walk, and the
+// accumulated item length is bounded as the walk proceeds, so neither the walk
+// count nor the accumulated length can run past the buffer. The red evidence for
+// tx_witness is not a sanitizer report but a call that DOES NOT RETURN: with the
+// bound absent, a count near the type maximum makes the walk take that many
+// steps. run.sh time-limits that arm and treats "stopped at the limit" as its
+// expected result. tx_witness_ctl is the control: an honest two-item witness on
+// the same transaction, which must be ACCEPTED and whose bytes must round-trip.
 
 #include <stdio.h>
 #include <string.h>
@@ -228,6 +242,93 @@ static int case_cf(void)
     return accepted;
 }
 
+// ---- cases: per-input witness item count -----------------------------------
+//
+// A segwit transaction carries, after its outputs, one witness stack per input:
+// a CompactSize item count, then each item as a CompactSize length prefix
+// followed by that many bytes. The count and the accumulated item length are both
+// read from the message. Once the buffer is exhausted BRVarInt returns 0 and reports a
+// one-byte length, so the walk advances one byte per declared item; a count near
+// its type's maximum makes the walk run for that many steps -- it does not return
+// in any practical time. The bounded parser bounds the count by the bytes that
+// remain (each item needs at least its one-byte prefix) before the walk, and
+// bounds the accumulated length as it walks, so the message is rejected.
+//
+// Both cases share a well-formed prefix (version, segwit marker+flag, one input,
+// one output); they differ only in the witness stack.
+
+// Write the shared prefix into p and return its length (58): 4-byte version, the
+// segwit marker/flag pair, a one-input body with an empty scriptSig, and a
+// one-output body with an empty scriptPubKey.
+static size_t put_segwit_prefix(uint8_t *p)
+{
+    size_t o = 0;
+    put_u32le(&p[o], 1); o += 4;                 // version = 1
+    p[o++] = 0x00;                               // segwit marker (reads as input count 0)
+    p[o++] = 0x01;                               // segwit flag
+    p[o++] = 0x01;                               // real input count = 1
+    memset(&p[o], 0x11, 32); o += 32;            // previous-output hash
+    put_u32le(&p[o], 0); o += 4;                 // previous-output index
+    p[o++] = 0x00;                               // empty scriptSig
+    put_u32le(&p[o], 0xffffffff); o += 4;        // sequence
+    p[o++] = 0x01;                               // output count = 1
+    put_u64le(&p[o], 100000000ULL); o += 8;      // value
+    p[o++] = 0x00;                               // empty scriptPubKey
+    return o;                                     // 58
+}
+
+// One input whose witness stack declares a count far larger than the bytes
+// present: a VAR_INT64 count of 0xFFFFFFFFFFFFFFF0 with no items behind it and
+// only the 4-byte lock time remaining. The bounded parser rejects it; the
+// comparison arm walks the declared count and does not return.
+static int case_tx_witness(void)
+{
+    uint8_t raw[128];
+    size_t o = put_segwit_prefix(raw);
+    raw[o++] = 0xff;                             // CompactSize: 8-byte count follows
+    put_u64le(&raw[o], (uint64_t)0xFFFFFFFFFFFFFFF0ULL); o += 8;
+    put_u32le(&raw[o], 0); o += 4;              // lock time
+    size_t len = o;
+    uint8_t *buf = dup_exact(raw, len);
+    BRTransaction *tx = BRTransactionParse(buf, len);
+    int accepted = (tx != NULL);
+    if (tx) BRTransactionFree(tx);
+    free(buf);
+    return accepted;
+}
+
+// Control: the same transaction with an honest witness -- two small items, a
+// two-byte one and a three-byte one. It must be ACCEPTED and the parsed witness
+// bytes must equal exactly what was on the wire after the item count (the two
+// length-prefixed items concatenated). Returns 1 only when both hold.
+static int case_tx_witness_ctl(void)
+{
+    static const uint8_t want[] = { 0x02, 0xAA, 0xBB, 0x03, 0xCC, 0xDD, 0xEE };
+    uint8_t raw[128];
+    size_t o = put_segwit_prefix(raw);
+    raw[o++] = 0x02;                             // witness item count = 2
+    raw[o++] = 0x02; raw[o++] = 0xAA; raw[o++] = 0xBB;                 // item 0 (2 bytes)
+    raw[o++] = 0x03; raw[o++] = 0xCC; raw[o++] = 0xDD; raw[o++] = 0xEE; // item 1 (3 bytes)
+    put_u32le(&raw[o], 0); o += 4;             // lock time
+    size_t len = o;
+    uint8_t *buf = dup_exact(raw, len);
+    BRTransaction *tx = BRTransactionParse(buf, len);
+    int ok = 0;
+    if (tx) {
+        if (tx->inCount == 1 && tx->inputs[0].witness &&
+            tx->inputs[0].witLen == sizeof(want) &&
+            memcmp(tx->inputs[0].witness, want, sizeof(want)) == 0) {
+            ok = 1;                             // parsed and the witness bytes round-trip
+        } else {
+            fprintf(stderr, "tx_witness_ctl: witness did not round-trip (witLen=%zu)\n",
+                    tx->inputs[0].witLen);
+        }
+        BRTransactionFree(tx);
+    }
+    free(buf);
+    return ok;
+}
+
 // ---- cases: the store holds what the loop fills --------------------------------
 //
 // A well-formed transaction with `nIn` inputs and `nOut` outputs, every script
@@ -331,7 +432,7 @@ static int case_array_insert_array_full(void) { return insert_into_full_store(1)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <tx|headers|version|reject|cf>\n", argv[0]);
+        fprintf(stderr, "usage: %s <tx|headers|version|reject|cf|tx_witness|tx_witness_ctl>\n", argv[0]);
         return 2;
     }
     const char *c = argv[1];
@@ -341,6 +442,8 @@ int main(int argc, char **argv)
     else if (strcmp(c, "version") == 0) accepted = case_version();
     else if (strcmp(c, "reject") == 0)  accepted = case_reject();
     else if (strcmp(c, "cf") == 0)      accepted = case_cf();
+    else if (strcmp(c, "tx_witness") == 0)     accepted = case_tx_witness();
+    else if (strcmp(c, "tx_witness_ctl") == 0) accepted = case_tx_witness_ctl();
 #ifdef KAT_GROW_HOOK
     else if (strcmp(c, "tx_store_in") == 0)  accepted = case_tx_store_in();
     else if (strcmp(c, "tx_store_out") == 0) accepted = case_tx_store_out();
