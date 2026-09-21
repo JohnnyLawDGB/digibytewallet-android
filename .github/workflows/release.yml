@@ -147,40 +147,31 @@ jobs:
           body: |
             ${{ contains(github.ref_name, '-beta') && '## ⚠ BETA — please read before installing
 
-            This build is published for testing. It contains substantial changes to how the
-            wallet synchronises and has **not** completed the full acceptance cycle.
+            This build is published for testing ahead of the stable release of the same version.
+            The in-app updater offers it only to wallets that have turned on **Beta updates** in
+            Settings (off by default). Everyone else stays on the stable channel.
 
-            **Use a wallet you can afford to lose access to, and keep your recovery phrase.**
+            **Keep your recovery phrase to hand, as with any pre-release build.**
 
-            ### What is fixed in this build
+            ### What is in this build
 
-            Sync was slow or never finished on some devices. Measured on a Samsung Galaxy Note 8
-            (2017 hardware), a new wallet now reaches the chain tip in about 5 minutes:
+            - Fresh chain and compact-filter checkpoints. Every filter checkpoint is now proven
+              against the chain before it ships, and restoring an older wallet no longer stalls
+              part-way through its scan.
+            - Stricter handling of data received from the network, in 32- and 64-bit builds alike.
+            - The amount you approve is the amount that is signed, for DGB, DigiDollar and
+              DigiAssets. A lone comma is read as the decimal point in all three.
+            - DigiAsset outputs an incoming transfer assigns to you are set aside as soon as they
+              are seen, and again immediately before any send is built.
+            - DigiDollar transfers that use any standard script framing are recognised.
 
-            - New wallets scan ~59,000 blocks instead of ~299,000 — the bundled chain checkpoints
-              had gone 50 days stale, so every new wallet re-scanned months of history it could
-              not possibly have transactions in.
-            - Filter processing is ~60x faster. The wallet was rebuilding its entire address set
-              for every single block filter, and walking the whole block chain on every new block
-              while freeing nothing.
-            - A pacing mechanism could deadlock the scan permanently. Removed.
-            - The wallet no longer reports "synced" while blocks remain unscanned. It previously
-              could declare a final balance with ~60,000 blocks never checked for payments.
-            - A new wallet no longer shows a false "scan for missing transactions" warning.
-            - Peer connection churn reduced ~36x, and IPv6 peers are now handled correctly.
+            ### What to test
 
-            ### Known issues and outstanding work
-
-            - **Do not use Sweep if you hold DigiAssets or DigiDollar.** The sweep path is not
-              asset-aware and will spend those outputs as plain DGB, destroying the asset. Use
-              **Recover** instead, which is safe. An asset-aware migration is still to be built.
-            - **Restoring a wallet with a long transaction history has not been verified in this
-              cycle.** New-wallet sync is well tested; deep restore is not.
-            - Interrupting a deep restore and resuming has not been re-verified.
-            - Not yet tested on Android 15 / 16 KB page-size devices.
-            - Some bundled peer nodes are unreachable and are being refreshed.
-            - Advanced compact-filter back-pressure remains disabled pending the deep-restore
-              acceptance run.
+            - Upgrade over the previous stable release and check that balances, assets and history
+              are unchanged.
+            - Send DGB, DigiDollar and an asset, and check that the confirmation shows exactly what
+              you typed.
+            - Restore a wallet with an older birthday and let it sync to the tip.
 
             Source, full commit history and issue tracker:
             https://github.com/JohnnyLawDGB/digibytewallet-android
