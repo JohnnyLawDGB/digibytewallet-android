@@ -4,9 +4,16 @@ on:
     branches: [phase1-modernization, main, develop]
   pull_request:
     branches: [main, develop]
+  # Some of what the native sweep guards goes stale with WALL-CLOCK time, not with commits —
+  # checkpoint_staleness_kat turns red three weeks after the last table refresh whether or
+  # not anyone pushes. A push-only trigger cannot see that happen. Mondays, 06:17 UTC.
+  schedule:
+    - cron: '17 6 * * 1'
 
 jobs:
   build:
+    # The scheduled run is the native sweep below and nothing else.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,3 +89,17 @@ jobs:
           name: debug-apk
           path: app/build/outputs/apk/mainnet/debug/*.apk
           retention-days: 30
+
+  # Weekly native sweep, on a quiet repository too. Needs no SDK, no JDK and no Gradle: the
+  # KATs compile the C core on the host, and scripts/run-host-kats.sh finds its own compiler
+  # and prints which one it used.
+  native-kats-weekly:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Native host KATs (full sweep)
+        run: ./scripts/run-host-kats.sh

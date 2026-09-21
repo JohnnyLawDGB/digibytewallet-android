@@ -8,19 +8,23 @@ import io.digibyte.core.TransactionBuilder
 import io.digibyte.core.TxResult
 import io.digibyte.core.UtxoManager
 import io.digibyte.core.bridge.NativeBridge
+import io.digibyte.core.model.ApprovedSend
 import io.digibyte.core.model.DigiByteUri
 import io.digibyte.core.model.DgbAmount
+import io.digibyte.core.model.UsdCents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.math.BigDecimal
 import java.text.NumberFormat
 import java.util.Locale
 import javax.inject.Inject
 
 sealed class SendState {
     data object Idle : SendState()
-    data object Confirming : SendState()
+    /** The confirmation is on screen, showing [approved] — the only thing [SendViewModel.send] accepts. */
+    data class Confirming(val approved: ApprovedSend.Dgb) : SendState()
     data object Sending : SendState()
     data class Success(val txid: String) : SendState()
     data class Error(val message: String) : SendState()
@@ -98,8 +102,8 @@ class SendViewModel @Inject constructor(
         if (!custom) return@combine FeeWarning.None
         val feeSat = DgbAmount.toSats(input) ?: 0L
         if (feeSat <= 0) return@combine FeeWarning.ZeroFee
-        val satPerVbyte = feeSat.toDouble() / TYPICAL_TX_VSIZE
-        if (satPerVbyte < 100.0) FeeWarning.BelowRelay else FeeWarning.None
+        // Whole satoshis on both sides: under 100 sat/vB across the typical size.
+        if (feeSat < 100L * TYPICAL_TX_VSIZE) FeeWarning.BelowRelay else FeeWarning.None
     }.stateIn(viewModelScope, SharingStarted.Eagerly, FeeWarning.None)
 
     /** Current send flow state. */
@@ -123,38 +127,47 @@ class SendViewModel @Inject constructor(
 
     // ── Amount input ──────────────────────────────────────────────────────
 
+    /**
+     * Numbers every edit of either amount field. Each field can be worked out from the other
+     * through a price lookup, and the lookup takes time: what it returns belongs to the edit that
+     * started it, and may be written only while that edit is still the latest one. Main thread only.
+     */
+    private var amountEdit = 0L
+
     fun onAmountDgbChanged(value: String) {
+        val edit = ++amountEdit
         amountDgb.value = value
+        // The dollars line on screen was worked out from the text BEFORE this edit. It goes now,
+        // not when the lookup returns: until the line for this text lands there is no line, so
+        // neither the form nor a confirmation can set this amount beside an earlier one's dollars.
+        amountFiat.value = ""
         _validationError.value = null
-        // Try to convert to fiat
+        // Read by the parser the send uses. Text that is not an amount gets no line at all.
+        if (DgbAmount.toSats(value) == null) return
         viewModelScope.launch {
-            val dgb = value.toDoubleOrNull() ?: return@launch
-            runCatching {
-                val price = priceProvider.fetchPrice()
-                val fiat = dgb * price.priceUsd
-                amountFiat.value = NumberFormat.getNumberInstance(Locale.US).apply {
-                    minimumFractionDigits = 2
-                    maximumFractionDigits = 2
-                }.format(fiat)
-            }
+            val preview = runCatching {
+                UsdCents.previewForDgb(value, priceProvider.fetchPrice().priceUsd)
+            }.getOrDefault("")
+            // Only for the edit it was worked out for — not after a later one, in either field.
+            if (edit == amountEdit) amountFiat.value = preview
         }
     }
 
     fun onAmountFiatChanged(value: String) {
+        val edit = ++amountEdit
         amountFiat.value = value
+        // The same rule in the other direction, where it decides what can be sent: the DGB amount
+        // is what Review reads, and the one on screen was worked out from the dollars text before
+        // this edit. It goes now. Until the amount for THIS text lands the DGB field is empty, and
+        // Review answers "enter a valid amount" instead of approving an amount for other text.
+        amountDgb.value = ""
         _validationError.value = null
-        // Try to convert to DGB
+        if (UsdCents.parse(value) == null) return
         viewModelScope.launch {
-            val fiat = value.toDoubleOrNull() ?: return@launch
-            runCatching {
-                val price = priceProvider.fetchPrice()
-                if (price.priceUsd <= 0.0) return@launch
-                val dgb = fiat / price.priceUsd
-                amountDgb.value = NumberFormat.getNumberInstance(Locale.US).apply {
-                    minimumFractionDigits = 2
-                    maximumFractionDigits = 8
-                }.format(dgb)
-            }
+            val dgbText = runCatching {
+                UsdCents.dgbTextFor(value, priceProvider.fetchPrice().priceUsd)
+            }.getOrDefault("")
+            if (edit == amountEdit) amountDgb.value = dgbText
         }
     }
 
@@ -180,33 +193,32 @@ class SendViewModel @Inject constructor(
         onAmountDgbChanged(DgbAmount.format(sats))
     }
 
-    // ── Amount conversion helpers ─────────────────────────────────────────
-
-    /** Convert current DGB input to satoshis. Returns null if invalid. */
-    fun amountSatoshis(): Long? {
-        // Exact: the double path sent 0.29 DGB as 28,999,999 sats.
-        val sats = DgbAmount.toSats(amountDgb.value) ?: return null
-        if (sats <= 0L) return null
-        return sats
-    }
-
     // ── Send flow ─────────────────────────────────────────────────────────
 
-    /** Move to the Confirming state (shows confirmation dialog). */
+    /**
+     * Move to the Confirming state (shows confirmation dialog).
+     *
+     * This is the one place the amount text is read. It becomes an [ApprovedSend] here; the
+     * confirmation is drawn from that object and [send] receives it, so nothing that changes a
+     * field afterwards can change what is signed.
+     */
     fun requestConfirm() {
         val addr = address.value
-        val sats = amountSatoshis()
 
         if (addr.isBlank() || _addressValid.value != true) {
             _validationError.value = "Enter a valid DigiByte address"
             return
         }
-        if (sats == null || sats <= 0) {
+        val approved = ApprovedSend.dgb(
+            addr, amountDgb.value, feeRatePerKb.value, estimatedFeeSat.value,
+            dollarsShown = amountFiat.value,
+        )
+        if (approved == null) {
             _validationError.value = "Enter a valid amount"
             return
         }
 
-        _sendState.value = SendState.Confirming
+        _sendState.value = SendState.Confirming(approved)
     }
 
     fun cancelConfirm() {
@@ -221,13 +233,16 @@ class SendViewModel @Inject constructor(
      */
     private val TAG = "DGB-Send"
 
-    fun send() {
-        val addr = address.value
-        val sats = amountSatoshis() ?: run {
-            _sendState.value = SendState.Error("Invalid amount")
+    fun send(approved: ApprovedSend.Dgb) {
+        // Only the approval that is on screen may be sent, and only once: a second tap, or an
+        // approval cancelled while the credential prompt was up, finds nothing to send.
+        if ((_sendState.value as? SendState.Confirming)?.approved !== approved) {
+            android.util.Log.w(TAG, "send ignored: not the approval being confirmed")
             return
         }
-        val feePerKb = feeRatePerKb.value
+        val addr = approved.address
+        val sats = approved.sats
+        val feePerKb = approved.feePerKb
 
         _sendState.value = SendState.Sending
 
@@ -299,7 +314,11 @@ class SendViewModel @Inject constructor(
 
     /** Fill the amount field with MAX sendable DigiDollar — the held balance
      *  clamped to the per-transfer consensus cap so MAX always passes validation. */
-    fun setDdAmountToMax() { amountFiat.value = ddCentsToPlainUsd(minOf(_ddBalance.value, DD_MAX_CENTS)) }
+    fun setDdAmountToMax() {
+        // Through the handler, as if typed: the other field is emptied and the edit is numbered,
+        // so nothing worked out for earlier text stays beside it or lands on top of it.
+        onAmountFiatChanged(ddCentsToPlainUsd(minOf(_ddBalance.value, DD_MAX_CENTS)))
+    }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -312,27 +331,38 @@ class SendViewModel @Inject constructor(
     }
 
     /**
-     * Execute a DigiDollar send after the caller has validated [usd] via
-     * [parseUsdToCents]/[ddAmountValid]. Mirrors [send]'s dispatcher pattern.
+     * The DigiDollar send as it will be confirmed and sent, or null when the form is not sendable.
+     * Read once, when the user asks to send; the confirmation and [sendDigiDollar] use only this.
      */
-    fun sendDigiDollar(tdAddress: String, usd: String, onResult: (txid: String?) -> Unit) {
-        val cents = parseUsdToCents(usd)
-        if (cents == null || !NativeBridge.isValidDigiDollarAddress(tdAddress)) { onResult(null); return }
+    fun approveDigiDollar(): ApprovedSend.DigiDollar? {
+        if (_ddAddressValid.value != true) return null
+        return ApprovedSend.digiDollar(address.value, amountFiat.value)
+            ?.takeIf { ddAmountValid(it.cents, _ddBalance.value) }
+    }
+
+    /**
+     * Execute the DigiDollar send the user approved. Mirrors [send]'s dispatcher pattern.
+     */
+    fun sendDigiDollar(approved: ApprovedSend.DigiDollar, onResult: (txid: String?) -> Unit) {
+        if (!NativeBridge.isValidDigiDollarAddress(approved.address)) { onResult(null); return }
         viewModelScope.launch(Dispatchers.IO) {
-            val txid = runCatching { NativeBridge.sendDigiDollar(tdAddress, cents) }
-                .onFailure { android.util.Log.w("SendViewModel", "sendDigiDollar failed", it) }
-                .getOrNull()
+            // Through the builder, never the bridge: it runs asset detection to completion before
+            // the native transfer takes its network fee from the plain-coin set.
+            val txid = try {
+                transactionBuilder.sendDigiDollar(approved.address, approved.cents)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.w("SendViewModel", "sendDigiDollar failed", t)
+                null
+            }
             onResult(txid)
         }
     }
 
     companion object {
-        /** "40.50" USD -> 4050 cents; null if blank/non-numeric/negative. */
-        fun parseUsdToCents(s: String): Long? {
-            val d = s.trim().toDoubleOrNull() ?: return null
-            if (d < 0) return null
-            return Math.round(d * 100.0)
-        }
+        /** "40.50" USD -> 4050 cents; null unless the text is a whole number of cents. */
+        fun parseUsdToCents(s: String): Long? = UsdCents.parse(s)
 
         /** Consensus max DigiDollar per transfer, in cents ($100,000.00). */
         const val DD_MAX_CENTS = 10_000_000L
@@ -345,10 +375,10 @@ class SendViewModel @Inject constructor(
             cents in DD_MIN_CENTS..DD_MAX_CENTS && cents <= ddBalance
 
         /** cents -> plain "X.XX" for the amount field (5000 -> "50.00"). */
-        fun ddCentsToPlainUsd(cents: Long): String = "%.2f".format(cents / 100.0)
+        fun ddCentsToPlainUsd(cents: Long): String = UsdCents.format(cents)
 
         /** cents -> "$X,XXX.XX" for display (5000 -> "$50.00"). */
         fun formatDdUsd(cents: Long): String =
-            NumberFormat.getCurrencyInstance(Locale.US).format(cents / 100.0)
+            NumberFormat.getCurrencyInstance(Locale.US).format(BigDecimal.valueOf(cents, 2))
     }
 }

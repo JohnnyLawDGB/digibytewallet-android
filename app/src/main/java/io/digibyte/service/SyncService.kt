@@ -690,6 +690,23 @@ class SyncService : Service() {
     }
 
     /**
+     * Bring [io.digibyte.core.asset.AssetManager.holdAssetOutputsBeforeSpend] up to date in the
+     * background, so the pass a send runs first has little or nothing left to read. Call it only
+     * AFTER the asset sweep: the pass totals an asset transfer's inputs from the rows the sweep
+     * writes. The pass is serialised, so a send that arrives meanwhile simply waits for it. A
+     * failure here is not a failure of anything: the send runs the pass again and decides there.
+     */
+    private suspend fun warmPreSpendPass() {
+        try {
+            assetManager.holdAssetOutputsBeforeSpend()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("SyncService", "pre-spend pass warm-up did not finish", e)
+        }
+    }
+
+    /**
      * Demand-side load-spread: hold the FULL peer set while catching up (fast sync + the wedge
      * buffer we rely on), then drop to [SYNCED_PEER_COUNT] once STABLY synced so the thousands of
      * synced+idle wallets stop each pinning 8 slots on the small shared filter-node fleet. A wallet
@@ -1075,6 +1092,11 @@ class SyncService : Service() {
                     try {
                         runCatching { assetManager.sweepKnownTransactionsForAssets() }
                             .onFailure { android.util.Log.w("SyncService", "native sweep threw", it) }
+                        // Bring the pre-spend pass up to date AFTER the sweep has written its rows,
+                        // never before: a pass that runs ahead of the rows cannot total an asset
+                        // transfer's inputs and holds out more than it needs to. With the pass
+                        // current, the next send finds nothing left to read.
+                        warmPreSpendPass()
                         // Re-derive each asset row's spent flag from the native wallet.
                         // Nothing else on the standing path does: it used to ride along
                         // with the backend asset refresh, which bailed before reaching it.
@@ -2797,6 +2819,8 @@ class SyncService : Service() {
                 // repeatedly — UtxoDao.insertAll is REPLACE-on-PK.
                 runCatching { assetManager.sweepKnownTransactionsForAssets() }
                     .onFailure { android.util.Log.w("SyncService", "native asset sweep failed", it) }
+                // After the sweep, for the same reason as on the periodic tick.
+                warmPreSpendPass()
 
                 // Confirmation-reconcile: a tx first detected while pending (CF
                 // match) can strand at "Unconfirmed" because, in CF-only mode,
@@ -3827,7 +3851,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 24_100_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 24_150_000L
 
         /** How far the compact-filter SCAN may trail the network tip and still count as
          *  caught up. The scan legitimately lags the header tip by a few blocks while the

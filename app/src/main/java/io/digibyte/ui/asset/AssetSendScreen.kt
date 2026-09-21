@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.digibyte.core.model.AssetQuantity
 import io.digibyte.core.model.OwnedAsset
 import io.digibyte.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
@@ -63,6 +64,7 @@ fun AssetSendScreen(
 
     val asset by viewModel.selectedAsset.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
+    val approval by viewModel.approval.collectAsStateWithLifecycle()
     val ruleCheck by viewModel.ruleCheck.collectAsStateWithLifecycle()
     val refusedRuleBound = stringResource(R.string.as_refused_rule_bound)
     val refusedUnknown = stringResource(R.string.as_refused_rules_unknown)
@@ -74,11 +76,9 @@ fun AssetSendScreen(
     val customFeeInput by viewModel.customFeeInput.collectAsStateWithLifecycle()
     val estimatedFeeSat by viewModel.estimatedFeeSat.collectAsStateWithLifecycle()
     val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
-    val feeRatePerKb by viewModel.feeRatePerKb.collectAsStateWithLifecycle()
 
     var recipientAddress by remember { mutableStateOf("") }
     var quantityInput by remember { mutableStateOf("") }
-    var showConfirmDialog by remember { mutableStateOf(false) }
     var addressError by remember { mutableStateOf<String?>(null) }
     var quantityError by remember { mutableStateOf<String?>(null) }
 
@@ -101,43 +101,31 @@ fun AssetSendScreen(
         }
     }
 
-    // Close confirm dialog once the send either succeeds or fails so the
-    // user sees the terminal state banner rendered below the form.
-    LaunchedEffect(sendState) {
-        if (sendState is AssetViewModel.SendState.Success ||
-            sendState is AssetViewModel.SendState.Failure ||
-            sendState is AssetViewModel.SendState.Refused) {
-            showConfirmDialog = false
-        }
-    }
-
     // ── Confirmation dialog ───────────────────────────────────────────────
-    if (showConfirmDialog && asset != null) {
+    // Quantity, recipient and fee all come from the approval made at Review, and that same object
+    // is what the send receives: the fields are not read again once the dialog is up. The view
+    // model closes it when the send ends, so the result banner below the form is what remains.
+    val shownAsset = asset
+    val approved = approval
+    if (approved != null && shownAsset != null) {
         AssetSendConfirmDialog(
-            asset = asset!!,
-            recipientAddress = recipientAddress,
-            quantityInput = quantityInput,
-            feeSats = estimatedFeeSat,
+            asset = shownAsset,
+            recipientAddress = approved.address,
+            quantityText = approved.amountText,
+            quantityUnits = approved.units,
+            feeSats = approved.feeEstimateSats,
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
                 coroutineScope.launch {
                     val activity = context as? androidx.fragment.app.FragmentActivity
                     if (spendAuth.authorize(activity, authTitle, authSubtitle)) {
-                        viewModel.sendAssetTransfer(
-                            toAddress = recipientAddress,
-                            quantityInput = quantityInput,
-                            feePerKb = feeRatePerKb,
-                        )
+                        viewModel.sendAssetTransfer(approved)
                     } else {
-                        showConfirmDialog = false
-                        viewModel.resetSendState()
+                        viewModel.cancelConfirm()
                     }
                 }
             },
-            onCancel = {
-                showConfirmDialog = false
-                viewModel.resetSendState()
-            }
+            onCancel = { viewModel.cancelConfirm() }
         )
     }
 
@@ -346,14 +334,12 @@ fun AssetSendScreen(
                 },
                 trailingIcon = {
                     // Max — convenience for sending the entire balance.
-                    // Renders the user's quantity in the asset's display
-                    // decimals so the input round-trips through the same
-                    // scale-to-internal logic the ViewModel uses on submit.
+                    // Written by the formatter whose text the quantity
+                    // parser reads back as the same whole units, so
+                    // MAX → Review is exact.
                     TextButton(
                         onClick = {
-                            quantityInput = formatBalanceForInput(
-                                ownedAsset.quantity, decimals,
-                            )
+                            quantityInput = AssetQuantity.format(ownedAsset.quantity, decimals)
                             quantityError = null
                         },
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
@@ -472,7 +458,7 @@ fun AssetSendScreen(
             // Updates as the user types quantity / edits the fee so the DGB
             // outflow is visible before the confirm dialog ever opens.
             CostPreviewCard(
-                quantityInput = quantityInput,
+                units = AssetQuantity.parse(quantityInput, decimals),
                 ownedAsset = ownedAsset,
                 feeSats = estimatedFeeSat,
             )
@@ -482,17 +468,13 @@ fun AssetSendScreen(
             // ── Review button ─────────────────────────────────────────────
             Button(
                 onClick = {
-                    var valid = true
-                    if (recipientAddress.isBlank()) {
-                        addressError = errRecipient
-                        valid = false
-                    }
-                    if (quantityInput.isBlank() || quantityInput.toDoubleOrNull() == null ||
-                        quantityInput.toDouble() <= 0) {
+                    if (recipientAddress.isBlank()) addressError = errRecipient
+                    // The one place the quantity text is read for a send. What it names becomes
+                    // the approval the confirmation is drawn from and the send receives — or,
+                    // when it names no quantity of this asset, the field's error.
+                    if (!viewModel.requestConfirm(recipientAddress, quantityInput)) {
                         quantityError = errQuantity
-                        valid = false
                     }
-                    if (valid) showConfirmDialog = true
                 },
                 enabled = ruleCheck.allowsSend,
                 modifier = Modifier
@@ -528,7 +510,10 @@ fun AssetSendScreen(
 private fun AssetSendConfirmDialog(
     asset: OwnedAsset,
     recipientAddress: String,
-    quantityInput: String,
+    /** The approved quantity, written out from [quantityUnits] — never the text that was typed. */
+    quantityText: String,
+    /** The approved quantity in whole asset units: what the send receives. */
+    quantityUnits: Long,
     feeSats: Long,
     sending: Boolean,
     onConfirm: () -> Unit,
@@ -565,7 +550,7 @@ private fun AssetSendConfirmDialog(
                 )
                 AssetConfirmRow(
                     label = stringResource(R.string.as_quantity),
-                    value = "$quantityInput ${asset.metadata?.symbol ?: stringResource(R.string.as_tokens)}",
+                    value = quantityText + " " + (asset.metadata?.symbol ?: stringResource(R.string.as_tokens)),
                 )
                 // Full address — never truncated per security requirement
                 AssetConfirmRow(label = stringResource(R.string.send_to), value = recipientAddress)
@@ -576,7 +561,7 @@ private fun AssetSendConfirmDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 CostPreviewCard(
-                    quantityInput = quantityInput,
+                    units = quantityUnits,
                     ownedAsset = asset,
                     feeSats = feeSats,
                 )
@@ -702,16 +687,6 @@ private fun AssetConfirmRow(label: String, value: String) {
  *  DGB cost after the dust-driven bump to 6,000). */
 private val DA_MARKER_SATS_UI: Long = io.digibyte.core.asset.send.DA_MARKER_SATS
 
-/** Render an internal-units quantity back to a decimal string suitable
- *  for the OutlinedTextField. Keeps round-trip parity with the
- *  ViewModel's `scaleToInternalUnits` so MAX → submit is exact. */
-private fun formatBalanceForInput(quantity: Long, decimals: Int): String {
-    if (decimals <= 0) return quantity.toString()
-    val scaled = java.math.BigDecimal(quantity).movePointLeft(decimals).stripTrailingZeros()
-    // BigDecimal.toString may produce "1E+1" for trailing zeros; toPlainString avoids that.
-    return scaled.toPlainString()
-}
-
 /**
  * Card showing the DGB outflow breakdown for the in-progress send.
  *
@@ -724,20 +699,22 @@ private fun formatBalanceForInput(quantity: Long, decimals: Int): String {
  * Doesn't account for DGB-fee-input contribution (the marker sats already in
  * the asset UTXO partly fund the new markers); that's a wash from the user's
  * perspective and complicates the display, so we surface gross outflow.
+ *
+ * [units] is the quantity in whole asset units, or null when there is none: on the form, what the
+ * quantity field names as it is typed; in the confirmation, the approved units.
  */
 @Composable
 private fun CostPreviewCard(
-    quantityInput: String,
+    units: Long?,
     ownedAsset: io.digibyte.core.model.OwnedAsset,
     feeSats: Long,
 ) {
     val decimals = ownedAsset.metadata?.decimals ?: 0
-    val typedInternalQty = parseQuantityToInternal(quantityInput, decimals)
 
     // Asset change emitted iff user is sending less than their full balance
-    // (and the input parsed as a valid positive number).
-    val needsAssetChange = typedInternalQty != null &&
-        typedInternalQty in 1 until ownedAsset.quantity
+    // (and there is a quantity at all).
+    val needsAssetChange = units != null &&
+        units in 1 until ownedAsset.quantity
     val markerCount = if (needsAssetChange) 2 else 1
     val markerSats = DA_MARKER_SATS_UI * markerCount
     val totalSats = markerSats + feeSats
@@ -776,12 +753,12 @@ private fun CostPreviewCard(
             )
             // Partial-transfer hint — shows the user the change UTXO they'll
             // hold after the send so the new partial path doesn't surprise.
-            if (needsAssetChange && typedInternalQty != null) {
+            if (needsAssetChange && units != null) {
                 Spacer(modifier = Modifier.height(6.dp))
-                val keptInternal = ownedAsset.quantity - typedInternalQty
+                val keptInternal = ownedAsset.quantity - units
                 val symbol = ownedAsset.metadata?.symbol ?: stringResource(R.string.as_units)
                 Text(
-                    text = stringResource(R.string.as_stays, formatAssetQuantity(keptInternal, decimals), symbol),
+                    text = stringResource(R.string.as_stays, AssetQuantity.format(keptInternal, decimals), symbol),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent,
                 )
@@ -811,26 +788,6 @@ private fun CostRow(label: String, value: String, emphasize: Boolean = false) {
                     else MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = if (emphasize) FontWeight.Bold else FontWeight.Normal,
         )
-    }
-}
-
-/** Parse a user's decimal string to internal asset units. Mirrors
- *  AssetViewModel.scaleToInternalUnits but lives in the Composable layer
- *  so the cost preview can react before the user hits Review. Returns
- *  null on any parse error, including more decimals than the asset
- *  supports. */
-private fun parseQuantityToInternal(input: String, decimals: Int): Long? {
-    val trimmed = input.trim()
-    if (trimmed.isEmpty()) return null
-    val decimal = trimmed.toBigDecimalOrNull() ?: return null
-    if (decimal.signum() < 0) return null
-    if (decimal.scale() > decimals) return null
-    val scaled = decimal.movePointRight(decimals)
-        .setScale(0, java.math.RoundingMode.UNNECESSARY)
-    return try {
-        scaled.longValueExact()
-    } catch (_: ArithmeticException) {
-        null
     }
 }
 

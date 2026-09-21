@@ -45,7 +45,12 @@ object DgbAmount {
         }
     }
 
-    private fun normalizeSeparators(s: String): String? {
+    /**
+     * The one separator rule, shared by every amount parser in the wallet ([UsdCents] reads dollar
+     * text through it) so that two amount fields can never disagree about what a comma means.
+     * Returns dot-decimal text with no commas, or null when the commas are ambiguous.
+     */
+    internal fun normalizeSeparators(s: String): String? {
         val commas = s.count { it == ',' }
         return when {
             commas == 0 -> s

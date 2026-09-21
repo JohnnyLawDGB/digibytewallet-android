@@ -102,4 +102,44 @@ object AssetTxQuantity {
      *  burn) — mirror the reference rather than "improving" it, or our view of the chain
      *  diverges from every other implementation's. */
     fun implicitChangeVout(outputCount: Int): Int = outputCount - 1
+
+    /**
+     * Does an instruction (or the implicit-change rule) target output [vout]? This is the
+     * PROTECTION decision, and it differs from [forOutput]'s crediting decision in two ways.
+     * It is fail-closed and independent of whether the quantity is knowable, so it COUNTS
+     * percent targets — a percent instruction still moves units to its output even though the
+     * amount cannot be resolved here. And it does NOT count an owned output that no instruction
+     * names (ordinary DGB change), so protecting a targeted output never locks change out of
+     * spending. Implicit change is targeted when the remainder is positive OR unknown.
+     *
+     * Every operation distributes units through the same instruction list — an issuance hands
+     * out what it issues, and a burn transaction still delivers the units of its non-burn
+     * instructions — so instruction targets count for all three. The non-range index 31 is the
+     * destroy marker only in a BURN; in any other operation it names a real output (one that
+     * exists once a transaction has 32 or more outputs) and is a target like any other.
+     */
+    fun targetsOutput(
+        header: DecodedAssetHeader,
+        vout: Int,
+        firstNonOpReturnVout: Int?,
+        inputUnits: Long?,
+        outputCount: Int,
+    ): Boolean {
+        val destroyMarkerApplies = header.operation == AssetOperation.BURN
+        val instructionTargets = header.transferInstructions.any { inst ->
+            when {
+                inst.isBurn && destroyMarkerApplies -> false
+                inst.range -> vout <= inst.outputIndex
+                else -> inst.outputIndex == vout
+            }
+        }
+        if (instructionTargets) return true
+        // The issuer's marker: [forOutput] credits the issued supply here.
+        if (header.operation == AssetOperation.ISSUANCE && vout == firstNonOpReturnVout) return true
+        if (vout == implicitChangeVout(outputCount)) {
+            val change = implicitChange(header, inputUnits, outputCount)
+            return change == null || change > 0L
+        }
+        return false
+    }
 }

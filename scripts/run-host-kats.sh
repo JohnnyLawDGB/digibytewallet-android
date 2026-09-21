@@ -29,10 +29,16 @@ if [ ! -d "$HOST_DIR" ]; then
     exit 1
 fi
 
-if ! command -v clang >/dev/null 2>&1; then
-    echo "error: clang is required (the KATs build with -fsanitize=address)" >&2
-    exit 1
-fi
+# The KATs build with `clang -fsanitize=address`. Rather than insist that a `clang` already
+# be on the PATH, find one that can actually do that (scripts/find-clang.sh explains why
+# "exists" is not enough), export it for every run.sh below, and say which one it is — a
+# sanitizer result means little without knowing what produced it.
+# shellcheck source=scripts/find-clang.sh
+. "$SCRIPT_DIR/find-clang.sh"
+find_host_clang || exit 1
+[ -n "${HOST_CLANG_SHIM:-}" ] && trap 'rm -rf "$HOST_CLANG_SHIM"' EXIT
+echo "compiler: $HOST_CLANG ($("$HOST_CLANG" --version 2>/dev/null | head -1))"
+echo
 
 pass=0; fail=0; norunner=0
 failed_kats=""

@@ -723,12 +723,21 @@ Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject th
     for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
     txidHex[64] = '\0';
 
-    BRWalletRegisterTransaction(g_wallet, tx);
+    /* One owner per object — the same shape the plain-DGB paths (publishTransaction /
+     * publishTransactionStem) use. The wallet's record and the publisher's object are always
+     * distinct objects; the publisher may release its object at any time. So the wallet keeps
+     * an independent COPY and the publisher is handed the ORIGINAL. The timestamp is set first
+     * because _BRWalletInsertTx orders by it. The original is never handed to the wallet: with
+     * no copy, nothing is registered here. */
+    if (! tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
+    BRTransaction *walletCopy = BRTransactionCopy(tx);
+    if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
+
     /* Non-NULL callback: see _publishResult — NULL makes the publish invisible to the
        cancellation path and it never leaves publishedTx. */
     PublishCtx *ctx = calloc(1, sizeof(*ctx));
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
-    BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* takes ownership; do NOT free tx */
+    BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* owns the original; do NOT free tx */
 
     return (*env)->NewStringUTF(env, txidHex);
 }

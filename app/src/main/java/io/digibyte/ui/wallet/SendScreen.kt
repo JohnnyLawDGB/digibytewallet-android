@@ -73,7 +73,6 @@ fun SendScreen(
     val amountFiat by viewModel.amountFiat.collectAsStateWithLifecycle()
     val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
     val customFeeInput by viewModel.customFeeInput.collectAsStateWithLifecycle()
-    val estimatedFeeSat by viewModel.estimatedFeeSat.collectAsStateWithLifecycle()
     val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val validationError by viewModel.validationError.collectAsStateWithLifecycle()
@@ -100,7 +99,9 @@ fun SendScreen(
     val effectiveAddressValid = if (effectiveDdMode) ddAddressValid else addressValid
     var ddSentTxid by remember { mutableStateOf<String?>(null) }
     var ddSending by remember { mutableStateOf(false) }
-    var ddConfirming by remember { mutableStateOf(false) }
+    // Non-null while the DigiDollar confirmation is up: the approval it shows, and the only
+    // thing the send is then given.
+    var ddApproved by remember { mutableStateOf<io.digibyte.core.model.ApprovedSend.DigiDollar?>(null) }
 
     var inputIsDgb by remember { mutableStateOf(true) }
 
@@ -133,17 +134,20 @@ fun SendScreen(
     }
 
     // ── Confirmation dialog ───────────────────────────────────────────────
-    if (sendState is SendState.Confirming) {
+    // Address, amount, the dollars beside it and the fee all come from the approval made at
+    // Review, and that same object is what the send receives: the fields are not read again once
+    // the dialog is up.
+    (sendState as? SendState.Confirming)?.approved?.let { approved ->
         SendConfirmationDialog(
-            address = address,
-            amountDgb = amountDgb,
-            amountFiat = amountFiat,
-            feeEstimate = estimatedFeeSat,
+            address = approved.address,
+            amountDgb = approved.amountText,
+            amountFiat = approved.approxUsdText,
+            feeEstimate = approved.feeEstimateSats,
             onConfirm = {
                 coroutineScope.launch {
                     val activity = context as? androidx.fragment.app.FragmentActivity
                     if (spendAuth.authorize(activity, bioConfirmTitle, bioAuthSubtitle)) {
-                        viewModel.send()
+                        viewModel.send(approved)
                     } else {
                         viewModel.cancelConfirm()
                     }
@@ -156,23 +160,23 @@ fun SendScreen(
     // ── DigiDollar confirmation dialog ────────────────────────────────────
     // DD sends get the same confirm + credential gate as DGB — a real-value
     // transfer must not broadcast straight from a button tap (finality parity).
-    if (ddConfirming) {
+    ddApproved?.let { approvedDd ->
         DigiDollarConfirmationDialog(
-            address = address,
-            amountUsd = amountFiat,
+            address = approvedDd.address,
+            amountUsd = approvedDd.amountText,
             onConfirm = {
-                // Synchronous re-entrancy guard: the first tap flips ddConfirming
-                // false immediately, so a second tap already queued on this button
+                // Synchronous re-entrancy guard: the first tap clears ddApproved
+                // immediately, so a second tap already queued on this button
                 // no-ops. (State set inside the coroutine below runs too late to
                 // debounce an already-dispatched tap — hence the guard out here.)
-                if (ddConfirming) {
-                    ddConfirming = false
+                if (ddApproved != null) {
+                    ddApproved = null
                     coroutineScope.launch {
                         val activity = context as? androidx.fragment.app.FragmentActivity
                         val authed = spendAuth.authorize(activity, bioConfirmDdTitle, bioAuthSubtitle)
                         if (!authed) return@launch   // dialog already dismissed; back to the form
                         ddSending = true
-                        viewModel.sendDigiDollar(address, amountFiat) { txid ->
+                        viewModel.sendDigiDollar(approvedDd) { txid ->
                             // sendDigiDollar's callback fires on a background dispatcher —
                             // hop back to Main before touching Compose state or Toast.
                             coroutineScope.launch {
@@ -191,7 +195,7 @@ fun SendScreen(
                     }
                 }
             },
-            onCancel = { ddConfirming = false }
+            onCancel = { ddApproved = null }
         )
     }
 
@@ -442,9 +446,11 @@ fun SendScreen(
                     isError = feeWarning is FeeWarning.ZeroFee
                 )
             } else {
-                val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
+                // Whole satoshis to text, with a dot in every language: the spelling the
+                // confirmation's fee row uses for the same number.
+                val defaultFeeDgb = java.math.BigDecimal.valueOf(viewModel.defaultFeeSat, 8)
                 Text(
-                    text = String.format("%.8f DGB", defaultFeeDgb),
+                    text = String.format(java.util.Locale.US, "%.8f DGB", defaultFeeDgb),
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -550,11 +556,12 @@ fun SendScreen(
             Button(
                 // Gate DD sends behind the same confirm + biometric flow as DGB
                 // (finality parity) instead of broadcasting straight from the tap.
-                onClick = { ddConfirming = true },
+                // The amount is read here, once; the dialog and the send use the approval.
+                onClick = { ddApproved = viewModel.approveDigiDollar() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                enabled = !ddSending && !ddConfirming && canSend && ddValid,
+                enabled = !ddSending && ddApproved == null && canSend && ddValid,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
@@ -651,10 +658,12 @@ private fun SendConfirmationDialog(
                 if (amountFiat.isNotBlank()) {
                     ConfirmRow(label = stringResource(R.string.send_approx_usd_label), value = "$$amountFiat")
                 }
-                val feeDgb = feeEstimate / 100_000_000.0
+                // Whole satoshis to text with no binary fraction in between, and a dot in every
+                // language — the spelling the amount row above uses.
+                val feeDgb = java.math.BigDecimal.valueOf(feeEstimate, 8)
                 ConfirmRow(
                     label = stringResource(R.string.send_network_fee_row),
-                    value = String.format("%.8f DGB", feeDgb)
+                    value = String.format(java.util.Locale.US, "%.8f DGB", feeDgb)
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

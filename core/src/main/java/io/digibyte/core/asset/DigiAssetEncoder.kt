@@ -22,6 +22,12 @@ object DigiAssetEncoder {
     /** OP_RETURN opcode in DGB/Bitcoin script. */
     private const val OP_RETURN: Byte = 0x6A
 
+    /** Largest payload a direct single-byte push can frame. */
+    private const val MAX_SINGLE_PUSH: Int = 75
+
+    /** OP_PUSHDATA1: the canonical framing for a payload of 76..255 bytes. */
+    private const val OP_PUSHDATA1: Byte = 0x4C
+
     /** TRANSFER opcode within the DA payload (`0x15`). */
     const val OPCODE_TRANSFER: Byte = 0x15
 
@@ -85,13 +91,24 @@ object DigiAssetEncoder {
         require(payload.size <= MAX_OP_RETURN_PAYLOAD) {
             "OP_RETURN payload ${payload.size}b exceeds max $MAX_OP_RETURN_PAYLOAD b"
         }
-        // Standard Bitcoin PUSHDATA encoding: for 1..75 byte payloads the
-        // length is a single byte equal to the length; no OP_PUSHDATA1 needed.
-        val script = ByteArray(payload.size + 2)
-        script[0] = OP_RETURN
-        script[1] = payload.size.toByte()
-        System.arraycopy(payload, 0, script, 2, payload.size)
-        return script
+        // Canonical Bitcoin/DGB script-push framing: a direct single-byte push for payloads up
+        // to 75 bytes, and OP_PUSHDATA1 (0x4c) followed by a length byte for 76..255. A
+        // single-byte push cannot frame 76 bytes (76 == 0x4c collides with the PUSHDATA1
+        // opcode) or more, so a payload at or above the boundary must use PUSHDATA1 to decode.
+        return if (payload.size <= MAX_SINGLE_PUSH) {
+            val script = ByteArray(payload.size + 2)
+            script[0] = OP_RETURN
+            script[1] = payload.size.toByte()
+            System.arraycopy(payload, 0, script, 2, payload.size)
+            script
+        } else {
+            val script = ByteArray(payload.size + 3)
+            script[0] = OP_RETURN
+            script[1] = OP_PUSHDATA1
+            script[2] = payload.size.toByte()
+            System.arraycopy(payload, 0, script, 3, payload.size)
+            script
+        }
     }
 
     /**
