@@ -77,6 +77,15 @@ jobs:
       # NativeBridge's static initializer throws UnsatisfiedLinkError on a host JVM, so the
       # native layer is unmockable there. Nothing ran these before, and two had rotted into
       # a permanently broken state unnoticed.
+      #
+      # Two suites build a 32-bit arm as well as a 64-bit one (`clang -m32`). The runner image
+      # ships clang and its 32-bit sanitizer runtime but not the 32-bit libc headers, so those
+      # arms died in <stdint.h> and the suites failed without having tested anything.
+      # gcc-multilib brings libc6-dev-i386 and the 32-bit libgcc. A suite that cannot build an
+      # arm fails rather than skips, on purpose: install the toolchain, never relax the suite.
+      - name: 32-bit toolchain for the native sweep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
+
       - name: Native host KATs
         run: ./scripts/run-host-kats.sh
 
@@ -100,6 +109,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Same toolchain as the per-push sweep above, for the same two suites.
+      - name: 32-bit toolchain for the native sweep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
 
       - name: Native host KATs (full sweep)
         run: ./scripts/run-host-kats.sh
