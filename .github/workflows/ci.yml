@@ -25,8 +25,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # Pinned to a commit, not a tag. v3 installed the `tools` package by default; Google
+      # removed it from the SDK repository in 2026-09 and every run died here in two minutes.
+      # v4.0.2+ dropped it from the defaults.
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Cache Gradle
         uses: actions/cache@v4

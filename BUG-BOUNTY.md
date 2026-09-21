@@ -157,7 +157,7 @@ Reports about the following are **closed without payout**:
 
 ### How to submit
 
-1. Email `security@digiscope.me` with subject prefix `[BOUNTY]`
+1. Email `security@aroundtheblock.us` with subject prefix `[BOUNTY]`
 2. Or open a GitHub Security Advisory at
    https://github.com/JohnnyLawDGB/digibytewallet-android/security/advisories/new
 
