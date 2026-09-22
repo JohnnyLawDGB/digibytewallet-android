@@ -133,20 +133,20 @@ class AssetRequestWiringTest {
             "the view model does not hold the request",
             Regex("""val\s+requestedQuantity\s*=\s*RequestedAssetQuantity\(\)""").containsMatchIn(vm.code),
         )
-        val review = vm.range("fun requestConfirm(", "fun cancelConfirm(")
-        assertTrue("cannot find requestConfirm() — the gate is blind, not clean", review != null)
-        val approval = vm.theCall("ApprovedSend.asset", within = review!!)
+        val confirmBody = vm.range("fun requestConfirm(", "fun cancelConfirm(")
+        assertTrue("cannot find requestConfirm() — the gate is blind, not clean", confirmBody != null)
+        val approval = vm.theCall("ApprovedSend.asset", within = confirmBody!!)
         assertEquals(
             "the approval's quantity is not the request's units, or the field's own text, read in one step",
             "requestedQuantity.textToApprove(quantityInput, divisibility)", approval.named["typedQuantity"],
         )
         assertEquals("the approval is not made at the divisibility its quantity was read at", "divisibility", approval.named["divisibility"])
-        val read = Regex("""val\s+divisibility\s*=\s*divisibilityOf\(asset\)""").findAll(vm.code).filter { it.range.first in review }.toList()
+        val read = Regex("""val\s+divisibility\s*=\s*divisibilityOf\(asset\)""").findAll(vm.code).filter { it.range.first in confirmBody }.toList()
         assertEquals("requestConfirm() reads the asset's divisibility ${read.size} times — once, so that both uses are one value", 1, read.size)
         assertTrue("the divisibility is read after the approval is made", read.single().range.last < approval.range.first)
         assertEquals(
             "requestConfirm() reads the field's text somewhere other than through the request",
-            2, Regex("""(?<!\w)quantityInput(?!\w)""").findAll(vm.code).count { it.range.first in review },
+            2, Regex("""(?<!\w)quantityInput(?!\w)""").findAll(vm.code).count { it.range.first in confirmBody },
         )
     }
 
