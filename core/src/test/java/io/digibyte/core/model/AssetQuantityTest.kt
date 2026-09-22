@@ -107,6 +107,25 @@ class AssetQuantityTest {
         assertNull(AssetQuantity.parse("9".repeat(100_000), 8))
     }
 
+    /**
+     * The length is settled before anything is built from the text, and settled by length alone:
+     * 32 characters are read, 33 are not — whatever they spell, a quantity as small as 1 included.
+     * Range cannot stand in for this: text of any length can spell a quantity that is in range.
+     */
+    @Test(timeout = 2_000) fun `text longer than any quantity is refused by its length alone`() {
+        val longest = "0".repeat(31) + "1"
+        assertEquals(32, longest.length)
+        assertEquals(1L, AssetQuantity.parse(longest, 0))
+        assertNull(AssetQuantity.parse("0$longest", 0))
+        assertEquals(150L, AssetQuantity.parse("0".repeat(29) + "1.5", 2))
+        assertNull(AssetQuantity.parse("0".repeat(30) + "1.5", 2))
+        assertEquals(100_000_000L, AssetQuantity.parse("0".repeat(23) + "1.0000000", 8))
+        assertNull(AssetQuantity.parse("0".repeat(24) + "1.0000000", 8))
+        for (divisibility in listOf(0, 2, 8)) {
+            assertNull(AssetQuantity.parse("0".repeat(1_000) + "1", divisibility))
+        }
+    }
+
     @Test fun `a divisibility no asset has reads nothing`() {
         assertNull(AssetQuantity.parse("1", -1))
         assertNull(AssetQuantity.parse("1", Int.MIN_VALUE))

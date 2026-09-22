@@ -109,7 +109,6 @@ class OnboardingHardcodedStringTest {
         // Asset screens: truncated ids, unit composites ("sats" is a unit like DGB) and format
         // patterns. Each is a value plus a symbol, with no sentence to translate.
         "txid \${s.txid.take(12)}…\${s.txid.takeLast(8)}",
-        "\$quantityInput \${asset.metadata?.symbol ?: stringResource(R.string.as_tokens)}",
         "\${formatSats(DA_MARKER_SATS_UI)} sats", "≈ \${formatSats(feeSats)} sats",
         "≈ \${formatSats(totalSats)} sats (\${formatDgb(totalSats)} DGB)",
         "\${ownedAsset.utxoCount}", "ID: \${assetId.take(12)}…",
