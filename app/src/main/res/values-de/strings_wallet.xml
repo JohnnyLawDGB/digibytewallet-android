@@ -591,4 +591,6 @@
     <string name="as_refused_rules_unknown">Blockiert: Die Übertragungsregeln dieses Assets konnten nicht überprüft werden. Es wurde nichts gesendet.</string>
     <string name="rf_move_refused_rule_bound">%1$s bleibt, wo es ist: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann</string>
     <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
+    <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
+    <string name="wipe_incomplete">Das Löschen der Wallet wurde nicht abgeschlossen. Einige Wallet-Daten befinden sich möglicherweise noch auf diesem Gerät. Starten Sie die App neu und versuchen Sie es erneut.</string>
 </resources>

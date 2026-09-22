@@ -101,15 +101,24 @@ class MainActivity : FragmentActivity() {
 
         // Wipe-after-N backstop: if a prior wipe-after-N was interrupted (process
         // killed between PinManager returning ShouldWipe and the wallet wipe
-        // completing), finish it now — BEFORE any unlock UI is shown — so we never
-        // present an unlock screen over a half-wiped wallet. Rare recovery path;
-        // at cold start the native peer manager isn't running yet so this is quick.
+        // completing) or could not be verified, run it again now — BEFORE any unlock
+        // UI is shown — so we never present an unlock screen over a half-wiped wallet.
+        // Rare recovery path; at cold start the native peer manager isn't running yet
+        // so this is quick.
+        //
+        // The PIN store (hash, counters, pin_wipe_pending) is released by
+        // wipeThenReleasePin and only after the wipe verified. No loop follows from
+        // keeping it: this runs once per launch, and the owed-wipe flag is released as
+        // soon as the seed is verifiably gone. Until then the wallet is still behind
+        // its PIN, and the unlock screen retries the wipe instead of taking one.
         if (pinManager.isWipePending()) {
             android.util.Log.w("MainActivity", "pin_wipe_pending set — completing interrupted wallet wipe")
-            kotlinx.coroutines.runBlocking {
-                runCatching { walletManager.wipeWallet() }
-                    .onFailure { android.util.Log.e("MainActivity", "backstop wipe failed", it) }
-                pinManager.clearPin() // clears counters + pin_wipe_pending so we don't loop
+            val verified = kotlinx.coroutines.runBlocking {
+                walletManager.wipeThenReleasePin(pinManager)
+            }
+            if (!verified) {
+                android.util.Log.e("MainActivity", "backstop wipe could not be verified")
+                io.digibyte.ui.components.showWipeIncompleteNotice(this)
             }
         }
 

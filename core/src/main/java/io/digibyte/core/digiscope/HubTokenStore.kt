@@ -61,6 +61,27 @@ class HubTokenStore internal constructor(
     }
 
     /**
+     * [clear] for a caller that has to know: true only when the token is gone for certain. Both
+     * stores are always attempted.
+     *
+     * An encrypted store that cannot be used is discarded as everywhere else in this class — the
+     * whole `dgb_hub_session` file is removed — so that case is the token at its most thoroughly
+     * gone and it counts as cleared. Reporting it as "not confirmed" would be a whole class of
+     * device, the one this class exists to keep working, on which a wipe could never say it
+     * finished. "Not confirmed" is kept for what it describes: a store that answered and whose
+     * removal did not land.
+     */
+    fun clearConfirmed(): Boolean {
+        val secureCleared = guarded("clear") {
+            secure.edit().remove(KEY_JWT).commit() && !secure.contains(KEY_JWT)
+        } ?: runCatching { !secure.contains(KEY_JWT) }.getOrDefault(true)
+        val legacyCleared = runCatching {
+            legacy.edit().remove(KEY_JWT).commit() && !legacy.contains(KEY_JWT)
+        }.getOrDefault(false)
+        return secureCleared && legacyCleared
+    }
+
+    /**
      * Runs [block] against the encrypted store; a failure to open it or to read/write a value
      * is logged by exception class only and the store is discarded. The Hub session is
      * re-established by logging in again; wallet access must never depend on it.

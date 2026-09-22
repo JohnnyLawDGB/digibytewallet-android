@@ -1,6 +1,7 @@
 package io.digibyte.core.sync
 
 import android.content.Context
+import io.digibyte.core.WALLET_NETWORK_SUFFIXES
 import io.digibyte.core.networkSuffix
 import java.io.File
 
@@ -112,5 +113,25 @@ object SavedBlockStore {
             runCatching { tmpFile(ctx).delete() }
             runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() }
         }
+    }
+
+    /**
+     * [delete] for EVERY network's block window, not only the selected one — a full wallet reset
+     * leaves no network's copy for the next wallet to load. The record format is untouched: the
+     * files are removed, never rewritten. Returns true only when, read back, no file is left and
+     * the legacy key's removal was written.
+     */
+    fun deleteAllNetworks(ctx: Context): Boolean = synchronized(ioLock) {
+        epoch++
+        WALLET_NETWORK_SUFFIXES.map { net ->
+            val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
+            val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
+            runCatching { bin.delete() }
+            runCatching { tmp.delete() }
+            val legacyGone = runCatching {
+                ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).commit()
+            }.getOrDefault(false)
+            !bin.exists() && !tmp.exists() && legacyGone
+        }.all { it }
     }
 }

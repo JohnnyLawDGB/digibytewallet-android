@@ -583,4 +583,6 @@
     <string name="as_refused_rules_unknown">已阻止：无法验证此资产的转账规则。未发送任何内容。</string>
     <string name="rf_move_refused_rule_bound">%1$s 留在原处：此资产带有本钱包尚无法满足的转账规则</string>
     <string name="rf_move_refused_unknown">%1$s 留在原处：无法验证其转账规则</string>
+    <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
+    <string name="wipe_incomplete">钱包清除未完成。部分钱包数据可能仍在本设备上。请重启应用后重试。</string>
 </resources>

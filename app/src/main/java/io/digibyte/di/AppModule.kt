@@ -173,8 +173,23 @@ object AppModule {
         ksm: KeyStoreManager,
         um: UtxoManager,
         am: AssetManager,
+        identitySessions: io.digibyte.IdentitySessionEraser,
     ): WalletManager =
-        WalletManager(context, ksm, um, assetManager = am)
+        WalletManager(context, ksm, um, assetManager = am, identitySessions = identitySessions)
+
+    /**
+     * The app-side half of a wallet wipe (Hub login held in memory, DigiStamp web session),
+     * handed to [WalletManager] so ONE wipe covers them whichever screen starts it. Both
+     * clients are taken lazily: nothing here needs them until a wipe runs, and WalletManager
+     * must not start constructing the Hub client as a side effect of being created.
+     */
+    @Provides @Singleton
+    fun provideIdentitySessionEraser(
+        @ApplicationContext context: Context,
+        digiScopeClient: dagger.Lazy<DigiScopeClient>,
+        hubWebSocket: dagger.Lazy<HubWebSocket>,
+    ): io.digibyte.IdentitySessionEraser =
+        io.digibyte.IdentitySessionEraser(context, digiScopeClient, hubWebSocket)
 
     /**
      * Seed seam for the recovery flow. Delegates to the existing seed store via

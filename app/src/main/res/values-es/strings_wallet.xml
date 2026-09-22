@@ -585,4 +585,6 @@
     <string name="as_refused_rules_unknown">Bloqueado: no se pudieron verificar las reglas de transferencia de este activo. No se envió nada.</string>
     <string name="rf_move_refused_rule_bound">%1$s se quedó donde estaba: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir</string>
     <string name="rf_move_refused_unknown">%1$s se quedó donde estaba: no se pudieron verificar sus reglas de transferencia</string>
+    <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
+    <string name="wipe_incomplete">El borrado de la billetera no se completó. Es posible que algunos datos de la billetera sigan en este dispositivo. Reinicia la app e inténtalo de nuevo.</string>
 </resources>
