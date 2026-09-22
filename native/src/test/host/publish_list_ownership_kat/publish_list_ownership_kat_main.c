@@ -22,12 +22,21 @@
  *
  * ARMS (run.sh builds all; convention: PRESENCE of a macro selects a comparison arm — the shipped
  * arm is built with NO -D at all, matching publish_cancel_survivor_kat):
- *   default:                          the shipped arm — the release rule above, and an entry's
- *                                     ownership follows its object into the wallet.
+ *   default:                          the shipped arm — the release rule above; an entry's ownership
+ *                                     follows its object into the wallet; a wallet-side removal goes
+ *                                     through the one manager-locked call that purges list entries by
+ *                                     their cached hash; a getdata request is answered from a private
+ *                                     copy made under the lock, released by the caller after sending.
  *   -DPUBLISH_LIST_OWNERSHIP_UNFIXED: a shape without the rule at the release seams — release keyed
  *                                     off the wallet's knowledge of the hash instead of off ownership.
  *   -DPUBLISH_OWNED_FOLLOWS_UNFIXED:  a shape without the rule at the sites where the wallet becomes
  *                                     an object's owner — the entry does not follow the object.
+ *   -DPUBLISH_REMOVE_PURGE_UNFIXED:   a shape where the manager-locked removal frees the wallet's
+ *                                     records but leaves the list entries that named them, so a
+ *                                     reader after a removal touches a released record.
+ *   -DPUBLISH_SERVED_COPY_UNFIXED:    a shape where a getdata request returns the object the list or
+ *                                     wallet owns rather than a private copy, so a read after the
+ *                                     lock is dropped can meet a concurrent removal.
  *
  * SCENARIOS (argv[1] selects one). Each header line states RED-THEN-GREEN (a comparison arm is
  * reported by AddressSanitizer while the shipped arm is clean) or GUARD (the shipped arm asserts the
@@ -52,6 +61,17 @@
  *             the inv (has-tx) path.
  *   relay     [RED-THEN-GREEN, PUBLISH_OWNED_FOLLOWS_UNFIXED] — a send re-added to the list from the
  *             wallet by the relay path is the wallet's, so it survives a broadcast timeout.
+ *   remove_relay   [RED-THEN-GREEN, PUBLISH_REMOVE_PURGE_UNFIXED] — a relay-listed wallet record
+ *             removed through the manager leaves no list entry naming it, so a confirmation after the
+ *             removal reads no released record.
+ *   remove_parent  [RED-THEN-GREEN, PUBLISH_REMOVE_PURGE_UNFIXED] — removing a parent frees it and its
+ *             listed dependant child; both list entries are dropped.
+ *   remove_readers [RED-THEN-GREEN, PUBLISH_REMOVE_PURGE_UNFIXED] — a send taken back by the wallet on
+ *             a getdata request, then removed, leaves every reader (publish, confirm, inv, getdata,
+ *             fluff) clean.
+ *   remove_getdata_race [RED-THEN-GREEN, PUBLISH_SERVED_COPY_UNFIXED] — an object served on a getdata
+ *             request and read after the lock is dropped outlives a concurrent wallet removal (two
+ *             threads).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +79,7 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "BRWallet.h"
 #include "BRTransaction.h"
@@ -328,24 +349,32 @@ static void scenario_confirm_window(void)
     _BRPeerManagerAddTxToPublishList(m, A, &g_cbSentinel, recordPublishResult);
     check(BRWalletTransactionForHash(w, aHash) != A, "the wallet record and the list's object are distinct");
 
-    /* Obtain the object from the real request path. The wallet already holds an equal record, so
-     * it does not take the list's object; the list keeps it. */
+    /* Obtain the object from the real request path. The request is answered from a private copy
+     * made under the lock; the list keeps its own object (owned = 1), the wallet keeps its record. */
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES;
     BRPeer *p = addPeer(m, 0x05, 1);
     BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
     BRTransaction *served = _peerRequestedTx(&info, aHash);
-    check(served == A, "the request serves the list's own object");
+    check(served != NULL && served != A, "the request serves a private copy, not the list's object");
     check(array_count(m->publishedTx) == 1 && m->publishedTx[0].owned == 1,
           "the list keeps ownership of its object when the wallet has an equal record");
+    if (served) { check(readObjectLikePeer(served), "the served private copy reads cleanly"); BRTransactionFree(served); }
 
-    /* Then the confirmation runs. The wallet holds an equal record, so the object is NOT released. */
+    /* Then the confirmation runs. The wallet holds an equal record, so the list's own object (A) is
+     * NOT released — the release rule is the conjunction owned && the wallet holds no equal record. */
     uint32_t h = newest_checkpoint_height_or(25000000) + 1000;
     _BRPeerManagerUpdateTx(m, &aHash, 1, h, (uint32_t)time(NULL));
 
-    /* Then the served object is read. It is still live. */
-    check(__asan_address_is_poisoned(served) == 0, "the served object is live after confirmation");
-    check(readObjectLikePeer(served), "the served object reads cleanly after confirmation");
+    /* The list's own object is still live and readable after confirmation. run.sh's mut_release
+     * mutant (release iff owned, dropping the wallet-holds-no-record conjunct) frees A here, so the
+     * read below meets a released object under the mutant and is clean on the shipped arm. */
+    check(__asan_address_is_poisoned(A) == 0, "the list's own object is live after confirmation");
+    check(readObjectLikePeer(A), "the list's own object reads cleanly after confirmation");
     check(walletRecordRoundTrips(w, aHash), "the wallet's own record round-trips after confirmation");
+
+    /* A is the list's own object, dropped from the list on confirmation but not released (the wallet
+     * holds an equal record); release it here so the scenario leaves nothing owner-less. */
+    BRTransactionFree(A);
 
     BRPeerManagerFree(m);
     BRWalletFree(w);
@@ -432,9 +461,11 @@ static void scenario_invalid_survives(void)
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES;
     BRPeer *p = addPeer(m, 0x05, 1);
     BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
-    (void)_peerRequestedTx(&info, aHash);
+    BRTransaction *served = _peerRequestedTx(&info, aHash);
+    if (served) BRTransactionFree(served);   /* the served private copy is the handler's to release */
 
-    /* THE GUARANTEE: the wallet's record is untouched and still readable. */
+    /* THE GUARANTEE: the wallet's record is untouched and still readable. run.sh's mut_invalid
+     * mutant releases regardless of ownership, freeing WA here; the read below then faults. */
     check(__asan_address_is_poisoned(WA) == 0, "the wallet's record was not released");
     check(BRWalletTransactionForHash(w, aHash) == WA, "the wallet still holds WA");
     check(readObjectLikePeer(WA), "the wallet's record reads cleanly after the invalid request");
@@ -470,7 +501,8 @@ static void scenario_requested(void)
     BRPeer *p = addPeer(m, 0x05, 1);
     BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
     BRTransaction *served = _peerRequestedTx(&info, aHash);
-    check(served == A, "the request serves the list's object");
+    check(served != NULL && served != A, "the request serves a private copy, not the list's object");
+    if (served) BRTransactionFree(served);   /* the getdata handler owns the served copy */
     check(BRWalletTransactionForHash(w, aHash) == A, "the wallet now holds A");
     check(m->publishedTx[0].owned == 0, "the entry follows the object to the wallet's ownership");
 
@@ -574,6 +606,253 @@ static void scenario_relay(void)
     BRWalletFree(w);
 }
 
+/* ---- remove_relay: a wallet record listed by the relay path is dropped from the list when the
+ *      wallet removes it through the one manager-locked removal, so no reader touches a released
+ *      record. ------------------------------------------------------------------------------- */
+static void scenario_remove_relay(void)
+{
+    printf("\n-- remove_relay: a relay-listed record removed through the manager leaves the list in agreement --\n");
+    BRWallet *w = makeWallet();
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, w, 0, NULL, 0, NULL, 0);
+    if (! w || ! m) { check(0, "fixtures allocated"); return; }
+    BRAddress ta = BRWalletReceiveAddress(w, 2);
+    uint8_t spk[64];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), ta.s);
+
+    UInt256 prev; memset(prev.u8, 0x21, 32);
+    BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
+    F->blockHeight = 1000;                                   /* confirmed funding, so the parent walk skips it */
+    F->timestamp = (uint32_t)time(NULL);
+    BRWalletRegisterTransaction(w, F);                       /* funding, wallet-owned */
+    BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 40000); /* the wallet's record of send A */
+    WA->timestamp = (uint32_t)time(NULL);
+    UInt256 aHash = WA->txHash;
+    BRWalletRegisterTransaction(w, WA);
+
+    m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
+    BRPeer *p = addPeer(m, 0x06, 1);
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
+    BRTransaction *R = mkTx(spk, spkLen, F->txHash, 40000);  /* the wire copy the relay path delivers */
+    _peerRelayedTx(&info, R);
+
+    int listed = 0;
+    for (size_t i = 0; i < array_count(m->publishedTx); i++)
+        if (m->publishedTx[i].tx == WA) { listed = 1; check(m->publishedTx[i].owned == 0,
+            "the relay listed the wallet's record of A (owned = 0)"); }
+    check(listed, "the relay path listed the wallet's record of A");
+
+    /* the wallet removes A through the one manager-locked removal */
+    BRPeerManagerRemoveTransaction(m, aHash);
+    check(BRWalletTransactionForHash(w, aHash) == NULL, "the wallet released its A record");
+    int aStillListed = 0;
+    for (size_t i = 0; i < array_count(m->publishedTx); i++)
+        if (UInt256Eq(m->publishedTxHashes[i], aHash)) aStillListed = 1;
+    check(! aStillListed, "the removed record left the publish list");
+
+    /* the confirmation loop walks every entry's object — it must touch no released record */
+    uint32_t h = newest_checkpoint_height_or(25000000) + 1000;
+    _BRPeerManagerUpdateTx(m, &aHash, 1, h, (uint32_t)time(NULL));
+    check(1, "a confirmation after the removal read no released record");
+
+    BRPeerManagerFree(m);
+    BRWalletFree(w);
+}
+
+/* ---- remove_parent: removing a parent frees it and its listed dependant child; the one
+ *      manager-locked removal drops BOTH list entries. ---------------------------------------- */
+static void scenario_remove_parent(void)
+{
+    printf("\n-- remove_parent: removing a parent drops it and its listed dependant child from the list --\n");
+    BRWallet *w = makeWallet();
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, w, 0, NULL, 0, NULL, 0);
+    if (! w || ! m) { check(0, "fixtures allocated"); return; }
+    BRAddress ta = BRWalletReceiveAddress(w, 2);
+    uint8_t spk[64];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), ta.s);
+
+    UInt256 prev; memset(prev.u8, 0x31, 32);
+    BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
+    F->blockHeight = 1000;                                    /* confirmed funding, so the parent walk skips it */
+    F->timestamp = (uint32_t)time(NULL);
+    BRWalletRegisterTransaction(w, F);
+    BRTransaction *P = mkTx(spk, spkLen, F->txHash, 40000);   /* wallet's parent send */
+    P->timestamp = (uint32_t)time(NULL);
+    UInt256 pHash = P->txHash;
+    BRWalletRegisterTransaction(w, P);
+    BRTransaction *C = mkTx(spk, spkLen, pHash, 30000);       /* wallet's child, spends P:0 */
+    C->timestamp = (uint32_t)time(NULL);
+    UInt256 cHash = C->txHash;
+    BRWalletRegisterTransaction(w, C);
+
+    /* the relay path lists the wallet's child record (owned = 0), and its parent walk lists the
+     * wallet's parent record (owned = 0). The confirmed funding F is skipped by the parent walk. */
+    m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
+    BRPeer *p = addPeer(m, 0x08, 1);
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
+    BRTransaction *R = mkTx(spk, spkLen, pHash, 30000);       /* wire copy of the child */
+    _peerRelayedTx(&info, R);
+    check(array_count(m->publishedTx) == 2, "the relay listed the wallet's child and its parent");
+
+    /* remove the parent: the wallet frees P and its dependant child C; the list drops both entries */
+    BRPeerManagerRemoveTransaction(m, pHash);
+    check(BRWalletTransactionForHash(w, pHash) == NULL, "the wallet released the parent");
+    check(BRWalletTransactionForHash(w, cHash) == NULL, "the wallet released the dependant child");
+    int anyListed = 0;
+    for (size_t i = 0; i < array_count(m->publishedTx); i++)
+        if (UInt256Eq(m->publishedTxHashes[i], pHash) || UInt256Eq(m->publishedTxHashes[i], cHash)) anyListed = 1;
+    check(! anyListed, "both removed records left the publish list");
+
+    uint32_t h = newest_checkpoint_height_or(25000000) + 1000;
+    _BRPeerManagerUpdateTx(m, &pHash, 1, h, (uint32_t)time(NULL));
+    check(1, "a confirmation after the parent removal read no released record");
+
+    BRPeerManagerFree(m);
+    BRWalletFree(w);
+}
+
+/* ---- remove_readers: a send published with no wallet copy, taken back by the wallet on a getdata
+ *      request, then removed — every reader (publish, confirm, inv, getdata, fluff) must touch no
+ *      released record. ------------------------------------------------------------------------ */
+static void scenario_remove_readers(void)
+{
+    printf("\n-- remove_readers: a send taken back on getdata then removed leaves every reader clean --\n");
+    BRWallet *w = makeWallet();
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, w, 0, NULL, 0, NULL, 0);
+    if (! w || ! m) { check(0, "fixtures allocated"); return; }
+    BRAddress ta = BRWalletReceiveAddress(w, 2);
+    uint8_t spk[64];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), ta.s);
+
+    /* publish A with no wallet copy: the list owns it, the wallet holds nothing equal */
+    BRTransaction *A = makeOwnedSend(spk, spkLen, 0x11);
+    UInt256 aHash = A->txHash;
+    _BRPeerManagerAddTxToPublishList(m, A, &g_cbSentinel, recordPublishResult);
+    check(BRWalletTransactionForHash(w, aHash) == NULL, "the wallet holds no record of A");
+
+    /* a getdata request: the wallet takes the listed object, the entry follows it to owned = 0 */
+    m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
+    BRPeer *p = addPeer(m, 0x07, 1);
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
+    BRTransaction *served = _peerRequestedTx(&info, aHash);
+    if (served) BRTransactionFree(served);   /* the served object is a private copy */
+    check(BRWalletTransactionForHash(w, aHash) == A, "the wallet took A on the request");
+    check(array_count(m->publishedTx) == 1 && m->publishedTx[0].owned == 0,
+          "the entry followed the object to the wallet's ownership");
+
+    /* the wallet removes A through the one manager-locked removal */
+    BRPeerManagerRemoveTransaction(m, aHash);
+    check(BRWalletTransactionForHash(w, aHash) == NULL, "the wallet released A");
+    check(array_count(m->publishedTx) == 0, "the removed record left the publish list");
+
+    /* every reader must touch no released record: publish (duplicate scan), confirm, inv, getdata,
+     * fluff. On the shipped arm the list is empty, so each reader runs clean; a shape that left the
+     * entry behind would fault at the first of them. */
+    BRTransaction *B = makeOwnedSend(spk, spkLen, 0x22);
+    BRPeerManagerPublishTx(m, B, &g_cbSentinel, recordPublishResult);
+    uint32_t h = newest_checkpoint_height_or(25000000) + 1000;
+    _BRPeerManagerUpdateTx(m, &aHash, 1, h, (uint32_t)time(NULL));
+    _peerHasTx(&info, aHash);
+    BRTransaction *served2 = _peerRequestedTx(&info, aHash);
+    if (served2) BRTransactionFree(served2);
+    BRPeerManagerFluffTx(m, aHash);
+    check(1, "publish / confirm / inv / getdata / fluff read no released record after the removal");
+
+    BRPeerManagerFree(m);
+    BRWalletFree(w);
+}
+
+/* ---- remove_getdata_race: an object served on a getdata request and read after the manager lock
+ *      is dropped must outlive a concurrent wallet removal. Two threads, tx_serialize_race_kat
+ *      style. The server models the BRPeer.c getdata handler; the mutator models the wallet-side
+ *      removal a user tap or the automatic dead-send drop drives. ----------------------------- */
+#define RGR_SLOTS 8
+#define RGR_ITERS 5000
+static BRWallet       *g_rgrWallet;
+static BRPeerManager  *g_rgrMgr;
+static BRPeer         *g_rgrPeer;
+static uint8_t         g_rgrSpk[64];
+static size_t          g_rgrSpkLen;
+static UInt256         g_rgrFund[RGR_SLOTS];   /* funding hash per slot */
+static UInt256         g_rgrHash[RGR_SLOTS];   /* current send hash per slot */
+static volatile int    g_rgrStop;
+
+static BRTransaction *rgrMakeSend(int slot, uint32_t nonce)
+{
+    /* spend the slot's funding:0, unique amount so each send has a unique hash */
+    return mkTx(g_rgrSpk, g_rgrSpkLen, g_rgrFund[slot], 20000 + (uint64_t)slot * 1000 + nonce);
+}
+
+static void *rgr_server(void *arg)
+{
+    (void)arg;
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info));
+    info.peer = g_rgrPeer; info.manager = g_rgrMgr;
+    for (int i = 0; i < RGR_ITERS && ! g_rgrStop; i++) {
+        UInt256 h = g_rgrHash[i % RGR_SLOTS];
+        BRTransaction *served = _peerRequestedTx(&info, h);   /* a private copy on the shipped arm */
+        usleep(20);                                           /* the read window BRPeer.c has */
+        (void)readObjectLikePeer(served);
+#ifndef PUBLISH_SERVED_COPY_UNFIXED
+        if (served) BRTransactionFree(served);                /* the handler owns the copy */
+#endif
+    }
+    return NULL;
+}
+
+static void *rgr_mutator(void *arg)
+{
+    (void)arg;
+    for (int i = 0; i < RGR_ITERS && ! g_rgrStop; i++) {
+        int slot = i % RGR_SLOTS;
+        BRPeerManagerRemoveTransaction(g_rgrMgr, g_rgrHash[slot]);  /* frees the send, purges the list */
+        BRTransaction *fresh = rgrMakeSend(slot, (uint32_t)i + 1);
+        fresh->timestamp = (uint32_t)time(NULL);
+        BRWalletRegisterTransaction(g_rgrWallet, fresh);
+        MGR_LOCK(g_rgrMgr);
+        _BRPeerManagerAddTxToPublishListOwned(g_rgrMgr, fresh, NULL, NULL, 0);
+        MGR_UNLOCK(g_rgrMgr);
+        g_rgrHash[slot] = fresh->txHash;
+    }
+    return NULL;
+}
+
+static void scenario_remove_getdata_race(void)
+{
+    printf("\n-- remove_getdata_race: a served object outlives a concurrent wallet removal (2 threads) --\n");
+    g_rgrWallet = makeWallet();
+    g_rgrMgr = BRPeerManagerNew(&BRMainNetParams, g_rgrWallet, 0, NULL, 0, NULL, 0);
+    if (! g_rgrWallet || ! g_rgrMgr) { check(0, "fixtures allocated"); return; }
+    BRAddress ta = BRWalletReceiveAddress(g_rgrWallet, 2);
+    g_rgrSpkLen = BRAddressScriptPubKey(g_rgrSpk, sizeof(g_rgrSpk), ta.s);
+    g_rgrMgr->isConnected = 1; g_rgrMgr->connectFailureCount = MAX_CONNECT_FAILURES; g_rgrMgr->downloadPeer = NULL;
+    g_rgrPeer = addPeer(g_rgrMgr, 0x33, 1);   /* created before the threads start, not raced */
+
+    for (int s = 0; s < RGR_SLOTS; s++) {
+        UInt256 prev; memset(prev.u8, (uint8_t)(0x50 + s), 32);
+        BRTransaction *F = mkTx(g_rgrSpk, g_rgrSpkLen, prev, 5000000);
+        F->blockHeight = 1000;                 /* confirmed funding, so the parent walk skips it */
+        F->timestamp = (uint32_t)time(NULL);
+        BRWalletRegisterTransaction(g_rgrWallet, F);
+        g_rgrFund[s] = F->txHash;
+        BRTransaction *WA = rgrMakeSend(s, 0);
+        WA->timestamp = (uint32_t)time(NULL);
+        BRWalletRegisterTransaction(g_rgrWallet, WA);
+        _BRPeerManagerAddTxToPublishListOwned(g_rgrMgr, WA, NULL, NULL, 0);
+        g_rgrHash[s] = WA->txHash;
+    }
+
+    g_rgrStop = 0;
+    pthread_t server, mutator;
+    pthread_create(&server, NULL, rgr_server, NULL);
+    pthread_create(&mutator, NULL, rgr_mutator, NULL);
+    pthread_join(server, NULL);
+    pthread_join(mutator, NULL);
+    check(1, "no released object was read across the getdata / removal window");
+
+    BRPeerManagerFree(g_rgrMgr);
+    BRWalletFree(g_rgrWallet);
+}
+
 /* The rig's confirmed height must clear the hardcoded checkpoint table so the wallet accepts it. */
 static uint32_t newest_checkpoint_height_or(uint32_t fallback)
 {
@@ -591,9 +870,15 @@ int main(int argc, char **argv)
 #elif defined(PUBLISH_OWNED_FOLLOWS_UNFIXED)
     printf("ARM: comparison (-DPUBLISH_OWNED_FOLLOWS_UNFIXED) — a shape without the rule where the "
            "wallet becomes an object's owner\n");
+#elif defined(PUBLISH_REMOVE_PURGE_UNFIXED)
+    printf("ARM: comparison (-DPUBLISH_REMOVE_PURGE_UNFIXED) — a removal that frees wallet records "
+           "but leaves the list entries that named them\n");
+#elif defined(PUBLISH_SERVED_COPY_UNFIXED)
+    printf("ARM: comparison (-DPUBLISH_SERVED_COPY_UNFIXED) — a getdata answer that returns an "
+           "owned object rather than a private copy\n");
 #else
     printf("ARM: shipped — the publish list releases only objects it owns and the wallet keeps no "
-           "equal record of\n");
+           "equal record of; removal and getdata keep the list in agreement with the wallet\n");
 #endif
 
     const char *which = (argc > 1) ? argv[1] : "all";
@@ -606,9 +891,14 @@ int main(int argc, char **argv)
     if (! strcmp(which, "requested")        || ! strcmp(which, "all")) { scenario_requested();        ran = 1; }
     if (! strcmp(which, "hastx")            || ! strcmp(which, "all")) { scenario_hastx();            ran = 1; }
     if (! strcmp(which, "relay")            || ! strcmp(which, "all")) { scenario_relay();            ran = 1; }
+    if (! strcmp(which, "remove_relay")     || ! strcmp(which, "all")) { scenario_remove_relay();     ran = 1; }
+    if (! strcmp(which, "remove_parent")    || ! strcmp(which, "all")) { scenario_remove_parent();    ran = 1; }
+    if (! strcmp(which, "remove_readers")   || ! strcmp(which, "all")) { scenario_remove_readers();   ran = 1; }
+    if (! strcmp(which, "remove_getdata_race") || ! strcmp(which, "all")) { scenario_remove_getdata_race(); ran = 1; }
     if (! ran) {
         printf("usage: %s [survives|confirm_released|confirm_window|invalid_released|"
-               "invalid_survives|requested|hastx|relay]\n", argv[0]);
+               "invalid_survives|requested|hastx|relay|remove_relay|remove_parent|"
+               "remove_readers|remove_getdata_race]\n", argv[0]);
         return 2;
     }
 

@@ -429,10 +429,29 @@ Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thi
  * Drop a transaction (and any dependents) from the wallet, restoring the
  * balance view. Used to clear a phantom unconfirmed send that can never confirm
  * — a double-spend whose inputs were already spent by a confirmed tx. Guarded
- * by a transaction-exists check so an unknown hash is a harmless no-op. */
+ * by a transaction-exists check so an unknown hash is a harmless no-op.
+ *
+ * Routed through the one manager-locked removal so the publish list and the
+ * wallet agree about every object: a record the wallet releases here leaves no
+ * list entry naming it. PEER_GUARD serialises g_peerManager the same way the
+ * other broadcast-path entry points do.
+ *
+ * That route removes from the wallet the manager was built with, so it is taken
+ * only while that is this g_wallet: createWalletFromBytes / recoverWalletFromBytes
+ * set g_peerManagerNeedsRecreate BEFORE they begin swapping the wallet, and until
+ * the next startSync rebuilds the manager the two names stand for different
+ * wallets — so the marker is already set for the whole of any window in which
+ * they differ, including while the new wallet is being built.
+ * With the marker set — and when there is no manager at all, so no publish list
+ * — the wallet removal stands alone on g_wallet, exactly as it did before.
+ *
+ * The return value says whether g_wallet has really let go of the record: the
+ * caller deletes its own rows for this hash on a true return, and a row deleted
+ * while the wallet still holds the record could never be cleared again. */
 JNIEXPORT jboolean JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
+    PEER_GUARD();
     if (!g_wallet || !jtxid) return JNI_FALSE;
     const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
     if (!txid) return JNI_FALSE;
@@ -440,9 +459,15 @@ Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject
     if (strlen(txid) == 64) {
         UInt256 h = _u256FromTxidHex(txid);
         if (BRWalletTransactionForHash(g_wallet, h)) {
-            BRWalletRemoveTransaction(g_wallet, h);
-            LOGI("removeTransaction: dropped %s", txid);
-            removed = JNI_TRUE;
+            if (g_peerManager && !g_peerManagerNeedsRecreate) {
+                BRPeerManagerRemoveTransaction(g_peerManager, h);
+            } else {
+                BRWalletRemoveTransaction(g_wallet, h);
+            }
+            /* Report on what g_wallet holds now, not on which path ran. */
+            removed = BRWalletTransactionForHash(g_wallet, h) ? JNI_FALSE : JNI_TRUE;
+            if (removed) LOGI("removeTransaction: dropped %s", txid);
+            else LOGW("removeTransaction: %s is still held by the wallet — reporting not dropped", txid);
         }
     }
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
