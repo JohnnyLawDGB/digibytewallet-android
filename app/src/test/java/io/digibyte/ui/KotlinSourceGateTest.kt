@@ -182,6 +182,27 @@ class KotlinSourceGateTest {
         }
     }
 
+    @Test fun `a block is found from what stands in it, and from the call it follows`() {
+        val gate = gate(
+            """
+            Field(onChange = { text = it; touched() }, label = { Text("{") })
+            Effect(key, other) {
+                value?.let { text = it }
+            }
+            """
+        )
+        val write = gate.code.indexOf("text = it")
+        assertEquals("{ text = it; touched() }", gate.code.substring(gate.enclosingBlock(write)!!))
+        val effect = gate.calls("Effect").single()
+        assertEquals(listOf("key", "other"), effect.arguments)
+        val body = gate.trailingBlock(effect)!!
+        assertTrue(gate.code.substring(body).contains("value?.let"))
+        assertEquals("{ text = it }", gate.code.substring(gate.enclosingBlock(gate.code.lastIndexOf("text = it"))!!))
+        assertNull(gate.trailingBlock(gate.calls("touched").single()))
+        assertNull(gate.enclosingBlock(0))
+        assertTrue("a literal is kept as it is written, for the gates that pin one", gate.written.contains("Text(\"{\")"))
+    }
+
     @Test fun `a condition is matched whole, however it is spaced`() {
         val gate = gate(
             """

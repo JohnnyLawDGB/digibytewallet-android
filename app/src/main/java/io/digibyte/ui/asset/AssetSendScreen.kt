@@ -45,8 +45,11 @@ fun AssetSendScreen(
     assetId: String,
     onNavigateBack: () -> Unit,
     prefillAddress: String = "",
-    /** Raw asset units carried by a `digibyte:…?assetId=&assetAmount=` transfer request. */
-    prefillQuantity: String = "",
+    /**
+     * Whole units of the asset named by a `digibyte:…?assetId=&assetAmount=` transfer request — the
+     * integer the request carried, never text. The view model writes the quantity field from it.
+     */
+    requestedUnits: Long? = null,
     onScanQr: () -> Unit = {},
     viewModel: AssetViewModel = hiltViewModel()
 ) {
@@ -88,16 +91,6 @@ fun AssetSendScreen(
         if (prefillAddress.isNotBlank()) {
             recipientAddress = prefillAddress
             addressError = null
-        }
-    }
-
-    // Pre-fill the quantity from an asset transfer request. Pre-filled, NOT locked: the
-    // request is untrusted input, so the user must still be able to see and change what
-    // leaves their wallet before signing.
-    LaunchedEffect(prefillQuantity) {
-        if (prefillQuantity.isNotBlank()) {
-            quantityInput = prefillQuantity
-            quantityError = null
         }
     }
 
@@ -312,6 +305,20 @@ fun AssetSendScreen(
 
             // ── Quantity input ────────────────────────────────────────────
             val decimals = ownedAsset.metadata?.decimals ?: 0
+
+            // Pre-fill the quantity from an asset transfer request. Pre-filled, NOT locked: the
+            // request is untrusted input, so the user must still be able to see and change what
+            // leaves their wallet before signing. The request names whole units; the text is
+            // written from them at the divisibility this form reads the field with, and written
+            // again if that divisibility changes while the field is still the request's. From
+            // the first edit the field is the user's text and is not written over.
+            LaunchedEffect(requestedUnits, decimals) {
+                viewModel.requestedQuantity.deliver(requestedUnits)
+                viewModel.requestedQuantity.fieldText(decimals)?.let {
+                    quantityInput = it
+                    quantityError = null
+                }
+            }
             Text(
                 text = stringResource(R.string.as_quantity),
                 style = MaterialTheme.typography.labelLarge,
@@ -324,6 +331,7 @@ fun AssetSendScreen(
                 onValueChange = {
                     quantityInput = it
                     quantityError = null
+                    viewModel.requestedQuantity.edited()
                 },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
@@ -341,6 +349,7 @@ fun AssetSendScreen(
                         onClick = {
                             quantityInput = AssetQuantity.format(ownedAsset.quantity, decimals)
                             quantityError = null
+                            viewModel.requestedQuantity.edited()
                         },
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     ) {

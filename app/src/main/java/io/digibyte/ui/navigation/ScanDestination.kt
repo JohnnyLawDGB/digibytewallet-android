@@ -21,7 +21,16 @@ object ScanDestination {
             // An asset transfer request names what to send, so it goes to that asset's send
             // screen rather than the DGB flow — which would otherwise silently drop the asset
             // and prompt for a coin payment.
-            assetId != null -> "asset_send/${encode(assetId)}?address=$address&quantity=${uri.assetAmount}"
+            //
+            // It names WHOLE UNITS of the asset (DigiByteUri.assetAmount), and they travel as that
+            // integer, under a name that says so: the send screen writes its quantity field from
+            // them at the asset's own divisibility. They are never handed on as text for a later
+            // step to read at some scale. A request object without usable units names none.
+            assetId != null -> {
+                val units = uri.assetAmount?.takeIf { it > 0L }
+                val route = "asset_send/${encode(assetId)}?address=$address"
+                if (units != null) "$route&units=$units" else route
+            }
             // A caller that asked for the scan gets the address back; a DGB amount means
             // nothing to an asset send screen.
             returnTo.isNotBlank() -> "$returnTo?address=$address"

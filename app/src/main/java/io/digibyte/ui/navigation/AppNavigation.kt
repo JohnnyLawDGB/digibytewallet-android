@@ -674,20 +674,22 @@ fun AppNavigation(
             }
 
             composable(
-                "asset_send/{assetId}?address={address}&quantity={quantity}",
+                "asset_send/{assetId}?address={address}&units={units}",
                 arguments = listOf(
                     navArgument("address") { defaultValue = "" },
-                    navArgument("quantity") { defaultValue = "" },
+                    // Whole units of the asset named by a transfer request — an integer, never
+                    // text to be read at some scale. 0 is a route that names none.
+                    navArgument("units") { type = NavType.LongType; defaultValue = 0L },
                 )
             ) { backStackEntry ->
                 val assetId = backStackEntry.arguments?.getString("assetId") ?: ""
                 val prefillAddress = backStackEntry.arguments?.getString("address") ?: ""
-                val prefillQuantity = backStackEntry.arguments?.getString("quantity") ?: ""
+                val requestedUnits = backStackEntry.arguments?.getLong("units")?.takeIf { it > 0L }
                 AssetSendScreen(
                     assetId = assetId,
                     onNavigateBack = { navController.popBackStack() },
                     prefillAddress = prefillAddress,
-                    prefillQuantity = prefillQuantity,
+                    requestedUnits = requestedUnits,
                     onScanQr = {
                         navController.navigate(
                             "qr_scanner?returnTo=" + Uri.encode("asset_send/$assetId")

@@ -13,8 +13,8 @@ package io.digibyte.ui
  * brackets to it, so a call pinned through it should not pass `f<A, B>()` as an argument.
  */
 internal class KotlinSourceGate private constructor(
-    /** The file with its comments blanked. Same length and lines as the file. */
-    private val written: String,
+    /** The file with its comments blanked, literals as they are written. Same length and lines as the file. */
+    val written: String,
     /** The file with its comments and the text inside its literals blanked: what is left is code. */
     val code: String,
 ) {
@@ -125,6 +125,21 @@ internal class KotlinSourceGate private constructor(
     /** The `{ … }` that opens at [open], or null when [open] is not an opening brace with a partner. */
     fun blockAt(open: Int): IntRange? =
         if (code.getOrNull(open) == '{') matching(open)?.let { open..it } else null
+
+    /** The lambda written after [call]'s closing bracket — `f(a) { … }` — or null when there is none. */
+    fun trailingBlock(call: Call): IntRange? = blockAt(skipSpace(call.range.last + 1))
+
+    /** The innermost `{ … }` that [at] stands in, or null when it stands in none. */
+    fun enclosingBlock(at: Int): IntRange? {
+        var depth = 0
+        for (open in (at - 1) downTo 0) {
+            when (code[open]) {
+                '}' -> depth++
+                '{' -> if (depth == 0) return blockAt(open) else depth--
+            }
+        }
+        return null
+    }
 
     private fun skipSpace(from: Int): Int {
         var at = from
