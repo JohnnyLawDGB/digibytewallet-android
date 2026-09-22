@@ -83,6 +83,93 @@ class DigiDollarTransferServiceTest {
         assertTrue("the fee input", r.spentInputs.contains("fee:0"))
     }
 
+    // ---- moved and left behind are separate figures -------------------------------------------
+
+    /**
+     * The moved figure is what the broadcast transfer carried — the amount it was planned for and
+     * the signer was handed — and whatever else was found is reported as still where it was.
+     * The two figures are reported separately.
+     */
+    @Test fun `two dollars found with one unlocatable reports one moved and one left behind`() {
+        var signedCents = -1L
+        val svc = service(sign = { plan, _, _ -> signedCents = plan.cents; "00ff" })
+
+        val r = run(svc, scanOf(200, unlocatable = 100L))
+
+        assertTrue(r.moved)
+        assertEquals("everything found is still reported", 200L, r.cents)
+        assertEquals("the moved figure is the amount that was signed", 100L, signedCents)
+        assertEquals(signedCents, r.movedCents)
+        assertEquals(100L, r.leftBehindCents)
+        assertEquals(100L, r.unlocatableCents)
+    }
+
+    @Test fun `a full move leaves nothing behind`() {
+        val r = run(service(), scanOf(100))
+        assertEquals(100L, r.movedCents)
+        assertEquals(0L, r.leftBehindCents)
+    }
+
+    /** No broadcast, no moved figure — whichever step stopped it. */
+    @Test fun `nothing is reported as moved unless the transfer was broadcast`() {
+        val stopped = listOf(
+            run(service(), scanOf(200), fees = emptyList()),
+            run(service(sign = { _, _, _ -> null }), scanOf(200)),
+            run(service(sign = { _, _, _ -> "nothex" }), scanOf(200)),
+            run(service(broadcast = { null }), scanOf(200)),
+            run(service(), scanOf(200, holdings = emptyList(), unlocatable = 200L)),
+        )
+        for (r in stopped) {
+            assertFalse(r.moved)
+            assertEquals(0L, r.movedCents)
+            assertEquals(200L, r.leftBehindCents)
+        }
+    }
+
+    // ---- whether the fee inputs are enough ------------------------------------------------------
+
+    private fun suffice(scan: DigiDollarScan.Result, fees: List<ForeignAssetTransferPlan.Spend>) =
+        DigiDollarTransferService.feeInputsSuffice(scan, fees, recipient, changeAddr)
+
+    @Test fun `fee inputs are enough exactly when they meet the fee floor for an ordinary transfer`() {
+        assertFalse(suffice(scanOf(100), emptyList()))
+        assertFalse(suffice(scanOf(100), listOf(feeInput(DigiDollarTransferPlan.DD_MIN_FEE_SATS - 1))))
+        assertTrue(suffice(scanOf(100), listOf(feeInput(DigiDollarTransferPlan.DD_MIN_FEE_SATS))))
+    }
+
+    /**
+     * The question is put to [DigiDollarTransferPlan] with what [DigiDollarTransferService.move]
+     * hands it, so the two agree at every size: inputs that are not enough are refused for the fee, and inputs
+     * that are enough move the dollars.
+     */
+    @Test fun `the fee check and the move agree on a transfer of many outpoints`() {
+        val scan = scanOf(70_000, holdings = (0 until 700).map { holding(it).copy(txid = "dd$it") })
+        val one = listOf(feeInput(10_000_000L))
+        val two = one + feeInput(10_000_000L).copy(txid = "fee2")
+
+        assertFalse(suffice(scan, one))
+        assertEquals(DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR,
+            run(service(), scan, fees = one).refusalReason)
+
+        assertTrue(suffice(scan, two))
+        assertTrue(run(service(), scan, fees = two).moved)
+    }
+
+    /** Only movable cents are planned, so the check is made on those too. */
+    @Test fun `the fee check sizes what will be moved, not everything found`() {
+        // $1.50 found with $1.00 unlocatable leaves $0.50 movable — under the per-output minimum,
+        // which no amount of DGB changes.
+        val scan = scanOf(150, unlocatable = 100L)
+        assertTrue(suffice(scan, emptyList()))
+        assertEquals(DigiDollarTransferPlan.Reason.BELOW_MIN_CENTS,
+            run(service(), scan).refusalReason)
+    }
+
+    /** A refusal more DGB would not change is not a request for more DGB. */
+    @Test fun `with no outpoint to move no further fee inputs are asked for`() {
+        assertTrue(suffice(scanOf(500, holdings = emptyList(), unlocatable = 500L), emptyList()))
+    }
+
     // ---- found but not moved: still reported ----------------------------------------------------
 
     /**

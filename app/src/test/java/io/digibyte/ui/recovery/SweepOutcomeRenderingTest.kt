@@ -1,7 +1,10 @@
 package io.digibyte.ui.recovery
 
 import io.digibyte.core.recovery.DerivationProfile
+import io.digibyte.core.recovery.DigiDollarTransferService
 import io.digibyte.core.recovery.LegacySweepService
+import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -93,5 +96,112 @@ class SweepOutcomeRenderingTest {
         val o = outcome("deadbeef", LegacySweepService.BroadcastState.PENDING, swept = 145_000_000L)
         assertTrue(o.txid != null)
         assertTrue(o.sweptSat > 0)
+    }
+
+    // ---- the DigiDollar result card -----------------------------------------------------------
+    //
+    // Same approach as above: the card draws one line per entry of digiDollarOutcomeLines, so the
+    // rule is asserted on that list, and a source gate holds the card to drawing from it.
+
+    /** [unlocatable] is its own figure: what was left behind is not always what was unlocatable. */
+    private fun ddResult(
+        found: Long,
+        moved: Long,
+        unlocatable: Long = 0L,
+        txid: String? = "dd-txid",
+        reachable: Boolean = true,
+    ) = DigiDollarTransferService.Result(
+        cents = found, txid = txid, failureReason = null,
+        unlocatableCents = unlocatable, reachable = reachable, movedCents = moved,
+    )
+
+    private fun line(kind: DigiDollarOutcomeLine.Kind, cents: Long = 0L) =
+        DigiDollarOutcomeLine(kind, cents)
+
+    /**
+     * The moved line carries what the transfer carried, and the remainder gets its own line.
+     * The two figures are reported separately.
+     */
+    @Test fun `a partial DigiDollar move shows the moved figure and the left-behind figure`() {
+        assertEquals(
+            listOf(
+                line(DigiDollarOutcomeLine.Kind.MOVED, 100L),
+                line(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, 100L),
+            ),
+            digiDollarOutcomeLines(ddResult(found = 200L, moved = 100L, unlocatable = 100L)),
+        )
+    }
+
+    @Test fun `a full DigiDollar move shows one line`() {
+        assertEquals(
+            listOf(line(DigiDollarOutcomeLine.Kind.MOVED, 100L)),
+            digiDollarOutcomeLines(ddResult(found = 100L, moved = 100L)),
+        )
+    }
+
+    /**
+     * Every cent here had its outpoint located and none moved — the wallet was short of the fee.
+     * What is left behind is everything found that did not move, whatever the reason.
+     */
+    @Test fun `DigiDollar that did not move is shown as left behind in full`() {
+        assertEquals(
+            listOf(line(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, 200L)),
+            digiDollarOutcomeLines(ddResult(found = 200L, moved = 0L, unlocatable = 0L, txid = null)),
+        )
+    }
+
+    @Test fun `an unanswered DigiDollar lookup is not shown as an amount`() {
+        assertEquals(
+            listOf(line(DigiDollarOutcomeLine.Kind.UNREACHABLE)),
+            digiDollarOutcomeLines(ddResult(found = 0L, moved = 0L, txid = null, reachable = false)),
+        )
+    }
+
+    /**
+     * An address that could not be asked about is said so beside whatever else is reported, so a
+     * moved figure never stands for the whole wallet when part of it went unchecked.
+     */
+    @Test fun `an unanswered lookup is reported beside a moved figure`() {
+        assertEquals(
+            listOf(
+                line(DigiDollarOutcomeLine.Kind.MOVED, 100L),
+                line(DigiDollarOutcomeLine.Kind.UNREACHABLE),
+            ),
+            digiDollarOutcomeLines(ddResult(found = 100L, moved = 100L, reachable = false)),
+        )
+    }
+
+    @Test fun `an unanswered lookup is reported beside a left-behind figure`() {
+        assertEquals(
+            listOf(
+                line(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, 200L),
+                line(DigiDollarOutcomeLine.Kind.UNREACHABLE),
+            ),
+            digiDollarOutcomeLines(ddResult(found = 200L, moved = 0L, txid = null, reachable = false)),
+        )
+    }
+
+    /** The card holds no figure of its own: every amount it prints comes from a line. */
+    @Test fun `the DigiDollar card draws its amounts from the outcome lines`() {
+        val file = File("src/main/java/io/digibyte/ui/recovery/RecoverFundsScreen.kt")
+        assertTrue("RecoverFundsScreen.kt is missing — this gate is watching a file that moved",
+            file.exists())
+        val src = file.readLines()
+            .filterNot { l -> l.trimStart().startsWith("//") || l.trimStart().startsWith("*") }
+            .filterNot { l -> l.trimStart().startsWith("/*") }
+            .joinToString("\n")
+        val start = src.indexOf("private fun DigiDollarSection(")
+        assertTrue("no DigiDollarSection found at all", start > 0)
+        val end = src.indexOf("\n@Composable", start).let { if (it < 0) src.length else it }
+        val card = src.substring(start, end)
+
+        // The scanner is not blind: this is the card, and it still prints both sentences.
+        assertTrue(card.contains("R.string.rf_dd_moved"))
+        assertTrue(card.contains("R.string.rf_dd_left_behind"))
+
+        assertTrue("the card no longer draws from digiDollarOutcomeLines",
+            card.contains("digiDollarOutcomeLines(dd)"))
+        assertFalse("the card formats the found total itself instead of a line's figure",
+            card.contains("dd.cents"))
     }
 }

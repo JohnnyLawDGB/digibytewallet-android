@@ -52,6 +52,10 @@ class DigiDollarTransferService(
      * [cents] is everything found, which is deliberately reported even when none of it moved —
      * knowing the dollars exist is useful on its own, and silence about them is the bug this
      * whole path exists to fix.
+     *
+     * [movedCents] is a separate figure and is never read off [cents]: it is the amount the
+     * broadcast transfer was planned and signed for. Whatever was found beyond it is
+     * [leftBehindCents], so a move that carried only part of the balance reads as partial.
      */
     data class Result(
         val cents: Long,
@@ -71,9 +75,14 @@ class DigiDollarTransferService(
         val refusalReason: DigiDollarTransferPlan.Reason? = null,
         /** Satoshis short of the consensus fee, when [refusalReason] is BELOW_FEE_FLOOR. */
         val shortfallSat: Long = 0L,
+        /** Cents the broadcast transfer carried — the figure handed to the signer. Zero unless
+         *  [txid] is set. */
+        val movedCents: Long = 0L,
     ) {
         val moved: Boolean get() = txid != null
         val hasDollars: Boolean get() = cents > 0
+        /** Found and still where it was: everything in [cents] the transfer did not carry. */
+        val leftBehindCents: Long get() = (cents - movedCents).coerceAtLeast(0L)
     }
 
     /**
@@ -90,7 +99,7 @@ class DigiDollarTransferService(
         feeProfile: DerivationProfile,
         recipientKeyHex: String,
         changeAddress: String,
-        feePerKb: Long = 100_000L,
+        feePerKb: Long = DEFAULT_FEE_PER_KB,
     ): Result = withContext(Dispatchers.IO) {
         if (!scan.hasDollars) {
             // Nothing to report and nothing to do. Distinguished from an unreachable lookup,
@@ -102,14 +111,7 @@ class DigiDollarTransferService(
         log('i', "found ${DigiDollarHolding.formatCents(scan.cents)} in DigiDollar across " +
             "${scan.holdings.size} outpoint(s); ${scan.unlocatableCents} cents unlocatable")
 
-        val planned = DigiDollarTransferPlan.build(
-            holdings = scan.holdings,
-            totalCents = scan.movableCents,
-            feeInputs = feeInputs,
-            recipientKeyHex = recipientKeyHex,
-            changeAddress = changeAddress,
-            feePerKb = feePerKb,
-        )
+        val planned = planFor(scan, feeInputs, recipientKeyHex, changeAddress, feePerKb)
 
         val plan = when (planned) {
             is DigiDollarTransferPlan.Result.Refused -> {
@@ -154,7 +156,7 @@ class DigiDollarTransferService(
             recordOutgoing(txid, 0L, plan.feeSat, plan.changeAddress, true)
         }
 
-        log('i', "DigiDollar MOVED in $txid")
+        log('i', "DigiDollar MOVED in $txid: ${plan.cents} of ${scan.cents} cents")
         Result(
             cents = scan.cents,
             txid = txid,
@@ -163,11 +165,54 @@ class DigiDollarTransferService(
                 plan.feeInputs.map { "${it.txid}:${it.vout}" },
             unlocatableCents = scan.unlocatableCents,
             reachable = scan.reachable,
+            // The signed figure, not the found one: what the scan could not locate is not in
+            // this transaction, and the result must not say it is.
+            movedCents = plan.cents,
         )
     }
 
     companion object {
         private const val TAG = "DigiDollarMove"
+
+        /** The fee rate a transfer is sized at unless the caller names another. */
+        const val DEFAULT_FEE_PER_KB = 100_000L
+
+        /**
+         * Whether [feeInputs] are all the DGB that moving [scan] needs.
+         *
+         * Puts to [DigiDollarTransferPlan] the question [move] puts to it, with the same
+         * arguments, so the answer is about the fee this transfer is charged at its real size and
+         * not about a fixed figure. True as soon as no more DGB is asked for — which includes a
+         * transfer declined for a reason more DGB would not change, where further coins add
+         * nothing.
+         */
+        fun feeInputsSuffice(
+            scan: DigiDollarScan.Result,
+            feeInputs: List<ForeignAssetTransferPlan.Spend>,
+            recipientKeyHex: String,
+            changeAddress: String,
+            feePerKb: Long = DEFAULT_FEE_PER_KB,
+        ): Boolean {
+            val planned = planFor(scan, feeInputs, recipientKeyHex, changeAddress, feePerKb)
+            return !(planned is DigiDollarTransferPlan.Result.Refused &&
+                planned.reason == DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR)
+        }
+
+        /** The one place a scan becomes a plan, so [move] and [feeInputsSuffice] cannot differ. */
+        private fun planFor(
+            scan: DigiDollarScan.Result,
+            feeInputs: List<ForeignAssetTransferPlan.Spend>,
+            recipientKeyHex: String,
+            changeAddress: String,
+            feePerKb: Long,
+        ): DigiDollarTransferPlan.Result = DigiDollarTransferPlan.build(
+            holdings = scan.holdings,
+            totalCents = scan.movableCents,
+            feeInputs = feeInputs,
+            recipientKeyHex = recipientKeyHex,
+            changeAddress = changeAddress,
+            feePerKb = feePerKb,
+        )
 
         private fun nativeSign(
             plan: DigiDollarTransferPlan.Plan,

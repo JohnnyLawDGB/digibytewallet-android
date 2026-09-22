@@ -346,14 +346,6 @@ class RecoverFundsViewModel @Inject constructor(
                 return@repeat
             }
 
-            // DigiDollar moves alongside the assets and BEFORE the sweep, for the same reason:
-            // the DGB paying its consensus fee is exactly what the sweep would otherwise take.
-            // Its inputs join the same exclusion set.
-            // Foreign only. On the own-wallet path the source and destination m/86' keys are the
-            // same key, so a "move" would spend the 0.1 DGB consensus fee to send the dollars to
-            // where they already are.
-            val dd = if (isForeign) moveDigiDollar(seed, current, destIsSelf) else null
-
             val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
                 moveResult.moves.map {
                     io.digibyte.core.recovery.RecoverySequence.MoveRecord(
@@ -363,6 +355,16 @@ class RecoverFundsViewModel @Inject constructor(
                     )
                 }
             )
+
+            // DigiDollar moves alongside the assets and BEFORE the sweep, for the same reason:
+            // the DGB paying its consensus fee is exactly what the sweep would otherwise take.
+            // Its inputs join the same exclusion set.
+            // Foreign only. On the own-wallet path the source and destination m/86' keys are the
+            // same key, so a "move" would spend the 0.1 DGB consensus fee to send the dollars to
+            // where they already are.
+            val dd = if (isForeign) {
+                moveDigiDollar(seed, current, destIsSelf, verdicts, exclusions)
+            } else null
 
             val swept = LegacySweepService(outgoingTxStore, walletTxPersister, classifier).sweepFromSeed(
                 seedBytes = seed,
@@ -386,11 +388,18 @@ class RecoverFundsViewModel @Inject constructor(
      * Null when there is nothing to say — no dollars and a reachable lookup. Anything else is
      * reported, including dollars we found and could not move: a recovery that empties a wallet
      * of DGB while staying silent about its dollars is the failure this whole path exists to fix.
+     *
+     * @param verdicts         this round's classification — the same map the sweep is handed.
+     * @param claimedOutpoints what the DigiAsset moves of this round claimed — the same set the
+     *                         sweep excludes.
      */
     private suspend fun moveDigiDollar(
         seed: ByteArray,
         findings: List<RecoveryScanService.ProfileResult>,
         destIsSelf: Boolean,
+        verdicts: Map<io.digibyte.core.reconcile.UtxoEntry,
+            io.digibyte.core.recovery.ForeignUtxoAssetClassifier.Verdict>,
+        claimedOutpoints: Set<String>,
     ): io.digibyte.core.recovery.DigiDollarTransferService.Result? {
         if (!destIsSelf) return null   // DigiDollar always comes home; there is no external form
         val scan = (scanService.state.value as? RecoveryScanService.State.Done)?.digiDollar
@@ -402,13 +411,29 @@ class RecoverFundsViewModel @Inject constructor(
         val recipient = NativeBridge.getDigiDollarTaprootKeyHex() ?: return null
         val change = NativeBridge.getReceiveAddress(0, format = 2) ?: return null
 
-        // The fee comes from the plain DGB the scan found, wherever it lives. Asset-bearing
-        // outpoints are excluded by the same partition the sweep uses.
+        // The fee comes from the plain DGB the scan found, wherever it lives. The selection is
+        // handed the verdicts and the claimed outpoints, so it applies the partition and the
+        // exclusions the sweep applies: only classified, plain, unclaimed outputs pay the fee.
         //
         // An EMPTY selection is passed through rather than returned on: a wallet with dollars and
         // no DGB used to bail out here, so its dollars went unmentioned — the silence this path
         // exists to end. The transfer service refuses it honestly and reports the balance.
-        val fee = io.digibyte.core.recovery.DigiDollarFeeSelection.from(findings)
+        val fee = io.digibyte.core.recovery.DigiDollarFeeSelection.from(
+            findings = findings,
+            verdicts = verdicts,
+            excludeOutpoints = claimedOutpoints,
+            // Enough is decided by DigiDollarTransferPlan for THIS transfer — asked with the scan
+            // and the addresses the move below is given — so selection stops where the fee is
+            // covered at the transfer's real size.
+            covers = { picked ->
+                io.digibyte.core.recovery.DigiDollarTransferService.feeInputsSuffice(
+                    scan = scan,
+                    feeInputs = picked,
+                    recipientKeyHex = recipient,
+                    changeAddress = change,
+                )
+            },
+        )
 
         return io.digibyte.core.recovery.DigiDollarTransferService(
             outgoingTxStore = outgoingTxStore,

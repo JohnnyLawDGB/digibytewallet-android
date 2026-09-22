@@ -816,6 +816,31 @@ private fun DigiDollarFoundCard(
     }
 }
 
+/** One line of the DigiDollar result card. [cents] is unused for [Kind.UNREACHABLE]. */
+internal data class DigiDollarOutcomeLine(val kind: Kind, val cents: Long = 0L) {
+    enum class Kind { MOVED, LEFT_BEHIND, UNREACHABLE }
+}
+
+/**
+ * What the DigiDollar result card says, top to bottom.
+ *
+ * Moved and left behind are separate figures. The moved line carries what the broadcast transfer
+ * carried, never the total found, and anything found beyond that gets its own line — so a move
+ * that carried part of the balance reads as partial. The card prints amounts only from these
+ * lines, which is what lets the rule be checked without a UI harness.
+ */
+internal fun digiDollarOutcomeLines(
+    dd: io.digibyte.core.recovery.DigiDollarTransferService.Result,
+): List<DigiDollarOutcomeLine> = buildList {
+    if (dd.moved) add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.MOVED, dd.movedCents))
+    if (dd.leftBehindCents > 0L) {
+        add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, dd.leftBehindCents))
+    }
+    // At least one address could not be asked about. Said beside whatever else is reported, so
+    // no figure above stands for the whole wallet — and never shown as "holds none".
+    if (!dd.reachable) add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.UNREACHABLE))
+}
+
 /**
  * What became of the wallet's DigiDollar.
  *
@@ -834,53 +859,55 @@ private fun DigiDollarSection(
         Column(modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)) {
-            val amount = io.digibyte.core.recovery.DigiDollarHolding.formatCents(dd.cents)
-            when {
-                dd.moved -> {
-                    Text(
+            digiDollarOutcomeLines(dd).forEachIndexed { i, line ->
+                if (i > 0) Spacer(Modifier.height(6.dp))
+                val amount = io.digibyte.core.recovery.DigiDollarHolding.formatCents(line.cents)
+                when (line.kind) {
+                    DigiDollarOutcomeLine.Kind.MOVED -> Text(
                         text = stringResource(R.string.rf_dd_moved, amount),
                         color = SUCCESS_GREEN,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                }
-                !dd.reachable && !dd.hasDollars -> {
                     // Could not ask. Never reported as "holds none" — the wallet may hold plenty.
-                    Text(
+                    DigiDollarOutcomeLine.Kind.UNREACHABLE -> Text(
                         text = stringResource(R.string.rf_dd_unreachable),
                         color = AMBER,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                }
-                else -> {
-                    Text(
-                        text = stringResource(R.string.rf_dd_left_behind, amount),
-                        color = AMBER,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    // The fee floor is the refusal a real user actually hits, so it gets a
-                    // sentence in their language and in DGB. Everything else falls back to the
-                    // planner's own words — imperfect, but never silent.
-                    val reason = if (dd.refusalReason ==
-                        io.digibyte.core.recovery.DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR
-                    ) {
-                        stringResource(
-                            R.string.rf_dd_fee_floor,
-                            formatSatToDgb(io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS),
-                            formatSatToDgb(
-                                (io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS -
-                                    dd.shortfallSat).coerceAtLeast(0L)
-                            ),
-                        )
-                    } else dd.failureReason
-                    reason?.let {
-                        Spacer(Modifier.height(6.dp))
+                    DigiDollarOutcomeLine.Kind.LEFT_BEHIND -> {
                         Text(
-                            text = it,
-                            color = MUTED,
-                            style = MaterialTheme.typography.bodySmall,
+                            text = stringResource(R.string.rf_dd_left_behind, amount),
+                            color = AMBER,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
                         )
+                        // The reason sits directly beneath the figure it explains.
+                        if (!dd.moved) {
+                            // The fee floor is the refusal a real user actually hits, so it gets
+                            // a sentence in their language and in DGB. Everything else falls back
+                            // to the refusal's own English — imperfect, but never silent.
+                            val reason = if (dd.refusalReason ==
+                                io.digibyte.core.recovery.DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR
+                            ) {
+                                stringResource(
+                                    R.string.rf_dd_fee_floor,
+                                    formatSatToDgb(io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS),
+                                    formatSatToDgb(
+                                        (io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS -
+                                            dd.shortfallSat).coerceAtLeast(0L)
+                                    ),
+                                )
+                            } else dd.failureReason
+                            reason?.let {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = it,
+                                    color = MUTED,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
                     }
                 }
             }
