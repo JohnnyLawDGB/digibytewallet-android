@@ -38,6 +38,8 @@ class ForeignAssetTransferService(
     private val assetClassifier: ForeignUtxoAssetClassifier,
     private val outgoingTxStore: OutgoingTxStore? = null,
     private val walletTxPersister: WalletTxPersister? = null,
+    /** Reads each input's parent transaction. Native in production. */
+    private val parents: RawTxBinding = RawTxBinding.native(),
     /** Raw transaction bytes to its outputs. Native, because these bytes are remote-supplied. */
     private val parseOutputs: (ByteArray) -> List<ForeignAssetQuantity.Output>? = ::nativeParseOutputs,
     /** Sign a planned transfer with the foreign seed. Returns signed hex, or null on refusal. */
@@ -103,8 +105,28 @@ class ForeignAssetTransferService(
         /** The split is on the wire. Nothing moved this round: its outputs must confirm before
          *  they can be spent. The caller waits, re-scans, and calls again. */
         data class Broadcast(val txid: String, val feeOutputCount: Int) : FanOut()
-        /** Not enough plain DGB to split. Reported before anything is signed. */
-        data class Refused(val shortfallSat: Long, val detail: String) : FanOut()
+        /**
+         * Not enough plain DGB to split. Reported before anything is signed.
+         *
+         * [unreadInputs] are the plain outpoints ("txid:vout") that were not counted because the
+         * transaction each came from could not be read. When it is not empty the wallet may well
+         * hold enough DGB; what it lacks is coins it can prove, and [reason] says so.
+         */
+        data class Refused(
+            val shortfallSat: Long,
+            val detail: String,
+            val unreadInputs: List<String> = emptyList(),
+        ) : FanOut() {
+            enum class Reason {
+                /** Every plain coin's parent was read, and together they are too little. */
+                NOT_ENOUGH_DGB,
+                /** Some plain coins were left out because their parent could not be read. */
+                PARENTS_UNREAD,
+            }
+
+            val reason: Reason
+                get() = if (unreadInputs.isEmpty()) Reason.NOT_ENOUGH_DGB else Reason.PARENTS_UNREAD
+        }
         /** The split could not be built, signed or broadcast. */
         data class Failed(val reason: String) : FanOut()
     }
@@ -150,6 +172,27 @@ class ForeignAssetTransferService(
                     "outpoint(s) to move, ${partition.sweepable.size} plain",
             )
 
+            // Every input below is signed with the amount and script its parent transaction
+            // states, never with the lookup's figures alone: a legacy signature does not commit to
+            // the amount it spends. A parent that disagrees with the lookup means nothing on this
+            // profile is signed; an input without a readable parent is simply not used.
+            val checked = when (val v = parents.check(result)) {
+                is RawTxBinding.Verdict.Contradicted -> {
+                    log('w', "profile=${result.profile.label}: ${v.outpoint}: ${v.detail} — " +
+                        "nothing is signed for this profile")
+                    for (utxo in partition.assetBearing) {
+                        moves += Move("${utxo.txid}:${utxo.vout}", 0L, null,
+                            "not moved — ${v.outpoint}: ${v.detail}")
+                    }
+                    continue
+                }
+                is RawTxBinding.Verdict.Checked -> v
+            }
+            val provenPlain = partition.sweepable.mapNotNull { checked.proven(it) }
+            val unreadPlain = partition.sweepable
+                .filter { checked.proven(it) == null }
+                .map { RawTxBinding.outpoint(it) }
+
             val byAddress = result.derivedAddresses.associateBy { it.address }
 
             // More assets than spendable outputs: split the DGB before moving anything. Without
@@ -165,12 +208,13 @@ class ForeignAssetTransferService(
                 assetCount = partition.assetBearing.count {
                     verdicts[it]?.ruleState == io.digibyte.core.asset.rules.TransferRuleState.NONE
                 },
-                plainInputs = partition.sweepable.mapNotNull { toSpend(it, byAddress) },
+                plainInputs = provenPlain.mapNotNull { toSpend(it, byAddress) },
                 // Pays the wallet being recovered — only its seed can sign these, and the asset
                 // transfers are what spend them.
                 sourceAddress = partition.sweepable.firstOrNull()?.address
                     ?: partition.assetBearing.first().address,
                 feePerKb = feePerKb,
+                unreadInputs = unreadPlain,
             )
             when (fan) {
                 is ForeignAssetFanOut.Result.NotNeeded -> Unit
@@ -178,7 +222,7 @@ class ForeignAssetTransferService(
                 is ForeignAssetFanOut.Result.Refused -> {
                     log('w', "fan-out refused: ${fan.detail}")
                     return@withContext Result(
-                        moves, FanOut.Refused(fan.shortfallSat, fan.detail),
+                        moves, FanOut.Refused(fan.shortfallSat, fan.detail, fan.unreadInputs),
                     )
                 }
 
@@ -218,7 +262,19 @@ class ForeignAssetTransferService(
                     continue
                 }
 
-                val spend = toSpend(utxo, byAddress)
+                val provenAsset = checked.proven(utxo)
+                if (provenAsset == null) {
+                    log('w', "${utxo.txid}:${utxo.vout}: not moved — its parent transaction was " +
+                        "not supplied or did not parse")
+                    moves += Move(
+                        outpoint = "${utxo.txid}:${utxo.vout}",
+                        units = 0L,
+                        txid = null,
+                        failureReason = "not moved — the transaction it came from could not be read",
+                    )
+                    continue
+                }
+                val spend = toSpend(provenAsset, byAddress)
                 if (spend == null) {
                     // No derivation position, or no scriptPubKey — we cannot sign for it. Report
                     // it rather than drop it: an asset missing from this list reads to the user
@@ -239,7 +295,7 @@ class ForeignAssetTransferService(
             // Every plain-DGB outpoint, not a reserved subset. The sweep has not run yet, so
             // all of it is still available — and what these plans spend is what the sweep will
             // exclude. Nothing is estimated.
-            val feePool = partition.sweepable.mapNotNull { toSpend(it, byAddress) }
+            val feePool = provenPlain.mapNotNull { toSpend(it, byAddress) }
 
             log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s) / " +
                     "${feePool.sumOf { it.amountSat }} sats; units=" +

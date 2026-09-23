@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
  * enough that one-tx-per-profile is still very cheap (a few hundred
  * satoshis per sweep).
  */
-class LegacySweepService(
+class LegacySweepService internal constructor(
     private val outgoingTxStore: OutgoingTxStore,
     private val walletTxPersister: WalletTxPersister,
     /**
@@ -29,7 +29,31 @@ class LegacySweepService(
      * at the call site, by someone who can see it.
      */
     private val assetClassifier: ForeignUtxoAssetClassifier,
+    /** Reads each input's parent transaction. Native in production. */
+    private val parents: RawTxBinding,
+    /** Signs one profile's sweep with the foreign seed. Signed hex, or null on refusal. */
+    private val signSweep: (
+        seed: ByteArray, profile: DerivationProfile, inputs: SweepInputs, destAddress: String, feePerKb: Long,
+    ) -> String?,
+    /** Broadcasts signed bytes. The relay txid, or null. */
+    private val broadcast: (ByteArray) -> String?,
+    /** Progress lines. Injected because android.util.Log is an unmocked stub on the JVM. */
+    private val log: (String) -> Unit,
 ) {
+
+    constructor(
+        outgoingTxStore: OutgoingTxStore,
+        walletTxPersister: WalletTxPersister,
+        assetClassifier: ForeignUtxoAssetClassifier,
+    ) : this(
+        outgoingTxStore = outgoingTxStore,
+        walletTxPersister = walletTxPersister,
+        assetClassifier = assetClassifier,
+        parents = RawTxBinding.native(),
+        signSweep = ::nativeSignSweep,
+        broadcast = { Broadcaster.broadcast(it) },
+        log = { android.util.Log.i("LegacySweep", it) },
+    )
 
     /** Acceptance state of a sweep broadcast. A returned txid means the tx
      *  reached local relay / mempool-pending only — NOT that the network
@@ -52,14 +76,23 @@ class LegacySweepService(
         /** Outpoints ("txid:vout") left behind because they carry a DigiAsset. Spending these as
          *  plain DGB would destroy the asset, so the sweep proceeds without them and says so. */
         val heldBackAssets: List<String> = emptyList(),
-        /** Outpoints left behind because the asset question could not be answered — a raw tx that
-         *  would not fetch or parse. Distinct from [heldBackAssets]: these MIGHT be plain DGB.
-         *  Held anyway, because being wrong here burns an asset. Retrying later may free them. */
+        /** Outpoints left behind because the transaction they came from could not be read: either
+         *  the asset question could not be answered (a raw tx that would not fetch or parse), or
+         *  the lookup supplied no parent transaction for them, or one that does not parse, so the
+         *  amount and script to sign could not be taken from it. Distinct from [heldBackAssets]:
+         *  these MIGHT be plain DGB. Held anyway: an input is signed only once the transaction it
+         *  came from has been read. Retrying later may free them. */
         val heldBackUnknown: List<String> = emptyList(),
         /** Outpoints the DigiAsset moves already claimed — spent by a move that broadcast, or
          *  held for one that failed and will be retried. Not a reserve: these are the exact
          *  inputs concrete plans named, which is why AssetFeeReserve's estimate is gone. */
         val heldBackFeeReserve: List<String> = emptyList(),
+        /**
+         * The fee the signed transaction pays, read back from it: what the outpoints it spends
+         * hold, at the amounts their parent transactions state, less what it pays out. Null when
+         * nothing was signed.
+         */
+        val feeSat: Long? = null,
     )
 
     data class Result(
@@ -140,51 +173,64 @@ class LegacySweepService(
         // amount, so a stale or under-reported value produces an invalid signature rather than
         // a valid one that silently burns the difference to fee.
         val outcomes = nonNativeResults.map { result ->
-            val refusal = amountProvenanceGate(result)
-            if (refusal != null) {
-                SweepOutcome(result.profile, null, null, 0L, 0, refusal,
-                    broadcastState = BroadcastState.FAILED)
-            } else {
-                sweepOneProfile(seedBytes, result, destAddress, feePerKb, destIsSelf, verdicts,
-                    excludeOutpoints)
+            when (val admission = admit(result)) {
+                is Admission.Refused ->
+                    SweepOutcome(result.profile, null, null, 0L, 0, admission.reason,
+                        broadcastState = BroadcastState.FAILED)
+                is Admission.Admitted ->
+                    sweepOneProfile(seedBytes, result, admission.parents, destAddress, feePerKb,
+                        destIsSelf, verdicts, excludeOutpoints)
             }
         }
         return Result(outcomes)
     }
 
+    internal sealed class Admission {
+        data class Refused(val reason: String) : Admission()
+        /** [parents] says which inputs are proven, with the values their parents state. */
+        class Admitted(val parents: RawTxBinding.Verdict.Checked) : Admission()
+    }
+
     /**
-     * Amount-provenance pre-sign gate (bug #2 — fund-loss defense).
+     * Pre-sign gate: whether anything on this profile may be signed.
      *
-     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or
-     * under-reported amountSatoshi still signs into a consensus-valid tx that
-     * spends the REAL prevout and burns the unreported remainder to fee. We
-     * cannot verify a foreign prevout on-device without fetching it, so we
-     * apply the cheap, honest guards we CAN:
-     *   - refuse if the reconcile backend was unreachable (amounts are
-     *     unverified hints; never sign against a null reconcile result);
-     *   - refuse if ANY UTXO reports a non-positive amount — a corrupt/hostile
-     *     row, and because the sighash is amount-blind, one bad row means the
-     *     whole response's amounts are untrustworthy, so we refuse the entire
-     *     profile-sweep rather than sign a subset.
-     * Returns a human-readable refusal reason, or null when the profile's
-     * UTXOs are safe to hand to the signer. Pure — no JNI, unit-testable.
+     * A legacy P2PKH signature does not commit to the amount it spends, so the amount handed to
+     * the signer has to be the one the chain holds. The whole profile is refused when:
+     *   - the reconcile backend was unreachable (nothing it reported was answered);
+     *   - any UTXO reports a non-positive amount;
+     *   - any parent transaction the lookup supplied disagrees with what the lookup reported for
+     *     an outpoint (see [RawTxBinding]). One disagreement means no amount reported for the
+     *     profile is used, not just that row's.
+     * An input whose parent was not supplied, or does not parse, is not a refusal: it is held
+     * back and reported, and the rest of the profile proceeds with proven values only.
      */
-    internal fun amountProvenanceGate(
-        result: RecoveryScanService.ProfileResult,
-    ): String? {
+    internal fun admit(result: RecoveryScanService.ProfileResult): Admission {
         if (!result.reachableBackend) {
-            return "backend unreachable — refusing to sign against unverified input amounts"
+            return Admission.Refused("backend unreachable — refusing to sign against unverified input amounts")
         }
         val bad = result.utxos.firstOrNull { it.amountSatoshi <= 0L }
         if (bad != null) {
-            return "non-positive amount ${bad.amountSatoshi} on ${bad.txid}:${bad.vout} — refusing sweep"
+            return Admission.Refused(
+                "non-positive amount ${bad.amountSatoshi} on ${bad.txid}:${bad.vout} — refusing sweep",
+            )
         }
-        return null
+        return when (val checked = parents.check(result)) {
+            is RawTxBinding.Verdict.Contradicted -> Admission.Refused(
+                "${checked.outpoint}: ${checked.detail} — refusing to sign amounts its parent " +
+                    "transaction does not state",
+            )
+            is RawTxBinding.Verdict.Checked -> Admission.Admitted(checked)
+        }
     }
+
+    /** The refusal reason [admit] gives, or null when the profile may proceed. */
+    internal fun amountProvenanceGate(result: RecoveryScanService.ProfileResult): String? =
+        (admit(result) as? Admission.Refused)?.reason
 
     private fun sweepOneProfile(
         seed: ByteArray,
         result: RecoveryScanService.ProfileResult,
+        checked: RawTxBinding.Verdict.Checked,
         destAddress: String,
         feePerKb: Long,
         destIsSelf: Boolean,
@@ -207,8 +253,7 @@ class LegacySweepService(
         val heldAssets = partition.assetBearing.map { "${it.txid}:${it.vout}" }
         val heldUnknown = partition.unclassified.map { "${it.txid}:${it.vout}" }
         if (heldAssets.isNotEmpty() || heldUnknown.isNotEmpty()) {
-            android.util.Log.i(
-                "LegacySweep",
+            log(
                 "profile=${profile.label}: holding back ${heldAssets.size} asset-bearing and " +
                     "${heldUnknown.size} unclassified outpoint(s); sweeping ${partition.sweepable.size}",
             )
@@ -223,18 +268,28 @@ class LegacySweepService(
             .filter { "${it.txid}:${it.vout}" in excludeOutpoints }
             .map { "${it.txid}:${it.vout}" }
         if (heldForAssets.isNotEmpty()) {
-            android.util.Log.i(
-                "LegacySweep",
+            log(
                 "profile=${profile.label}: ${heldForAssets.size} outpoint(s) already claimed by " +
                     "the DigiAsset move(s); sweeping ${stillSweepable.size}",
             )
         }
-        val sweepableResult = result.copy(utxos = stillSweepable)
+        // Only inputs whose parent transaction states their amount and script are signed, and
+        // they are signed with the values the parent states. An input without a readable parent
+        // stays where it is and is reported beside the ones the asset check could not answer:
+        // for both, the transaction it came from could not be read.
+        val proven = stillSweepable.mapNotNull { checked.proven(it) }
+        val unproven = stillSweepable.filter { checked.proven(it) == null }.map { "${it.txid}:${it.vout}" }
+        if (unproven.isNotEmpty()) {
+            log("profile=${profile.label}: holding back ${unproven.size} outpoint(s) whose parent " +
+                "transaction was not supplied or did not parse")
+        }
+        val heldUnread = (heldUnknown + unproven).distinct()
         // #3: each UTXO's (chain,index) is carried straight from its
         // DerivedAddress — no positional reconstruction vs gapExternal, so a
-        // dropped empty slot can't sign the wrong child key. #4: a UTXO with a
-        // null scriptPubKey is collected in skippedNoScript, not fatal.
-        val inputs = assembleSweepInputs(sweepableResult)
+        // dropped empty slot can't sign the wrong child key. #4: a proven copy
+        // carries its parent's scriptPubKey, so a lookup row that gave none is
+        // no longer skipped; skippedNoScript stays for rows that reach here without one.
+        val inputs = assembleSweepInputs(result.copy(utxos = proven))
 
         if (inputs.txids.isEmpty()) {
             // "Everything was kept on purpose" and "nothing could be used" both arrive here with
@@ -242,12 +297,14 @@ class LegacySweepService(
             // mappable UTXOs" tells someone looking at a wallet they can see has coins in it that
             // it malfunctioned and their funds are at risk — when in fact the wallet deliberately
             // kept them so their DigiAsset would still be movable.
-            val reservedEverything = heldForAssets.isNotEmpty()
+            val reservedEverything = heldForAssets.isNotEmpty() && unproven.isEmpty()
             val reason = when {
                 reservedEverything ->
                     "Nothing was swept — all of it was kept back so your " +
                         "${partition.assetBearing.size} DigiAsset(s) can still be moved. " +
                         "Your coins are safe where they are."
+                unproven.isNotEmpty() ->
+                    "no input's parent transaction could be read — ${unproven.size} left in place"
                 inputs.skippedNoScript.isNotEmpty() ->
                     "all ${inputs.skippedNoScript.size} UTXO(s) missing scriptPubKey (old backend?)"
                 else -> "no mappable UTXOs"
@@ -260,32 +317,20 @@ class LegacySweepService(
                                  else BroadcastState.FAILED,
                 skippedNoScript = inputs.skippedNoScript,
                 heldBackAssets = heldAssets,
-                heldBackUnknown = heldUnknown,
+                heldBackUnknown = heldUnread,
                 // Previously omitted here, so the one branch where the reserve explains
                 // EVERYTHING was the one branch that did not mention it.
                 heldBackFeeReserve = heldForAssets,
             )
         }
 
-        val signedHex = NativeBridge.buildAndSignLegacySweep(
-            seedBytes = seed,
-            hmacKey = profile.hmacKey,
-            prefixPath = profile.prefixPath,
-            txidsHex = inputs.txids.toTypedArray(),
-            vouts = inputs.vouts.toIntArray(),
-            amounts = inputs.amounts.toLongArray(),
-            chainIndices = inputs.chains.toIntArray(),
-            addressIndices = inputs.indices.toIntArray(),
-            scriptPubKeysHex = inputs.scripts.toTypedArray(),
-            destAddress = destAddress,
-            feePerKb = feePerKb,
-        ) ?: return SweepOutcome(
+        val signedHex = signSweep(seed, profile, inputs, destAddress, feePerKb) ?: return SweepOutcome(
             profile, null, null, 0L, inputs.txids.size,
             "buildAndSignLegacySweep failed (sign mismatch or dust)",
             broadcastState = BroadcastState.FAILED,
             skippedNoScript = inputs.skippedNoScript,
             heldBackAssets = heldAssets,
-            heldBackUnknown = heldUnknown,
+            heldBackUnknown = heldUnread,
             heldBackFeeReserve = heldForAssets,
         )
 
@@ -298,10 +343,27 @@ class LegacySweepService(
                 broadcastState = BroadcastState.FAILED,
                 skippedNoScript = inputs.skippedNoScript,
                 heldBackAssets = heldAssets,
-                heldBackUnknown = heldUnknown,
+                heldBackUnknown = heldUnread,
             )
 
-        val txid = Broadcaster.broadcast(txBytes)
+        // Read back from the signed transaction, not estimated: what the inputs it spends hold,
+        // at the amounts their parents state, less what it pays out. A transaction that does not
+        // read back as spending exactly the proven inputs is not sent.
+        val spent = inputs.txids.indices.associate { "${inputs.txids[it]}:${inputs.vouts[it]}" to inputs.amounts[it] }
+        val feeSat = parents.feePaid(txBytes, spent)
+            ?: return SweepOutcome(
+                profile, signedHex, null, 0L, inputs.txids.size,
+                "signed transaction did not read back as spending exactly its inputs — not sent",
+                broadcastState = BroadcastState.FAILED,
+                skippedNoScript = inputs.skippedNoScript,
+                heldBackAssets = heldAssets,
+                heldBackUnknown = heldUnread,
+                heldBackFeeReserve = heldForAssets,
+            )
+
+        val txid = broadcast(txBytes)
+        log("profile=${profile.label}: ${inputs.txids.size} input(s), ${inputs.totalIn} sat in, " +
+            "fee $feeSat sat read back from the signed transaction; txid=${txid ?: "not relayed"}")
         if (txid != null) {
             // Durability: route the sweep through the same OutgoingTxStore +
             // WalletTxPersister the normal send uses so
@@ -325,7 +387,7 @@ class LegacySweepService(
             outgoingTxStore.record(
                 txid = txid,
                 sentSats = inputs.totalIn,
-                feeSats = estimateFee(txBytes.size, feePerKb),
+                feeSats = feeSat,
                 toAddress = destAddress,
                 isSelfTransfer = destIsSelf,
             )
@@ -342,13 +404,33 @@ class LegacySweepService(
             broadcastState = if (txid == null) BroadcastState.FAILED else BroadcastState.PENDING,
             skippedNoScript = inputs.skippedNoScript,
             heldBackAssets = heldAssets,
-            heldBackUnknown = heldUnknown,
+            heldBackUnknown = heldUnread,
             heldBackFeeReserve = heldForAssets,
+            feeSat = feeSat,
         )
     }
 
-    private fun estimateFee(signedSize: Int, feePerKb: Long): Long =
-        (signedSize.toLong() * feePerKb + 999L) / 1000L
+    internal companion object {
+        fun nativeSignSweep(
+            seed: ByteArray,
+            profile: DerivationProfile,
+            inputs: SweepInputs,
+            destAddress: String,
+            feePerKb: Long,
+        ): String? = NativeBridge.buildAndSignLegacySweep(
+            seedBytes = seed,
+            hmacKey = profile.hmacKey,
+            prefixPath = profile.prefixPath,
+            txidsHex = inputs.txids.toTypedArray(),
+            vouts = inputs.vouts.toIntArray(),
+            amounts = inputs.amounts.toLongArray(),
+            chainIndices = inputs.chains.toIntArray(),
+            addressIndices = inputs.indices.toIntArray(),
+            scriptPubKeysHex = inputs.scripts.toTypedArray(),
+            destAddress = destAddress,
+            feePerKb = feePerKb,
+        )
+    }
 
     private fun hexToBytes(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "hex must be even length" }
