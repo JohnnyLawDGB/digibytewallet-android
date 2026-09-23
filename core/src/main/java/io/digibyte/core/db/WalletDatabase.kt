@@ -4,9 +4,20 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import io.digibyte.core.db.dao.*
 import io.digibyte.core.db.entity.*
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+
+/** The schema version this build opens the database at. A fresh install is created here and runs
+ *  none of [WALLET_DB_MIGRATIONS]; an existing install runs each step from its version up to it. */
+internal const val WALLET_DB_VERSION = 11
+
+/** Every step between schema versions, in order. [WalletDatabase.create] registers exactly these. */
+internal val WALLET_DB_MIGRATIONS: Array<Migration> = arrayOf(
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+)
 
 @Database(
     entities = [
@@ -22,7 +33,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         AssetProvenanceEntity::class,
         AssetWalkFrontierEntity::class
     ],
-    version = 10,
+    version = WALLET_DB_VERSION,
     exportSchema = true
 )
 abstract class WalletDatabase : RoomDatabase() {
@@ -55,7 +66,7 @@ abstract class WalletDatabase : RoomDatabase() {
                 dbFileName
             )
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(*WALLET_DB_MIGRATIONS)
                 .fallbackToDestructiveMigration()
                 .build()
         }

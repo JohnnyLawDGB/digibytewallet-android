@@ -162,4 +162,38 @@ class AssetCoinSelectorTest {
         r as AssetCoinSelector.Result.Ok
         assertEquals(0L, r.assetChangeQty)
     }
+
+    /** The asset-change marker is budgeted when, and only when, the chosen asset inputs hold more
+     *  than the send: 50 of 100 units come back, so the budget is both markers. */
+    @Test
+    fun `the change marker is budgeted when units come back`() {
+        val r = AssetCoinSelector.select(
+            assetUtxos = listOf(assetUtxo("a", 600, 100)),
+            dgbUtxos = listOf(dgbUtxo("d", 10_000)),
+            assetNeeded = 50,
+            feeSats = 500,
+            markerOutputSats = 600,
+            assetChangeMarkerSats = 600,
+        )
+        r as AssetCoinSelector.Result.Ok
+        assertEquals(50L, r.assetChangeQty)
+        // inputs 10_600 - fee 500 - recipient marker 600 - change marker 600 = 8_900
+        assertEquals(8_900L, r.dgbChangeSats)
+    }
+
+    /** GUARD (passes before and after): an exact send has no change marker to budget. */
+    @Test
+    fun `guard no change marker is budgeted for an exact send`() {
+        val r = AssetCoinSelector.select(
+            assetUtxos = listOf(assetUtxo("a", 600, 100)),
+            dgbUtxos = listOf(dgbUtxo("d", 10_000)),
+            assetNeeded = 100,
+            feeSats = 500,
+            markerOutputSats = 600,
+            assetChangeMarkerSats = 600,
+        )
+        r as AssetCoinSelector.Result.Ok
+        assertEquals(0L, r.assetChangeQty)
+        assertEquals(9_500L, r.dgbChangeSats)
+    }
 }

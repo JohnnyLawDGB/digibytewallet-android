@@ -1212,11 +1212,36 @@ class AssetManager(
      * predecessor collapsed both into "return null", which threw away proven ground every time
      * a request happened to fail.
      */
-    private suspend fun classifyProvenanceHop(txid: String): AssetProvenanceWalker.Hop {
-        val rawTx = fetchRawTransactionBytes(txid)
+    private suspend fun classifyProvenanceHop(txid: String): AssetProvenanceWalker.Hop =
+        classifyProvenanceHopFrom(
+            txid,
+            fetch = ::fetchRawTransactionBytes,
+            opReturnOf = { NativeBridge.getOpReturnData(it) },
+            deriveIssuanceAssetId = { prevTxidHex, prevVout, aggregation, divisibility ->
+                NativeBridge.deriveIssuanceAssetId(
+                    firstInputTxidHex = prevTxidHex,
+                    firstInputVout = prevVout,
+                    locked = true,
+                    aggregation = aggregation,
+                    divisibility = divisibility,
+                )
+            },
+        )
+
+    /** [classifyProvenanceHop] with its three native reads passed in, so the hop runs on the
+     *  JVM exactly as it does on a device. [fetch] is where the parent's bytes come from; in
+     *  production that is [fetchRawTransactionBytes], whose remote half accepts a transaction
+     *  only when its bytes hash to the id it was asked for. */
+    internal suspend fun classifyProvenanceHopFrom(
+        txid: String,
+        fetch: suspend (String) -> ByteArray?,
+        opReturnOf: (ByteArray) -> ByteArray?,
+        deriveIssuanceAssetId: (prevTxidHex: String, prevVout: Int, aggregation: Int, divisibility: Int) -> String?,
+    ): AssetProvenanceWalker.Hop {
+        val rawTx = fetch(txid)
             ?: return AssetProvenanceWalker.Hop.Unavailable
 
-        val opReturn = NativeBridge.getOpReturnData(rawTx)
+        val opReturn = opReturnOf(rawTx)
             ?: return AssetProvenanceWalker.Hop.DeadEnd
         val header = decoder.decode(opReturn)
             ?: return AssetProvenanceWalker.Hop.DeadEnd
@@ -1236,12 +1261,11 @@ class AssetManager(
                     Aggregation.DISPERSED -> 2
                 }
                 val derived = runCatching {
-                    NativeBridge.deriveIssuanceAssetId(
-                        firstInputTxidHex = firstInput.prevTxidHex,
-                        firstInputVout = firstInput.prevVout,
-                        locked = true,
-                        aggregation = aggregationCode,
-                        divisibility = header.divisibility,
+                    deriveIssuanceAssetId(
+                        firstInput.prevTxidHex,
+                        firstInput.prevVout,
+                        aggregationCode,
+                        header.divisibility,
                     )
                 }.getOrNull() ?: return AssetProvenanceWalker.Hop.DeadEnd
 
@@ -1265,9 +1289,22 @@ class AssetManager(
         }
     }
 
-    private suspend fun fetchRawTransactionBytes(txHashHex: String): ByteArray? {
-        NativeBridge.getSerializedTransactionForHash(txHashHex)?.let { return it }
-        val client = assetNetworkClient ?: return null
+    private suspend fun fetchRawTransactionBytes(txHashHex: String): ByteArray? =
+        fetchRawTransactionBytesFrom(
+            txHashHex,
+            walletCopy = { NativeBridge.getSerializedTransactionForHash(it) },
+            client = assetNetworkClient,
+        )
+
+    /** A parent transaction's bytes: the wallet's own copy when it holds one (the native wallet
+     *  keys its transactions by the id it computed itself), otherwise [client]'s answer. */
+    internal suspend fun fetchRawTransactionBytesFrom(
+        txHashHex: String,
+        walletCopy: (String) -> ByteArray?,
+        client: io.digibyte.core.asset.network.AssetNetworkClient?,
+    ): ByteArray? {
+        walletCopy(txHashHex)?.let { return it }
+        client ?: return null
         return runCatching { client.getRawTransaction(txHashHex) }.getOrNull()
     }
 
@@ -2212,159 +2249,58 @@ class AssetManager(
         val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
         if (assetUtxos.isEmpty()) return TxResult.Error("No UTXOs for asset $assetId")
 
-        // 2. Budget for two markers (recipient + possible asset-change). If
-        //    selection turns out exact-match, the extra 700 sats falls into
-        //    DGB change naturally — slight pessimism, simpler code.
-        val markerSats = io.digibyte.core.asset.send.DA_MARKER_SATS
-        val twoMarkerSats = markerSats * 2
-
-        // 2a. First (bootstrap) selection with a conservative typical-shape
-        //     fee. The asset-input set and the OP_RETURN are FEE-INDEPENDENT
-        //     (they depend only on the transfer quantity), so this select
-        //     reveals the stable parts of the shape; only the DGB fee inputs
-        //     and DGB change vary with the fee. The bootstrap's DGB-input count
-        //     merely seeds the convergence loop below (step 4a) — it is NOT
-        //     assumed to be within one input of the final count.
-        val bootstrapFeeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
-            assetInputCount = 1,
-            dgbInputCount = 1,
-            outputCount = 3,
-            opReturnBytes = 80,
-            feePerKb = feePerKb,
-        )
-        val bootstrap = io.digibyte.core.asset.send.AssetCoinSelector.select(
-            assetUtxos = assetUtxos,
-            dgbUtxos = dgbUtxos,
-            assetNeeded = quantity,
-            feeSats = bootstrapFeeSats,
-            markerOutputSats = twoMarkerSats,
-        )
-        val ok0 = when (bootstrap) {
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
-                return TxResult.Error("Not enough asset: need ${bootstrap.required}, have ${bootstrap.available}")
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
-                return TxResult.Error("Not enough DGB for fee: need ${bootstrap.required}, have ${bootstrap.available}")
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> bootstrap
-        }
-
-        val hasAssetChange = ok0.assetChangeQty > 0L
-
-        // 3. Output layout. Recipient marker at vout 0, OP_RETURN at vout 1,
-        //    optional asset-change marker at vout 2, optional DGB change at
-        //    the next free vout. Transfer instructions reference these vouts
-        //    directly so we have to commit to the layout before encoding.
-        val recipientVout = 0
-        val assetChangeVout = if (hasAssetChange) 2 else -1
-
-        // 4. Build transfer instructions: walk asset inputs in order,
-        //    distributing each input's units into the recipient first then
-        //    the change marker. `skip=true` on the LAST instruction pulling
-        //    from a non-final input advances the decoder to the next input.
-        //    Built from the bootstrap selection's asset side — identical
-        //    across both selects since asset selection is fee-independent.
-        val instructions = buildTransferInstructions(
-            assetInputs = ok0.assetInputs,
-            quantityToRecipient = quantity,
-            assetChangeQty = ok0.assetChangeQty,
-            recipientVout = recipientVout,
-            assetChangeVout = assetChangeVout,
-        ) ?: return TxResult.Error("Could not build transfer instructions")
-
-        val opReturnScript = try {
-            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
-        } catch (e: Exception) {
-            return TxResult.Error("Encode failed: ${e.message}")
-        }
-
-        // 4a. Now that we know the real OP_RETURN length and the concrete
-        //     output count (recipient + optional asset-change + a DGB-change
-        //     output we conservatively assume is present), compute the actual
-        //     size-aware fee and RE-select with it. Value-output count for the
-        //     estimate: recipient(1) + asset-change(0/1) + dgb-change(1).
-        //
-        //     CONVERGENCE LOOP (not a single pass): the size-aware fee is a
-        //     function of the DGB-input count, and the DGB-input count is a
-        //     function of the fee — a wallet whose DGB side is fragmented into
-        //     many small UTXOs can pull far more inputs when the fee jumps from
-        //     the bootstrap estimate to the real one than the estimator's fixed
-        //     +1-input margin covers. If we only re-selected once, the built tx
-        //     would pay below the 100 sat/byte min relay for its (larger) actual
-        //     vsize and never relay. So iterate select→estimate→select, feeding
-        //     the actual DGB-input count back into the next fee estimate, until
-        //     the count stops growing. DGB-input count is monotonically
-        //     non-decreasing in the fee and bounded by dgbUtxos.size, so the
-        //     loop is guaranteed to reach a fixed point; the cap is a safety net.
-        val estimateOutputCount = 1 + (if (hasAssetChange) 1 else 0) + 1
-        // dgbUtxos.size distinct growth steps at most, +2 slack. Never below 2.
-        val maxFeeIterations = dgbUtxos.size + 2
-        var estimatedForDgbInputs = ok0.dgbInputs.size
-        var feeSats = bootstrapFeeSats
-        var ok = ok0
-        for (iter in 0 until maxFeeIterations) {
-            feeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
-                assetInputCount = ok0.assetInputs.size,
-                dgbInputCount = estimatedForDgbInputs,
-                outputCount = estimateOutputCount,
-                opReturnBytes = opReturnScript.size,
-                feePerKb = feePerKb,
-            )
-            val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
+        // 2-5. Selection, transfer instructions, the size-aware fee and the output values: the
+        //      pure half of the send, in AssetTransferPlanner so the numbers signed below are
+        //      testable on the JVM.
+        val plan = when (
+            val planned = io.digibyte.core.asset.send.AssetTransferPlanner.plan(
                 assetUtxos = assetUtxos,
                 dgbUtxos = dgbUtxos,
-                assetNeeded = quantity,
-                feeSats = feeSats,
-                markerOutputSats = twoMarkerSats,
+                quantity = quantity,
+                feePerKb = feePerKb,
             )
-            ok = when (selection) {
-                is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
-                    return TxResult.Error("Not enough asset: need ${selection.required}, have ${selection.available}")
-                is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
-                    return TxResult.Error("Not enough DGB for fee: need ${selection.required}, have ${selection.available}")
-                is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
-            }
-            // Converged: the fee we just charged was estimated for at least as
-            // many DGB inputs as the selection actually pulled (the estimator's
-            // internal +1 margin then still leaves a cushion), so the built tx
-            // pays >= min relay for its real vsize.
-            if (ok.dgbInputs.size <= estimatedForDgbInputs) break
-            estimatedForDgbInputs = ok.dgbInputs.size
+        ) {
+            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Refused -> return TxResult.Error(planned.message)
+            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Ready -> planned.plan
         }
-
-        // 5. Build the output list — order locked to match the vout
-        //    references baked into the transfer instructions above. The
-        //    asset side of `ok` is identical to `ok0` (fee-independent);
-        //    only the DGB inputs / change reflect the real fee.
-        val allInputs = ok.assetInputs + ok.dgbInputs
+        val allInputs = plan.inputs
+        if (!io.digibyte.core.asset.send.AssetCoinSelector.outpointsDistinct(allInputs)) {
+            return TxResult.Error("An input is listed more than once")
+        }
         val outAddresses = mutableListOf<String>()
         val outAmounts = mutableListOf<Long>()
         val outScripts = mutableListOf<String>()
 
-        outAddresses += toAddress
-        outAmounts += markerSats
-        outScripts += ""
-
-        outAddresses += ""   // empty address = use raw script below (OP_RETURN)
-        outAmounts += 0L
-        outScripts += opReturnScript.toHex()
-
-        if (hasAssetChange) {
-            // Use change index 1 to keep this distinct from the DGB change
-            // address — small privacy win + makes the wallet's own asset
-            // marker easier to identify in tx history.
-            val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
-                ?: return TxResult.Error("Could not derive asset-change address")
-            outAddresses += assetChangeAddr
-            outAmounts += markerSats
-            outScripts += ""
-        }
-
-        val dgbChange = ok.dgbChangeSats
-        if (dgbChange > DGB_CHANGE_DUST_THRESHOLD) {
-            val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
-                ?: return TxResult.Error("Could not derive change address")
-            outAddresses += changeAddr
-            outAmounts += dgbChange
-            outScripts += ""
+        for (out in plan.outputs) {
+            when (out.role) {
+                io.digibyte.core.asset.send.PlannedOutput.Role.RECIPIENT_MARKER -> {
+                    outAddresses += toAddress
+                    outAmounts += out.sats
+                    outScripts += ""
+                }
+                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_DATA -> {
+                    outAddresses += ""   // empty address = use raw script below (OP_RETURN)
+                    outAmounts += out.sats
+                    outScripts += plan.opReturnScript.toHex()
+                }
+                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_CHANGE_MARKER -> {
+                    // Use change index 1 to keep this distinct from the DGB change
+                    // address — small privacy win + makes the wallet's own asset
+                    // marker easier to identify in tx history.
+                    val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
+                        ?: return TxResult.Error("Could not derive asset-change address")
+                    outAddresses += assetChangeAddr
+                    outAmounts += out.sats
+                    outScripts += ""
+                }
+                io.digibyte.core.asset.send.PlannedOutput.Role.DGB_CHANGE -> {
+                    val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
+                        ?: return TxResult.Error("Could not derive change address")
+                    outAddresses += changeAddr
+                    outAmounts += out.sats
+                    outScripts += ""
+                }
+            }
         }
 
         // 6. Native build + sign + broadcast.
@@ -2394,80 +2330,17 @@ class AssetManager(
         // uses so SyncService.rebroadcastStrandedSends() re-publishes this asset
         // transfer if a force-stop within ~1s of broadcast strands the stem.
         // Best-effort — never affects on-chain state. sentSats is the recipient
-        // DGB marker (the asset quantity isn't a DGB amount); feeSats is exact.
+        // DGB marker (the asset quantity isn't a DGB amount); feeSats is what the
+        // signed transaction pays: its inputs minus its outputs.
         outgoingTxStore?.record(
             txid = txid,
-            sentSats = markerSats,
-            feeSats = feeSats,
+            sentSats = io.digibyte.core.asset.send.DA_MARKER_SATS,
+            feeSats = plan.paidFeeSats,
             toAddress = toAddress,
         )
         walletTxPersister?.persist()
 
         return TxResult.Success(txid)
-    }
-
-    /**
-     * Build the DA TRANSFER instruction list for a single-recipient send
-     * with optional asset change.
-     *
-     * Walks the chosen asset inputs in order. Each input contributes its
-     * full quantity, distributed first toward the recipient (until [quantity
-     * ToRecipient] is exhausted), then toward the asset-change marker. The
-     * last instruction pulling from a non-final input is marked `skip=true`
-     * so the decoder advances to the next input.
-     *
-     * Returns null only if the input set's combined quantity doesn't match
-     * `quantityToRecipient + assetChangeQty` — programmer error, never user
-     * error (the coin selector enforces sums).
-     */
-    private fun buildTransferInstructions(
-        assetInputs: List<UtxoEntity>,
-        quantityToRecipient: Long,
-        assetChangeQty: Long,
-        recipientVout: Int,
-        assetChangeVout: Int,
-    ): List<DigiAssetEncoder.TransferInstruction>? {
-        val totalIn = assetInputs.sumOf { it.assetQuantity }
-        if (totalIn != quantityToRecipient + assetChangeQty) return null
-
-        val out = mutableListOf<DigiAssetEncoder.TransferInstruction>()
-        var qtyRemaining = quantityToRecipient
-        var changeRemaining = assetChangeQty
-
-        for ((idx, input) in assetInputs.withIndex()) {
-            val isLastInput = idx == assetInputs.lastIndex
-            var inputRemaining = input.assetQuantity
-
-            // Allocate toward recipient first.
-            if (inputRemaining > 0 && qtyRemaining > 0) {
-                val take = minOf(inputRemaining, qtyRemaining)
-                out += DigiAssetEncoder.TransferInstruction(
-                    skip = false, range = false, percent = false,
-                    outputIndex = recipientVout, amount = take,
-                )
-                qtyRemaining -= take
-                inputRemaining -= take
-            }
-
-            // Then toward asset change.
-            if (inputRemaining > 0 && changeRemaining > 0 && assetChangeVout >= 0) {
-                val take = minOf(inputRemaining, changeRemaining)
-                out += DigiAssetEncoder.TransferInstruction(
-                    skip = false, range = false, percent = false,
-                    outputIndex = assetChangeVout, amount = take,
-                )
-                changeRemaining -= take
-                inputRemaining -= take
-            }
-
-            // Mark the last instruction pulling from this input with skip=true
-            // (except on the final input — skip is a no-op there).
-            if (!isLastInput && out.isNotEmpty()) {
-                val last = out.removeAt(out.lastIndex)
-                out += last.copy(skip = true)
-            }
-        }
-        return out
     }
 
     private fun ByteArray.toHex(): String =
@@ -2802,16 +2675,6 @@ class AssetManager(
     }
 
     private companion object {
-        /** DGB change below this floor is folded into the fee rather than
-         *  emitted as its own output. MUST be >= the network dust threshold
-         *  for the change address type, or the node rejects the whole tx
-         *  with reject-reason "dust". DigiByte 9.26 raised dust to 30,000
-         *  sat/kB → legacy P2PKH floor = 5,460 sats (measured on a 9.26.4
-         *  node). We use the legacy worst case so a change output is never
-         *  dust regardless of the change address's script type. The old
-         *  1,000 value produced dust change outputs that stalled sends. */
-        const val DGB_CHANGE_DUST_THRESHOLD = 5_460L
-
         /** Consecutive prune passes native must positively lack a NATIVE
          *  row's tx before it's deleted (see [pruneRemovedNativeAssetRowsImpl]). */
         const val ABSENCE_DEBOUNCE_THRESHOLD = 2

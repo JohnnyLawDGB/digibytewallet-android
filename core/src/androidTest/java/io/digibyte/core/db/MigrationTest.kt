@@ -119,7 +119,7 @@ class MigrationTest {
             totalSupply = 1_000_000L,
             cachedAt = System.currentTimeMillis()
         )
-        dao.insert(entity)
+        dao.insertChainFacts(entity)
 
         val result = dao.getMetadata("Ua9UVkALVFTHnHFLnqPc1n7xJj7Rrm4kM3")
         assertNotNull(result)
@@ -132,8 +132,8 @@ class MigrationTest {
     @Test
     fun assetMetadataDao_getAllMetadata_flow() = runTest {
         val dao: AssetMetadataDao = db.assetMetadataDao()
-        dao.insert(AssetMetadataEntity(assetId = "asset1", name = "Alpha"))
-        dao.insert(AssetMetadataEntity(assetId = "asset2", name = "Beta"))
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset1", name = "Alpha"))
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset2", name = "Beta"))
 
         val all = dao.getAllMetadata().first()
         assertEquals(2, all.size)
@@ -143,13 +143,13 @@ class MigrationTest {
     }
 
     @Test
-    fun assetMetadataDao_insertReplace_updatesExisting() = runTest {
+    fun assetMetadataDao_insertChainFacts_keepsExisting() = runTest {
         val dao: AssetMetadataDao = db.assetMetadataDao()
-        dao.insert(AssetMetadataEntity(assetId = "asset1", name = "Old Name"))
-        dao.insert(AssetMetadataEntity(assetId = "asset1", name = "New Name"))
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset1", name = "Old Name"))
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset1", name = "New Name"))
 
         val result = dao.getMetadata("asset1")
-        assertEquals("New Name", result!!.name)
+        assertEquals("Old Name", result!!.name)
     }
 
     @Test
@@ -199,6 +199,46 @@ class MigrationTest {
             assertEquals("legacy", c.getString(0))
         }
         v9Db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // Migration path: v10 → v11 (provenance derived again under the parent-id binding)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate10To11_discardsProvenanceAndKeepsEveryAssetRow() {
+        val start = "5".repeat(64)
+        val v10Db = helper.createDatabase(TEST_DB_NAME, 10)
+        v10Db.execSQL(
+            """INSERT INTO asset_provenance (txid, assetId, totalSupply, divisibility, metadataCid,
+               issuanceOpcode, issuanceLocked) VALUES ('$start', 'LaBefore', 10, 0, NULL, 1, 1)"""
+        )
+        v10Db.execSQL(
+            """INSERT INTO asset_walk_frontier (startTxid, resumeTxid, hopsWalked, updatedAt)
+               VALUES ('$start', '${"a".repeat(64)}', 7, 1)"""
+        )
+        v10Db.execSQL(
+            """INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id,
+               asset_quantity, spent, asset_source)
+               VALUES ('$start', 0, X'0014', 600, 100, 1, 'LaBefore', 10, 0, 'NATIVE')"""
+        )
+        v10Db.close()
+
+        val v11Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 11, true, MIGRATION_10_11)
+        v11Db.query("SELECT COUNT(*) FROM asset_provenance").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0))
+        }
+        v11Db.query("SELECT COUNT(*) FROM asset_walk_frontier").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0))
+        }
+        v11Db.query("SELECT asset_id, asset_quantity, spent FROM utxos WHERE txid = '$start' AND vout = 0").use { c ->
+            assertTrue("the carrier row is kept", c.moveToFirst())
+            assertEquals("LaBefore", c.getString(0))
+            assertEquals(10L, c.getLong(1))
+            assertEquals(0, c.getInt(2))
+        }
+        v11Db.close()
     }
 
     @Test

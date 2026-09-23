@@ -7,6 +7,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -66,16 +68,14 @@ class AssetSupplyNotClobberedByMetadataTest {
     )
 
     /**
-     * The regression, asserted positively: the whole-row REPLACE must not be used at all, and the
-     * targeted IPFS-only write must be. Asserting "no insert carried supply 0" would pass
-     * vacuously once insert stops being called, which is a gate that observes nothing.
+     * The regression, asserted positively: the targeted IPFS-only write is used. The whole-row
+     * REPLACE no longer exists on the DAO (see the last test), so it cannot be used at all.
      */
     @Test
     fun `a metadata document is written through the targeted path, never a whole-row REPLACE`() = runBlocking {
         val dao = mockk<AssetMetadataDao>(relaxed = true)
         service(dao).storeFromJson(assetId, cid = "bafk", jsonRaw = canonicalDocument(), provenIssuer = null)
 
-        coVerify(exactly = 0) { dao.insert(any()) }
         coVerify(exactly = 1) {
             dao.updateIpfsFacts(assetId, any(), any(), any(), any(), any(), any(), any())
         }
@@ -117,9 +117,21 @@ class AssetSupplyNotClobberedByMetadataTest {
         val doc = JSONObject("""{"name":"Flat","totalSupply":1,"decimals":3}""")
         service(dao).storeFromJson(assetId, cid = null, jsonRaw = doc, provenIssuer = null)
 
-        coVerify(exactly = 0) { dao.insert(any()) }
         coVerify(exactly = 1) { dao.insertChainFacts(capture(seeded)) }
         assertEquals("a declared supply is still not honoured", 0L, seeded[0].totalSupply)
         assertEquals("a declared divisibility is still not honoured", 0, seeded[0].decimals)
+    }
+
+    /**
+     * The metadata DAO offers no whole-row replace at all. Every write goes through a path that
+     * touches only the columns its source owns (updateChainFacts, updateIpfsFacts) or seeds a row
+     * without overwriting one (insertChainFacts), so no future caller can reach the REPLACE that
+     * stamped a default supply over the chain's.
+     */
+    @Test
+    fun `the metadata DAO offers no whole-row replace`() {
+        val writes = AssetMetadataDao::class.java.declaredMethods.map { it.name }.toSet()
+        assertFalse("AssetMetadataDao still declares insert: $writes", "insert" in writes)
+        assertTrue("the seeding path is gone: $writes", "insertChainFacts" in writes)
     }
 }
