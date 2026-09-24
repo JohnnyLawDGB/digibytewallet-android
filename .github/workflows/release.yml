@@ -155,23 +155,26 @@ jobs:
 
             ### What is in this build
 
-            - Fresh chain and compact-filter checkpoints. Every filter checkpoint is now proven
-              against the chain before it ships, and restoring an older wallet no longer stalls
-              part-way through its scan.
-            - Stricter handling of data received from the network, in 32- and 64-bit builds alike.
-            - The amount you approve is the amount that is signed, for DGB, DigiDollar and
-              DigiAssets. A lone comma is read as the decimal point in all three.
-            - DigiAsset outputs an incoming transfer assigns to you are set aside as soon as they
-              are seen, and again immediately before any send is built.
-            - DigiDollar transfers that use any standard script framing are recognised.
+            - Once a wipe has removed the wallet, the app starts afresh on onboarding, so the next
+              wallet you create is created and stored cleanly. A wipe that could not finish says so
+              and completes at the next launch.
+            - A failure inside the PIN check is reported as such and is never counted as a wrong PIN.
+            - Recover funds asks for your device lock when the wallet key needs it, signs an
+              older-style input only with the amount and script its parent transaction proves, and
+              reports the fee it paid.
+            - Asset data fetched from a server is accepted only when it is the transaction that was
+              asked for; an asset send lists every input once and pays the fee it planned. Assets are
+              re-identified once on the first launch after the update.
+            - A DigiDollar send tries another coin before it gives up.
 
             ### What to test
 
             - Upgrade over the previous stable release and check that balances, assets and history
-              are unchanged.
+              are unchanged (assets may show "identifying…" for a moment on the first launch).
             - Send DGB, DigiDollar and an asset, and check that the confirmation shows exactly what
               you typed.
-            - Restore a wallet with an older birthday and let it sync to the tip.
+            - Settings > Recover funds from another wallet.
+            - On a test wallet only: wipe it, then create a new wallet.
 
             Source, full commit history and issue tracker:
             https://github.com/JohnnyLawDGB/digibytewallet-android
