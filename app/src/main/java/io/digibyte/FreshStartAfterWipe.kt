@@ -29,7 +29,8 @@ import kotlinx.coroutines.withContext
  * A wipe that removed the seed but not everything else is finished by the fresh launch. Before this
  * process ends the erasure is marked owed, and the relaunch carries the one "did not complete"
  * message. The launch backstop ([atLaunch]) then runs the wipe again before anything else and shows
- * that message once — unless its own wipe completes the erasure, and never by restarting again.
+ * that message — unless its own wipe completes the erasure — and every later launch does the same
+ * until the erasure completes, never by restarting again.
  *
  * A wipe that could NOT remove the seed does not restart: the process runs on exactly as before — the
  * PIN, its counters and the owed wipe are kept, the entry point shows its one message, the launch
@@ -53,6 +54,10 @@ object FreshStartAfterWipe {
     /** Where an erasure left owed waits for the next launch. JVM tests replace it. */
     @Volatile
     internal var owedErasure: OwedErasure = OwedErasureMark
+
+    /** Set by the first [atLaunch] of this process; an owed erasure runs only at that launch. */
+    @Volatile
+    internal var launchCheckedInThisProcess = false
 
     /**
      * Take a wipe's report. Once the seed is gone this process ends and a fresh one starts on
@@ -105,11 +110,15 @@ object FreshStartAfterWipe {
      * The launch a fresh start made ([launch] marked, not an activity [recreated] later in that
      * process, not a task brought back from Recents, which is started again with the intent it was
      * first started with, extras included) runs on whatever its own wipe established: it is never
-     * restarted again. So a store that keeps refusing its write costs at most one restart per launch,
-     * never a loop.
+     * restarted again. An erasure owed at a launch that holds no wallet runs there without a
+     * restart, since that process never loaded one — and only at the first launch of a process, never
+     * in an activity recreated later or opened beside a live one. Its mark stays until an erasure
+     * verifies, so a store that keeps refusing its write is retried, with the message, at every new
+     * process — at most one restart per launch, never a loop.
      *
-     * @return true when this launch shows the one "did not complete" message, once: after a wipe of
-     *   its own, when that wipe did not complete and this process runs on; with no wipe to run, when
+     * @return true when this launch shows the one "did not complete" message: after a wipe of its
+     *   own, when that wipe did not complete and this process runs on (so at every launch while an
+     *   owed erasure keeps failing); with no wipe to run, when
      *   this is the launch a fresh start made and its relaunch carried the message while no wallet
      *   is stored.
      */
@@ -123,19 +132,27 @@ object FreshStartAfterWipe {
     ): Boolean {
         val app = context.applicationContext
         val madeByARestart = launchedByARestart(launch, recreated)
+        // Only the first launch of a process runs an owed erasure: a recreated activity, or a second
+        // one a link opens, may sit beside a wallet being created on another thread.
+        val firstInProcess = !launchCheckedInThisProcess
+        launchCheckedInThisProcess = true
         val erasureOwed = runCatching { owedErasure.isMarked(app) }.getOrDefault(false)
-        val finishesErasure = erasureOwed && !walletStored
-        if (erasureOwed && !finishesErasure) clearOwedErasure(app)
+        val finishesErasure = erasureOwed && !walletStored && firstInProcess
+        if (erasureOwed && walletStored) clearOwedErasure(app)
         if (!wipeOwed && !finishesErasure) {
             return madeByARestart && !walletStored && launch.flag(EXTRA_WIPE_INCOMPLETE)
         }
         Log.w(TAG, "a wipe is owed at this launch; running it before anything else")
         val report = wipe()
-        if (finishesErasure) clearOwedErasure(app)
+        // The mark stays until an erasure verifies, so every launch retries while a store refuses.
+        if (finishesErasure && report.verified) clearOwedErasure(app)
         if (madeByARestart) {
             if (report.seedGone) Log.w(TAG, "wipe ran again in the process a fresh start began; running on instead of restarting again")
             return !report.verified
         }
+        // Finishing an owed erasure at a launch with no wallet stored: this process never loaded one,
+        // so there is nothing to restart away from.
+        if (!wipeOwed) return !report.verified
         return afterWipe(context, report)
     }
 

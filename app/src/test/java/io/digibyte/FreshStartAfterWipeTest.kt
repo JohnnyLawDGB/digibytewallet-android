@@ -36,7 +36,8 @@ import java.util.concurrent.Executors
  *    restored is made in a process that never loaded the wiped one.
  *  - Seed gone, the rest NOT confirmed: before the process ends the erasure is marked owed, and the
  *    relaunch carries the one "did not complete" message. The fresh launch runs the wipe again before
- *    anything else and shows that message once — unless its own wipe completes the erasure.
+ *    anything else and shows that message — unless its own wipe completes the erasure. Every later
+ *    launch does the same until the erasure completes, without a restart.
  *  - Seed NOT gone: the process runs on as it is — the PIN, its counters and the owed wipe are kept by
  *    the wipe itself, the entry point shows its one message, and the wallet still opens with its PIN.
  *  - The launch a fresh start made never restarts again, whatever its own wipe finds, so a store
@@ -67,6 +68,7 @@ class FreshStartAfterWipeTest {
         every { Log.i(any(), any<String>()) } returns 0
         shipped = FreshStartAfterWipe.restart
         shippedMark = FreshStartAfterWipe.owedErasure
+        FreshStartAfterWipe.launchCheckedInThisProcess = false
         FreshStartAfterWipe.restart = ProcessRestart { app, incomplete ->
             requested += Request(app, Thread.currentThread(), incomplete)
             steps += "restart"
@@ -111,8 +113,12 @@ class FreshStartAfterWipeTest {
         launch: Intent? = launch(false),
         recreated: Boolean = false,
         wipe: WipeReport = verified,
+        // A recreated activity lives in the process that already ran its launch; any other launch
+        // here is a new process unless a test says it is a second activity in a live one.
+        newProcess: Boolean = !recreated,
     ): Launch {
         var wipes = 0
+        if (newProcess) FreshStartAfterWipe.launchCheckedInThisProcess = false
         val shows = FreshStartAfterWipe.atLaunch(
             screen, wipeOwed = wipeOwed, walletStored = walletStored, launch = launch, recreated = recreated,
         ) { wipes++; wipe }
@@ -212,13 +218,13 @@ class FreshStartAfterWipeTest {
 
     // ---- the fresh launch after a wipe that removed the seed and not the rest ----
 
-    @Test fun `the fresh launch finishes the owed erasure and says it did not complete once`() {
+    @Test fun `the fresh launch runs the owed erasure again and says it did not complete`() {
         marked = true
         val run = atLaunch(launch = launch(true, incomplete = true), wipe = seedGoneRestOwed)
         assertEquals("the erasure a fresh start left owed was not run again at that launch", 1, run.wipes)
         assertTrue("the fresh launch does not say the wipe did not complete", run.showsMessage)
         assertEquals("the fresh launch restarted again after its own wipe", 0, requested.size)
-        assertFalse("the owed erasure is still marked after the launch ran it", marked)
+        assertTrue("an erasure that is still incomplete lost its mark, so no later launch retries it", marked)
     }
 
     @Test fun `a fresh launch whose own wipe completes the erasure has nothing left to report`() {
@@ -270,6 +276,46 @@ class FreshStartAfterWipeTest {
         }
     }
 
+    @Test fun `an owed erasure never runs in a process that already launched`() {
+        // A recreated activity, or a second activity a link opens in the live process, may sit beside
+        // a wallet being created on another thread: the erasure waits for the next process instead.
+        marked = true
+        val first = atLaunch(launch = launch(false), wipe = seedGoneRestOwed)
+        assertEquals("the first launch of the process did not run the erasure owed", 1, first.wipes)
+        assertTrue(marked)
+        val recreatedRun = atLaunch(launch = launch(false), recreated = true, wipe = seedGoneRestOwed)
+        assertEquals("a recreated activity ran the owed erasure", 0, recreatedRun.wipes)
+        assertFalse("a recreated activity repeated the message for an erasure it did not run", recreatedRun.showsMessage)
+        assertTrue("the owed erasure lost its mark to a recreated activity", marked)
+        val secondActivity = atLaunch(launch = launch(false), newProcess = false, wipe = seedGoneRestOwed)
+        assertEquals("a second activity in a live process ran the owed erasure", 0, secondActivity.wipes)
+        assertTrue("the owed erasure lost its mark to a second activity", marked)
+        assertEquals("a process that already launched was restarted", 0, requested.size)
+        val next = atLaunch(launch = launch(false), wipe = verified)
+        assertEquals("the next process did not run the erasure still owed", 1, next.wipes)
+        assertFalse(marked)
+    }
+
+    @Test fun `an activity restored into a new process runs the erasure owed there`() {
+        // After process death the system restores the activity with saved state, in a NEW process:
+        // nothing of a wallet is being created there, so the erasure runs, without a restart.
+        marked = true
+        val restored = atLaunch(launch = launch(false), recreated = true, newProcess = true, wipe = seedGoneRestOwed)
+        assertEquals("a process restored after death did not run the erasure owed", 1, restored.wipes)
+        assertTrue("an erasure that did not complete was not reported", restored.showsMessage)
+        assertEquals("a restored process was restarted to finish an erasure", 0, requested.size)
+        assertTrue(marked)
+    }
+
+    @Test fun `guard - an owed wipe and an owed erasure together at an ordinary launch restart once`() {
+        // Wipe-after-N's own wipe is owed as well: its launch may hold what it loaded, so it restarts.
+        marked = true
+        val run = atLaunch(wipeOwed = true, launch = launch(false), wipe = seedGoneRestOwed)
+        assertEquals(1, run.wipes)
+        assertEquals("an owed wipe that removed the seed did not end the process", 1, requested.size)
+        assertTrue("the erasure still owed lost its mark", marked)
+    }
+
     @Test fun `a launch whose extras cannot be read is an ordinary launch`() {
         // A Bundle that cannot be unpacked makes every extra read throw on API 26-32; the launch
         // must still open, and nothing in such an intent may start or report a wipe.
@@ -297,14 +343,16 @@ class FreshStartAfterWipeTest {
 
     @Test fun `an erasure still owed at an ordinary launch runs there first`() {
         // The relaunch was not taken (the app was in the background): the next launch finishes it.
+        // That launch is a process which never loaded a wallet (none is stored), so it runs on.
         marked = true
         val run = atLaunch(launch = launch(false), wipe = verified)
         assertEquals(1, run.wipes)
-        assertEquals("the seed is gone and the process that ran the wipe was kept", 1, requested.size)
-        assertFalse(marked)
+        assertEquals("a launch that holds no wallet was restarted to finish an erasure", 0, requested.size)
+        assertFalse("a completed erasure left its mark", marked)
+        assertFalse("a completed erasure showed the message", run.showsMessage)
     }
 
-    @Test fun `a store that keeps refusing its write costs one restart and one message, then nothing`() {
+    @Test fun `a store that keeps refusing its write is retried at every launch until it takes it`() {
         // The process that ran the wipe: the seed is gone, one store refused.
         assertFalse(FreshStartAfterWipe.afterWipe(screen, seedGoneRestOwed))
         val restart = requested.single()
@@ -312,11 +360,22 @@ class FreshStartAfterWipeTest {
         val fresh = atLaunch(launch = launch(true, incomplete = restart.incomplete), wipe = seedGoneRestOwed)
         assertEquals(1, fresh.wipes)
         assertTrue(fresh.showsMessage)
-        // Every later launch: nothing owed, nothing run, nothing restarted.
-        val later = atLaunch(launch = launch(false), wipe = seedGoneRestOwed)
-        assertEquals(0, later.wipes)
-        assertFalse(later.showsMessage)
-        assertEquals("a store that refuses its write restarted the app more than once", 1, requested.size)
+        // Every later launch while the store still refuses: the erasure runs again and says so,
+        // and nothing restarts — none of these processes ever loaded a wallet.
+        repeat(3) { n ->
+            val later = atLaunch(launch = launch(false), wipe = seedGoneRestOwed)
+            assertEquals("launch ${n + 2} did not retry the erasure still owed", 1, later.wipes)
+            assertTrue("launch ${n + 2} did not say the wipe is still incomplete", later.showsMessage)
+            assertTrue("the erasure's mark was dropped while it is still owed", marked)
+        }
+        // The launch at which the store finally takes its write: done, and quiet from then on.
+        val done = atLaunch(launch = launch(false), wipe = verified)
+        assertEquals(1, done.wipes)
+        assertFalse(done.showsMessage)
+        assertFalse("a completed erasure left its mark", marked)
+        val after = atLaunch(launch = launch(false), wipe = verified)
+        assertEquals("an erasure already completed ran again", 0, after.wipes)
+        assertEquals("a store that refused its write restarted the app more than once", 1, requested.size)
     }
 
     // ---- an entry point that runs its wipe in a screen's own scope ----
