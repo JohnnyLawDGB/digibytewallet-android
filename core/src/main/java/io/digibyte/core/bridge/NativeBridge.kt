@@ -408,6 +408,20 @@ object NativeBridge {
      *  Null on a parse failure or an empty array — never partial output. */
     external fun getRawTransactionInputs(rawTx: ByteArray): Array<String>?
 
+    // ---------- Raw transaction id ----------
+
+    /** The id of the transaction in [rawTx] — display-order lowercase hex, the form a txid is
+     *  requested by — or null when the bytes are not exactly one complete signed transaction
+     *  (the parser refuses them, reads them as unsigned, or they carry anything beyond it).
+     *
+     *  The id is the one the core parser computes over the serialization WITHOUT witness data,
+     *  which is what a txid names; for a transaction with a witness it is not the hash of the
+     *  bytes as fetched. Parsing happens natively, like every other path fed remote bytes.
+     *
+     *  A transaction fetched by id is accepted only when this returns the id it was requested
+     *  by; see [io.digibyte.core.asset.network.MultiEndpointAssetClient]. */
+    external fun rawTransactionId(rawTx: ByteArray): String?
+
     /** The wallet's spendable NATIVE DigiByte UTXOs (excludes asset/DD dust) as
      *  newline-separated "txidHex|vout|amountSats|scriptPubKeyHex" lines, "" if none.
      *  Sovereign source for the DigiAsset-send DGB fee — the Room is_asset=0 partition

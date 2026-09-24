@@ -448,6 +448,8 @@
     <string name="sec_confirm_pin">Xác nhận mã PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Nhập mã PIN để xóa ví</string>
     <string name="sec_incorrect_pin">Mã PIN không đúng</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">Hiện không thể kiểm tra mã PIN trên thiết bị này. Không có gì bị tính. Vui lòng thử lại.</string>
     <string name="auth_node_pair_title">Xác nhận ghép nối nút</string>
     <string name="auth_node_pair_subtitle">Xác thực để ghép nối nút này</string>
     <string name="sec_enable">Bật</string>
@@ -583,4 +585,6 @@
     <string name="as_refused_rules_unknown">Đã chặn: không thể xác minh quy tắc chuyển của tài sản này. Chưa gửi gì cả.</string>
     <string name="rf_move_refused_rule_bound">%1$s vẫn ở nguyên chỗ cũ: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng</string>
     <string name="rf_move_refused_unknown">%1$s vẫn ở nguyên chỗ cũ: không thể xác minh quy tắc chuyển của nó</string>
+    <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
+    <string name="wipe_incomplete">Việc xóa ví chưa hoàn tất. Một số dữ liệu ví có thể vẫn còn trên thiết bị này. Hãy khởi động lại ứng dụng và thử lại.</string>
 </resources>

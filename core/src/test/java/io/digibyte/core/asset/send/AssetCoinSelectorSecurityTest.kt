@@ -2,6 +2,7 @@ package io.digibyte.core.asset.send
 
 import io.digibyte.core.db.entity.UtxoEntity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -250,5 +251,109 @@ class AssetCoinSelectorSecurityTest {
                 ok.assetChangeQty,
             )
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Distinct inputs — an outpoint is listed once, whichever pool it came from
+    // -------------------------------------------------------------------------
+
+    private fun outpoint(txid: String, vout: Int, sats: Long, qty: Long = 0L, asset: Boolean = qty > 0) =
+        UtxoEntity(
+            txid = txid, vout = vout, scriptPubKey = ByteArray(0), satoshis = sats, blockHeight = 100L,
+            isAsset = asset, assetId = if (asset) "La2ih1bm2u4dVcWGNHKesrY132xTDtKShnYQch" else null,
+            assetQuantity = qty, spent = false,
+        )
+
+    private val shared = "5".repeat(64)
+
+    private fun keys(inputs: List<UtxoEntity>) = inputs.map { it.txid.lowercase() to it.vout }
+
+    /** The asset pool (Room) and the fee pool (the native wallet's plain coins) are separate
+     *  sources, so one outpoint can sit in both. It is an asset input, and it is never also
+     *  taken as a fee input: the combined list the send signs names it once. */
+    @Test
+    fun `an outpoint in both pools appears once in the combined list`() {
+        val asset = outpoint(shared, 0, sats = 6_000, qty = 100)
+        val r = AssetCoinSelector.select(
+            assetUtxos = listOf(asset),
+            dgbUtxos = listOf(
+                outpoint(shared, 0, sats = 6_000),       // the same outpoint, seen as a plain coin
+                outpoint("d".repeat(64), 0, sats = 5_000),
+                outpoint("e".repeat(64), 0, sats = 4_000),
+            ),
+            assetNeeded = 100,
+            feeSats = 9_000,
+            markerOutputSats = 6_000,
+        )
+        r as AssetCoinSelector.Result.Ok
+        val combined = r.assetInputs + r.dgbInputs
+        assertEquals("combined list ${keys(combined)}", 1, keys(combined).count { it == shared to 0 })
+        assertEquals(keys(combined).toSet().size, combined.size)
+        assertTrue(AssetCoinSelector.outpointsDistinct(combined))
+    }
+
+    /** The txid spelling does not make two outpoints of one. */
+    @Test
+    fun `an outpoint spelled in another case is still the same outpoint`() {
+        val r = AssetCoinSelector.select(
+            assetUtxos = listOf(outpoint(shared.uppercase().replace('5', 'A'), 0, sats = 6_000, qty = 100)),
+            dgbUtxos = listOf(
+                outpoint(shared.replace('5', 'a'), 0, sats = 6_000),
+                outpoint("d".repeat(64), 0, sats = 5_000),
+                outpoint("e".repeat(64), 0, sats = 4_000),
+            ),
+            assetNeeded = 100,
+            feeSats = 9_000,
+            markerOutputSats = 6_000,
+        )
+        r as AssetCoinSelector.Result.Ok
+        val combined = r.assetInputs + r.dgbInputs
+        assertEquals(keys(combined).toSet().size, combined.size)
+    }
+
+    /** What the send signs: AssetTransferPlan.inputs, with the same outpoint offered by both pools
+     *  and, as a plain coin, the largest one on offer. */
+    @Test
+    fun `the inputs a send signs name every outpoint once`() {
+        val planned = AssetTransferPlanner.plan(
+            assetUtxos = listOf(outpoint(shared, 0, sats = 30_000, qty = 100)),
+            dgbUtxos = listOf(outpoint(shared, 0, sats = 30_000)) +
+                (1..12).map { outpoint("%064x".format(it), 0, sats = 20_000) },
+            quantity = 100,
+            feePerKb = 100_000,
+        )
+        planned as AssetTransferPlanner.Result.Ready
+        val inputs = planned.plan.inputs
+        assertEquals("signed inputs ${keys(inputs)}", keys(inputs).toSet().size, inputs.size)
+    }
+
+    /** The check the send makes before it signs. */
+    @Test
+    fun `a list naming one outpoint twice is not distinct`() {
+        val a = outpoint(shared, 0, sats = 6_000, qty = 100)
+        assertFalse(
+            "the same outpoint twice was called distinct",
+            AssetCoinSelector.outpointsDistinct(listOf(a, outpoint("d".repeat(64), 0, 5_000), outpoint(shared, 0, 6_000))),
+        )
+        assertFalse(
+            "the same outpoint in two spellings was called distinct",
+            AssetCoinSelector.outpointsDistinct(listOf(a, outpoint(shared.uppercase(), 0, 6_000))),
+        )
+    }
+
+    /** GUARD (passes before and after): the same txid at another output index is another
+     *  outpoint, and both may be spent together. */
+    @Test
+    fun `guard the same txid at another index is another outpoint`() {
+        val r = AssetCoinSelector.select(
+            assetUtxos = listOf(outpoint(shared, 0, sats = 6_000, qty = 100)),
+            dgbUtxos = listOf(outpoint(shared, 1, sats = 50_000)),
+            assetNeeded = 100,
+            feeSats = 9_000,
+            markerOutputSats = 6_000,
+        )
+        r as AssetCoinSelector.Result.Ok
+        assertEquals(listOf(shared to 1), keys(r.dgbInputs))
+        assertTrue(AssetCoinSelector.outpointsDistinct(r.assetInputs + r.dgbInputs))
     }
 }

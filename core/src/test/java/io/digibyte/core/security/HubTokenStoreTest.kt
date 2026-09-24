@@ -135,6 +135,44 @@ class HubTokenStoreTest {
             legacy.getString(HubTokenStore.KEY_JWT, null))
     }
 
+    // ── what "the token is gone" means for the wallet wipe ───────────────────
+
+    @Test
+    fun `a secure store that had to be discarded counts as cleared`() {
+        // The store that cannot be used is deleted outright by the handler above, so this is the
+        // case where the token is at its most thoroughly gone. A wipe asks this store whether the
+        // token is gone; answering "not confirmed" here would make every wipe on such a device
+        // report itself unfinished, for ever, over the least valuable secret in the app.
+        var resets = 0
+        val broken = HubTokenStore(legacy, { ThrowingPrefs }, { resets++ })
+        legacy.edit().putString(HubTokenStore.KEY_JWT, "stale").commit()
+
+        assertTrue("a store that was deleted holds no token", broken.clearConfirmed())
+        assertEquals("the unusable store must be discarded", 1, resets)
+        assertFalse("the plaintext copy must go too", legacy.contains(HubTokenStore.KEY_JWT))
+    }
+
+    @Test
+    fun `a secure store that answers and keeps the token is not confirmed`() {
+        // The other direction: a store that is usable and whose write did not land must still
+        // report "not confirmed", so the case above cannot be turned into a blanket yes.
+        val keeps = HubTokenStore(legacy, { RejectingWritePrefs() })
+        legacy.edit().putString(HubTokenStore.KEY_JWT, "stale").commit()
+
+        assertFalse("a write that did not land is not a token that is gone", keeps.clearConfirmed())
+    }
+
+    @Test
+    fun `clearConfirmed is true when both stores really are empty`() {
+        legacy.edit().putString(HubTokenStore.KEY_JWT, "stale").commit()
+        store.save("live")
+
+        assertTrue(store.clearConfirmed())
+        assertNull(store.load())
+        assertFalse(legacy.contains(HubTokenStore.KEY_JWT))
+        assertFalse(secure.contains(HubTokenStore.KEY_JWT))
+    }
+
     /** Every read and write throws, the way a corrupt AEAD keyset does. */
     private object ThrowingPrefs : SharedPreferences by FakeSharedPreferences() {
         override fun getString(key: String?, defValue: String?): String? = throw SecurityException("AEAD failed")

@@ -11,6 +11,8 @@ import io.digibyte.core.recovery.SeedProvider
 import io.digibyte.core.recovery.SweepDestination
 import io.digibyte.core.recovery.resolve
 import io.digibyte.core.recovery.sweepSet
+import io.digibyte.core.security.KeystoreKeyInvalidatedException
+import io.digibyte.core.security.KeystoreUserAuthRequiredException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -93,6 +95,32 @@ class RecoverFundsViewModel @Inject constructor(
             val digiDollar: io.digibyte.core.recovery.DigiDollarTransferService.Result? = null,
         ) : UiState()
         data class Error(val reason: String) : UiState()
+
+        /**
+         * This wallet's seed key is bound to device authentication and needs a fresh one before
+         * the seed can be read. The screen answers with the device-credential prompt and reports
+         * the outcome through [onDeviceCredentialResult]; the step that asked then runs once more.
+         *
+         * [request] counts the times the prompt was asked for while this step waits
+         * ([askDeviceCredentialAgain]); each is a new state, so the screen shows the prompt anew.
+         */
+        data class NeedsDeviceCredential(val request: Int = 0) : UiState()
+    }
+
+    /** [UiState.Error] reasons for an own-wallet seed that could not be read. The screen maps
+     *  each to its message. */
+    object SeedReason {
+        /** The provider returned no seed, or failed in any way other than the two below. */
+        const val UNAVAILABLE = "Wallet seed unavailable"
+
+        /** The device credential was declined, could not be shown, or did not open the key. */
+        const val CREDENTIAL_NOT_CONFIRMED = "Wallet seed unavailable: device credential not confirmed"
+
+        /** The device lock was removed, so the key is gone for good; only the phrase restores. */
+        const val KEY_INVALIDATED = "Wallet key invalidated: device lock removed"
+
+        /** Whether trying again can succeed after [reason]: not once the key is gone for good. */
+        fun offersRetry(reason: String): Boolean = reason != KEY_INVALIDATED
     }
 
 
@@ -167,9 +195,14 @@ class RecoverFundsViewModel @Inject constructor(
     // is zeroed either way.
     private var activeJob: kotlinx.coroutines.Job? = null
 
+    /** The own-wallet step waiting on [UiState.NeedsDeviceCredential], run once when the
+     *  credential is confirmed. Cleared by the answer and by [reset]. */
+    private var credentialRetry: (() -> Unit)? = null
+
     /** Return to Idle, cancel any in-flight scan/sweep, and drop any held foreign phrase (mode switch / leaving). */
     fun reset() {
         activeJob?.cancel()
+        credentialRetry = null
         pendingForeignMnemonic = null
         pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
@@ -179,13 +212,68 @@ class RecoverFundsViewModel @Inject constructor(
         _state.value = UiState.Idle
     }
 
-    fun classify() {
+    /**
+     * The screen's answer to [UiState.NeedsDeviceCredential]. Confirmed: the step that asked runs
+     * once more. Declined, or no prompt could be shown: a message the user can retry from, and
+     * nothing else runs. An answer that arrives when nothing is waiting is ignored.
+     */
+    fun onDeviceCredentialResult(confirmed: Boolean) {
+        if (_state.value !is UiState.NeedsDeviceCredential) return
+        val retry = credentialRetry
+        credentialRetry = null
+        if (confirmed && retry != null) retry()
+        else _state.value = UiState.Error(SeedReason.CREDENTIAL_NOT_CONFIRMED)
+    }
+
+    /**
+     * The screen's way to show the device-credential prompt again for the step that is waiting,
+     * for when no answer is on its way (the system may decline to show a prompt at all, and then
+     * never answers). The waiting step is kept, and still runs at most once. Ignored when nothing
+     * is waiting.
+     */
+    fun askDeviceCredentialAgain() {
+        val waiting = _state.value as? UiState.NeedsDeviceCredential ?: return
+        _state.value = UiState.NeedsDeviceCredential(waiting.request + 1)
+    }
+
+    /**
+     * Reads THIS wallet's seed for one own-wallet step, or settles the screen and returns null.
+     *
+     * Outside the key's device-authentication window the provider throws by design. The first
+     * time, the screen is asked for the device credential and [retry] runs the same step once
+     * more after it is confirmed ([afterCredential] true). A key still refused after that prompt,
+     * or one the device invalidated for good, ends in a message; every outcome leaves the screen
+     * in a state it can render. No seed exists on those paths; a returned seed is the caller's
+     * to zero.
+     */
+    private fun loadOwnSeed(afterCredential: Boolean, retry: () -> Unit): ByteArray? {
+        val seed = try {
+            seedProvider.loadSeed()
+        } catch (e: KeystoreUserAuthRequiredException) {
+            if (afterCredential) {
+                _state.value = UiState.Error(SeedReason.CREDENTIAL_NOT_CONFIRMED)
+            } else {
+                credentialRetry = retry
+                _state.value = UiState.NeedsDeviceCredential()
+            }
+            return null
+        } catch (e: KeystoreKeyInvalidatedException) {
+            _state.value = UiState.Error(SeedReason.KEY_INVALIDATED)
+            return null
+        } catch (e: Exception) {
+            null
+        }
+        if (seed == null) _state.value = UiState.Error(SeedReason.UNAVAILABLE)
+        return seed
+    }
+
+    fun classify() = classifyOwn(afterCredential = false)
+
+    private fun classifyOwn(afterCredential: Boolean) {
         _state.value = UiState.Classifying
         activeJob = viewModelScope.launch {
-            val seed = seedProvider.loadSeed() ?: run {
-                _state.value = UiState.Error("Wallet seed unavailable")
-                return@launch
-            }
+            val seed = loadOwnSeed(afterCredential) { classifyOwn(afterCredential = true) }
+                ?: return@launch
             try {
                 // seed = 64-byte BIP39 seed (scanFromSeed takes ONLY the seed —
                 // no passphrase argument).
@@ -221,16 +309,27 @@ class RecoverFundsViewModel @Inject constructor(
         }
     }
 
-    fun sweep(destination: SweepDestination) {
+    /**
+     * Turns the chosen sweep destination into an address: this wallet's own receive address, or
+     * a validated external one. Held in one place so unit tests, which run without the native
+     * library, can stand in for the two native calls and exercise everything after them.
+     */
+    internal var destinationResolver: (SweepDestination) -> DestResolution = { d ->
+        d.resolve(
+            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
+            validator = { NativeBridge.isValidAddress(it) },
+        )
+    }
+
+    fun sweep(destination: SweepDestination) = sweepOwn(destination, afterCredential = false)
+
+    private fun sweepOwn(destination: SweepDestination, afterCredential: Boolean) {
         val findings = lastFindings
         if (findings.isEmpty()) {
             _state.value = UiState.Error("Nothing to recover")
             return
         }
-        when (val res = destination.resolve(
-            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
-            validator = { NativeBridge.isValidAddress(it) },
-        )) {
+        when (val res = destinationResolver(destination)) {
             is DestResolution.Invalid -> _state.value = UiState.Error(res.reason)
             is DestResolution.Ok -> {
                 _state.value = UiState.Sweeping
@@ -241,10 +340,9 @@ class RecoverFundsViewModel @Inject constructor(
                 // .shouldApplyOutgoingOverride). External destinations are real sends.
                 val destIsSelf = destination is SweepDestination.Native
                 activeJob = viewModelScope.launch {
-                    val seed = seedProvider.loadSeed() ?: run {
-                        _state.value = UiState.Error("Wallet seed unavailable")
-                        return@launch
-                    }
+                    val seed = loadOwnSeed(afterCredential) {
+                        sweepOwn(destination, afterCredential = true)
+                    } ?: return@launch
                     try {
                         val outcome = withContext(Dispatchers.IO) {
                             runRecovery(seed, findings, res.address, destIsSelf, isForeign = false)
@@ -346,14 +444,6 @@ class RecoverFundsViewModel @Inject constructor(
                 return@repeat
             }
 
-            // DigiDollar moves alongside the assets and BEFORE the sweep, for the same reason:
-            // the DGB paying its consensus fee is exactly what the sweep would otherwise take.
-            // Its inputs join the same exclusion set.
-            // Foreign only. On the own-wallet path the source and destination m/86' keys are the
-            // same key, so a "move" would spend the 0.1 DGB consensus fee to send the dollars to
-            // where they already are.
-            val dd = if (isForeign) moveDigiDollar(seed, current, destIsSelf) else null
-
             val exclusions = io.digibyte.core.recovery.RecoverySequence.sweepExclusions(
                 moveResult.moves.map {
                     io.digibyte.core.recovery.RecoverySequence.MoveRecord(
@@ -363,6 +453,16 @@ class RecoverFundsViewModel @Inject constructor(
                     )
                 }
             )
+
+            // DigiDollar moves alongside the assets and BEFORE the sweep, for the same reason:
+            // the DGB paying its consensus fee is exactly what the sweep would otherwise take.
+            // Its inputs join the same exclusion set.
+            // Foreign only. On the own-wallet path the source and destination m/86' keys are the
+            // same key, so a "move" would spend the 0.1 DGB consensus fee to send the dollars to
+            // where they already are.
+            val dd = if (isForeign) {
+                moveDigiDollar(seed, current, destIsSelf, verdicts, exclusions)
+            } else null
 
             val swept = LegacySweepService(outgoingTxStore, walletTxPersister, classifier).sweepFromSeed(
                 seedBytes = seed,
@@ -386,11 +486,18 @@ class RecoverFundsViewModel @Inject constructor(
      * Null when there is nothing to say — no dollars and a reachable lookup. Anything else is
      * reported, including dollars we found and could not move: a recovery that empties a wallet
      * of DGB while staying silent about its dollars is the failure this whole path exists to fix.
+     *
+     * @param verdicts         this round's classification — the same map the sweep is handed.
+     * @param claimedOutpoints what the DigiAsset moves of this round claimed — the same set the
+     *                         sweep excludes.
      */
     private suspend fun moveDigiDollar(
         seed: ByteArray,
         findings: List<RecoveryScanService.ProfileResult>,
         destIsSelf: Boolean,
+        verdicts: Map<io.digibyte.core.reconcile.UtxoEntry,
+            io.digibyte.core.recovery.ForeignUtxoAssetClassifier.Verdict>,
+        claimedOutpoints: Set<String>,
     ): io.digibyte.core.recovery.DigiDollarTransferService.Result? {
         if (!destIsSelf) return null   // DigiDollar always comes home; there is no external form
         val scan = (scanService.state.value as? RecoveryScanService.State.Done)?.digiDollar
@@ -402,13 +509,29 @@ class RecoverFundsViewModel @Inject constructor(
         val recipient = NativeBridge.getDigiDollarTaprootKeyHex() ?: return null
         val change = NativeBridge.getReceiveAddress(0, format = 2) ?: return null
 
-        // The fee comes from the plain DGB the scan found, wherever it lives. Asset-bearing
-        // outpoints are excluded by the same partition the sweep uses.
+        // The fee comes from the plain DGB the scan found, wherever it lives. The selection is
+        // handed the verdicts and the claimed outpoints, so it applies the partition and the
+        // exclusions the sweep applies: only classified, plain, unclaimed outputs pay the fee.
         //
         // An EMPTY selection is passed through rather than returned on: a wallet with dollars and
         // no DGB used to bail out here, so its dollars went unmentioned — the silence this path
         // exists to end. The transfer service refuses it honestly and reports the balance.
-        val fee = io.digibyte.core.recovery.DigiDollarFeeSelection.from(findings)
+        val fee = io.digibyte.core.recovery.DigiDollarFeeSelection.from(
+            findings = findings,
+            verdicts = verdicts,
+            excludeOutpoints = claimedOutpoints,
+            // Enough is decided by DigiDollarTransferPlan for THIS transfer — asked with the scan
+            // and the addresses the move below is given — so selection stops where the fee is
+            // covered at the transfer's real size.
+            covers = { picked ->
+                io.digibyte.core.recovery.DigiDollarTransferService.feeInputsSuffice(
+                    scan = scan,
+                    feeInputs = picked,
+                    recipientKeyHex = recipient,
+                    changeAddress = change,
+                )
+            },
+        )
 
         return io.digibyte.core.recovery.DigiDollarTransferService(
             outgoingTxStore = outgoingTxStore,

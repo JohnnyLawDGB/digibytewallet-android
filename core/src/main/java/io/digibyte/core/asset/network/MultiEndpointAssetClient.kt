@@ -1,6 +1,7 @@
 package io.digibyte.core.asset.network
 
 import android.util.Log
+import io.digibyte.core.bridge.NativeBridge
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -18,6 +19,12 @@ import kotlinx.coroutines.sync.withLock
  * method returns null — callers get the same semantics as a single-endpoint
  * client, just with built-in failover.
  *
+ * A raw transaction is accepted only when its bytes hash to the id it was requested by
+ * ([transactionIdOf], the id the core parser computes over the serialization without witness
+ * data). Any other answer counts as a failure of that endpoint, exactly like a null or a throw,
+ * and the client moves to the next one before anything reads or keeps the bytes. Every
+ * consumer of parents — the provenance walk and the recovery classifier — takes them from here.
+ *
  * The circuit breaker is intentionally simple: an endpoint that fails N
  * times in a row is skipped for [circuitOpenMs]; any success resets the
  * counter. No exponential backoff, no half-open probes — callers retry on
@@ -28,6 +35,10 @@ class MultiEndpointAssetClient(
     private val endpoints: List<AssetNetworkClient>,
     private val failureThreshold: Int = 3,
     private val circuitOpenMs: Long = 60_000L,
+    /** The id of a raw transaction, display-order hex, or null when the bytes are not exactly
+     *  one signed transaction. The native parser in production; the default lambda touches
+     *  [NativeBridge] only when it is invoked, so constructing a client loads nothing. */
+    private val transactionIdOf: (ByteArray) -> String? = { NativeBridge.rawTransactionId(it) },
 ) : AssetNetworkClient {
 
     override val endpointLabel: String = "multi(${endpoints.joinToString(",") { it.endpointLabel }})"
@@ -47,8 +58,24 @@ class MultiEndpointAssetClient(
     override suspend fun getSyncState(): SyncStateResponse? =
         tryEach("getSyncState") { it.getSyncState() }
 
-    override suspend fun getRawTransaction(txHashHex: String): ByteArray? =
-        tryEach("getRawTransaction") { it.getRawTransaction(txHashHex) }
+    override suspend fun getRawTransaction(txHashHex: String): ByteArray? {
+        val requested = txHashHex.lowercase()
+        if (!TXID_HEX.matches(requested)) return null
+        return tryEach("getRawTransaction") { endpoint ->
+            endpoint.getRawTransaction(txHashHex)?.takeIf { raw ->
+                val id = transactionIdOf(raw)
+                (id?.lowercase() == requested).also { same ->
+                    if (!same) {
+                        Log.w(
+                            TAG,
+                            "getRawTransaction: ${endpoint.endpointLabel} answered $txHashHex with " +
+                                "bytes whose id is ${id ?: "not computable"}; trying the next endpoint",
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     private suspend fun <T> tryEach(label: String, block: suspend (AssetNetworkClient) -> T?): T? {
         require(endpoints.isNotEmpty()) { "MultiEndpointAssetClient requires at least one endpoint" }
@@ -93,5 +120,6 @@ class MultiEndpointAssetClient(
 
     companion object {
         private const val TAG = "MultiAssetClient"
+        private val TXID_HEX = Regex("^[0-9a-f]{64}$")
     }
 }

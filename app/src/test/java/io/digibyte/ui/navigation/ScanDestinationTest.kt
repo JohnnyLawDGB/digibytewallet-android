@@ -52,12 +52,34 @@ class ScanDestinationTest {
         )
     }
 
-    @Test fun `an asset request goes to that asset's send screen with its quantity`() {
+    /**
+     * A request names whole units of the asset. The route carries them as that integer, under a
+     * name that says so; the send screen writes the quantity field from it at the asset's own
+     * divisibility. It is never carried as text for a later step to read at some scale.
+     */
+    @Test fun `an asset request goes to that asset's send screen with its whole units`() {
         val uri = DigiByteUri.parse("digibyte:DTest123?assetId=La1&assetAmount=7")!!
         assertEquals(
-            "asset_send/La1?address=DTest123&quantity=7",
+            "asset_send/La1?address=DTest123&units=7",
             ScanDestination.forDigiByteUri(uri, returnTo = "", encode = enc),
         )
+        val large = DigiByteUri.parse("digibyte:DTest123?assetId=La1&assetAmount=9223372036854775807")!!
+        assertEquals(
+            "asset_send/La1?address=DTest123&units=9223372036854775807",
+            ScanDestination.forDigiByteUri(large, returnTo = "", encode = enc),
+        )
+    }
+
+    /** The route's units are an integer argument: a request object without usable units names none. */
+    @Test fun `an asset request without usable units goes to the send screen with none`() {
+        for (units in listOf(null, 0L, -7L)) {
+            val uri = DigiByteUri(address = "DTest123", assetId = "La1", assetAmount = units)
+            assertEquals(
+                "units=$units",
+                "asset_send/La1?address=DTest123",
+                ScanDestination.forDigiByteUri(uri, returnTo = "", encode = enc),
+            )
+        }
     }
 
     @Test fun `the address and asset id pass through the encoder`() {

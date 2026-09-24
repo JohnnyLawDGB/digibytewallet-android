@@ -448,6 +448,8 @@
     <string name="sec_confirm_pin">Confirmar PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Digite seu PIN para apagar a carteira</string>
     <string name="sec_incorrect_pin">PIN incorreto</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">Não foi possível verificar o PIN neste dispositivo agora. Nada foi contabilizado. Tente novamente.</string>
     <string name="auth_node_pair_title">Confirmar pareamento do nó</string>
     <string name="auth_node_pair_subtitle">Autentique-se para parear este nó</string>
     <string name="sec_enable">Ativar</string>
@@ -583,4 +585,6 @@
     <string name="as_refused_rules_unknown">Bloqueado: não foi possível verificar as regras de transferência deste ativo. Nada foi enviado.</string>
     <string name="rf_move_refused_rule_bound">%1$s ficou onde estava: este ativo tem regras de transferência que esta carteira ainda não consegue cumprir</string>
     <string name="rf_move_refused_unknown">%1$s ficou onde estava: não foi possível verificar suas regras de transferência</string>
+    <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
+    <string name="wipe_incomplete">A carteira não foi apagada por completo. Alguns dados da carteira ainda podem estar neste dispositivo. Reinicie o app e tente novamente.</string>
 </resources>

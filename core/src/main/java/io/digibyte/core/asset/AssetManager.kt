@@ -130,12 +130,20 @@ internal fun buildOutgoingUnconfirmedMap(detailRows: List<String>): Map<String, 
  * the whole input.
  *
  * Per input outpoint:
- *  - we hold a row for it → its resolved quantity;
+ *  - we hold a row for it with a positive quantity → that quantity;
+ *  - we hold a row for it with a stored zero → 0 units only if nothing in the transaction that
+ *    created it directs units to that output ([rowIsTargeted] answers `false`: ordinary DGB
+ *    change). Every owned output of an asset transaction gets a row and a row's quantity starts
+ *    at zero, so on a targeted output a zero is "not totalled here" (a percent target, a
+ *    remainder left unknown), never a count → UNKNOWN, as is a row with no targeting answer;
  *  - no row, and the funding tx carries no DigiAsset payload → 0 units (a plain DGB input);
  *  - no row, but the funding tx IS an asset tx → UNKNOWN (it could hold any amount);
  *  - funding tx unretrievable → UNKNOWN.
  *
- * Top-level and dependency-free (both probes are lambdas) so it is unit-testable without a
+ * [unresolved], when given, is filled if stored-zero rows are the whole reason for UNKNOWN, so a
+ * caller can say which rows keep an output held out.
+ *
+ * Top-level and dependency-free (every probe is a lambda) so it is unit-testable without a
  * NativeBridge — whose static initializer does `System.loadLibrary` and cannot run on the
  * host JVM, the same constraint the other seams in this file are shaped around.
  */
@@ -143,18 +151,211 @@ internal suspend fun resolveInputAssetUnits(
     inputs: List<Pair<String, Int>>,
     rowQuantity: suspend (String, Int) -> Long?,
     isAssetTx: suspend (String) -> Boolean?,
+    rowIsTargeted: suspend (String, Int) -> Boolean?,
+    unresolved: ZeroRowInputs? = null,
 ): Long? {
     var total = 0L
+    var zeroRows: MutableList<Pair<String, Int>>? = null
     for ((txid, vout) in inputs) {
-        val known = rowQuantity(txid, vout)
-        if (known != null) {
-            total += known
+        val stored = rowQuantity(txid, vout)
+        if (stored != null && stored > 0L) {
+            total += stored
+            continue
+        }
+        if (stored != null) {
+            if (rowIsTargeted(txid, vout) == false) continue    // ordinary DGB change: no units
+            if (unresolved == null) return null                 // nobody asked why
+            (zeroRows ?: ArrayList<Pair<String, Int>>().also { zeroRows = it }).add(txid to vout)
             continue
         }
         // No row. Only a funding tx we can prove carries no DigiAsset payload is safely 0.
         if (isAssetTx(txid) != false) return null
     }
-    return total
+    val unknown = zeroRows ?: return total
+    unresolved?.rows?.addAll(unknown)
+    unresolved?.otherUnits = total
+    return null
+}
+
+/** Filled by [resolveInputAssetUnits] when stored-zero rows are the whole reason its answer is
+ *  "unknown": which rows, and what every other input carried. Left empty otherwise. */
+internal class ZeroRowInputs {
+    val rows: MutableList<Pair<String, Int>> = ArrayList()
+    var otherUnits: Long = 0L
+}
+
+/** What [outputIsTargeted] reads of the transaction that created an output. */
+internal class AssetTxShape(
+    val header: DecodedAssetHeader,
+    val firstNonOpReturnVout: Int?,
+    val outputCount: Int,
+    /** The outpoints it spends, read only when a remainder has to be resolved; null when they
+     *  could not all be read. */
+    val inputs: () -> List<Pair<String, Int>>?,
+)
+
+/**
+ * Does transaction [txid] direct asset units to its output [vout]? The question
+ * [resolveInputAssetUnits] puts about an input whose row stores a zero, answered with the rule
+ * detection applies to outputs ([AssetTxQuantity.targetsOutput]) — so an input is read the way it
+ * was, or would have been, held when it was an output. Null is "no answer": the transaction
+ * cannot be read.
+ *
+ * The payload alone decides every output but one. An instruction target, a percent target and
+ * an issuer's marker are targeted whatever came in; an output nothing names that is not the last
+ * is not. Only for the last output of a transaction that may leave a remainder do the units its
+ * own inputs carried matter, and those are resolved the same way, one transaction further back.
+ * In the ordinary case that is the run of sends which each paid their fee with the change of the
+ * one before — the shape a wallet with one dominant DGB coin makes on every send.
+ *
+ * **The run is followed to its start, however long it is**, so the answer for an output does not
+ * depend on how many sends came before it: ordinary change of a transaction whose inputs carried
+ * known quantities is answered `false` at any depth, and stays in the plain-coin set. The walk
+ * keeps its own state on the heap rather than on the call stack, reads each transaction once, and
+ * steps back only through transactions the wallet itself holds — so its work is one pass over
+ * that part of the wallet's own history and no further.
+ *
+ * [settled] is a caller's record, for one pass, of input totals already resolved (null = resolved
+ * as unknown). It is read before resolving and written after — and only totals the walk resolved
+ * all the way down are written, so a later reader never takes a provisional "unknown" as settled.
+ */
+internal suspend fun outputIsTargeted(
+    txid: String,
+    vout: Int,
+    shapeOf: suspend (String) -> AssetTxShape?,
+    rowQuantity: suspend (String, Int) -> Long?,
+    isAssetTx: suspend (String) -> Boolean?,
+    settled: MutableMap<String, Long?>? = null,
+): Boolean? = TargetingWalk(shapeOf, rowQuantity, isAssetTx, settled).answer(txid, vout)
+
+/**
+ * One question put to [outputIsTargeted], and everything it read on the way: the shapes, rows and
+ * input totals it has already resolved, plus an explicit stack so that following a long run of
+ * transactions costs heap and not call frames.
+ */
+private class TargetingWalk(
+    private val shapeOf: suspend (String) -> AssetTxShape?,
+    private val rowQuantity: suspend (String, Int) -> Long?,
+    private val isAssetTx: suspend (String) -> Boolean?,
+    private val settled: MutableMap<String, Long?>?,
+) {
+    private val shapes = HashMap<String, AssetTxShape?>()
+    private val inputLists = HashMap<String, List<Pair<String, Int>>?>()
+    private val rows = HashMap<Pair<String, Int>, Long?>()
+    private val totals = HashMap<String, Long?>()
+
+    /** False once a total here had to be taken before everything under it was resolved. Nothing
+     *  this walk resolved is then written into the caller's record. */
+    private var everyTotalResolvedBelow = true
+
+    /** One transaction on the stack, and how far through the transactions under it we are. */
+    private class Step(val txid: String, val below: List<String>) { var next = 0 }
+
+    suspend fun answer(txid: String, vout: Int): Boolean? {
+        val tx = shape(txid) ?: return null
+        fromPayload(tx, vout)?.let { return it }
+        resolveTotals(txid)
+        val answer = answerFromTotals(txid, vout)
+        if (everyTotalResolvedBelow) settled?.putAll(totals)
+        return answer
+    }
+
+    /**
+     * Resolve the input total of [root] and of every transaction under it, deepest first. Each is
+     * visited once, so a run of n transactions costs one pass over it however deep [root] sits.
+     */
+    private suspend fun resolveTotals(root: String) {
+        if (totalResolved(root)) return
+        val stack = ArrayList<Step>()
+        val onTheWay = HashSet<String>()
+        stack.add(Step(root, restsOn(root)))
+        onTheWay.add(root)
+        while (stack.isNotEmpty()) {
+            val step = stack[stack.lastIndex]
+            if (step.next < step.below.size) {
+                val below = step.below[step.next++]
+                if (totalResolved(below)) continue
+                if (!onTheWay.add(below)) {
+                    // Already on the way here: nothing under it is left to resolve first. Its
+                    // total stays unresolved, and this walk records nothing for the caller.
+                    everyTotalResolvedBelow = false
+                    continue
+                }
+                stack.add(Step(below, restsOn(below)))
+                continue
+            }
+            stack.removeAt(stack.lastIndex)
+            onTheWay.remove(step.txid)
+            totals[step.txid] = inputTotalOf(step.txid)
+        }
+    }
+
+    /** The transactions whose own input total has to be resolved before [txid]'s can be: the ones
+     *  that created a stored-zero input of [txid] which the payload alone does not answer for. */
+    private suspend fun restsOn(txid: String): List<String> {
+        val tx = shape(txid) ?: return emptyList()
+        val inputs = inputsOf(txid, tx) ?: return emptyList()
+        var below: MutableList<String>? = null
+        for ((funding, vout) in inputs) {
+            val stored = row(funding, vout) ?: continue
+            if (stored > 0L) continue
+            val fundingTx = shape(funding) ?: continue
+            if (fromPayload(fundingTx, vout) != null) continue
+            val list = below ?: ArrayList<String>().also { below = it }
+            if (funding !in list) list.add(funding)
+        }
+        return below ?: emptyList()
+    }
+
+    /** [txid]'s input total, with every stored-zero input answered from what is already resolved
+     *  — so this never steps back a further transaction and the walk's depth stays one. */
+    private suspend fun inputTotalOf(txid: String): Long? {
+        val tx = shape(txid) ?: return null
+        val inputs = inputsOf(txid, tx) ?: return null
+        return resolveInputAssetUnits(
+            inputs = inputs,
+            rowQuantity = { funding, vout -> row(funding, vout) },
+            isAssetTx = isAssetTx,
+            rowIsTargeted = { funding, vout -> answerFromTotals(funding, vout) },
+        )
+    }
+
+    /** The targeting answer for one output, from the payload and the totals already resolved. */
+    private suspend fun answerFromTotals(txid: String, vout: Int): Boolean? {
+        val tx = shape(txid) ?: return null
+        fromPayload(tx, vout)?.let { return it }
+        if (!totalResolved(txid)) {
+            everyTotalResolvedBelow = false
+            return null
+        }
+        return AssetTxQuantity.targetsOutput(
+            tx.header, vout, tx.firstNonOpReturnVout, totalOf(txid), tx.outputCount,
+        )
+    }
+
+    /** What the payload alone says, or null when only a remainder decides. */
+    private fun fromPayload(tx: AssetTxShape, vout: Int): Boolean? = when {
+        // Not even an unknown remainder would land here.
+        !AssetTxQuantity.targetsOutput(tx.header, vout, tx.firstNonOpReturnVout, null, tx.outputCount) -> false
+        // Named whatever the inputs carried.
+        AssetTxQuantity.targetsOutput(tx.header, vout, tx.firstNonOpReturnVout, 0L, tx.outputCount) -> true
+        else -> null
+    }
+
+    private fun totalResolved(txid: String) = totals.containsKey(txid) || settled?.containsKey(txid) == true
+
+    private fun totalOf(txid: String): Long? = if (totals.containsKey(txid)) totals[txid] else settled?.get(txid)
+
+    private suspend fun shape(txid: String): AssetTxShape? =
+        if (shapes.containsKey(txid)) shapes[txid] else shapeOf(txid).also { shapes[txid] = it }
+
+    private fun inputsOf(txid: String, tx: AssetTxShape): List<Pair<String, Int>>? =
+        if (inputLists.containsKey(txid)) inputLists[txid] else tx.inputs().also { inputLists[txid] = it }
+
+    private suspend fun row(txid: String, vout: Int): Long? {
+        val key = txid to vout
+        return if (rows.containsKey(key)) rows[key] else rowQuantity(txid, vout).also { rows[key] = it }
+    }
 }
 
 /**
@@ -634,6 +835,12 @@ class AssetManager(
         // change — the units the explicit instructions leave unassigned, which the
         // protocol credits to the transaction's LAST output. Resolving that needs the
         // input quantities, which we take from the rows we already hold.
+        // Each call totals what it needs on its own, with no record shared across the sweep's
+        // calls: detection WRITES rows as it goes, so a total carried over from an earlier call
+        // could rest on a row that has since been raised, and a total that is too low reads a
+        // remainder as nothing. The pass in front of a spend and the startup replay, which write
+        // no row, each keep one record for the whole run.
+        val zeroRowInputs = ZeroRowInputs()
         val inputUnits = resolveInputAssetUnits(
             inputs = (NativeBridge.getTransactionInputsForHash(txHashHex) ?: emptyArray())
                 .mapNotNull { line ->
@@ -643,6 +850,10 @@ class AssetManager(
                 },
             rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
             isAssetTx = { txid -> txHasAssetPayload(txid) },
+            rowIsTargeted = { txid, vout ->
+                inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
+            },
+            unresolved = zeroRowInputs,
         )
         val outputCount = outputLines.size
 
@@ -686,6 +897,9 @@ class AssetManager(
             firstNonOpReturnVout = firstNonOpReturn,
             inputUnits = inputUnits,
             outputCount = outputCount,
+            onNewlyHeld = { vout ->
+                logIfHeldForZeroRows(txHashHex, vout, header, firstNonOpReturn, outputCount, zeroRowInputs)
+            },
         )
 
         var anyStillUnresolved = false
@@ -816,7 +1030,7 @@ class AssetManager(
      * explicit instruction outputs, every output a range names, percent targets, and the
      * implicit-change remainder; an owned output nothing targets is ordinary DGB change and is
      * left spendable — protecting every `is_asset` row instead would lock ordinary change out of
-     * spending. Returns the number of outpoints newly protected.
+     * spending. Returns the number of outpoints newly protected; [onNewlyHeld] hears each of them.
      */
     internal fun protectTargetedOutputs(
         txHashHex: String,
@@ -825,6 +1039,7 @@ class AssetManager(
         firstNonOpReturnVout: Int?,
         inputUnits: Long?,
         outputCount: Int,
+        onNewlyHeld: ((Int) -> Unit)? = null,
     ): Int {
         var protectedCount = 0
         for (vout in ownedVouts) {
@@ -832,7 +1047,10 @@ class AssetManager(
             val added = runCatching { registerAssetOutpoint(txHashHex, vout) }
                 .onFailure { android.util.Log.d("AssetManager", "registerAssetOutpoint threw", it) }
                 .getOrDefault(false)
-            if (added) protectedCount++
+            if (added) {
+                protectedCount++
+                onNewlyHeld?.invoke(vout)
+            }
         }
         return protectedCount
     }
@@ -994,11 +1212,36 @@ class AssetManager(
      * predecessor collapsed both into "return null", which threw away proven ground every time
      * a request happened to fail.
      */
-    private suspend fun classifyProvenanceHop(txid: String): AssetProvenanceWalker.Hop {
-        val rawTx = fetchRawTransactionBytes(txid)
+    private suspend fun classifyProvenanceHop(txid: String): AssetProvenanceWalker.Hop =
+        classifyProvenanceHopFrom(
+            txid,
+            fetch = ::fetchRawTransactionBytes,
+            opReturnOf = { NativeBridge.getOpReturnData(it) },
+            deriveIssuanceAssetId = { prevTxidHex, prevVout, aggregation, divisibility ->
+                NativeBridge.deriveIssuanceAssetId(
+                    firstInputTxidHex = prevTxidHex,
+                    firstInputVout = prevVout,
+                    locked = true,
+                    aggregation = aggregation,
+                    divisibility = divisibility,
+                )
+            },
+        )
+
+    /** [classifyProvenanceHop] with its three native reads passed in, so the hop runs on the
+     *  JVM exactly as it does on a device. [fetch] is where the parent's bytes come from; in
+     *  production that is [fetchRawTransactionBytes], whose remote half accepts a transaction
+     *  only when its bytes hash to the id it was asked for. */
+    internal suspend fun classifyProvenanceHopFrom(
+        txid: String,
+        fetch: suspend (String) -> ByteArray?,
+        opReturnOf: (ByteArray) -> ByteArray?,
+        deriveIssuanceAssetId: (prevTxidHex: String, prevVout: Int, aggregation: Int, divisibility: Int) -> String?,
+    ): AssetProvenanceWalker.Hop {
+        val rawTx = fetch(txid)
             ?: return AssetProvenanceWalker.Hop.Unavailable
 
-        val opReturn = NativeBridge.getOpReturnData(rawTx)
+        val opReturn = opReturnOf(rawTx)
             ?: return AssetProvenanceWalker.Hop.DeadEnd
         val header = decoder.decode(opReturn)
             ?: return AssetProvenanceWalker.Hop.DeadEnd
@@ -1018,12 +1261,11 @@ class AssetManager(
                     Aggregation.DISPERSED -> 2
                 }
                 val derived = runCatching {
-                    NativeBridge.deriveIssuanceAssetId(
-                        firstInputTxidHex = firstInput.prevTxidHex,
-                        firstInputVout = firstInput.prevVout,
-                        locked = true,
-                        aggregation = aggregationCode,
-                        divisibility = header.divisibility,
+                    deriveIssuanceAssetId(
+                        firstInput.prevTxidHex,
+                        firstInput.prevVout,
+                        aggregationCode,
+                        header.divisibility,
                     )
                 }.getOrNull() ?: return AssetProvenanceWalker.Hop.DeadEnd
 
@@ -1047,9 +1289,22 @@ class AssetManager(
         }
     }
 
-    private suspend fun fetchRawTransactionBytes(txHashHex: String): ByteArray? {
-        NativeBridge.getSerializedTransactionForHash(txHashHex)?.let { return it }
-        val client = assetNetworkClient ?: return null
+    private suspend fun fetchRawTransactionBytes(txHashHex: String): ByteArray? =
+        fetchRawTransactionBytesFrom(
+            txHashHex,
+            walletCopy = { NativeBridge.getSerializedTransactionForHash(it) },
+            client = assetNetworkClient,
+        )
+
+    /** A parent transaction's bytes: the wallet's own copy when it holds one (the native wallet
+     *  keys its transactions by the id it computed itself), otherwise [client]'s answer. */
+    internal suspend fun fetchRawTransactionBytesFrom(
+        txHashHex: String,
+        walletCopy: (String) -> ByteArray?,
+        client: io.digibyte.core.asset.network.AssetNetworkClient?,
+    ): ByteArray? {
+        walletCopy(txHashHex)?.let { return it }
+        client ?: return null
         return runCatching { client.getRawTransaction(txHashHex) }.getOrNull()
     }
 
@@ -1232,6 +1487,9 @@ class AssetManager(
         var read = 0
         var owned: Set<String>? = null              // built once, and only if an asset transaction is met
         val assetTxsThisPass = HashSet<String>()
+        // What each asset transaction's inputs carried, as answered during this pass, so that a
+        // later transaction asking about an earlier one's remainder does not resolve it again.
+        val inputUnitsThisPass = HashMap<String, Long?>()
         var listings = 0
         // Listed again after every round: the pass ends on a listing that shows nothing it has not
         // looked at, so what it returns is true of the wallet as it stands then.
@@ -1276,11 +1534,19 @@ class AssetManager(
                     val prevVout = p?.getOrNull(1)?.toIntOrNull()
                     if (p == null || p[0].length != 64 || prevVout == null || prevVout < 0) null else p[0] to prevVout
                 }
+                val isAssetTx: suspend (String) -> Boolean? =
+                    { txid -> if (txid in plainTxs) false else hasAssetPayload(outputsOf(txid)) }
+                val zeroRowInputs = ZeroRowInputs()
                 val inputUnits = if (inputs.any { it == null }) null else resolveInputAssetUnits(
                     inputs = inputs.filterNotNull(),
                     rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
-                    isAssetTx = { txid -> if (txid in plainTxs) false else hasAssetPayload(outputsOf(txid)) },
+                    isAssetTx = isAssetTx,
+                    rowIsTargeted = { txid, vout ->
+                        inputRowIsTargeted(txid, vout, outputsOf, inputsOf, inputUnitsThisPass, isAssetTx)
+                    },
+                    unresolved = zeroRowInputs,
                 )
+                inputUnitsThisPass[txHash] = inputUnits
 
                 // The same ownership rule detection applies: with an owned set, only what is ours;
                 // with none (the lookup failed), every output, which registers some that are inert.
@@ -1291,7 +1557,10 @@ class AssetManager(
                     if (ownedNow.isNotEmpty() && out.scriptHex !in ownedNow) continue
                     if (!AssetTxQuantity.targetsOutput(header, out.vout, firstNonOpReturn, inputUnits, outputLines.size)) continue
                     // Not wrapped: a registration that did not happen is a pass that did not finish.
-                    if (registerAssetOutpoint(txHash, out.vout)) heldOut++
+                    if (registerAssetOutpoint(txHash, out.vout)) {
+                        heldOut++
+                        logIfHeldForZeroRows(txHash, out.vout, header, firstNonOpReturn, outputLines.size, zeroRowInputs)
+                    }
                 }
             }
         }
@@ -1512,6 +1781,110 @@ class AssetManager(
     }
 
     /**
+     * Does the transaction that created an input outpoint direct asset units to it? This is what
+     * [resolveInputAssetUnits] asks about a row whose stored quantity is zero, answered by
+     * [outputIsTargeted] from the transaction as the wallet holds it. Null is "no answer".
+     * [settled] is a caller's record of input totals already resolved in the same pass.
+     */
+    private suspend fun inputRowIsTargeted(
+        txid: String,
+        vout: Int,
+        outputsOf: (String) -> Array<out String?>?,
+        inputsOf: (String) -> Array<out String?>?,
+        settled: MutableMap<String, Long?>? = null,
+        isAssetTx: suspend (String) -> Boolean?,
+    ): Boolean? = outputIsTargeted(
+        txid = txid,
+        vout = vout,
+        shapeOf = { funding -> assetTxShape(outputsOf(funding)) { inputsOf(funding) } },
+        rowQuantity = { t, v -> utxoDao.getAssetUtxoAt(t, v)?.assetQuantity },
+        isAssetTx = isAssetTx,
+        settled = settled,
+    )
+
+    /** [AssetTxShape] from bridge lines. Null — no answer — for a transaction that is not held,
+     *  carries no payload that decodes, or has an output line that cannot be read; an input line
+     *  that cannot be read leaves [AssetTxShape.inputs] null. */
+    private fun assetTxShape(
+        outputLines: Array<out String?>?,
+        inputLines: () -> Array<out String?>?,
+    ): AssetTxShape? {
+        if (outputLines == null || outputLines.isEmpty()) return null
+        var payload: ByteArray? = null
+        var firstNonOpReturn: Int? = null
+        for (line in outputLines) {
+            val p = line?.split("|", limit = 3) ?: return null
+            val v = p.getOrNull(0)?.toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val script = p.getOrNull(2)?.hexToByteArray() ?: return null
+            if (script.isNotEmpty() && script[0] == 0x6A.toByte()) {
+                if (payload == null) payload = script
+            } else if (firstNonOpReturn == null) {
+                firstNonOpReturn = v
+            }
+        }
+        val header = payload?.let { decoder.decode(it) } ?: return null
+        return AssetTxShape(
+            header = header,
+            firstNonOpReturnVout = firstNonOpReturn,
+            outputCount = outputLines.size,
+            inputs = {
+                inputLines()?.map { line ->
+                    val p = line?.split("|", limit = 2)
+                    val prevVout = p?.getOrNull(1)?.toIntOrNull()
+                    if (p == null || p[0].length != 64 || prevVout == null || prevVout < 0) null else p[0] to prevVout
+                }?.takeIf { lines -> lines.none { it == null } }?.filterNotNull()
+            },
+        )
+    }
+
+    /** A bridge read of a transaction the wallet may not hold: anything but a clean reply is
+     *  "no lines", which every reader above treats as no answer. */
+    private inline fun heldLines(read: () -> Array<out String?>?): Array<out String?>? =
+        try { read() } catch (t: Throwable) { null }   // Throwable: a missing native library is an Error
+
+    private fun heldOutputLines(txid: String): Array<out String?>? =
+        heldLines { NativeBridge.getTransactionOutputsForHash(txid) }
+
+    private fun heldInputLines(txid: String): Array<out String?>? =
+        heldLines { NativeBridge.getTransactionInputsForHash(txid) }
+
+    /** True when [vout] is held out for one reason only: [cause] lists input rows whose stored
+     *  quantity is zero and cannot be read as "no units". With those rows counted as nothing,
+     *  the targeting rule would not have named the output. */
+    private fun heldOnlyForZeroRows(
+        header: DecodedAssetHeader,
+        vout: Int,
+        firstNonOpReturnVout: Int?,
+        outputCount: Int,
+        cause: ZeroRowInputs,
+    ): Boolean = cause.rows.isNotEmpty() &&
+        !AssetTxQuantity.targetsOutput(header, vout, firstNonOpReturnVout, cause.otherUnits, outputCount)
+
+    private fun logIfHeldForZeroRows(
+        txid: String,
+        vout: Int,
+        header: DecodedAssetHeader,
+        firstNonOpReturnVout: Int?,
+        outputCount: Int,
+        cause: ZeroRowInputs,
+    ) {
+        if (heldOnlyForZeroRows(header, vout, firstNonOpReturnVout, outputCount, cause)) {
+            logHeldForZeroRows(txid, vout, cause.rows)
+        }
+    }
+
+    /** The per-row record of an output newly held out because of [rows]: one line per output,
+     *  naming the rows. Wrapped, so that writing the line can never undo the hold. */
+    private fun logHeldForZeroRows(txid: String, vout: Int, rows: List<Pair<String, Int>>) {
+        if (rows.isEmpty()) return
+        runCatching {
+            android.util.Log.i("AssetManager",
+                "held ${txid.take(12)}:$vout (last output): what its inputs carried is not known — " +
+                    rows.joinToString(", ") { "input row ${it.first.take(12)}:${it.second} qty=0, not shown to be plain change" })
+        }
+    }
+
+    /**
      * Does this transaction carry a DigiAsset payload? Null when we cannot tell — the tx
      * isn't retrievable — which [resolveInputAssetUnits] treats as unknown rather than as
      * "no units".
@@ -1553,8 +1926,16 @@ class AssetManager(
      */
     suspend fun replayAssetOutpointExclusions(): Int {
         var registered = 0
+        // One record for the whole replay: a transaction's input total is resolved once, however
+        // many rows rest on it, so the replay costs one pass over the wallet's own history rather
+        // than one per row. Sound here because the replay writes no row — every row every answer
+        // rests on is the row this replay started from.
+        val settledInputUnits = HashMap<String, Long?>()
         for (row in utxoDao.getAllAssetUtxosNow()) {
             if (row.spent) continue
+            // Filled by the production resolver when stored-zero input rows are the whole reason
+            // the row is held out; the line below is written from it.
+            val zeroRowInputs = ArrayList<Pair<String, Int>>()
             val protect = if (row.assetQuantity > 0L) {
                 // A resolved carrier: hold it out, as before.
                 true
@@ -1569,7 +1950,9 @@ class AssetManager(
                 // is asked per row: one row without an answer is held out and the replay goes on
                 // to the next, so it never ends before the last row.
                 val targeted = try {
-                    (resolveRowTargets ?: ::defaultResolveRowTargets)(row.txid, row.vout)
+                    val injected = resolveRowTargets
+                    if (injected != null) injected(row.txid, row.vout)
+                    else defaultResolveRowTargets(row.txid, row.vout, zeroRowInputs, settledInputUnits)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -1581,7 +1964,10 @@ class AssetManager(
             if (!protect) continue
             val added = runCatching { registerAssetOutpoint(row.txid, row.vout) }
                 .getOrDefault(false)
-            if (added) registered++
+            if (added) {
+                registered++
+                logHeldForZeroRows(row.txid, row.vout, zeroRowInputs)
+            }
         }
         if (registered > 0) {
             android.util.Log.i("AssetManager",
@@ -1599,24 +1985,53 @@ class AssetManager(
      * ([replayAnswerForAbsentTransaction] says why). Never reached when a test injects
      * [resolveRowTargets], so the replay stays testable without the native library.
      */
-    private suspend fun defaultResolveRowTargets(txHashHex: String, vout: Int): Boolean? {
+    private suspend fun defaultResolveRowTargets(
+        txHashHex: String,
+        vout: Int,
+        heldForZeroRows: MutableList<Pair<String, Int>>? = null,
+        settled: MutableMap<String, Long?>? = null,
+    ): Boolean? = resolveRowTargetsImpl(
+        txHashHex = txHashHex,
+        vout = vout,
+        outputsOf = { NativeBridge.getTransactionOutputsForHash(it) },
+        inputsOf = { NativeBridge.getTransactionInputsForHash(it) },
+        walletLoaded = { NativeBridge.isWalletLoaded() },
+        heldForZeroRows = heldForZeroRows,
+        settled = settled,
+    )
+
+    /**
+     * Testable core of [defaultResolveRowTargets], shaped like the other seams in this file: the
+     * bridge reads are lambdas. [heldForZeroRows] receives the input rows when stored-zero rows
+     * are the whole reason the answer is "targeted". [settled] is the caller's record of input
+     * totals already resolved — one per replay, so each transaction is totalled once.
+     */
+    internal suspend fun resolveRowTargetsImpl(
+        txHashHex: String,
+        vout: Int,
+        outputsOf: (String) -> Array<out String?>?,
+        inputsOf: (String) -> Array<out String?>?,
+        walletLoaded: () -> Boolean,
+        heldForZeroRows: MutableList<Pair<String, Int>>? = null,
+        settled: MutableMap<String, Long?>? = null,
+    ): Boolean? {
         var bridgeAnsweredCleanly = true
         val outputLines = try {
-            NativeBridge.getTransactionOutputsForHash(txHashHex)
+            outputsOf(txHashHex)
         } catch (t: Throwable) {   // Throwable: a missing native library is an Error, not an Exception
             bridgeAnsweredCleanly = false
             null
         }
         if (outputLines == null) {
             return replayAnswerForAbsentTransaction(
-                walletLoaded = bridgeAnsweredCleanly && runCatching { NativeBridge.isWalletLoaded() }.getOrDefault(false),
+                walletLoaded = bridgeAnsweredCleanly && runCatching { walletLoaded() }.getOrDefault(false),
                 txidWellFormed = txHashHex.length == 64 && txHashHex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' },
                 bridgeAnsweredCleanly = bridgeAnsweredCleanly,
             )
         }
         if (outputLines.isEmpty()) return null
         val scripts = outputLines.mapNotNull { line ->
-            val p = line.split("|", limit = 3)
+            val p = line?.split("|", limit = 3) ?: return@mapNotNull null
             val v = p.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
             val s = p.getOrNull(2)?.hexToByteArray() ?: return@mapNotNull null
             v to s
@@ -1627,21 +2042,37 @@ class AssetManager(
         val firstNonOpReturn = scripts.firstOrNull { it.second.isEmpty() || it.second[0] != 0x6A.toByte() }?.first
         // try/catch rather than runCatching: this is a suspend call, and a cancellation raised
         // inside it has to reach the replay loop, which rethrows it.
+        val isAssetTx: suspend (String) -> Boolean? =
+            { txid -> hasAssetPayload(runCatching { outputsOf(txid) }.getOrNull()) }
+        val zeroRowInputs = ZeroRowInputs()
         val inputUnits = try {
             resolveInputAssetUnits(
-                inputs = (NativeBridge.getTransactionInputsForHash(txHashHex) ?: emptyArray())
+                inputs = (inputsOf(txHashHex) ?: emptyArray())
                     .mapNotNull { line ->
-                        val p = line.split("|", limit = 2)
+                        val p = line?.split("|", limit = 2) ?: return@mapNotNull null
                         val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
                         if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
                     },
                 rowQuantity = { txid, v -> utxoDao.getAssetUtxoAt(txid, v)?.assetQuantity },
-                isAssetTx = { txid -> txHasAssetPayload(txid) },
+                isAssetTx = isAssetTx,
+                rowIsTargeted = { txid, v ->
+                    inputRowIsTargeted(
+                        txid, v,
+                        outputsOf = { funding -> heldLines { outputsOf(funding) } },
+                        inputsOf = { funding -> heldLines { inputsOf(funding) } },
+                        settled = settled,
+                        isAssetTx = isAssetTx,
+                    )
+                },
+                unresolved = zeroRowInputs,
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             null
+        }
+        if (heldOnlyForZeroRows(header, vout, firstNonOpReturn, outputLines.size, zeroRowInputs)) {
+            heldForZeroRows?.addAll(zeroRowInputs.rows)
         }
         return AssetTxQuantity.targetsOutput(header, vout, firstNonOpReturn, inputUnits, outputLines.size)
     }
@@ -1818,159 +2249,58 @@ class AssetManager(
         val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
         if (assetUtxos.isEmpty()) return TxResult.Error("No UTXOs for asset $assetId")
 
-        // 2. Budget for two markers (recipient + possible asset-change). If
-        //    selection turns out exact-match, the extra 700 sats falls into
-        //    DGB change naturally — slight pessimism, simpler code.
-        val markerSats = io.digibyte.core.asset.send.DA_MARKER_SATS
-        val twoMarkerSats = markerSats * 2
-
-        // 2a. First (bootstrap) selection with a conservative typical-shape
-        //     fee. The asset-input set and the OP_RETURN are FEE-INDEPENDENT
-        //     (they depend only on the transfer quantity), so this select
-        //     reveals the stable parts of the shape; only the DGB fee inputs
-        //     and DGB change vary with the fee. The bootstrap's DGB-input count
-        //     merely seeds the convergence loop below (step 4a) — it is NOT
-        //     assumed to be within one input of the final count.
-        val bootstrapFeeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
-            assetInputCount = 1,
-            dgbInputCount = 1,
-            outputCount = 3,
-            opReturnBytes = 80,
-            feePerKb = feePerKb,
-        )
-        val bootstrap = io.digibyte.core.asset.send.AssetCoinSelector.select(
-            assetUtxos = assetUtxos,
-            dgbUtxos = dgbUtxos,
-            assetNeeded = quantity,
-            feeSats = bootstrapFeeSats,
-            markerOutputSats = twoMarkerSats,
-        )
-        val ok0 = when (bootstrap) {
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
-                return TxResult.Error("Not enough asset: need ${bootstrap.required}, have ${bootstrap.available}")
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
-                return TxResult.Error("Not enough DGB for fee: need ${bootstrap.required}, have ${bootstrap.available}")
-            is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> bootstrap
-        }
-
-        val hasAssetChange = ok0.assetChangeQty > 0L
-
-        // 3. Output layout. Recipient marker at vout 0, OP_RETURN at vout 1,
-        //    optional asset-change marker at vout 2, optional DGB change at
-        //    the next free vout. Transfer instructions reference these vouts
-        //    directly so we have to commit to the layout before encoding.
-        val recipientVout = 0
-        val assetChangeVout = if (hasAssetChange) 2 else -1
-
-        // 4. Build transfer instructions: walk asset inputs in order,
-        //    distributing each input's units into the recipient first then
-        //    the change marker. `skip=true` on the LAST instruction pulling
-        //    from a non-final input advances the decoder to the next input.
-        //    Built from the bootstrap selection's asset side — identical
-        //    across both selects since asset selection is fee-independent.
-        val instructions = buildTransferInstructions(
-            assetInputs = ok0.assetInputs,
-            quantityToRecipient = quantity,
-            assetChangeQty = ok0.assetChangeQty,
-            recipientVout = recipientVout,
-            assetChangeVout = assetChangeVout,
-        ) ?: return TxResult.Error("Could not build transfer instructions")
-
-        val opReturnScript = try {
-            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
-        } catch (e: Exception) {
-            return TxResult.Error("Encode failed: ${e.message}")
-        }
-
-        // 4a. Now that we know the real OP_RETURN length and the concrete
-        //     output count (recipient + optional asset-change + a DGB-change
-        //     output we conservatively assume is present), compute the actual
-        //     size-aware fee and RE-select with it. Value-output count for the
-        //     estimate: recipient(1) + asset-change(0/1) + dgb-change(1).
-        //
-        //     CONVERGENCE LOOP (not a single pass): the size-aware fee is a
-        //     function of the DGB-input count, and the DGB-input count is a
-        //     function of the fee — a wallet whose DGB side is fragmented into
-        //     many small UTXOs can pull far more inputs when the fee jumps from
-        //     the bootstrap estimate to the real one than the estimator's fixed
-        //     +1-input margin covers. If we only re-selected once, the built tx
-        //     would pay below the 100 sat/byte min relay for its (larger) actual
-        //     vsize and never relay. So iterate select→estimate→select, feeding
-        //     the actual DGB-input count back into the next fee estimate, until
-        //     the count stops growing. DGB-input count is monotonically
-        //     non-decreasing in the fee and bounded by dgbUtxos.size, so the
-        //     loop is guaranteed to reach a fixed point; the cap is a safety net.
-        val estimateOutputCount = 1 + (if (hasAssetChange) 1 else 0) + 1
-        // dgbUtxos.size distinct growth steps at most, +2 slack. Never below 2.
-        val maxFeeIterations = dgbUtxos.size + 2
-        var estimatedForDgbInputs = ok0.dgbInputs.size
-        var feeSats = bootstrapFeeSats
-        var ok = ok0
-        for (iter in 0 until maxFeeIterations) {
-            feeSats = io.digibyte.core.asset.send.AssetFeeEstimator.estimateAssetTxFeeSats(
-                assetInputCount = ok0.assetInputs.size,
-                dgbInputCount = estimatedForDgbInputs,
-                outputCount = estimateOutputCount,
-                opReturnBytes = opReturnScript.size,
-                feePerKb = feePerKb,
-            )
-            val selection = io.digibyte.core.asset.send.AssetCoinSelector.select(
+        // 2-5. Selection, transfer instructions, the size-aware fee and the output values: the
+        //      pure half of the send, in AssetTransferPlanner so the numbers signed below are
+        //      testable on the JVM.
+        val plan = when (
+            val planned = io.digibyte.core.asset.send.AssetTransferPlanner.plan(
                 assetUtxos = assetUtxos,
                 dgbUtxos = dgbUtxos,
-                assetNeeded = quantity,
-                feeSats = feeSats,
-                markerOutputSats = twoMarkerSats,
+                quantity = quantity,
+                feePerKb = feePerKb,
             )
-            ok = when (selection) {
-                is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientAsset ->
-                    return TxResult.Error("Not enough asset: need ${selection.required}, have ${selection.available}")
-                is io.digibyte.core.asset.send.AssetCoinSelector.Result.InsufficientDgb ->
-                    return TxResult.Error("Not enough DGB for fee: need ${selection.required}, have ${selection.available}")
-                is io.digibyte.core.asset.send.AssetCoinSelector.Result.Ok -> selection
-            }
-            // Converged: the fee we just charged was estimated for at least as
-            // many DGB inputs as the selection actually pulled (the estimator's
-            // internal +1 margin then still leaves a cushion), so the built tx
-            // pays >= min relay for its real vsize.
-            if (ok.dgbInputs.size <= estimatedForDgbInputs) break
-            estimatedForDgbInputs = ok.dgbInputs.size
+        ) {
+            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Refused -> return TxResult.Error(planned.message)
+            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Ready -> planned.plan
         }
-
-        // 5. Build the output list — order locked to match the vout
-        //    references baked into the transfer instructions above. The
-        //    asset side of `ok` is identical to `ok0` (fee-independent);
-        //    only the DGB inputs / change reflect the real fee.
-        val allInputs = ok.assetInputs + ok.dgbInputs
+        val allInputs = plan.inputs
+        if (!io.digibyte.core.asset.send.AssetCoinSelector.outpointsDistinct(allInputs)) {
+            return TxResult.Error("An input is listed more than once")
+        }
         val outAddresses = mutableListOf<String>()
         val outAmounts = mutableListOf<Long>()
         val outScripts = mutableListOf<String>()
 
-        outAddresses += toAddress
-        outAmounts += markerSats
-        outScripts += ""
-
-        outAddresses += ""   // empty address = use raw script below (OP_RETURN)
-        outAmounts += 0L
-        outScripts += opReturnScript.toHex()
-
-        if (hasAssetChange) {
-            // Use change index 1 to keep this distinct from the DGB change
-            // address — small privacy win + makes the wallet's own asset
-            // marker easier to identify in tx history.
-            val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
-                ?: return TxResult.Error("Could not derive asset-change address")
-            outAddresses += assetChangeAddr
-            outAmounts += markerSats
-            outScripts += ""
-        }
-
-        val dgbChange = ok.dgbChangeSats
-        if (dgbChange > DGB_CHANGE_DUST_THRESHOLD) {
-            val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
-                ?: return TxResult.Error("Could not derive change address")
-            outAddresses += changeAddr
-            outAmounts += dgbChange
-            outScripts += ""
+        for (out in plan.outputs) {
+            when (out.role) {
+                io.digibyte.core.asset.send.PlannedOutput.Role.RECIPIENT_MARKER -> {
+                    outAddresses += toAddress
+                    outAmounts += out.sats
+                    outScripts += ""
+                }
+                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_DATA -> {
+                    outAddresses += ""   // empty address = use raw script below (OP_RETURN)
+                    outAmounts += out.sats
+                    outScripts += plan.opReturnScript.toHex()
+                }
+                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_CHANGE_MARKER -> {
+                    // Use change index 1 to keep this distinct from the DGB change
+                    // address — small privacy win + makes the wallet's own asset
+                    // marker easier to identify in tx history.
+                    val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
+                        ?: return TxResult.Error("Could not derive asset-change address")
+                    outAddresses += assetChangeAddr
+                    outAmounts += out.sats
+                    outScripts += ""
+                }
+                io.digibyte.core.asset.send.PlannedOutput.Role.DGB_CHANGE -> {
+                    val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
+                        ?: return TxResult.Error("Could not derive change address")
+                    outAddresses += changeAddr
+                    outAmounts += out.sats
+                    outScripts += ""
+                }
+            }
         }
 
         // 6. Native build + sign + broadcast.
@@ -2000,80 +2330,17 @@ class AssetManager(
         // uses so SyncService.rebroadcastStrandedSends() re-publishes this asset
         // transfer if a force-stop within ~1s of broadcast strands the stem.
         // Best-effort — never affects on-chain state. sentSats is the recipient
-        // DGB marker (the asset quantity isn't a DGB amount); feeSats is exact.
+        // DGB marker (the asset quantity isn't a DGB amount); feeSats is what the
+        // signed transaction pays: its inputs minus its outputs.
         outgoingTxStore?.record(
             txid = txid,
-            sentSats = markerSats,
-            feeSats = feeSats,
+            sentSats = io.digibyte.core.asset.send.DA_MARKER_SATS,
+            feeSats = plan.paidFeeSats,
             toAddress = toAddress,
         )
         walletTxPersister?.persist()
 
         return TxResult.Success(txid)
-    }
-
-    /**
-     * Build the DA TRANSFER instruction list for a single-recipient send
-     * with optional asset change.
-     *
-     * Walks the chosen asset inputs in order. Each input contributes its
-     * full quantity, distributed first toward the recipient (until [quantity
-     * ToRecipient] is exhausted), then toward the asset-change marker. The
-     * last instruction pulling from a non-final input is marked `skip=true`
-     * so the decoder advances to the next input.
-     *
-     * Returns null only if the input set's combined quantity doesn't match
-     * `quantityToRecipient + assetChangeQty` — programmer error, never user
-     * error (the coin selector enforces sums).
-     */
-    private fun buildTransferInstructions(
-        assetInputs: List<UtxoEntity>,
-        quantityToRecipient: Long,
-        assetChangeQty: Long,
-        recipientVout: Int,
-        assetChangeVout: Int,
-    ): List<DigiAssetEncoder.TransferInstruction>? {
-        val totalIn = assetInputs.sumOf { it.assetQuantity }
-        if (totalIn != quantityToRecipient + assetChangeQty) return null
-
-        val out = mutableListOf<DigiAssetEncoder.TransferInstruction>()
-        var qtyRemaining = quantityToRecipient
-        var changeRemaining = assetChangeQty
-
-        for ((idx, input) in assetInputs.withIndex()) {
-            val isLastInput = idx == assetInputs.lastIndex
-            var inputRemaining = input.assetQuantity
-
-            // Allocate toward recipient first.
-            if (inputRemaining > 0 && qtyRemaining > 0) {
-                val take = minOf(inputRemaining, qtyRemaining)
-                out += DigiAssetEncoder.TransferInstruction(
-                    skip = false, range = false, percent = false,
-                    outputIndex = recipientVout, amount = take,
-                )
-                qtyRemaining -= take
-                inputRemaining -= take
-            }
-
-            // Then toward asset change.
-            if (inputRemaining > 0 && changeRemaining > 0 && assetChangeVout >= 0) {
-                val take = minOf(inputRemaining, changeRemaining)
-                out += DigiAssetEncoder.TransferInstruction(
-                    skip = false, range = false, percent = false,
-                    outputIndex = assetChangeVout, amount = take,
-                )
-                changeRemaining -= take
-                inputRemaining -= take
-            }
-
-            // Mark the last instruction pulling from this input with skip=true
-            // (except on the final input — skip is a no-op there).
-            if (!isLastInput && out.isNotEmpty()) {
-                val last = out.removeAt(out.lastIndex)
-                out += last.copy(skip = true)
-            }
-        }
-        return out
     }
 
     private fun ByteArray.toHex(): String =
@@ -2408,16 +2675,6 @@ class AssetManager(
     }
 
     private companion object {
-        /** DGB change below this floor is folded into the fee rather than
-         *  emitted as its own output. MUST be >= the network dust threshold
-         *  for the change address type, or the node rejects the whole tx
-         *  with reject-reason "dust". DigiByte 9.26 raised dust to 30,000
-         *  sat/kB → legacy P2PKH floor = 5,460 sats (measured on a 9.26.4
-         *  node). We use the legacy worst case so a change output is never
-         *  dust regardless of the change address's script type. The old
-         *  1,000 value produced dust change outputs that stalled sends. */
-        const val DGB_CHANGE_DUST_THRESHOLD = 5_460L
-
         /** Consecutive prune passes native must positively lack a NATIVE
          *  row's tx before it's deleted (see [pruneRemovedNativeAssetRowsImpl]). */
         const val ABSENCE_DEBOUNCE_THRESHOLD = 2

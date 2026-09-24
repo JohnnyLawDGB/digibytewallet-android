@@ -263,6 +263,11 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
 
     if (g_wallet) {
         LOGW("createWalletFromBytes: wallet already exists, freeing old one");
+        /* Marked before the swap begins, not after it ends: from the first moment this
+         * g_wallet stops being the one the peer manager was built with, the marker says
+         * so. Anything that reads the pair between here and the next startSync then takes
+         * the path that names only g_wallet. Set again below, which is harmless. */
+        g_peerManagerNeedsRecreate = 1;
         BRWalletFree(g_wallet);
         g_wallet = NULL;
     }
@@ -359,6 +364,8 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
     BRMasterPubKey mpkBIP86  = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
 
     if (g_wallet) {
+        /* Marked before the swap begins — see createWalletFromBytes. */
+        g_peerManagerNeedsRecreate = 1;
         BRWalletFree(g_wallet);
         g_wallet = NULL;
     }

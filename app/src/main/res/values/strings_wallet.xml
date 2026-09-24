@@ -544,6 +544,10 @@
     <string name="sec_confirm_pin">Confirm PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Enter your PIN to wipe the wallet</string>
     <string name="sec_incorrect_pin">Incorrect PIN</string>
+    <!-- PIN keypads: the PIN could not be checked on this device (the hashing library did not
+         run). No attempt was counted, no countdown started. Machine-assisted in the other
+         languages; needs a native speaker. -->
+    <string name="pin_check_unavailable">The PIN could not be checked on this device right now. Nothing was counted. Please try again.</string>
     <string name="auth_node_pair_title">Confirm Node Pairing</string>
     <string name="auth_node_pair_subtitle">Authenticate to pair this node</string>
     <string name="sec_enable">Enable</string>
@@ -716,4 +720,8 @@
     <string name="as_refused_rules_unknown">Blocked: this asset\'s transfer rules could not be verified. Nothing was sent.</string>
     <string name="rf_move_refused_rule_bound">%1$s stayed where it is: this asset has transfer rules this wallet cannot satisfy yet</string>
     <string name="rf_move_refused_unknown">%1$s stayed where it is: its transfer rules could not be verified</string>
+    <!-- Wallet wipe: the ONE message shown when a wipe could not be verified. The PIN stays in
+         place when this is shown. Wipe wording, like the seed-phrase warnings, needs a native
+         speaker in every language before it can be called done. -->
+    <string name="wipe_incomplete">The wallet wipe did not complete. Some wallet data may still be on this device. Restart the app and try again.</string>
 </resources>

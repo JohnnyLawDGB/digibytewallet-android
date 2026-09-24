@@ -76,7 +76,15 @@ class WalletManager(
     // phantom asset-row cleanup); every other WalletManager method is
     // unaffected if it's null.
     private val assetManager: AssetManager? = null,
+    // The app-side half of a wipe (Hub login held in memory, DigiStamp web session) — core
+    // cannot see those, so the app module supplies it (AppModule). Defaulted so pure-JVM
+    // constructions keep compiling; the default has nothing to end and says so truthfully.
+    private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
 ) {
+    // Sessions running for the wallet in this process (the sync service), stopped by every wipe
+    // before it erases anything. See [WalletSessionStop].
+    private val runningSessions = java.util.concurrent.CopyOnWriteArraySet<WalletSessionStop>()
+
     private val _walletState = MutableStateFlow<WalletState>(WalletState.NoWallet)
     val walletState: StateFlow<WalletState> = _walletState.asStateFlow()
 
@@ -106,6 +114,27 @@ class WalletManager(
 
     /** Check if an encrypted seed exists on disk. */
     fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed") || prefs.contains("encrypted_seed_v2")
+
+    /**
+     * Whether PIN setup creates the wallet from the words onboarding holds.
+     *
+     * Decided by the wallet STORED on this device, never by what is loaded in memory: a wallet a
+     * wipe removed may still be the one this process last loaded, and the words the user has just
+     * written down must then become the wallet. A stored wallet is never created a second time —
+     * the restore path stores it before PIN setup, and a recomposition finds the one PIN setup
+     * has just made.
+     */
+    fun pinSetupCreatesWallet(): Boolean = !hasSavedWallet()
+
+    /** Register a session running for the wallet in this process; every wipe stops it first. */
+    fun addSessionStop(stop: WalletSessionStop) {
+        runningSessions += stop
+    }
+
+    /** The session has ended: later wipes leave it alone. */
+    fun removeSessionStop(stop: WalletSessionStop) {
+        runningSessions -= stop
+    }
 
     /**
      * Create a new wallet from a mnemonic phrase.
@@ -647,27 +676,179 @@ class WalletManager(
      * Complete wallet wipe — destroys the seed AND all privacy-sensitive derived
      * data (tx history, address set, recorded sends, filter-header chain, Room DB),
      * so a security wipe (manual Settings OR the PIN wipe-after-N backstop) doesn't
-     * leave transaction history behind. Both paths call this single routine.
+     * leave transaction history behind. Both paths call this single routine, and one
+     * run covers BOTH networks' stores and the identity sessions ([IdentitySessionWipe]).
      *
-     * Order is crash-safe: the seed ciphertext is cleared FIRST, so a process death
-     * mid-wipe leaves hasSavedWallet()=false (no half-loadable wallet).
+     * Order holds across a process death: the seed ciphertext is cleared FIRST, and its key once
+     * that removal is CONFIRMED — so a wipe cut short leaves hasSavedWallet()=false (no
+     * half-loadable wallet) and nothing that could decrypt a record that did survive, while a
+     * record that is still on the device keeps the key that opens it and stays the wallet its
+     * PIN opened before this run. A wipe that could not finish is always one that can be run
+     * again, from a device its owner can still open.
+     *
+     * Nothing of the wiped wallet keeps running once the erase begins: every session running for
+     * it in this process ([WalletSessionStop] — the sync service) is stopped first, then the
+     * native session is quiesced (sync stopped, seed zeroed), so nothing writes the wiped stores
+     * back after they are erased. The native wallet itself stays loaded — bridge readers rely on it
+     * not being taken away under them — and once the seed is gone the app ends this process and
+     * starts a fresh one instead, so the next wallet created or restored is made in a process that
+     * never loaded the wiped one.
+     *
+     * Every step is attempted whatever happened to the ones before it — a native session
+     * that cannot be stopped, or a store that refuses its write, never keeps the seed on the
+     * device. What the run established comes back as a [WipeReport]; entry points do not call
+     * this directly but go through [wipeThenReleasePin], which decides about the PIN from it.
      */
-    suspend fun wipeWallet() {
+    suspend fun wipeWallet(): WipeReport {
+        fun attempt(what: String, block: () -> Boolean): Boolean = try {
+            block()
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wipe: $what did not complete (${t.javaClass.simpleName})")
+            false
+        }
+
+        // Stop what runs the wallet's session in this process, so nothing it holds is written
+        // after the erase below. Each one is asked, whatever the one before it did.
+        val sessionsStopped = runningSessions.toList()
+            .map { session -> attempt("running session") { session.stopForWipe(); true } }
+            .all { it }
         // Stop sync and disconnect peers before destroying wallet.
-        quiesceNative()
-        // Seed ciphertext FIRST (crash-safety invariant, see above).
-        dataEraser.eraseSeedCiphertext()
-        // Regenerable + privacy-sensitive persisted data.
-        dataEraser.eraseSyncData()
-        dataEraser.eraseBloomPeerCache()
-        dataEraser.eraseWatchedAddresses()
-        dataEraser.eraseOutgoingTx()
-        dataEraser.eraseCfSyncState()
-        dataEraser.eraseDatabase()
-        utxoManager.clearAll()
-        keyStoreManager.deleteKey()
-        _walletState.value = WalletState.NoWallet
+        val quiesced = attempt("native quiesce") { quiesceNative(); true }
+        // Seed ciphertext FIRST (the ordering invariant above). The record is what holds the
+        // seed; the key only unwraps it. So the record's removal is CONFIRMED first — the write
+        // landed (the in-memory view of a preferences file shows an edit whether or not it
+        // reached the disk, so the write result is part of the evidence) and nothing is readable
+        // any more — and only then does the key go.
+        val seedErased = attempt("wallet record") { dataEraser.eraseSeedCiphertext() }
+        val recordGone = seedErased && attempt("wallet record read-back") { !hasSavedWallet() }
+        if (recordGone) {
+            attempt("wallet key") { keyStoreManager.deleteKey(); true } // judged by the read-back below
+        }
+        // Regenerable + privacy-sensitive persisted data, both networks.
+        val storesCleared = listOf(
+            attempt("sync data") { dataEraser.eraseSyncData() },
+            attempt("peer cache") { dataEraser.eraseBloomPeerCache() },
+            attempt("watched addresses") { dataEraser.eraseWatchedAddresses() },
+            attempt("recorded sends") { dataEraser.eraseOutgoingTx() },
+            attempt("compact-filter state") { dataEraser.eraseCfSyncState() },
+            attempt("database") { dataEraser.eraseDatabase() },
+            attempt("leftover state") { dataEraser.eraseLeftoverState() },
+            attempt("hub session") { dataEraser.eraseHubSession() },
+            attempt("identity sessions") { identitySessions.eraseIdentitySessions() },
+        ).all { it }
+        // READ-BACK, not "no step threw": the record's removal is confirmed (above) and neither
+        // seed key alias exists when the Keystore is asked again.
+        val seedGone = recordGone && attempt("wallet key read-back") { dataEraser.seedKeyAbsent() }
+
+        // The state says what is on the device: no wallet only when the seed is gone. Otherwise
+        // the wallet still exists behind its PIN and its session has been stopped — Locked.
+        _walletState.value = if (seedGone) WalletState.NoWallet else WalletState.Locked
         _syncState.value = SyncState.Idle
+        val report = WipeReport(
+            seedGone = seedGone,
+            everythingCleared = sessionsStopped && quiesced && storesCleared,
+        )
+
+        // Last, and not part of the report: the database FILES are already gone (read back by
+        // the eraser); emptying the table through the still-open handle is tidiness for this
+        // process only.
+        try {
+            utxoManager.clearAll()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletManager", "wipe: utxo cache not emptied (${t.javaClass.simpleName})")
+        }
+        return report
+    }
+
+    /**
+     * The ONE sequence every wipe entry point runs (Settings, the unlock screen, the spend
+     * dialog, the launch backstop): wipe, look at what the wipe established, and only then
+     * touch the PIN store. `WipeCallSiteGateTest` keeps the entry points on it.
+     *
+     *  - The PIN store — hash, attempt counters, wipe-after-N setting — is cleared only after
+     *    a [WipeReport.verified] wipe. While a wallet may still be on the device, the PIN that
+     *    guards it stays, so the app never offers to set a new PIN over a wallet that was not
+     *    wiped.
+     *  - The owed-wipe flag is released as soon as the seed is verifiably gone, and not
+     *    before: until then the launch backstop and the unlock screen keep retrying the wipe;
+     *    from then on there is nothing left for a retry to protect, and a wallet created
+     *    afterwards must never inherit a wipe that was owed to its predecessor.
+     *
+     * Runs to its end once started (NonCancellable): a wipe flips the wallet state, which pops
+     * the screen — and the scope — that started it. The caller picks the thread.
+     *
+     * @return what the wipe established. Only a [WipeReport.verified] report means the wallet was
+     *   wiped. [WipeReport.seedGone] is the read-back of the seed alone — its record and its key —
+     *   and the app acts on it too: once the seed is gone it ends the process that held the wallet,
+     *   whether or not every other store confirmed. A wipe that did not run to its end reports
+     *   nothing gone.
+     */
+    suspend fun wipeThenReleasePin(pinManager: io.digibyte.core.security.PinManager): WipeReport =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            val report = try {
+                wipeWallet()
+            } catch (t: Throwable) {
+                android.util.Log.e("WalletManager", "wipe did not run to its end (${t.javaClass.simpleName})")
+                WipeReport(seedGone = false, everythingCleared = false)
+            }
+            if (report.seedGone) {
+                runCatching { pinManager.clearWipePending() }.onFailure {
+                    android.util.Log.e("WalletManager", "owed-wipe flag not released (${it.javaClass.simpleName})")
+                }
+            }
+            if (report.verified) {
+                runCatching { pinManager.clearPin() }.onFailure {
+                    android.util.Log.e("WalletManager", "PIN store not cleared (${it.javaClass.simpleName})")
+                }
+            }
+            report
+        }
+
+    /**
+     * The way out of an owed wipe that will not complete.
+     *
+     * While a wipe is owed the unlock screen takes no credential and retries the wipe instead of
+     * opening the wallet. That hold is bounded, because a store that will not take its write must
+     * never add up to a device that can no longer be opened at all. After the bound the screen
+     * asks this and then acts on the answer:
+     *
+     *  - **true** — no wallet record is on this device, so there is nothing left for the owed wipe
+     *    to hold the screen for. The flag is released (and only the flag: the PIN store is
+     *    untouched, as after any wipe that could not be verified) so onboarding can be offered and
+     *    a wallet made from here on does not inherit a wipe owed to its predecessor.
+     *  - **false** — a wallet record is still on this device, so the hold has nothing left to
+     *    protect and the screen stands down and takes the PIN, which opens that wallet: a refused
+     *    write leaves this process reading what the store's file still holds (see
+     *    [AndroidWalletDataEraser]), so a load from the record finds it. The screen still acts on
+     *    whether the wallet actually loaded, rather than showing a wallet with nothing in it.
+     *    Either way the wipe stays owed: the launch backstop and each later entry to the unlock
+     *    screen retry it.
+     *
+     * The evidence is the store's own answer to the wipe's first step, asked once more, and not
+     * the record read-back on its own. So only a store that TAKES the removal counts as a device
+     * with no wallet left, and a store that still refuses its write keeps its owner on the unlock
+     * screen — never at onboarding over a wallet that is still there.
+     *
+     * Runs to its end once started (NonCancellable). The caller picks the thread. A PIN store that
+     * refuses the release is reported and the way out is still taken: being able to reach the app
+     * at all comes first.
+     */
+    suspend fun releaseOwedWipeIfNoWalletIsLeft(
+        pinManager: io.digibyte.core.security.PinManager,
+    ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+        val recordGone = try {
+            dataEraser.eraseSeedCiphertext() && !hasSavedWallet()
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wallet record not removable (${t.javaClass.simpleName})")
+            false // unknown is "still here": the screen stands down and the PIN decides
+        }
+        if (!recordGone) return@withContext false
+        runCatching { pinManager.clearWipePending() }.onFailure {
+            android.util.Log.e("WalletManager", "owed-wipe flag not released (${it.javaClass.simpleName})")
+        }
+        true
     }
 
     // ── Seed persistence ────────────────────────────────────────

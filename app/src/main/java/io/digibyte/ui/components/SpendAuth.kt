@@ -1,6 +1,10 @@
 package io.digibyte.ui.components
 
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -14,12 +18,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.digibyte.R
 import io.digibyte.core.WalletManager
 import io.digibyte.core.security.BiometricAuth
 import io.digibyte.core.security.BiometricResult
 import io.digibyte.core.security.PinManager
 import io.digibyte.core.security.PinVerifyResult
+import io.digibyte.ui.locale.LocaleController
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -67,8 +73,23 @@ fun biometricErrorFallsThroughToPin(errorCode: Int): Boolean = when (errorCode) 
  * Resolved with hiltViewModel() from inside [rememberSpendAuth] so screens get the gate
  * without PinManager being threaded through AppNavigation.
  */
+/**
+ * The ONE message every wipe entry point shows when a wipe could not be verified (Settings, the
+ * spend dialog, the launch backstop; the unlock screen shows the same string in its own error
+ * line). A toast, because the screen that started the wipe is replaced by the unlock or the
+ * onboarding route while it runs, so nothing of it is left to draw on. Resolved through
+ * [LocaleController] so an application context still reads the language chosen in the app.
+ */
+fun showWipeIncompleteNotice(context: Context) {
+    val localized = LocaleController.wrap(context.applicationContext)
+    Handler(Looper.getMainLooper()).post {
+        runCatching { Toast.makeText(localized, R.string.wipe_incomplete, Toast.LENGTH_LONG).show() }
+    }
+}
+
 @HiltViewModel
 class AuthGateViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val pinManager: PinManager,
     private val walletManager: WalletManager,
     val biometricAuth: BiometricAuth,
@@ -84,16 +105,22 @@ class AuthGateViewModel @Inject constructor(
     /**
      * Wipe-after-N tripped inside a spend dialog. Same sequence as UnlockScreen: PinManager
      * has already persisted pin_wipe_pending, so a kill mid-way is completed by the
-     * MainActivity backstop. NonCancellable because the wipe flips the wallet to NoWallet,
-     * AppNavigation then pops this screen (and its ViewModel scope) — the clearPin() that
-     * releases the pending flag must still run.
+     * MainActivity backstop. NonCancellable because the wipe flips the wallet state,
+     * AppNavigation then pops this screen (and its ViewModel scope) — the sequence must still
+     * run to its end.
+     *
+     * The PIN store is released by [WalletManager.wipeThenReleasePin], only after a verified
+     * wipe. When the wipe could not remove the seed the PIN, its counters and the owed wipe all
+     * stay: the wallet is Locked again, AppNavigation routes to the unlock screen, and that
+     * screen keeps retrying the wipe instead of taking a PIN. Once the wipe has removed the seed it
+     * does not come back: [io.digibyte.FreshStartAfterWipe] ends this process and starts a fresh one
+     * on onboarding, which finishes and reports whatever the wipe left undone.
      */
     fun wipeWallet() {
         viewModelScope.launch {
             withContext(NonCancellable + Dispatchers.IO) {
-                runCatching { walletManager.wipeWallet() }
-                    .onFailure { Log.e(TAG, "wipe after failed PINs failed", it) }
-                pinManager.clearPin()
+                val incomplete = io.digibyte.FreshStartAfterWipe.afterWipe(appContext, walletManager.wipeThenReleasePin(pinManager))
+                if (incomplete) showWipeIncompleteNotice(appContext)
             }
         }
     }
@@ -172,6 +199,8 @@ class SpendAuth internal constructor(private val vm: AuthGateViewModel) {
                         input = ""
                         when (val r = vm.verifyPin(entered)) {
                             is PinVerifyResult.Success -> req.outcome.complete(true)
+                            // Not checked, so nothing was counted: say so and keep the keypad open.
+                            is PinVerifyResult.Unavailable -> error = resources.getString(R.string.pin_check_unavailable)
                             is PinVerifyResult.Wrong -> error = r.lockedUntil
                                 ?.let { pinLockedCountdownMessage(resources, it) } ?: incorrectPinMsg
                             is PinVerifyResult.LockedOut -> error = pinLockedCountdownMessage(resources, r.until)

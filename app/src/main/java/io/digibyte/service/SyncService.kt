@@ -36,6 +36,7 @@ import io.digibyte.core.settings.syncModeFor
 import io.digibyte.core.tor.TorManager
 import io.digibyte.core.tor.TorState
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -241,6 +242,15 @@ class SyncService : Service() {
     // forceReconnect blocks on that mutex until it releases; withTimeout bounds the wait
     // and the next onAvailable retries.)
     private val recoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // ── Wallet wipe ───────────────────────────────────────────────────────────
+    // A wipe stops this service BEFORE it erases the stores the service writes
+    // (io.digibyte.core.WalletSessionStop, registered in onCreate). Once stood down, nothing the
+    // service holds of the wiped wallet is written, its native callbacks do nothing, and a start
+    // delivered to it does not revive it: the next wallet this process opens gets a fresh instance.
+    @Volatile private var stoodDownForWipe = false
+    private val wipeStop = io.digibyte.core.WalletSessionStop { standDownForWipe() }
+
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     @Volatile private var lastNetworkRecoveryMs = 0L
 
@@ -275,6 +285,8 @@ class SyncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instanceAlive.set(true)
+        walletManager.addSessionStop(wipeStop)
         foregroundSyncLive.set(true)
         createNotificationChannel()
         startFilterHeaderWriter()
@@ -312,6 +324,15 @@ class SyncService : Service() {
         } catch (t: Throwable) {
             android.util.Log.e("SyncService", "startForeground denied — stopping service to avoid a crash", t)
             stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // A wipe stood this instance down: a start delivered to it before its onDestroy has run does
+        // not revive it. Promoted above (a foreground start must be), then stopped again; the next
+        // wallet gets a fresh instance (startAgainForTheNextWallet).
+        if (stoodDownForWipe) {
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            stopSelf(startId)
             return START_NOT_STICKY
         }
 
@@ -1357,7 +1378,7 @@ class SyncService : Service() {
                         // Persist transactions
                         serviceScope.launch(Dispatchers.IO) {
                             val txData = NativeBridge.getSerializedTransactions()
-                            if (txData != null) {
+                            if (txData != null && !stoodDownForWipe) {
                                 val hex = bytesToHex(txData)
                                 getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                                     .edit().putString("saved_transactions", hex).apply()
@@ -2385,6 +2406,9 @@ class SyncService : Service() {
         runCatching {
             val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
             val blob = NativeBridge.serializePeerPenalties()
+            // Asked after the native read, which can wait on the peer lock: a wipe may have
+            // stood the service down meanwhile, and then nothing is written.
+            if (stoodDownForWipe) return@runCatching
             when (val action = io.digibyte.core.sync.PeerPenaltyPersist.decide(blob)) {
                 // Null means the native side couldn't answer (no live peer manager, or the
                 // probe threw) — NOT that nothing is penalized: an empty set still carries a
@@ -2576,17 +2600,63 @@ class SyncService : Service() {
             "cf-ledger: resume cursor snap $cursorBefore -> $cursorAfter")
     }
 
+    /**
+     * A wipe's first step ([io.digibyte.core.WalletSessionStop]), on the wiping thread and BEFORE
+     * anything is erased. Stops every loop this service runs and waits, within a bound, for a step
+     * already under way to end, so no write it started lands after the erase; drops what it
+     * captured of the wallet and has not written yet; stops the service. Its teardown then writes
+     * nothing ([onDestroy]) and its native callbacks do nothing.
+     */
+    private fun standDownForWipe() {
+        if (stoodDownForWipe) return
+        stoodDownForWipe = true
+        foregroundSyncLive.set(false)
+        pendingFilterHeaders = null
+        pendingCfLedger = null
+        lastSavedBlocksData = null
+        filterHeadersDirty = false
+        runBlocking {
+            withTimeoutOrNull(STAND_DOWN_BOUND_MS) {
+                serviceScope.coroutineContext[Job]?.cancelAndJoin()
+                recoveryScope.coroutineContext[Job]?.cancelAndJoin()
+            }
+        }
+        // Past the bound, a step still inside a native call is left cancelled: it stops at its next
+        // suspension point, not when the call returns. The service's own writers of the wiped
+        // stores ask stoodDownForWipe after their last native read, so a late return writes
+        // nothing; a write already past that check when the erase runs is the one thing this bound
+        // does not exclude, and after a verified wipe the process it runs in ends.
+        serviceScope.cancel()
+        recoveryScope.cancel()
+        runCatching { nativeKeepaliveExecutor.shutdown() }
+        networkCallback?.let { cb ->
+            runCatching {
+                getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(cb)
+            }
+        }
+        networkCallback = null
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        stopSelf()
+        startAgainForTheNextWallet(applicationContext, walletManager)
+        android.util.Log.i("SyncService", "stood down for a wallet wipe")
+    }
+
     override fun onDestroy() {
         foregroundSyncLive.set(false)
-        // Flush the latest block window synchronously before teardown so a
-        // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
-        // guard ensures this never regresses a higher persisted tip.
-        lastSavedBlocksData?.let { (bytes, epoch) ->
-            runCatching { persistBlocks(bytes, epoch, synchronous = true) }
+        walletManager.removeSessionStop(wipeStop)
+        // After a wipe stood this service down, none of these is written: they hold the wiped
+        // wallet, and the wipe has already erased the stores they would write.
+        if (!stoodDownForWipe) {
+            // Flush the latest block window synchronously before teardown so a
+            // graceful stop doesn't drop it to serviceScope.cancel(). The monotonic
+            // guard ensures this never regresses a higher persisted tip.
+            lastSavedBlocksData?.let { (bytes, epoch) ->
+                runCatching { persistBlocks(bytes, epoch, synchronous = true) }
+            }
+            flushFilterHeaders()
+            // Before stopSync frees the peer manager: keep what we learned about bad peers.
+            persistPeerPenalties()
         }
-        flushFilterHeaders()
-        // Before stopSync frees the peer manager: keep what we learned about bad peers.
-        persistPeerPenalties()
         // stopSync() takes the native peer-manager lock (PEER_GUARD), which the
         // keepalive sweep can hold for up to ~K×10s pinging half-dead sockets —
         // calling it synchronously here runs on the main thread (Service lifecycle
@@ -2608,6 +2678,7 @@ class SyncService : Service() {
         // native peer lock, and interrupting a thread in JNI does nothing useful anyway. The
         // thread is a daemon, so a stuck sweep cannot keep the process alive.
         runCatching { nativeKeepaliveExecutor.shutdown() }
+        instanceAlive.set(false)
         super.onDestroy()
     }
 
@@ -2664,9 +2735,12 @@ class SyncService : Service() {
     // don't revert "Connected" back to "Syncing 0%" on restart near the chain tip.
     @Volatile private var hasReachedSynced = false
 
+    // Every callback returns at once after a wipe stood this service down: a callback still in
+    // flight from the wiped wallet's session must not put anything back.
     private val syncCallback = object : NativeCallback {
 
         override fun onSyncProgress(progress: Float, blockHeight: Long) {
+            if (stoodDownForWipe) return
             // First real callback of this session — the PUSH path is now
             // authoritative for progress; the cold-poll provisional window closes.
             sawSyncProgressCallback = true
@@ -2699,6 +2773,7 @@ class SyncService : Service() {
         }
 
         override fun onTransactionReceived(txHash: String, amount: Long, isReceive: Boolean) {
+            if (stoodDownForWipe) return
             serviceScope.launch {
                 // Native asset detection: run the Kotlin DigiAssetDecoder against
                 // the OP_RETURN in this tx (looked up via BRWallet). If it's a
@@ -2740,6 +2815,7 @@ class SyncService : Service() {
         }
 
         override fun onPeerConnected(peerCount: Int) {
+            if (stoodDownForWipe) return
             updateNotification(currentSyncProgress(), peerCount)
 
             // Persist newly connected peer address from the native side.
@@ -2752,12 +2828,14 @@ class SyncService : Service() {
         }
 
         override fun onPeerDisconnected(peerCount: Int) {
+            if (stoodDownForWipe) return
             updateNotification(currentSyncProgress(), peerCount)
             // Don't show failure if we already reached the chain tip —
             // peer drops are normal, the polling loop will reconnect.
         }
 
         override fun onSyncComplete() {
+            if (stoodDownForWipe) return
             // Defense in depth for the same eclipse-attack / stale-peer scenario
             // the poll loop guards against: if the C core fires syncStopped while
             // our known height is below the checkpoint floor, all connected peers
@@ -2841,6 +2919,7 @@ class SyncService : Service() {
         }
 
         override fun onSyncFailed(errorCode: Int, message: String) {
+            if (stoodDownForWipe) return
             // Don't show failure to the user — just retry after a short delay.
             // Most "failures" are peers rejecting SPV mode, which is normal.
             // The wallet will keep trying peers until it finds a compatible one.
@@ -2852,11 +2931,13 @@ class SyncService : Service() {
         }
 
         override fun onBalanceChanged(balanceSatoshis: Long) {
+            if (stoodDownForWipe) return
             // UtxoDao Flow picks this up automatically via Room's invalidation
             // tracker — no explicit action needed here.
         }
 
         override fun onAssetDetected(txHash: String, assetId: String, quantity: Long, isReceive: Boolean) {
+            if (stoodDownForWipe) return
             // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
             // and ensures all Room writes are serialised through the supervisor job.
             if (assetId.isBlank()) {
@@ -2891,6 +2972,7 @@ class SyncService : Service() {
             }
         }
         override fun onSaveBlocks(data: ByteArray, replace: Int) {
+            if (stoodDownForWipe) return
             // Persist off the C core callback thread to avoid blocking peer manager.
             // Cache the latest window so onDestroy can flush it synchronously, and
             // route through persistBlocks() for the monotonic anti-regression guard.
@@ -2907,6 +2989,7 @@ class SyncService : Service() {
         }
 
         override fun onSavePeers(data: ByteArray, replace: Int) {
+            if (stoodDownForWipe) return
             val copy = data.copyOf()
             serviceScope.launch(Dispatchers.IO) {
                 val hex = bytesToHex(copy)
@@ -2916,6 +2999,7 @@ class SyncService : Service() {
         }
 
         override fun onSaveFilterHeaders(data: ByteArray) {
+            if (stoodDownForWipe) return
             // BIP 158 filter-header chain advanced. Record the latest chain only; the
             // coalesced writer (startFilterHeaderWriter) flushes it to a plain file at
             // most once per interval. Do NOT hex-encode + putString here — that pinned
@@ -2926,6 +3010,7 @@ class SyncService : Service() {
         }
 
         override fun onSaveCfLedger(data: ByteArray) {
+            if (stoodDownForWipe) return
             // CF scan ledger advanced (Phase-1 observe-only). Record the latest ledger
             // only; the coalesced writer flushes it to a plain file at most once per
             // interval — mirrors onSaveFilterHeaders. Does NOT change sync behavior.
@@ -3433,7 +3518,7 @@ class SyncService : Service() {
         // Persist the wallet tx set so any drops survive a restart.
         if (dropped) {
             runCatching {
-                NativeBridge.getSerializedTransactions()?.let { data ->
+                NativeBridge.getSerializedTransactions()?.takeUnless { stoodDownForWipe }?.let { data ->
                     getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
                         .edit().putString("saved_transactions", bytesToHex(data)).apply()
                 }
@@ -3475,6 +3560,7 @@ class SyncService : Service() {
         filterHeaderWriterJob = serviceScope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(filterHeaderSaveIntervalMs)
+                if (stoodDownForWipe) break
                 if (filterHeadersDirty) {
                     filterHeadersDirty = false // cleared first; a concurrent callback re-sets it
                     pendingFilterHeaders?.let { (bytes, ep) -> FilterHeaderStore.write(this@SyncService, bytes, ep) }
@@ -3493,6 +3579,7 @@ class SyncService : Service() {
     /** Synchronously flush the latest filter-header chain and CF scan ledger — the final
      *  save on teardown, and the pre-recreate flush (see [flushLiveStateBeforeRecreate]). */
     private fun flushFilterHeaders() {
+        if (stoodDownForWipe) return
         if (filterHeadersDirty) {
             filterHeadersDirty = false
             pendingFilterHeaders?.let { (bytes, ep) -> runCatching { FilterHeaderStore.write(this, bytes, ep) } }
@@ -3514,11 +3601,16 @@ class SyncService : Service() {
     private fun persistWalletTransactionsCheckpoint(): Boolean = runCatching {
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
         val transactionCount = NativeBridge.getTransactionCount()
-        val editor = prefs.edit().putBoolean("transactions_checkpointed", true)
-        if (transactionCount > 0) {
-            val txData = NativeBridge.getSerializedTransactions() ?: return@runCatching false
-            editor.putString("saved_transactions", bytesToHex(txData))
+        val txData = if (transactionCount > 0) {
+            NativeBridge.getSerializedTransactions() ?: return@runCatching false
+        } else {
+            null
         }
+        // After the native reads and before the write: a wipe that stood the service down in
+        // between leaves the wiped stores as it erased them.
+        if (stoodDownForWipe) return@runCatching false
+        val editor = prefs.edit().putBoolean("transactions_checkpointed", true)
+        if (txData != null) editor.putString("saved_transactions", bytesToHex(txData))
         editor.commit()
     }.getOrDefault(false)
 
@@ -3564,6 +3656,7 @@ class SyncService : Service() {
      *  survives serviceScope cancellation; the file write itself is always a
      *  synchronous tmp-write+rename regardless of [synchronous]. */
     private fun persistBlocks(data: ByteArray, snapshotEpoch: Long, synchronous: Boolean) {
+        if (stoodDownForWipe) return
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
         val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
@@ -3718,6 +3811,42 @@ class SyncService : Service() {
          * lifecycle callbacks) and read from the worker's coroutine.
          */
         val foregroundSyncLive = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        /** True from onCreate until onDestroy has run: an instance exists in this process. */
+        private val instanceAlive = java.util.concurrent.atomic.AtomicBoolean(false)
+        /** The one pending start for the next wallet, after a wipe stood the service down. */
+        private val nextWalletStart = java.util.concurrent.atomic.AtomicReference<Job?>(null)
+        /** How long a stand-down waits for a step already under way to end. */
+        private const val STAND_DOWN_BOUND_MS = 3_000L
+        /** How long the next start waits for the instance that stood down to finish onDestroy. */
+        private const val STOOD_DOWN_GONE_BOUND_MS = 5_000L
+
+        /**
+         * After a wipe stood the service down: start it again once the next wallet is open in this
+         * process — created, restored, or loaded by the PIN — and never beside the instance that
+         * stood down. The wipe that stood it down ends by moving the wallet out of Unlocked; the
+         * next wallet opened moves it back in. (After a verified wipe this process ends first and
+         * the fresh one starts its own service; this is for a wipe that could not be verified.)
+         */
+        private fun startAgainForTheNextWallet(app: android.content.Context, wallet: WalletManager) {
+            val watch = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
+                wallet.walletState
+                    .dropWhile { it is WalletState.Unlocked }
+                    .first { it is WalletState.Unlocked }
+                withTimeoutOrNull(STOOD_DOWN_GONE_BOUND_MS) {
+                    while (instanceAlive.get()) delay(100)
+                }
+                try {
+                    androidx.core.content.ContextCompat.startForegroundService(app, Intent(app, SyncService::class.java))
+                } catch (t: Throwable) {
+                    // Same as every other caller-side start: a denied start is retried by the
+                    // wallet screen's watchdog and onResume.
+                    android.util.Log.e("SyncService", "start for the next wallet threw", t)
+                }
+            }
+            nextWalletStart.getAndSet(watch)?.cancel()
+        }
+
         const val ERR_NO_PEERS     = 1001
         /** Sent by the Settings own-node UI to apply a host/port/exclusive change
          *  immediately (forceReconnect → re-inject bloom + custom node → startSync)

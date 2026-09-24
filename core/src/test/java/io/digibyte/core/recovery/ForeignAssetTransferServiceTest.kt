@@ -2,7 +2,6 @@ package io.digibyte.core.recovery
 
 import io.digibyte.core.asset.DigiAssetEncoder
 import io.digibyte.core.asset.send.DA_MARKER_SATS
-import io.digibyte.core.reconcile.RawTxEntry
 import io.digibyte.core.reconcile.UtxoEntry
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -43,10 +42,13 @@ class ForeignAssetTransferServiceTest {
         ),
     )
 
+    /** Every UTXO made here gets a parent that states exactly what was reported for it. */
+    private val book = TxBook()
+
     private fun utxo(txid: String, addr: String, sats: Long, vout: Int = 0) = UtxoEntry(
         txid = txid, vout = vout, amountSatoshi = sats, address = addr,
         blockHeight = 24_000_000L, scriptPubKeyHex = script,
-    )
+    ).also { book.honest(it) }
 
     private val assetUtxo = utxo("a55e7", assetAddr, DA_MARKER_SATS)
     private val feeUtxo = utxo("feeee", feeAddr, 300_000L)
@@ -66,7 +68,7 @@ class ForeignAssetTransferServiceTest {
         addresses = derived.map { it.address },
         derivedAddresses = derived,
         utxos = utxos,
-        rawTxs = utxos.associate { it.txid to RawTxEntry(hex = "00", blockHeight = 1L, blockTime = 1L) },
+        rawTxs = book.rawTxs(utxos),
         reachableBackend = true,
     )
 
@@ -96,6 +98,7 @@ class ForeignAssetTransferServiceTest {
         assetClassifier: ForeignUtxoAssetClassifier = classifier(),
     ) = ForeignAssetTransferService(
         assetClassifier = assetClassifier,
+        parents = book.binding,
         parseOutputs = parse,
         sign = sign,
         broadcast = broadcast,
@@ -294,6 +297,7 @@ class ForeignAssetTransferServiceTest {
                 // would make this test assert the opposite of what it is named for.
                 resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             ),
+            parents = book.binding,
             parseOutputs = { parentOutputs },
             sign = { _, _, _, _ -> "00ff" },
             broadcast = { "fanout-txid" },
@@ -334,6 +338,7 @@ class ForeignAssetTransferServiceTest {
                 // would make this test assert the opposite of what it is named for.
                 resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             ),
+            parents = book.binding,
             parseOutputs = { parentOutputs },
             sign = { _, _, _, _ -> "00ff" },
             broadcast = { broadcasts++; "x" },

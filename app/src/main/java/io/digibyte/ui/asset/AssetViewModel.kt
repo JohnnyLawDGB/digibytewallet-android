@@ -12,6 +12,7 @@ import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.asset.send.AssetFeeEstimator
 import io.digibyte.core.model.ApprovedSend
+import io.digibyte.core.model.AssetQuantity
 import io.digibyte.core.model.OwnedAsset
 import io.digibyte.core.model.DgbAmount
 import io.digibyte.core.model.SendConfirmation
@@ -35,6 +36,53 @@ sealed class AssetFeeWarning {
     data object None : AssetFeeWarning()
     data object BelowRelay : AssetFeeWarning()
     data object ZeroFee : AssetFeeWarning()
+}
+
+/**
+ * The quantity a transfer request named, for as long as the form's quantity field still shows it.
+ *
+ * A request names WHOLE UNITS of the asset. The field shows text at the asset's divisibility and
+ * Review reads text at the asset's divisibility — 150 units of an asset with two decimals read
+ * "1.5" — and that divisibility is a chain fact which can arrive after the form is on screen. So
+ * the units are kept here as the integer they arrived as, and text is only ever written FROM
+ * them, at the divisibility of the moment the text is needed:
+ *
+ *  - [fieldText] is what the field shows, and is asked for again whenever the divisibility changes;
+ *  - [textToApprove] is what the approval is read from, written at the divisibility it is read
+ *    at — so the approval holds exactly the requested units, whatever the field showed a moment
+ *    earlier;
+ *  - [edited] ends the request: from the user's first change the field is the user's text, is
+ *    never written over, and is read as any typed quantity is.
+ *
+ * Plain state, used from the main thread only. It lives in the view model so that it outlives a
+ * composition: the route hands its argument over again on every new one, and only the first
+ * delivery counts — a request the user has edited away does not come back.
+ */
+class RequestedAssetQuantity {
+    private var delivered = false
+    private var units: Long? = null
+
+    /** The route's request: [units] whole units, or null (or nothing positive) when it names none. */
+    fun deliver(units: Long?) {
+        if (delivered) return
+        delivered = true
+        this.units = units?.takeIf { it > 0L }
+    }
+
+    /** The field's text for the request at [divisibility], or null when the field is the user's own. */
+    fun fieldText(divisibility: Int): String? = units?.let { AssetQuantity.format(it, divisibility) }
+
+    /** The user changed the quantity field: what it holds is no longer the request, now or later. */
+    fun edited() {
+        delivered = true
+        units = null
+    }
+
+    /**
+     * The text an approval is read from at [divisibility]: the requested units written at that
+     * divisibility while the field is still the request's, and otherwise [fieldText], the user's own.
+     */
+    fun textToApprove(fieldText: String, divisibility: Int): String = fieldText(divisibility) ?: fieldText
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -72,6 +120,9 @@ class AssetViewModel @Inject constructor(
 
     /** The approval the confirmation is drawn from, or null when no confirmation is up. */
     val approval: StateFlow<ApprovedSend.Asset?> = confirmation.approval
+
+    /** What a transfer request asked for, while the quantity field still shows it. */
+    val requestedQuantity = RequestedAssetQuantity()
 
     // ── Transfer-rule check ─────────────────────────────────────────────
     //
@@ -198,16 +249,21 @@ class AssetViewModel @Inject constructor(
      * object and [sendAssetTransfer] receives it, so nothing typed, pre-filled or loaded afterwards
      * can change what is sent.
      *
+     * While the field still shows a transfer request, the text read is written here from the
+     * requested units, at the same divisibility it is then read at: the approval holds exactly
+     * those units even if the asset's divisibility became known after the field was filled.
+     *
      * Returns false when the text is not a positive quantity of the selected asset. A quantity
      * with no recipient is accepted and opens nothing: a confirmation names where it goes.
      */
     fun requestConfirm(toAddress: String, quantityInput: String): Boolean {
         val asset = selectedAsset.value ?: return false
+        val divisibility = divisibilityOf(asset)
         val approved = ApprovedSend.asset(
             address = toAddress,
             assetId = asset.assetId,
-            typedQuantity = quantityInput,
-            divisibility = divisibilityOf(asset),
+            typedQuantity = requestedQuantity.textToApprove(quantityInput, divisibility),
+            divisibility = divisibility,
             feePerKb = feeRatePerKb.value,
             feeEstimateSats = estimatedFeeSat.value,
         ) ?: return false

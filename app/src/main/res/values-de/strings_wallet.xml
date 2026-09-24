@@ -456,6 +456,8 @@
     <string name="sec_confirm_pin">PIN bestätigen</string>
     <string name="sec_confirm_pin_wipe_sub">Geben Sie Ihre PIN ein, um die Wallet zu löschen</string>
     <string name="sec_incorrect_pin">Falsche PIN</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">Die PIN konnte auf diesem Gerät gerade nicht geprüft werden. Es wurde nichts gezählt. Bitte versuchen Sie es erneut.</string>
     <string name="auth_node_pair_title">Node-Kopplung bestätigen</string>
     <string name="auth_node_pair_subtitle">Authentifizieren Sie sich, um diesen Node zu koppeln</string>
     <string name="sec_enable">Aktivieren</string>
@@ -591,4 +593,6 @@
     <string name="as_refused_rules_unknown">Blockiert: Die Übertragungsregeln dieses Assets konnten nicht überprüft werden. Es wurde nichts gesendet.</string>
     <string name="rf_move_refused_rule_bound">%1$s bleibt, wo es ist: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann</string>
     <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
+    <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
+    <string name="wipe_incomplete">Das Löschen der Wallet wurde nicht abgeschlossen. Einige Wallet-Daten befinden sich möglicherweise noch auf diesem Gerät. Starten Sie die App neu und versuchen Sie es erneut.</string>
 </resources>

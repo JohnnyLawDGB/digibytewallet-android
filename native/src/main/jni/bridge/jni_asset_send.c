@@ -16,6 +16,7 @@
 #include "BRTransaction.h"
 #include "BRWallet.h"
 #include "BRInt.h"
+#include "asset_tx_checks.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -179,6 +180,13 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(
     (*env)->ReleaseIntArrayElements(env, inputVouts, voutJ, JNI_ABORT);
     (*env)->ReleaseLongArrayElements(env, inputAmounts, amtJ, JNI_ABORT);
 
+    /* Invariant: every input names a different outpoint. The Kotlin caller checks the same
+     * before it gets here; this is the last place it can be checked before signing. */
+    if (ok && !tx_inputs_distinct(tx)) {
+        LOGW("buildAndSignAssetTransferTx: an outpoint is listed more than once among the inputs");
+        ok = 0;
+    }
+
     if (!ok) {
         (*env)->ReleaseLongArrayElements(env, outputAmounts, outAmtJ, JNI_ABORT);
         BRTransactionFree(tx);
@@ -313,4 +321,43 @@ Java_io_digibyte_core_bridge_NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env,
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
     return result;
+}
+
+/**
+ * public static native String rawTransactionId(byte[] rawTx);
+ *
+ * The id of the transaction in rawTx, as display-order lowercase hex (the form a txid is
+ * requested by), or NULL when the bytes are not exactly one complete signed transaction.
+ *
+ * The id is the one the core parser computes over the serialization without witness data,
+ * which is what a txid names; see raw_tx_id in asset_tx_checks.h. A parent transaction
+ * fetched by id is accepted only when this returns the id it was requested by.
+ */
+JNIEXPORT jstring JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_rawTransactionId(JNIEnv *env, jobject thiz,
+                                                            jbyteArray rawTx)
+{
+    (void)thiz;
+    if (!rawTx) return NULL;
+
+    jsize txLen = (*env)->GetArrayLength(env, rawTx);
+    if (txLen <= 0) return NULL;
+
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, rawTx, NULL);
+    if (!txBytes) return NULL;
+
+    UInt256 txHash;
+    int ok = raw_tx_id((const uint8_t *)txBytes, (size_t)txLen, &txHash);
+    (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
+    if (!ok) {
+        LOGW("rawTransactionId: bytes are not exactly one signed transaction");
+        return NULL;
+    }
+
+    /* Display order is the reverse of internal storage. */
+    uint8_t display[32];
+    for (int k = 0; k < 32; k++) display[k] = txHash.u8[31 - k];
+    char hex[65];
+    bytes_to_hex_local(display, sizeof(display), hex);
+    return (*env)->NewStringUTF(env, hex);
 }

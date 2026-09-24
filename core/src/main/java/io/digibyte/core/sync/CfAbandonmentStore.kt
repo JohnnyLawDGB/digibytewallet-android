@@ -1,6 +1,7 @@
 package io.digibyte.core.sync
 
 import android.content.Context
+import io.digibyte.core.WALLET_NETWORK_SUFFIXES
 import io.digibyte.core.networkSuffix
 
 /**
@@ -324,4 +325,16 @@ object CfAbandonmentStore {
     fun clear(ctx: Context) {
         prefs(ctx).edit().clear().commit()
     }
+
+    /**
+     * [clear] for EVERY network's band, not only the selected one, for a full wallet reset: a
+     * band describes ONE wallet's scan, so the next wallet must not be shown it on either
+     * network. Returns true only when every write landed; both networks are always attempted.
+     */
+    fun clearAllNetworks(ctx: Context): Boolean =
+        WALLET_NETWORK_SUFFIXES.map { net ->
+            runCatching {
+                ctx.getSharedPreferences(PREFS_BASE + net, Context.MODE_PRIVATE).edit().clear().commit()
+            }.getOrDefault(false)
+        }.all { it }
 }

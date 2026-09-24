@@ -43,10 +43,60 @@ shopt -u nullglob
 
 # Seam self-check: a -D that names nothing silently builds the shipped path, so a comparison arm
 # would run the shipped code and (wrongly) pass. Require each seam to exist in the real source.
-for macro in PUBLISH_LIST_OWNERSHIP_UNFIXED PUBLISH_OWNED_FOLLOWS_UNFIXED; do
+for macro in PUBLISH_LIST_OWNERSHIP_UNFIXED PUBLISH_OWNED_FOLLOWS_UNFIXED \
+             PUBLISH_REMOVE_PURGE_UNFIXED PUBLISH_SERVED_COPY_UNFIXED; do
     if ! grep -q "$macro" "$CORE_DIR/BRPeerManager.c"; then
         echo "GATE FAILED: $macro is not present in BRPeerManager.c — the -D would select nothing"
         echo "             and its comparison arm would run the shipped code."
+        exit 1
+    fi
+done
+
+# Source gate 1 — BRPeer.c's getdata handler. No scenario in this suite, and none in any sibling
+# suite, enters _BRPeerAcceptGetdataMessage: it needs a live socket. So the one release the handler
+# performs has no arm that would notice it going away, and the object it releases is the private copy
+# _peerRequestedTx hands out — released exactly once, on every path out of the item. Hold that by
+# reading the source, the same way the seam self-check above holds the comparison macros.
+GETDATA_FN="$(awk '/^static int _BRPeerAcceptGetdataMessage/,/^\}/' "$CORE_DIR/BRPeer.c")"
+if [ -z "$GETDATA_FN" ]; then
+    echo "GATE FAILED: _BRPeerAcceptGetdataMessage was not found in BRPeer.c, so the source gate"
+    echo "             over the served copy's release cannot hold. Re-anchor the gate."
+    exit 1
+fi
+GETDATA_FREES=$(printf '%s\n' "$GETDATA_FN" | grep -c "BRTransactionFree(tx)")
+if [ "$GETDATA_FREES" -lt 2 ]; then
+    echo "GATE FAILED: BRPeer.c's getdata handler must release the object requestedTx returns on"
+    echo "             BOTH paths through an inv_tx item — after it has been sent, and when it is"
+    echo "             too large to send. Found $GETDATA_FREES release(s) of tx, expected 2."
+    exit 1
+fi
+if ! printf '%s\n' "$GETDATA_FN" | grep -q "tx = ctx->requestedTx ? ctx->requestedTx(ctx->info, hash) : NULL;"; then
+    echo "GATE FAILED: BRPeer.c's getdata handler must set tx for every inv_tx item (NULL when there"
+    echo "             is no provider), so no item can read or send the previous item's object."
+    exit 1
+fi
+
+# Source gate 2 — the bridge's removal. jni_transaction.c cannot be compiled on the host (JNI), and
+# this suite drives the core call directly, so nothing here would notice the bridge stopping using
+# it. Read the source: the removal takes the peer guard, routes through the manager only while the
+# manager holds this same wallet, and reports on what the wallet holds afterwards. Same pattern as
+# tx_publish_ownership_kat's gate over the publish entry points.
+BRIDGE_C="$REPO_ROOT/native/src/main/jni/bridge/jni_transaction.c"
+REMOVE_FN="$(awk '/^Java_io_digibyte_core_bridge_NativeBridge_removeTransaction/,/^\}/' "$BRIDGE_C")"
+if [ -z "$REMOVE_FN" ]; then
+    echo "GATE FAILED: removeTransaction was not found in jni_transaction.c. Re-anchor the gate."
+    exit 1
+fi
+for needle in "PEER_GUARD();" \
+              "g_peerManager && !g_peerManagerNeedsRecreate" \
+              "BRPeerManagerRemoveTransaction(g_peerManager, h)" \
+              "BRWalletRemoveTransaction(g_wallet, h)" \
+              "removed = BRWalletTransactionForHash(g_wallet, h) ? JNI_FALSE : JNI_TRUE;"; do
+    if ! printf '%s\n' "$REMOVE_FN" | grep -qF "$needle"; then
+        echo "GATE FAILED: the bridge's removeTransaction no longer contains: $needle"
+        echo "             It must hold the peer guard, take the manager-locked removal only while"
+        echo "             the manager holds this g_wallet (the marker says it may not), fall back to"
+        echo "             the wallet's own removal otherwise, and report on what the wallet holds."
         exit 1
     fi
 done
@@ -110,6 +160,12 @@ if ! build "$BUILD_DIR/ref_release" "$CORE_DIR" -DPUBLISH_LIST_OWNERSHIP_UNFIXED
 fi
 if ! build "$BUILD_DIR/ref_follows" "$CORE_DIR" -DPUBLISH_OWNED_FOLLOWS_UNFIXED; then
     echo "GATE FAILED: comparison arm PUBLISH_OWNED_FOLLOWS_UNFIXED did not build"; exit 1
+fi
+if ! build "$BUILD_DIR/ref_remove" "$CORE_DIR" -DPUBLISH_REMOVE_PURGE_UNFIXED; then
+    echo "GATE FAILED: comparison arm PUBLISH_REMOVE_PURGE_UNFIXED did not build"; exit 1
+fi
+if ! build "$BUILD_DIR/ref_served" "$CORE_DIR" -DPUBLISH_SERVED_COPY_UNFIXED; then
+    echo "GATE FAILED: comparison arm PUBLISH_SERVED_COPY_UNFIXED did not build"; exit 1
 fi
 if ! build "$BUILD_DIR/mut_release" "$MUT_RELEASE_DIR"; then
     echo "GATE FAILED: confirmation-seam mutant arm did not build"; exit 1
@@ -192,7 +248,11 @@ run_guard invalid_survives "$BUILD_DIR/mut_invalid" mut_invalid
 run_rtg   requested        "$BUILD_DIR/ref_follows" ref_follows
 run_rtg   hastx            "$BUILD_DIR/ref_follows" ref_follows
 run_rtg   relay            "$BUILD_DIR/ref_follows" ref_follows
+run_rtg   remove_relay        "$BUILD_DIR/ref_remove" ref_remove
+run_rtg   remove_parent       "$BUILD_DIR/ref_remove" ref_remove
+run_rtg   remove_readers      "$BUILD_DIR/ref_remove" ref_remove
+run_rtg   remove_getdata_race "$BUILD_DIR/ref_served" ref_served
 
 echo
-echo "publish_list_ownership_kat: RED-BEFORE-GREEN OK (4 comparison-arm scenarios + 2 mutant-proven guards + 2 guards)"
+echo "publish_list_ownership_kat: RED-BEFORE-GREEN OK (8 comparison-arm scenarios + 2 mutant-proven guards + 2 guards), source gates OK"
 exit 0

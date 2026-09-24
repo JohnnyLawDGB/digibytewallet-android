@@ -1,6 +1,7 @@
 package io.digibyte.core.sync
 
 import android.content.Context
+import io.digibyte.core.WALLET_NETWORK_SUFFIXES
 import io.digibyte.core.networkSuffix
 import java.io.File
 
@@ -73,5 +74,22 @@ object CfScanLedgerStore {
             runCatching { file(ctx).delete() }
             runCatching { tmpFile(ctx).delete() }
         }
+    }
+
+    /**
+     * [delete] for EVERY network's ledger, not only the selected one. For a full wallet reset
+     * only: a ledger records which heights were already evaluated for ONE wallet, so none may
+     * be left for the next wallet on either network. Returns true only when, read back, no file
+     * is left.
+     */
+    fun deleteAllNetworks(ctx: Context): Boolean = synchronized(ioLock) {
+        epoch++
+        WALLET_NETWORK_SUFFIXES.map { net ->
+            val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
+            val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
+            runCatching { bin.delete() }
+            runCatching { tmp.delete() }
+            !bin.exists() && !tmp.exists()
+        }.all { it }
     }
 }

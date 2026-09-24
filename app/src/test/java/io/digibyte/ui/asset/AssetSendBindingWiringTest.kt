@@ -1,5 +1,6 @@
 package io.digibyte.ui.asset
 
+import io.digibyte.ui.KotlinSourceGate
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,23 +18,49 @@ import org.junit.Test
  * use the object. A confirmation fed from the quantity field again, or a send that reads the
  * field again after the credential prompt, would compile and look right.
  *
+ * Each value it pins is compared WHOLE, in code and not in comments or literals: an argument is
+ * the approved object's value and nothing more, a condition is the one check and nothing more,
+ * and a call the gate reads is the only call of its kind in the file.
+ *
  * `SendAmountBindingWiringTest` is the same gate for the DGB and DigiDollar sends.
  */
 class AssetSendBindingWiringTest {
 
     private val uiRoot = File("src/main/java/io/digibyte/ui")
 
-    private val blockComment = Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)
-
-    /** The file as code: block comments and line comments say nothing about what it does. */
-    private fun source(rel: String): String =
+    /** The file as code: comments and the text inside literals say nothing about what it does. */
+    private fun gate(rel: String): KotlinSourceGate =
         File(uiRoot, rel).let {
             assertTrue("$rel is missing — this gate is watching a file that moved", it.exists())
-            blockComment.replace(it.readText(), "").lines().joinToString("\n") { l -> l.substringBefore("//") }
+            KotlinSourceGate.of(it.readText())
         }
 
-    private val screen get() = source("asset/AssetSendScreen.kt")
-    private val viewModel get() = source("asset/AssetViewModel.kt")
+    private fun source(rel: String): String = gate(rel).code
+
+    private val screenGate get() = gate("asset/AssetSendScreen.kt")
+    private val viewModelGate get() = gate("asset/AssetViewModel.kt")
+    private val screen get() = screenGate.code
+    private val viewModel get() = viewModelGate.code
+
+    /** The one call of [callee] in the file. None, or a second one, and the gate says so. */
+    private fun KotlinSourceGate.theCall(callee: String): KotlinSourceGate.Call {
+        val found = calls(callee)
+        assertEquals("`$callee(` is called ${found.size} times — the gate reads one call, and it has to be the only one", 1, found.size)
+        return found.single()
+    }
+
+    /** The one `if` inside [within] whose whole condition is [condition]: its branch. */
+    private fun KotlinSourceGate.theBranchOn(condition: String, within: IntRange): IntRange {
+        val found = branchesOn(condition, within)
+        assertEquals("`if ($condition)` stands ${found.size} times as a whole condition — the gate reads exactly one", 1, found.size)
+        return found.single()
+    }
+
+    private fun KotlinSourceGate.sendRange(): IntRange {
+        val found = range("fun sendAssetTransfer(", "sealed class SendState")
+        assertTrue("cannot find sendAssetTransfer() — the gate is blind, not clean", found != null)
+        return found!!
+    }
 
     /** The text from [from] up to the next occurrence of [until]. */
     private fun String.section(from: String, until: String): String {
@@ -53,20 +80,21 @@ class AssetSendBindingWiringTest {
         return substring(start, end)
     }
 
-    /** The confirmation as the screen calls it (the call comes before the declaration in the file). */
-    private fun confirmationCall() = screen.section("AssetSendConfirmDialog(", "onCancel")
-
     private fun confirmationDialog() = screen.section("private fun AssetSendConfirmDialog(", "private fun SendResultBanner(")
 
     private fun send() = viewModel.section("fun sendAssetTransfer(", "sealed class SendState")
 
     @Test fun `the asset confirmation is drawn from the approved object`() {
-        val call = confirmationCall()
-        assertTrue("the confirmation's quantity is not the approved object's text", call.contains("quantityText = approved.amountText"))
-        assertTrue("the confirmation's cost rows are not worked out from the approved units", call.contains("quantityUnits = approved.units"))
-        assertTrue("the confirmation's address is not the approved object's", call.contains("recipientAddress = approved.address"))
-        assertTrue("the confirmation's fee is not the approved object's", call.contains("feeSats = approved.feeEstimateSats"))
-        assertTrue("the send is not handed the approved object", call.contains("viewModel.sendAssetTransfer(approved)"))
+        val confirmation = screenGate.theCall("AssetSendConfirmDialog")
+        val shown = confirmation.named
+        assertEquals("the confirmation's quantity is not the approved object's text", "approved.amountText", shown["quantityText"])
+        assertEquals("the confirmation's cost rows are not worked out from the approved units", "approved.units", shown["quantityUnits"])
+        assertEquals("the confirmation's address is not the approved object's", "approved.address", shown["recipientAddress"])
+        assertEquals("the confirmation's fee is not the approved object's", "approved.feeEstimateSats", shown["feeSats"])
+        val handOff = screenGate.theCall("viewModel.sendAssetTransfer")
+        assertEquals("the send is not handed the approved object, and only that", listOf("approved"), handOff.arguments)
+        assertTrue("the send is not made from the confirmation", handOff.range.first in confirmation.range)
+        val call = confirmation.text
         for (field in listOf("quantityInput", "recipientAddress = recipientAddress", "feeRatePerKb", "estimatedFeeSat")) {
             assertFalse("the confirmation reads `$field` instead of what was approved", call.contains(field))
         }
@@ -81,8 +109,18 @@ class AssetSendBindingWiringTest {
         for (reRead in listOf("quantityInput", "AssetQuantity.parse(", "parseQuantityToInternal(", "toBigDecimal")) {
             assertFalse("the dialog reads `$reRead`: what it shows must come from the approval", dialog.contains(reRead))
         }
-        assertTrue("the dialog's quantity row is not the approved text", dialog.contains("quantityText"))
-        assertTrue("the dialog's cost rows are not worked out from the approved units", dialog.contains("units = quantityUnits"))
+        val declared = screenGate.range("private fun AssetSendConfirmDialog(", "private fun SendResultBanner(")!!
+        val quantityRows = screenGate.calls("AssetConfirmRow", within = declared)
+            .filter { it.named["label"] == "stringResource(R.string.as_quantity)" }
+        assertEquals("the dialog has ${quantityRows.size} quantity rows — the gate reads exactly one", 1, quantityRows.size)
+        assertEquals(
+            "the dialog's quantity row is not the approved text, as it stands, and the asset's symbol",
+            "quantityText + \" \" + (asset.metadata?.symbol ?: stringResource(R.string.as_tokens))",
+            quantityRows.single().named["value"],
+        )
+        val costRows = screenGate.calls("CostPreviewCard", within = declared)
+        assertEquals("the dialog works its cost rows out ${costRows.size} times — the gate reads exactly one", 1, costRows.size)
+        assertEquals("the dialog's cost rows are not worked out from the approved units", "quantityUnits", costRows.single().named["units"])
     }
 
     @Test fun `the asset send takes the approved object and reads no field`() {
@@ -99,16 +137,22 @@ class AssetSendBindingWiringTest {
             "sendAssetTransfer() does not take the approved object",
             send.contains("fun sendAssetTransfer(approved: ApprovedSend.Asset)"),
         )
-        val handedOn = listOf(
-            "assetId = approved.assetId", "quantity = approved.units",
-            "toAddress = approved.address", "feePerKb = approved.feePerKb",
+        val vm = viewModelGate
+        val handedOn = vm.theCall("assetManager.sendAsset")
+        assertTrue("the asset manager is not called from sendAssetTransfer()", handedOn.range.first in vm.sendRange())
+        assertEquals(
+            "sendAssetTransfer() does not hand on what was approved, each value whole",
+            mapOf(
+                "assetId" to "approved.assetId", "quantity" to "approved.units",
+                "toAddress" to "approved.address", "feePerKb" to "approved.feePerKb",
+            ),
+            handedOn.named,
         )
-        for (use in handedOn) {
-            assertTrue("sendAssetTransfer() does not hand on `$use`", send.contains(use))
-        }
+        assertEquals("sendAssetTransfer() hands on something that was not approved", 4, handedOn.arguments.size)
+        val otherScale = vm.theBranchOn("divisibilityOf(asset) != approved.divisibility", within = vm.sendRange())
         assertTrue(
-            "sendAssetTransfer() does not hold the asset's divisibility against the one the approval was read and shown at",
-            send.contains("divisibilityOf(asset) != approved.divisibility"),
+            "sendAssetTransfer() does not stop when the asset's divisibility is not the one the approval was read and shown at",
+            Regex("""\breturn\b""").containsMatchIn(vm.code.substring(otherScale)) && otherScale.last < handedOn.range.first,
         )
     }
 
@@ -117,23 +161,30 @@ class AssetSendBindingWiringTest {
         val send = send()
         val claim = send.indexOf("confirmation.claim(approved)")
         assertTrue("sendAssetTransfer() does not ask whether this approval is the one on screen", claim >= 0)
+        val notOnScreen = viewModelGate.run { theBranchOn("!confirmation.claim(approved)", within = sendRange()) }
         assertTrue(
             "sendAssetTransfer() does not stop when this approval is not the one on screen",
-            Regex("""if \(!confirmation\.claim\(approved\)\) \{[^}]*\breturn\b""").containsMatchIn(send),
+            Regex("""\breturn\b""").containsMatchIn(viewModel.substring(notOnScreen)),
         )
-        for (later in listOf("selectedAsset.value", "_ruleCheck.value", "_sendState.value = SendState.Sending", "assetManager.sendAsset(")) {
+        for (later in listOf("selectedAsset.value", "_ruleCheck.value", "_sendState.value = SendState.Sending")) {
             val at = send.indexOf(later)
             assertTrue("cannot find `$later` in sendAssetTransfer() — the gate is blind, not clean", at >= 0)
             assertTrue("sendAssetTransfer() reaches `$later` before it has asked whether this approval is the one on screen", claim < at)
         }
+        assertTrue(
+            "sendAssetTransfer() reaches the asset manager before it has asked whether this approval is the one on screen",
+            viewModelGate.run { notOnScreen.last < theCall("assetManager.sendAsset").range.first },
+        )
     }
 
     @Test fun `Review is the one place the quantity text becomes a send`() {
         val click = screen.reviewClick()
-        assertTrue(
-            "Review does not hand the form to the view model to be approved",
-            click.contains("viewModel.requestConfirm(recipientAddress, quantityInput)"),
+        val request = screenGate.theCall("viewModel.requestConfirm")
+        assertEquals(
+            "Review does not hand the form, as it stands, to the view model to be approved",
+            listOf("recipientAddress", "quantityInput"), request.arguments,
         )
+        assertTrue("the form is not handed over from Review's click", click.contains(request.text))
         for (own in listOf("AssetQuantity.parse(", "parseQuantityToInternal(", "toBigDecimal", "showConfirmDialog")) {
             assertFalse("Review decides with `$own` instead of the approval", click.contains(own))
         }
@@ -169,18 +220,29 @@ class AssetSendBindingWiringTest {
      * before the view model is called, and the transfer-rule check before the asset manager is.
      */
     @Test fun `the credential prompt and the transfer-rule check still come before the send`() {
-        val call = confirmationCall()
-        val prompt = call.indexOf("spendAuth.authorize(")
-        val handOff = call.indexOf("viewModel.sendAssetTransfer(")
-        assertTrue("cannot find the credential prompt or the send in the confirmation — the gate is blind, not clean", prompt >= 0 && handOff >= 0)
-        assertTrue("the send is called before the credential prompt", prompt < handOff)
+        val ui = screenGate
+        val confirmation = ui.theCall("AssetSendConfirmDialog")
+        val prompt = ui.theCall("spendAuth.authorize")
+        val handOff = ui.theCall("viewModel.sendAssetTransfer")
+        assertTrue("the credential prompt is not the confirmation's", prompt.range.first in confirmation.range)
+        val allowed = ui.guardedBy(prompt)
+        assertTrue("the credential prompt's answer is not, by itself, the condition the send stands under", allowed != null)
+        assertTrue(
+            "the send does not stand under the credential prompt's answer",
+            handOff.range.first in allowed!! && handOff.range.last in allowed,
+        )
 
-        val send = send()
-        val ruleCheck = send.indexOf("_ruleCheck.value.allowsSend")
-        val manager = send.indexOf("assetManager.sendAsset(")
-        assertTrue("cannot find the transfer-rule check or the asset manager call — the gate is blind, not clean", ruleCheck >= 0 && manager >= 0)
-        assertTrue("the asset manager is called before the transfer-rule check", ruleCheck < manager)
-        assertTrue("Review is no longer held back by the transfer-rule check", screen.contains("enabled = ruleCheck.allowsSend"))
+        val vm = viewModelGate
+        val manager = vm.theCall("assetManager.sendAsset")
+        val refused = vm.theBranchOn("!_ruleCheck.value.allowsSend", within = vm.sendRange())
+        assertTrue(
+            "sendAssetTransfer() does not stop, before the asset manager is called, when the transfer-rule check does not allow a send",
+            Regex("""\breturn\b""").containsMatchIn(vm.code.substring(refused)) && refused.last < manager.range.first,
+        )
+        val request = ui.theCall("viewModel.requestConfirm")
+        val button = ui.calls("Button").filter { request.range.first in it.range }
+        assertEquals("cannot find the Review button — the gate is blind, not clean", 1, button.size)
+        assertEquals("Review is no longer held back by the transfer-rule check alone", "ruleCheck.allowsSend", button.single().named["enabled"])
     }
 
     @Test fun `the gate can see the files it reads`() {

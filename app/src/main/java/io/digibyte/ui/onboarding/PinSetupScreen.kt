@@ -45,6 +45,16 @@ private const val PIN_LENGTH = 6
 
 private enum class PinStep { ENTER, CONFIRM, BIOMETRIC }
 
+/**
+ * The wallet manager for PIN setup's create-or-skip decision. The screen is reached from the
+ * onboarding graph and from the lost-PIN start destination, and neither hands it one.
+ */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface PinSetupEntryPoint {
+    fun walletManager(): io.digibyte.core.WalletManager
+}
+
 @Composable
 fun PinSetupScreen(
     navController: NavController,
@@ -54,6 +64,11 @@ fun PinSetupScreen(
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
+    val walletManager = remember {
+        dagger.hilt.android.EntryPointAccessors
+            .fromApplication(context.applicationContext, PinSetupEntryPoint::class.java)
+            .walletManager()
+    }
 
     val pendingLegacyRecovery by viewModel.pendingLegacyRecovery.collectAsStateWithLifecycle()
 
@@ -132,12 +147,15 @@ fun PinSetupScreen(
                                                             firstPin = ""
                                                         }
                                                     }
-                                                    // If wallet already exists (recovery flow or
-                                                    // recomposition), skip creation and proceed.
-                                                    if (io.digibyte.core.bridge.NativeBridge.isWalletLoaded()) {
-                                                        afterWalletReady(true)
-                                                    } else {
+                                                    // Create the wallet unless one is already STORED:
+                                                    // the recovery flow stores it before PIN setup, and a
+                                                    // recomposition finds the one made here. Never
+                                                    // decided by what is loaded in memory — after a wipe
+                                                    // in this process that can be the wiped wallet.
+                                                    if (walletManager.pinSetupCreatesWallet()) {
                                                         viewModel.createWallet(afterWalletReady)
+                                                    } else {
+                                                        afterWalletReady(walletManager.isWalletReady())
                                                     }
                                                 } else {
                                                     isPinSaving = false

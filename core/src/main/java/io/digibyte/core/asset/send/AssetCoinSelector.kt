@@ -53,6 +53,10 @@ object AssetCoinSelector {
      *                    outputs. For a single-recipient transfer, this is
      *                    one marker ([DA_MARKER_SATS]); for a multi-recipient
      *                    transfer it's `N × DA_MARKER_SATS`.
+     * @param assetChangeMarkerSats The sender's asset-change marker. Budgeted when, and only
+     *                    when, the chosen asset inputs hold more than [assetNeeded] — the one
+     *                    case in which the send emits that marker. What is budgeted is what is
+     *                    emitted, so the DGB change carries everything but the fee.
      */
     fun select(
         assetUtxos: List<UtxoEntity>,
@@ -60,10 +64,12 @@ object AssetCoinSelector {
         assetNeeded: Long,
         feeSats: Long,
         markerOutputSats: Long,
+        assetChangeMarkerSats: Long = 0L,
     ): Result {
         require(assetNeeded > 0) { "assetNeeded must be positive" }
         require(feeSats >= 0) { "feeSats must be non-negative" }
         require(markerOutputSats >= 0) { "markerOutputSats must be non-negative" }
+        require(assetChangeMarkerSats >= 0) { "assetChangeMarkerSats must be non-negative" }
 
         // 1. Pick asset UTXOs — largest first until we cover the quantity.
         //    (Multi-asset UTXOs aren't a thing in DA2's common case; assume
@@ -80,17 +86,26 @@ object AssetCoinSelector {
             return Result.InsufficientAsset(required = assetNeeded, available = assetSum)
         }
 
-        // 2. The asset inputs also contribute their marker sats toward the
-        //    tx's DGB balance — we don't need to fund the full marker-output
-        //    total from plain DGB, only the delta.
+        // 2. The markers this send emits: the recipients' always, the asset-change marker only
+        //    when units come back. The asset inputs also contribute their marker sats toward
+        //    the tx's DGB balance — we don't need to fund the full marker-output total from
+        //    plain DGB, only the delta.
+        val assetChangeQty = assetSum - assetNeeded
+        val markersEmitted = markerOutputSats + (if (assetChangeQty > 0L) assetChangeMarkerSats else 0L)
         val assetInputSats = pickedAsset.sumOf { it.satoshis }
-        val dgbRequired = (feeSats + markerOutputSats - assetInputSats).coerceAtLeast(0L)
+        val dgbRequired = (feeSats + markersEmitted - assetInputSats).coerceAtLeast(0L)
 
-        // 3. Pick DGB UTXOs — largest first until we cover the required sats.
+        // 3. Pick DGB UTXOs — largest first until we cover the required sats. The two pools
+        //    come from separate sources (Room and the native wallet), so an outpoint in the
+        //    asset pool is never also offered as a fee coin, and each fee coin is offered once.
+        val assetOutpoints = assetUtxos.mapTo(HashSet()) { it.outpointKey() }
+        val feeCoins = dgbUtxos
+            .filter { it.outpointKey() !in assetOutpoints }
+            .distinctBy { it.outpointKey() }
         val pickedDgb = mutableListOf<UtxoEntity>()
         var dgbSum = 0L
         if (dgbRequired > 0) {
-            for (u in dgbUtxos.sortedByDescending { it.satoshis }) {
+            for (u in feeCoins.sortedByDescending { it.satoshis }) {
                 if (dgbSum >= dgbRequired) break
                 pickedDgb += u
                 dgbSum += u.satoshis
@@ -101,8 +116,7 @@ object AssetCoinSelector {
         }
 
         val totalInSats = assetInputSats + dgbSum
-        val dgbChangeSats = totalInSats - feeSats - markerOutputSats
-        val assetChangeQty = assetSum - assetNeeded
+        val dgbChangeSats = totalInSats - feeSats - markersEmitted
 
         return Result.Ok(
             assetInputs = pickedAsset.toList(),
@@ -111,6 +125,13 @@ object AssetCoinSelector {
             dgbChangeSats = dgbChangeSats,
         )
     }
+
+    /** True when no two of [inputs] name the same outpoint (txid in any spelling, and output
+     *  index). The send checks this on the exact list it signs; the bridge checks it again. */
+    fun outpointsDistinct(inputs: List<UtxoEntity>): Boolean =
+        inputs.mapTo(HashSet()) { it.outpointKey() }.size == inputs.size
+
+    private fun UtxoEntity.outpointKey(): Pair<String, Int> = txid.lowercase() to vout
 
     sealed class Result {
         data class Ok(

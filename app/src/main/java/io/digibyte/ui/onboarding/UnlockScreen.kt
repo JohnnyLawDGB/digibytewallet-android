@@ -42,6 +42,15 @@ import kotlinx.coroutines.withContext
 
 private const val UNLOCK_PIN_LENGTH = 6
 
+/**
+ * How many times this screen retries an owed wipe before it stops holding itself for it. A wipe
+ * that will not complete must not be a screen that never opens: at the bound the screen either
+ * offers onboarding, when no wallet record is left on the device, or takes the PIN again over the
+ * wallet that is still there. The wipe stays owed either way — the launch backstop and each later
+ * entry to this screen retry it — so the bound costs a retry, not the wipe.
+ */
+private const val OWED_WIPE_HOLD_ATTEMPTS = 3
+
 /** Format a remaining-lockout duration (ms) as M:SS for the countdown. */
 private fun formatLockCountdown(remainingMs: Long): String {
     val totalSec = ((remainingMs + 999L) / 1000L).coerceAtLeast(0L) // round up
@@ -65,6 +74,7 @@ fun UnlockScreen(
     val unlockFailedMsg = stringResource(R.string.unlock_err_failed)
     val deviceLockRemovedMsg = stringResource(R.string.unlock_device_lock_removed)
     val wipingMsg = stringResource(R.string.unlock_wiping)
+    val wipeIncompleteMsg = stringResource(R.string.wipe_incomplete)
     val attemptsLeftFmt = stringResource(R.string.unlock_attempts_left)
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -84,6 +94,71 @@ fun UnlockScreen(
     // "Unlocking…" indicator is shown while this is in flight.
     var isUnlocking by remember { mutableStateOf(false) }
     val biometricAvailable = remember { activity?.let { biometricAuth.canAuthenticate(it) } ?: false }
+    // True while an owed wipe is running, so a second entry cannot start another beside it.
+    var isWiping by remember { mutableStateOf(false) }
+    // Attempts this screen has made at an owed wipe, and whether it has stood down (below).
+    var owedWipeAttempts by remember { mutableStateOf(0) }
+    var owedWipeStoodDown by remember { mutableStateOf(false) }
+
+    // A wipe is OWED from the moment wipe-after-N trips (PinManager persists pin_wipe_pending)
+    // until WalletManager.wipeThenReleasePin finds the seed verifiably gone. While it is owed this
+    // screen takes no PIN and no biometric — every attempt, and every entry to the screen, retries
+    // the wipe — and because the PIN store is released only after a verified wipe, PIN setup is
+    // never offered over a wallet that was not wiped.
+    //
+    // The hold is BOUNDED, and that bound comes first: a store that will not take its write must
+    // never add up to a device that can no longer be opened at all. After
+    // OWED_WIPE_HOLD_ATTEMPTS attempts that could not be verified, the screen asks
+    // WalletManager.releaseOwedWipeIfNoWalletIsLeft and then either offers onboarding (no wallet
+    // record is left for the owed wipe to hold this screen for) or stands down and takes the PIN
+    // again over the wallet that is still there. The wipe stays owed either way, so the launch
+    // backstop and every later entry to this screen retry it.
+    fun owedWipeHoldsTheScreen(): Boolean = !owedWipeStoodDown && pinManager.isWipePending()
+
+    suspend fun runOwedWipe() {
+        if (isWiping) return
+        isWiping = true
+        currentInput = ""
+        errorMessage = wipingMsg
+        try {
+            // The wipe and its hand-over run to their end even if this screen goes away meanwhile.
+            // Once the wipe has removed the seed it does not come back from the hand-over: this
+            // process ends and a fresh one starts on onboarding, which finishes and reports whatever
+            // the wipe left undone. Everything below is for a wipe that could not remove the seed.
+            val incomplete = io.digibyte.FreshStartAfterWipe.wipeThenHandOver(context) {
+                walletManager.wipeThenReleasePin(pinManager)
+            }
+            if (!incomplete) return
+            owedWipeAttempts++
+            val walletGone = walletManager.walletState.value is io.digibyte.core.WalletState.NoWallet
+            if (walletGone) {
+                // No wallet is left here for a credential to open, so onboarding; leaving this
+                // screen takes its error line with it, hence the notice.
+                io.digibyte.ui.components.showWipeIncompleteNotice(context)
+                navController.navigate("onboarding") {
+                    popUpTo(0) { inclusive = true }
+                }
+                return
+            }
+            errorMessage = wipeIncompleteMsg
+            if (owedWipeAttempts >= OWED_WIPE_HOLD_ATTEMPTS) {
+                val nothingLeft = withContext(Dispatchers.IO) {
+                    walletManager.releaseOwedWipeIfNoWalletIsLeft(pinManager)
+                }
+                if (nothingLeft) {
+                    io.digibyte.ui.components.showWipeIncompleteNotice(context)
+                    navController.navigate("onboarding") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                } else {
+                    // The wallet is still here and still opens with its PIN. Stand down so it can.
+                    owedWipeStoodDown = true
+                }
+            }
+        } finally {
+            isWiping = false
+        }
+    }
 
     // Shared unlock body for all three entry points below (auto-biometric,
     // PIN entry, manual biometric button). Runs the wallet-ready check off
@@ -100,6 +175,8 @@ fun UnlockScreen(
     //  - isUnlocking is always reset in `finally` so the keypad/biometric
     //    button never get stuck disabled if navigation is skipped.
     suspend fun performUnlockAndNavigate(isAuthRetry: Boolean = false) {
+        // No credential — biometric included — opens a wallet whose wipe is owed and still held.
+        if (owedWipeHoldsTheScreen()) { runOwedWipe(); return }
         isUnlocking = true
         // Any successful unlock — PIN or BIOMETRIC — clears the PIN rate-limit
         // counter. Critical for the biometric path: a legit user who unlocks with a
@@ -107,9 +184,15 @@ fun UnlockScreen(
         // (The PIN path already reset via verifyPin()==Success; this is idempotent.)
         pinManager.onUnlockSuccess()
         try {
-            withContext(Dispatchers.IO) {
-                if (walletManager.isWalletReady()) {
+            val opened = withContext(Dispatchers.IO) {
+                if (!walletManager.hasSavedWallet()) {
+                    // No wallet is stored on this device, so a credential opens nothing — even
+                    // when this process still holds the one a wipe that could not be verified
+                    // took off the device. (A wallet whose seed is still here reads as stored.)
+                    false
+                } else if (walletManager.isWalletReady()) {
                     walletManager.unlockFromUi()
+                    true
                 } else {
                     // Restore-crash bracket: BootGuard lives in the app module and
                     // WalletManager.restoreFromDisk() is core (core cannot depend on
@@ -122,6 +205,16 @@ fun UnlockScreen(
                     BootGuard.beginRestore(context)
                     walletManager.restoreFromDisk()
                 }
+            }
+            if (!opened) {
+                // The credential was right and the wallet still did not load, so there is
+                // nothing behind this screen to show. (After a wipe that could not remove the
+                // seed, the stood-down PIN does open it: a store whose write did not land still
+                // reads as what its file holds.) Say so and keep the screen, rather than
+                // navigating to a wallet with nothing in it — from which the only way back is
+                // to kill the app.
+                errorMessage = if (owedWipeStoodDown) wipeIncompleteMsg else unlockFailedMsg
+                return
             }
             navController.navigate("wallet") {
                 popUpTo("unlock") { inclusive = true }
@@ -161,6 +254,16 @@ fun UnlockScreen(
     // finger — a legit owner shouldn't be locked out of their own fingerprint by
     // someone else fat-fingering the PIN.
     LaunchedEffect(Unit) {
+        // An owed wipe comes first: retry it on entry instead of prompting for anything.
+        if (owedWipeHoldsTheScreen()) { runOwedWipe(); return@LaunchedEffect }
+        // No wallet is stored for a credential to open, so onboarding — for instance when the task
+        // is brought back, with this screen on it, in the fresh process a verified wipe started.
+        if (!walletManager.hasSavedWallet()) {
+            navController.navigate("onboarding") {
+                popUpTo(0) { inclusive = true }
+            }
+            return@LaunchedEffect
+        }
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
             if (result is BiometricResult.Success) {
@@ -192,6 +295,14 @@ fun UnlockScreen(
     }
 
     fun attemptUnlock(pin: String) {
+        // While a wipe is owed and this screen still holds itself for it, the entry is not checked
+        // against the PIN at all — so it can neither unlock the wallet nor touch the attempt
+        // counters — it retries the wipe.
+        if (owedWipeHoldsTheScreen()) {
+            currentInput = ""
+            scope.launch { runOwedWipe() }
+            return
+        }
         when (val result = pinManager.verifyPin(pin)) {
             is PinVerifyResult.Success -> {
                 scope.launch {
@@ -214,6 +325,12 @@ fun UnlockScreen(
                     errorMessage = attemptsLeftFmt.format(before)
                 }
             }
+            is PinVerifyResult.Unavailable -> {
+                // The PIN could not be checked, so no attempt was used and no countdown started:
+                // say exactly that and take the PIN again.
+                currentInput = ""
+                errorMessage = context.getString(R.string.pin_check_unavailable)
+            }
             is PinVerifyResult.LockedOut -> {
                 currentInput = ""
                 lockedUntil = result.until
@@ -224,17 +341,9 @@ fun UnlockScreen(
                 // Wipe-after-N tripped: PinManager already persisted pin_wipe_pending
                 // (a kill here completes the wipe next launch). The caller owns the
                 // destructive wallet wipe — PinManager can only clear dgb_pin_store.
+                // The PIN store is released by wipeThenReleasePin, only after a verified wipe.
                 currentInput = ""
-                errorMessage = wipingMsg
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        walletManager.wipeWallet()
-                        pinManager.clearPin() // clears counters + pin_wipe_pending
-                    }
-                    navController.navigate("onboarding") {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
+                scope.launch { runOwedWipe() }
             }
         }
     }

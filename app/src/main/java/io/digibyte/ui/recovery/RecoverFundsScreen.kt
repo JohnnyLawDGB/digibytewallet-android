@@ -86,6 +86,22 @@ fun RecoverFundsScreen(
         if (mode == RecoverMode.ThisWallet && state is RecoverFundsViewModel.UiState.Idle) vm.classify()
     }
 
+    // This wallet's seed key needs a fresh device authentication: the same device-credential
+    // prompt the unlock screen uses, its outcome handed back to the ViewModel, which runs the
+    // step once more when it is confirmed. No activity to host the prompt counts as declined.
+    // Each request is a new state: asking again from the request's own body restarts this
+    // effect, which drops any wait still pending and shows the prompt anew.
+    val deviceCredential = remember { io.digibyte.core.security.BiometricAuth() }
+    LaunchedEffect(state) {
+        if (state is RecoverFundsViewModel.UiState.NeedsDeviceCredential) {
+            val activity = context as? androidx.fragment.app.FragmentActivity
+            val confirmed = activity != null &&
+                deviceCredential.authenticateDeviceCredential(activity) is
+                    io.digibyte.core.security.BiometricResult.Success
+            vm.onDeviceCredentialResult(confirmed)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -147,6 +163,10 @@ fun RecoverFundsScreen(
                         else stringResource(R.string.rf_scanning_phrase)
                     )
                     is RecoverFundsViewModel.UiState.Sweeping -> ScanningBody(stringResource(R.string.rf_sweeping))
+                    // The system's credential prompt is normally on top of this. When the system
+                    // showed none, nothing will answer, so the body offers the prompt again.
+                    is RecoverFundsViewModel.UiState.NeedsDeviceCredential ->
+                        CredentialBody(onAskAgain = { vm.askDeviceCredentialAgain() })
                     // Its own screen because it is the one step that waits on a confirmation —
                     // up to a few minutes. Reusing "Sweeping…" would look frozen, and a user
                     // watching a stalled spinner over their own coins force-quits.
@@ -173,7 +193,11 @@ fun RecoverFundsScreen(
                         if (mode == RecoverMode.AnotherPhrase)
                             PhraseEntry(phrase, { phrase = it }, error = s.reason, passphrase = passphrase,
                                 onPassphrase = { passphrase = it }) { vm.classifyForeign(phrase, passphrase) }
-                        else ErrorBody(reason = s.reason, onRetry = { vm.classify() })
+                        // A key the device invalidated for good cannot be read by trying again.
+                        else ErrorBody(
+                            reason = s.reason,
+                            onRetry = if (RecoverFundsViewModel.SeedReason.offersRetry(s.reason)) ({ vm.classify() }) else null,
+                        )
                     else -> // Idle
                         if (mode == RecoverMode.AnotherPhrase)
                             PhraseEntry(phrase, { phrase = it }, error = null, passphrase = passphrase,
@@ -816,6 +840,31 @@ private fun DigiDollarFoundCard(
     }
 }
 
+/** One line of the DigiDollar result card. [cents] is unused for [Kind.UNREACHABLE]. */
+internal data class DigiDollarOutcomeLine(val kind: Kind, val cents: Long = 0L) {
+    enum class Kind { MOVED, LEFT_BEHIND, UNREACHABLE }
+}
+
+/**
+ * What the DigiDollar result card says, top to bottom.
+ *
+ * Moved and left behind are separate figures. The moved line carries what the broadcast transfer
+ * carried, never the total found, and anything found beyond that gets its own line — so a move
+ * that carried part of the balance reads as partial. The card prints amounts only from these
+ * lines, which is what lets the rule be checked without a UI harness.
+ */
+internal fun digiDollarOutcomeLines(
+    dd: io.digibyte.core.recovery.DigiDollarTransferService.Result,
+): List<DigiDollarOutcomeLine> = buildList {
+    if (dd.moved) add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.MOVED, dd.movedCents))
+    if (dd.leftBehindCents > 0L) {
+        add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, dd.leftBehindCents))
+    }
+    // At least one address could not be asked about. Said beside whatever else is reported, so
+    // no figure above stands for the whole wallet — and never shown as "holds none".
+    if (!dd.reachable) add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.UNREACHABLE))
+}
+
 /**
  * What became of the wallet's DigiDollar.
  *
@@ -834,53 +883,55 @@ private fun DigiDollarSection(
         Column(modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)) {
-            val amount = io.digibyte.core.recovery.DigiDollarHolding.formatCents(dd.cents)
-            when {
-                dd.moved -> {
-                    Text(
+            digiDollarOutcomeLines(dd).forEachIndexed { i, line ->
+                if (i > 0) Spacer(Modifier.height(6.dp))
+                val amount = io.digibyte.core.recovery.DigiDollarHolding.formatCents(line.cents)
+                when (line.kind) {
+                    DigiDollarOutcomeLine.Kind.MOVED -> Text(
                         text = stringResource(R.string.rf_dd_moved, amount),
                         color = SUCCESS_GREEN,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                }
-                !dd.reachable && !dd.hasDollars -> {
                     // Could not ask. Never reported as "holds none" — the wallet may hold plenty.
-                    Text(
+                    DigiDollarOutcomeLine.Kind.UNREACHABLE -> Text(
                         text = stringResource(R.string.rf_dd_unreachable),
                         color = AMBER,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                }
-                else -> {
-                    Text(
-                        text = stringResource(R.string.rf_dd_left_behind, amount),
-                        color = AMBER,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    // The fee floor is the refusal a real user actually hits, so it gets a
-                    // sentence in their language and in DGB. Everything else falls back to the
-                    // planner's own words — imperfect, but never silent.
-                    val reason = if (dd.refusalReason ==
-                        io.digibyte.core.recovery.DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR
-                    ) {
-                        stringResource(
-                            R.string.rf_dd_fee_floor,
-                            formatSatToDgb(io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS),
-                            formatSatToDgb(
-                                (io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS -
-                                    dd.shortfallSat).coerceAtLeast(0L)
-                            ),
-                        )
-                    } else dd.failureReason
-                    reason?.let {
-                        Spacer(Modifier.height(6.dp))
+                    DigiDollarOutcomeLine.Kind.LEFT_BEHIND -> {
                         Text(
-                            text = it,
-                            color = MUTED,
-                            style = MaterialTheme.typography.bodySmall,
+                            text = stringResource(R.string.rf_dd_left_behind, amount),
+                            color = AMBER,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
                         )
+                        // The reason sits directly beneath the figure it explains.
+                        if (!dd.moved) {
+                            // The fee floor is the refusal a real user actually hits, so it gets
+                            // a sentence in their language and in DGB. Everything else falls back
+                            // to the refusal's own English — imperfect, but never silent.
+                            val reason = if (dd.refusalReason ==
+                                io.digibyte.core.recovery.DigiDollarTransferPlan.Reason.BELOW_FEE_FLOOR
+                            ) {
+                                stringResource(
+                                    R.string.rf_dd_fee_floor,
+                                    formatSatToDgb(io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS),
+                                    formatSatToDgb(
+                                        (io.digibyte.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS -
+                                            dd.shortfallSat).coerceAtLeast(0L)
+                                    ),
+                                )
+                            } else dd.failureReason
+                            reason?.let {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = it,
+                                    color = MUTED,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1091,8 +1142,9 @@ private fun HeldBackNote(title: String, body: String, outpoints: List<String>) {
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
+/** [onRetry] null: no Retry is drawn, for an error that trying again cannot clear. */
 @Composable
-private fun ErrorBody(reason: String, onRetry: () -> Unit) {
+private fun ErrorBody(reason: String, onRetry: (() -> Unit)?) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1120,9 +1172,49 @@ private fun ErrorBody(reason: String, onRetry: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
+        if (onRetry != null) {
+            Spacer(Modifier.height(28.dp))
+            Button(
+                onClick = onRetry,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = ACCENT, contentColor = Color(0xFF0A1628))
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.seed_retry), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+// ── Device credential ─────────────────────────────────────────────────────────
+
+/** Behind the device-credential prompt: what the prompt is for, and a way to show it again. */
+@Composable
+private fun CredentialBody(onAskAgain: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Default.Lock,
+            contentDescription = null,
+            tint = ACCENT,
+            modifier = Modifier.size(56.dp)
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.rf_err_seed),
+            color = MUTED,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
         Spacer(Modifier.height(28.dp))
         Button(
-            onClick = onRetry,
+            onClick = onAskAgain,
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = ACCENT, contentColor = Color(0xFF0A1628))
         ) {
@@ -1144,6 +1236,19 @@ private fun formatSatToDgb(sat: Long): String {
 
 /** Map raw exception/service text to friendlier copy where obviously raw. */
 private fun friendlyErrorReason(
+    res: android.content.res.Resources,
+    reason: String,
+): String = when (reason) {
+    RecoverFundsViewModel.SeedReason.KEY_INVALIDATED ->
+        res.getString(R.string.unlock_device_lock_removed)
+    RecoverFundsViewModel.SeedReason.CREDENTIAL_NOT_CONFIRMED ->
+        res.getString(R.string.rf_err_seed)
+    RecoverFundsViewModel.SeedReason.UNAVAILABLE ->
+        res.getString(R.string.rf_err_seed)
+    else -> friendlyRawReason(res, reason)
+}
+
+private fun friendlyRawReason(
     res: android.content.res.Resources,
     reason: String,
 ): String = when {

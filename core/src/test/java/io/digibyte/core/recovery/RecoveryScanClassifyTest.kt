@@ -161,8 +161,10 @@ class RecoveryScanClassifyTest {
         val bip49 = DerivationProfile.BUILT_INS.first { it.addressFormat == 2 }
         val addr = "SXBip49TestKeyDoNotSendRealFunds123"
         val utxo = UtxoEntry("dd".repeat(32), 0, 12_345_000L, addr, 300L, "a914dd87")
+        // The sweep signs only inputs whose parent transaction states their amount and script.
+        val parents = TxBook().apply { honest(utxo) }
         val source = FakeUtxoSource(
-            mapOf(addr to ReconcileResult(listOf(utxo), emptyMap(), 400L)),
+            mapOf(addr to ReconcileResult(listOf(utxo), parents.rawTxs(listOf(utxo)), 400L)),
         )
         val service = RecoveryScanService(source)
 
@@ -185,12 +187,21 @@ class RecoveryScanClassifyTest {
         // UnsatisfiedLinkError. Getting that error is the positive observation — it can only
         // happen if the pre-JNI refusal is gone. A returned "manual recovery" outcome, or any
         // outcome at all, would mean the short-circuit is still there.
-        val sweeper = LegacySweepService(mockk(relaxed = true), mockk(relaxed = true), ForeignUtxoAssetClassifier(
-            // These tests are not about assets; a classifier that answers "plain, and I
-            // could tell" keeps them testing what they test rather than the new guard.
-            fetchRawTx = { byteArrayOf(1) },
-            isAssetTx = { false },
-        ))
+        val sweeper = LegacySweepService(
+            outgoingTxStore = mockk(relaxed = true),
+            walletTxPersister = mockk(relaxed = true),
+            assetClassifier = ForeignUtxoAssetClassifier(
+                // These tests are not about assets; a classifier that answers "plain, and I
+                // could tell" keeps them testing what they test rather than the new guard.
+                fetchRawTx = { byteArrayOf(1) },
+                isAssetTx = { false },
+            ),
+            parents = parents.binding,
+            // The real native signer: reaching it is what this test observes.
+            signSweep = { seed, p, inputs, to, fee -> LegacySweepService.nativeSignSweep(seed, p, inputs, to, fee) },
+            broadcast = { null },
+            log = {},
+        )
         var reachedNative = false
         try {
             sweeper.sweepFromSeed(

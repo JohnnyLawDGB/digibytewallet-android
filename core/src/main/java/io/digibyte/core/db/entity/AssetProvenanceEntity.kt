@@ -18,7 +18,7 @@ data class AssetProvenanceEntity(
     val divisibility: Int,
     val metadataCid: String?,
     /** Opcode byte of the issuance this path walks back to; NULL on rows written before
-     *  migration 10→11 added the column. */
+     *  migration 9→10 added the column. */
     val issuanceOpcode: Int? = null,
     /** Locked flag of that issuance; NULL when [issuanceOpcode] is. */
     val issuanceLocked: Boolean? = null,

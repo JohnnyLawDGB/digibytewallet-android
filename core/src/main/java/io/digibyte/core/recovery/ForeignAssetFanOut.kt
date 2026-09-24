@@ -51,8 +51,13 @@ object ForeignAssetFanOut {
         data object NotNeeded : Result()
         data class Ok(val plan: Plan) : Result()
         /** Stated BEFORE anything is broadcast — discovering this after three assets have moved
-         *  and the money has run out is the worst version of this failure. */
-        data class Refused(val shortfallSat: Long, val detail: String) : Result()
+         *  and the money has run out is the worst version of this failure. [unreadInputs] are
+         *  the plain outpoints ("txid:vout") left out because their parent could not be read. */
+        data class Refused(
+            val shortfallSat: Long,
+            val detail: String,
+            val unreadInputs: List<String> = emptyList(),
+        ) : Result()
     }
 
     /**
@@ -87,12 +92,17 @@ object ForeignAssetFanOut {
      * @param plainInputs   spendable plain-DGB outpoints. Never asset-bearing — the caller passes
      *                      [SweepPartition]'s sweepable set, so an asset can never be split up.
      * @param sourceAddress an address of the wallet being recovered. Every output pays here.
+     * @param unreadInputs  plain outpoints ("txid:vout") the caller left out of [plainInputs]
+     *                      because the transaction each came from could not be read. They are
+     *                      never spent here; a refusal names them, so "this wallet has no DGB"
+     *                      is never said of coins that exist but could not be checked.
      */
     fun plan(
         assetCount: Int,
         plainInputs: List<ForeignAssetTransferPlan.Spend>,
         sourceAddress: String,
         feePerKb: Long,
+        unreadInputs: List<String> = emptyList(),
     ): Result {
         if (assetCount <= 0) return Result.NotNeeded
         // Each asset needs its own output; if there are already enough, splitting would only cost
@@ -109,10 +119,19 @@ object ForeignAssetFanOut {
 
         val needed = perAsset * assetCount + fanOutFee
         if (available < needed) {
+            val detail = if (unreadInputs.isEmpty()) {
+                "moving $assetCount asset(s) needs $needed sats of plain DGB, " +
+                    "this wallet has $available"
+            } else {
+                "moving $assetCount asset(s) needs $needed sats of plain DGB; the plain coins " +
+                    "whose parent transaction was read hold $available, and " +
+                    "${unreadInputs.size} more are held back because the transaction each came " +
+                    "from could not be read: ${unreadInputs.joinToString(limit = 5)}"
+            }
             return Result.Refused(
                 shortfallSat = needed - available,
-                detail = "moving $assetCount asset(s) needs $needed sats of plain DGB, " +
-                    "this wallet has $available",
+                detail = detail,
+                unreadInputs = unreadInputs,
             )
         }
 
