@@ -199,6 +199,7 @@ dependencies {
     // Unit test deps (:app)
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // ── AddressSanitizer runtime staging (opt-in: -PasanNative=true) ─────────────────────────────

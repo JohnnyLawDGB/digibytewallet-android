@@ -11,6 +11,8 @@ import io.digibyte.core.recovery.SeedProvider
 import io.digibyte.core.recovery.SweepDestination
 import io.digibyte.core.recovery.resolve
 import io.digibyte.core.recovery.sweepSet
+import io.digibyte.core.security.KeystoreKeyInvalidatedException
+import io.digibyte.core.security.KeystoreUserAuthRequiredException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -93,6 +95,32 @@ class RecoverFundsViewModel @Inject constructor(
             val digiDollar: io.digibyte.core.recovery.DigiDollarTransferService.Result? = null,
         ) : UiState()
         data class Error(val reason: String) : UiState()
+
+        /**
+         * This wallet's seed key is bound to device authentication and needs a fresh one before
+         * the seed can be read. The screen answers with the device-credential prompt and reports
+         * the outcome through [onDeviceCredentialResult]; the step that asked then runs once more.
+         *
+         * [request] counts the times the prompt was asked for while this step waits
+         * ([askDeviceCredentialAgain]); each is a new state, so the screen shows the prompt anew.
+         */
+        data class NeedsDeviceCredential(val request: Int = 0) : UiState()
+    }
+
+    /** [UiState.Error] reasons for an own-wallet seed that could not be read. The screen maps
+     *  each to its message. */
+    object SeedReason {
+        /** The provider returned no seed, or failed in any way other than the two below. */
+        const val UNAVAILABLE = "Wallet seed unavailable"
+
+        /** The device credential was declined, could not be shown, or did not open the key. */
+        const val CREDENTIAL_NOT_CONFIRMED = "Wallet seed unavailable: device credential not confirmed"
+
+        /** The device lock was removed, so the key is gone for good; only the phrase restores. */
+        const val KEY_INVALIDATED = "Wallet key invalidated: device lock removed"
+
+        /** Whether trying again can succeed after [reason]: not once the key is gone for good. */
+        fun offersRetry(reason: String): Boolean = reason != KEY_INVALIDATED
     }
 
 
@@ -167,9 +195,14 @@ class RecoverFundsViewModel @Inject constructor(
     // is zeroed either way.
     private var activeJob: kotlinx.coroutines.Job? = null
 
+    /** The own-wallet step waiting on [UiState.NeedsDeviceCredential], run once when the
+     *  credential is confirmed. Cleared by the answer and by [reset]. */
+    private var credentialRetry: (() -> Unit)? = null
+
     /** Return to Idle, cancel any in-flight scan/sweep, and drop any held foreign phrase (mode switch / leaving). */
     fun reset() {
         activeJob?.cancel()
+        credentialRetry = null
         pendingForeignMnemonic = null
         pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
@@ -179,13 +212,68 @@ class RecoverFundsViewModel @Inject constructor(
         _state.value = UiState.Idle
     }
 
-    fun classify() {
+    /**
+     * The screen's answer to [UiState.NeedsDeviceCredential]. Confirmed: the step that asked runs
+     * once more. Declined, or no prompt could be shown: a message the user can retry from, and
+     * nothing else runs. An answer that arrives when nothing is waiting is ignored.
+     */
+    fun onDeviceCredentialResult(confirmed: Boolean) {
+        if (_state.value !is UiState.NeedsDeviceCredential) return
+        val retry = credentialRetry
+        credentialRetry = null
+        if (confirmed && retry != null) retry()
+        else _state.value = UiState.Error(SeedReason.CREDENTIAL_NOT_CONFIRMED)
+    }
+
+    /**
+     * The screen's way to show the device-credential prompt again for the step that is waiting,
+     * for when no answer is on its way (the system may decline to show a prompt at all, and then
+     * never answers). The waiting step is kept, and still runs at most once. Ignored when nothing
+     * is waiting.
+     */
+    fun askDeviceCredentialAgain() {
+        val waiting = _state.value as? UiState.NeedsDeviceCredential ?: return
+        _state.value = UiState.NeedsDeviceCredential(waiting.request + 1)
+    }
+
+    /**
+     * Reads THIS wallet's seed for one own-wallet step, or settles the screen and returns null.
+     *
+     * Outside the key's device-authentication window the provider throws by design. The first
+     * time, the screen is asked for the device credential and [retry] runs the same step once
+     * more after it is confirmed ([afterCredential] true). A key still refused after that prompt,
+     * or one the device invalidated for good, ends in a message; every outcome leaves the screen
+     * in a state it can render. No seed exists on those paths; a returned seed is the caller's
+     * to zero.
+     */
+    private fun loadOwnSeed(afterCredential: Boolean, retry: () -> Unit): ByteArray? {
+        val seed = try {
+            seedProvider.loadSeed()
+        } catch (e: KeystoreUserAuthRequiredException) {
+            if (afterCredential) {
+                _state.value = UiState.Error(SeedReason.CREDENTIAL_NOT_CONFIRMED)
+            } else {
+                credentialRetry = retry
+                _state.value = UiState.NeedsDeviceCredential()
+            }
+            return null
+        } catch (e: KeystoreKeyInvalidatedException) {
+            _state.value = UiState.Error(SeedReason.KEY_INVALIDATED)
+            return null
+        } catch (e: Exception) {
+            null
+        }
+        if (seed == null) _state.value = UiState.Error(SeedReason.UNAVAILABLE)
+        return seed
+    }
+
+    fun classify() = classifyOwn(afterCredential = false)
+
+    private fun classifyOwn(afterCredential: Boolean) {
         _state.value = UiState.Classifying
         activeJob = viewModelScope.launch {
-            val seed = seedProvider.loadSeed() ?: run {
-                _state.value = UiState.Error("Wallet seed unavailable")
-                return@launch
-            }
+            val seed = loadOwnSeed(afterCredential) { classifyOwn(afterCredential = true) }
+                ?: return@launch
             try {
                 // seed = 64-byte BIP39 seed (scanFromSeed takes ONLY the seed —
                 // no passphrase argument).
@@ -221,16 +309,27 @@ class RecoverFundsViewModel @Inject constructor(
         }
     }
 
-    fun sweep(destination: SweepDestination) {
+    /**
+     * Turns the chosen sweep destination into an address: this wallet's own receive address, or
+     * a validated external one. Held in one place so unit tests, which run without the native
+     * library, can stand in for the two native calls and exercise everything after them.
+     */
+    internal var destinationResolver: (SweepDestination) -> DestResolution = { d ->
+        d.resolve(
+            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
+            validator = { NativeBridge.isValidAddress(it) },
+        )
+    }
+
+    fun sweep(destination: SweepDestination) = sweepOwn(destination, afterCredential = false)
+
+    private fun sweepOwn(destination: SweepDestination, afterCredential: Boolean) {
         val findings = lastFindings
         if (findings.isEmpty()) {
             _state.value = UiState.Error("Nothing to recover")
             return
         }
-        when (val res = destination.resolve(
-            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
-            validator = { NativeBridge.isValidAddress(it) },
-        )) {
+        when (val res = destinationResolver(destination)) {
             is DestResolution.Invalid -> _state.value = UiState.Error(res.reason)
             is DestResolution.Ok -> {
                 _state.value = UiState.Sweeping
@@ -241,10 +340,9 @@ class RecoverFundsViewModel @Inject constructor(
                 // .shouldApplyOutgoingOverride). External destinations are real sends.
                 val destIsSelf = destination is SweepDestination.Native
                 activeJob = viewModelScope.launch {
-                    val seed = seedProvider.loadSeed() ?: run {
-                        _state.value = UiState.Error("Wallet seed unavailable")
-                        return@launch
-                    }
+                    val seed = loadOwnSeed(afterCredential) {
+                        sweepOwn(destination, afterCredential = true)
+                    } ?: return@launch
                     try {
                         val outcome = withContext(Dispatchers.IO) {
                             runRecovery(seed, findings, res.address, destIsSelf, isForeign = false)
