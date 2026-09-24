@@ -448,6 +448,8 @@
     <string name="sec_confirm_pin">Kumpirmahin ang PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Ilagay ang PIN mo para burahin ang wallet</string>
     <string name="sec_incorrect_pin">Maling PIN</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">Hindi masuri ang PIN sa device na ito ngayon. Walang nabilang. Pakisubukan ulit.</string>
     <string name="auth_node_pair_title">Kumpirmahin ang Pagpapares ng Node</string>
     <string name="auth_node_pair_subtitle">Mag-authenticate para ipares ang node na ito</string>
     <string name="sec_enable">I-enable</string>

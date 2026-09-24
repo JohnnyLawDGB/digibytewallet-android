@@ -448,6 +448,8 @@
     <string name="sec_confirm_pin">PIN की पुष्टि करें</string>
     <string name="sec_confirm_pin_wipe_sub">वॉलेट मिटाने के लिए अपना PIN दर्ज करें</string>
     <string name="sec_incorrect_pin">गलत PIN</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">इस डिवाइस पर अभी PIN की जाँच नहीं हो सकी। कुछ भी गिना नहीं गया। कृपया फिर से कोशिश करें।</string>
     <string name="auth_node_pair_title">नोड पेयरिंग की पुष्टि करें</string>
     <string name="auth_node_pair_subtitle">इस नोड को पेयर करने के लिए प्रमाणित करें</string>
     <string name="sec_enable">सक्षम करें</string>

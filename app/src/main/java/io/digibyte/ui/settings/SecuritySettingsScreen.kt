@@ -280,6 +280,10 @@ fun SecuritySettingsScreen(
                                         pinInput = ""
                                         activeDialog = SecurityDialog.ChangePinNew
                                     }
+                                    is PinVerifyResult.Unavailable -> {
+                                        // Not checked, nothing counted: say so and take the PIN again.
+                                        pinError = appResources.getString(R.string.pin_check_unavailable); pinInput = ""
+                                    }
                                     is PinVerifyResult.LockedOut -> {
                                         pinError = pinLockedCountdownMessage(appResources, r.until); pinInput = ""
                                     }
@@ -423,6 +427,10 @@ fun SecuritySettingsScreen(
                                             }
                                         }
                                     }
+                                    is PinVerifyResult.Unavailable -> {
+                                        // Not checked, nothing counted: say so and take the PIN again.
+                                        pinError = appResources.getString(R.string.pin_check_unavailable); pinInput = ""
+                                    }
                                     is PinVerifyResult.LockedOut -> {
                                         pinError = pinLockedCountdownMessage(appResources, r.until); pinInput = ""
                                     }
@@ -456,6 +464,10 @@ fun SecuritySettingsScreen(
                                     is PinVerifyResult.Success -> {
                                         pinInput = ""
                                         activeDialog = SecurityDialog.WipeConfirmDialog
+                                    }
+                                    is PinVerifyResult.Unavailable -> {
+                                        // Not checked, nothing counted: say so and take the PIN again.
+                                        pinError = appResources.getString(R.string.pin_check_unavailable); pinInput = ""
                                     }
                                     is PinVerifyResult.LockedOut -> {
                                         pinError = pinLockedCountdownMessage(appResources, r.until); pinInput = ""

@@ -448,6 +448,8 @@
     <string name="sec_confirm_pin">PIN の確認</string>
     <string name="sec_confirm_pin_wipe_sub">ウォレットを消去するには PIN を入力してください</string>
     <string name="sec_incorrect_pin">PIN が正しくありません</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">現在、この端末では PIN を確認できませんでした。回数には数えられていません。もう一度お試しください。</string>
     <string name="auth_node_pair_title">ノードのペアリングを確認</string>
     <string name="auth_node_pair_subtitle">このノードをペアリングするには認証してください</string>
     <string name="sec_enable">有効にする</string>

@@ -448,6 +448,8 @@
     <string name="sec_confirm_pin">Xác nhận mã PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Nhập mã PIN để xóa ví</string>
     <string name="sec_incorrect_pin">Mã PIN không đúng</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">Hiện không thể kiểm tra mã PIN trên thiết bị này. Không có gì bị tính. Vui lòng thử lại.</string>
     <string name="auth_node_pair_title">Xác nhận ghép nối nút</string>
     <string name="auth_node_pair_subtitle">Xác thực để ghép nối nút này</string>
     <string name="sec_enable">Bật</string>

@@ -199,6 +199,8 @@ class SpendAuth internal constructor(private val vm: AuthGateViewModel) {
                         input = ""
                         when (val r = vm.verifyPin(entered)) {
                             is PinVerifyResult.Success -> req.outcome.complete(true)
+                            // Not checked, so nothing was counted: say so and keep the keypad open.
+                            is PinVerifyResult.Unavailable -> error = resources.getString(R.string.pin_check_unavailable)
                             is PinVerifyResult.Wrong -> error = r.lockedUntil
                                 ?.let { pinLockedCountdownMessage(resources, it) } ?: incorrectPinMsg
                             is PinVerifyResult.LockedOut -> error = pinLockedCountdownMessage(resources, r.until)

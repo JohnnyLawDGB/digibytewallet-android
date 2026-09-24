@@ -450,6 +450,8 @@
     <string name="sec_confirm_pin">Confirmar PIN</string>
     <string name="sec_confirm_pin_wipe_sub">Introduce tu PIN para borrar la billetera</string>
     <string name="sec_incorrect_pin">PIN incorrecto</string>
+    <!-- PIN keypads: the PIN could not be checked; nothing was counted. Machine-assisted; needs a native speaker. -->
+    <string name="pin_check_unavailable">No se pudo comprobar el PIN en este dispositivo en este momento. No se contó nada. Inténtalo de nuevo.</string>
     <string name="auth_node_pair_title">Confirmar emparejamiento de nodo</string>
     <string name="auth_node_pair_subtitle">Autentícate para emparejar este nodo</string>
     <string name="sec_enable">Activar</string>

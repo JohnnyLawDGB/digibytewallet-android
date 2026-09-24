@@ -39,6 +39,12 @@ sealed interface PinVerifyResult {
      *  the CALLER performs the destructive wallet wipe + routes to onboarding.
      *  A `pin_wipe_pending` flag is set so a kill mid-wipe completes on next launch. */
     data object ShouldWipe : PinVerifyResult
+
+    /** The PIN could not be checked at all: the hashing library failed before any comparison was
+     *  made, so nothing is known about the entry. It is neither a right nor a wrong PIN and NOTHING
+     *  was counted — the failure counter, the cooldown and wipe-after-N are exactly as they were.
+     *  The caller says so and lets the owner enter the PIN again. */
+    data object Unavailable : PinVerifyResult
 }
 
 /**
@@ -62,6 +68,37 @@ interface PinStore {
     fun putBoolean(key: String, value: Boolean)
     fun remove(key: String)
     fun clear()
+}
+
+/**
+ * The Argon2id hash [PinManager] stores and checks PINs with: the PIN's bytes and the salt in, the
+ * 32-byte hash out. It THROWS when the hash cannot be computed (the native library did not load, or
+ * the memory it asks for was not there); [PinManager] reads a throw as "not checked", never as a
+ * wrong PIN. Replacing the hashing library means replacing [SignalArgon2id], and nothing else.
+ */
+internal fun interface Argon2idHash {
+    fun hash(pin: ByteArray, salt: ByteArray): ByteArray
+}
+
+/**
+ * Argon2id through the Signal library, with the parameters per OWASP recommendations for
+ * interactive login (t=3, m=64MiB, p=4):
+ * - iterations: 3
+ * - memory: 65536 KiB (64 MiB)
+ * - parallelism: 4
+ * - hashLength: 32 bytes
+ */
+internal object SignalArgon2id : Argon2idHash {
+    override fun hash(pin: ByteArray, salt: ByteArray): ByteArray =
+        Argon2.Builder(Version.V13)
+            .type(Type.Argon2id)
+            .iterations(3)
+            .memoryCostKiB(65536)
+            .parallelism(4)
+            .hashLength(32)
+            .build()
+            .hash(pin, salt)
+            .hash
 }
 
 /** Production [PinStore] backed by the hardware-keyed `dgb_pin_store`
@@ -110,7 +147,11 @@ private class EncryptedPrefsPinStore(context: Context) : PinStore {
  * [WIPE_THRESHOLD]. See the design spec at
  * `docs/superpowers/specs/2026-07-16-pin-rate-limit-design.md`.
  */
-class PinManager internal constructor(private val store: PinStore) {
+class PinManager internal constructor(
+    private val store: PinStore,
+    /** The one Argon2id call. Production always uses [SignalArgon2id]; tests put a stand-in here. */
+    private val argon2id: Argon2idHash = SignalArgon2id,
+) {
 
     /** Production constructor used by Hilt — backs the store with EncryptedSharedPreferences. */
     constructor(context: Context) : this(EncryptedPrefsPinStore(context))
@@ -186,7 +227,8 @@ class PinManager internal constructor(private val store: PinStore) {
      *  2. Lockout check: `now < lockout_until` ⇒ [PinVerifyResult.LockedOut]
      *     WITHOUT running the (expensive, constant-time) compare — the check
      *     precedes the compare and never branches on PIN correctness.
-     *  3. Compare (constant-time Argon2id/PBKDF2).
+     *  3. Compare (constant-time Argon2id/PBKDF2). A hasher that could not run has
+     *     checked nothing ⇒ [PinVerifyResult.Unavailable], with every counter untouched.
      *  4. Success ⇒ reset counters ⇒ [PinVerifyResult.Success].
      *  5. Fail ⇒ increment; if wipe-after-N && count ≥ threshold ⇒
      *     [PinVerifyResult.ShouldWipe] (+ set wipe-pending); else set the cooldown
@@ -209,11 +251,16 @@ class PinManager internal constructor(private val store: PinStore) {
             return PinVerifyResult.LockedOut(lockoutUntil)
         }
 
-        // 3. Constant-time compare.
-        if (compareConstantTime(pin)) {
-            // 4. Any valid PIN resets the limiter.
-            resetRateLimit()
-            return PinVerifyResult.Success
+        // 3. Constant-time compare. A PIN the hasher could not check is not a wrong PIN: it
+        //    returns before the failure branch, so it counts toward no cooldown and no wipe.
+        when (checkPin(pin)) {
+            PinCheck.MATCH -> {
+                // 4. Any valid PIN resets the limiter.
+                resetRateLimit()
+                return PinVerifyResult.Success
+            }
+            PinCheck.UNAVAILABLE -> return PinVerifyResult.Unavailable
+            PinCheck.MISMATCH -> Unit
         }
 
         // 5. Failure — increment persisted counter.
@@ -277,13 +324,23 @@ class PinManager internal constructor(private val store: PinStore) {
 
     // ── Hashing (unchanged crypto) ────────────────────────────────────────────
 
-    private fun compareConstantTime(pin: String): Boolean {
-        val storedHash = store.getString(KEY_HASH) ?: return false
-        val salt = store.getString(KEY_SALT)?.hexToBytes() ?: return false
+    /** What checking an entry against the stored record established. */
+    private enum class PinCheck {
+        /** The entry hashes to the stored record. */
+        MATCH,
+        /** The entry was checked and does not match. */
+        MISMATCH,
+        /** The hasher could not run, so the entry was not checked at all. */
+        UNAVAILABLE,
+    }
+
+    private fun checkPin(pin: String): PinCheck {
+        val storedHash = store.getString(KEY_HASH) ?: return PinCheck.MISMATCH
+        val salt = store.getString(KEY_SALT)?.hexToBytes() ?: return PinCheck.MISMATCH
         val method = store.getString(KEY_METHOD) ?: "pbkdf2"
-        return when (method) {
+        val matches = when (method) {
             "argon2id" -> {
-                val result = tryArgon2Hash(pin, salt) ?: return false
+                val result = tryArgon2Hash(pin, salt) ?: return PinCheck.UNAVAILABLE
                 constantTimeEquals(result.first.hexToBytes(), storedHash.hexToBytes())
             }
             else -> {
@@ -291,29 +348,18 @@ class PinManager internal constructor(private val store: PinStore) {
                 constantTimeEquals(computedHash, storedHash.hexToBytes())
             }
         }
+        return if (matches) PinCheck.MATCH else PinCheck.MISMATCH
     }
 
     /**
-     * Attempts to hash with Argon2id (Signal library). Returns (hashHex, "argon2id") on success,
-     * null if the native library fails (e.g., unsupported ABI).
-     *
-     * Parameters per OWASP recommendations for interactive login (t=3, m=64MiB, p=4):
-     * - iterations: 3
-     * - memory: 65536 KiB (64 MiB)
-     * - parallelism: 4
-     * - hashLength: 32 bytes
+     * Attempts to hash with Argon2id ([argon2id]). Returns (hashHex, "argon2id") on success,
+     * null if the hash throws (e.g., unsupported ABI, or the 64 MiB it asks for is not
+     * available). This is the one Argon2id call: [setPin] reads null as "write a PBKDF2 record
+     * instead", and [verifyPin] reads it as [PinVerifyResult.Unavailable] — never as a wrong PIN.
      */
     private fun tryArgon2Hash(pin: String, salt: ByteArray): Pair<String, String>? {
         return try {
-            val argon2 = Argon2.Builder(Version.V13)
-                .type(Type.Argon2id)
-                .iterations(3)
-                .memoryCostKiB(65536)
-                .parallelism(4)
-                .hashLength(32)
-                .build()
-            val result = argon2.hash(pin.toByteArray(Charsets.UTF_8), salt)
-            Pair(result.hash.toHex(), "argon2id")
+            Pair(argon2id.hash(pin.toByteArray(Charsets.UTF_8), salt).toHex(), "argon2id")
         } catch (t: Throwable) {
             // Throwable, not Exception: an unsupported ABI (the documented fallback
             // case) surfaces as an UnsatisfiedLinkError / ExceptionInInitializerError

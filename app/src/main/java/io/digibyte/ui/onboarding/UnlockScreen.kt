@@ -325,6 +325,12 @@ fun UnlockScreen(
                     errorMessage = attemptsLeftFmt.format(before)
                 }
             }
+            is PinVerifyResult.Unavailable -> {
+                // The PIN could not be checked, so no attempt was used and no countdown started:
+                // say exactly that and take the PIN again.
+                currentInput = ""
+                errorMessage = context.getString(R.string.pin_check_unavailable)
+            }
             is PinVerifyResult.LockedOut -> {
                 currentInput = ""
                 lockedUntil = result.until
