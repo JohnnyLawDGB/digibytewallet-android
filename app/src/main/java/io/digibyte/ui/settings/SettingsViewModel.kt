@@ -443,11 +443,14 @@ class SettingsViewModel @Inject constructor(
     /**
      * Both the deliberate wipe and a wipe-after-N that trips in one of this screen's PIN
      * dialogs. The PIN store is released by [WalletManager.wipeThenReleasePin], only after a
-     * verified wipe; Success is reported only then. Off the main thread (the native quiesce
-     * can wait on the peer-manager lock) and NonCancellable: the wipe flips the wallet state,
-     * navigation then pops this screen and its ViewModel scope, and the sequence — the verdict
-     * and the message it owes included — must still run to its end. `WipeCallSiteGateTest` keeps
-     * the reporting inside that block.
+     * verified wipe. Off the main thread (the native quiesce can wait on the peer-manager lock)
+     * and NonCancellable: the wipe flips the wallet state, navigation then pops this screen and
+     * its ViewModel scope, and the sequence — the verdict and the message it owes included —
+     * must still run to its end. `WipeCallSiteGateTest` keeps the reporting inside that block.
+     *
+     * Once the wipe has removed the seed it does not come back: [io.digibyte.FreshStartAfterWipe]
+     * ends this process and starts a fresh one on onboarding, which finishes and reports whatever
+     * the wipe left undone. This screen reports a wipe only when the seed is still on the device.
      */
     fun wipeWallet() {
         viewModelScope.launch {
@@ -456,13 +459,13 @@ class SettingsViewModel @Inject constructor(
             // anything left outside would be resumed as cancelled — and the one message a wipe
             // that could not be verified owes its user would be the thing that went missing.
             withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                val verified = walletManager.wipeThenReleasePin(pinManager)
-                if (verified) {
-                    _wipeResult.value = WipeResult.Success
-                } else {
+                val incomplete = io.digibyte.FreshStartAfterWipe.afterWipe(context, walletManager.wipeThenReleasePin(pinManager))
+                if (incomplete) {
                     val localized = io.digibyte.ui.locale.LocaleController.wrap(context)
                     _wipeResult.value = WipeResult.Error(localized.getString(io.digibyte.R.string.wipe_incomplete))
                     io.digibyte.ui.components.showWipeIncompleteNotice(context)
+                } else {
+                    _wipeResult.value = WipeResult.Success
                 }
             }
         }

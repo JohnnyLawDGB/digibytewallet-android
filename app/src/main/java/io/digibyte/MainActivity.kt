@@ -106,20 +106,31 @@ class MainActivity : FragmentActivity() {
         // Rare recovery path; at cold start the native peer manager isn't running yet
         // so this is quick.
         //
-        // The PIN store (hash, counters, pin_wipe_pending) is released by
-        // wipeThenReleasePin and only after the wipe verified. No loop follows from
-        // keeping it: this runs once per launch, and the owed-wipe flag is released as
-        // soon as the seed is verifiably gone. Until then the wallet is still behind
-        // its PIN, and the unlock screen retries the wipe instead of taking one.
-        if (pinManager.isWipePending()) {
-            android.util.Log.w("MainActivity", "pin_wipe_pending set — completing interrupted wallet wipe")
-            val verified = kotlinx.coroutines.runBlocking {
-                walletManager.wipeThenReleasePin(pinManager)
-            }
-            if (!verified) {
-                android.util.Log.e("MainActivity", "backstop wipe could not be verified")
-                io.digibyte.ui.components.showWipeIncompleteNotice(this)
-            }
+        // The PIN store (hash, counters) is released by wipeThenReleasePin only after the
+        // wipe verified, and the owed-wipe flag as soon as the seed is verifiably gone. No
+        // loop follows from keeping them: this runs once per launch. Until the seed is gone
+        // the wallet is still behind its PIN, and the unlock screen retries the wipe instead
+        // of taking one.
+        //
+        // The same backstop finishes an erasure a fresh start left owed: a wipe that removed the seed
+        // but not everything else ends its process, and this launch runs the wipe again before
+        // anything else — never over a wallet stored since. It is asked at every launch for that.
+        //
+        // Once a wipe here has removed the seed it does not come back from the hand-over: this
+        // process ends and a fresh one starts on onboarding — except in the launch that restart
+        // itself made, which runs on whatever its own wipe found (FreshStartAfterWipe). The one
+        // message is shown at most once per launch, including the one the restart carried.
+        val incomplete = FreshStartAfterWipe.atLaunch(
+            this,
+            wipeOwed = pinManager.isWipePending(),
+            walletStored = walletManager.hasSavedWallet(),
+            launch = intent,
+            recreated = savedInstanceState != null,
+            wipe = { kotlinx.coroutines.runBlocking { walletManager.wipeThenReleasePin(pinManager) } },
+        )
+        if (incomplete) {
+            android.util.Log.e("MainActivity", "the wipe owed at this launch did not complete")
+            io.digibyte.ui.components.showWipeIncompleteNotice(this)
         }
 
         // Capture digiid:// deep link from launching intent

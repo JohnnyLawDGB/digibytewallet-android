@@ -121,12 +121,20 @@ fun UnlockScreen(
         currentInput = ""
         errorMessage = wipingMsg
         try {
-            val verified = withContext(Dispatchers.IO) { walletManager.wipeThenReleasePin(pinManager) }
+            // The wipe and its hand-over run to their end even if this screen goes away meanwhile.
+            // Once the wipe has removed the seed it does not come back from the hand-over: this
+            // process ends and a fresh one starts on onboarding, which finishes and reports whatever
+            // the wipe left undone. Everything below is for a wipe that could not remove the seed.
+            val incomplete = io.digibyte.FreshStartAfterWipe.wipeThenHandOver(context) {
+                walletManager.wipeThenReleasePin(pinManager)
+            }
+            if (!incomplete) return
             owedWipeAttempts++
             val walletGone = walletManager.walletState.value is io.digibyte.core.WalletState.NoWallet
             if (walletGone) {
-                // Leaving this screen takes its error line with it, hence the notice.
-                if (!verified) io.digibyte.ui.components.showWipeIncompleteNotice(context)
+                // No wallet is left here for a credential to open, so onboarding; leaving this
+                // screen takes its error line with it, hence the notice.
+                io.digibyte.ui.components.showWipeIncompleteNotice(context)
                 navController.navigate("onboarding") {
                     popUpTo(0) { inclusive = true }
                 }
@@ -177,7 +185,12 @@ fun UnlockScreen(
         pinManager.onUnlockSuccess()
         try {
             val opened = withContext(Dispatchers.IO) {
-                if (walletManager.isWalletReady()) {
+                if (!walletManager.hasSavedWallet()) {
+                    // No wallet is stored on this device, so a credential opens nothing — even
+                    // when this process still holds the one a wipe that could not be verified
+                    // took off the device. (A wallet whose seed is still here reads as stored.)
+                    false
+                } else if (walletManager.isWalletReady()) {
                     walletManager.unlockFromUi()
                     true
                 } else {
@@ -195,11 +208,11 @@ fun UnlockScreen(
             }
             if (!opened) {
                 // The credential was right and the wallet still did not load, so there is
-                // nothing behind this screen to show: a store that did not take its write
-                // reads as empty for the rest of the process while its durable copy is
-                // still there, and that is exactly the state the stood-down hold leaves.
-                // Say so and keep the screen, rather than navigating to a wallet with
-                // nothing in it — from which the only way back is to kill the app.
+                // nothing behind this screen to show. (After a wipe that could not remove the
+                // seed, the stood-down PIN does open it: a store whose write did not land still
+                // reads as what its file holds.) Say so and keep the screen, rather than
+                // navigating to a wallet with nothing in it — from which the only way back is
+                // to kill the app.
                 errorMessage = if (owedWipeStoodDown) wipeIncompleteMsg else unlockFailedMsg
                 return
             }
@@ -243,6 +256,14 @@ fun UnlockScreen(
     LaunchedEffect(Unit) {
         // An owed wipe comes first: retry it on entry instead of prompting for anything.
         if (owedWipeHoldsTheScreen()) { runOwedWipe(); return@LaunchedEffect }
+        // No wallet is stored for a credential to open, so onboarding — for instance when the task
+        // is brought back, with this screen on it, in the fresh process a verified wipe started.
+        if (!walletManager.hasSavedWallet()) {
+            navController.navigate("onboarding") {
+                popUpTo(0) { inclusive = true }
+            }
+            return@LaunchedEffect
+        }
         if (biometricAvailable && activity != null) {
             val result = biometricAuth.authenticate(activity)
             if (result is BiometricResult.Success) {

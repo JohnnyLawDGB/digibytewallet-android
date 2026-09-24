@@ -110,15 +110,17 @@ class AuthGateViewModel @Inject constructor(
      * run to its end.
      *
      * The PIN store is released by [WalletManager.wipeThenReleasePin], only after a verified
-     * wipe. When the wipe could not be verified the PIN, its counters and the owed wipe all
+     * wipe. When the wipe could not remove the seed the PIN, its counters and the owed wipe all
      * stay: the wallet is Locked again, AppNavigation routes to the unlock screen, and that
-     * screen keeps retrying the wipe instead of taking a PIN.
+     * screen keeps retrying the wipe instead of taking a PIN. Once the wipe has removed the seed it
+     * does not come back: [io.digibyte.FreshStartAfterWipe] ends this process and starts a fresh one
+     * on onboarding, which finishes and reports whatever the wipe left undone.
      */
     fun wipeWallet() {
         viewModelScope.launch {
             withContext(NonCancellable + Dispatchers.IO) {
-                val verified = walletManager.wipeThenReleasePin(pinManager)
-                if (!verified) showWipeIncompleteNotice(appContext)
+                val incomplete = io.digibyte.FreshStartAfterWipe.afterWipe(appContext, walletManager.wipeThenReleasePin(pinManager))
+                if (incomplete) showWipeIncompleteNotice(appContext)
             }
         }
     }

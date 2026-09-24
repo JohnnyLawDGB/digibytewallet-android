@@ -230,7 +230,7 @@ class WalletWipeTest {
         val store = trippedPinStore()
         val pin = PinManager(store)
 
-        val verified = walletManager(eraser = RecordingEraser()).wipeThenReleasePin(pin)
+        val verified = walletManager(eraser = RecordingEraser()).wipeThenReleasePin(pin).verified
 
         assertTrue(verified)
         assertFalse(pin.hasPin())
@@ -246,7 +246,7 @@ class WalletWipeTest {
         val pin = PinManager(store)
         val wm = walletManager(eraser = RecordingEraser(), quiesce = { throw IllegalStateException("native layer unavailable") })
 
-        val verified = wm.wipeThenReleasePin(pin)
+        val verified = wm.wipeThenReleasePin(pin).verified
 
         assertFalse(verified)
         assertTrue("the PIN was cleared after an unverified wipe", pin.hasPin())
@@ -263,7 +263,7 @@ class WalletWipeTest {
             val store = trippedPinStore()
             val pin = PinManager(store)
 
-            val verified = walletManager(eraser = eraser).wipeThenReleasePin(pin)
+            val verified = walletManager(eraser = eraser).wipeThenReleasePin(pin).verified
 
             assertFalse(verified)
             assertTrue(pin.hasPin())
@@ -280,13 +280,40 @@ class WalletWipeTest {
         val store = trippedPinStore()
         val pin = PinManager(store)
 
-        val verified = walletManager(eraser = RecordingEraser(refuses = setOf("db"))).wipeThenReleasePin(pin)
+        val verified = walletManager(eraser = RecordingEraser(refuses = setOf("db"))).wipeThenReleasePin(pin).verified
 
         assertFalse(verified)
         assertTrue(pin.hasPin())
         assertEquals(PinManager.WIPE_THRESHOLD, store.map["pin_fail_count"])
         assertFalse(pin.isWipePending())
         assertEquals(listOf("remove:pin_wipe_pending"), store.writes)
+    }
+
+    @Test fun `the one sequence hands back what the wipe established, the seed's read-back with it`() = runTest {
+        // Entry points act on the seed's read-back as well as on the verdict: once the seed is gone
+        // the app ends the process that held the wallet, whether or not every other store confirmed.
+        val clean = walletManager(eraser = RecordingEraser()).wipeThenReleasePin(PinManager(trippedPinStore()))
+        assertEquals(WipeReport(seedGone = true, everythingCleared = true), clean)
+
+        val restRefused = walletManager(eraser = RecordingEraser(refuses = setOf("db"))).wipeThenReleasePin(PinManager(trippedPinStore()))
+        assertTrue("the seed is gone by read-back, yet the sequence did not say so", restRefused.seedGone)
+        assertFalse(restRefused.verified)
+
+        for (eraser in listOf(
+            RecordingEraser(refuses = setOf("seed")),
+            RecordingEraser(throws = setOf("seed")),
+            RecordingEraser(seedKeyStillThere = true),
+        )) {
+            val report = walletManager(eraser = eraser).wipeThenReleasePin(PinManager(trippedPinStore()))
+            assertFalse("a seed still on the device was reported gone", report.seedGone)
+            assertFalse(report.verified)
+        }
+
+        // A wipe that could not run to its end says nothing is gone.
+        val wm = walletManager(eraser = RecordingEraser(), um = mockk<UtxoManager>(relaxed = true).also {
+            io.mockk.coEvery { it.clearAll() } throws kotlinx.coroutines.CancellationException("scope gone")
+        })
+        assertEquals(WipeReport(seedGone = false, everythingCleared = false), wm.wipeThenReleasePin(PinManager(trippedPinStore())))
     }
 
     // ── the real eraser, over in-memory preferences and a scratch directory ──
@@ -394,7 +421,7 @@ class WalletWipeTest {
         val store = trippedPinStore()
         val pin = PinManager(store)
 
-        val verified = d.walletManager().wipeThenReleasePin(pin)
+        val verified = d.walletManager().wipeThenReleasePin(pin).verified
 
         assertFalse(verified)
         assertTrue("the durable copy still holds the seed", d.prefs.prefsFor("dgb_wallet_seed").durable.containsKey("encrypted_seed_v2"))
@@ -419,7 +446,7 @@ class WalletWipeTest {
         val heldStore = trippedPinStore()
         val held = PinManager(heldStore)
 
-        assertFalse(stillHere.walletManager().wipeThenReleasePin(held))
+        assertFalse(stillHere.walletManager().wipeThenReleasePin(held).verified)
         assertFalse(
             "a wallet that is still on the device is not released, it is opened",
             stillHere.walletManager().releaseOwedWipeIfNoWalletIsLeft(held),

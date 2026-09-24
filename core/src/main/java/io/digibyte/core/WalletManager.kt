@@ -81,6 +81,10 @@ class WalletManager(
     // constructions keep compiling; the default has nothing to end and says so truthfully.
     private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
 ) {
+    // Sessions running for the wallet in this process (the sync service), stopped by every wipe
+    // before it erases anything. See [WalletSessionStop].
+    private val runningSessions = java.util.concurrent.CopyOnWriteArraySet<WalletSessionStop>()
+
     private val _walletState = MutableStateFlow<WalletState>(WalletState.NoWallet)
     val walletState: StateFlow<WalletState> = _walletState.asStateFlow()
 
@@ -110,6 +114,27 @@ class WalletManager(
 
     /** Check if an encrypted seed exists on disk. */
     fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed") || prefs.contains("encrypted_seed_v2")
+
+    /**
+     * Whether PIN setup creates the wallet from the words onboarding holds.
+     *
+     * Decided by the wallet STORED on this device, never by what is loaded in memory: a wallet a
+     * wipe removed may still be the one this process last loaded, and the words the user has just
+     * written down must then become the wallet. A stored wallet is never created a second time —
+     * the restore path stores it before PIN setup, and a recomposition finds the one PIN setup
+     * has just made.
+     */
+    fun pinSetupCreatesWallet(): Boolean = !hasSavedWallet()
+
+    /** Register a session running for the wallet in this process; every wipe stops it first. */
+    fun addSessionStop(stop: WalletSessionStop) {
+        runningSessions += stop
+    }
+
+    /** The session has ended: later wipes leave it alone. */
+    fun removeSessionStop(stop: WalletSessionStop) {
+        runningSessions -= stop
+    }
 
     /**
      * Create a new wallet from a mnemonic phrase.
@@ -661,6 +686,14 @@ class WalletManager(
      * PIN opened before this run. A wipe that could not finish is always one that can be run
      * again, from a device its owner can still open.
      *
+     * Nothing of the wiped wallet keeps running once the erase begins: every session running for
+     * it in this process ([WalletSessionStop] — the sync service) is stopped first, then the
+     * native session is quiesced (sync stopped, seed zeroed), so nothing writes the wiped stores
+     * back after they are erased. The native wallet itself stays loaded — bridge readers rely on it
+     * not being taken away under them — and once the seed is gone the app ends this process and
+     * starts a fresh one instead, so the next wallet created or restored is made in a process that
+     * never loaded the wiped one.
+     *
      * Every step is attempted whatever happened to the ones before it — a native session
      * that cannot be stopped, or a store that refuses its write, never keeps the seed on the
      * device. What the run established comes back as a [WipeReport]; entry points do not call
@@ -674,6 +707,11 @@ class WalletManager(
             false
         }
 
+        // Stop what runs the wallet's session in this process, so nothing it holds is written
+        // after the erase below. Each one is asked, whatever the one before it did.
+        val sessionsStopped = runningSessions.toList()
+            .map { session -> attempt("running session") { session.stopForWipe(); true } }
+            .all { it }
         // Stop sync and disconnect peers before destroying wallet.
         val quiesced = attempt("native quiesce") { quiesceNative(); true }
         // Seed ciphertext FIRST (the ordering invariant above). The record is what holds the
@@ -706,7 +744,10 @@ class WalletManager(
         // the wallet still exists behind its PIN and its session has been stopped — Locked.
         _walletState.value = if (seedGone) WalletState.NoWallet else WalletState.Locked
         _syncState.value = SyncState.Idle
-        val report = WipeReport(seedGone = seedGone, everythingCleared = quiesced && storesCleared)
+        val report = WipeReport(
+            seedGone = seedGone,
+            everythingCleared = sessionsStopped && quiesced && storesCleared,
+        )
 
         // Last, and not part of the report: the database FILES are already gone (read back by
         // the eraser); emptying the table through the still-open handle is tidiness for this
@@ -738,10 +779,13 @@ class WalletManager(
      * Runs to its end once started (NonCancellable): a wipe flips the wallet state, which pops
      * the screen — and the scope — that started it. The caller picks the thread.
      *
-     * @return true only for a verified wipe. On false the caller shows the one "did not
-     *   complete" message and leaves everything else as it is.
+     * @return what the wipe established. Only a [WipeReport.verified] report means the wallet was
+     *   wiped. [WipeReport.seedGone] is the read-back of the seed alone — its record and its key —
+     *   and the app acts on it too: once the seed is gone it ends the process that held the wallet,
+     *   whether or not every other store confirmed. A wipe that did not run to its end reports
+     *   nothing gone.
      */
-    suspend fun wipeThenReleasePin(pinManager: io.digibyte.core.security.PinManager): Boolean =
+    suspend fun wipeThenReleasePin(pinManager: io.digibyte.core.security.PinManager): WipeReport =
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
             val report = try {
                 wipeWallet()
@@ -759,7 +803,7 @@ class WalletManager(
                     android.util.Log.e("WalletManager", "PIN store not cleared (${it.javaClass.simpleName})")
                 }
             }
-            report.verified
+            report
         }
 
     /**
@@ -775,21 +819,17 @@ class WalletManager(
      *    untouched, as after any wipe that could not be verified) so onboarding can be offered and
      *    a wallet made from here on does not inherit a wipe owed to its predecessor.
      *  - **false** — a wallet record is still on this device, so the hold has nothing left to
-     *    protect and the screen stands down and takes the PIN. Whether that PIN then opens the
-     *    wallet depends on something this answer cannot settle: the same refused write that keeps
-     *    the wipe owed also leaves the store reading as empty for the rest of the process, so the
-     *    record may be unreadable until the next start even though it is still on disk. The screen
-     *    therefore acts on whether the wallet actually loaded — it opens it if it did, and
-     *    otherwise keeps the screen and asks for the restart the message names, rather than
-     *    showing a wallet with nothing in it. Either way the wipe stays owed: the launch backstop
-     *    and each later entry to the unlock screen retry it.
+     *    protect and the screen stands down and takes the PIN, which opens that wallet: a refused
+     *    write leaves this process reading what the store's file still holds (see
+     *    [AndroidWalletDataEraser]), so a load from the record finds it. The screen still acts on
+     *    whether the wallet actually loaded, rather than showing a wallet with nothing in it.
+     *    Either way the wipe stays owed: the launch backstop and each later entry to the unlock
+     *    screen retry it.
      *
      * The evidence is the store's own answer to the wipe's first step, asked once more, and not
-     * the record read-back on its own: a preferences file whose write did not land reads as empty
-     * for the rest of the process while its durable copy still holds the record. So only a store
-     * that TAKES the removal counts as a device with no wallet left, and a store that still refuses
-     * its write keeps its owner on the unlock screen — never at onboarding over a wallet that is
-     * still there.
+     * the record read-back on its own. So only a store that TAKES the removal counts as a device
+     * with no wallet left, and a store that still refuses its write keeps its owner on the unlock
+     * screen — never at onboarding over a wallet that is still there.
      *
      * Runs to its end once started (NonCancellable). The caller picks the thread. A PIN store that
      * refuses the release is reported and the way out is still taken: being able to reach the app

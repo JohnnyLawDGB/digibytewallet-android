@@ -1,6 +1,7 @@
 package io.digibyte.core
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import io.digibyte.core.digiscope.HubTokenStore
 import io.digibyte.core.security.KeyStoreManager
@@ -80,12 +81,24 @@ fun interface IdentitySessionWipe {
 }
 
 /**
+ * Something that runs the wallet's session in this process — the sync service — and so writes the
+ * stores a wipe erases. It registers with [WalletManager] for as long as it runs
+ * ([WalletManager.addSessionStop]), and every wipe stops each one BEFORE it erases anything, so
+ * nothing the session holds of the wiped wallet is written after the erase.
+ *
+ * Called on the wiping thread. Returns once the session has stopped writing, within a bound.
+ */
+fun interface WalletSessionStop {
+    fun stopForWipe()
+}
+
+/**
  * What one run of [WalletManager.wipeWallet] established.
  *
  * @property seedGone READ-BACK after the erase: the seed store's write landed, no saved wallet
  *   is readable, and neither seed key alias exists. Never inferred from "no step threw".
  * @property everythingCleared every other store reported cleared (both networks), the identity
- *   sessions ended, and the native session stopped.
+ *   sessions ended, every session running for the wallet stopped, and the native session stopped.
  */
 data class WipeReport(val seedGone: Boolean, val everythingCleared: Boolean) {
     /** The only result an entry point may treat as "the wallet was wiped". */
@@ -122,13 +135,42 @@ class AndroidWalletDataEraser internal constructor(
 
     /**
      * Clear one preferences file: true only when the write LANDED. The in-memory view of a
-     * preferences file shows an edit whether or not it reached the disk, so for these stores the
-     * write result is the evidence and a read-back would add nothing; the seed is read back
-     * separately, by [WalletManager.wipeWallet].
+     * preferences file takes an edit before the file does, so for these stores the write result is
+     * the evidence and a read-back would add nothing; the seed is read back separately, by
+     * [WalletManager.wipeWallet].
+     *
+     * A write that did not land leaves the file as it was, and this process goes on reading what
+     * the file holds: the view is put back to what it showed before the clear. A seed store that
+     * refused its clear therefore still reads as the wallet it holds, so the PIN that opens that
+     * wallet can load it in this same process — never an empty store over a record still on disk.
      */
     private fun clearPrefs(name: String): Boolean = step("clear $name") {
-        val landed = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
+        val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        val held = store.all
+        val landed = store.edit().clear().commit()
+        if (!landed) readWhatTheFileHolds(name, store, held)
         landed
+    }
+
+    /**
+     * After a write to [store] that did not land, put [held] — what the view showed before that
+     * write, which is what the file still holds — back into the view. The rewrite carries the same
+     * content the file has, so whether or not it lands, the file and this process agree.
+     */
+    private fun readWhatTheFileHolds(name: String, store: SharedPreferences, held: Map<String, *>) {
+        val editor = store.edit().clear()
+        for ((key, value) in held) {
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Long -> editor.putLong(key, value)
+                is Int -> editor.putInt(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        val rewritten = editor.commit()
+        Log.w(TAG, "$name: write not confirmed; this process reads what the file holds (rewrite landed=$rewritten)")
     }
 
     /** [clearPrefs] for [base] on EVERY network. All are attempted even when one refuses. */
@@ -216,8 +258,11 @@ class AndroidWalletDataEraser internal constructor(
         val assetHeal = clearPrefs("dgb_asset_heal")
         // ONE key, not the file: dgb_settings also holds the language and the network selection.
         val scanFloor = step("scan floor") {
-            val landed = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
-                .edit().remove("cf_birth_height").commit()
+            val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
+            val held = settings.all
+            val landed = settings.edit().remove("cf_birth_height").commit()
+            // As clearPrefs: a write that did not land leaves this process reading the file.
+            if (!landed) readWhatTheFileHolds("dgb_settings", settings, held)
             landed
         }
         return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && scanFloor
