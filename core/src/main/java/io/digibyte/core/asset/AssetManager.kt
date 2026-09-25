@@ -2195,6 +2195,79 @@ class AssetManager(
         }
     }
 
+    /** What planning a transfer came to: the plan [sendAsset] would sign, or the result it would
+     *  return instead. */
+    sealed class AssetTransferPlanning {
+        data class Planned(val plan: io.digibyte.core.asset.send.AssetTransferPlan) : AssetTransferPlanning()
+        data class NotPlanned(val result: TxResult) : AssetTransferPlanning()
+    }
+
+    private fun notPlanned(result: TxResult) = AssetTransferPlanning.NotPlanned(result)
+
+    /**
+     * Plan a transfer exactly as [sendAsset] does — the same rule check, detection pass, coins and
+     * planner — without signing anything. [sendAsset] signs what this returns; the confirmation
+     * shows its fee ([previewAssetTransferFee]), so the fee on screen is the fee of this plan.
+     */
+    suspend fun planAssetTransfer(
+        assetId: String,
+        quantity: Long,
+        toAddress: String,
+        feePerKb: Long,
+    ): AssetTransferPlanning {
+        // Refuse before reading a UTXO or touching native. DigiAsset Core clears every output of
+        // a transfer that breaks a rule; this wallet builds no rule outputs, so a rule-bearing
+        // asset must never leave through here, and "don't know" is not "no rules".
+        when (transferRuleState(assetId)) {
+            TransferRuleState.RULE_BOUND -> return notPlanned(TxResult.Refused(SendRefusal.RULE_BOUND_ASSET))
+            TransferRuleState.UNKNOWN -> return notPlanned(TxResult.Refused(SendRefusal.RULES_UNKNOWN))
+            TransferRuleState.NONE -> Unit
+        }
+
+        // Detection first, to completion: the network fee below is paid from the plain-coin set,
+        // and that set is right to select from once every transaction the wallet holds has been
+        // looked at. A pass that did not finish means no coin is read and nothing is built.
+        val pass: suspend () -> Unit = beforeSpend ?: { holdAssetOutputsBeforeSpend() }
+        if (!SpendPreflight.completed(pass)) return notPlanned(TxResult.Error(SpendPreflight.NOT_SENT))
+
+        if (!NativeBridge.isValidAddress(toAddress)) return notPlanned(TxResult.Error("Invalid DigiByte address"))
+        if (quantity <= 0) return notPlanned(TxResult.Error("Quantity must be positive"))
+        if (feePerKb < 0) return notPlanned(TxResult.Error("Fee rate must be non-negative"))
+
+        // 1. Load spendable UTXOs.
+        val assetUtxos = utxoDao.getAssetUtxosByIdNow(assetId)
+        // Sovereign DGB fee source: the native wallet->utxos set, NOT the Room
+        // is_asset=0 partition (empty on a normally-synced wallet whose DGB lives
+        // in native → the "Not enough DGB for fee: have 0" failure).
+        val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
+        if (assetUtxos.isEmpty()) return notPlanned(TxResult.Error("No UTXOs for asset $assetId"))
+
+        // 2-5. Selection, transfer instructions, the size-aware fee and the output values: the
+        //      pure half of the send, in AssetTransferPlanner so the numbers signed below are
+        //      testable on the JVM.
+        val plan = when (
+            val planned = io.digibyte.core.asset.send.AssetTransferPlanner.plan(
+                assetUtxos = assetUtxos,
+                dgbUtxos = dgbUtxos,
+                quantity = quantity,
+                feePerKb = feePerKb,
+            )
+        ) {
+            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Refused -> return notPlanned(TxResult.Error(planned.message))
+            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Ready -> planned.plan
+        }
+        return AssetTransferPlanning.Planned(plan)
+    }
+
+    /** The fee, in sats, the transfer would pay if sent now, or the result [sendAsset] would return
+     *  instead of sending. Shown on the confirmation; [sendAsset] refuses to pay more than it. */
+    suspend fun previewAssetTransferFee(
+        assetId: String,
+        quantity: Long,
+        toAddress: String,
+        feePerKb: Long,
+    ): AssetTransferPlanning = planAssetTransfer(assetId, quantity, toAddress, feePerKb)
+
     /**
      * Build, sign, and broadcast a DigiAsset transfer transaction.
      *
@@ -2221,47 +2294,17 @@ class AssetManager(
         quantity: Long,
         toAddress: String,
         feePerKb: Long,
+        maxFeeSats: Long = Long.MAX_VALUE,
     ): TxResult {
-        // Refuse before reading a UTXO or touching native. DigiAsset Core clears every output of
-        // a transfer that breaks a rule; this wallet builds no rule outputs, so a rule-bearing
-        // asset must never leave through here, and "don't know" is not "no rules".
-        when (transferRuleState(assetId)) {
-            TransferRuleState.RULE_BOUND -> return TxResult.Refused(SendRefusal.RULE_BOUND_ASSET)
-            TransferRuleState.UNKNOWN -> return TxResult.Refused(SendRefusal.RULES_UNKNOWN)
-            TransferRuleState.NONE -> Unit
+        val plan = when (val planned = planAssetTransfer(assetId, quantity, toAddress, feePerKb)) {
+            is AssetTransferPlanning.NotPlanned -> return planned.result
+            is AssetTransferPlanning.Planned -> planned.plan
         }
-
-        // Detection first, to completion: the network fee below is paid from the plain-coin set,
-        // and that set is right to select from once every transaction the wallet holds has been
-        // looked at. A pass that did not finish means no coin is read and nothing is built.
-        val pass: suspend () -> Unit = beforeSpend ?: { holdAssetOutputsBeforeSpend() }
-        if (!SpendPreflight.completed(pass)) return TxResult.Error(SpendPreflight.NOT_SENT)
-
-        if (!NativeBridge.isValidAddress(toAddress)) return TxResult.Error("Invalid DigiByte address")
-        if (quantity <= 0) return TxResult.Error("Quantity must be positive")
-        if (feePerKb < 0) return TxResult.Error("Fee rate must be non-negative")
-
-        // 1. Load spendable UTXOs.
-        val assetUtxos = utxoDao.getAssetUtxosByIdNow(assetId)
-        // Sovereign DGB fee source: the native wallet->utxos set, NOT the Room
-        // is_asset=0 partition (empty on a normally-synced wallet whose DGB lives
-        // in native → the "Not enough DGB for fee: have 0" failure).
-        val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
-        if (assetUtxos.isEmpty()) return TxResult.Error("No UTXOs for asset $assetId")
-
-        // 2-5. Selection, transfer instructions, the size-aware fee and the output values: the
-        //      pure half of the send, in AssetTransferPlanner so the numbers signed below are
-        //      testable on the JVM.
-        val plan = when (
-            val planned = io.digibyte.core.asset.send.AssetTransferPlanner.plan(
-                assetUtxos = assetUtxos,
-                dgbUtxos = dgbUtxos,
-                quantity = quantity,
-                feePerKb = feePerKb,
-            )
-        ) {
-            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Refused -> return TxResult.Error(planned.message)
-            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Ready -> planned.plan
+        // The fee approved on the confirmation is the most this send may pay (B231): the plan is
+        // made again here from the coins as they are now, and if it would cost more than the user
+        // saw, nothing is signed and they review it again.
+        if (!io.digibyte.core.asset.send.AssetTransferPlanner.feeWithinApproval(plan.paidFeeSats, maxFeeSats)) {
+            return TxResult.Error(FEE_ABOVE_APPROVED)
         }
         val allInputs = plan.inputs
         if (!io.digibyte.core.asset.send.AssetCoinSelector.outpointsDistinct(allInputs)) {
@@ -2675,6 +2718,10 @@ class AssetManager(
     }
 
     private companion object {
+        /** The send would pay more than the fee on the confirmation (B231). */
+        const val FEE_ABOVE_APPROVED =
+            "The network fee is now higher than the one you approved. Review the send again."
+
         /** Consecutive prune passes native must positively lack a NATIVE
          *  row's tx before it's deleted (see [pruneRemovedNativeAssetRowsImpl]). */
         const val ABSENCE_DEBOUNCE_THRESHOLD = 2

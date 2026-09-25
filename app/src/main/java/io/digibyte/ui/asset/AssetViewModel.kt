@@ -267,8 +267,40 @@ class AssetViewModel @Inject constructor(
             feePerKb = feeRatePerKb.value,
             feeEstimateSats = estimatedFeeSat.value,
         ) ?: return false
-        if (toAddress.isNotBlank()) confirmation.open(approved)
+        if (toAddress.isBlank()) return true
+        // The confirmation shows the fee of the transfer as it would be built now (B231), not a
+        // typical-size guess: a send that consolidates many coins pays for every input, and the
+        // user approves that. sendAssetTransfer then refuses to sign anything costing more.
+        planJob?.cancel()
+        _planning.value = true
+        planJob = viewModelScope.launch {
+            val planned = try {
+                assetManager.previewAssetTransferFee(
+                    approved.assetId, approved.units, approved.address, approved.feePerKb,
+                )
+            } finally {
+                _planning.value = false
+            }
+            // An answer for an asset no longer selected is not the user's current send.
+            if (_selectedAssetId.value != approved.assetId) return@launch
+            when (planned) {
+                is AssetManager.AssetTransferPlanning.Planned ->
+                    confirmation.open(approved.withPlannedFee(planned.plan.paidFeeSats))
+                is AssetManager.AssetTransferPlanning.NotPlanned -> finish(planned.result.toSendState())
+            }
+        }
         return true
+    }
+
+    /** Planning the transfer for the confirmation (see [requestConfirm]) is under way. */
+    private val _planning = MutableStateFlow(false)
+    val planning: StateFlow<Boolean> = _planning.asStateFlow()
+    private var planJob: Job? = null
+
+    private fun TxResult.toSendState(): SendState = when (this) {
+        is TxResult.Success -> SendState.Success(txid)
+        is TxResult.Error -> SendState.Failure(message)
+        is TxResult.Refused -> SendState.Refused(reason)
     }
 
     /** Decimals of [asset] as the wallet holds them: the scale its quantities are typed and shown at. */
@@ -276,6 +308,7 @@ class AssetViewModel @Inject constructor(
 
     /** The confirmation was dismissed, or the credential prompt was: nothing is on screen to send. */
     fun cancelConfirm() {
+        planJob?.cancel()
         confirmation.close()
         _sendState.value = SendState.Idle
     }
@@ -336,12 +369,9 @@ class AssetViewModel @Inject constructor(
                 quantity = approved.units,
                 toAddress = approved.address,
                 feePerKb = approved.feePerKb,
+                maxFeeSats = approved.feeEstimateSats,
             )
-            finish(when (result) {
-                is TxResult.Success -> SendState.Success(result.txid)
-                is TxResult.Error -> SendState.Failure(result.message)
-                is TxResult.Refused -> SendState.Refused(result.reason)
-            })
+            finish(result.toSendState())
         }
     }
 

@@ -78,6 +78,8 @@ fun AssetSendScreen(
     val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
     val customFeeInput by viewModel.customFeeInput.collectAsStateWithLifecycle()
     val estimatedFeeSat by viewModel.estimatedFeeSat.collectAsStateWithLifecycle()
+    // Review plans the transfer so the confirmation can show its real fee; one tap at a time.
+    val planning by viewModel.planning.collectAsStateWithLifecycle()
     val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
 
     var recipientAddress by remember { mutableStateOf("") }
@@ -485,7 +487,7 @@ fun AssetSendScreen(
                         quantityError = errQuantity
                     }
                 },
-                enabled = ruleCheck.allowsSend,
+                enabled = ruleCheck.allowsSend && !planning,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),

@@ -54,6 +54,12 @@ data class AssetTransferPlan(
  */
 object AssetTransferPlanner {
 
+    /** A plan paying [paidFeeSats] may be signed under an approval of [approvedFeeSats]: never
+     *  more than the user saw on the confirmation (B231). A zero or negative approval approves
+     *  nothing. */
+    fun feeWithinApproval(paidFeeSats: Long, approvedFeeSats: Long): Boolean =
+        approvedFeeSats > 0 && paidFeeSats in 0..approvedFeeSats
+
     sealed interface Result {
         data class Ready(val plan: AssetTransferPlan) : Result
         /** Nothing is built; [message] is what the send reports. */

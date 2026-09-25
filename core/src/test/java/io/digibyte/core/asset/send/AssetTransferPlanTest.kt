@@ -122,4 +122,24 @@ class AssetTransferPlanTest {
         assertEquals(DA_MARKER_SATS, plan.sats(PlannedOutput.Role.ASSET_CHANGE_MARKER))
         assertEquals(plan.estimatedFeeSats, plan.paidFeeSats)
     }
+
+    /** B231, the Note 8 shape: a whole balance held across eight outputs is sent by consolidating
+     *  them, and that send pays for every input — far above the flat 613 vB (61,300 sat) the
+     *  confirmation used to show. The plan's own fee is the one the confirmation must show. */
+    @Test fun a_consolidating_send_pays_far_more_than_the_flat_estimate() {
+        val carriers = (1..8).map { assetUtxo("a$it", 600L, 1L) }
+        val plan = ready(AssetTransferPlanner.plan(carriers, listOf(dgbUtxo("f", 5_000_000L)), 8L, feePerKb))
+        val flatEstimate = 613L * feePerKb / 1000
+        assertTrue("paid ${plan.paidFeeSats} vs flat $flatEstimate", plan.paidFeeSats > 2 * flatEstimate)
+        assertEquals(plan.estimatedFeeSats, plan.paidFeeSats)
+    }
+
+    /** B231: a plan may be signed under an approval only if it pays no more than was approved. */
+    @Test fun a_plan_is_signed_only_at_or_under_the_approved_fee() {
+        assertTrue(AssetTransferPlanner.feeWithinApproval(paidFeeSats = 161_200L, approvedFeeSats = 161_200L))
+        assertTrue(AssetTransferPlanner.feeWithinApproval(paidFeeSats = 61_300L, approvedFeeSats = 161_200L))
+        assertTrue(!AssetTransferPlanner.feeWithinApproval(paidFeeSats = 161_200L, approvedFeeSats = 61_300L))
+        assertTrue(!AssetTransferPlanner.feeWithinApproval(paidFeeSats = 1L, approvedFeeSats = 0L))
+        assertTrue(!AssetTransferPlanner.feeWithinApproval(paidFeeSats = -1L, approvedFeeSats = 100L))
+    }
 }
