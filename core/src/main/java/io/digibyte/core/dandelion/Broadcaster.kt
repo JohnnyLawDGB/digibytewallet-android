@@ -21,17 +21,25 @@ import java.security.SecureRandom
  *
  * Source of truth for the on/off setting is the C core ([NativeBridge.hasDandelionPeer]
  * already returns `dandelionEnabled && a capable peer is connected`); [dandelionEnabled]
- * here is a belt-and-suspenders Kotlin mirror the settings toggle keeps in sync.
+ * here is a belt-and-suspenders Kotlin mirror kept in sync by [applySetting].
  */
 object Broadcaster {
 
     private val embargoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val rng = SecureRandom()
 
-    /** Mirrors the user's Dandelion setting; updated by the settings toggle, which
-     *  also calls [NativeBridge.setDandelionEnabled] (the authoritative gate). */
+    /** Mirrors the user's Dandelion setting. False in every new process until
+     *  [applySetting] runs — at sync start from the saved pref, and on the settings toggle. */
     @Volatile
     var dandelionEnabled: Boolean = false
+
+    /** Apply the user's Dandelion setting: the Kotlin mirror and the native gate
+     *  ([NativeBridge.setDandelionEnabled], authoritative) together. The mirror is set
+     *  first, so a native failure cannot leave it stale. */
+    fun applySetting(enabled: Boolean) {
+        dandelionEnabled = enabled
+        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) { /* re-applied on next sync start */ }
+    }
 
     /** Broadcast a signed tx. Returns the txid on success, or null on failure. */
     fun broadcast(signedTx: ByteArray): String? {
