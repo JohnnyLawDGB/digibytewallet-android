@@ -18,6 +18,7 @@ import io.digibyte.core.asset.assetPruneGateOpen
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
 import io.digibyte.core.dandelion.Broadcaster
+import io.digibyte.core.dandelion.shouldSweepRepublish
 import io.digibyte.core.sync.CfAbandonmentStore
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
@@ -3493,6 +3494,9 @@ class SyncService : Service() {
             // it's a no-op for exactly this case. Fetch the raw bytes and
             // publishTransaction instead: that re-registers the tx for broadcast
             // (BRPeerManagerPublishTx) and floods it to all connected peers.
+            // A stem of this process still under its embargo is not stranded: flooding it would
+            // announce it from this wallet to every peer and undo the stem.
+            if (!shouldSweepRepublish(Broadcaster.isEmbargoPending(txid))) continue
             val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
             if (raw == null) {
                 android.util.Log.w("SyncService",

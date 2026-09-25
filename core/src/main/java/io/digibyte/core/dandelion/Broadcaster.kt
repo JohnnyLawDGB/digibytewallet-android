@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Single broadcast entry point for the wallet. Stems the tx to one Dandelion node
@@ -27,6 +28,12 @@ object Broadcaster {
 
     private val embargoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val rng = SecureRandom()
+
+    /** Txids stemmed by this process whose embargo has not finished. */
+    private val embargoPending: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** True while this process's embargo for [txid] is still running (see [shouldSweepRepublish]). */
+    fun isEmbargoPending(txid: String): Boolean = txid in embargoPending
 
     /** Mirrors the user's Dandelion setting. False in every new process until
      *  [applySetting] runs — at sync start from the saved pref, and on the settings toggle. */
@@ -56,12 +63,17 @@ object Broadcaster {
 
     private fun armEmbargo(txid: String) {
         val delayMs = embargoDelayMs(rng.nextDouble())
+        embargoPending.add(txid)
         embargoScope.launch {
-            delay(delayMs)
-            // If the relay count can't be read, assume it propagated (don't double-send).
-            val relays = try { NativeBridge.getRelayCount(txid) } catch (_: Throwable) { 1 }
-            if (shouldFluffAfterEmbargo(relays)) {
-                try { NativeBridge.fluffTransaction(txid) } catch (_: Throwable) { /* best effort */ }
+            try {
+                delay(delayMs)
+                // If the relay count can't be read, assume it propagated (don't double-send).
+                val relays = try { NativeBridge.getRelayCount(txid) } catch (_: Throwable) { 1 }
+                if (shouldFluffAfterEmbargo(relays)) {
+                    try { NativeBridge.fluffTransaction(txid) } catch (_: Throwable) { /* best effort */ }
+                }
+            } finally {
+                embargoPending.remove(txid)
             }
         }
     }
