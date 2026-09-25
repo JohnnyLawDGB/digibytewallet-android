@@ -1,7 +1,9 @@
 package io.digibyte.ui.navigation
 
 import io.digibyte.core.WalletState
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -107,5 +109,27 @@ class WipeRouteGatePolicyTest {
         assertFalse(shouldRouteToOnboardingAfterWipe(WalletState.NoWallet, null))
         assertFalse(shouldRouteToOnboardingAfterWipe(WalletState.Locked, "wallet"))
         assertFalse(shouldRouteToOnboardingAfterWipe(WalletState.Unlocked, "wallet"))
+    }
+
+    // ── B230: return to the screen the lock interrupted ────────────────────────────────────
+
+    @Test
+    fun `a credential prompt from Recover funds returns there after the unlock`() {
+        // Note 8 2026-09-23: the system credential activity stopped MainActivity, which locked;
+        // after the PIN the user landed on wallet home and had to open Recover funds again.
+        assertEquals("recover_funds", routeToResumeAfterUnlock("recover_funds"))
+        for (route in listOf("settings_security", "settings_view_seed", "settings_network",
+                "settings_display", "settings_about")) {
+            assertEquals(route, routeToResumeAfterUnlock(route))
+        }
+    }
+
+    @Test
+    fun `routes with arguments, the wallet itself and the pre-wallet graph are not resumed`() {
+        for (route in listOf(null, "wallet", "unlock", "onboarding", "pin_setup", "send",
+                "asset_detail/{assetId}", "transaction_detail/{txid}", "digiid_confirm/{uri}",
+                "node_pair_confirm/{uri}", "qr_scanner")) {
+            assertNull(route.toString(), routeToResumeAfterUnlock(route))
+        }
     }
 }
