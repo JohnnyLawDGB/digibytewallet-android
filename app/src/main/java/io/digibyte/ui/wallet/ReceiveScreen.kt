@@ -40,7 +40,9 @@ import io.digibyte.R
 @Composable
 fun ReceiveScreen(
     onNavigateBack: () -> Unit,
-    viewModel: WalletViewModel = hiltViewModel()
+    viewModel: WalletViewModel = hiltViewModel(),
+    /** The address format shown first (see addressFormat below); 3 opens on DigiDollar. */
+    initialFormat: Int = 2,
 ) {
     val context = LocalContext.current
     val peerCount by viewModel.peerCount.collectAsStateWithLifecycle()
@@ -54,7 +56,7 @@ fun ReceiveScreen(
 
     // Address format: 0=legacy(D), 2=bech32/SegWit(dgb1q), 4=Taproot/P2TR(dgb1p),
     // 3=DigiDollar(TD…) — default to bech32/SegWit.
-    var addressFormat by remember { mutableIntStateOf(2) }
+    var addressFormat by remember { mutableIntStateOf(initialFormat) }
 
     // Pre-derive each format once so toggling the chip doesn't re-run the JNI
     // key-derivation path. getReceiveAddress format: 0 = legacy, 2 = bech32 P2WPKH,

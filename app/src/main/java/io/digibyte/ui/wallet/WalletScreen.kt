@@ -45,6 +45,7 @@ import io.digibyte.R
 fun WalletScreen(
     onNavigateSend: () -> Unit,
     onNavigateReceive: () -> Unit,
+    onNavigateReceiveDigiDollar: () -> Unit = onNavigateReceive,
     onNavigateScan: () -> Unit,
     onNavigateTx: (String) -> Unit,
     onNavigateAssets: () -> Unit = {},
@@ -125,7 +126,8 @@ fun WalletScreen(
                         // while cfheaders is still catching up.
                         isSynced = syncProgressInfo.stage == SyncStage.Synced,
                         hidden = balanceHidden,
-                        onFiatTap = { showCurrencyPicker = true }
+                        onFiatTap = { showCurrencyPicker = true },
+                        onDigiDollarTap = onNavigateReceiveDigiDollar,
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))

@@ -82,6 +82,7 @@ private val fullScreenRoutes = setOf(
     "unlock",
     "send",
     "receive",
+    "receive_dd",
     "transaction_detail/{txid}",
     "settings_security",
     "settings_network",
@@ -400,6 +401,7 @@ fun AppNavigation(
                 WalletScreen(
                     onNavigateSend = { navController.navigate("send") },
                     onNavigateReceive = { navController.navigate("receive") },
+                    onNavigateReceiveDigiDollar = { navController.navigate("receive_dd") },
                     onNavigateScan = { navController.navigate("qr_scanner") },
                     onNavigateTx = { txid ->
                         navController.navigate("transaction_detail/${txid}")
@@ -625,6 +627,20 @@ fun AppNavigation(
                 ReceiveScreen(
                     onNavigateBack = { navController.popBackStack() },
                     viewModel = sharedWalletVm
+                )
+            }
+
+            // DigiDollar receive: the home screen's DigiDollar balance opens it (B236).
+            composable("receive_dd") { backStackEntry ->
+                val walletEntry = remember(backStackEntry) {
+                    runCatching { navController.getBackStackEntry(Screen.Wallet.route) }
+                        .getOrDefault(backStackEntry)
+                }
+                val sharedWalletVm: WalletViewModel = hiltViewModel(walletEntry)
+                ReceiveScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    viewModel = sharedWalletVm,
+                    initialFormat = 3,
                 )
             }
 
