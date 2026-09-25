@@ -46,9 +46,6 @@
     <string name="unlock_locked">已锁定——请在 %1$s 后重试</string>
     <string name="unlock_unlocking">正在解锁…</string>
     <string name="unlock_biometrics_cd">使用生物识别解锁</string>
-    <string name="recover_title">恢复钱包</string>
-    <string name="recover_body">输入您的助记词以恢复钱包。</string>
-    <string name="recover_continue">继续</string>
 
     <string name="seed_retry">重试</string>
     <string name="verify_next">下一步</string>

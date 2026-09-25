@@ -75,9 +75,6 @@ private val fullScreenRoutes = setOf(
     "seed_display/{wordCount}",
     "seed_verify",
     "seed_passphrase",
-    "mnemonic_input",
-    "recovery_scan",
-    "recovery_date",
     "pin_setup",
     "unlock",
     "send",
@@ -299,32 +296,6 @@ fun AppNavigation(
                     navController = navController,
                     viewModel = sharedViewModel,
                 )
-            }
-
-            composable("mnemonic_input") { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
-                }
-                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
-                MnemonicInputScreen(navController = navController, viewModel = sharedViewModel)
-            }
-
-            composable("recovery_scan") { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
-                }
-                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
-                io.digibyte.ui.onboarding.RecoveryScanScreen(
-                    navController = navController, viewModel = sharedViewModel
-                )
-            }
-
-            composable("recovery_date") { backStackEntry ->
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
-                }
-                val sharedViewModel: io.digibyte.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
-                RecoveryDateScreen(navController = navController, viewModel = sharedViewModel)
             }
 
             composable("pin_setup") { backStackEntry ->

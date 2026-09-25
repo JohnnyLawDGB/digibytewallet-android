@@ -48,9 +48,6 @@
     <string name="unlock_unlocking">Desbloqueando…</string>
     <string name="unlock_biometrics_cd">Desbloquear con biometría</string>
 
-    <string name="recover_title">Recuperar billetera</string>
-    <string name="recover_body">Introduce tu frase de recuperación para restaurar tu billetera.</string>
-    <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Reintentar</string>
     <string name="verify_next">Siguiente</string>

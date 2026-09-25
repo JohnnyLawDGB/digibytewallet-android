@@ -45,9 +45,6 @@
     <string name="unlock_locked">Verrouillé — réessayez dans %1$s</string>
     <string name="unlock_unlocking">Déverrouillage…</string>
     <string name="unlock_biometrics_cd">Déverrouiller par biométrie</string>
-    <string name="recover_title">Récupérer le portefeuille</string>
-    <string name="recover_body">Saisissez votre phrase de récupération pour restaurer votre portefeuille.</string>
-    <string name="recover_continue">Continuer</string>
     <string name="seed_retry">Réessayer</string>
     <string name="verify_next">Suivant</string>
     <string name="verify_finish">Terminer</string>

@@ -59,9 +59,6 @@
     <string name="unlock_biometrics_cd">Unlock with biometrics</string>
 
     <!-- ── Recover ──────────────────────────────────────────────────────────────── -->
-    <string name="recover_title">Recover Wallet</string>
-    <string name="recover_body">Enter your seed phrase to restore your wallet.</string>
-    <string name="recover_continue">Continue</string>
 
     <!-- ── Seed display / verification ──────────────────────────────────────────── -->
     <string name="seed_retry">Retry</string>

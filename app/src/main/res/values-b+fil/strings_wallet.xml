@@ -46,9 +46,6 @@
     <string name="unlock_locked">Naka-lock — subukan ulit sa %1$s</string>
     <string name="unlock_unlocking">Ina-unlock…</string>
     <string name="unlock_biometrics_cd">I-unlock gamit ang biometrics</string>
-    <string name="recover_title">I-recover ang Wallet</string>
-    <string name="recover_body">Ilagay ang iyong recovery phrase para maibalik ang iyong wallet.</string>
-    <string name="recover_continue">Magpatuloy</string>
 
     <string name="seed_retry">Subukan ulit</string>
     <string name="verify_next">Susunod</string>

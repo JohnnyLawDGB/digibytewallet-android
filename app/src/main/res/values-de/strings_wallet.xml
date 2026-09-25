@@ -54,9 +54,6 @@
     <string name="unlock_unlocking">Wird entsperrt…</string>
     <string name="unlock_biometrics_cd">Mit Biometrie entsperren</string>
 
-    <string name="recover_title">Wallet wiederherstellen</string>
-    <string name="recover_body">Geben Sie Ihre Wiederherstellungsphrase ein, um Ihre Wallet wiederherzustellen.</string>
-    <string name="recover_continue">Weiter</string>
 
     <string name="seed_retry">Erneut versuchen</string>
     <string name="verify_next">Weiter</string>

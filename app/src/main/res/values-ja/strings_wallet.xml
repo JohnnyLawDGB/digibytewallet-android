@@ -46,9 +46,6 @@
     <string name="unlock_locked">ロック中 — %1$s 後に再試行してください</string>
     <string name="unlock_unlocking">ロック解除中…</string>
     <string name="unlock_biometrics_cd">生体認証でロック解除</string>
-    <string name="recover_title">ウォレットを復元</string>
-    <string name="recover_body">ウォレットを復元するにはリカバリーフレーズを入力してください。</string>
-    <string name="recover_continue">続ける</string>
 
     <string name="seed_retry">再試行</string>
     <string name="verify_next">次へ</string>

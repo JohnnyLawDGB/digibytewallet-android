@@ -46,9 +46,6 @@
     <string name="unlock_locked">Заблокировано — повторите через %1$s</string>
     <string name="unlock_unlocking">Разблокировка…</string>
     <string name="unlock_biometrics_cd">Разблокировать по биометрии</string>
-    <string name="recover_title">Восстановить кошелёк</string>
-    <string name="recover_body">Введите фразу восстановления, чтобы восстановить кошелёк.</string>
-    <string name="recover_continue">Продолжить</string>
 
     <string name="seed_retry">Повторить</string>
     <string name="verify_next">Далее</string>

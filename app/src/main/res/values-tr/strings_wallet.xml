@@ -46,9 +46,6 @@
     <string name="unlock_locked">Kilitli — %1$s sonra tekrar deneyin</string>
     <string name="unlock_unlocking">Kilit açılıyor…</string>
     <string name="unlock_biometrics_cd">Biyometri ile aç</string>
-    <string name="recover_title">Cüzdanı Kurtar</string>
-    <string name="recover_body">Cüzdanınızı geri yüklemek için kurtarma ifadenizi girin.</string>
-    <string name="recover_continue">Devam</string>
 
     <string name="seed_retry">Yeniden dene</string>
     <string name="verify_next">İleri</string>

@@ -41,7 +41,6 @@ class SensitiveInputHardeningTest {
             .replace(Regex("//[^\n]*"), "")
     }
 
-    private val mnemonicInput get() = source(File(onboarding, "MnemonicInputScreen.kt"))
     private val passphraseSection get() = source(File(onboarding, "PassphraseSection.kt"))
     private val passphraseScreen get() = source(File(onboarding, "PassphraseScreen.kt"))
     private val recoverFunds get() = source(File(recovery, "RecoverFundsScreen.kt"))
@@ -75,26 +74,12 @@ class SensitiveInputHardeningTest {
     @Test
     fun `phrase and passphrase entry screens apply SecureWindow`() {
         for ((name, src) in listOf(
-            "MnemonicInputScreen" to mnemonicInput,
             "PassphraseScreen" to passphraseScreen,
             "RecoverFundsScreen" to recoverFunds,
         )) {
             assertTrue("$name does not apply SecureWindow()", src.contains("SecureWindow()"))
             assertTrue("$name does not import SecureWindow", src.contains("import io.digibyte.ui.components.SecureWindow"))
         }
-    }
-
-    @Test
-    fun `every mnemonic word field is a Password-type IME field with password semantics`() {
-        val src = mnemonicInput
-        val fields = count(src, "OutlinedTextField(")
-        assertTrue("expected a word field", fields >= 1)
-        assertEquals("every field must declare KeyboardType.Password", fields, count(src, "KeyboardType.Password"))
-        assertFalse("a word field still uses the learnable Text IME", src.contains("KeyboardType.Text"))
-        assertTrue("autoCorrect must stay off", src.contains("autoCorrect = false"))
-        assertTrue("word field must carry password() semantics", src.contains("password()"))
-        // The words must remain readable: Password is only the IME hint, never a mask.
-        assertFalse("mnemonic words must stay visible", src.contains("PasswordVisualTransformation"))
     }
 
     @Test

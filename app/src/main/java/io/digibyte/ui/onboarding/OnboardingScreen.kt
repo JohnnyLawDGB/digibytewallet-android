@@ -127,8 +127,9 @@ fun OnboardingScreen(
             // in from Settings instead — landing on never-spent addresses whose keys are still
             // behind a hash. Importing would carry the exposure forward; sweeping leaves it behind.
             //
-            // The restore/transfer code itself is unchanged and still reachable from
-            // Settings -> Recovery. This removes the first-run entry point, not the capability.
+            // Transferring an older wallet's funds in is Settings -> Recover funds (a sweep into
+            // this wallet's fresh keys). There is no restore-in-place: the screens that used to do
+            // it were unreachable after this change and have been removed.
 
             Spacer(modifier = Modifier.height(40.dp))
 
