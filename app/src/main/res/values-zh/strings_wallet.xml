@@ -225,7 +225,7 @@
     <string name="send_to">收款方</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_paid_in_dgb">以 DGB 支付</string>
+    <string name="send_dd_fee_value">≈ %1$s DGB</string>
     <string name="send_verify_warning">请仔细核对上方的完整地址。\n交易不可撤销。</string>
     <string name="send_send">发送</string>
     <string name="send_success">成功</string>

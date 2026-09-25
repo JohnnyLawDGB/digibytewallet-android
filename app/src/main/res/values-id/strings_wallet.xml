@@ -225,7 +225,7 @@
     <string name="send_to">Kepada</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_paid_in_dgb">Dibayar dalam DGB</string>
+    <string name="send_dd_fee_value">≈ %1$s DGB</string>
     <string name="send_verify_warning">Periksa alamat lengkap di atas dengan teliti.\nTransaksi tidak dapat dibatalkan.</string>
     <string name="send_send">Kirim</string>
     <string name="send_success">Berhasil</string>

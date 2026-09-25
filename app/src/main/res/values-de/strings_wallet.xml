@@ -233,7 +233,7 @@
     <string name="send_to">An</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_paid_in_dgb">In DGB bezahlt</string>
+    <string name="send_dd_fee_value">≈ %1$s DGB</string>
     <string name="send_verify_warning">Prüfen Sie die vollständige Adresse oben sorgfältig.\nTransaktionen sind unwiderruflich.</string>
     <string name="send_send">Senden</string>
     <string name="send_success">Erfolg</string>
