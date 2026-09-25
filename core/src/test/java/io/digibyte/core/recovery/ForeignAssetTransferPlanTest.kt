@@ -62,16 +62,44 @@ class ForeignAssetTransferPlanTest {
         assertEquals(listOf(assetUtxo, feeUtxo), plan.inputs)
     }
 
-    @Test fun `the layout is marker then OP_RETURN then change`() {
+    @Test fun `the layout is change then OP_RETURN then marker`() {
         val plan = ok()
         assertEquals(3, plan.outputs.size)
 
-        assertEquals("recipient marker at vout 0", dest, plan.outputs[0].address)
-        assertEquals(DA_MARKER_SATS, plan.outputs[0].amountSat)
+        assertEquals("DGB change at vout 0", dest, plan.outputs[0].address)
+        assertTrue("change is not a marker", plan.outputs[0].amountSat > DA_MARKER_SATS)
 
         assertEquals("OP_RETURN carries no address", "", plan.outputs[1].address)
         assertEquals(0L, plan.outputs[1].amountSat)
         assertTrue("OP_RETURN script is present", plan.outputs[1].scriptHex.isNotEmpty())
+
+        assertEquals("recipient marker LAST, at vout 2", dest, plan.outputs[2].address)
+        assertEquals(DA_MARKER_SATS, plan.outputs[2].amountSat)
+    }
+
+    /**
+     * B221. The receiving wallet cannot see the old wallet's input units, so it decides which
+     * outputs may carry asset units with inputUnits = null — and then the protocol's last-output
+     * remainder is "unknown", so the LAST output is held as a possible carrier. With the DGB
+     * change last (the old layout) a recovery left real DGB unspendable (Note 8, 2026-09-22:
+     * 2da4edc8…:2, 0.149453 DGB). The change must be an output no instruction and no remainder
+     * can reach; the marker, already an asset output, takes the remainder.
+     */
+    @Test fun `the receiving wallet sees the change as plain DGB, whatever the unit count`() {
+        for (units in listOf(10L, 0L)) {
+            val r = ForeignAssetTransferPlan.build(
+                assetInput = assetUtxo, assetUnits = units,
+                feeInputs = listOf(feeUtxo), destAddress = dest, feePerKb = feePerKb,
+            )
+            val plan = (r as ForeignAssetTransferPlan.Result.Ok).plan
+            val script = plan.outputs[1].scriptHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val header = DigiAssetDecoder().decode(script)!!
+            fun targeted(vout: Int) = io.digibyte.core.asset.AssetTxQuantity.targetsOutput(
+                header, vout, firstNonOpReturnVout = 0, inputUnits = null, outputCount = plan.outputs.size,
+            )
+            assertTrue("units=$units: the change (vout 0) must not be held as an asset carrier", !targeted(0))
+            assertTrue("units=$units: the marker (last) carries the asset", targeted(plan.outputs.size - 1))
+        }
     }
 
     /**
@@ -92,7 +120,7 @@ class ForeignAssetTransferPlanTest {
         val header = DigiAssetDecoder().decode(script)
         assertNotNull("the marker must decode as a DigiAsset transfer", header)
         val inst = header!!.transferInstructions.single()
-        assertEquals("units land on the recipient marker", 0, inst.outputIndex)
+        assertEquals("units land on the recipient marker, the last output", 2, inst.outputIndex)
         assertEquals(10L, inst.amount)
         assertTrue("an absolute amount, never a percentage", !inst.percent)
         assertTrue("not a range instruction", !inst.range)
@@ -189,7 +217,7 @@ class ForeignAssetTransferPlanTest {
         val header = DigiAssetDecoder().decode(script)
         assertNotNull("the marker must decode as a DigiAsset transfer", header)
         val inst = header!!.transferInstructions.single()
-        assertEquals("units land on the recipient marker at vout 0", 0, inst.outputIndex)
+        assertEquals("units land on the recipient marker at vout 2", 2, inst.outputIndex)
         assertEquals("minimal 1-unit split — the remainder rule delivers the rest", 1L, inst.amount)
         assertTrue("an absolute amount, never a percentage", !inst.percent)
         assertTrue("not a range instruction", !inst.range)
