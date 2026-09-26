@@ -26,8 +26,9 @@ data class SyncFrontier(
     /** The bottleneck frontier: cfTip when cfheaders is what we're waiting on,
      *  else the header height. This is the honest "Block X" to display. */
     val currentBlock: Long,
-    /** The effective chain tip — the authoritative external tip when known,
-     *  else the peer-quorum estimate. Never regresses below the seen tip. */
+    /** The effective chain tip — the larger of the running header maximum and
+     *  the native agreed peer estimate; the header height itself when that
+     *  estimate is unproven (see [SYNC_TARGET_MAX_LEAD]). */
     val targetBlock: Long,
     /** 0.0–1.0, tracking [currentBlock] toward [targetBlock]. */
     val progressFraction: Float,
@@ -51,6 +52,16 @@ const val SYNC_BEHIND_THRESHOLD = 100L
  *  detection only reaches cfTip. */
 const val CF_BEHIND_THRESHOLD = 100L
 
+/** Blocks a target may lead the header height by, once this session has already
+ *  reached Synced with [SyncState.Complete] latched, before the target is treated
+ *  as unproven and the header height is reported instead. One week of 15 s blocks:
+ *  a wallet asleep for days catches up honestly below it; no real tip moves that
+ *  far from a height this same process had already declared Synced. The primary
+ *  defence against a peer estimate far above the majority is native (the agreed-height
+ *  recompute with its growth bound); this rule only refuses to let a residual
+ *  outlier target hold the Send gate after a completed session. */
+const val SYNC_TARGET_MAX_LEAD = 40_320L
+
 /**
  * Derive the CF-gated sync frontier from raw inputs. Pure and deterministic —
  * the single place this logic lives.
@@ -58,12 +69,18 @@ const val CF_BEHIND_THRESHOLD = 100L
  * @param state         header-based sync state produced by SyncService
  * @param peerCount     live SPV peer count
  * @param currentHeight raw header height (getLastBlockHeight)
- * @param targetHeight  peer-quorum estimated height (getEstimatedBlockHeight)
- * @param externalTip   stable sync-target tip — a native monotonic high-water
- *                      mark of ONLY the PoW-validated header height (never
- *                      regresses, un-inflatable), or 0 if unknown. No external
- *                      call. The peer estimate is passed live as [targetHeight]
- *                      (this fn maxes them), so a spiked estimate self-heals.
+ * @param targetHeight  the native agreed estimated height (getEstimatedBlockHeight):
+ *                      the connected peers' agreed height, bounded by plausible
+ *                      growth, never below [currentHeight]
+ * @param externalTip   a Kotlin-side running maximum of the wallet's OWN header
+ *                      height ([currentHeight]), or 0 if never sampled. It is not
+ *                      proof-of-work validated (header PoW is not enforced before
+ *                      wave 5) and, being a maximum of [currentHeight], it can
+ *                      exceed [targetHeight] only right after a rescan moved the
+ *                      header height back. So `max(externalTip, targetHeight)`
+ *                      keeps the denominator from dropping below a height already
+ *                      seen and does nothing against an outlier [targetHeight];
+ *                      that defence is native, see [SYNC_TARGET_MAX_LEAD].
  * @param cfTip         compact-filter chain tip (getCFChainTipHeight), or 0 if
  *                      CF hasn't started this session
  * @param scanFrontier  compact-filter SCAN frontier (`getLowestNeededHeight()`),
@@ -78,6 +95,14 @@ const val CF_BEHIND_THRESHOLD = 100L
  *                      rescan) has covered it yet. NOT `abandonedBelow > 0`:
  *                      that watermark is a monotonic hard floor no recovery
  *                      clears, so keying on it directly makes recovery terminal.
+ * @param reachedSyncedThisSession
+ *                      true once THIS process has derived [SyncStage.Synced] (or the
+ *                      abandoned-band hold) at least once — WalletViewModel's
+ *                      `hasReachedSyncedOnce`. Defaulted false, which disables the
+ *                      [SYNC_TARGET_MAX_LEAD] rule: a cold start with a month-old
+ *                      header height and a sticky [SyncState.Complete] restored from
+ *                      prefs looks identical to an outlier target by magnitude alone, and must
+ *                      keep showing catch-up progress.
  */
 fun deriveSyncFrontier(
     state: SyncState,
@@ -88,12 +113,24 @@ fun deriveSyncFrontier(
     cfTip: Long,
     scanFrontier: Long = 0L,
     abandonedBandUnrecovered: Boolean = false,
+    reachedSyncedThisSession: Boolean = false,
 ): SyncFrontier {
-    // Prefer the authoritative external tip when available; fall back to the
-    // peer-quorum target only when the fetch has never succeeded. Never let the
-    // effective target regress — once we've seen the real tip we trust it over
-    // any lower peer claim.
-    val effectiveTarget = if (externalTip > targetHeight) externalTip else targetHeight
+    // The denominator never drops below a header height this wallet has already
+    // seen (externalTip is a running maximum of currentHeight; it exceeds the
+    // native estimate only right after a rescan). The native estimate is the
+    // connected peers' agreed height, already bounded and never below
+    // currentHeight, so in every other state this IS targetHeight.
+    val seenTarget = if (externalTip > targetHeight) externalTip else targetHeight
+
+    // A target more than SYNC_TARGET_MAX_LEAD above a header height this session
+    // already declared Synced (Complete latched) is unproven: no real tip moves a
+    // week's worth of blocks away from a height the same process just reached.
+    // Report the header height as the target so the Send gate is not held by a
+    // residual outlier. Gated on reachedSyncedThisSession so the offline-a-month cold
+    // start (identical by magnitude, Complete sticky from prefs) still catches up.
+    val targetUnproven = reachedSyncedThisSession && state is SyncState.Complete &&
+        currentHeight > 0 && (seenTarget - currentHeight) > SYNC_TARGET_MAX_LEAD
+    val effectiveTarget = if (targetUnproven) currentHeight else seenTarget
 
     // Honest progress: if the real header height is materially behind the tip,
     // surface catch-up even if SyncState.Complete latched.
