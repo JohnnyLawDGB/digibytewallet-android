@@ -17,6 +17,8 @@ import io.digibyte.core.reconcile.DgbNodeClient
 import io.digibyte.core.asset.assetPruneGateOpen
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.bridge.NativeCallback
+import io.digibyte.core.dandelion.Broadcaster
+import io.digibyte.core.dandelion.shouldSweepRepublish
 import io.digibyte.core.sync.CfAbandonmentStore
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
@@ -3303,7 +3305,8 @@ class SyncService : Service() {
         // dies mid-embargo. Until that's fully hardened, sends flood directly
         // (reliable delivery). Opt-in via Settings → Network Info.
         val enabled = getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", false)
-        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) {}
+        // Both gates, every start: the Kotlin mirror is false in a new process (B234).
+        Broadcaster.applySetting(enabled)
         if (!enabled) return
 
         val prefs = getSharedPreferences("dgb_dandelion_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
@@ -3491,6 +3494,9 @@ class SyncService : Service() {
             // it's a no-op for exactly this case. Fetch the raw bytes and
             // publishTransaction instead: that re-registers the tx for broadcast
             // (BRPeerManagerPublishTx) and floods it to all connected peers.
+            // A stem of this process still under its embargo is not stranded: flooding it would
+            // announce it from this wallet to every peer and undo the stem.
+            if (!shouldSweepRepublish(Broadcaster.isEmbargoPending(txid))) continue
             val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
             if (raw == null) {
                 android.util.Log.w("SyncService",
