@@ -16,24 +16,34 @@
  * additionally greps the real jni_transaction.c: a green KAT cannot coexist with a send
  * function that hands one object to both the wallet and the publisher.
  *
- * TWO SHAPES (run.sh builds both; convention: PRESENCE of the macro selects the red arm — the
- * green arm is built with NO -D at all, matching the sibling publish_cancel_survivor_kat)
- *   default:                     the two-object shape — the wallet registers a COPY, the
- *                                publisher gets the ORIGINAL. MUST print ALL PASS, exit 0.
- *   -DPUBLISH_OWNERSHIP_UNFIXED: the single-object shape, which this test rules out — the
- *                                wallet registers the SAME object the publisher is handed.
- *                                MUST be reported by AddressSanitizer, in every arm.
+ * THREE SHAPES (run.sh builds all; convention: PRESENCE of a macro selects a comparison arm —
+ * the green arm is built with NO -D at all, matching the sibling publish_cancel_survivor_kat)
+ *   default:                       the two-object shape — the wallet keeps a COPY made only when
+ *                                  it holds no record of the hash yet, the publisher gets the
+ *                                  ORIGINAL. MUST print ALL PASS, exit 0; arm 5 leak-clean.
+ *   -DPUBLISH_OWNERSHIP_UNFIXED:   the single-object shape, which this test rules out at the
+ *                                  bridge — the wallet registers the SAME object the publisher is
+ *                                  handed. The peer manager decides ownership at add time and so
+ *                                  keeps this caller safe (no sanitizer report: a GUARD run.sh
+ *                                  requires), but every arm FAILS its own checks: the publisher
+ *                                  cannot release an object that is the wallet's, and the
+ *                                  wallet's record is not an object of its own.
+ *   -DPUBLISH_LOOKUP_FIRST_UNFIXED: copy-then-register with no lookup — on a re-publish of a send
+ *                                  the wallet already holds, the second copy has no owner. Arm 5
+ *                                  MUST be reported by LeakSanitizer.
  *
- * argv[1], when given, selects ONE arm by number (1-4), so that run.sh can show each arm on its
- * own is able to see the single-object shape. With no argument all four arms run.
+ * argv[1], when given, selects ONE arm by number (1-5), so that run.sh can show each arm on its
+ * own. With no argument all five arms run.
  *
  * WHICH CHECKS ARE THE PROOF, AND WHICH ARE GUARDS
- *   RED-THEN-GREEN  in each arm, the sanitizer's verdict on the wallet's serialization, and the
- *                   check that the wallet's record is an object of its own: reported for the
- *                   single-object shape, clean for the two-object shape.
- *   GUARD           the checks on the callback, on the publish list and on "released exactly
- *                   once". They describe what the publisher does with ITS object and hold for
- *                   either shape, so they pin that behaviour and are never the proof.
+ *   RED-THEN-GREEN  in arms 1-4, the check that the wallet's record is an object of its own and
+ *                   that the publisher released the object it was handed: failing for the
+ *                   single-object shape, passing for the two-object shape. In arm 5, the leak
+ *                   checker's verdict on the second copy: reported for copy-then-register, clean
+ *                   for lookup-first.
+ *   GUARD           the checks on the callback and on the publish list, and — for the
+ *                   single-object shape — the absence of any sanitizer report: the peer manager
+ *                   keeps the same-object caller safe whatever the bridge does.
  *
  * DETERMINISTIC — no sockets, no threads, no timing. Synthetic BRPeerNew() peers with their
  * private status/gotVerack forced, driven straight into the peer manager's release paths.
@@ -156,22 +166,38 @@ static BRTransaction *makeOwnedSend(BRWallet *w, uint8_t tag)
     return tx;
 }
 
-/* Mirrors the register-then-publish hand-off of the send functions in jni_transaction.c: set
+/* Mirrors the hand-off of the send functions in jni_transaction.c (_registerWalletCopy): set
  * the timestamp, then decide which object the wallet's registered record is. Returns the
  * ORIGINAL, which the caller hands to the publisher exactly as the JNI function hands its tx
  * to BRPeerManagerPublishTx.
  *
- *   two-object shape:     the wallet keeps an independent COPY; the publisher owns the ORIGINAL.
- *   single-object shape:  the wallet keeps the SAME object the publisher will own — one object,
- *                         two owners — which is the shape this test rules out. */
+ *   two-object shape (default):   the wallet keeps an independent COPY, made only when it holds
+ *                                 no record of the hash yet and released again if it did not take
+ *                                 it; the publisher owns the ORIGINAL.
+ *   -DPUBLISH_LOOKUP_FIRST_UNFIXED: copy-then-register with no lookup — on a re-publish of a send
+ *                                 the wallet already holds, the registration is a no-op and the
+ *                                 second copy has no owner.
+ *   -DPUBLISH_OWNERSHIP_UNFIXED:  the wallet keeps the SAME object the publisher will own — the
+ *                                 shape this test rules out at the bridge.
+ * g_lastCopy records the copy the last hand-off made (NULL when none was made). */
+static BRTransaction *g_lastCopy = NULL;
 static BRTransaction *registerAndHandOff(BRWallet *w, BRTransaction *tx)
 {
     if (! tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
-#ifdef PUBLISH_OWNERSHIP_UNFIXED
+    g_lastCopy = NULL;
+#if defined(PUBLISH_OWNERSHIP_UNFIXED)
     BRWalletRegisterTransaction(w, tx);
-#else
+#elif defined(PUBLISH_LOOKUP_FIRST_UNFIXED)
     BRTransaction *copy = BRTransactionCopy(tx);
     if (copy) BRWalletRegisterTransaction(w, copy);
+    g_lastCopy = copy;
+#else
+    if (BRWalletTransactionForHash(w, tx->txHash)) return tx;   /* already held: nothing to copy */
+    BRTransaction *copy = BRTransactionCopy(tx);
+    if (! copy) return tx;
+    BRWalletRegisterTransaction(w, copy);
+    if (BRWalletTransactionForHash(w, tx->txHash) != copy) BRTransactionFree(copy);
+    g_lastCopy = copy;
 #endif
     return tx;
 }
@@ -347,10 +373,49 @@ static void arm_timeout_zero_survivors(void)
     serializeAndCheck(w, h, tx, "the wallet serializes its records after a broadcast timeout");
 }
 
+/* (5) Re-publish of a registered send: the wallet already holds its record (the 90-second
+ * stranded-send sweep and a manual retry re-publish a send the wallet has). The hand-off makes
+ * no second copy — or, if it made one the wallet did not take, releases it — so nothing is
+ * left without an owner. Torn down completely so the leak checker can judge it. */
+static void arm_republish_registered(void)
+{
+    printf("\n-- [5] re-publish of a registered send: no untaken copy is left without an owner --\n");
+    BRWallet *w = makeWallet();
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, w, 0, NULL, 0, NULL, 0);
+    if (! fixturesReady(w, m)) return;
+
+    m->isConnected = 1;                 /* past the not-connected branch; no peers => no inv I/O */
+
+    BRTransaction *tx = makeOwnedSend(w, 0x55);
+    UInt256 h = tx->txHash;
+    g_cbCount = 0; g_cbError = 0;
+    BRPeerManagerPublishTx(m, registerAndHandOff(w, tx), &g_cbSentinel, recordPublishResult);
+    const BRTransaction *record = BRWalletTransactionForHash(w, h);
+    check(record != NULL && record != tx, "the wallet holds its own record after the first publish");
+    check(g_lastCopy == record, "that record is the copy the first hand-off made");
+
+    /* the same send again: an equal object, handed off and published a second time */
+    BRTransaction *tx2 = BRTransactionCopy(tx);
+    BRPeerManagerPublishTx(m, registerAndHandOff(w, tx2), &g_cbSentinel, recordPublishResult);
+    check(BRWalletTransactionForHash(w, h) == record, "the wallet keeps the record it had");
+    check(g_lastCopy == NULL || __asan_address_is_poisoned(g_lastCopy) != 0,
+          "no second copy is left without an owner (none made, or released as untaken)");
+    check(g_cbCount == 1 && g_cbError == EALREADY, "the second publish was answered EALREADY, once");
+    checkReleasedOnce(tx2, "the publisher released the second object it was handed, once");
+    serializeAndCheck(w, h, tx, "the wallet serializes its records after the re-publish");
+
+    /* complete teardown: the pending first publish is answered, the list's object released */
+    BRPeerManagerFree(m);
+    check(g_cbCount == 2 && g_cbError == ENOTCONN, "the first publish was answered once, at teardown");
+    checkReleasedOnce(tx, "the publisher released the first object it was handed, once");
+    BRWalletFree(w);
+}
+
 int main(int argc, char **argv)
 {
     static void (*const arms[])(void) = {
-        arm_no_connection, arm_duplicate, arm_terminal_disconnect, arm_timeout_zero_survivors
+        arm_no_connection, arm_duplicate, arm_terminal_disconnect, arm_timeout_zero_survivors,
+        arm_republish_registered
     };
     const int armCount = (int)(sizeof(arms) / sizeof(arms[0]));
     int only = 0;   /* 0 = every arm */
@@ -366,9 +431,12 @@ int main(int argc, char **argv)
         }
     }
 
-#ifdef PUBLISH_OWNERSHIP_UNFIXED
+#if defined(PUBLISH_OWNERSHIP_UNFIXED)
     printf("SHAPE: single object (-DPUBLISH_OWNERSHIP_UNFIXED) — the wallet registers the same "
            "object the publisher is handed; the shape this test rules out\n");
+#elif defined(PUBLISH_LOOKUP_FIRST_UNFIXED)
+    printf("SHAPE: copy-then-register (-DPUBLISH_LOOKUP_FIRST_UNFIXED) — a copy is made and registered "
+           "without asking whether the wallet already holds the hash\n");
 #else
     printf("SHAPE: two objects — the wallet registers an independent copy; the publisher owns "
            "the original\n");

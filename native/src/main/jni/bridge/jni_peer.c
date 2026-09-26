@@ -839,9 +839,9 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             LOGW("startSync: rescan stalled at 0 peers — clearing marker, recreating fresh manager");
             g_isRescanning = 0;
         }
-        /* Wallet was created/recovered after peer manager was initialized.
-         * Destroy and recreate so the bloom filter includes the wallet's addresses.
-         * Only do this ONCE — clear the flag immediately. */
+        /* Wallet was created/recovered after peer manager was initialized (or a reconnect was
+         * requested). Destroy and recreate on the current wallet. Only do this ONCE — clear the
+         * flag immediately. g_walletSwapped is cleared below, once the new manager exists. */
         g_peerManagerNeedsRecreate = 0;
         LOGI("startSync: recreating peer manager (wallet changed since last init)");
         /* Disconnect's wait is BOUNDED (PEER_DISCONNECT_WAIT_SECS) and peer threads are
@@ -962,10 +962,11 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             LOGI("startSync: saved-block ownership transferred to peer manager");
         }
 
-        /* Clear the flag — peer manager is now built with current wallet.
+        /* Clear the flags — peer manager is now built with current wallet.
          * Without this, the poll loop's next startSync call would see the
          * stale flag and destroy what we just created. */
         g_peerManagerNeedsRecreate = 0;
+        g_walletSwapped = 0;
 
         /* Set callbacks */
         BRPeerManagerSetCallbacks(g_peerManager, NULL,

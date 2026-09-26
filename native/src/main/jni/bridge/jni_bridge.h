@@ -142,9 +142,19 @@ extern int            g_mpkValid;
  * Set by createWallet (current time) or recoverWallet (user-provided). */
 extern uint32_t g_walletCreationTime;
 
-/* Flag: set to 1 when createWallet/recoverWallet is called, so startSync
- * knows to recreate the peer manager with the wallet's bloom filter. */
+/* Flag: set to 1 when createWallet/recoverWallet is called (and by forceReconnect), so
+ * startSync knows to recreate the peer manager. A request, not a statement about the wallet:
+ * forceReconnect sets it while the manager still holds the current g_wallet. */
 extern int g_peerManagerNeedsRecreate;
+
+/* Flag: 1 from the first moment g_wallet stops being the wallet g_peerManager was built with
+ * (createWalletFromBytes / recoverWalletFromBytes set it BEFORE they free the old wallet) until
+ * startSync has rebuilt the manager on the current g_wallet (cleared where the new manager is
+ * created). While it is set, a wallet-side removal must name only g_wallet: the manager's
+ * removal would act on a wallet that is not this one. Distinct from g_peerManagerNeedsRecreate so
+ * a plain reconnect request does not switch the removal off the manager-locked path. Guarded by
+ * PEER_GUARD, as g_peerManager is. */
+extern int g_walletSwapped;
 
 /* Callback handler (NativeCallback interface) */
 extern jobject  g_callbackHandler;
