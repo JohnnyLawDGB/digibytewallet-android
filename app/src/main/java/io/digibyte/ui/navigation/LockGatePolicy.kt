@@ -53,3 +53,22 @@ fun shouldRouteToOnboardingAfterWipe(state: WalletState, currentRoute: String?):
     val base = currentRoute.substringBefore("?").substringBefore("/")
     return base !in PRE_WALLET_ROUTES
 }
+
+/**
+ * Screens a lock may interrupt that the wallet reopens once the user has unlocked (B230).
+ *
+ * A system credential prompt (the device-lock refresh Recover funds and the seed screens ask for)
+ * is another activity: it stops MainActivity, which locks, and the unlock then lands on the wallet
+ * home — the user had to find their way back to the screen they were using. Only argument-free
+ * settings-side screens are listed: the route is reopened as a pattern, and anything typed on the
+ * screen before the lock is gone either way. The user has just authenticated, so reopening the
+ * screen shows nothing the unlock did not already open.
+ */
+private val RESUMABLE_AFTER_UNLOCK = setOf(
+    "recover_funds", "settings_security", "settings_view_seed", "settings_network",
+    "settings_display", "settings_about", "settings_reconcile",
+)
+
+/** The route to reopen after the unlock that followed a lock on [interrupted], or null. */
+fun routeToResumeAfterUnlock(interrupted: String?): String? =
+    interrupted?.takeIf { it in RESUMABLE_AFTER_UNLOCK }
