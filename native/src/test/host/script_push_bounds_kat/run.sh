@@ -46,11 +46,14 @@ bounded() {
     local outfile="$1"; shift
     "$@" >"$outfile" 2>&1 &
     local pid=$!
-    ( sleep "$LIMIT_S"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    # The watchdog subshell inherits this script's EXIT trap; a plain kill would run it
+    # and remove $BUILD_DIR under the other arms. Drop the trap inside, and stop the
+    # watchdog with a signal that runs no trap at all.
+    ( trap - EXIT; sleep "$LIMIT_S"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$pid" 2>/dev/null; local rc=$?
     if kill -0 "$watchdog" 2>/dev/null; then
-        kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; return $rc
+        kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; return $rc
     fi
     return 124
 }
