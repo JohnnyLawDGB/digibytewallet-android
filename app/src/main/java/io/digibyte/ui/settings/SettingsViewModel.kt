@@ -143,12 +143,11 @@ class SettingsViewModel @Inject constructor(
     )
     val dandelionEnabled: StateFlow<Boolean> = _dandelionEnabled.asStateFlow()
 
-    /** Toggle Dandelion stem submission: persist the pref, update the C-core gate,
-     *  and mirror the Kotlin-side Broadcaster flag. */
+    /** Toggle Dandelion stem submission: apply it to the broadcaster (Kotlin mirror +
+     *  C-core gate) and persist the pref that sync start re-applies. */
     fun setDandelionEnabled(enabled: Boolean) {
         _dandelionEnabled.value = enabled
-        Broadcaster.dandelionEnabled = enabled
-        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) { /* applied on next sync */ }
+        Broadcaster.applySetting(enabled)
         context.getSharedPreferences("dgb_dandelion", Context.MODE_PRIVATE)
             .edit().putBoolean("enabled", enabled).apply()
     }

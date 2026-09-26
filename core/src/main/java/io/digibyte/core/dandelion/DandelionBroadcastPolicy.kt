@@ -15,6 +15,16 @@ fun shouldStem(enabled: Boolean, hasDandelionPeer: Boolean): Boolean =
  *  node dropped it / it didn't propagate. relayCount>0 means it's already spreading. */
 fun shouldFluffAfterEmbargo(relayCount: Int): Boolean = relayCount == 0
 
+/** Whether the stranded-send sweep may flood a recorded, unconfirmed send: not while this
+ *  process's embargo for it is still running. The embargo owns a fresh stem, and a flood then
+ *  would announce it from this wallet to every peer. Once the embargo has run (or after a
+ *  restart, when there is none), an unconfirmed send is republished as before.
+ *
+ *  Deliberately NOT keyed on the relay count: the core counts the stem peer's own getdata as a
+ *  relay, so a stem that dies at the stem peer reads as propagated (Note 8, 2026-09-25: relay
+ *  count 1 within 4 s, never reached the network). Trusting it here stranded the send. */
+fun shouldSweepRepublish(embargoPending: Boolean): Boolean = !embargoPending
+
 /** Map a uniform [0,1] CSPRNG draw to the embargo window. Caller supplies the
  *  random (SecureRandom) so this stays pure/testable. */
 fun embargoDelayMs(rng01: Double): Long {
