@@ -41,7 +41,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import javax.inject.Inject
 import kotlinx.coroutines.runInterruptible
 
@@ -156,6 +155,8 @@ class SyncService : Service() {
     @Inject lateinit var assetHistoryBackfill: io.digibyte.core.asset.AssetHistoryBackfill
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var okHttpClient: OkHttpClient
+    /** Every seeder request goes through this; see [SeederClient]. Derived once, after injection. */
+    private val seederClient by lazy { SeederClient(okHttpClient) }
 
     /** True if Tor proxy was successfully wired before this sync session started. */
     @Volatile private var torProxyActive: Boolean = false
@@ -3340,20 +3341,8 @@ class SyncService : Service() {
      *  [capability] filters the seeder pool (e.g. "dandelion"); null = default pool. */
     private fun fetchFromSeeder(capability: String? = null): List<Triple<String, Int, Long>>? {
         val url = if (capability != null) "$SEEDER_URL?capability=$capability" else SEEDER_URL
-        return try {
-            val request = Request.Builder().url(url).build()
-            okHttpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    parsePeersJson(response.body!!.string())
-                } else {
-                    android.util.Log.w("SyncService", "Seeder API returned ${response.code}")
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("SyncService", "Seeder API unreachable: ${e.message}")
-            null
-        }
+        val body = seederClient.fetch(url) { android.util.Log.w("SyncService", it) } ?: return null
+        return parsePeersJson(body)
     }
 
     /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024,"services_hex":"0x44d", ...}], "capability":"filter|bloom|filter+bloom", ...}
