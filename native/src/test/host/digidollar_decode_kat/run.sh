@@ -25,13 +25,18 @@
 # than a -1 return. Leak detection is off (this KAT is not about leaks);
 # symbol resolution is off for speed.
 #
-# This is a single-arm functional KAT: main.c labels each extended group as
-# RED-THEN-GREEN or GUARD.
+# ARMS. The shipped arm (no -D at all) must pass every check, in a 64-bit and a
+# 32-bit build. Two comparison arms, presence convention, pin the reader properties
+# main.c tags as [type-width] and [push-list-opcode] to their own seams in
+# BRDigiDollar.c: -DDD_TYPE_WIDTH_UNFIXED must fail every [type-width] check and no
+# other, -DDD_PUSH_LIST_OPCODE_UNFIXED every [push-list-opcode] check and no other.
+# A comparison arm that fails nothing, or fails something else, is a gate failure:
+# the -D would then not be selecting what the tag says. Untagged extended checks are
+# GUARDs and hold in every arm.
 #
-# Exit code 0 = all checks passed, 1 = at least one check failed (or build
-# error -- expected before BRDigiDollar.h/.c exist); a sanitizer report aborts
+# Exit code 0 = every arm behaved as stated, 1 otherwise; a sanitizer report aborts
 # the run, which is a non-zero exit too.
-set -euo pipefail
+set -uo pipefail   # not -e: a comparison arm's non-zero exit is expected and captured
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
@@ -45,29 +50,96 @@ shopt -u nullglob
 
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
 
-clang -w -include stdint.h \
-    -g -fsanitize=address -fno-omit-frame-pointer \
-    -I "$CORE_DIR" \
-    -I "$CORE_DIR/secp256k1/include" \
-    "$SCRIPT_DIR/digidollar_decode_kat_main.c" \
-    "$CORE_DIR/BRDigiDollar.c" \
-    "$CORE_DIR/BRTransaction.c" \
-    "$CORE_DIR/BRAddress.c" \
-    "$CORE_DIR/BRSet.c" \
-    "$CORE_DIR/BRKey.c" \
-    "$CORE_DIR/BRNetwork.c" \
-    "$CORE_DIR/BRBase58.c" \
-    "$CORE_DIR/BRBech32.c" \
-    "$CORE_DIR/BRCrypto.c" \
-    "$CORE_DIR/BRDigiAsset.c" \
-    "$CORE_DIR/BRBIP32Sequence.c" \
-    "$CORE_DIR/BRBIP39Mnemonic.c" \
-    "$CORE_DIR/crypto/groestl.c" \
-    "$CORE_DIR/crypto/skein.c" \
-    "$CORE_DIR/crypto/qubit.c" \
-    "$CORE_DIR/crypto/odocrypt.c" \
-    "${SHA3_SRCS[@]}" \
-    -lm \
-    -o "$BUILD_DIR/digidollar_decode_kat"
+# Seam self-check: a -D that names nothing silently builds the shipped path.
+for tok in DD_TYPE_WIDTH_UNFIXED DD_PUSH_LIST_OPCODE_UNFIXED; do
+    if ! grep -q "$tok" "$CORE_DIR/BRDigiDollar.c"; then
+        echo "GATE FAILURE: BRDigiDollar.c has no $tok seam; -D would be inert."
+        exit 1
+    fi
+done
 
-"$BUILD_DIR/digidollar_decode_kat"
+# build <out> <bits: 64|32> [extra -D flags...]
+build() {
+    local out="$1"; local bits="$2"; shift 2
+    local m=()
+    [ "$bits" = "32" ] && m=(-m32)
+    clang -w -include stdint.h \
+        -g -fsanitize=address -fno-omit-frame-pointer \
+        "${m[@]}" "$@" \
+        -I "$CORE_DIR" \
+        -I "$CORE_DIR/secp256k1/include" \
+        "$SCRIPT_DIR/digidollar_decode_kat_main.c" \
+        "$CORE_DIR/BRDigiDollar.c" \
+        "$CORE_DIR/BRTransaction.c" \
+        "$CORE_DIR/BRAddress.c" \
+        "$CORE_DIR/BRSet.c" \
+        "$CORE_DIR/BRKey.c" \
+        "$CORE_DIR/BRNetwork.c" \
+        "$CORE_DIR/BRBase58.c" \
+        "$CORE_DIR/BRBech32.c" \
+        "$CORE_DIR/BRCrypto.c" \
+        "$CORE_DIR/BRDigiAsset.c" \
+        "$CORE_DIR/BRBIP32Sequence.c" \
+        "$CORE_DIR/BRBIP39Mnemonic.c" \
+        "$CORE_DIR/crypto/groestl.c" \
+        "$CORE_DIR/crypto/skein.c" \
+        "$CORE_DIR/crypto/qubit.c" \
+        "$CORE_DIR/crypto/odocrypt.c" \
+        "${SHA3_SRCS[@]}" \
+        -lm \
+        -o "$out"
+}
+
+FAIL=0
+
+# comparison_arm <bits> <flag> <tag>: the arm built with -D<flag> must fail every check
+# tagged [<tag>], at least one, and nothing else.
+comparison_arm() {
+    local bits="$1" flag="$2" tag="$3"
+    if ! build "$BUILD_DIR/red_${tag}${bits}" "$bits" "-D$flag"; then
+        echo "GATE FAILURE: ${bits}-bit comparison arm -D$flag did not compile."; FAIL=1; return
+    fi
+    local out; out="$("$BUILD_DIR/red_${tag}${bits}" 2>&1)"; local rc=$?
+    if echo "$out" | grep -Eq 'ERROR: AddressSanitizer|runtime error:'; then
+        echo "  [$bits -D$flag] GATE FAILURE: sanitizer report in the comparison arm (rc=$rc)"
+        echo "$out" | grep -E 'ERROR: AddressSanitizer|runtime error:' | head -3 | sed 's/^/      /'; FAIL=1; return
+    fi
+    local fails tagged untagged passed_tagged
+    fails="$(echo "$out" | grep '^FAIL: ' || true)"
+    tagged="$(echo "$fails" | grep -c "^FAIL: \[$tag\]" || true)"
+    untagged="$(echo "$fails" | grep -vc "^FAIL: \[$tag\]" || true)"
+    passed_tagged="$(echo "$out" | grep -c "^PASS: \[$tag\]" || true)"
+    if [ "$tagged" -ge 1 ] && [ "$untagged" -eq 0 ] && [ "$passed_tagged" -eq 0 ]; then
+        echo "  [$bits -D$flag] fails exactly the $tagged [$tag] check(s) and nothing else (rc=$rc): the arm sees what the seam governs"
+    else
+        echo "  [$bits -D$flag] GATE FAILURE: [$tag] failed=$tagged still-passing=$passed_tagged, other failures=$untagged (rc=$rc)"
+        echo "$fails" | head -8 | sed 's/^/      /'; FAIL=1
+    fi
+}
+
+for bits in 64 32; do
+    echo "======================================================================"
+    echo "=== ${bits}-bit build ==="
+    echo "======================================================================"
+    if ! build "$BUILD_DIR/green${bits}" "$bits"; then
+        echo "GATE FAILURE: ${bits}-bit shipped arm did not compile."; FAIL=1; continue
+    fi
+    out="$("$BUILD_DIR/green${bits}" 2>&1)"; rc=$?
+    if [ $rc -eq 0 ] && echo "$out" | grep -q '^ALL PASS'; then
+        echo "  [$bits shipped] $(echo "$out" | grep -c '^PASS: ') checks passed"
+    else
+        echo "  [$bits shipped] GATE FAILURE (rc=$rc):"
+        echo "$out" | grep -E '^FAIL: |ERROR: AddressSanitizer|runtime error:|SOME FAILED' | head -12 | sed 's/^/      /'; FAIL=1
+    fi
+    comparison_arm "$bits" DD_TYPE_WIDTH_UNFIXED type-width
+    comparison_arm "$bits" DD_PUSH_LIST_OPCODE_UNFIXED push-list-opcode
+done
+
+echo
+if [ "$FAIL" -eq 0 ]; then
+    echo "PASS: digidollar_decode_kat (shipped arm clean, each comparison arm fails exactly its own checks; 64-bit and 32-bit)"
+    exit 0
+else
+    echo "FAIL: digidollar_decode_kat"
+    exit 1
+fi

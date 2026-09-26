@@ -343,8 +343,9 @@ int main(void)
             BRTransactionFree(wl);
         }
 
-        // The agreement holds in the accepting direction too. A transfer's list ends at the
-        // first byte that is not a push; what was read up to there stands, for both readers.
+        // The agreement holds in the accepting direction too. A trailing opcode that is not
+        // a push (OP_1 here) carries no data: it is passed over as an empty push, as the
+        // reference reader does, and what was read stands, for both readers (see (h) below).
         uint8_t l_tail[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13,0x02,0xc4,0x09,0x51};
         BRTransaction *tl = BRTransactionNew(); tl->version = 0x02000770;
         BRTransactionAddOutput(tl, 0, o_a, 34);
@@ -365,6 +366,87 @@ int main(void)
         check(n5 == 1 && a5[0] == 5000, "mint reads its first amount only -> [5000]");
         check(BRDigiDollarOutputAmount(mt, 0) == 5000, "mint: output 0 binds to the first amount");
         BRTransactionFree(mt);
+    }
+
+    // --- Push encodings the reference reader accepts, and no others. Each vector below is
+    //     stated against DigiByte Core's DigiDollar reader (src/digidollar/validation.cpp):
+    //     the type push is read as a script number of at most 4 bytes (CScriptNum's default
+    //     width) and compared at full width; a push whose declared length does not fit ends
+    //     the list with what was read standing; an opcode that is not a push carries no data
+    //     and is passed over. Descriptions carry a [tag] naming the reader property so that
+    //     run.sh can pin each comparison arm to exactly its own cases:
+    //       [type-width]        RED-THEN-GREEN, comparison arm -DDD_TYPE_WIDTH_UNFIXED
+    //       [push-list-opcode]  RED-THEN-GREEN, comparison arm -DDD_PUSH_LIST_OPCODE_UNFIXED
+    //       (untagged)          GUARD: holds in every arm ---
+    {
+        uint8_t o_a[34]; o_a[0]=0x51; o_a[1]=0x20; memset(o_a+2,0xA1,32);
+        uint8_t o_b[34]; o_b[0]=0x51; o_b[1]=0x20; memset(o_b+2,0xB2,32);
+
+        // (f) [type-width] A five-byte type push 05 02 00 00 00 01. It is a minimal script
+        //     number (4294967298), so it is not refused as an encoding; only its width refuses
+        //     it. The reference reads the type through a 4-byte CScriptNum and refuses the
+        //     transaction; a reader that narrowed the value to int would read TRANSFER.
+        //     Neither reader may credit the transfer.
+        uint8_t t5[] = {0x6a,0x02,0x44,0x44,0x05,0x02,0x00,0x00,0x00,0x01,0x02,0x88,0x13};
+        BRTransaction *f = BRTransactionNew(); f->version = 0x02000770;
+        BRTransactionAddOutput(f, 0, o_a, 34);
+        BRTransactionAddOutput(f, 0, t5, sizeof(t5));
+        int64_t a6[8];
+        check(BRDigiDollarDecodeAmounts(f, a6, 8) == -1, "[type-width] five-byte type push: the list is refused -> -1");
+        check(BRDigiDollarOutputAmount(f, 0) == -1,      "[type-width] five-byte type push: output 0 binds to no amount -> -1");
+        BRTransactionFree(f);
+
+        // (g) GUARD: a four-byte type push 04 02 00 00 00 is a padded (non-minimal) number; both
+        //     readers refuse it in every arm. Pins that a push of the reference width cannot
+        //     read as a type it is not.
+        uint8_t t4[] = {0x6a,0x02,0x44,0x44,0x04,0x02,0x00,0x00,0x00,0x02,0x88,0x13};
+        BRTransaction *g = BRTransactionNew(); g->version = 0x02000770;
+        BRTransactionAddOutput(g, 0, o_a, 34);
+        BRTransactionAddOutput(g, 0, t4, sizeof(t4));
+        check(BRDigiDollarDecodeAmounts(g, a6, 8) == -1, "four-byte padded type push -> -1 (guard)");
+        check(BRDigiDollarOutputAmount(g, 0) == -1,      "four-byte padded type push: output 0 binds to no amount (guard)");
+        BRTransactionFree(g);
+
+        // (h) [push-list-opcode] An opcode that is not a push inside the amount list:
+        //     OP_RETURN "DD" <02> <5000> OP_5 <7000>. The reference's GetOp yields OP_5 with
+        //     no data, its loop passes over it and reads 7000; both readers here do the same.
+        uint8_t l_op[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13,0x55,0x02,0x58,0x1b};
+        BRTransaction *h = BRTransactionNew(); h->version = 0x02000770;
+        BRTransactionAddOutput(h, 0, o_a, 34);
+        BRTransactionAddOutput(h, 0, o_b, 34);
+        BRTransactionAddOutput(h, 0, l_op, sizeof(l_op));
+        int n6 = BRDigiDollarDecodeAmounts(h, a6, 8);
+        check(n6 == 2 && a6[0] == 5000 && a6[1] == 7000, "[push-list-opcode] OP_5 inside the list is passed over -> [5000, 7000]");
+        check(BRDigiDollarOutputAmount(h, 0) == 5000,    "OP_5 inside the list: output 0 -> 5000 (guard: read before the opcode, it binds in every arm)");
+        check(BRDigiDollarOutputAmount(h, 1) == 7000,    "[push-list-opcode] OP_5 inside the list: output 1 -> 7000");
+        BRTransactionFree(h);
+
+        // (i) GUARD: an amount push whose declared length does not fit (PUSHDATA4 ffffffff after
+        //     5000). The reference's GetScriptOp answers false there and its loop ends with
+        //     [5000] standing; both readers here end the same way.
+        uint8_t l_fit[] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13,0x4e,0xff,0xff,0xff,0xff};
+        BRTransaction *i = BRTransactionNew(); i->version = 0x02000770;
+        BRTransactionAddOutput(i, 0, o_a, 34);
+        BRTransactionAddOutput(i, 0, o_b, 34);
+        BRTransactionAddOutput(i, 0, l_fit, sizeof(l_fit));
+        int n7 = BRDigiDollarDecodeAmounts(i, a6, 8);
+        check(n7 == 1 && a6[0] == 5000,               "amount push that does not fit ends the list -> [5000] (guard)");
+        check(BRDigiDollarOutputAmount(i, 0) == 5000, "amount push that does not fit: output 0 -> 5000 (guard)");
+        check(BRDigiDollarOutputAmount(i, 1) == -1,   "amount push that does not fit: output 1 binds to no amount (guard)");
+        BRTransactionFree(i);
+
+        // (j) GUARD: a MINT in the reference's own shape, DD <01> <amount> <lockHeight> <lockTier>
+        //     (2073600 = 00 a4 1f, tier 3). Only the first push is the amount, in every arm.
+        uint8_t l_mint2[] = {0x6a,0x02,0x44,0x44,0x01,0x01,0x02,0x88,0x13,0x03,0x00,0xa4,0x1f,0x01,0x03};
+        BRTransaction *j = BRTransactionNew(); j->version = 0x01000770;
+        BRTransactionAddOutput(j, 0, o_a, 34);
+        BRTransactionAddOutput(j, 0, o_b, 34);
+        BRTransactionAddOutput(j, 0, l_mint2, sizeof(l_mint2));
+        int n8 = BRDigiDollarDecodeAmounts(j, a6, 8);
+        check(n8 == 1 && a6[0] == 5000,               "mint with lock fields after the amount -> [5000] (guard)");
+        check(BRDigiDollarOutputAmount(j, 0) == 5000, "mint with lock fields: output 0 -> 5000 (guard)");
+        check(BRDigiDollarOutputAmount(j, 1) == -1,   "mint with lock fields: output 1 binds to no amount (guard)");
+        BRTransactionFree(j);
     }
 
     if (g_failures == 0) {
