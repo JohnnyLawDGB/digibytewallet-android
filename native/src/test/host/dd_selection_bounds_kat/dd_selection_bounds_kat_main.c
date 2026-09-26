@@ -64,7 +64,7 @@ static BRTransaction *ddCreditTx(const uint8_t *spk, size_t spkLen, int64_t cent
     uint8_t enc[9]; size_t el = BRDigiDollarWriteScriptNum(cents, enc);
     orr[ol++] = (uint8_t)el; memcpy(orr + ol, enc, el); ol += el;
     BRTransactionAddOutput(tx, 0, orr, ol);
-    tx->blockHeight = 700000;
+    tx->blockHeight = 23700000;
     finalizeTxHash(tx);
     return tx;
 }
@@ -88,7 +88,7 @@ static BRWallet *mkWallet(size_t nPlain) {
         UInt256 ph; memset(ph.u8, 0x22, 32);
         BRTransactionAddInput(tx, ph, 0, 0, dspk, dspkLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
         for (size_t i = 0; i < nPlain; i++) BRTransactionAddOutput(tx, 20000, dspk, dspkLen);
-        tx->blockHeight = 700000;
+        tx->blockHeight = 23700000;
         // A unique, stable txHash without serialising a 50,000-output tx on the setup stack.
         memset(tx->txHash.u8, 0x77, 32);
         BRWalletRegisterTransaction(w, tx);

@@ -72,7 +72,7 @@ int main(void) {
     // it confirms. Give it a confirmed height here so this KAT exercises the
     // detection/accumulation logic directly, matching how a chain-scanned/confirmed
     // DD transfer reaches this code path in production.
-    tx->blockHeight = 700000;
+    tx->blockHeight = 23700000;
     finalizeTxHash(tx);
     BRWalletRegisterTransaction(w, tx);
     check(BRWalletDigiDollarBalance(w) == 5000, "DD balance credited: 5000 cents");
@@ -88,7 +88,7 @@ int main(void) {
     BRTransactionAddOutput(sp, 0, fspk, 34);
     uint8_t orr2[9] = {0x6a,0x02,0x44,0x44,0x01,0x02,0x02,0x88,0x13};
     BRTransactionAddOutput(sp, 0, orr2, sizeof(orr2));
-    sp->blockHeight = 700001; // confirmed spend, same reasoning as tx above
+    sp->blockHeight = 23700001; // confirmed spend, same reasoning as tx above
     finalizeTxHash(sp);
     BRWalletRegisterTransaction(w, sp);
     check(BRWalletDigiDollarBalance(w) == 0, "DD balance 0 after spending the DD utxo");
