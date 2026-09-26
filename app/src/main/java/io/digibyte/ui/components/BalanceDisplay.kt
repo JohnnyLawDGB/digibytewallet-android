@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ import io.digibyte.ui.theme.DigiDollarGreenBright
  * @param ddAmount    Pre-formatted DigiDollar string e.g. "$50.00", or null to hide the pill
  * @param isSynced    When false, everything is dimmed (last-known snapshot)
  * @param onFiatTap   Tap handler on the equivalent line (cycles the display currency)
+ * @param onDigiDollarTap Tap handler on the DigiDollar pill (opens DigiDollar receive), or null
  */
 @Composable
 fun BalanceDisplay(
@@ -43,6 +45,7 @@ fun BalanceDisplay(
     isSynced: Boolean = true,
     hidden: Boolean = false,
     onFiatTap: (() -> Unit)? = null,
+    onDigiDollarTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // Privacy toggle: when hidden, every figure is replaced by a mask, but the layout —
@@ -107,8 +110,20 @@ fun BalanceDisplay(
         // DigiDollar held — a distinct pill, separate from the DGB total
         if (ddAmount != null) {
             Spacer(modifier = Modifier.height(12.dp))
+            val pillShape = RoundedCornerShape(percent = 50)
+            val ddTapLabel = androidx.compose.ui.res.stringResource(io.digibyte.R.string.receive_title_dd)
             Surface(
-                shape = RoundedCornerShape(percent = 50),
+                shape = pillShape,
+                // A tap opens DigiDollar receive (B236): the pill is where a user looks for it.
+                modifier = if (onDigiDollarTap != null) {
+                    Modifier
+                        .clip(pillShape)
+                        .clickable(
+                            onClickLabel = ddTapLabel,
+                            role = androidx.compose.ui.semantics.Role.Button,
+                            onClick = onDigiDollarTap,
+                        )
+                } else Modifier,
                 // Tinted to DigiDollar's own green, not the DGB accent. The pill's job is to
                 // say "separate asset"; a blue container holding a green mark said the reverse.
                 color = DigiDollarGreen.copy(alpha = alpha * 0.22f)
