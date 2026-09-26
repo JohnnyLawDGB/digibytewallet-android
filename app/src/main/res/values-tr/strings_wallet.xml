@@ -222,7 +222,7 @@
     <string name="send_to">Alıcı</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_paid_in_dgb">DGB ile ödenir</string>
+    <string name="send_dd_fee_value">≈ %1$s DGB</string>
     <string name="send_verify_warning">Yukarıdaki tam adresi dikkatle doğrulayın.\nİşlemler geri alınamaz.</string>
     <string name="send_send">Gönder</string>
     <string name="send_success">Başarılı</string>

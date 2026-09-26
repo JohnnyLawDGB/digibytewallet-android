@@ -287,7 +287,7 @@
     <string name="send_to">To</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_paid_in_dgb">Paid in DGB</string>
+    <string name="send_dd_fee_value">≈ %1$s DGB</string>
     <!-- WARNING: the last thing shown before an irreversible transfer. "Irreversible" must stay
          blunt — no softening to "cannot usually be undone". -->
     <string name="send_verify_warning">Verify the full address above carefully.\nTransactions are irreversible.</string>

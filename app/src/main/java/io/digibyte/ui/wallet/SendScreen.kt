@@ -38,6 +38,7 @@ import io.digibyte.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import io.digibyte.R
+import io.digibyte.core.recovery.DigiDollarTransferPlan
 
 @Composable
 fun SendScreen(
@@ -740,7 +741,14 @@ private fun DigiDollarConfirmationDialog(
 
                 ConfirmRow(label = stringResource(R.string.send_to), value = address) // FULL address — never truncated
                 ConfirmRow(label = stringResource(R.string.send_amount), value = stringResource(R.string.send_amount_dd, amountUsd))
-                ConfirmRow(label = stringResource(R.string.send_network_fee_row), value = stringResource(R.string.send_paid_in_dgb))
+                // The fee the DigiDollar send pays, not only its currency (B235): the consensus floor,
+                // 0.1 DGB, which the builder charges at any practical size (plus at most a dust
+                // remainder). Spelled like the DGB confirmation's fee row: a dot in every language.
+                val ddFeeDgb = java.math.BigDecimal.valueOf(DigiDollarTransferPlan.DD_MIN_FEE_SATS, 8)
+                ConfirmRow(
+                    label = stringResource(R.string.send_network_fee_row),
+                    value = stringResource(R.string.send_dd_fee_value, String.format(java.util.Locale.US, "%.8f", ddFeeDgb))
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
