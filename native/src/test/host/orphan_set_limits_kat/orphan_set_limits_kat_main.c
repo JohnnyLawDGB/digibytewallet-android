@@ -8,13 +8,18 @@
 //      Both limits are measured here by walking the set, never by trusting the running total.
 //   2. ONE OWNER. A header that leaves the set -- displaced by an insert sharing its parent,
 //      evicted by the limit, or connected to the chain -- has exactly one owner afterwards,
-//      and manager->lastOrphan never names a header that has left the set.
+//      and manager->lastOrphan never names a header that has left the set. The same holds
+//      for a resident header that a re-delivered copy replaces in manager->blocks, and for
+//      a saved header the resume load displaces before it chains the saved run.
 //   3. EXACT TOTAL. manager->orphanBytes equals the sum over the resident set after every
 //      kind of change: insert, displacement, eviction, and a header connecting.
 //   4. SPACING. The re-anchor getheaders is authorized once per chain of parentless headers
 //      and at most once per interval per peer; a chain whose first member arrived inside the
 //      interval still gets its request from a later member; a clock that steps backwards
 //      does not hold a peer's request back.
+//   5. FIXED STACK. The headers of one held chain connect in a loop, one pass each, so a full
+//      set connects on a small fixed stack; the count limit is a memory bound, not a stack
+//      budget.
 //
 // HOW. This file #includes BRPeerManager.c, so it reaches the file-static helpers AND the
 // real relay entry point:
@@ -29,25 +34,34 @@
 //     peer announced. The announcement reaches the peer through the real version-message
 //     handler (orphan_set_limits_kat_peer.c). What holds at the first call site is asserted
 //     there too: exact total, lastOrphan resident, a displaced header released exactly once,
-//     the count limit, and the header connecting once the tip reaches its parent.
-// Single-threaded apart from one fixed-stack worker: the ...Locked helpers need only mutual
+//     the count limit, and the header connecting once the tip reaches its parent;
+//   * the "redeliver" scenario is that state's counterpart: the resident chain above the
+//     moved-back tip is delivered again as fresh objects, each of which takes the resident
+//     copy's place in manager->blocks (the "extends main chain" branch);
+//   * the "resume_sibling" scenario drives the real BRPeerManagerNewEx with a saved-blocks
+//     array holding one run and one header sharing a parent with a member of it;
+//   * the "connect_stack" scenario is the "relay" scenario's full-set pass on a small fixed
+//     stack (CONNECT_STACK_BYTES).
+// Single-threaded apart from the fixed-stack workers: the ...Locked helpers need only mutual
 // exclusion, which one caller at a time provides.
 //
 // CHECK TAGS. Every check line carries a tag. (R) went red first -- in the reference arm, or
 // against the tree as it stood before the check was added. (G) guards a property that
 // already held and must keep holding; a guard is never the red-then-green proof.
 //
-// MACRO CONVENTION (value form): run.sh passes -DORPHAN_SET_LIMITS_UNFIXED=1 for the
-// reference arm and =0 for the fixed arm, and the code selects with `#if`, never `#ifdef`,
-// so the =0 build really takes the fixed path. The reference arm keeps the earlier store,
-// connect step and request rule, selected inside BRPeerManager.c by the same macro.
+// MACRO CONVENTION (value form): run.sh passes -D<NAME>_UNFIXED=1 for the reference arm and
+// =0 for the fixed arm, and the code selects with `#if`, never `#ifdef`, so the =0 build
+// really takes the fixed path. Three seams inside BRPeerManager.c: ORPHAN_SET_LIMITS_UNFIXED
+// keeps the earlier store, connect step and request rule; RESIDENT_REPLACE_OWNER_UNFIXED
+// leaves a replaced resident header, and a displaced saved header, unowned;
+// RELAY_CONNECT_RECURSION_UNFIXED keeps the nested connect step.
 //
 // LEAK DETECTION IS ON for this gate: single ownership is what it proves, so the fixed arm
 // must finish clean under LeakSanitizer.
 //
-// SCENARIO SELECTION. argv[1] = "limits" | "relay" | "connect" | "rescan"; none runs them
-// all. run.sh runs the reference arm once per scenario so that each one is reported for its
-// own reason.
+// SCENARIO SELECTION. argv[1] = "limits" | "relay" | "connect" | "rescan" | "redeliver" |
+// "resume_sibling" | "connect_stack"; none runs them all. run.sh runs the reference arm once
+// per scenario so that each one is reported for its own reason.
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -346,6 +360,20 @@ static void *cascade_worker(void *arg)
     return NULL;
 }
 
+// Runs cascade_worker on a worker thread whose stack is exactly `stackBytes`, and waits for
+// it. Returns 1 once the worker has started and been joined, 0 if it could not be started.
+static int cascade_on_stack(CascadeJob *job, size_t stackBytes)
+{
+    pthread_attr_t attr;
+    pthread_t worker;
+    pthread_attr_init(&attr);
+    int started = (pthread_attr_setstacksize(&attr, stackBytes) == 0) &&
+                  (pthread_create(&worker, &attr, cascade_worker, job) == 0);
+    pthread_attr_destroy(&attr);
+    if (started) pthread_join(worker, NULL);
+    return started;
+}
+
 static void scenario_relay(BRWallet *wallet)
 {
     uint32_t now = (uint32_t)time(NULL);
@@ -408,14 +436,8 @@ static void scenario_relay(BRWallet *wallet)
         Rig r;
         if (! rig_open(&r, wallet, newest_checkpoint_height() + 100)) { check(0, "(G)", "setup: manager allocated"); return; }
         CascadeJob job = { &r, now, 0, 0 };
-        pthread_attr_t attr;
-        pthread_t worker;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, 1024*1024);
-        int started = (pthread_create(&worker, &attr, cascade_worker, &job) == 0);
-        pthread_attr_destroy(&attr);
+        int started = cascade_on_stack(&job, 1024*1024);
         check(started, "(G)", "setup: worker started");
-        if (started) pthread_join(worker, NULL);
 
         check(job.ok, "(G)", "setup: a contiguous chain the size of the limit is held in full");
         check(r.m->lastBlock->height == job.baseHeight + 1 + ORPHAN_SET_COUNT_MAX, "(G)",
@@ -608,6 +630,209 @@ static void scenario_rescan(BRWallet *wallet)
     }
 }
 
+// =======================================================================================
+// SCENARIO "redeliver": the counterpart of the "rescan" state. Once the tip has moved back,
+// the chain above it is fetched again, so each resident header arrives once more as a fresh
+// object of the same identity. Each one extends the main chain, takes the resident copy's
+// place in manager->blocks, and the copy it displaces must have exactly one owner afterwards
+// (LeakSanitizer is the oracle at rig_close). Every pointer the manager keeps to a header --
+// the parentless set and its total, lastOrphan, lastBlock, the floor memo, the sync start --
+// must follow the replacement, exactly as the "already have the block" branch makes them.
+// =======================================================================================
+// Delivers the identities tagBase..tagBase+chainLen-1 again, lowest first, on top of `from`.
+// Returns the re-delivered top; `fresh` (optional) receives the new objects, lowest first.
+static BRMerkleBlock *redeliver_chain(Rig *r, const BRMerkleBlock *from, uint32_t tagBase, uint32_t chainLen,
+                                      uint32_t now, BRMerkleBlock **fresh)
+{
+    UInt256 prevHash = from->blockHash;
+    BRMerkleBlock *again = NULL;
+    for (uint32_t k = 0; k < chainLen; k++) {
+        again = make_header(tagBase + k, prevHash, now, 0);
+        prevHash = again->blockHash;
+        if (fresh) fresh[k] = again;
+        _peerRelayedBlock(&r->info, again);
+    }
+    return again;
+}
+
+// 1 when, for every identity, the resident copy in manager->blocks is the fresh object.
+// Compares pointers only: the displaced copies are not read.
+static int fresh_copies_resident(Rig *r, BRMerkleBlock **fresh, uint32_t chainLen)
+{
+    for (uint32_t k = 0; k < chainLen; k++)
+        if (BRSetGet(r->m->blocks, &fresh[k]->blockHash) != fresh[k]) return 0;
+    return 1;
+}
+
+static void scenario_redeliver(BRWallet *wallet)
+{
+    uint32_t now = (uint32_t)time(NULL);
+
+    printf("\n=== redeliver: the resident chain above a moved-back tip is delivered again ===\n");
+    {
+        enum { CHAIN = 3 };
+        const uint32_t tagBase = 0x18000000u;
+        BRMerkleBlock *members[CHAIN], *fresh[CHAIN];
+        RescanRig rr;
+        if (! rescan_rig_open(&rr, wallet, tagBase, CHAIN, now, members)) { check(0, "(G)", "setup: manager allocated"); return; }
+        Rig *r = &rr.rig;
+        check(rr.ok, "(G)", "setup: resident chain built through the relay path, best height announced above it, tip moved back");
+        const size_t   blocksBefore = BRSetCount(r->m->blocks);
+        const uint32_t topHeight    = rr.top->height;
+
+        BRMerkleBlock *top = redeliver_chain(r, rr.tip0, tagBase, CHAIN, now, fresh);
+        check(r->m->lastBlock == top && top->height == topHeight, "(G)", "the tip is the re-delivered top");
+        check(BRSetCount(r->m->blocks) == blocksBefore, "(G)", "the chain set holds as many headers as before the re-delivery");
+        check(fresh_copies_resident(r, fresh, CHAIN), "(G)", "the resident copy of every identity is the re-delivered object");
+        check(BRSetCount(r->m->orphans) == 0 && total_is_exact(r->m), "(G)", "the parentless set is untouched by a re-delivery");
+        rig_close(r);   // each displaced copy has its one owner already: LeakSanitizer confirms it at exit
+    }
+
+    printf("\n=== redeliver: the manager's other pointers name a header that is delivered again ===\n");
+    {
+        // Hand-built aliases on top of the same state: the lowest member is also held in the
+        // parentless set (as the relay scenario's "both sets" case builds it), the floor memo
+        // is keyed by the middle member, and the sync start names the lowest one. Each must
+        // follow the replacement the way the "already have the block" branch makes them.
+        enum { CHAIN = 3 };
+        const uint32_t tagBase = 0x18100000u;
+        BRMerkleBlock *members[CHAIN], *fresh[CHAIN];
+        RescanRig rr;
+        if (! rescan_rig_open(&rr, wallet, tagBase, CHAIN, now, members)) { check(0, "(G)", "setup: manager allocated"); return; }
+        Rig *r = &rr.rig;
+        check(rr.ok, "(G)", "setup: resident chain built through the relay path, best height announced above it, tip moved back");
+
+        _BRPeerManagerStoreOrphanLocked(r->m, members[0]);   // in both sets, and named by lastOrphan
+        r->m->floorMemoTip       = members[1];
+        r->m->floorMemoTipHeight = members[1]->height;
+        r->m->floorMemoValid     = 1;
+        r->m->startSyncFrom      = members[0];
+        check(BRSetCount(r->m->orphans) == 1 && r->m->lastOrphan == members[0] && total_is_exact(r->m), "(G)",
+              "setup: the lowest member is held in the parentless set as well");
+
+        BRMerkleBlock *top = redeliver_chain(r, rr.tip0, tagBase, CHAIN, now, fresh);
+        check(r->m->lastBlock == top && fresh_copies_resident(r, fresh, CHAIN), "(G)", "the tip and every resident copy are the re-delivered objects");
+        check(BRSetCount(r->m->orphans) == 0, "(R)", "the replaced copy has left the parentless set");
+        check(r->m->orphanBytes == 0, "(R)", "byte total follows a copy replaced on the main chain");
+        check(r->m->lastOrphan == NULL, "(R)", "lastOrphan names nothing once its header has left the set");
+        check(r->m->floorMemoValid == 0, "(G)", "the floor memo is dropped when the header it is keyed by is replaced");
+        check(r->m->startSyncFrom == fresh[0], "(R)", "the sync start names the resident copy");
+        r->m->startSyncFrom = NULL;   // hand-set above; the manager did not adopt it through BRPeerManagerNewEx
+        rig_close(r);
+    }
+}
+
+// =======================================================================================
+// SCENARIO "resume_sibling": the resume load. BRPeerManagerNewEx adopts every saved header
+// and files them by parent before chaining the run downward, so two saved headers sharing one
+// parent hold one entry between them. The one that is not on the chain must still have exactly
+// one owner once the load is done (LeakSanitizer at BRPeerManagerFree is the oracle), and the
+// one that is on the chain, or still held, must not be released.
+// =======================================================================================
+static BRMerkleBlock *saved_header(uint32_t tag, UInt256 prevBlock, uint32_t height, uint32_t timestamp)
+{
+    BRMerkleBlock *h = make_header(tag, prevBlock, timestamp, 0);
+    h->height = height;   // a saved header carries its height
+    return h;
+}
+
+// A saved run of `chainLen` headers from `tagBase` at heights base.., whose lowest parent is
+// not saved. chain[] receives them lowest first.
+static void saved_chain(BRMerkleBlock **chain, uint32_t chainLen, uint32_t tagBase, uint32_t base, uint32_t now)
+{
+    UInt256 prev = hash_for(tagBase + 0x0FFFu);   // a parent nobody saved
+    for (uint32_t i = 0; i < chainLen; i++) {
+        chain[i] = saved_header(tagBase + i, prev, base + i, now);
+        prev = chain[i]->blockHash;
+    }
+}
+
+static int chain_resident(BRPeerManager *m, BRMerkleBlock **chain, uint32_t chainLen)
+{
+    for (uint32_t i = 0; i < chainLen; i++)
+        if (BRSetGet(m->blocks, chain[i]) != chain[i]) return 0;
+    return 1;
+}
+
+static void scenario_resume_sibling(BRWallet *wallet)
+{
+    uint32_t now = (uint32_t)time(NULL);
+    const uint32_t base = newest_checkpoint_height() + 100;   // clear of the checkpoint table's heights
+    enum { CHAIN = 5 };
+
+    printf("\n=== resume_sibling: a saved header displaced by the chain member sharing its parent ===\n");
+    {
+        BRMerkleBlock *chain[CHAIN], *saved[CHAIN + 1];
+        saved_chain(chain, CHAIN, 0x19000000u, base, now);
+        BRMerkleBlock *sibling = saved_header(0x19100000u, chain[1]->blockHash, base + 2, now);   // chain[2]'s parent
+
+        // Saved order: the sibling comes BEFORE the chain member sharing its parent, so the
+        // member's insert displaces it before the downward walk starts.
+        size_t n = 0;
+        saved[n++] = chain[0]; saved[n++] = chain[1]; saved[n++] = sibling;
+        saved[n++] = chain[2]; saved[n++] = chain[3]; saved[n++] = chain[4];
+
+        BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, saved, n, NULL, 0);
+        if (! m) { check(0, "(G)", "setup: manager allocated"); return; }
+        check(m->lastBlock == chain[CHAIN - 1] && m->lastBlock->height == base + CHAIN - 1, "(G)", "the tip is the highest saved header");
+        check(chain_resident(m, chain, CHAIN), "(G)", "every member of the saved run is resident in the chain set");
+        check(BRSetCount(m->orphans) == 0 && m->orphanBytes == 0, "(G)", "the displaced header is not in the parentless set");
+        BRPeerManagerFree(m);   // the displaced header has its one owner already: LeakSanitizer confirms it at exit
+    }
+
+    printf("\n=== resume_sibling: a saved header that displaces the chain member sharing its parent ===\n");
+    {
+        BRMerkleBlock *chain[CHAIN], *saved[CHAIN + 1];
+        saved_chain(chain, CHAIN, 0x1A000000u, base, now);
+        BRMerkleBlock *sibling = saved_header(0x1A100000u, chain[1]->blockHash, base + 2, now);
+
+        // Saved order: the sibling comes AFTER the member, so it is the one resident by parent
+        // when the walk reaches the member; the walk keeps it held, and the load must not
+        // release a header that is held.
+        size_t n = 0;
+        saved[n++] = chain[0]; saved[n++] = chain[1]; saved[n++] = chain[2];
+        saved[n++] = sibling;  saved[n++] = chain[3]; saved[n++] = chain[4];
+
+        BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, saved, n, NULL, 0);
+        if (! m) { check(0, "(G)", "setup: manager allocated"); return; }
+        check(m->lastBlock == chain[CHAIN - 1] && chain_resident(m, chain, CHAIN), "(G)", "the saved run is the resident chain");
+        check(BRSetCount(m->orphans) == 1 && BRSetGet(m->orphans, sibling) == sibling, "(G)", "the sibling stays held in the parentless set");
+        check(total_is_exact(m), "(G)", "byte total equals the resident sum after the load");
+        g_sink += sibling->timestamp;   // read through the held header under ASan: it was not released
+        BRPeerManagerFree(m);
+    }
+}
+
+// =======================================================================================
+// SCENARIO "connect_stack": the relay scenario's full-set pass again, on a SMALL fixed stack.
+// The connect step is a loop, so connecting a full set costs the stack of one pass however
+// many held headers connect at once.
+// =======================================================================================
+// The worker's stack. Sized with a margin on both sides under the sanitizer (x86_64, clang 18,
+// -O0): one pass per header needs under 128 KiB (the largest single frame on the path is the
+// message send's buffer, about 66 KB), while one nested frame per header, ORPHAN_SET_COUNT_MAX
+// of them, needs more than 512 KiB; run.sh's reference arm requires the latter to be reported.
+#ifndef CONNECT_STACK_BYTES
+#define CONNECT_STACK_BYTES (256u*1024u)
+#endif
+
+static void scenario_connect_stack(BRWallet *wallet)
+{
+    uint32_t now = (uint32_t)time(NULL);
+    printf("\n=== connect_stack: a full set connects in one pass on a %u KiB stack ===\n", (unsigned)(CONNECT_STACK_BYTES/1024u));
+    Rig r;
+    if (! rig_open(&r, wallet, newest_checkpoint_height() + 100)) { check(0, "(G)", "setup: manager allocated"); return; }
+    CascadeJob job = { &r, now, 0, 0 };
+    int started = cascade_on_stack(&job, CONNECT_STACK_BYTES);
+    check(started, "(G)", "setup: worker started");
+    check(job.ok, "(G)", "setup: a contiguous chain the size of the limit is held in full");
+    check(r.m->lastBlock->height == job.baseHeight + 1 + ORPHAN_SET_COUNT_MAX, "(R)",
+          "every held header connected in the one pass on the small stack");
+    check(BRSetCount(r.m->orphans) == 0 && r.m->orphanBytes == 0, "(G)", "the set and its byte total are empty afterwards");
+    check(r.m->lastOrphan == NULL, "(G)", "lastOrphan names nothing afterwards");
+    rig_close(&r);
+}
+
 int main(int argc, char **argv)
 {
     // Unbuffered: a sanitizer ends the process without flushing stdio, and the captured
@@ -630,6 +855,9 @@ int main(int argc, char **argv)
     if (! *only || strcmp(only, "relay") == 0)   scenario_relay(wallet);
     if (! *only || strcmp(only, "connect") == 0) scenario_connect(wallet);
     if (! *only || strcmp(only, "rescan") == 0)  scenario_rescan(wallet);
+    if (! *only || strcmp(only, "redeliver") == 0)      scenario_redeliver(wallet);
+    if (! *only || strcmp(only, "resume_sibling") == 0) scenario_resume_sibling(wallet);
+    if (! *only || strcmp(only, "connect_stack") == 0)  scenario_connect_stack(wallet);
 
     BRWalletFree(wallet);
 
