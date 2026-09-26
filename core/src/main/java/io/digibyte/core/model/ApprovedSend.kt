@@ -72,6 +72,11 @@ sealed class ApprovedSend {
         val feeEstimateSats: Long,
     ) : ApprovedSend() {
         override val amountText: String get() = AssetQuantity.format(units, divisibility)
+
+        /** This approval, showing [feeSats] — the fee of the transfer as planned (B231) — as its fee.
+         *  Everything else, and so what is sent, is unchanged. */
+        fun withPlannedFee(feeSats: Long): Asset =
+            Asset(address, assetId, units, divisibility, feePerKb, feeSats)
     }
 
     companion object {

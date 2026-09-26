@@ -145,10 +145,11 @@ class AssetSendBindingWiringTest {
             mapOf(
                 "assetId" to "approved.assetId", "quantity" to "approved.units",
                 "toAddress" to "approved.address", "feePerKb" to "approved.feePerKb",
+                "maxFeeSats" to "approved.feeEstimateSats",
             ),
             handedOn.named,
         )
-        assertEquals("sendAssetTransfer() hands on something that was not approved", 4, handedOn.arguments.size)
+        assertEquals("sendAssetTransfer() hands on something that was not approved", 5, handedOn.arguments.size)
         val otherScale = vm.theBranchOn("divisibilityOf(asset) != approved.divisibility", within = vm.sendRange())
         assertTrue(
             "sendAssetTransfer() does not stop when the asset's divisibility is not the one the approval was read and shown at",
@@ -242,7 +243,8 @@ class AssetSendBindingWiringTest {
         val request = ui.theCall("viewModel.requestConfirm")
         val button = ui.calls("Button").filter { request.range.first in it.range }
         assertEquals("cannot find the Review button — the gate is blind, not clean", 1, button.size)
-        assertEquals("Review is no longer held back by the transfer-rule check alone", "ruleCheck.allowsSend", button.single().named["enabled"])
+        // Held back by the transfer-rule check, and — one tap at a time — while Review plans the fee (B231).
+        assertEquals("Review is no longer held back by the transfer-rule check", "ruleCheck.allowsSend && !planning", button.single().named["enabled"])
     }
 
     @Test fun `the gate can see the files it reads`() {

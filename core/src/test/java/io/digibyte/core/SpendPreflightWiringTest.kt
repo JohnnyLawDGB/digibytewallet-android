@@ -107,10 +107,14 @@ class SpendPreflightWiringTest {
     }
 
     @Test fun `the asset send runs the pass before it reads a coin`() {
-        val send = source("asset/AssetManager.kt").section("suspend fun sendAsset(", "suspend fun pruneRemovedNativeAssetRows(")
-        assertBefore(send, "SpendPreflight.completed(", "NativeBridge.getSpendableDigiByteUtxos(")
-        assertBefore(send, "SpendPreflight.completed(", "utxoDao.getAssetUtxosByIdNow(")
-        assertBefore(send, "SpendPreflight.completed(", "NativeBridge.buildAndSignAssetTransferTx(")
+        // The send plans through planAssetTransfer (which the confirmation's fee preview shares,
+        // B231) and signs what it returns, so the pass is pinned there, ahead of every coin read.
+        val mgr = source("asset/AssetManager.kt")
+        val plan = mgr.section("suspend fun planAssetTransfer(", "suspend fun previewAssetTransferFee(")
+        assertBefore(plan, "SpendPreflight.completed(", "NativeBridge.getSpendableDigiByteUtxos(")
+        assertBefore(plan, "SpendPreflight.completed(", "utxoDao.getAssetUtxosByIdNow(")
+        val send = mgr.section("suspend fun sendAsset(", "suspend fun pruneRemovedNativeAssetRows(")
+        assertBefore(send, "planAssetTransfer(", "NativeBridge.buildAndSignAssetTransferTx(")
     }
 
     /** The pass reads every transaction the first time it runs, and a caller may be on the main
