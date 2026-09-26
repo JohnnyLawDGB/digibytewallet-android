@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Single broadcast entry point for the wallet. Stems the tx to one Dandelion node
@@ -21,17 +22,31 @@ import java.security.SecureRandom
  *
  * Source of truth for the on/off setting is the C core ([NativeBridge.hasDandelionPeer]
  * already returns `dandelionEnabled && a capable peer is connected`); [dandelionEnabled]
- * here is a belt-and-suspenders Kotlin mirror the settings toggle keeps in sync.
+ * here is a belt-and-suspenders Kotlin mirror kept in sync by [applySetting].
  */
 object Broadcaster {
 
     private val embargoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val rng = SecureRandom()
 
-    /** Mirrors the user's Dandelion setting; updated by the settings toggle, which
-     *  also calls [NativeBridge.setDandelionEnabled] (the authoritative gate). */
+    /** Txids stemmed by this process whose embargo has not finished. */
+    private val embargoPending: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** True while this process's embargo for [txid] is still running (see [shouldSweepRepublish]). */
+    fun isEmbargoPending(txid: String): Boolean = txid in embargoPending
+
+    /** Mirrors the user's Dandelion setting. False in every new process until
+     *  [applySetting] runs — at sync start from the saved pref, and on the settings toggle. */
     @Volatile
     var dandelionEnabled: Boolean = false
+
+    /** Apply the user's Dandelion setting: the Kotlin mirror and the native gate
+     *  ([NativeBridge.setDandelionEnabled], authoritative) together. The mirror is set
+     *  first, so a native failure cannot leave it stale. */
+    fun applySetting(enabled: Boolean) {
+        dandelionEnabled = enabled
+        try { NativeBridge.setDandelionEnabled(enabled) } catch (_: Throwable) { /* re-applied on next sync start */ }
+    }
 
     /** Broadcast a signed tx. Returns the txid on success, or null on failure. */
     fun broadcast(signedTx: ByteArray): String? {
@@ -48,12 +63,17 @@ object Broadcaster {
 
     private fun armEmbargo(txid: String) {
         val delayMs = embargoDelayMs(rng.nextDouble())
+        embargoPending.add(txid)
         embargoScope.launch {
-            delay(delayMs)
-            // If the relay count can't be read, assume it propagated (don't double-send).
-            val relays = try { NativeBridge.getRelayCount(txid) } catch (_: Throwable) { 1 }
-            if (shouldFluffAfterEmbargo(relays)) {
-                try { NativeBridge.fluffTransaction(txid) } catch (_: Throwable) { /* best effort */ }
+            try {
+                delay(delayMs)
+                // If the relay count can't be read, assume it propagated (don't double-send).
+                val relays = try { NativeBridge.getRelayCount(txid) } catch (_: Throwable) { 1 }
+                if (shouldFluffAfterEmbargo(relays)) {
+                    try { NativeBridge.fluffTransaction(txid) } catch (_: Throwable) { /* best effort */ }
+                }
+            } finally {
+                embargoPending.remove(txid)
             }
         }
     }

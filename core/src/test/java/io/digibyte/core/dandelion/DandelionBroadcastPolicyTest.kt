@@ -23,4 +23,12 @@ class DandelionBroadcastPolicyTest {
             assertTrue("$ms out of range", ms in EMBARGO_MIN_MS..EMBARGO_MAX_MS)
         }
     }
+
+    @Test fun `the stranded-send sweep leaves a stem alone only while its embargo runs`() {
+        // The embargo owns a fresh stem; a flood now would undo it.
+        assertFalse(shouldSweepRepublish(embargoPending = true))
+        // After the embargo (or a restart): an unconfirmed send is republished, whatever the
+        // relay count says — the stem peer's own getdata counts as a relay.
+        assertTrue(shouldSweepRepublish(embargoPending = false))
+    }
 }
