@@ -21,14 +21,22 @@ import io.digibyte.core.asset.send.DA_MARKER_SATS
  * [io.digibyte.core.asset.AssetTxQuantity], which deliberately under-counts rather than invent a
  * number it cannot derive — it skips `percent` instructions outright. So the layout is:
  *
- *     vout 0   marker      DA_MARKER_SATS   → destination
- *     vout 1   OP_RETURN   0                → "all counted units to vout 0"
- *     vout 2   change      remainder        → destination      (LAST)
+ *     vout 0   change      remainder        → destination
+ *     vout 1   OP_RETURN   0                → "all counted units to vout 2"
+ *     vout 2   marker      DA_MARKER_SATS   → destination      (LAST)
  *
  * Both value outputs belong to the user's new wallet. Under-count the units and the remainder
- * rides to vout 2 and still arrives; there is no arrangement of our arithmetic that burns it.
- * That property is the reason this is safe to ship against an imperfect decoder — not the
- * arithmetic, which is merely correct.
+ * rides to vout 2 — the marker — and still arrives; there is no arrangement of our arithmetic
+ * that burns it. That property is the reason this is safe to ship against an imperfect decoder —
+ * not the arithmetic, which is merely correct.
+ *
+ * ## Why the change is FIRST (B221)
+ *
+ * The receiving wallet cannot see the old wallet's input units, so for this transaction the
+ * protocol remainder is "unknown" to it and it holds the LAST output as a possible asset carrier.
+ * With the change last, a recovery left the user's DGB unspendable. With the marker last, the
+ * held output is the one that carries the asset anyway, and the change — named by no instruction
+ * and not last — is plain DGB to every reader.
  *
  * ## Why a missing change output is a refusal
  *
@@ -42,6 +50,9 @@ object ForeignAssetTransferPlan {
 
     /** Below this a change output is unrelayable dust; matches the asset-send path. */
     const val CHANGE_DUST_THRESHOLD = 5_460L
+
+    /** The marker's output index: the last of the three, where the remainder is credited. */
+    private const val MARKER_VOUT = 2
 
     /** DigiAsset transfer encoding version. v3 is what the wallet's own sends emit. */
     private const val TRANSFER_VERSION = 3
@@ -121,9 +132,9 @@ object ForeignAssetTransferPlan {
         // nothing": the foreign decoder credits a transfer's implicit remainder to the last
         // output, which we cannot resolve offline (see ForeignAssetQuantity — inputUnits=null).
         // Old V1/V2 assets sit on exactly such remainder outputs, so refusing zero stranded them
-        // (DGB-1007). Encode a minimal 1-unit instruction to vout 0 instead: 1 unit rides to vout
-        // 0 (dest) and the rest is credited by the protocol's last-output rule to vout 2 (dest).
-        // Both value outputs are the user's, so every unit lands with them — 1 is a valid split of
+        // (DGB-1007). Encode a minimal 1-unit instruction to the marker instead: 1 unit rides to vout
+        // 2 (dest) and the rest is credited by the protocol's last-output rule to vout 2 too.
+        // The marker is the user's, so every unit lands with them — 1 is a valid split of
         // any real holding >= 1, not an invented number. It is the extreme case of the same
         // under-count-safe remainder rule the known path already relies on.
         val markerUnits = if (assetUnits == 0L) 1L else assetUnits
@@ -142,7 +153,7 @@ object ForeignAssetTransferPlan {
                         skip = false,
                         range = false,
                         percent = false,
-                        outputIndex = 0,   // the marker at vout 0
+                        outputIndex = MARKER_VOUT,   // the marker, last
                         amount = markerUnits,
                     ),
                 ),
@@ -173,11 +184,13 @@ object ForeignAssetTransferPlan {
         }
 
         val outputs = listOf(
-            Out(address = dest, amountSat = DA_MARKER_SATS, scriptHex = ""),
+            // FIRST: no instruction names it and it is not last, so no reader holds it (B221).
+            Out(address = dest, amountSat = change, scriptHex = ""),
             Out(address = "", amountSat = 0L, scriptHex = opReturnScript.toHex()),
             // LAST on purpose: unassigned units are credited here, and here is the user's wallet.
-            Out(address = dest, amountSat = change, scriptHex = ""),
+            Out(address = dest, amountSat = DA_MARKER_SATS, scriptHex = ""),
         )
+        check(outputs.lastIndex == MARKER_VOUT)
 
         return Result.Ok(
             Plan(

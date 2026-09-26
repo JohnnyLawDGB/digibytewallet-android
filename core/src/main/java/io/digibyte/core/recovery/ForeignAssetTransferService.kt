@@ -315,7 +315,7 @@ class ForeignAssetTransferService(
                     is ForeignAssetTransferPlan.Result.Ok -> {
                         log('i', "${item.outpoint}: planned ${r.plan.assetUnits} unit(s), " +
                                 "${r.plan.inputs.size} input(s), fee ${r.plan.feeSat} sats, " +
-                                "change ${r.plan.outputs.last().amountSat} sats -> $destAddress",
+                                "change ${r.plan.outputs.first().amountSat} sats -> $destAddress",
                         )
                         val signed = sign(r.plan, seedBytes, result.profile, feePerKb)
                         if (signed == null) {
