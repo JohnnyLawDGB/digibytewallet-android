@@ -46,9 +46,6 @@
     <string name="unlock_locked">Đã khóa — thử lại sau %1$s</string>
     <string name="unlock_unlocking">Đang mở khóa…</string>
     <string name="unlock_biometrics_cd">Mở khóa bằng sinh trắc học</string>
-    <string name="recover_title">Khôi phục ví</string>
-    <string name="recover_body">Nhập cụm từ khôi phục để khôi phục ví của bạn.</string>
-    <string name="recover_continue">Tiếp tục</string>
 
     <string name="seed_retry">Thử lại</string>
     <string name="verify_next">Tiếp theo</string>

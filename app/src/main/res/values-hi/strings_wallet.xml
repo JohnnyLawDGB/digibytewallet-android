@@ -46,9 +46,6 @@
     <string name="unlock_locked">लॉक — %1$s में पुनः प्रयास करें</string>
     <string name="unlock_unlocking">अनलॉक हो रहा है…</string>
     <string name="unlock_biometrics_cd">बायोमेट्रिक्स से अनलॉक करें</string>
-    <string name="recover_title">वॉलेट पुनर्प्राप्त करें</string>
-    <string name="recover_body">अपना वॉलेट पुनर्स्थापित करने के लिए अपना रिकवरी वाक्यांश दर्ज करें।</string>
-    <string name="recover_continue">जारी रखें</string>
 
     <string name="seed_retry">फिर से कोशिश करें</string>
     <string name="verify_next">आगे</string>

@@ -46,9 +46,6 @@
     <string name="unlock_locked">Terkunci — coba lagi dalam %1$s</string>
     <string name="unlock_unlocking">Membuka…</string>
     <string name="unlock_biometrics_cd">Buka dengan biometrik</string>
-    <string name="recover_title">Pulihkan Dompet</string>
-    <string name="recover_body">Masukkan frasa pemulihan Anda untuk memulihkan dompet.</string>
-    <string name="recover_continue">Lanjutkan</string>
 
     <string name="seed_retry">Coba lagi</string>
     <string name="verify_next">Berikutnya</string>

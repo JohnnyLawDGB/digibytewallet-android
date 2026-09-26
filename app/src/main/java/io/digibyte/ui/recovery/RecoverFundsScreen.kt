@@ -76,7 +76,7 @@ fun RecoverFundsScreen(
     var mode by rememberSaveable { mutableStateOf(RecoverMode.ThisWallet) }
     // Not rememberSaveable: a foreign recovery phrase must not be written to
     // Android's saved-instance-state Bundle (larger exposure surface than the
-    // in-memory-only convention used by MnemonicInputScreen.kt).
+    // in-memory-only convention for recovery phrases).
     var phrase by remember { mutableStateOf("") }
     // Same reasoning as `phrase` above: never rememberSaveable, so a foreign passphrase is not
     // written to a saved-state bundle.
@@ -1332,8 +1332,7 @@ private fun PhraseEntry(
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = phrase,
-            // Lowercase per-keystroke (keep spaces) — mirrors MnemonicInputScreen's
-            // WordInputField normalization so IME auto-capitalization/autocorrect
+            // Lowercase per-keystroke (keep spaces) so IME auto-capitalization/autocorrect
             // can never smuggle uppercase into a case-sensitive BIP39 check.
             onValueChange = { onPhrase(it.lowercase()) },
             modifier = Modifier.fillMaxWidth().semantics { password() },

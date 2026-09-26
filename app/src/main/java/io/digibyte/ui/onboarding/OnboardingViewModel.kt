@@ -22,7 +22,6 @@ import javax.inject.Inject
 class OnboardingViewModel @Inject constructor(
     private val walletManager: WalletManager,
     private val pinManager: PinManager,
-    private val recoveryScanService: io.digibyte.core.recovery.RecoveryScanService,
 ) : ViewModel() {
 
     // In-memory mnemonic — cleared after wallet creation
@@ -31,14 +30,8 @@ class OnboardingViewModel @Inject constructor(
     // Word count for create flow
     private var _wordCount: Int = 12
 
-    // Recovery timestamp (Unix seconds) — 0 means full rescan
-    private var _recoveryTimestamp: Long = 0L
-
     private val _uiState = MutableStateFlow<OnboardingUiState>(OnboardingUiState.Idle)
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
-
-    private val _pendingLegacyRecovery = MutableStateFlow(false)
-    val pendingLegacyRecovery: StateFlow<Boolean> = _pendingLegacyRecovery.asStateFlow()
 
     fun getWordCount(): Int = _wordCount
 
@@ -87,86 +80,6 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /** Set mnemonic from recovery input (splits on whitespace). */
-    fun setRecoveryMnemonic(phrase: String) {
-        _mnemonic = phrase.trim().split("\\s+".toRegex())
-    }
-
-    /** Set the recovery timestamp mapped from the date picker. */
-    fun setRecoveryTimestamp(timestamp: Long) {
-        _recoveryTimestamp = timestamp
-    }
-
-    // ── Universal Restore scan state ─────────────────────────────────────────
-    //
-    // Holds the most recent multi-path scan result so RecoveryScanScreen can
-    // show it without re-running the scan on config change, and so
-    // RecoveryDateScreen / WalletScreen can consult it for "we found funds
-    // on legacy paths" sweep context.
-
-    private val _scanResults = kotlinx.coroutines.flow.MutableStateFlow<
-            io.digibyte.core.recovery.RecoveryScanService.State
-            >(io.digibyte.core.recovery.RecoveryScanService.State.Idle)
-    val scanResults: kotlinx.coroutines.flow.StateFlow<
-            io.digibyte.core.recovery.RecoveryScanService.State
-            > = _scanResults.asStateFlow()
-
-    /** Run the multi-path derivation scan against the currently-entered
-     *  mnemonic. Results land in [scanResults]. Safe to call from the UI
-     *  and observe reactively. */
-    fun runRecoveryScan(passphrase: String? = null) {
-        val phrase = _mnemonic.joinToString(" ")
-        if (phrase.isBlank()) {
-            _scanResults.value = io.digibyte.core.recovery.RecoveryScanService
-                .State.Failed("No mnemonic entered")
-            return
-        }
-        viewModelScope.launch {
-            // Converted at the boundary and zeroed straight after: the ViewModel keeps the
-            // String only as long as the user is typing it.
-            val passBytes = io.digibyte.core.Bip39Passphrase.prepare(passphrase)
-            val result = try {
-                recoveryScanService.scan(phrase, passBytes)
-            } finally {
-                passBytes?.fill(0)
-            }
-
-            // When a passphrase was supplied and found nothing, ask the other question too:
-            // does this phrase have funds WITHOUT it? A BIP39 passphrase has no checksum, so a
-            // typo derives a valid empty wallet and the scan honestly reports nothing — which
-            // reads to the user as stolen coins. One extra pass turns that into "check the
-            // passphrase", which is a five-second fix instead of a panic.
-            val comparison: Long? =
-                if (passphrase != null &&
-                    result is io.digibyte.core.recovery.RecoveryScanService.State.Done &&
-                    result.totalBalanceSat == 0L &&
-                    !result.anyBackendUnreachable
-                ) {
-                    (recoveryScanService.scan(phrase, null)
-                        as? io.digibyte.core.recovery.RecoveryScanService.State.Done)
-                        ?.totalBalanceSat
-                } else null
-
-            _passphraseVerdict.value = if (result is io.digibyte.core.recovery.RecoveryScanService.State.Done) {
-                io.digibyte.core.recovery.PassphraseScanVerdict.of(
-                    withPassphraseSat = result.totalBalanceSat,
-                    withoutPassphraseSat = comparison,
-                    incomplete = result.anyBackendUnreachable,
-                )
-            } else null
-
-            // The comparison scan overwrote the observable state; put the real answer back so the
-            // UI never shows funds that belong to a wallet the user is not restoring.
-            _scanResults.value = result
-        }
-    }
-
-    /** Why a passphrase scan came back empty, when one was supplied. Null when not applicable. */
-    private val _passphraseVerdict =
-        MutableStateFlow<io.digibyte.core.recovery.PassphraseScanVerdict.Outcome?>(null)
-    val passphraseVerdict: StateFlow<io.digibyte.core.recovery.PassphraseScanVerdict.Outcome?> =
-        _passphraseVerdict
-
-    /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
         viewModelScope.launch {
@@ -184,43 +97,6 @@ class OnboardingViewModel @Inject constructor(
             _passphrase?.fill(0)
             _passphrase = null
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet creation failed")
-            onResult(success)
-        }
-    }
-
-    /** Recover wallet from entered mnemonic and chosen timestamp. */
-    fun recoverWallet(onResult: (Boolean) -> Unit) {
-        val phrase = _mnemonic.joinToString(" ")
-        val ts = _recoveryTimestamp
-        viewModelScope.launch {
-            _uiState.value = OnboardingUiState.Loading
-
-            // NOTE: no depth gate here. Restores are accepted at ANY depth — the
-            // paced convoy bounds the memory of an arbitrarily deep CF scan, so
-            // there is nothing to refuse. (A backup you can't restore from isn't a
-            // backup.)
-            val success = withContext(Dispatchers.Default) {
-                // Clear any stale PIN from a previous install so the user
-                // is routed to PIN setup, not the unlock screen. Done inside
-                // the worker dispatcher so the Keystore-backed prefs write
-                // never lands on the main thread.
-                pinManager.clearPin()
-                walletManager.recoverWallet(phrase, ts)
-            }
-
-            // If the pre-recovery scan found funds on non-native paths, signal
-            // the UI to navigate to RecoverFundsScreen after the wallet lands.
-            // No silent sweep happens here anymore — the user is shown the screen
-            // and initiates the sweep themselves.
-            if (success) {
-                val scan = _scanResults.value
-                _pendingLegacyRecovery.value =
-                    scan is io.digibyte.core.recovery.RecoveryScanService.State.Done &&
-                    scan.nonNativeWithFunds.isNotEmpty()
-            }
-
-            wipeMnemonicFromMemory()
-            _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Recovery failed")
             onResult(success)
         }
     }

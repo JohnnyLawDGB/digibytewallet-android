@@ -9,8 +9,7 @@ import io.digibyte.core.WalletState
  * never re-gated to "unlock".
  */
 private val PRE_WALLET_ROUTES = setOf(
-    "onboarding", "seed_display", "seed_verify", "seed_passphrase", "mnemonic_input",
-    "recovery_scan", "recovery_date", "pin_setup", "unlock",
+    "onboarding", "seed_display", "seed_verify", "seed_passphrase", "pin_setup", "unlock",
 )
 
 /**

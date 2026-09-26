@@ -74,7 +74,7 @@ class LockGatePolicyTest {
         // while the on-disk wallet is still Locked with a PIN. Bouncing those screens to
         // the PIN prompt would strand the restore.
         for (route in listOf("onboarding", "seed_display/12", "seed_verify", "seed_passphrase",
-                "mnemonic_input", "recovery_scan", "recovery_date", "pin_setup")) {
+                "pin_setup")) {
             assertFalse(route, shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = route))
         }
     }
@@ -99,7 +99,7 @@ class WipeRouteGatePolicyTest {
     @Test
     fun `the onboarding graph itself is NoWallet by definition and never bounces`() {
         for (route in listOf("onboarding", "seed_display/12", "seed_verify", "seed_passphrase",
-                "mnemonic_input", "recovery_scan", "recovery_date", "pin_setup", "unlock")) {
+                "pin_setup", "unlock")) {
             assertFalse(route, shouldRouteToOnboardingAfterWipe(WalletState.NoWallet, route))
         }
     }

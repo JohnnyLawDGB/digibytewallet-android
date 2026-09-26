@@ -70,8 +70,6 @@ fun PinSetupScreen(
             .walletManager()
     }
 
-    val pendingLegacyRecovery by viewModel.pendingLegacyRecovery.collectAsStateWithLifecycle()
-
     var step by remember { mutableStateOf(PinStep.ENTER) }
     var firstPin by remember { mutableStateOf("") }
     // Hoisted: the assignments below happen inside event lambdas, which are not composable.
@@ -133,8 +131,7 @@ fun PinSetupScreen(
                                                                 if (biometricAvailable && activity != null) {
                                                                     step = PinStep.BIOMETRIC
                                                                 } else {
-                                                                    val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
-                                                                    navController.navigate(dest) {
+                                                                    navController.navigate("wallet") {
                                                                         popUpTo(navController.graph.startDestinationId) { inclusive = true }
                                                                     }
                                                                 }
@@ -199,18 +196,13 @@ fun PinSetupScreen(
                                 )
                             }
                             // Wallet already created before reaching biometric step.
-                            // Route to RecoverFundsScreen if the recovery scan found
-                            // funds on non-native paths; otherwise go straight to wallet.
-                            val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
-                            navController.navigate(dest) {
+                            navController.navigate("wallet") {
                                 popUpTo("onboarding") { inclusive = true }
                             }
                         }
                     },
                     onSkip = {
-                        // Same routing logic as onEnable.
-                        val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
-                        navController.navigate(dest) {
+                        navController.navigate("wallet") {
                             popUpTo("onboarding") { inclusive = true }
                         }
                     }

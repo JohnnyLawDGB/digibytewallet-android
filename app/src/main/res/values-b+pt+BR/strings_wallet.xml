@@ -46,9 +46,6 @@
     <string name="unlock_locked">Bloqueado — tente novamente em %1$s</string>
     <string name="unlock_unlocking">Desbloqueando…</string>
     <string name="unlock_biometrics_cd">Desbloquear com biometria</string>
-    <string name="recover_title">Recuperar carteira</string>
-    <string name="recover_body">Digite sua frase de recuperação para restaurar sua carteira.</string>
-    <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Tentar novamente</string>
     <string name="verify_next">Avançar</string>
