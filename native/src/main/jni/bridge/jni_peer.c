@@ -14,6 +14,9 @@
 #include "saved_blocks_deserialize.h"
 #include "bridge_status_stale.h"
 #include "BRPeerPenalty.h"
+#include "dandelion_state.h"
+
+static void _applyDandelionState(void);   /* defined with the Dandelion JNI setters */
 
 /* Forward decl — defined in the BIP 158 bridge section; called from startSync. */
 static void _applyPendingBip158State(void);
@@ -977,6 +980,7 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
         /* Apply any BIP 158 state SyncService.kt configured before this point
          * (setSyncMode, setCompactFilterChain, enableAutoCompactFilterFetch). */
         _applyPendingBip158State();
+        _applyDandelionState();
 
         /* Re-apply the persisted re-dial penalties so a fresh manager doesn't start by
          * dialling peers the last session already learned were behind. Entries whose
@@ -1623,31 +1627,43 @@ Java_io_digibyte_core_bridge_NativeBridge_getSyncMode(JNIEnv *env, jobject thiz)
     return (jint)atomic_load_explicit(&g_mirrorSyncMode, memory_order_relaxed);
 }
 
+/* The Dandelion setting and capable peers, remembered whether or not a peer manager exists and
+ * replayed onto every one startSync creates (B234: SyncService applies both before the manager
+ * exists, so dropping them meant a restarted app never stemmed). Guarded by PEER_GUARD. */
+static DandelionState g_dandelion = { 0 };
+
+/* Caller holds PEER_GUARD. The manager's own default is enabled with no capable peers; the
+ * remembered state replaces it, so "off" holds natively too. */
+static void _applyDandelionState(void) {
+    if (!g_peerManager) return;
+    BRPeerManagerSetDandelionEnabled(g_peerManager, g_dandelion.enabled);
+    for (size_t i = 0; i < g_dandelion.count; i++) {
+        BRPeerManagerAddDandelionPeer(g_peerManager, g_dandelion.addrs[i]);
+    }
+    LOGI("Dandelion: applied enabled=%d, %zu capable peer(s)", g_dandelion.enabled, g_dandelion.count);
+}
+
 JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_setDandelionEnabled(JNIEnv *env, jobject thiz, jboolean enabled) {
     (void)env; (void)thiz;
     PEER_GUARD();
-    if (!g_peerManager) {
-        LOGI("setDandelionEnabled: peer manager not created — ignoring (re-applied on sync start)");
-        return;
-    }
-    BRPeerManagerSetDandelionEnabled(g_peerManager, enabled ? 1 : 0);
-    LOGI("setDandelionEnabled: %d", enabled ? 1 : 0);
+    dandelion_state_set_enabled(&g_dandelion, enabled ? 1 : 0);
+    if (g_peerManager) BRPeerManagerSetDandelionEnabled(g_peerManager, enabled ? 1 : 0);
+    LOGI("setDandelionEnabled: %d%s", enabled ? 1 : 0, g_peerManager ? "" : " (remembered for the next peer manager)");
 }
 
 JNIEXPORT void JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_addDandelionPeer(JNIEnv *env, jobject thiz, jstring ipStr) {
     (void)thiz;
     PEER_GUARD();
-    if (!g_peerManager || !ipStr) return;
+    if (!ipStr) return;
     const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
     if (!ip) return;
-    struct in_addr ip4;
-    if (inet_pton(AF_INET, ip, &ip4) == 1) {
-        UInt128 addr = UINT128_ZERO;
-        addr.u16[5] = 0xffff;          /* IPv4-mapped IPv6 (::ffff:x.x.x.x) */
-        addr.u32[3] = ip4.s_addr;
-        BRPeerManagerAddDandelionPeer(g_peerManager, addr);
+    UInt128 addr;
+    if (dandelion_ipv4_mapped(ip, &addr)) {
+        int r = dandelion_state_add(&g_dandelion, addr);
+        if (r < 0) LOGW("addDandelionPeer: %s not remembered (list full)", ip);
+        if (g_peerManager) BRPeerManagerAddDandelionPeer(g_peerManager, addr);
         LOGI("addDandelionPeer: %s", ip);
     }
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);

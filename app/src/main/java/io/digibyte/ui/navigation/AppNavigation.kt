@@ -118,6 +118,16 @@ fun AppNavigation(
     // Observe wallet state to gate navigation
     val walletState by walletManager.walletState.collectAsStateWithLifecycle()
 
+    // The screen a lock interrupted, reopened once the unlock has landed on the wallet (B230).
+    var resumeAfterUnlock by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(walletState, currentRoute) {
+        val resume = resumeAfterUnlock ?: return@LaunchedEffect
+        if (walletState !is WalletState.Unlocked || currentRoute != Screen.Wallet.route) return@LaunchedEffect
+        resumeAfterUnlock = null
+        android.util.Log.i("AppNavigation", "unlocked — reopening $resume, which the lock interrupted")
+        navController.navigate(resume) { launchSingleTop = true }
+    }
+
     // Reactive lock. MainActivity.onStop() → lockUi() flips the state to Locked, but the
     // start destination below is computed once, so on a warm resume of the same Activity
     // instance the NavHost was still on the wallet graph — balance, Send, Assets, the
@@ -132,6 +142,7 @@ fun AppNavigation(
         val hasPin = try { pinManager.hasPin() } catch (e: Exception) { false }
         if (shouldRouteToUnlock(walletState, hasPin, currentRoute)) {
             android.util.Log.i("AppNavigation", "wallet locked on route=$currentRoute — routing to unlock")
+            resumeAfterUnlock = routeToResumeAfterUnlock(currentRoute)
             navController.navigate("unlock") {
                 popUpTo(0) { inclusive = true }
                 launchSingleTop = true
