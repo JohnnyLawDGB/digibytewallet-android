@@ -90,17 +90,19 @@ class WalletViewModel @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-    /** Pull-to-refresh "wake up": if disconnected, force a clean peer-manager
-     *  recreate (recovers a manager stuck after long idle); either way kick
+    /** Pull-to-refresh "wake up": if disconnected, ask SyncService to rebuild the
+     *  peer manager (recovers a manager stuck after long idle); either way kick
      *  startSync to catch up to the tip. Holds the spinner until peers reconnect
-     *  or ~8s elapse. */
+     *  or ~8s elapse. The rebuild is SyncService's, never done here: it reloads the
+     *  recent saved headers first, where a bare forceReconnect() from this layer
+     *  would rebuild from an empty saved set and re-sync from the birth checkpoint. */
     fun refresh() {
         if (_isRefreshing.value) return
         _isRefreshing.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val peers = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
-                if (peers == 0) runCatching { NativeBridge.forceReconnect() }
+                if (peers == 0) requestRecreateNearTip()
                 runCatching { NativeBridge.startSync() }
                 var waited = 0
                 while (waited < 8000 &&
@@ -110,6 +112,19 @@ class WalletViewModel @Inject constructor(
             } finally {
                 _isRefreshing.value = false
             }
+        }
+    }
+
+    /** Hand a stuck manager to SyncService's reload-first rebuild. A caller-side foreground
+     *  start can be refused (Android 12+ budgets); the keepalive's own zero-peer recovery then
+     *  performs the same rebuild on its next cycle, so a refused start only delays it. */
+    private fun requestRecreateNearTip() {
+        try {
+            val intent = android.content.Intent(application, io.digibyte.service.SyncService::class.java)
+                .setAction(io.digibyte.service.SyncService.ACTION_RECREATE_NEAR_TIP)
+            androidx.core.content.ContextCompat.startForegroundService(application, intent)
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletVM", "pull-to-refresh: rebuild request not delivered", t)
         }
     }
 

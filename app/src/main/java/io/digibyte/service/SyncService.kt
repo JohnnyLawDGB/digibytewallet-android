@@ -369,6 +369,17 @@ class SyncService : Service() {
             return START_STICKY
         }
 
+        // Main-screen pull-to-refresh at 0 peers: the user is asking to un-stick a manager that
+        // has sat idle. Rebuild it here, the one place that reloads the recent saved headers
+        // first — a bare forceReconnect()+startSync() from the UI would rebuild from an empty
+        // saved set and re-sync every header since the wallet's birth checkpoint.
+        if (intent?.action == ACTION_RECREATE_NEAR_TIP) {
+            serviceScope.launch {
+                recreatePeerManagerResumingNearTip("pull-to-refresh")
+            }
+            return START_STICKY
+        }
+
         // Session escape hatch: the dark-node banner's "Use public peers" action.
         // Re-pins the SAME configured node but non-exclusive for THIS session only —
         // prefs are never written, so the persisted exclusive choice still applies
@@ -3878,6 +3889,9 @@ class SyncService : Service() {
          *  degradation. Deliberately manual - the watchdog decision NOT to auto-restart
          *  (it would kill working direct connections) stands; this only runs on a tap. */
         const val ACTION_RETRY_TOR = "io.digibyte.service.RETRY_TOR"
+        /** Main-screen pull-to-refresh with 0 peers: rebuild the peer manager here, reloading
+         *  the recent saved headers first (see [recreatePeerManagerResumingNearTip]). */
+        const val ACTION_RECREATE_NEAR_TIP = "io.digibyte.service.RECREATE_NEAR_TIP"
         /** Debounce for the post-sync confirmation-reconcile (5 min): a flaky
          *  network firing onSyncComplete repeatedly must not hammer the node. */
         private const val CONFIRM_RECONCILE_DEBOUNCE_MS = 5 * 60 * 1000L
