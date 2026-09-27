@@ -1,6 +1,6 @@
 # Enable BIP 157/158 Compact Block Filters on Your DigiByte Node
 
-**Who this is for:** anyone running a DigiByte Core **8.26** full node on
+**Who this is for:** anyone running a DigiByte Core **9.26** full node on
 Linux, Windows, or macOS who wants to help mobile SPV wallets sync
 privately. Five-minute config change, one restart, then a few hours of
 passive index building. No downtime for your existing peers.
@@ -32,13 +32,16 @@ already reachable for filter serving.
 
 ## Before you start — check three things
 
-### 1. You're on DigiByte Core 8.26 or newer
+### 1. You're on DigiByte Core 9.26
 
 ```bash
 digibyte-cli getnetworkinfo | grep subversion
 ```
-Expect something like `"subversion": "/Satoshi:8.26.0/"`. Older than
-8.26 doesn't support this — upgrade first.
+Expect something like `"subversion": "/DigiByte:9.26.5/"`. Upgrade an 8.x
+node first: 8.x predates the retirement of Groestl mining at block
+23,808,000 and the DigiDollar rules active since block 23,869,440, so it
+can accept blocks the rest of the network rejects — not a node a wallet
+should sync from.
 
 ### 2. You're not running a pruned node
 
@@ -309,4 +312,4 @@ or reach out directly to the node operators who shared this guide.
 
 - [BIP 157 — Client Side Block Filtering](https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki)
 - [BIP 158 — Compact Block Filters for Light Clients](https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki)
-- [DigiByte Core 8.26 release notes](https://github.com/DigiByte-Core/digibyte/releases/tag/v8.26.0)
+- [DigiByte Core 9.26.5 release notes](https://github.com/DigiByte-Core/digibyte/releases/tag/v9.26.5)

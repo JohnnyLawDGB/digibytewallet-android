@@ -11,11 +11,20 @@ a node you already run breaks it, for you and for everyone else.
 
 ## What you need
 
-- **DigiByte Core 8.22 or newer.** 9.26.x is current. `digibyte-cli getnetworkinfo` reports yours.
+- **DigiByte Core 9.26** (9.26.5 is the current release). `digibyte-cli getnetworkinfo | grep subversion`
+  should report `/DigiByte:9.26.x/`. Older 8.x nodes are no longer enough: they predate the retirement
+  of Groestl mining at block 23,808,000 and the DigiDollar rules active since block 23,869,440, so
+  they can accept blocks the rest of the network rejects. The wallet checks each header's mining
+  algorithm against the height it appears at, so a node that follows such blocks is one it will stop
+  trusting.
 - **An unpruned node.** The filter index is built by reading every block, so `prune=` and
   `blockfilterindex` are mutually exclusive. If you are pruned you will need a full sync to switch.
-- **~5 GB of extra disk** for the index, and a few hours the first time it builds.
+- **About 4 GB of extra disk** for the index today (it grows with the chain), and a few hours the first
+  time it builds.
 - **No `txindex` required.** It is unrelated; leave it however you have it.
+- **Transaction relay left on** if you will send through this node. A node running `blocksonly=1`
+  still serves filters, so the wallet syncs from it, but it disconnects any peer that announces a
+  transaction to it. With **"Only my node"** on, that means your sends cannot leave the phone.
 
 ## Configure
 
@@ -45,7 +54,7 @@ $ digibyte-cli getindexinfo
 {
   "basic block filter index": {
     "synced": true,
-    "best_block_height": 23972517
+    "best_block_height": 24285000
   }
 }
 ```
@@ -117,6 +126,10 @@ taking on: inbound bandwidth, connection slots, and a node that is now a target.
 
 **`getindexinfo` says `"synced": false` and the height is not moving.** The index build is I/O
 bound and competes with normal block processing. Give it time; check the debug log for progress.
+
+**It syncs, but sends fail or the node drops the wallet when you send.** Check for `blocksonly=1`
+in the conf. A blocks-only node disconnects a peer that announces a transaction; remove the line
+(or leave "Only my node" off so other peers can carry the send).
 
 **It syncs, then stops.** Look at `getconnectioncount`. A saturated node accepts and then drops
 connections, and under exclusive mode the wallet has no alternative to move to.
