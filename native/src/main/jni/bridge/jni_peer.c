@@ -44,6 +44,9 @@ static _Atomic uint32_t g_mirrorLastHeight;
 static _Atomic uint32_t g_mirrorEstimatedHeight;
 static _Atomic uint32_t g_mirrorCFTip;
 static _Atomic int      g_mirrorSyncMode;
+/* --- pkg 5.2: filter-header corroboration, observe-only readouts --- */
+static _Atomic uint32_t g_mirrorCFCorroboratedThrough;
+static _Atomic uint32_t g_mirrorCFCheckptDisagreeCount;
 static _Atomic int64_t  g_mirrorLastRefreshMonotonicMs;  /* CLOCK_MONOTONIC ms; 0 = never */
 
 /* Monotonic milliseconds — immune to wall-clock jumps, the correct base for an
@@ -75,6 +78,8 @@ static void _refreshBridgeStatusMirror(void) {
         atomic_store_explicit(&g_mirrorEstimatedHeight, BRPeerManagerEstimatedBlockHeight(m),     memory_order_relaxed);
         atomic_store_explicit(&g_mirrorCFTip,           BRPeerManagerCFChainTipHeight(m),         memory_order_relaxed);
         atomic_store_explicit(&g_mirrorSyncMode,        (int)BRPeerManagerGetSyncMode(m),         memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorCFCorroboratedThrough,  BRPeerManagerCFCorroboratedThrough(m),  memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorCFCheckptDisagreeCount, BRPeerManagerCFCheckptDisagreeCount(m), memory_order_relaxed);
     }
     atomic_store_explicit(&g_mirrorLastRefreshMonotonicMs, _nowMonotonicMs(), memory_order_relaxed);
 }
@@ -1682,6 +1687,21 @@ JNIEXPORT jint JNICALL
 Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorCFTip, memory_order_relaxed);
+}
+
+/* --- pkg 5.2: filter-header corroboration, observe-only readouts. Lock-free
+ * mirrors exactly like getCFChainTipHeight (refreshed by _refreshBridgeStatusMirror);
+ * nothing in the wallet decides on them — they are for logcat / Network Info. */
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCFCorroboratedThrough(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return (jint)atomic_load_explicit(&g_mirrorCFCorroboratedThrough, memory_order_relaxed);
+}
+
+JNIEXPORT jint JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCFCheckptDisagreeCount(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return (jint)atomic_load_explicit(&g_mirrorCFCheckptDisagreeCount, memory_order_relaxed);
 }
 
 /* CF scan-ledger observe-only readouts (Phase 1). Both KEEP PEER_GUARD + a

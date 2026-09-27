@@ -756,6 +756,19 @@ object NativeBridge {
      *  Used by the watchdog to detect "no BIP158 progress." */
     external fun getCFChainTipHeight(): Int
 
+    // --- pkg 5.2: filter-header corroboration (observe-only) ---
+    // Lock-free status mirrors, refreshed with the others (see [isStatusStale]).
+    // Neither value drives any behaviour; they are read for logcat / Network Info.
+
+    /** Highest 1000-multiple height above the top compiled filter-header checkpoint
+     *  at which a filter peer OTHER than the one supplying our cfheaders returned the
+     *  same filter header we hold. 0 = no second-source confirmation yet this session. */
+    external fun getCFCorroboratedThrough(): Int
+
+    /** Number of cfcheckpt replies this session that disagreed with our filter-header
+     *  chain at some height. Observed and logged only; nothing is rejected on it. */
+    external fun getCFCheckptDisagreeCount(): Int
+
     /** True if the lock-free status mirrors (peer count, block heights, CF tip,
      *  sync mode — read via [getPeerCount], [getLastBlockHeight], etc.) have not
      *  been refreshed within the staleness bound, or never this session. The
