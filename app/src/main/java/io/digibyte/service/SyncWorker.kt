@@ -6,10 +6,15 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.isTestnet
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
 
 /**
  * WorkManager periodic job for background header-only sync.
@@ -29,6 +34,19 @@ class SyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters
 ) : CoroutineWorker(context, params) {
+
+    /**
+     * What the worker takes from the application graph. Reached through an entry point rather than
+     * the constructor: WorkManager's default factory constructs a worker by name through its
+     * `(Context, WorkerParameters)` constructor, so that must stay the only constructor
+     * (`SyncWorkerConstructionTest`), whichever factory is in force.
+     */
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface SyncWorkerEntryPoint {
+        /** The shared client (Tor-aware); the seeder request is derived from it, see [SeederClient]. */
+        fun okHttpClient(): OkHttpClient
+    }
 
     override suspend fun doWork(): Result {
         return try {
@@ -97,20 +115,18 @@ class SyncWorker @AssistedInject constructor(
         val json: String? = if (now - lastFetch < 60 * 60 * 1000L && cachedJson != null) {
             cachedJson
         } else {
-            try {
-                // capability=filter: the wallet is CF-only end to end, so the
-                // background catch-up worker must never source a bloom-only peer.
-                val url = java.net.URL("$SEEDER_URL?capability=filter")
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
-                val body = conn.inputStream.bufferedReader().readText()
-                conn.disconnect()
-                if (conn.responseCode == 200) {
-                    prefs.edit().putString("peers_json", body).putLong("last_fetch", now).apply()
-                    body
-                } else cachedJson
-            } catch (e: Exception) { cachedJson }
+            // capability=filter: the wallet is CF-only end to end, so the
+            // background catch-up worker must never source a bloom-only peer.
+            val okHttpClient = EntryPointAccessors
+                .fromApplication(applicationContext, SyncWorkerEntryPoint::class.java)
+                .okHttpClient()
+            val body = SeederClient(okHttpClient).fetch("$SEEDER_URL?capability=filter") {
+                android.util.Log.w("SyncWorker", it)
+            }
+            if (body != null) {
+                prefs.edit().putString("peers_json", body).putLong("last_fetch", now).apply()
+                body
+            } else cachedJson
         }
 
         if (json != null) {

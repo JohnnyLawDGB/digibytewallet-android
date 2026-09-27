@@ -9,15 +9,23 @@
  * (via secp256k1_nonce_function_rfc6979 in BRKey.c / BRKeySign).
  */
 
+#include <errno.h>
 #include "jni_bridge.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 
 /* ---------- publish result callback ----------
  *
- * BRPeerManagerPublishTx reports EVERY failure through this callback and nothing else:
- * EINVAL for an unsigned tx, ENOTCONN when the peer manager is not connected, and
- * ENOTCONN again from the disconnect path that cancels pending publishes.
+ * BRPeerManagerPublishTx answers this callback EXACTLY ONCE per publish and reports every
+ * verdict through it and nothing else: 0 when a peer relays or requests the transaction or a
+ * block confirms it; EINVAL for an unsigned tx, for one the wallet judges invalid when a peer
+ * asks for it, or for a peer's invalid/non-standard/dust rejection while no other peer had it;
+ * ENOTCONN when the peer manager is not connected, from the disconnect path that cancels
+ * pending publishes, and when the manager is torn down while the publish is pending;
+ * ETIMEDOUT when no peer echoed it back; ECANCELED when the wallet itself removed the
+ * transaction (removeTransaction) while it was pending; and EALREADY when this publish
+ * duplicated one still pending -- the earlier publish's callback carries the verdict, so
+ * EALREADY is consumed here as "no verdict" and never recorded.
  *
  * Passing NULL here — as this bridge did until 2026-08-20 — is not merely "don't tell me".
  * The cancellation loop in _peerDisconnected skips entries whose callback is NULL:
@@ -86,6 +94,14 @@ static void _publishResult(void *info, int error)
 {
     PublishCtx *ctx = (PublishCtx *)info;
     if (!ctx) return;
+    if (error == EALREADY) {
+        /* This publish duplicated one still pending. The ring stays keyed by txid with the first
+         * publish's slot, whose callback carries the verdict; recording here would overwrite a
+         * pending or delivered verdict with a non-verdict. Consume the context and nothing else. */
+        LOGD("publishTransaction: already pending txid=%s (earlier publish carries the verdict)", ctx->txid);
+        free(ctx);
+        return;
+    }
     _publishResultRecord(ctx->txid, error);
     if (error) {
         LOGE("publishTransaction: REJECTED txid=%s error=%d (%s) — the network did not "
@@ -118,6 +134,32 @@ Java_io_digibyte_core_bridge_NativeBridge_getPublishResult(JNIEnv *env, jobject 
 
     (*env)->ReleaseStringUTFChars(env, txidHex, txid);
     return result;
+}
+
+/* ---------- the wallet's record of a send ----------
+ *
+ * One owner per object. The wallet keeps its own record of a send and the peer manager is
+ * handed the ORIGINAL to broadcast (BRPeerManagerPublishTx / StemPublishTx take ownership and
+ * may release it at any time), so the wallet's record must never be the same object -- it is
+ * an independent COPY. And the copy is made only when the wallet holds no record of the hash
+ * yet: on a re-publish of a send it already holds (the 90-second stranded-send sweep, a manual
+ * retry) the wallet keeps the record it has and no copy is made. If the wallet did not take
+ * the copy after all -- a peer thread registered the hash between the lookup and the
+ * registration (peer threads do not hold PEER_GUARD), or the record is a confirmed
+ * non-wallet transaction the wallet keeps no record of -- the copy has no owner and is
+ * released here. The timestamp is set first because _BRWalletInsertTx orders by it.
+ *
+ * Every publish entry point calls this, and only this, before it publishes; the host KAT
+ * tx_publish_ownership_kat reads this file and requires exactly that shape.
+ * Caller holds PEER_GUARD. */
+static void _registerWalletCopy(BRTransaction *tx)
+{
+    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
+    if (BRWalletTransactionForHash(g_wallet, tx->txHash)) return;   /* already held: nothing to copy */
+    BRTransaction *walletCopy = BRTransactionCopy(tx);
+    if (!walletCopy) return;                                        /* the peer relay-back re-registers */
+    BRWalletRegisterTransaction(g_wallet, walletCopy);
+    if (BRWalletTransactionForHash(g_wallet, tx->txHash) != walletCopy) BRTransactionFree(walletCopy);
 }
 
 /* ---------- createTransaction ---------- */
@@ -298,35 +340,18 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobjec
     }
     txidHex[64] = '\0';
 
-    /* Register the tx into the wallet *before* publish so it's in
-     * BRWalletTransactions() the moment publishTransaction returns —
-     * otherwise the Kotlin-side save-after-broadcast hook can race the
-     * peer relay-back path and persist a stale snapshot. The peer's
-     * relay-back later calls BRWalletRegisterTransaction again, which
-     * is idempotent (BRWallet.c:1111). Timestamp must be set first
-     * because _BRWalletInsertTx orders by timestamp. */
-    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
-    /* Register an independent COPY into the wallet; hand the ORIGINAL to the peer
-     * manager below. BRPeerManagerPublishTx takes ownership and FREES tx on its
-     * error paths (unsigned / not-connected + unreachable) and otherwise holds it
-     * in its publish list — so it must NOT be the same object the wallet keeps, or
-     * the wallet's registered pointer dangles and a later getSerializedTransactions
-     * reads freed memory (use-after-free — the "String_" SIGSEGV on send, window
-     * widened by the asset-send's post-broadcast reconcile/record before persist).
-     * On copy OOM (rare) skip the local register; the peer relay-back re-registers. */
-    BRTransaction *walletCopy = BRTransactionCopy(tx);
-    if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
+    /* The wallet's record goes in *before* the publish so it is in BRWalletTransactions() the
+     * moment publishTransaction returns — otherwise the Kotlin-side save-after-broadcast hook
+     * can race the peer relay-back path and persist a stale snapshot. The wallet keeps an
+     * independent copy, made only when it holds no record of the hash yet; the peer manager is
+     * handed the ORIGINAL below and owns it from then on (see _registerWalletCopy). */
+    _registerWalletCopy(tx);
 
-    /* Publish — BRPeerManagerPublishTx takes ownership of tx, do NOT free it.
-       Pass NULL info/callback: the callback fires asynchronously on the peer
-       thread AFTER this JNI frame returns, so a stack-local PublishContext
-       would be written cross-thread once it is out of scope — a use-after-free.
-       Kotlin already polls acceptance via getRelayCount (Broadcaster embargo +
-       SyncService.rebroadcastStrandedSends), so no native callback is needed.
-       Matches publishTransactionStem's proven NULL/NULL pattern below. */
-    /* Non-NULL callback is load-bearing — see _publishResult. On allocation failure fall
-     * back to the old NULL behaviour rather than dropping the send entirely: a publish that
-     * cannot be tracked is still better than no publish at all. */
+    /* Publish — BRPeerManagerPublishTx takes ownership of tx, do NOT free it. The context is
+       heap-allocated: the callback fires asynchronously on a peer thread AFTER this JNI frame
+       returns. Non-NULL callback is load-bearing — see _publishResult. On allocation failure
+       fall back to the old NULL behaviour rather than dropping the send entirely: a publish
+       that cannot be tracked is still better than no publish at all. */
     PublishCtx *ctx = calloc(1, sizeof(*ctx));
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
     BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);
@@ -371,13 +396,9 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jo
     for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
     txidHex[64] = '\0';
 
-    /* Register before broadcast (same coherence rule as publishTransaction).
-     * Wallet keeps an independent COPY; the peer manager gets the ORIGINAL (which
-     * stem/publish may free on error / hold in its publish list) — same
-     * double-ownership UAF fix as publishTransaction. */
-    if (!tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
-    BRTransaction *walletCopy = BRTransactionCopy(tx);
-    if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
+    /* The wallet's record before the broadcast (same coherence rule as publishTransaction);
+     * the peer manager gets the ORIGINAL — see _registerWalletCopy. */
+    _registerWalletCopy(tx);
 
     /* Heap ctx, not stack — the callback is async and fires long after this frame returns.
        A NULL callback would also make the publish invisible to the cancellation path that
@@ -438,10 +459,12 @@ Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thi
  *
  * That route removes from the wallet the manager was built with, so it is taken
  * only while that is this g_wallet: createWalletFromBytes / recoverWalletFromBytes
- * set g_peerManagerNeedsRecreate BEFORE they begin swapping the wallet, and until
- * the next startSync rebuilds the manager the two names stand for different
- * wallets — so the marker is already set for the whole of any window in which
- * they differ, including while the new wallet is being built.
+ * set g_walletSwapped BEFORE they begin swapping the wallet, and until the next
+ * startSync rebuilds the manager the two names stand for different wallets — so
+ * the marker is already set for the whole of any window in which they differ,
+ * including while the new wallet is being built. A plain reconnect request
+ * (g_peerManagerNeedsRecreate from forceReconnect, or a rescan deferring the
+ * recreate) leaves the pair intact, so it does not switch this route off.
  * With the marker set — and when there is no manager at all, so no publish list
  * — the wallet removal stands alone on g_wallet, exactly as it did before.
  *
@@ -459,7 +482,7 @@ Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject
     if (strlen(txid) == 64) {
         UInt256 h = _u256FromTxidHex(txid);
         if (BRWalletTransactionForHash(g_wallet, h)) {
-            if (g_peerManager && !g_peerManagerNeedsRecreate) {
+            if (g_peerManager && !g_walletSwapped) {
                 BRPeerManagerRemoveTransaction(g_peerManager, h);
             } else {
                 BRWalletRemoveTransaction(g_wallet, h);
@@ -749,14 +772,9 @@ Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject th
     txidHex[64] = '\0';
 
     /* One owner per object — the same shape the plain-DGB paths (publishTransaction /
-     * publishTransactionStem) use. The wallet's record and the publisher's object are always
-     * distinct objects; the publisher may release its object at any time. So the wallet keeps
-     * an independent COPY and the publisher is handed the ORIGINAL. The timestamp is set first
-     * because _BRWalletInsertTx orders by it. The original is never handed to the wallet: with
-     * no copy, nothing is registered here. */
-    if (! tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
-    BRTransaction *walletCopy = BRTransactionCopy(tx);
-    if (walletCopy) BRWalletRegisterTransaction(g_wallet, walletCopy);
+     * publishTransactionStem) use: the wallet keeps its own record, the publisher is handed the
+     * ORIGINAL. See _registerWalletCopy. */
+    _registerWalletCopy(tx);
 
     /* Non-NULL callback: see _publishResult — NULL makes the publish invisible to the
        cancellation path and it never leaves publishedTx. */

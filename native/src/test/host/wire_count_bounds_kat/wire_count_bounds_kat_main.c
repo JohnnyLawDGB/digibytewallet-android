@@ -16,8 +16,9 @@
 // tree). The seams in BRArray.h, BRTransaction.c, BRPeer.c, BRGCSFilter.c and
 // BRMerkleBlock.c are therefore all `#ifdef WIRE_COUNT_BOUNDS_UNFIXED`, never
 // `#if`, so the flag's ABSENCE selects the shipped (bounded) code. The per-input
-// witness bound (see the third invariant below) has its own presence flag,
-// WIRE_WITNESS_COUNT_UNFIXED, on the same convention.
+// witness bound (see the third invariant below) has two presence flags of its
+// own, WIRE_WITNESS_COUNT_UNFIXED and WIRE_WITNESS_ITEM_UNFIXED, one per arm, on
+// the same convention; the sign tail (fifth invariant) has TX_SIGN_REPARSE_UNFIXED.
 //
 // The parsers under test are reached as follows:
 //   * BRTransactionParse and BRGCSFilterParse are public API, called directly.
@@ -48,12 +49,44 @@
 // message, and the parser walks that many items. The count is bounded by the bytes left
 // (each item needs at least a one-byte length prefix) before the walk, and the
 // accumulated item length is bounded as the walk proceeds, so neither the walk
-// count nor the accumulated length can run past the buffer. The red evidence for
-// tx_witness is not a sanitizer report but a call that DOES NOT RETURN: with the
-// bound absent, a count near the type maximum makes the walk take that many
-// steps. run.sh time-limits that arm and treats "stopped at the limit" as its
-// expected result. tx_witness_ctl is the control: an honest two-item witness on
-// the same transaction, which must be ACCEPTED and whose bytes must round-trip.
+// count nor the accumulated length can run past the buffer. The two arms have one
+// flag each. The red evidence for tx_witness is not a sanitizer report but a call
+// that DOES NOT RETURN: with BOTH arms absent, a count near the type maximum makes
+// the walk take that many steps. run.sh time-limits that arm and treats "stopped at
+// the limit" as its expected result; with either arm present alone the same message
+// is rejected cleanly, which is what shows each arm bounds the walk by itself.
+// tx_witness_item (a count of two whose first item declares more bytes than remain)
+// is rejected with or without the per-item arm -- a GUARD. tx_witness_ctl is the
+// control: an honest two-item witness on the same transaction, which must be
+// ACCEPTED and whose bytes must round-trip.
+//
+// FOURTH INVARIANT -- A COUNT IS COMPARED AS THE VALUE THE WIRE CARRIED. The four
+// item-list messages (addr, inv, getdata, notfound) and the transaction's three
+// counts are compared against the bytes that remain BEFORE they are narrowed to
+// size_t and before they are multiplied by the item size. The *_wrap cases carry a
+// count whose product with the item size is a multiple of 2^32 (32-bit build) or
+// 2^64 (64-bit build): the handler's verdict is the oracle, "malformed" (return 0)
+// being the bounded answer and "dropped, peer kept" (return 1) the unbounded one.
+// tx_count_trunc declares 2^32 + 1 inputs and carries one: a 32-bit parser that
+// narrows first sees one input and accepts; the bounded parser rejects in both
+// word sizes (at 64 bits the count already failed the bound: GUARD there).
+//
+// A count that passed its bound and its cap still must not size an allocation on the
+// stack. inv_hash_stack drives _BRPeerAcceptInvMessage with a max-count inv on a
+// worker thread whose stack is far smaller than MAX_GETDATA_HASHES*32 bytes: with the
+// per-item hash tables declared as stack VLAs (the presence flag WIRE_INV_HASH_STACK_UNFIXED)
+// the walk that fills them runs off the end of the stack; the bounded code puts them on
+// the heap and handles the same message on the small stack.
+//
+// FIFTH INVARIANT -- A STORE THE PARSER ASKED FOR EXISTS BEFORE THE OBJECT IS USED,
+// AND THE SIGNED HASH COMES FROM A RE-PARSE THAT SUCCEEDED. The tx_store_script /
+// _sig / _witness / _out cases are honest messages whose one byte store the
+// allocator declines (kat_calloc below declines exactly the request of that size):
+// the bounded parser rejects; the comparison arm keeps a length with no bytes
+// behind it and the serializer reads a store that is not there. sign_reparse_null
+// signs a two-input transaction with every grow declined, so the re-parse that
+// produces the hashes cannot size its input store: the bounded tail answers "not
+// signed" (0); the comparison arm answers 1 with the hash as it was.
 
 #include <stdio.h>
 #include <string.h>
@@ -62,16 +95,32 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <pthread.h>
 
 #ifdef KAT_GROW_HOOK
-// -Drealloc=kat_realloc renames the call in every unit, this one included; take the
-// real one back here so the hook can forward to it.
+// -Drealloc=kat_realloc -Dcalloc=kat_calloc rename the calls in every unit, this one
+// included; take the real ones back here so the hooks can forward to them.
 #undef realloc
+#undef calloc
 extern void *realloc(void *ptr, size_t size);
-static size_t kat_decline_from = (size_t)-1;   // idle: forwards everything
+extern void *calloc(size_t nmemb, size_t size);
+static size_t kat_decline_from = (size_t)-1;   // idle: forwards every grow
 void *kat_realloc(void *ptr, size_t size)
 {
     return (size >= kat_decline_from) ? NULL : realloc(ptr, size);
+}
+// A fresh store (BRArray.h's array_new) is one calloc of header + elements. The hook
+// declines every request of exactly kat_calloc_decline_bytes bytes (0: idle) and
+// counts what it declined, so a case can confirm it starved the one store it meant to.
+static size_t kat_calloc_decline_bytes = 0;
+static int kat_calloc_declined = 0;
+void *kat_calloc(size_t nmemb, size_t size)
+{
+    if (kat_calloc_decline_bytes != 0 && nmemb * size == kat_calloc_decline_bytes) {
+        kat_calloc_declined++;
+        return NULL;
+    }
+    return calloc(nmemb, size);
 }
 #endif
 
@@ -81,6 +130,7 @@ void *kat_realloc(void *ptr, size_t size)
 
 #include "BRTransaction.h"
 #include "BRGCSFilter.h"
+#include "BRKey.h"
 
 // ---- little helpers ---------------------------------------------------------
 
@@ -427,6 +477,316 @@ static int case_array_insert_array_full(void) { return insert_into_full_store(1)
 #undef realloc
 #endif
 
+// ---- cases: a count is compared as the value the wire carried ------------------
+//
+// Each item-list message is a CompactSize count then SIZE bytes per item (30 for
+// addr, 36 for inv/getdata/notfound). The count is chosen per word size so that
+// count*SIZE is a multiple of the word: 0x80000000*30 and 0x40000000*36 are
+// multiples of 2^32; 2^63*30 and 2^62*36 are multiples of 2^64. Nothing follows the
+// count, so an addition-first guard sees "off + 0 <= msgLen" and passes the count on
+// to the "too many" test, which drops the message and KEEPS the peer (return 1). The
+// bounded guard compares the count, unnarrowed, against (msgLen - off)/SIZE and
+// answers "malformed" (return 0). The verdict is the oracle; nothing is allocated in
+// either arm.
+static size_t put_wrap_count(uint8_t *p, unsigned itemSize)
+{
+    if (sizeof(size_t) >= 8) {
+        p[0] = 0xff;                                  // CompactSize: 8-byte count follows
+        put_u64le(&p[1], (itemSize == 30) ? (1ULL << 63) : (1ULL << 62));
+        return 9;
+    }
+    p[0] = 0xfe;                                      // CompactSize: 4-byte count follows
+    put_u32le(&p[1], (itemSize == 30) ? 0x80000000u : 0x40000000u);
+    return 5;
+}
+
+typedef int (*peer_handler)(BRPeer *, const uint8_t *, size_t);
+
+static int wrap_case(peer_handler handler, unsigned itemSize)
+{
+    uint8_t raw[16];
+    size_t len = put_wrap_count(raw, itemSize);
+    uint8_t *buf = dup_exact(raw, len);
+    BRPeer *peer = BRPeerNew(0x12345678);
+    int r = handler(peer, buf, len);
+    BRPeerFree(peer);
+    free(buf);
+    return r; // 1 = the message was passed on (dropped, peer kept), 0 = malformed
+}
+
+static int case_addr_wrap(void)     { return wrap_case(_BRPeerAcceptAddrMessage, 30); }
+static int case_inv_wrap(void)      { return wrap_case(_BRPeerAcceptInvMessage, 36); }
+static int case_getdata_wrap(void)  { return wrap_case(_BRPeerAcceptGetdataMessage, 36); }
+static int case_notfound_wrap(void) { return wrap_case(_BRPeerAcceptNotfoundMessage, 36); }
+
+// A transaction whose input count is the 9-byte CompactSize 2^32 + 1, followed by
+// exactly one honest input (empty scriptSig), one output and a lock time. A parser
+// that narrows the count to 32 bits before comparing it sees a count of one and
+// accepts the message; the bounded parser compares the 64-bit value against the
+// bytes that remain and rejects it. (At 64 bits the unnarrowed count fails the
+// bound in either arm.)
+static int case_tx_count_trunc(void)
+{
+    uint8_t raw[128];
+    size_t o = 0;
+    put_u32le(&raw[o], 1); o += 4;                    // version
+    raw[o++] = 0xff;                                  // CompactSize: 8-byte count follows
+    put_u64le(&raw[o], 0x100000001ULL); o += 8;      // 2^32 + 1 inputs declared
+    memset(&raw[o], 0x11, 32); o += 32;               // one input: previous-output hash
+    put_u32le(&raw[o], 0); o += 4;                    //   index
+    raw[o++] = 0x00;                                  //   empty scriptSig
+    put_u32le(&raw[o], 0xffffffff); o += 4;           //   sequence
+    raw[o++] = 0x01;                                  // output count = 1
+    put_u64le(&raw[o], 1000); o += 8;                 //   value
+    raw[o++] = 0x00;                                  //   empty scriptPubKey
+    put_u32le(&raw[o], 0); o += 4;                    // lock time
+    uint8_t *buf = dup_exact(raw, o);
+    BRTransaction *tx = BRTransactionParse(buf, o);
+    int accepted = (tx != NULL);
+    if (tx) BRTransactionFree(tx);
+    free(buf);
+    return accepted;
+}
+
+// Witness stack with an honest count of two whose FIRST item declares 0xffff bytes
+// (CompactSize fd ff ff) while only a few remain. Rejected with the per-item arm
+// present (the item does not fit) and without it (the accumulated length passes the
+// end and the tail test rejects): a GUARD for the per-item arm.
+static int case_tx_witness_item(void)
+{
+    uint8_t raw[128];
+    size_t o = put_segwit_prefix(raw);
+    raw[o++] = 0x02;                                  // witness item count = 2
+    raw[o++] = 0xfd; raw[o++] = 0xff; raw[o++] = 0xff; // item 0 declares 65535 bytes
+    raw[o++] = 0xAA; raw[o++] = 0xBB;                 // two bytes present
+    put_u32le(&raw[o], 0); o += 4;                    // lock time
+    uint8_t *buf = dup_exact(raw, o);
+    BRTransaction *tx = BRTransactionParse(buf, o);
+    int accepted = (tx != NULL);
+    if (tx) BRTransactionFree(tx);
+    free(buf);
+    return accepted;
+}
+
+// ---- case: a bounded, capped count still must not size a stack allocation ---------
+//
+// The two per-item hash tables in _BRPeerAcceptInvMessage scale with the (capped)
+// block/tx count. A max-count inv of block items reaches them with the count at the cap;
+// run on a worker thread whose stack is far smaller than the tables, the stack VLA form
+// runs off the end of the stack while it is filled and the bounded (heap) form does not.
+// The message carries
+// no tx items (so the "before a filter" guard is skipped) and the peer is put in a state
+// where blockCount survives to the tables (sentGetblocks) but no getdata is sent
+// afterwards (needsFilterUpdate zeroes it once the tables are filled), so the case
+// exercises the tables and nothing on the socket.
+#ifndef INV_HASH_STACK_BYTES
+#define INV_HASH_STACK_BYTES (256u*1024u)   // << MAX_GETDATA_HASHES*32 (~1.6 MB)
+#endif
+
+typedef struct { BRPeer *peer; uint8_t *msg; size_t msgLen; int r; } InvJob;
+
+static void *inv_worker(void *arg)
+{
+    InvJob *j = (InvJob *)arg;
+    j->r = _BRPeerAcceptInvMessage(j->peer, j->msg, j->msgLen);
+    return NULL;
+}
+
+static int case_inv_hash_stack(void)
+{
+    size_t count = MAX_GETDATA_HASHES;
+    size_t msgLen = 3 + count*36;                 // CompactSize (fd + 2 bytes), then 36 per item
+    uint8_t *buf = (uint8_t *)malloc(msgLen);
+    size_t off = 0;
+    buf[off++] = 0xfd;                            // CompactSize: a 2-byte count follows
+    buf[off++] = (uint8_t)(count & 0xff);
+    buf[off++] = (uint8_t)((count >> 8) & 0xff);
+    for (size_t i = 0; i < count; i++) {
+        put_u32le(&buf[off], 2); off += 4;        // inv_block
+        memset(&buf[off], 0, 32);
+        buf[off] = (uint8_t)(i & 0xff); buf[off + 1] = (uint8_t)((i >> 8) & 0xff); // distinct-ish
+        off += 32;
+    }
+
+    BRPeer *peer = BRPeerNew(0x12345678);
+    BRPeerContext *ctx = (BRPeerContext *)peer;
+    ctx->compactFiltersOnly = 0;
+    ctx->sentGetblocks = 1;                       // keep blockCount alive to the tables
+    ctx->needsFilterUpdate = 1;                   // then zero it, so no getdata is sent afterwards
+
+    InvJob job; job.peer = peer; job.msg = buf; job.msgLen = msgLen; job.r = -1;
+    pthread_attr_t attr; pthread_t worker;
+    pthread_attr_init(&attr);
+    int started = (pthread_attr_setstacksize(&attr, INV_HASH_STACK_BYTES) == 0) &&
+                  (pthread_create(&worker, &attr, inv_worker, &job) == 0);
+    pthread_attr_destroy(&attr);
+    if (started) pthread_join(worker, NULL);
+    else fprintf(stderr, "inv_hash_stack: could not start the fixed-stack worker\n");
+
+    BRPeerFree(peer);
+    free(buf);
+    return (started && job.r == 1) ? 1 : 0;       // green: handled cleanly on the small stack
+}
+
+// ---- cases: a store the parser asked for exists before the object is used --------
+//
+// Honest one-input, one-output transactions. What differs is the allocator: run.sh
+// builds these with the grow hook, and kat_calloc declines exactly the request whose
+// size is the byte store under test -- n bytes plus BRArray.h's two-word header --
+// leaving the other stores of the same message (the transaction, its two entry
+// arrays, the empty witness and signature stores) untouched. The parsed object is
+// then used as the wallet uses one: it is serialized. The bounded parser rejects the
+// message; the comparison arm carries a length with no bytes behind it.
+#ifdef KAT_GROW_HOOK
+static int g_ambiguous = 0;   // set when a case did not starve exactly the store it meant to
+
+// version, one input (previous output, script or scriptSig `in`, the unsigned form's
+// amount when `unsignedForm`, sequence), one output (`out`), lock time.
+static size_t put_one_in_one_out(uint8_t *p, const uint8_t *in, size_t inLen, int unsignedForm,
+                                 const uint8_t *out, size_t outLen)
+{
+    size_t o = 0;
+    put_u32le(&p[o], 1); o += 4;
+    p[o++] = 0x01;                                    // input count
+    memset(&p[o], 0x22, 32); o += 32;                 // previous-output hash
+    put_u32le(&p[o], 0); o += 4;                      // previous-output index
+    o += put_count(&p[o], inLen);
+    memcpy(&p[o], in, inLen); o += inLen;
+    if (unsignedForm) { put_u64le(&p[o], 100000); o += 8; }   // the unsigned form carries the amount
+    put_u32le(&p[o], 0xffffffff); o += 4;             // sequence
+    p[o++] = 0x01;                                    // output count
+    put_u64le(&p[o], 50000); o += 8;                  // value
+    o += put_count(&p[o], outLen);
+    memcpy(&p[o], out, outLen); o += outLen;
+    put_u32le(&p[o], 0); o += 4;                      // lock time
+    return o;
+}
+
+static size_t store_bytes(size_t n) { return n + 2*sizeof(size_t); }   // BRArray.h header + n bytes
+
+// Parse `raw` with the store of `storeBytes` bytes declined, then serialize whatever
+// came back. Returns 1 when the parser accepted the message.
+static int parse_starved(const uint8_t *raw, size_t len, size_t storeBytes)
+{
+    uint8_t *buf = dup_exact(raw, len);
+    kat_calloc_declined = 0;
+    kat_calloc_decline_bytes = storeBytes;
+    BRTransaction *tx = BRTransactionParse(buf, len);
+    kat_calloc_decline_bytes = 0;
+    int accepted = (tx != NULL);
+    if (kat_calloc_declined != 1) {
+        fprintf(stderr, "store case: %d request(s) of %zu bytes declined, expected exactly 1\n",
+                kat_calloc_declined, storeBytes);
+        g_ambiguous = 1;
+    }
+    if (tx) {
+        size_t need = BRTransactionSerialize(tx, NULL, 0);
+        uint8_t *out = (uint8_t *)malloc(need ? need : 1);
+        BRTransactionSerialize(tx, out, need);
+        free(out);
+        BRTransactionFree(tx);
+    }
+    free(buf);
+    return accepted;
+}
+
+static const uint8_t k_p2wpkh[22] = { 0x00, 0x14, 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 };
+
+// The input's scriptPubKey (unsigned form: a 25-byte pay-to-pubkey-hash script, then the amount).
+static int case_tx_store_script(void)
+{
+    uint8_t p2pkh[25] = { 0x76, 0xa9, 0x14 }; memset(&p2pkh[3], 0x44, 20); p2pkh[23] = 0x88; p2pkh[24] = 0xac;
+    uint8_t raw[160];
+    size_t len = put_one_in_one_out(raw, p2pkh, sizeof(p2pkh), 1, k_p2wpkh, sizeof(k_p2wpkh));
+    return parse_starved(raw, len, store_bytes(sizeof(p2pkh)));
+}
+
+// The input's scriptSig (signed form: 107 bytes that are not a scriptPubKey shape).
+static int case_tx_store_sig(void)
+{
+    uint8_t sig[107]; memset(sig, 0x30, sizeof(sig));
+    uint8_t raw[256];
+    size_t len = put_one_in_one_out(raw, sig, sizeof(sig), 0, k_p2wpkh, sizeof(k_p2wpkh));
+    return parse_starved(raw, len, store_bytes(sizeof(sig)));
+}
+
+// The output's scriptPubKey (22 bytes; the input's scriptSig is empty).
+static int case_tx_store_outscript(void)
+{
+    uint8_t raw[160];
+    size_t len = put_one_in_one_out(raw, NULL, 0, 0, k_p2wpkh, sizeof(k_p2wpkh));
+    return parse_starved(raw, len, store_bytes(sizeof(k_p2wpkh)));
+}
+
+// The input's witness: the honest two-item stack of tx_witness_ctl (7 bytes).
+static int case_tx_store_witness(void)
+{
+    uint8_t raw[128];
+    size_t o = put_segwit_prefix(raw);
+    raw[o++] = 0x02;
+    raw[o++] = 0x02; raw[o++] = 0xAA; raw[o++] = 0xBB;
+    raw[o++] = 0x03; raw[o++] = 0xCC; raw[o++] = 0xDD; raw[o++] = 0xEE;
+    put_u32le(&raw[o], 0); o += 4;
+    return parse_starved(raw, o, store_bytes(7));
+}
+
+// ---- cases: the signed hash comes from a re-parse that succeeded --------------------
+//
+// A two-input pay-to-pubkey-hash transaction signed with one key. Signing ends by
+// serializing and re-parsing the object to take its hashes; the re-parse must grow
+// its input store from one entry to two, and with every grow declined that store is
+// not made and the re-parse yields nothing. The bounded tail then answers 0 ("not
+// signed"): the signatures stay in place, the hash is left as it was, and a caller
+// does not publish on a stale hash. The comparison arm answers 1 with that stale hash.
+// sign_reparse_ctl is the same call with the hook idle: it must answer 1 AND set the hash.
+static int sign_two_inputs(int starve, int *hashSet)
+{
+    BRKey key;
+    UInt256 secret, prev;
+    memset(&secret, 0x5a, sizeof(secret));
+    memset(&prev, 0x33, sizeof(prev));
+    BRKeySetSecret(&key, &secret, 1);
+    UInt160 h = BRKeyHash160(&key);
+    uint8_t spk[25] = { 0x76, 0xa9, 0x14 };
+    memcpy(&spk[3], h.u8, 20); spk[23] = 0x88; spk[24] = 0xac;
+
+    BRTransaction *tx = BRTransactionNew();
+    BRTransactionAddInput(tx, prev, 0, 100000, spk, sizeof(spk), NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddInput(tx, prev, 1, 100000, spk, sizeof(spk), NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddOutput(tx, 150000, spk, sizeof(spk));
+    UInt256 before = tx->txHash;
+
+    if (starve) kat_decline_from = 1;                 // every grow declined for the duration of the call
+    int r = BRTransactionSign(tx, 0, &key, 1);
+    kat_decline_from = (size_t)-1;
+
+    *hashSet = ! UInt256Eq(tx->txHash, before);
+    BRTransactionFree(tx);
+    return r;
+}
+
+// "accepted" here means the sign tail answered 1 although the re-parse yielded nothing.
+static int case_sign_reparse_null(void)
+{
+    int hashSet = 0;
+    int r = sign_two_inputs(1, &hashSet);
+    if (r && hashSet) {
+        fprintf(stderr, "sign_reparse_null: answered 1 and set the hash; the re-parse was not starved\n");
+        g_ambiguous = 1;
+    }
+    return r;
+}
+
+// Control: hook idle; must answer 1 with the hash set. Returns 1 only when both hold.
+static int case_sign_reparse_ctl(void)
+{
+    int hashSet = 0;
+    int r = sign_two_inputs(0, &hashSet);
+    if (r && ! hashSet) fprintf(stderr, "sign_reparse_ctl: answered 1 without setting the hash\n");
+    return r && hashSet;
+}
+#endif
+
 // ---- dispatch ---------------------------------------------------------------
 
 int main(int argc, char **argv)
@@ -444,19 +804,36 @@ int main(int argc, char **argv)
     else if (strcmp(c, "cf") == 0)      accepted = case_cf();
     else if (strcmp(c, "tx_witness") == 0)     accepted = case_tx_witness();
     else if (strcmp(c, "tx_witness_ctl") == 0) accepted = case_tx_witness_ctl();
+    else if (strcmp(c, "tx_witness_item") == 0) accepted = case_tx_witness_item();
+    else if (strcmp(c, "addr_wrap") == 0)      accepted = case_addr_wrap();
+    else if (strcmp(c, "inv_wrap") == 0)       accepted = case_inv_wrap();
+    else if (strcmp(c, "getdata_wrap") == 0)   accepted = case_getdata_wrap();
+    else if (strcmp(c, "notfound_wrap") == 0)  accepted = case_notfound_wrap();
+    else if (strcmp(c, "tx_count_trunc") == 0) accepted = case_tx_count_trunc();
+    else if (strcmp(c, "inv_hash_stack") == 0) accepted = case_inv_hash_stack();
 #ifdef KAT_GROW_HOOK
     else if (strcmp(c, "tx_store_in") == 0)  accepted = case_tx_store_in();
     else if (strcmp(c, "tx_store_out") == 0) accepted = case_tx_store_out();
     else if (strcmp(c, "tx_store_ctl") == 0) accepted = case_tx_store_ctl();
+    else if (strcmp(c, "tx_store_script") == 0)  accepted = case_tx_store_script();
+    else if (strcmp(c, "tx_store_sig") == 0)     accepted = case_tx_store_sig();
+    else if (strcmp(c, "tx_store_outscript") == 0) accepted = case_tx_store_outscript();
+    else if (strcmp(c, "tx_store_witness") == 0) accepted = case_tx_store_witness();
+    else if (strcmp(c, "sign_reparse_null") == 0) accepted = case_sign_reparse_null();
+    else if (strcmp(c, "sign_reparse_ctl") == 0)  accepted = case_sign_reparse_ctl();
     else if (strcmp(c, "array_insert_known") == 0)      accepted = case_array_insert_known();
     else if (strcmp(c, "array_insert_full") == 0)       accepted = case_array_insert_full();
     else if (strcmp(c, "array_insert_array_full") == 0) accepted = case_array_insert_array_full();
 #endif
     else { fprintf(stderr, "unknown case: %s\n", c); return 2; }
 
+#ifdef KAT_GROW_HOOK
+    if (g_ambiguous) { printf("RESULT %s ambiguous\n", c); return 2; }
+#endif
     // If we reach here the parser returned rather than faulting. The bounded
-    // (green) parser must REJECT each of these messages -- except tx_store_ctl and
-    // array_insert_known, which run.sh requires to be ACCEPTED.
+    // (green) parser must REJECT each of these messages -- except the controls
+    // (tx_store_ctl, tx_witness_ctl, sign_reparse_ctl) and array_insert_known, which
+    // run.sh requires to be ACCEPTED.
     printf("RESULT %s %s\n", c, accepted ? "accepted" : "rejected");
     return accepted ? 1 : 0;
 }

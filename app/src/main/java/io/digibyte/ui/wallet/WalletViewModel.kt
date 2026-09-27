@@ -279,6 +279,10 @@ class WalletViewModel @Inject constructor(
             cfTip = cfTip,
             scanFrontier = scanFrontier,
             abandonedBandUnrecovered = abandonedBand != null,
+            // The previous emission's latch (set just below): "this process has already
+            // derived Synced". Lets the lead rule treat an implausibly far target as
+            // unproven, without touching a cold start whose Complete is sticky from prefs.
+            reachedSyncedThisSession = hasReachedSyncedOnce,
         )
 
         // Latch hasReachedSyncedOnce — gates the anti-flash balance guard in

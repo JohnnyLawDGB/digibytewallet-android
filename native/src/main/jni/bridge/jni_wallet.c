@@ -38,6 +38,7 @@ BRMasterPubKey g_mpk;
 int           g_mpkValid     = 0;
 uint32_t      g_walletCreationTime = 0;
 int           g_peerManagerNeedsRecreate = 0;
+int           g_walletSwapped = 0;   /* see jni_bridge.h */
 
 /* Callback globals — defined here, used by jni_peer.c via extern */
 jobject   g_callbackHandler  = NULL;
@@ -212,7 +213,11 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
                                                                   jbyteArray phraseBytes,
                                                                   jbyteArray passphrase) {
     (void)thiz;
-
+    /* The swap of g_wallet is serialised with every other user of the pair (g_wallet,
+     * g_peerManager): a publish or removal on another JNI thread cannot interleave with it.
+     * Peer threads never take this guard, so there is no lock-order question; the cost is that a
+     * create may wait behind a startSync's bounded disconnect wait. */
+    PEER_GUARD();
 
     if (!phraseBytes) {
         LOGW("createWalletFromBytes: phraseBytes is null");
@@ -264,9 +269,11 @@ Java_io_digibyte_core_bridge_NativeBridge_createWalletFromBytes(JNIEnv *env, job
     if (g_wallet) {
         LOGW("createWalletFromBytes: wallet already exists, freeing old one");
         /* Marked before the swap begins, not after it ends: from the first moment this
-         * g_wallet stops being the one the peer manager was built with, the marker says
-         * so. Anything that reads the pair between here and the next startSync then takes
-         * the path that names only g_wallet. Set again below, which is harmless. */
+         * g_wallet stops being the one the peer manager was built with, g_walletSwapped says
+         * so, and anything that reads the pair between here and the next startSync takes the
+         * path that names only g_wallet. The recreate request is set here too, so a failure
+         * below (no new wallet) still has startSync rebuild the manager. */
+        g_walletSwapped = 1;
         g_peerManagerNeedsRecreate = 1;
         BRWalletFree(g_wallet);
         g_wallet = NULL;
@@ -313,7 +320,7 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
                                                                    jlong creationTimestamp,
                                                                    jbyteArray passphrase) {
     (void)thiz;
-
+    PEER_GUARD();   /* the swap is serialised with every other user of (g_wallet, g_peerManager) */
 
     if (!phraseBytes) {
         LOGW("recoverWalletFromBytes: phraseBytes is null");
@@ -365,6 +372,7 @@ Java_io_digibyte_core_bridge_NativeBridge_recoverWalletFromBytes(JNIEnv *env, jo
 
     if (g_wallet) {
         /* Marked before the swap begins — see createWalletFromBytes. */
+        g_walletSwapped = 1;
         g_peerManagerNeedsRecreate = 1;
         BRWalletFree(g_wallet);
         g_wallet = NULL;

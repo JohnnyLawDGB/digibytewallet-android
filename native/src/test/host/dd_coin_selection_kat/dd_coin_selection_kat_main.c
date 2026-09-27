@@ -92,7 +92,7 @@ static BRTransaction *ddCreditTx(const uint8_t *spk, size_t spkLen, int64_t cent
     uint8_t enc[9]; size_t el = BRDigiDollarWriteScriptNum(cents, enc);
     orr[ol++] = (uint8_t)el; memcpy(orr + ol, enc, el); ol += el;
     BRTransactionAddOutput(tx, 0, orr, ol);                     // vout1: OP_RETURN
-    tx->blockHeight = 700000;                                   // confirmed
+    tx->blockHeight = 23700000;                                   // confirmed
     finalizeTxHash(tx);
     return tx;
 }
@@ -117,7 +117,7 @@ static BRWallet *mkWallet(const int64_t *cents, size_t n, const size_t *order) {
     UInt256 dh; memset(dh.u8, 0xD0, 32);
     BRTransactionAddInput(dgb, dh, 0, 0, dspk, dspkLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
     BRTransactionAddOutput(dgb, 500000000, dspk, dspkLen);
-    dgb->blockHeight = 700000;
+    dgb->blockHeight = 23700000;
     finalizeTxHash(dgb);
     BRWalletRegisterTransaction(w, dgb);
     return w;

@@ -93,7 +93,7 @@ int main(void){
     // fund the wallet with a 10000-cent ($100) confirmed DD UTXO
     UInt256 h1; memset(h1.u8, 0x11, 32);
     BRTransaction *ddCredit = ddTx(spk, spkLen, 10000, h1, 0);
-    ddCredit->blockHeight = 700000;                            // confirmed (see ddTx-adjacent comment upstream)
+    ddCredit->blockHeight = 23700000;                            // confirmed (see ddTx-adjacent comment upstream)
     finalizeTxHash(ddCredit);
     BRWalletRegisterTransaction(w, ddCredit);
     ck(BRWalletDigiDollarBalance(w) == 10000, "builder KAT setup: DD balance 10000 cents");
@@ -106,7 +106,7 @@ int main(void){
     dgbCredit->version = 1;
     BRTransactionAddInput(dgbCredit, h2, 0, 0, dspk, dspkLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
     BRTransactionAddOutput(dgbCredit, 100000000, dspk, dspkLen);
-    dgbCredit->blockHeight = 700000;
+    dgbCredit->blockHeight = 23700000;
     finalizeTxHash(dgbCredit);
     BRWalletRegisterTransaction(w, dgbCredit);
     ck(BRWalletBalance(w) == 100000000, "builder KAT setup: DGB balance 1 DGB (100000000 sat)");
@@ -190,7 +190,7 @@ int main(void){
     uint8_t spkD[64]; size_t spkDLen = BRAddressScriptPubKey(spkD, sizeof(spkD), taD.s);
     UInt256 h3; memset(h3.u8, 0x33, 32);
     BRTransaction *ddCreditDust = ddTx(spkD, spkDLen, 4050, h3, 0);
-    ddCreditDust->blockHeight = 700000;
+    ddCreditDust->blockHeight = 23700000;
     finalizeTxHash(ddCreditDust);
     BRWalletRegisterTransaction(wDust, ddCreditDust);
     ck(BRWalletDigiDollarBalance(wDust) == 4050, "wDust setup: DD balance 4050 cents");
@@ -201,7 +201,7 @@ int main(void){
     dgbCreditDust->version = 1;
     BRTransactionAddInput(dgbCreditDust, h4, 0, 0, dspkD, dspkDLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
     BRTransactionAddOutput(dgbCreditDust, 100000000, dspkD, dspkDLen);
-    dgbCreditDust->blockHeight = 700000;
+    dgbCreditDust->blockHeight = 23700000;
     finalizeTxHash(dgbCreditDust);
     BRWalletRegisterTransaction(wDust, dgbCreditDust);
     ck(BRWalletBalance(wDust) == 100000000, "wDust setup: DGB balance 1 DGB");
@@ -221,7 +221,7 @@ int main(void){
     uint8_t spkE[64]; size_t spkELen = BRAddressScriptPubKey(spkE, sizeof(spkE), taE.s);
     UInt256 h5; memset(h5.u8, 0x55, 32);
     BRTransaction *ddCreditExact = ddTx(spkE, spkELen, 4000, h5, 0);
-    ddCreditExact->blockHeight = 700000;
+    ddCreditExact->blockHeight = 23700000;
     finalizeTxHash(ddCreditExact);
     BRWalletRegisterTransaction(wExact, ddCreditExact);
     ck(BRWalletDigiDollarBalance(wExact) == 4000, "wExact setup: DD balance 4000 cents");
@@ -232,7 +232,7 @@ int main(void){
     dgbCreditExact->version = 1;
     BRTransactionAddInput(dgbCreditExact, h6, 0, 0, dspkE, dspkELen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
     BRTransactionAddOutput(dgbCreditExact, 100000000, dspkE, dspkELen);
-    dgbCreditExact->blockHeight = 700000;
+    dgbCreditExact->blockHeight = 23700000;
     finalizeTxHash(dgbCreditExact);
     BRWalletRegisterTransaction(wExact, dgbCreditExact);
     ck(BRWalletBalance(wExact) == 100000000, "wExact setup: DGB balance 1 DGB");

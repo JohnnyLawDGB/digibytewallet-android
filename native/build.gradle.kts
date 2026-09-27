@@ -32,7 +32,11 @@ android {
                 cFlags(
                     "-DANDROID_TOOLCHAIN=clang",
                     "-fstack-protector-strong",
-                    "-fvisibility=hidden"
+                    "-fvisibility=hidden",
+                    // Header proof-of-work / allowed-algorithm-by-height check level (see BRMerkleBlock.h):
+                    // 1 = compute, log "pow-mismatch" / "algo-by-height" and count, never reject.
+                    // Raise to 2 only after full syncs on both ABIs show zero mismatches.
+                    "-DDGB_HEADER_POW_CHECK=1"
                 )
                 if (asanNative) {
                     // -fno-omit-frame-pointer so the report carries a usable stack; -O1 keeps it

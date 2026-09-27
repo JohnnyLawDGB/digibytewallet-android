@@ -56,13 +56,40 @@ class OutgoingTxStore(context: Context) {
         )
     }
 
-    /** All recorded send txids. Used at startup to re-fluff any that the wallet
-     *  still sees as unconfirmed — a Dandelion stem killed mid-embargo (process
-     *  death before the fluff timer fires) otherwise strands the tx forever. */
-    fun allTxids(): Set<String> =
-        prefs.all.keys.mapNotNull { key ->
-            if (key.endsWith(".sent")) key.removeSuffix(".sent") else null
-        }.toSet()
+    /** All recorded send txids, settled or not. */
+    fun allTxids(): Set<String> = recordedTxidsOf(prefs.all.keys)
+
+    /** The recorded sends the stranded-send sweep still looks after: every recorded txid
+     *  not yet [markSettled]. The sweep re-fluffs any of these the wallet still sees as
+     *  unconfirmed — a Dandelion stem killed mid-embargo (process death before the fluff
+     *  timer fires) otherwise strands the tx forever. */
+    fun pendingTxids(): Set<String> = pendingTxidsOf(prefs.all.keys)
+
+    /** Settle a recorded send for the sweep: the wallet holds it at a confirmed height (or has
+     *  aged it out of its recent-transaction window, which only a confirmed tx does), or the
+     *  sweep has given up on it. The record itself stays — the activity list still reads it
+     *  through [lookup] to render the send with its recipient amount — but [pendingTxids] no
+     *  longer lists it, so the sweep never re-publishes it again. */
+    fun markSettled(txid: String) {
+        prefs.edit().putBoolean("$txid.settled", true).apply()
+    }
+
+    fun isSettled(txid: String): Boolean = prefs.getBoolean("$txid.settled", false)
+
+    /** How many times the sweep has re-published (or tried to) a send, and when it last did. */
+    data class SweepAttempts(val count: Int, val lastMs: Long) {
+        companion object { val NONE = SweepAttempts(0, 0L) }
+    }
+
+    fun sweepAttempts(txid: String): SweepAttempts =
+        SweepAttempts(prefs.getInt("$txid.sweeps", 0), prefs.getLong("$txid.sweptAt", 0L))
+
+    fun noteSweepAttempt(txid: String, nowMs: Long) {
+        prefs.edit()
+            .putInt("$txid.sweeps", prefs.getInt("$txid.sweeps", 0) + 1)
+            .putLong("$txid.sweptAt", nowMs)
+            .apply()
+    }
 
     /** Forget every recorded send. Used by the full chain rebuild, which discards the
      *  local transaction cache entirely and re-derives it from on-chain data.
@@ -72,7 +99,7 @@ class OutgoingTxStore(context: Context) {
         prefs.edit().clear().commit()
     }
 
-    /** Forget a recorded send (its three keys). Used after a phantom double-spend
+    /** Forget a recorded send (all of its keys). Used after a phantom double-spend
      *  is dropped so it isn't re-checked on the next launch. */
     fun remove(txid: String) {
         prefs.edit()
@@ -80,11 +107,28 @@ class OutgoingTxStore(context: Context) {
             .remove("$txid.fee")
             .remove("$txid.to")
             .remove("$txid.self")
+            .remove("$txid.settled")
+            .remove("$txid.sweeps")
+            .remove("$txid.sweptAt")
             .apply()
     }
 
     companion object {
         private const val PREFS_NAME = "dgb_outgoing_tx"
+
+        /** The txids recorded among the store's keys: one `<txid>.sent` key per record. Pure. */
+        fun recordedTxidsOf(keys: Collection<String>): Set<String> =
+            keys.mapNotNullTo(HashSet()) { key ->
+                if (key.endsWith(".sent")) key.removeSuffix(".sent") else null
+            }
+
+        /** The recorded txids the sweep still has to look after: recorded and not settled. Pure. */
+        fun pendingTxidsOf(keys: Collection<String>): Set<String> {
+            val settled = keys.mapNotNullTo(HashSet()) { key ->
+                if (key.endsWith(".settled")) key.removeSuffix(".settled") else null
+            }
+            return recordedTxidsOf(keys).filterNotTo(HashSet()) { it in settled }
+        }
 
         /**
          * Whether the activity list should override a tx's amount with the

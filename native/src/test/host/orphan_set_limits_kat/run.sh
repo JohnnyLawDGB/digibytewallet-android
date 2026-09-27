@@ -6,16 +6,22 @@
 # The _main.c #includes BRPeerManager.c, so it reaches the file-static helpers and the real
 # _peerRelayedBlock (see its header for what each scenario proves). This script requires:
 #
-#   * ORPHAN_SET_LIMITS_UNFIXED=1 (reference arm: the earlier store, connect step and request
-#     rule, selected inside BRPeerManager.c). Run once per scenario, and each run must be
-#     reported for its own reason:
-#       limits   -> this KAT's own count-limit check fails, AND LeakSanitizer reports
-#       relay    -> LeakSanitizer reports (the store's real call site)
-#       connect  -> AddressSanitizer reports (lastOrphan after its header left the set)
-#       rescan   -> this KAT's own exact-total check at the store's SECOND call site fails,
-#                   AND LeakSanitizer reports (a header displaced there)
-#   * ORPHAN_SET_LIMITS_UNFIXED=0 (fixed arm): every check passes, exit 0, and the run is
-#     clean under AddressSanitizer and LeakSanitizer.
+#   * the reference arm: ORPHAN_SET_LIMITS_UNFIXED=1 (the earlier store, connect step and
+#     request rule), RESIDENT_REPLACE_OWNER_UNFIXED=1 (a replaced resident header, and a saved
+#     header displaced by the resume load, are left unowned) and RELAY_CONNECT_RECURSION_UNFIXED=1
+#     (the nested connect step), all selected inside BRPeerManager.c. Run once per scenario,
+#     and each run must be reported for its own reason:
+#       limits         -> this KAT's own count-limit check fails, AND LeakSanitizer reports
+#       relay          -> LeakSanitizer reports (the store's real call site)
+#       connect        -> AddressSanitizer reports (lastOrphan after its header left the set)
+#       rescan         -> this KAT's own exact-total check at the store's SECOND call site fails,
+#                         AND LeakSanitizer reports (a header displaced there)
+#       redeliver      -> LeakSanitizer reports (a resident header replaced by a re-delivered copy)
+#       resume_sibling -> LeakSanitizer reports (a saved header displaced by the resume load)
+#       connect_stack  -> the sanitizer emits its "stack-overflow" report (a full set connecting on a
+#                         small fixed stack, one nested frame per header)
+#   * the fixed arm (every seam =0): every check passes, exit 0, and the run is clean under
+#     AddressSanitizer and LeakSanitizer.
 #
 # A reference arm that is not reported proves nothing, so that is a failure of this gate; a
 # non-zero exit alone does not count (a kill or a stop in setup also exits non-zero).
@@ -71,22 +77,27 @@ build() {
         -o "$out"
 }
 
-# Seam: the reference arm is selected by a macro INSIDE BRPeerManager.c. If that macro were
-# gone, -D...=1 would select nothing and both arms would be the same code.
-if ! grep -q 'ORPHAN_SET_LIMITS_UNFIXED' "$CORE_DIR/BRPeerManager.c"; then
-    echo "GATE FAILURE: BRPeerManager.c no longer tests ORPHAN_SET_LIMITS_UNFIXED — the reference arm has no seam."
-    exit 1
-fi
+# Seams: the reference arm is selected by macros INSIDE BRPeerManager.c. If one were gone,
+# its -D...=1 would select nothing and both arms would be the same code there.
+SEAMS=(ORPHAN_SET_LIMITS_UNFIXED RESIDENT_REPLACE_OWNER_UNFIXED RELAY_CONNECT_RECURSION_UNFIXED)
+for seam in "${SEAMS[@]}"; do
+    if ! grep -q "$seam" "$CORE_DIR/BRPeerManager.c"; then
+        echo "GATE FAILURE: BRPeerManager.c no longer tests $seam — the reference arm has no seam."
+        exit 1
+    fi
+done
+REFERENCE_FLAGS=(); FIXED_FLAGS=()
+for seam in "${SEAMS[@]}"; do REFERENCE_FLAGS+=("-D$seam=1"); FIXED_FLAGS+=("-D$seam=0"); done
 
 # Leak detection ON. symbolize=0 for speed: the gate detects a report, it does not name frames.
 export ASAN_OPTIONS="detect_leaks=1 symbolize=0"
 
 echo "=== building the reference arm ==="
-if ! build "$BUILD_DIR/kat_reference" -DORPHAN_SET_LIMITS_UNFIXED=1; then
+if ! build "$BUILD_DIR/kat_reference" "${REFERENCE_FLAGS[@]}"; then
     echo "BUILD FAILURE (reference arm) — gate cannot run"; exit 1
 fi
 echo "=== building the fixed arm ==="
-if ! build "$BUILD_DIR/kat_fixed" -DORPHAN_SET_LIMITS_UNFIXED=0; then
+if ! build "$BUILD_DIR/kat_fixed" "${FIXED_FLAGS[@]}"; then
     echo "BUILD FAILURE (fixed arm)"; exit 1
 fi
 
@@ -120,6 +131,9 @@ require_reference_reported limits  "\[FAIL\] \(R\) parentless-header count stays
 require_reference_reported relay   "ERROR: LeakSanitizer"
 require_reference_reported connect "ERROR: AddressSanitizer"
 require_reference_reported rescan  "\[FAIL\] \(R\) byte total equals the resident sum after an insert at the second call site" "ERROR: LeakSanitizer"
+require_reference_reported redeliver      "ERROR: LeakSanitizer"
+require_reference_reported resume_sibling "ERROR: LeakSanitizer"
+require_reference_reported connect_stack  "ERROR: AddressSanitizer: stack-overflow"
 
 echo
 echo "---- FIXED ARM: every scenario must pass, clean under both sanitizers ----"

@@ -103,8 +103,8 @@ int main(void) {
           "DD receive scores zero DGB stake (the peer-manager deletion hazard, filed)");
 
     // ---- once CONFIRMED -----------------------------------------------------------
-    BRWalletUpdateTransactions(w, &ddHash, 1, 700000, 1784980000);
-    check(BRWalletTransactionForHash(w, ddHash)->blockHeight == 700000, "tx now confirmed");
+    BRWalletUpdateTransactions(w, &ddHash, 1, 23700000, 1784980000);
+    check(BRWalletTransactionForHash(w, ddHash)->blockHeight == 23700000, "tx now confirmed");
     check(BRWalletDigiDollarBalance(w) == 5000,
           "DigiDollar balance credited once the confirming height lands ($50.00)");
 

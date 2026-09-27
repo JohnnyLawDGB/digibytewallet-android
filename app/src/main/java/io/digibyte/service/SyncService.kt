@@ -41,7 +41,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import javax.inject.Inject
 import kotlinx.coroutines.runInterruptible
 
@@ -156,6 +155,8 @@ class SyncService : Service() {
     @Inject lateinit var assetHistoryBackfill: io.digibyte.core.asset.AssetHistoryBackfill
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var okHttpClient: OkHttpClient
+    /** Every seeder request goes through this; see [SeederClient]. Derived once, after injection. */
+    private val seederClient by lazy { SeederClient(okHttpClient) }
 
     /** True if Tor proxy was successfully wired before this sync session started. */
     @Volatile private var torProxyActive: Boolean = false
@@ -801,7 +802,7 @@ class SyncService : Service() {
                 val now = System.currentTimeMillis()
                 if (now - lastStrandedRebroadcastMs >= STRANDED_REBROADCAST_INTERVAL_MS &&
                     NativeBridge.getPeerCount() > 0 &&
-                    OutgoingTxStore(this@SyncService).allTxids().isNotEmpty()
+                    OutgoingTxStore(this@SyncService).pendingTxids().isNotEmpty()
                 ) {
                     lastStrandedRebroadcastMs = now
                     rebroadcastStrandedSends()
@@ -3340,20 +3341,8 @@ class SyncService : Service() {
      *  [capability] filters the seeder pool (e.g. "dandelion"); null = default pool. */
     private fun fetchFromSeeder(capability: String? = null): List<Triple<String, Int, Long>>? {
         val url = if (capability != null) "$SEEDER_URL?capability=$capability" else SEEDER_URL
-        return try {
-            val request = Request.Builder().url(url).build()
-            okHttpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    parsePeersJson(response.body!!.string())
-                } else {
-                    android.util.Log.w("SyncService", "Seeder API returned ${response.code}")
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("SyncService", "Seeder API unreachable: ${e.message}")
-            null
-        }
+        val body = seederClient.fetch(url) { android.util.Log.w("SyncService", it) } ?: return null
+        return parsePeersJson(body)
     }
 
     /** Parse the seeder JSON shape: {"peers":[{"ip":"...","port":12024,"services_hex":"0x44d", ...}], "capability":"filter|bloom|filter+bloom", ...}
@@ -3416,34 +3405,54 @@ class SyncService : Service() {
     /**
      * Re-fluff (flood-broadcast) any recorded send the wallet still sees as
      * unconfirmed. Recovers Dandelion stems stranded by a process death during
-     * the embargo window. Idempotent: an already-propagated or confirmed tx is
-     * harmlessly re-announced; a double-spend is rejected.
+     * the embargo window. A double-spend is rejected and dropped.
      *
-     * Retries with verification: getPeerCount counts peers that are merely
-     * connecting (not yet relay-ready, especially over Tor), so a single fluff
-     * can fire before any peer can carry it. After each fluff we wait and check
-     * getRelayCount(txid) — once the network relays it back the tx has
-     * propagated and we stop. If it never relays back after all attempts it is
-     * likely an unrecoverable double-spend (its inputs were already spent).
+     * Which sends that is, [StrandedSendSelector] decides from the wallet's own transaction
+     * list: a send the wallet holds at a confirmed height — listed at one, or aged out of the
+     * list's recent window, which only a confirmed tx does — is settled in the store and never
+     * re-published; an unconfirmed one is re-published a bounded number of times and then held.
+     * The sweep's working set is the store's pending records, so a settled send costs nothing
+     * on later ticks. A re-announced confirmed tx is not harmless: every peer sees this wallet
+     * announce an old send of its own, on a timer, for as long as it runs.
+     *
+     * One publish per sweep, with verification: getPeerCount counts peers that are
+     * merely connecting (not yet relay-ready, especially over Tor), so a fluff can
+     * fire before any peer can carry it. After the publish we wait and check
+     * getRelayCount(txid) — once the network relays it back the tx has propagated.
+     * The retry is the next sweep, under the store's persisted attempt count; a send
+     * that never relays back and never confirms is likely an unrecoverable
+     * double-spend (its inputs were already spent), and is held rather than flooded.
      */
     private suspend fun rebroadcastStrandedSends() {
-        val recorded = OutgoingTxStore(this).allTxids()
-        if (recorded.isEmpty()) return
-        // wallet's confirmation view: txid -> blockHeight (TX_UNCONFIRMED = INT32_MAX)
-        val heights = HashMap<String, Long>()
-        runCatching {
-            NativeBridge.getTransactionDetails().trim().lines().forEach { line ->
-                val parts = line.split("|")
-                if (parts.size >= 4) heights[parts[0]] = parts[3].toLongOrNull() ?: 0L
-            }
-        }
-        val unconfirmed = recorded.filter { txid ->
-            val h = heights[txid]
-            h == null || h <= 0L || h >= Int.MAX_VALUE.toLong()
-        }
         val store = OutgoingTxStore(this)
+        val recorded = store.pendingTxids()
+        if (recorded.isEmpty()) return
+        // The wallet's own view of every recorded send, read as StrandedSendSelector documents.
+        // A read the wallet could not produce (thrown, null, or blank) ends this sweep: nothing is
+        // tried, settled or counted against a send on the strength of a list nobody looked at. The
+        // blank check runs inside the runCatching so a null string from the bridge is caught here
+        // and never reaches the startup caller, which has no handler of its own.
+        val details = runCatching { NativeBridge.getTransactionDetails().takeIf { it.isNotBlank() } }.getOrNull()
+        if (details == null) {
+            android.util.Log.w("SyncService", "stranded-send sweep: no transaction list this tick; skipped")
+            return
+        }
+        val now = System.currentTimeMillis()
+        val decisions = StrandedSendSelector.select(recorded, details, store::sweepAttempts, now)
         var dropped = false
-        for (txid in unconfirmed) {
+        for (decision in decisions) {
+            val txid = decision.txid
+            if (decision.settles) {
+                // Confirmed (listed at a height, or aged out of the wallet's recent window), or
+                // not held by the wallet after every attempt: leave the sweep's working set. The
+                // record stays for the activity list.
+                store.markSettled(txid)
+                android.util.Log.i("SyncService",
+                    "stranded-send sweep: settled ${txid.take(12)} (${decision.action}" +
+                        (decision.height?.let { " at height $it" } ?: "") + ")")
+                continue
+            }
+            if (decision.action == StrandedSendSelector.Action.HOLD) continue
             // What the network actually said about the last publish. Until v4.0.42 this
             // could not be asked at all — the bridge passed a NULL callback, so a refused
             // send was indistinguishable from an accepted one and this loop re-published it
@@ -3497,28 +3506,30 @@ class SyncService : Service() {
             // A stem of this process still under its embargo is not stranded: flooding it would
             // announce it from this wallet to every peer and undo the stem.
             if (!shouldSweepRepublish(Broadcaster.isEmbargoPending(txid))) continue
+            // Counted before the fetch: a send the wallet does not hold is given up after the
+            // same number of tries, instead of being looked for on every tick.
+            store.noteSweepAttempt(txid, now)
             val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
             if (raw == null) {
                 android.util.Log.w("SyncService",
                     "Dandelion recovery: $txid not in wallet tx set — can't re-publish")
                 continue
             }
-            var propagated = false
-            for (attempt in 1..3) {
-                runCatching { NativeBridge.publishTransaction(raw) }
-                    .onFailure { android.util.Log.w("SyncService", "re-publish $txid threw", it) }
-                delay(15_000L)
-                val relays = runCatching { NativeBridge.getRelayCount(txid) }.getOrDefault(0)
-                if (relays > 0) {
-                    android.util.Log.i("SyncService",
-                        "Dandelion recovery: $txid re-published & propagated (relays=$relays, attempt $attempt)")
-                    propagated = true
-                    break
-                }
-            }
-            if (!propagated) {
+            // One publish per sweep. The retry is the next sweep, and the store's attempt count
+            // bounds it: a send that stays unconfirmed is published on three consecutive sweeps
+            // and then once an hour, never three times fifteen seconds apart while an earlier
+            // publish still awaits its verdict.
+            val attempt = store.sweepAttempts(txid).count
+            runCatching { NativeBridge.publishTransaction(raw) }
+                .onFailure { android.util.Log.w("SyncService", "re-publish $txid threw", it) }
+            delay(15_000L)
+            val relays = runCatching { NativeBridge.getRelayCount(txid) }.getOrDefault(0)
+            if (relays > 0) {
+                android.util.Log.i("SyncService",
+                    "Dandelion recovery: $txid re-published & propagated (relays=$relays, attempt $attempt)")
+            } else {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: $txid still un-relayed after re-publish retries")
+                    "Dandelion recovery: $txid still un-relayed after re-publish (attempt $attempt)")
             }
         }
         // Persist the wallet tx set so any drops survive a restart.
