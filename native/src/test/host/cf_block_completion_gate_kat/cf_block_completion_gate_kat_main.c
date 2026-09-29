@@ -5,8 +5,10 @@
 // A compact-filter scan retires a height when the full block for that height is delivered:
 // _peerRelayedBlockTxns (BRPeerManager.c) calls BRCFScanLedgerMarkEvaluated, which removes the
 // height from `outstanding`, lets scannedThrough advance past it, and persists the ledger
-// immediately. That handler is fed by BRPeer.c's `block` message path, which proves NEITHER of
-// the two things the completion silently assumes:
+// immediately. That handler is fed by BRPeer.c's `block` message path, which at first proved NEITHER
+// of the two things the completion silently assumes. The peer layer now checks both before it
+// delivers (block_delivery_gate_kat); this suite calls _peerRelayedBlockTxns directly, with the peer
+// layer bypassed, so the manager's own copy of both checks stays pinned on its own:
 //
 //   1. NOT REQUEST-GATED. BRPeer.c dispatches MSG_BLOCK unconditionally and wires
 //      relayedBlockTxns on EVERY connected peer, so any peer the wallet dials can send an
@@ -29,8 +31,8 @@
 // WHAT THIS KAT ASSERTS
 // ---------------------
 //   CRUX-A  an UNSOLICITED merkle-valid block does NOT complete an outstanding height
-//           (while the tx-confirmation half is deliberately left working — the gate is
-//           surgical, not a blanket bail-out)
+//           and confirms nothing (the confirmation lives in the solicited + verified branch;
+//           CRUX-B and CRUX-D are the positive controls)
 //   CRUX-B  a SOLICITED block whose tx list fails the merkle commitment (a stripped tx) does
 //           NOT complete the height, and does NOT burn the solicitation either, so the honest
 //           block that follows still completes it
@@ -261,13 +263,13 @@ static void test_unsolicited_block_cannot_complete(BRWallet *wallet, const uint8
     check(BRCFScanLedgerScannedThrough(&m->cfLedger) < H,
           "CRUX-A: scannedThrough does not advance past a height nobody was asked to scan");
 
-    // The gate is surgical: relaying a block we did not ask for still CONFIRMS wallet txs it
-    // carries, exactly as before. A blanket bail-out would also pass the two checks above, so
-    // this is what stops the fix from being over-broad.
+    // A block this wallet did not solicit confirms nothing either: the confirmation is made only
+    // in the solicited + merkle-verified branch (block_delivery_gate_kat pins that invariant, and
+    // CRUX-B / CRUX-D below are the positive controls that a solicited, verified block confirms).
     BRTransaction *after = BRWalletTransactionForHash(wallet, tx->txHash);
-    check(after != NULL && after->blockHeight == H,
-          "CRUX-A: the tx-confirmation half is untouched — the tx still confirms at H");
-    check(txStatusFired == 1, "CRUX-A: txStatusUpdate still fires for the confirmation");
+    check(after != NULL && after->blockHeight == TX_UNCONFIRMED,
+          "CRUX-A: an unsolicited block does not confirm the tx it names");
+    check(txStatusFired == 0, "CRUX-A: no confirmation is reported for it");
 
     BRPeerManagerFree(m);
 }

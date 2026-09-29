@@ -159,8 +159,10 @@ int main(void)
     // itself dispatched after a verified cfilter match, and (b) a delivered tx list that
     // hashes to the header's committed merkle root. This block is delivered straight into
     // the handler, so both have to be staged here — the gate itself has its own
-    // red-before-green KAT (cf_block_completion_gate_kat). The tx-CONFIRMATION half below
-    // is deliberately unchanged by that gate, which is what tests 2-5 keep honest.
+    // red-before-green KAT (cf_block_completion_gate_kat). The CONFIRMATION is made inside
+    // the same solicited + verified branch (block_delivery_gate_kat), so every block this
+    // KAT expects to confirm is solicited and delivered with the list its header commits to;
+    // tests 2-4 are the no-op paths that bail out before either check.
     check(BRMerkleRootFromTxHashes(&block1->merkleRoot, txHashes1, 1) == 1,
           "test1: header commits to the tx list that will be delivered");
     MGR_LOCK(manager);
@@ -255,10 +257,20 @@ int main(void)
     BRWalletRegisterTransaction(wallet, tx5);
     txStatusFired = 0;
     UInt256 txHashes5[1] = { tx5->txHash };
-    _peerRelayedBlockTxns(&info1, block1->blockHash, UINT256_ZERO, txHashes5, 1); // block1 is still the tip
+    // A new main-chain tip whose header commits to [tx5], solicited by this wallet (block1's
+    // solicitation was consumed by test1, and its header commits to [tx1]).
+    BRMerkleBlock *block5 = dummyBlock(500001, 0xBB, 1700000015);
+    check(BRMerkleRootFromTxHashes(&block5->merkleRoot, txHashes5, 1) == 1,
+          "test5: header commits to the tx list that will be delivered");
+    BRSetAdd(manager->blocks, block5);
+    manager->lastBlock = block5;
+    MGR_LOCK(manager);
+    _BRPeerManagerRecordSolicitedBlockLocked(manager, block5->blockHash, block5->height);
+    MGR_UNLOCK(manager);
+    _peerRelayedBlockTxns(&info1, block5->blockHash, block5->merkleRoot, txHashes5, 1); // block5 is the tip
 
     BRTransaction *after5 = BRWalletTransactionForHash(wallet, tx5->txHash);
-    check(after5 != NULL && after5->blockHeight == block1->height,
+    check(after5 != NULL && after5->blockHeight == block5->height,
           "test5: positive control -- a main-chain tip block still confirms after the guard");
     check(txStatusFired == 1, "test5: positive control -- txStatusUpdate still fires");
 
