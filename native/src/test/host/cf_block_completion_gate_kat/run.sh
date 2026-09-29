@@ -4,7 +4,7 @@
 # WHAT IS UNDER TEST
 # ------------------
 # _peerRelayedBlockTxns (BRPeerManager.c) retires a compact-filter scan height when the full
-# block for that height is delivered. Its input — BRPeer.c's `block` message path — is neither
+# block for that height is delivered. Its input — BRPeer.c's `block` message path — was at first neither
 # request-gated (MSG_BLOCK is dispatched unconditionally, and relayedBlockTxns is wired on EVERY
 # connected peer) nor commitment-checked (the delivered tx list is never hashed against the
 # header's committed merkleRoot). So before this fix ANY dialed peer could erase an outstanding
@@ -12,9 +12,11 @@
 # getdata with the real header plus a tx list with the wallet's payment stripped out. Either way
 # scannedThrough advances past a height that was never scanned, the ledger is persisted on the
 # spot, nothing re-requests it, and the receive is invisible until a manual rescan.
+# The peer layer now checks both before delivering (block_delivery_gate_kat); this suite calls the
+# manager handler directly so the manager's own copy of both checks stays pinned independently.
 #
-# The fix is two gates, both in the completion decision only (the tx-CONFIRMATION half of the
-# handler is deliberately untouched — CRUX-A asserts that):
+# The fix is two gates in the completion decision (the tx CONFIRMATION is made only inside the
+# same solicited + verified branch; CRUX-A asserts an unsolicited block confirms nothing):
 #   1. a manager-owned, bounded, manager-INLINE solicitation table recorded at the two getdata
 #      dispatch sites that follow a VERIFIED cfilter match (_peerRelayedCFilter and _cfBufEval)
 #   2. BRMerkleRootFromTxHashes (BRMerkleBlock.c) recomputed over the delivered txids and
