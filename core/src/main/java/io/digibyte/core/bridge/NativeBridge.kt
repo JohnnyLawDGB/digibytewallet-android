@@ -226,6 +226,14 @@ object NativeBridge {
      */
     external fun getWalletBirthCheckpointHeight(): Long
 
+    /**
+     * Timestamp (unix seconds) of the highest compiled block checkpoint at or below [height]
+     * on the active network, 0 if none. Needs no wallet. A creation time no later than this
+     * makes the header anchor a checkpoint at or below [height] (the anchor is the latest
+     * checkpoint more than a week older than the creation time).
+     */
+    external fun getCheckpointTimeAtOrBelow(height: Long): Long
+
     /** Register callback handler for native events. */
     external fun setCallbackHandler(handler: NativeCallback)
 
