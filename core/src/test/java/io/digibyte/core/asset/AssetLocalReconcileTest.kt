@@ -128,4 +128,31 @@ class AssetLocalReconcileTest {
 
         coVerify(exactly = 0) { utxoDao.setSpent(any(), any(), any()) }
     }
+
+    /** While the wallet is still re-deriving its history (a rescan from a floor), its address
+     *  set covers only the fresh derivation window. Ownership then says nothing about a row at a
+     *  higher index, so the ownership prune waits for the maintenance gate; the spent-state
+     *  pass still runs. */
+    @Test fun ownership_prune_waits_while_not_allowed() = runTest {
+        coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row("bb", foreignScript))
+        coEvery { utxoDao.deleteAssetUtxo(any(), any()) } returns 1
+
+        val pruned = mgr.reconcileAssetRowsLocallyImpl(
+            ownedScriptHexes = setOf(ownedHex),
+            spentState = { _, _ -> AssetSpentState.SPENT },
+            pruneUnowned = false,
+        )
+
+        assertEquals(0, pruned)
+        coVerify(exactly = 0) { utxoDao.deleteAssetUtxo(any(), any()) }
+        coVerify(exactly = 1) { utxoDao.setSpent("bb", 0, true) }
+    }
+
+    /** Callers outside the service's gated maintenance tick never prune by ownership. */
+    @Test fun reconcile_callers_outside_the_gated_tick_do_not_prune_by_ownership() {
+        val src = java.io.File("src/main/java/io/digibyte/core/reconcile/ChainReconciliationService.kt").readText()
+        val calls = Regex("""reconcileAssetRowsLocally\(([^)]*)\)""").findAll(src).map { it.groupValues[1].trim() }.toList()
+        assertEquals("scanner is blind", 2, calls.size)
+        for (args in calls) assertEquals("pruneUnowned = false", args)
+    }
 }

@@ -59,24 +59,44 @@ internal fun compactFilterBirthHeight(
 }
 
 /**
- * The `cf_birth_height` to persist after a one-time history rebuild left [floorHint] (the oldest
- * confirmed height its discarded cache held), or null to leave the pref as it is.
- *
- * The floor only ever goes down, and only to [walletBirth] — the native header anchor, a compiled
- * checkpoint — when that anchor is at or below the hint. The native checkpoint lookup is by time,
- * so the anchor is lowered by the creation time the wallet was loaded with (see
- * `creationTimeForRestore`), not here. A height below the anchor cannot be resolved by the
- * in-memory chain (the auto-fetch clamps it back up), so no such height is written.
+ * What the sync start does with the floor a one-time history rebuild left behind ([floorHint], the
+ * oldest confirmed height its discarded cache held). Nothing is written when [setBirth] is null and
+ * [removeBirth] is false; the hint is dropped only when [clearHint].
  */
-internal fun compactFilterBirthWithFloorHint(
-    persistedBirth: Long?,
-    walletBirth: Long,
-    floorHint: Long,
-): Long? {
-    if (floorHint <= 0L || walletBirth <= 0L || walletBirth > floorHint) return null
-    // No persisted floor yet: persist the anchor, so the floor survives restarts.
-    if (persistedBirth == null || persistedBirth <= 0L) return walletBirth
-    return if (walletBirth < persistedBirth) walletBirth else null
+internal data class FloorHintStep(
+    /** Persist this `cf_birth_height`. */
+    val setBirth: Long? = null,
+    /** Remove `cf_birth_height`, so the scan start falls back to the wallet birth (the genesis
+     *  anchor: a 0 floor is never persisted). */
+    val removeBirth: Boolean = false,
+    /** The floor is applied: forget the hint. */
+    val clearHint: Boolean = false,
+    /** The header anchor is still above the hint: keep the hint and say so. */
+    val anchorAboveHint: Boolean = false,
+)
+
+/**
+ * The step for [floorHint] given the native header [anchor] (`getWalletBirthCheckpointHeight`, a
+ * compiled checkpoint; 0 is the genesis anchor, a valid one) and the persisted `cf_birth_height`.
+ *
+ * - no hint, or no wallet loaded (the anchor is then meaningless): nothing, the hint waits;
+ * - anchor above the hint: nothing, the hint is kept (a height below the anchor cannot be
+ *   resolved by the in-memory chain and the auto-fetch would clamp it back up);
+ * - otherwise the floor is made to reach the hint: a persisted floor above the hint is lowered to
+ *   the anchor (or removed when the anchor is genesis), a missing one is set to the anchor (so it
+ *   survives restarts), and one already at or below the hint stays. The hint is then cleared.
+ *
+ * The anchor itself is lowered through the creation time the wallet is loaded with
+ * (`creationTimeForRestore`), which the rebuild takes from the checkpoint at or below the hint.
+ */
+internal fun floorHintStep(walletLoaded: Boolean, anchor: Long, persistedBirth: Long?, floorHint: Long): FloorHintStep {
+    if (floorHint <= 0L || !walletLoaded) return FloorHintStep()
+    if (anchor > floorHint) return FloorHintStep(anchorAboveHint = true)
+    if (persistedBirth == null) {
+        return if (anchor > 0L) FloorHintStep(setBirth = anchor, clearHint = true) else FloorHintStep(clearHint = true)
+    }
+    if (persistedBirth <= floorHint) return FloorHintStep(clearHint = true)
+    return if (anchor > 0L) FloorHintStep(setBirth = anchor, clearHint = true) else FloorHintStep(removeBirth = true, clearHint = true)
 }
 
 private data class CfLedgerState(

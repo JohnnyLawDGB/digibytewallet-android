@@ -1138,14 +1138,18 @@ class SyncService : Service() {
                         // with the backend asset refresh, which bailed before reaching it.
                         // A stale `spent = true` HIDES a real holding, and only this
                         // clears it. Local only — no address disclosure.
-                        runCatching { assetManager.reconcileAssetRowsLocally() }
+                        // The ownership half deletes rows at addresses the wallet does not
+                        // derive, so it waits for the same gate as the prunes below: during a
+                        // rescan from a floor the derived set is only the fresh window.
+                        val pruneGateOpen = assetPruneGateOpen(
+                            syncedThisSession = syncedThisSession,
+                            peerCount = NativeBridge.getPeerCount(),
+                            progress = currentSyncProgress(),
+                            walletLoaded = NativeBridge.isWalletLoaded(),
+                        )
+                        runCatching { assetManager.reconcileAssetRowsLocally(pruneUnowned = pruneGateOpen) }
                             .onFailure { android.util.Log.w("SyncService", "asset row reconcile threw", it) }
-                        if (assetPruneGateOpen(
-                                syncedThisSession = syncedThisSession,
-                                peerCount = NativeBridge.getPeerCount(),
-                                progress = currentSyncProgress(),
-                                walletLoaded = NativeBridge.isWalletLoaded(),
-                            )) {
+                        if (pruneGateOpen) {
                             // Rows from a broadcast that never confirmed and has since
                             // been dropped from the wallet. clearDeadAssetSend can't reach
                             // these: it needs the tx present to enumerate its outputs, and
@@ -2127,6 +2131,13 @@ class SyncService : Service() {
         runCatching { assetManager.replayAssetOutpointExclusions() }
             .onFailure { android.util.Log.w("SyncService", "asset exclusion replay failed", it) }
 
+        // After a one-time history rebuild, the Room transaction table (asset history) still
+        // holds rows for the discarded records: clear it once, before the peer manager can
+        // deliver the re-derived transactions that refill it.
+        runCatching {
+            HistoryRebuildOnUpgrade.clearRoomTransactionsIfPending(this@SyncService) { transactionDao.deleteAll() }
+        }.onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "transaction table clear threw", it) }
+
         // Load saved blocks and peers from previous session before syncing
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
 
@@ -2292,22 +2303,33 @@ class SyncService : Service() {
             // up further if the in-memory window can't resolve it.
             val savedTip = NativeBridge.getSavedBlocksTip()
             // A one-time history rebuild after an update may have left a floor: the oldest
-            // confirmed height its discarded cache held. Carry it into cf_birth_height (only
-            // ever lowering it, and only to a height the native anchor can serve), then forget
-            // it, so the existing plumbing keeps it across restarts. Needs a loaded wallet for
-            // the anchor; without one the hint waits for the next start.
+            // confirmed height its discarded cache held. Carry it into cf_birth_height so the
+            // scan starts at or below it (only ever lowering), then forget it, so the existing
+            // plumbing keeps it across restarts. Needs the loaded wallet's anchor (0 is the
+            // genesis anchor, a valid one); a hint that cannot be applied yet is kept.
             run {
                 val floorHint = HistoryRebuildOnUpgrade.floorHint(this@SyncService)
-                val anchor = NativeBridge.getWalletBirthCheckpointHeight()
-                if (floorHint > 0L && anchor > 0L) {
+                if (floorHint > 0L) {
+                    val loaded = NativeBridge.isWalletLoaded()
+                    val anchor = if (loaded) NativeBridge.getWalletBirthCheckpointHeight() else 0L
                     val persisted = if (settings.contains("cf_birth_height")) settings.getLong("cf_birth_height", 0L) else null
-                    val lowered = compactFilterBirthWithFloorHint(persisted, anchor, floorHint)
-                    if (lowered != null) settings.edit().putLong("cf_birth_height", lowered).commit()
-                    HistoryRebuildOnUpgrade.clearFloorHint(this@SyncService)
-                    android.util.Log.i(
-                        HistoryRebuildOnUpgrade.TAG,
-                        "scan floor: hint=$floorHint anchor=$anchor persisted=$persisted -> ${lowered ?: "unchanged"}",
-                    )
+                    val step = floorHintStep(loaded, anchor, persisted, floorHint)
+                    when {
+                        step.setBirth != null -> settings.edit().putLong("cf_birth_height", step.setBirth).commit()
+                        step.removeBirth -> settings.edit().remove("cf_birth_height").commit()
+                    }
+                    if (step.clearHint) HistoryRebuildOnUpgrade.clearFloorHint(this@SyncService)
+                    if (step.anchorAboveHint) {
+                        android.util.Log.w(
+                            HistoryRebuildOnUpgrade.TAG,
+                            "scan floor: anchor $anchor is above the hint $floorHint; hint kept",
+                        )
+                    } else {
+                        android.util.Log.i(
+                            HistoryRebuildOnUpgrade.TAG,
+                            "scan floor: hint=$floorHint loaded=$loaded anchor=$anchor persisted=$persisted -> $step",
+                        )
+                    }
                 }
             }
             // The 100-block margin exists to re-cover a shallow reorg around a SAVED tip.

@@ -15,54 +15,72 @@ class HistoryRebuildWiringTest {
 
     // ── floor: pure function ─────────────────────────────────────────────
 
-    @Test fun noHint_leavesTheFloorUnchanged() {
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = 22_650_000L, walletBirth = 22_650_000L, floorHint = 0L))
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = null, walletBirth = 22_650_000L, floorHint = 0L))
+    @Test fun noHint_doesNothing() {
+        assertEquals(FloorHintStep(), floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 22_650_000L, floorHint = 0L))
     }
 
-    @Test fun hintBelowTheBirth_lowersTheFloorToTheCheckpointAtOrBelowIt() {
-        // walletBirth is the native checkpoint for the (lowered) anchor time: at or below the hint.
+    @Test fun walletNotLoaded_keepsTheHint_andWritesNothing() {
+        assertEquals(FloorHintStep(), floorHintStep(walletLoaded = false, anchor = 0L, persistedBirth = 22_650_000L, floorHint = 19_500_000L))
+    }
+
+    @Test fun anchorAboveTheHint_keepsTheHint_andWritesNothing() {
         assertEquals(
-            19_000_000L,
-            compactFilterBirthWithFloorHint(persistedBirth = 22_650_000L, walletBirth = 19_000_000L, floorHint = 19_500_000L),
-        )
-        assertEquals(
-            19_000_000L,
-            compactFilterBirthWithFloorHint(persistedBirth = null, walletBirth = 19_000_000L, floorHint = 19_500_000L),
+            FloorHintStep(anchorAboveHint = true),
+            floorHintStep(walletLoaded = true, anchor = 22_650_000L, persistedBirth = 22_650_000L, floorHint = 19_500_000L),
         )
         assertEquals(
-            "the checkpoint may be exactly at the hint",
-            19_500_000L,
-            compactFilterBirthWithFloorHint(persistedBirth = 22_650_000L, walletBirth = 19_500_000L, floorHint = 19_500_000L),
+            FloorHintStep(anchorAboveHint = true),
+            floorHintStep(walletLoaded = true, anchor = 21_500_000L, persistedBirth = null, floorHint = 19_500_000L),
         )
     }
 
-    @Test fun hintAboveTheBirth_doesNotRaiseIt() {
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = 22_650_000L, walletBirth = 22_650_000L, floorHint = 23_000_000L))
-        assertNull(
-            "a lower persisted floor stays",
-            compactFilterBirthWithFloorHint(persistedBirth = 15_000_000L, walletBirth = 19_000_000L, floorHint = 19_500_000L),
-        )
-    }
-
-    @Test fun anchorAboveTheHint_isNotUsed_andTheExistingFloorStays() {
-        // The native anchor could not be lowered (no usable record time): a height below the
-        // resident chain cannot be served, so nothing unresolvable is written.
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = 22_650_000L, walletBirth = 22_650_000L, floorHint = 19_500_000L))
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = null, walletBirth = 21_500_000L, floorHint = 19_500_000L))
-    }
-
-    @Test fun neverWritesANonPositiveFloor() {
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = null, walletBirth = 0L, floorHint = 19_500_000L))
-        assertNull(compactFilterBirthWithFloorHint(persistedBirth = 0L, walletBirth = 0L, floorHint = 19_500_000L))
-    }
-
-    @Test fun theNewFloorFeedsTheExistingBirthChoice() {
-        val floor = compactFilterBirthWithFloorHint(persistedBirth = 22_650_000L, walletBirth = 19_000_000L, floorHint = 19_500_000L)
+    @Test fun anchorAtOrBelowTheHint_lowersAHigherFloorToTheAnchor_andClearsTheHint() {
         assertEquals(
-            19_000_000L,
-            compactFilterBirthHeight(wasSynced = false, savedTip = 0L, walletBirth = 19_000_000L, persistedBirth = floor ?: 22_650_000L),
+            FloorHintStep(setBirth = 19_000_000L, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 22_650_000L, floorHint = 19_500_000L),
         )
+        assertEquals(
+            FloorHintStep(setBirth = 19_500_000L, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_500_000L, persistedBirth = 22_650_000L, floorHint = 19_500_000L),
+        )
+    }
+
+    @Test fun noPersistedFloor_persistsTheAnchor() {
+        assertEquals(
+            FloorHintStep(setBirth = 19_000_000L, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = null, floorHint = 19_500_000L),
+        )
+    }
+
+    @Test fun aFloorAlreadyAtOrBelowTheHint_staysAsItIs() {
+        assertEquals(
+            FloorHintStep(clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 15_000_000L, floorHint = 19_500_000L),
+        )
+        assertEquals(
+            FloorHintStep(clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 19_500_000L, floorHint = 19_500_000L),
+        )
+    }
+
+    @Test fun genesisAnchor_isAValidAnchor_notAnUnloadedWallet() {
+        // A higher persisted floor cannot be lowered to 0 by writing it: removing the pref makes
+        // the scan start fall back to the wallet birth, which is the genesis anchor.
+        assertEquals(
+            FloorHintStep(removeBirth = true, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 0L, persistedBirth = 22_650_000L, floorHint = 19_500_000L),
+        )
+        assertEquals(
+            FloorHintStep(clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 0L, persistedBirth = null, floorHint = 19_500_000L),
+        )
+    }
+
+    @Test fun theResultFeedsTheExistingBirthChoice_atOrBelowTheHint() {
+        val step = floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 22_650_000L, floorHint = 19_500_000L)
+        val persisted = if (step.removeBirth) null else step.setBirth ?: 22_650_000L
+        val start = compactFilterBirthHeight(wasSynced = false, savedTip = 0L, walletBirth = 19_000_000L, persistedBirth = persisted)
+        assertTrue(start <= 19_500_000L)
     }
 
     // ── call sites ───────────────────────────────────────────────────────
@@ -91,8 +109,34 @@ class HistoryRebuildWiringTest {
         assertTrue("the floor hint is not consumed", hint >= 0)
         assertTrue("the floor hint must be applied before the scan start is chosen", hint < firstBirth)
         val between = service.substring(hint, firstBirth)
-        assertTrue(between.contains("compactFilterBirthWithFloorHint("))
+        assertTrue("the step is not the pure function", between.contains("floorHintStep("))
+        assertTrue("gated on a loaded wallet, not on a non-zero anchor", between.contains("NativeBridge.isWalletLoaded()"))
         assertTrue(between.contains("\"cf_birth_height\""))
-        assertTrue(between.contains("HistoryRebuildOnUpgrade.clearFloorHint("))
+        val clear = between.indexOf("HistoryRebuildOnUpgrade.clearFloorHint(")
+        assertTrue(clear >= 0)
+        assertTrue("the hint is cleared only when the step says so", between.substring(0, clear).contains("if (step.clearHint)"))
+    }
+
+    private fun startSyncBody(): String {
+        val start = service.indexOf("private suspend fun startSyncWithTor()")
+        return service.substring(start, service.indexOf("\n    private ", start + 1).let { if (it < 0) service.length else it })
+    }
+
+    @Test fun theRoomTableIsClearedBeforeThePeerManagerMayRun() {
+        val b = startSyncBody()
+        val clear = b.indexOf("HistoryRebuildOnUpgrade.clearRoomTransactionsIfPending(")
+        val gate = b.indexOf("NativeBridge.markSavedBlocksLoadComplete()")
+        assertTrue("scanner is blind", gate >= 0)
+        assertTrue("the Room table is not cleared after a rebuild", clear >= 0)
+        assertTrue("clear before the peer manager can deliver transactions", clear < gate)
+        assertTrue(b.substring(clear, gate).contains("transactionDao.deleteAll()"))
+    }
+
+    @Test fun theOwnershipPruneSitsBehindTheMaintenanceGate() {
+        assertTrue("an ungated reconcile call remains", !service.contains("reconcileAssetRowsLocally()"))
+        val call = service.indexOf("reconcileAssetRowsLocally(pruneUnowned = pruneGateOpen)")
+        assertTrue("the reconcile does not take the gate", call >= 0)
+        val gate = service.lastIndexOf("val pruneGateOpen = assetPruneGateOpen(", call)
+        assertTrue("the gate is not computed before the reconcile", gate in 0 until call)
     }
 }

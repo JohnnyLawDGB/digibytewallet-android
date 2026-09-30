@@ -110,14 +110,15 @@ class ChainReconciliationService(
                 return@withContext failed
             }
 
-            // Tidy the asset rows FIRST, independently of the main reconcile: drop
-            // phantoms at addresses we don't own, and re-derive spent-state from the
-            // native wallet. Local only — the listunspent-backed variant this replaced
+            // Tidy the asset rows FIRST, independently of the main reconcile: re-derive
+            // spent-state from the native wallet. Rows at addresses we don't own are dropped
+            // only by the sync service's gated maintenance tick (synced this session): here
+            // the wallet may still be re-deriving its addresses. Local only — the listunspent-backed variant this replaced
             // POSTed the whole address set to an indexer (and had been 404ing besides).
             // Non-fatal if it fails.
             if (assetManager != null) {
                 _state.value = State.Scanning("Tidying asset holdings…", progress = 0.05f)
-                runCatching { assetManager.reconcileAssetRowsLocally() }
+                runCatching { assetManager.reconcileAssetRowsLocally(pruneUnowned = false) }
                     .onFailure { /* non-fatal */ }
             }
 
@@ -187,9 +188,10 @@ class ChainReconciliationService(
     }
 
     /** Run the local asset-row tidy-up if an AssetManager is wired in. Local only —
-     *  ownership from the native address set, spent-state from the native wallet. */
+     *  spent-state from the native wallet; the ownership prune is left to the sync
+     *  service's gated maintenance tick. */
     suspend fun reconcileAssetRowsLocallyIfPresent() {
-        assetManager?.let { runCatching { it.reconcileAssetRowsLocally() } }
+        assetManager?.let { runCatching { it.reconcileAssetRowsLocally(pruneUnowned = false) } }
     }
 
     /**
