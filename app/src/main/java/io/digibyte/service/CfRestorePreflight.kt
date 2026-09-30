@@ -58,6 +58,27 @@ internal fun compactFilterBirthHeight(
     return if (wasSynced) resumeDefault else persistedBirth ?: resumeDefault
 }
 
+/**
+ * The `cf_birth_height` to persist after a one-time history rebuild left [floorHint] (the oldest
+ * confirmed height its discarded cache held), or null to leave the pref as it is.
+ *
+ * The floor only ever goes down, and only to [walletBirth] — the native header anchor, a compiled
+ * checkpoint — when that anchor is at or below the hint. The native checkpoint lookup is by time,
+ * so the anchor is lowered by the creation time the wallet was loaded with (see
+ * `creationTimeForRestore`), not here. A height below the anchor cannot be resolved by the
+ * in-memory chain (the auto-fetch clamps it back up), so no such height is written.
+ */
+internal fun compactFilterBirthWithFloorHint(
+    persistedBirth: Long?,
+    walletBirth: Long,
+    floorHint: Long,
+): Long? {
+    if (floorHint <= 0L || walletBirth <= 0L || walletBirth > floorHint) return null
+    // No persisted floor yet: persist the anchor, so the floor survives restarts.
+    if (persistedBirth == null || persistedBirth <= 0L) return walletBirth
+    return if (walletBirth < persistedBirth) walletBirth else null
+}
+
 private data class CfLedgerState(
     val scannedThrough: Long,
     val abandonedBelow: Long,

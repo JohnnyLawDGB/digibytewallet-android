@@ -22,6 +22,7 @@ import io.digibyte.core.dandelion.shouldSweepRepublish
 import io.digibyte.core.sync.CfAbandonmentStore
 import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.HistoryRebuildOnUpgrade
 import io.digibyte.core.sync.SavedBlockStore
 import io.digibyte.core.sync.KeepaliveAction
 import io.digibyte.core.sync.keepaliveAction
@@ -2290,6 +2291,25 @@ class SyncService : Service() {
             // BRPeerManagerEnableAutoCompactFilterFetch will snap the value
             // up further if the in-memory window can't resolve it.
             val savedTip = NativeBridge.getSavedBlocksTip()
+            // A one-time history rebuild after an update may have left a floor: the oldest
+            // confirmed height its discarded cache held. Carry it into cf_birth_height (only
+            // ever lowering it, and only to a height the native anchor can serve), then forget
+            // it, so the existing plumbing keeps it across restarts. Needs a loaded wallet for
+            // the anchor; without one the hint waits for the next start.
+            run {
+                val floorHint = HistoryRebuildOnUpgrade.floorHint(this@SyncService)
+                val anchor = NativeBridge.getWalletBirthCheckpointHeight()
+                if (floorHint > 0L && anchor > 0L) {
+                    val persisted = if (settings.contains("cf_birth_height")) settings.getLong("cf_birth_height", 0L) else null
+                    val lowered = compactFilterBirthWithFloorHint(persisted, anchor, floorHint)
+                    if (lowered != null) settings.edit().putLong("cf_birth_height", lowered).commit()
+                    HistoryRebuildOnUpgrade.clearFloorHint(this@SyncService)
+                    android.util.Log.i(
+                        HistoryRebuildOnUpgrade.TAG,
+                        "scan floor: hint=$floorHint anchor=$anchor persisted=$persisted -> ${lowered ?: "unchanged"}",
+                    )
+                }
+            }
             // The 100-block margin exists to re-cover a shallow reorg around a SAVED tip.
             // It must NOT be applied to the birth checkpoint: on a fresh wallet that
             // checkpoint IS the lowest resident block, so `checkpoint - 100` asks for 100

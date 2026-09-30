@@ -9,6 +9,7 @@ import coil.memory.MemoryCache
 import dagger.hilt.android.HiltAndroidApp
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.ipfs.IpfsClient
+import io.digibyte.core.sync.HistoryRebuildOnUpgrade
 import io.digibyte.service.SyncWorker
 import io.digibyte.ui.asset.IpfsCacheKeyer
 import io.digibyte.ui.asset.IpfsFetcher
@@ -48,6 +49,14 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
         BootGuard.recoverFromCrashedRestoreIfNeeded(this)
         super.onCreate()
         applyNetworkSelection()
+        // Rebuild transaction history once after an update, for the selected network: a
+        // transaction cache written by an earlier build is discarded before anything can load
+        // it, and the history is re-derived from the chain by the normal scan. Here, after the
+        // network is selected and the boot guard ran, and before any service, worker
+        // or unlock can read the sync state. Pure Kotlin, no native call. A throw leaves it
+        // undone; the next launch tries again.
+        runCatching { HistoryRebuildOnUpgrade.runAtProcessStart(this) }
+            .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
         scheduleBackgroundSync()
         // Clear the crash-loop counter once we've run stably past the risky
         // startup window. A crashing boot dies well before this fires, so the
