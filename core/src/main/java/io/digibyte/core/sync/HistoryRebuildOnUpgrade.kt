@@ -3,6 +3,7 @@ package io.digibyte.core.sync
 import android.content.Context
 import android.content.SharedPreferences
 import io.digibyte.core.OutgoingTxStore
+import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.decodeSavedTransactionsOrNull
 import io.digibyte.core.networkSuffix
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,10 @@ object HistoryRebuildOnUpgrade {
      *  The native checkpoint lookup is time-based, so this is what lowers the header anchor. Kept
      *  (never raised) until the wallet itself changes. */
     const val KEY_FLOOR_TIME = "floor_time"
+    /** Set in the same commit as [KEY_IN_PROGRESS] when a run starts: the Room `transactions`
+     *  table of this network (read by DigiAsset history) still holds rows for the discarded
+     *  records. Cleared by [clearRoomTransactionsIfPending] at the first sync start. */
+    const val KEY_ROOM_CLEAR_PENDING = "room_clear_pending"
 
     /** Matches the default mempool expiry: a send still unconfirmed after this is in no default
      *  mempool, so holding the cache for it any longer buys nothing. */
@@ -75,7 +80,7 @@ object HistoryRebuildOnUpgrade {
         val declaredCount: Long,
         val records: Int,
         val minConfirmedHeight: Long,
-        val minConfirmedTime: Long,
+        val minRecordTime: Long,
     ) {
         val isEmpty: Boolean get() = declaredCount == 0L
 
@@ -132,8 +137,9 @@ object HistoryRebuildOnUpgrade {
      * Read the framing of a `saved_transactions` blob (layout of jni_transaction_persist.c: u32
      * count, then per record u32 size, u32 height, u32 timestamp, size bytes; all little-endian).
      * Never throws. Mirrors the native loader's bounds: a count of 0 or above [MAX_RECORDS] loads
-     * nothing, and a record whose size runs past the end stops the walk. The floor comes only from
-     * records at a real height (0 < height < [UNCONFIRMED_HEIGHT]).
+     * nothing, and a record whose size runs past the end stops the walk. The floor height comes only
+     * from records at a real height (0 < height < [UNCONFIRMED_HEIGHT]); the floor time also from
+     * unconfirmed records (height == [UNCONFIRMED_HEIGHT]), whose time is when they were seen.
      */
     fun summarize(bytes: ByteArray?): CacheSummary {
         if (bytes == null || bytes.size <= 4) return CacheSummary.EMPTY
@@ -156,8 +162,8 @@ object HistoryRebuildOnUpgrade {
             records++
             if (height in 1L until UNCONFIRMED_HEIGHT) {
                 if (minHeight == 0L || height < minHeight) minHeight = height
-                if (time > 0L && (minTime == 0L || time < minTime)) minTime = time
             }
+            if (height in 1L..UNCONFIRMED_HEIGHT && time > 0L && (minTime == 0L || time < minTime)) minTime = time
             i++
         }
         return CacheSummary(count, records, minHeight, minTime)
@@ -200,8 +206,12 @@ object HistoryRebuildOnUpgrade {
      * `Application.onCreate` right after the network is selected, before any service or unlock.
      * A throw leaves [KEY_DONE] unset, so the next launch tries again.
      */
-    fun runAtProcessStart(context: Context, nowMs: Long = System.currentTimeMillis()): Outcome {
-        val outcome = evaluate(context, nowMs)
+    fun runAtProcessStart(
+        context: Context,
+        nowMs: Long = System.currentTimeMillis(),
+        checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
+    ): Outcome {
+        val outcome = evaluate(context, nowMs, checkpointTimeAtOrBelow)
         evaluated[networkSuffix(context)] = outcome
         return outcome
     }
@@ -213,12 +223,21 @@ object HistoryRebuildOnUpgrade {
      * session may already hold the old state in memory. Only a network this process has not
      * evaluated yet (or a start-time evaluation that threw) is evaluated here.
      */
-    fun beforeWalletLoad(context: Context, nowMs: Long = System.currentTimeMillis()): Outcome {
+    fun beforeWalletLoad(
+        context: Context,
+        nowMs: Long = System.currentTimeMillis(),
+        checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
+    ): Outcome {
         evaluated[networkSuffix(context)]?.let { return it }
-        return runAtProcessStart(context, nowMs)
+        return runAtProcessStart(context, nowMs, checkpointTimeAtOrBelow)
     }
 
-    private fun evaluate(context: Context, nowMs: Long): Outcome {
+    /** The native table lookup; 0 when the library cannot answer. The native library is loaded
+     *  by the network selection before the start-time call. */
+    private fun nativeCheckpointTimeAtOrBelow(height: Long): Long =
+        runCatching { NativeBridge.getCheckpointTimeAtOrBelow(height) }.getOrDefault(0L)
+
+    private fun evaluate(context: Context, nowMs: Long, checkpointTimeAtOrBelow: (Long) -> Long): Outcome {
         val state = readState(context)
         if (state.done) return publish(Outcome(OutcomeKind.NOT_NEEDED))
 
@@ -231,50 +250,70 @@ object HistoryRebuildOnUpgrade {
             Decision.NOT_NEEDED -> {
                 // Empty cache: nothing written by an earlier build to discard. An empty commit on
                 // the sync file first makes any pending asynchronous clear of it durable, so a
-                // cleared cache cannot reappear after `done` is on disk.
-                sync.edit().commit()
-                statePrefs(context).edit()
-                    .putBoolean(KEY_DONE, true)
-                    .putBoolean(KEY_IN_PROGRESS, false)
-                    .putLong(KEY_DEFERRED_SINCE_MS, 0L)
-                    .commit()
+                // cleared cache cannot reappear after `done` is on disk. If that write does not
+                // land, `done` is not stamped either.
+                check(sync.edit().commit()) { "sync state not durable; not marking the rebuild done" }
+                check(
+                    statePrefs(context).edit()
+                        .putBoolean(KEY_DONE, true)
+                        .putBoolean(KEY_IN_PROGRESS, false)
+                        .putLong(KEY_DEFERRED_SINCE_MS, 0L)
+                        .commit(),
+                ) { "rebuild state not durable" }
                 log("no earlier transaction cache on this network; nothing to rebuild")
                 publish(Outcome(OutcomeKind.NOT_NEEDED))
             }
             Decision.DEFER -> {
-                val since = state.deferredSinceMs
-                if (since <= 0L || nowMs < since) {
+                // Only the first deferral is stamped. A clock that reads earlier later on does not
+                // move it (that would shorten the cap once the clock is right again); a clock that
+                // was ahead at the stamp lengthens the deferral instead, which only delays.
+                if (state.deferredSinceMs <= 0L) {
                     statePrefs(context).edit().putLong(KEY_DEFERRED_SINCE_MS, nowMs).commit()
                 }
                 log("rebuild deferred: $pending recorded send(s) not settled")
                 publish(Outcome(OutcomeKind.DEFERRED))
             }
             Decision.RUN -> {
-                run(context, state, summary)
+                run(context, state, summary, checkpointTimeAtOrBelow)
                 publish(Outcome(OutcomeKind.RAN, summary.records))
             }
         }
     }
 
-    /** Steps 1-4. Each step is committed; re-running from any point completes the same way. */
-    private fun run(context: Context, state: State, summary: CacheSummary) {
+    /**
+     * Steps 1-4. Each step is committed; re-running from any point completes the same way. A clear
+     * that does not land throws before `done` is stamped: `in_progress` stays set, the wallet load
+     * then skips the cache, and the next start runs it again.
+     *
+     * The floor time is the lower of the records' own times and the time of the compiled
+     * checkpoint at or below the floor height: the header anchor chosen from it (the latest
+     * checkpoint more than a week older) is then at or below the floor height whatever the records'
+     * times say (zero, or later than their block).
+     */
+    private fun run(context: Context, state: State, summary: CacheSummary, checkpointTimeAtOrBelow: (Long) -> Long) {
         val hint = lowerFloor(state.floorHint, summary.minConfirmedHeight)
-        val time = lowerFloor(state.floorTime, summary.minConfirmedTime)
-        statePrefs(context).edit()
-            .putBoolean(KEY_IN_PROGRESS, true)
-            .putLong(KEY_FLOOR_HINT, hint)
-            .putLong(KEY_FLOOR_TIME, time)
-            .commit()
+        val checkpointTime = if (hint > 0L) runCatching { checkpointTimeAtOrBelow(hint) }.getOrDefault(0L) else 0L
+        val time = lowerFloor(lowerFloor(state.floorTime, summary.minRecordTime), checkpointTime)
+        check(
+            statePrefs(context).edit()
+                .putBoolean(KEY_IN_PROGRESS, true)
+                .putLong(KEY_FLOOR_HINT, hint)
+                .putLong(KEY_FLOOR_TIME, time)
+                .putBoolean(KEY_ROOM_CLEAR_PENDING, true)
+                .commit(),
+        ) { "rebuild state not durable; nothing cleared" }
         log(
             "rebuilding history from the chain: discarding ${summary.records} cached record(s), " +
-                "floor height $hint, floor time $time",
+                "floor height $hint, floor time $time (checkpoint time $checkpointTime)",
         )
-        clearTransactionCacheForRebuild(context)
-        statePrefs(context).edit()
-            .putBoolean(KEY_DONE, true)
-            .putBoolean(KEY_IN_PROGRESS, false)
-            .putLong(KEY_DEFERRED_SINCE_MS, 0L)
-            .commit()
+        check(clearTransactionCacheForRebuild(context)) { "transaction cache clear did not land; retried next start" }
+        check(
+            statePrefs(context).edit()
+                .putBoolean(KEY_DONE, true)
+                .putBoolean(KEY_IN_PROGRESS, false)
+                .putLong(KEY_DEFERRED_SINCE_MS, 0L)
+                .commit(),
+        ) { "rebuild state not durable; runs again next start" }
     }
 
     /**
@@ -282,13 +321,13 @@ object HistoryRebuildOnUpgrade {
      * is nothing to rebuild. [forgetFloor] drops the floor hints too, for a different wallet
      * (create, recover, seed change); a manual rebuild of the same wallet keeps them.
      */
-    fun markNotNeeded(context: Context, forgetFloor: Boolean = false) {
+    fun markNotNeeded(context: Context, forgetFloor: Boolean = false): Boolean {
         val e = statePrefs(context).edit()
             .putBoolean(KEY_DONE, true)
             .putBoolean(KEY_IN_PROGRESS, false)
             .putLong(KEY_DEFERRED_SINCE_MS, 0L)
-        if (forgetFloor) e.remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_TIME)
-        e.commit()
+        if (forgetFloor) e.remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_TIME).remove(KEY_ROOM_CLEAR_PENDING)
+        return e.commit()
     }
 
     /** True while a rebuild has started clearing and not finished (the cache may be partial). */
@@ -314,6 +353,36 @@ object HistoryRebuildOnUpgrade {
         runCatching { android.util.Log.i(TAG, msg) }
     }
 
+    /**
+     * Arm a run for the next process start, keeping the floors: `done` unset, `in_progress` set.
+     * Used by the manual rebuild BEFORE it clears, so whatever a writer puts back between its clear
+     * and the process exit is cleared again by the runner at the next start. Returns whether the
+     * commit landed.
+     */
+    fun armRerun(context: Context): Boolean =
+        statePrefs(context).edit()
+            .putBoolean(KEY_DONE, false)
+            .putBoolean(KEY_IN_PROGRESS, true)
+            .commit()
+
+    /**
+     * After a run, clear this network's Room `transactions` table once (it backs DigiAsset history
+     * and would keep rows for the discarded records). [clear] runs first; the flag is dropped only
+     * after it returned, so a clear that throws is retried at the next start. Returns whether a
+     * clear ran. Rows refill as the scan re-finds the transactions.
+     */
+    suspend fun clearRoomTransactionsIfPending(context: Context, clear: suspend () -> Unit): Boolean {
+        val p = statePrefs(context)
+        if (!p.getBoolean(KEY_ROOM_CLEAR_PENDING, false)) return false
+        val ok = runCatching { clear() }
+            .onFailure { runCatching { android.util.Log.w(TAG, "transaction table clear failed; retried next start", it) } }
+            .isSuccess
+        if (!ok) return false
+        p.edit().remove(KEY_ROOM_CLEAR_PENDING).commit()
+        log("cleared the transaction table after the history rebuild")
+        return true
+    }
+
     /** Test seam: forget what this process has evaluated. */
     internal fun resetProcessStateForTest() {
         evaluated.clear()
@@ -330,10 +399,11 @@ object HistoryRebuildOnUpgrade {
  * [io.digibyte.core.WalletManager.rebuildFromChainRescan] and [HistoryRebuildOnUpgrade] so the two
  * cannot drift. It does NOT touch recorded sends ([OutgoingTxStore]) or `cf_birth_height`; the
  * manual path handles those itself. Synchronous (`commit`): callers may end the process next.
+ * Returns false when the prefs commit did not land or a store file is still on disk.
  */
-fun clearTransactionCacheForRebuild(context: Context) {
+fun clearTransactionCacheForRebuild(context: Context): Boolean {
     val suffix = networkSuffix(context)
-    context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
+    val committed = context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
         .remove("saved_transactions")   // the tx graph — re-derived from chain
         .remove("saved_filter_headers") // CF chain re-anchors at the floor
         .remove("saved_blocks")         // legacy key belt-and-suspenders — file store is authoritative now
@@ -357,4 +427,8 @@ fun clearTransactionCacheForRebuild(context: Context) {
     // The surfaced band goes with it: after the re-Init `abandonedBelow` really is 0, so there
     // is nothing left to recover and nothing to nag about.
     CfAbandonmentStore.clear(context)
+    // Read back: a store file that is still there means the clear did not land.
+    val filesGone = listOf(FilterHeaderStore.file(context), SavedBlockStore.file(context), CfScanLedgerStore.file(context))
+        .none { runCatching { it.exists() }.getOrDefault(true) }
+    return committed && filesGone
 }

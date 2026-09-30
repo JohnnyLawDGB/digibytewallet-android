@@ -319,10 +319,10 @@ class WalletManager(
             // start (DigiByteApp.onCreate); this covers a network this process has not evaluated.
             // A throw leaves it undone, to be retried on the next launch.
             runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context) }
-                .onFailure { android.util.Log.w("WalletManager", "history rebuild check failed; retried next launch", it) }
+                .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
             // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
             val savedTxHex = if (HistoryRebuildOnUpgrade.isInProgress(context)) {
-                android.util.Log.w("WalletManager", "history rebuild in progress; not loading the transaction cache")
+                android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild in progress; not loading the transaction cache")
                 null
             } else {
                 syncPrefs.getString("saved_transactions", null)
@@ -603,6 +603,13 @@ class WalletManager(
         // saved_transactions after we clear them (its final persist, if any, runs
         // before the clear below and is therefore overwritten).
         runCatching { NativeBridge.stopSync() }
+        // Arm the one-time rebuild runner BEFORE clearing (done unset, in progress, floors kept).
+        // A coalesced writer can still put a cache back between the clear below and the
+        // process exit; the runner then clears it again at the next start before anything
+        // loads it, and only then stamps done.
+        if (!HistoryRebuildOnUpgrade.armRerun(context)) {
+            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: arming the rerun did not land") }
+        }
         // NOTE: synchronous (commit), NOT apply(). The caller kills the process
         // (Runtime.exit) immediately after this returns to force a clean reload; an
         // async apply() would be dropped before it flushes, leaving the corrupt cache
@@ -610,7 +617,9 @@ class WalletManager(
         // tip instead of the birth floor). The clear is shared with the one-time
         // history rebuild after an update, so the two cannot drift; see
         // clearTransactionCacheForRebuild for what it removes and why.
-        clearTransactionCacheForRebuild(context)
+        if (!clearTransactionCacheForRebuild(context)) {
+            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: the clear did not fully land; the next start repeats it") }
+        }
         OutgoingTxStore(context).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
@@ -622,10 +631,6 @@ class WalletManager(
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
             if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
         }.commit()
-        // Everything the cache holds from here on is re-derived by this build: the one-time
-        // rebuild after an update has nothing left to do for this network. Same wallet, so the
-        // floor it may have recorded stays.
-        HistoryRebuildOnUpgrade.markNotNeeded(context)
     }
 
     /**
@@ -1096,8 +1101,9 @@ class WalletManager(
      *  directly without instantiating createWallet/recoverWallet's native path. */
     internal fun clearSyncData() {
         // commit(), not apply(): the one-time history rebuild is stamped not needed below, and
-        // that stamp must not reach disk before the clear it relies on.
-        context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
+        // that stamp must not reach disk before the clear it relies on — nor at all if the
+        // clear did not land.
+        val cleared = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
             .edit().clear().commit()
         // Drop ChainTipStore's in-memory mirror too — see the note in
         // AndroidWalletDataEraser.eraseSyncData. This helper backs createWallet and recoverWallet,
@@ -1113,7 +1119,11 @@ class WalletManager(
         // A new wallet (create, recover, seed change): every record cached from here on is
         // written by this build, so the one-time rebuild after an update has nothing to do. The
         // floor a previous wallet's rebuild recorded does not belong to this one.
-        HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true)
+        if (cleared) {
+            HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true)
+        } else {
+            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "sync data clear did not land; the one-time rebuild stays armed") }
+        }
     }
 
     /**

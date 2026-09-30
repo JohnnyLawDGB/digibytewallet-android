@@ -1,6 +1,7 @@
 package io.digibyte.core.sync
 
 import android.content.Context
+import android.content.SharedPreferences
 import io.digibyte.core.OutgoingTxStore
 import io.digibyte.core.sync.HistoryRebuildOnUpgrade.CacheSummary
 import io.digibyte.core.sync.HistoryRebuildOnUpgrade.DEFER_CAP_MS
@@ -8,6 +9,9 @@ import io.digibyte.core.sync.HistoryRebuildOnUpgrade.Decision
 import io.digibyte.core.sync.HistoryRebuildOnUpgrade.OutcomeKind
 import io.digibyte.core.sync.HistoryRebuildOnUpgrade.State
 import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertThrows
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -73,6 +77,20 @@ class HistoryRebuildOnUpgradeTest {
         every { c.filesDir } returns tmp.newFolder()
         return c
     }
+
+    /** Context whose prefs file [failFile] keeps writes in memory but reports commit() = false. */
+    private fun failingCommitContext(failFile: String): Context {
+        val stores = HashMap<String, SharedPreferences>()
+        val c = mockk<Context>(relaxed = true)
+        every { c.getSharedPreferences(any(), any()) } answers {
+            val name = firstArg<String>()
+            stores.getOrPut(name) { if (name == failFile) FailingCommitPrefs(FakeSharedPreferences()) else FakeSharedPreferences() }
+        }
+        every { c.filesDir } returns tmp.newFolder()
+        return c
+    }
+
+    private val lookupNone: (Long) -> Long = { 0L }
 
     private fun syncPrefs(c: Context) = c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE)
     private fun statePrefs(c: Context) = c.getSharedPreferences("dgb_history_rebuild", Context.MODE_PRIVATE)
@@ -156,14 +174,14 @@ class HistoryRebuildOnUpgradeTest {
         val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(21_000_000L, 1_650_000_000L, realTx)))
         assertEquals(1, s.records)
         assertEquals(21_000_000L, s.minConfirmedHeight)
-        assertEquals(1_650_000_000L, s.minConfirmedTime)
+        assertEquals(1_650_000_000L, s.minRecordTime)
     }
 
     @Test fun summarize_mixedHeights_takesTheMinimum_andIgnoresTheUnconfirmedSentinel() {
         val s = HistoryRebuildOnUpgrade.summarize(
             blob(
                 Rec(23_000_000L, 1_700_000_000L, realTx),
-                Rec(0x7fffffffL, 1_000L, byteArrayOf(9, 9)),        // unconfirmed: no floor, no time
+                Rec(0x7fffffffL, 1_550_000_000L, byteArrayOf(9, 9)), // unconfirmed: no floor height, but its time counts
                 Rec(19_500_000L, 1_600_000_000L, byteArrayOf(1)),
                 Rec(0L, 500L, byteArrayOf(7)),                       // height 0: not a real height
                 Rec(0xfffffff0L, 400L, byteArrayOf(7)),              // above the sentinel: not a real height
@@ -172,15 +190,23 @@ class HistoryRebuildOnUpgradeTest {
         )
         assertEquals(6, s.records)
         assertEquals(19_500_000L, s.minConfirmedHeight)
-        assertEquals(1_600_000_000L, s.minConfirmedTime)
+        assertEquals("heights 0 and above the sentinel give no time", 1_550_000_000L, s.minRecordTime)
     }
 
-    @Test fun summarize_allUnconfirmed_givesNoHint() {
-        val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(0x7fffffffL, 1_700_000_000L, realTx), Rec(0x7fffffffL, 1L, byteArrayOf(1))))
+    @Test fun summarize_allUnconfirmed_givesNoHeightHint_butTheirTimesLowerTheFloorTime() {
+        val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(0x7fffffffL, 1_700_000_000L, realTx), Rec(0x7fffffffL, 1_690_000_000L, byteArrayOf(1))))
         assertFalse(s.isEmpty)
         assertEquals(2, s.records)
         assertEquals(0L, s.minConfirmedHeight)
-        assertEquals(0L, s.minConfirmedTime)
+        assertEquals(1_690_000_000L, s.minRecordTime)
+    }
+
+    @Test fun summarize_unconfirmedTimeBelowTheConfirmedOnes_lowersOnlyTheTime() {
+        val s = HistoryRebuildOnUpgrade.summarize(
+            blob(Rec(22_000_000L, 1_690_000_000L, realTx), Rec(0x7fffffffL, 1_600_000_000L, byteArrayOf(1)), Rec(0x7fffffffL, 0L, byteArrayOf(2))),
+        )
+        assertEquals(22_000_000L, s.minConfirmedHeight)
+        assertEquals(1_600_000_000L, s.minRecordTime)
     }
 
     @Test fun summarize_truncatedMidRecord_keepsTheWholeRecordsOnly() {
@@ -200,7 +226,7 @@ class HistoryRebuildOnUpgradeTest {
         )
         assertEquals(1, s.records)
         assertEquals(22_000_000L, s.minConfirmedHeight)
-        assertEquals(1_690_000_000L, s.minConfirmedTime)
+        assertEquals(1_690_000_000L, s.minRecordTime)
     }
 
     @Test fun summarize_countAboveTheCap_givesNoHint_andDoesNotThrow() {
@@ -407,5 +433,160 @@ class HistoryRebuildOnUpgradeTest {
         HistoryRebuildOnUpgrade.clearFloorHint(c)
         assertEquals(0L, HistoryRebuildOnUpgrade.floorHint(c))
         assertEquals(6L, HistoryRebuildOnUpgrade.floorTime(c))
+    }
+
+    // ── repair round ──────────────────────────────────────────────────────
+
+    @Test fun deferral_aClockSteppedBack_doesNotShortenTheCap() {
+        val c = ctx()
+        seedEarlierBuild(c)
+        recordSend(c, "ab12", settled = false)
+        val day = 24L * 60 * 60 * 1000
+
+        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone).kind)
+        HistoryRebuildOnUpgrade.resetProcessStateForTest()
+        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now - 20 * day, lookupNone).kind)
+        assertEquals("the first deferral stands", now, HistoryRebuildOnUpgrade.readState(c).deferredSinceMs)
+        HistoryRebuildOnUpgrade.resetProcessStateForTest()
+        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + day, lookupNone).kind)
+        assertTrue(syncPrefs(c).contains("saved_transactions"))
+        HistoryRebuildOnUpgrade.resetProcessStateForTest()
+        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + DEFER_CAP_MS, lookupNone).kind)
+    }
+
+    @Test fun run_floorTime_reachesTheCheckpointAtOrBelowTheHint_whateverTheRecordTimes() {
+        val c = ctx()
+        seedEarlierBuild(c, blob(Rec(21_000_000L, 0L, realTx), Rec(22_000_000L, 1_800_000_000L, realTx)))
+        val asked = ArrayList<Long>()
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now) { h -> asked += h; if (h == 21_000_000L) 1_650_000_000L else 0L }
+        assertEquals(listOf(21_000_000L), asked)
+        assertEquals(21_000_000L, HistoryRebuildOnUpgrade.readState(c).floorHint)
+        assertEquals(1_650_000_000L, HistoryRebuildOnUpgrade.readState(c).floorTime)
+    }
+
+    @Test fun run_floorTime_isTheLowerOfTheRecordAndCheckpointTimes() {
+        val c = ctx()
+        seedEarlierBuild(c, blob(Rec(21_000_000L, 1_500_000_000L, realTx)))
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now) { 1_650_000_000L }
+        assertEquals(1_500_000_000L, HistoryRebuildOnUpgrade.readState(c).floorTime)
+    }
+
+    @Test fun run_checkpointLookupThatThrows_fallsBackToTheRecordTime() {
+        val c = ctx()
+        seedEarlierBuild(c, blob(Rec(21_000_000L, 1_650_000_000L, realTx)))
+        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now) { error("no native library") }.kind)
+        assertEquals(1_650_000_000L, HistoryRebuildOnUpgrade.readState(c).floorTime)
+    }
+
+    @Test fun run_asksTheLookupForTheFinalHint_notARaisedOne() {
+        val c = ctx()
+        seedEarlierBuild(c, blob(Rec(22_000_000L, 1_690_000_000L, realTx)))
+        statePrefs(c).edit().putBoolean("in_progress", true).putLong("floor_hint", 20_000_000L).commit()
+        val asked = ArrayList<Long>()
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now) { h -> asked += h; 1_600_000_000L }
+        assertEquals(listOf(20_000_000L), asked)
+        assertEquals(1_600_000_000L, HistoryRebuildOnUpgrade.readState(c).floorTime)
+    }
+
+    @Test fun run_whenTheSyncClearDoesNotLand_throws_andLeavesItInProgress() {
+        val c = failingCommitContext("dgb_sync_data")
+        seedEarlierBuild(c)
+        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone) }
+        val st = HistoryRebuildOnUpgrade.readState(c)
+        assertFalse("done must not be stamped over a clear that did not land", st.done)
+        assertTrue(st.inProgress)
+        assertTrue(HistoryRebuildOnUpgrade.isInProgress(c))
+    }
+
+    @Test fun run_whenAStoreFileWillNotDelete_throws_andLeavesItInProgress() {
+        val c = ctx()
+        seedEarlierBuild(c)
+        // A directory with a child where the saved-blocks file lives: delete() cannot remove it.
+        val f = SavedBlockStore.file(c)
+        f.delete(); f.mkdirs(); java.io.File(f, "child").writeText("x")
+        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone) }
+        assertFalse(HistoryRebuildOnUpgrade.readState(c).done)
+        assertTrue(HistoryRebuildOnUpgrade.readState(c).inProgress)
+    }
+
+    @Test fun clearTransactionCacheForRebuild_reportsSuccessAndFailure() {
+        val ok = ctx()
+        seedEarlierBuild(ok)
+        assertTrue(clearTransactionCacheForRebuild(ok))
+        val bad = failingCommitContext("dgb_sync_data")
+        seedEarlierBuild(bad)
+        assertFalse(clearTransactionCacheForRebuild(bad))
+    }
+
+    @Test fun emptyCache_whenTheSyncCommitFails_doesNotStampDone() {
+        val c = failingCommitContext("dgb_sync_data")
+        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone) }
+        assertFalse(HistoryRebuildOnUpgrade.readState(c).done)
+    }
+
+    @Test fun run_marksTheRoomTableForClearing_inTheInProgressCommit() {
+        val c = ctx()
+        seedEarlierBuild(c)
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        assertTrue(statePrefs(c).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
+    }
+
+    @Test fun notNeededOrDeferred_doNotMarkTheRoomTable() {
+        val empty = ctx()
+        HistoryRebuildOnUpgrade.runAtProcessStart(empty, now, lookupNone)
+        assertFalse(statePrefs(empty).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
+        HistoryRebuildOnUpgrade.resetProcessStateForTest()
+        val deferred = ctx()
+        seedEarlierBuild(deferred)
+        recordSend(deferred, "cd34", settled = false)
+        HistoryRebuildOnUpgrade.runAtProcessStart(deferred, now, lookupNone)
+        assertFalse(statePrefs(deferred).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
+    }
+
+    @Test fun roomClear_runsOnce_thenDropsTheFlag() = runBlocking {
+        val c = ctx()
+        statePrefs(c).edit().putBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, true).commit()
+        var cleared = 0
+        assertTrue(HistoryRebuildOnUpgrade.clearRoomTransactionsIfPending(c) { cleared++ })
+        assertEquals(1, cleared)
+        assertFalse(statePrefs(c).contains(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING))
+        assertFalse(HistoryRebuildOnUpgrade.clearRoomTransactionsIfPending(c) { cleared++ })
+        assertEquals(1, cleared)
+    }
+
+    @Test fun roomClear_thatThrows_keepsTheFlagForTheNextStart() = runBlocking {
+        val c = ctx()
+        statePrefs(c).edit().putBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, true).commit()
+        assertFalse(HistoryRebuildOnUpgrade.clearRoomTransactionsIfPending(c) { error("db closed") })
+        assertTrue(statePrefs(c).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
+    }
+
+    @Test fun armRerun_makesTheNextStartRunAgain_keepingTheFloors() {
+        val c = ctx()
+        statePrefs(c).edit().putBoolean("done", true).putLong("floor_hint", 5L).putLong("floor_time", 6L).commit()
+        assertTrue(HistoryRebuildOnUpgrade.armRerun(c))
+        val st = HistoryRebuildOnUpgrade.readState(c)
+        assertFalse(st.done); assertTrue(st.inProgress); assertEquals(5L, st.floorHint); assertEquals(6L, st.floorTime)
+        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone).kind)
+        assertTrue(HistoryRebuildOnUpgrade.readState(c).done)
+    }
+}
+
+/** Keeps writes in memory, as Android does, but reports that commit() did not reach disk. */
+internal class FailingCommitPrefs(private val inner: FakeSharedPreferences) : SharedPreferences by inner {
+    override fun edit(): SharedPreferences.Editor {
+        val e = inner.edit()
+        return object : SharedPreferences.Editor {
+            override fun putString(key: String, value: String?) = apply { e.putString(key, value) }
+            override fun putStringSet(key: String, values: MutableSet<String>?) = apply { e.putStringSet(key, values) }
+            override fun putInt(key: String, value: Int) = apply { e.putInt(key, value) }
+            override fun putLong(key: String, value: Long) = apply { e.putLong(key, value) }
+            override fun putFloat(key: String, value: Float) = apply { e.putFloat(key, value) }
+            override fun putBoolean(key: String, value: Boolean) = apply { e.putBoolean(key, value) }
+            override fun remove(key: String) = apply { e.remove(key) }
+            override fun clear() = apply { e.clear() }
+            override fun commit(): Boolean { e.commit(); return false }
+            override fun apply() { e.apply() }
+        }
     }
 }

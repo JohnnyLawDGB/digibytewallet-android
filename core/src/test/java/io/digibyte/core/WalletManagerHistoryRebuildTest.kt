@@ -65,19 +65,43 @@ class WalletManagerHistoryRebuildTest {
         assertEquals(0L, HistoryRebuildOnUpgrade.floorTime(c))
     }
 
-    @Test fun rebuildFromChainRescan_marksTheRebuildNotNeeded_andKeepsTheFloor() {
+    @Test fun rebuildFromChainRescan_armsTheRebuild_soTheNextStartClearsWhatTheLastWindowWroteBack() {
         val c = ctx()
         c.getSharedPreferences("dgb_history_rebuild", Context.MODE_PRIVATE).edit()
-            .putLong("floor_time", 8L).commit()
+            .putBoolean("done", true).putLong("floor_time", 8L).commit()
         writeCache(c)
 
         walletManager(c).rebuildFromChainRescan()
         assertFalse(c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("saved_transactions"))
-        writeCache(c) // re-derived by the manual rebuild's scan
+        val armed = HistoryRebuildOnUpgrade.readState(c)
+        assertFalse("done must be left unset", armed.done)
+        assertTrue("the runner is armed", armed.inProgress)
+        assertEquals("same wallet: the floor time stays", 8L, armed.floorTime)
 
-        assertEquals(OutcomeKind.NOT_NEEDED, HistoryRebuildOnUpgrade.runAtProcessStart(c).kind)
-        assertTrue(c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("saved_transactions"))
-        assertEquals("same wallet: the floor time stays", 8L, HistoryRebuildOnUpgrade.floorTime(c))
+        // A coalesced writer lands between the clear and the process exit.
+        writeCache(c)
+
+        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, 1L) { 0L }.kind)
+        assertFalse(c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("saved_transactions"))
+        assertTrue(HistoryRebuildOnUpgrade.readState(c).done)
+        assertTrue(HistoryRebuildOnUpgrade.floorTime(c) in 1L..8L)
+    }
+
+    @Test fun clearSyncData_whoseClearDoesNotLand_doesNotMarkTheRebuildNotNeeded() {
+        val stores = HashMap<String, android.content.SharedPreferences>()
+        val c = mockk<Context>(relaxed = true)
+        every { c.getSharedPreferences(any(), any()) } answers {
+            val name = firstArg<String>()
+            stores.getOrPut(name) {
+                if (name == "dgb_sync_data") io.digibyte.core.sync.FailingCommitPrefs(io.digibyte.core.sync.FakeSharedPreferences())
+                else io.digibyte.core.sync.FakeSharedPreferences()
+            }
+        }
+        every { c.filesDir } returns tmp.newFolder()
+
+        walletManager(c).clearSyncData()
+
+        assertFalse(HistoryRebuildOnUpgrade.readState(c).done)
     }
 
     @Test fun rebuildFromChainRescan_stillForgetsRecordedSends() {
@@ -117,7 +141,21 @@ class WalletManagerHistoryRebuildTest {
 
     @Test fun restoreFromDisk_anchorsTheHeadersAtTheFloorTime() {
         val b = body("restoreFromDisk")
-        assertTrue(b.contains("creationTimeForRestore("))
-        assertTrue(b.contains("HistoryRebuildOnUpgrade.floorTime("))
+        val lowered = Regex("""val (\w+) = creationTimeForRestore\(\s*creationTime\s*,\s*HistoryRebuildOnUpgrade\.floorTime\(context\)\s*\)""")
+            .find(b) ?: error("the restore time is not creationTimeForRestore(creationTime, floorTime)")
+        val name = lowered.groupValues[1]
+        val calls = Regex("""NativeBridge\.recoverWalletFromBytes\(([^)]*)\)""").findAll(b).map { it.groupValues[1] }.toList()
+        assertTrue("scanner is blind: no native restore call", calls.isNotEmpty())
+        for (args in calls) {
+            val time = args.split(",").map { it.trim() }.getOrNull(1)
+            assertEquals("every native restore must receive the lowered time", name, time)
+        }
+    }
+
+    @Test fun restoreFromDisk_logsTheRebuildUnderTheSharedTag() {
+        val b = body("restoreFromDisk")
+        val lines = b.lines().filter { it.contains("Log.") && it.contains("rebuild", ignoreCase = true) }
+        assertTrue("scanner is blind", lines.isNotEmpty())
+        for (l in lines) assertTrue("rebuild log line not under the shared tag: $l", l.contains("HistoryRebuildOnUpgrade.TAG"))
     }
 }
