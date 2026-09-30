@@ -53,8 +53,9 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // transaction cache written by an earlier build is discarded before anything can load
         // it, and the history is re-derived from the chain by the normal scan. Here, after the
         // network is selected and the boot guard ran, and before any service, worker
-        // or unlock can read the sync state. Pure Kotlin, no native call. A throw leaves it
-        // undone; the next launch tries again.
+        // or unlock can read the sync state. Its one native call is the compiled checkpoint
+        // lookup (no wallet needed; the library is loaded by the network selection above). A
+        // throw leaves it undone; the next launch tries again.
         runCatching { HistoryRebuildOnUpgrade.runAtProcessStart(this) }
             .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
         scheduleBackgroundSync()

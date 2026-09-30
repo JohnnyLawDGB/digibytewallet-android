@@ -18,9 +18,10 @@ import java.util.concurrent.ConcurrentHashMap
  * wallet loads it, and the history is re-derived by the normal compact-filter scan, the same path
  * the manual "Full rebuild from chain" uses. Differences from the manual rebuild:
  *  - it runs at process start, before any service or unlock, so nothing stale survives in memory;
- *  - the scan floor is carried down to the oldest confirmed record the old cache held
- *    ([KEY_FLOOR_HINT] / [KEY_FLOOR_TIME]), never only the wallet's birth: a bogus low floor costs
- *    a longer scan, a floor that is too high would hide history;
+ *  - the scan floor is carried down to what the old cache held ([KEY_FLOOR_HINT]: the oldest
+ *    confirmed height; [KEY_FLOOR_TIME]: the oldest record time, confirmed or not, bounded by the
+ *    checkpoint at or below that height), never only the wallet's birth: a bogus low floor costs a
+ *    longer scan, a floor that is too high would hide history;
  *  - recorded-send metadata ([OutgoingTxStore]) is kept;
  *  - it is deferred while one of the wallet's own recorded sends is not settled (the scan cannot
  *    re-learn an unconfirmed transaction), for at most [DEFER_CAP_MS] from the first deferral.
@@ -28,9 +29,12 @@ import java.util.concurrent.ConcurrentHashMap
  * It runs to completion once per network. [KEY_IN_PROGRESS] is committed before anything is
  * cleared, so a process death part-way re-runs the clear rather than skipping it. It never runs for
  * a cache written by this build or later: an empty cache stamps [KEY_DONE], and [markNotNeeded] is
- * called wherever the cache is rebuilt from scratch (create, recover, seed change, manual rebuild).
+ * called when the cache starts over for a new wallet (create, recover, seed change). The manual
+ * rebuild arms a run instead ([armRerun]), so the next start clears whatever was written back.
  *
- * No native call anywhere in here: the native library is not in use yet when this runs.
+ * The only native call is the compiled checkpoint-table lookup (no wallet needed); the native
+ * library is loaded by the network selection before the start-time call, and a failed lookup
+ * falls back to the record times.
  */
 object HistoryRebuildOnUpgrade {
     const val TAG = "HistoryRebuild"
@@ -41,14 +45,21 @@ object HistoryRebuildOnUpgrade {
     /** Lowest confirmed block height the discarded cache held (raw height), 0 = none. Consumed by
      *  SyncService when it picks the compact-filter floor. */
     const val KEY_FLOOR_HINT = "floor_hint"
-    /** Lowest timestamp (unix seconds) of a confirmed record the discarded cache held, 0 = none.
-     *  The native checkpoint lookup is time-based, so this is what lowers the header anchor. Kept
-     *  (never raised) until the wallet itself changes. */
+    /** Lowest time (unix seconds) the discarded cache gives: its records' times (confirmed or
+     *  not) and the time of the compiled checkpoint at or below [KEY_FLOOR_HINT]; 0 = none. The
+     *  header anchor is chosen by time, so this is what lowers it. Kept (never raised) until the
+     *  wallet itself changes. */
     const val KEY_FLOOR_TIME = "floor_time"
     /** Set in the same commit as [KEY_IN_PROGRESS] when a run starts: the Room `transactions`
-     *  table of this network (read by DigiAsset history) still holds rows for the discarded
-     *  records. Cleared by [clearRoomTransactionsIfPending] at the first sync start. */
+     *  table of this network (read by DigiAsset history) may hold rows written by earlier builds
+     *  for the discarded records. Cleared by [clearRoomTransactionsIfPending] at the first sync
+     *  start. */
     const val KEY_ROOM_CLEAR_PENDING = "room_clear_pending"
+    /** Set in the same commit as [KEY_IN_PROGRESS] when the run recorded a floor (height or
+     *  time): the scan start still has to be carried down to the anchor. Needed because a floor
+     *  time can exist without a floor height (the oldest records all unconfirmed). Cleared with the
+     *  hint by [clearFloorHint] once SyncService applied it. */
+    const val KEY_FLOOR_PENDING = "floor_pending"
 
     /** Matches the default mempool expiry: a send still unconfirmed after this is in no default
      *  mempool, so holding the cache for it any longer buys nothing. */
@@ -300,6 +311,7 @@ object HistoryRebuildOnUpgrade {
                 .putLong(KEY_FLOOR_HINT, hint)
                 .putLong(KEY_FLOOR_TIME, time)
                 .putBoolean(KEY_ROOM_CLEAR_PENDING, true)
+                .putBoolean(KEY_FLOOR_PENDING, hint > 0L || time > 0L)
                 .commit(),
         ) { "rebuild state not durable; nothing cleared" }
         log(
@@ -326,7 +338,7 @@ object HistoryRebuildOnUpgrade {
             .putBoolean(KEY_DONE, true)
             .putBoolean(KEY_IN_PROGRESS, false)
             .putLong(KEY_DEFERRED_SINCE_MS, 0L)
-        if (forgetFloor) e.remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_TIME).remove(KEY_ROOM_CLEAR_PENDING)
+        if (forgetFloor) e.remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_TIME).remove(KEY_FLOOR_PENDING).remove(KEY_ROOM_CLEAR_PENDING)
         return e.commit()
     }
 
@@ -339,9 +351,13 @@ object HistoryRebuildOnUpgrade {
     /** The floor time for the native checkpoint anchor (unix seconds), 0 = none. */
     fun floorTime(context: Context): Long = statePrefs(context).getLong(KEY_FLOOR_TIME, 0L)
 
-    /** The floor height has been carried into `cf_birth_height`; forget it. */
+    /** A recorded floor (height or time) not yet carried into the scan start. */
+    fun floorPending(context: Context): Boolean = statePrefs(context).getBoolean(KEY_FLOOR_PENDING, false)
+
+    /** The floor has been carried into `cf_birth_height`; forget the height and the pending marker.
+     *  The floor time stays: it keeps the header anchor low on later loads. */
     fun clearFloorHint(context: Context) {
-        statePrefs(context).edit().remove(KEY_FLOOR_HINT).commit()
+        statePrefs(context).edit().remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_PENDING).commit()
     }
 
     private fun publish(outcome: Outcome): Outcome {
@@ -366,10 +382,12 @@ object HistoryRebuildOnUpgrade {
             .commit()
 
     /**
-     * After a run, clear this network's Room `transactions` table once (it backs DigiAsset history
-     * and would keep rows for the discarded records). [clear] runs first; the flag is dropped only
-     * after it returned, so a clear that throws is retried at the next start. Returns whether a
-     * clear ran. Rows refill as the scan re-finds the transactions.
+     * After a run, clear this network's Room `transactions` table once. It backs DigiAsset history,
+     * and earlier builds wrote rows to it for transactions the discarded cache held. No live path
+     * writes it now (the native bridge never calls `onTransactionReceived` / `onAssetDetected`), so
+     * this is a precaution against those old rows, and nothing refills the table. [clear] runs
+     * first; the flag is dropped only after it returned, so a clear that throws is retried at the
+     * next start. Returns whether a clear ran.
      */
     suspend fun clearRoomTransactionsIfPending(context: Context, clear: suspend () -> Unit): Boolean {
         val p = statePrefs(context)
@@ -395,7 +413,7 @@ object HistoryRebuildOnUpgrade {
 /**
  * Clear the transaction cache and everything the chain rebuild re-derives, for the selected
  * network: the tx cache, the filter-header chain, the saved block headers, `has_synced`,
- * `last_balance`, the CF scan ledger and its surfaced band. Shared by the manual
+ * `last_balance`, `last_dd_balance`, the CF scan ledger and its surfaced band. Shared by the manual
  * [io.digibyte.core.WalletManager.rebuildFromChainRescan] and [HistoryRebuildOnUpgrade] so the two
  * cannot drift. It does NOT touch recorded sends ([OutgoingTxStore]) or `cf_birth_height`; the
  * manual path handles those itself. Synchronous (`commit`): callers may end the process next.
@@ -410,6 +428,7 @@ fun clearTransactionCacheForRebuild(context: Context): Boolean {
         .remove("saved_blocks_tip")
         .remove("has_synced")
         .remove("last_balance")
+        .remove("last_dd_balance")      // the DigiDollar balance snapshot the wallet screen starts from
         .commit()
     FilterHeaderStore.delete(context) // the file-backed CF-header chain (synchronous)
     SavedBlockStore.delete(context)   // and the file-backed saved-blocks window (I2 fix)

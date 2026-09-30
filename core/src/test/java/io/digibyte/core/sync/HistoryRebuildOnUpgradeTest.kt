@@ -570,6 +570,50 @@ class HistoryRebuildOnUpgradeTest {
         assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone).kind)
         assertTrue(HistoryRebuildOnUpgrade.readState(c).done)
     }
+
+    // ── cleanup round ─────────────────────────────────────────────────────
+
+    @Test fun clear_removesTheDigiDollarBalanceSnapshot() {
+        val c = ctx()
+        seedEarlierBuild(c)
+        syncPrefs(c).edit().putLong("last_dd_balance", 150L).commit()
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        assertFalse(syncPrefs(c).contains("last_dd_balance"))
+    }
+
+    @Test fun run_withOnlyUnconfirmedRecords_marksTheFloorPending() {
+        val c = ctx()
+        seedEarlierBuild(c, blob(Rec(0x7fffffffL, 1_600_000_000L, realTx)))
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        val st = HistoryRebuildOnUpgrade.readState(c)
+        assertEquals(0L, st.floorHint)
+        assertEquals(1_600_000_000L, st.floorTime)
+        assertTrue("a floor time alone must still be carried to the scan start", HistoryRebuildOnUpgrade.floorPending(c))
+    }
+
+    @Test fun run_withAFloorHeight_marksTheFloorPending_andWithoutAnyFloor_doesNot() {
+        val c = ctx()
+        seedEarlierBuild(c)
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        assertTrue(HistoryRebuildOnUpgrade.floorPending(c))
+        HistoryRebuildOnUpgrade.resetProcessStateForTest()
+        val none = ctx()
+        seedEarlierBuild(none, blob(Rec(0x7fffffffL, 0L, realTx)))
+        HistoryRebuildOnUpgrade.runAtProcessStart(none, now, lookupNone)
+        assertFalse(HistoryRebuildOnUpgrade.floorPending(none))
+    }
+
+    @Test fun thePendingMarker_goesWithTheHint_andWithADifferentWallet() {
+        val c = ctx()
+        statePrefs(c).edit().putBoolean(HistoryRebuildOnUpgrade.KEY_FLOOR_PENDING, true).putLong("floor_hint", 5L).commit()
+        HistoryRebuildOnUpgrade.clearFloorHint(c)
+        assertFalse(HistoryRebuildOnUpgrade.floorPending(c))
+        statePrefs(c).edit().putBoolean(HistoryRebuildOnUpgrade.KEY_FLOOR_PENDING, true).commit()
+        HistoryRebuildOnUpgrade.markNotNeeded(c)
+        assertTrue("same wallet keeps it", HistoryRebuildOnUpgrade.floorPending(c))
+        HistoryRebuildOnUpgrade.markNotNeeded(c, forgetFloor = true)
+        assertFalse(HistoryRebuildOnUpgrade.floorPending(c))
+    }
 }
 
 /** Keeps writes in memory, as Android does, but reports that commit() did not reach disk. */

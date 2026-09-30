@@ -1146,6 +1146,11 @@ class SyncService : Service() {
                             peerCount = NativeBridge.getPeerCount(),
                             progress = currentSyncProgress(),
                             walletLoaded = NativeBridge.isWalletLoaded(),
+                            scanFrontier = runCatching { NativeBridge.getLowestNeededHeight() }.getOrDefault(0L),
+                            headerTip = maxOf(
+                                runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L),
+                                runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L),
+                            ),
                         )
                         runCatching { assetManager.reconcileAssetRowsLocally(pruneUnowned = pruneGateOpen) }
                             .onFailure { android.util.Log.w("SyncService", "asset row reconcile threw", it) }
@@ -2131,9 +2136,9 @@ class SyncService : Service() {
         runCatching { assetManager.replayAssetOutpointExclusions() }
             .onFailure { android.util.Log.w("SyncService", "asset exclusion replay failed", it) }
 
-        // After a one-time history rebuild, the Room transaction table (asset history) still
-        // holds rows for the discarded records: clear it once, before the peer manager can
-        // deliver the re-derived transactions that refill it.
+        // After a one-time history rebuild, clear the Room transaction table (asset history) once,
+        // before the peer manager starts. A precaution: earlier builds wrote rows there for the
+        // records the rebuild discarded; no live path writes the table now.
         runCatching {
             HistoryRebuildOnUpgrade.clearRoomTransactionsIfPending(this@SyncService) { transactionDao.deleteAll() }
         }.onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "transaction table clear threw", it) }
@@ -2309,11 +2314,12 @@ class SyncService : Service() {
             // genesis anchor, a valid one); a hint that cannot be applied yet is kept.
             run {
                 val floorHint = HistoryRebuildOnUpgrade.floorHint(this@SyncService)
-                if (floorHint > 0L) {
+                val floorPending = HistoryRebuildOnUpgrade.floorPending(this@SyncService)
+                if (floorHint > 0L || floorPending) {
                     val loaded = NativeBridge.isWalletLoaded()
                     val anchor = if (loaded) NativeBridge.getWalletBirthCheckpointHeight() else 0L
                     val persisted = if (settings.contains("cf_birth_height")) settings.getLong("cf_birth_height", 0L) else null
-                    val step = floorHintStep(loaded, anchor, persisted, floorHint)
+                    val step = floorHintStep(loaded, anchor, persisted, floorHint, floorPending)
                     when {
                         step.setBirth != null -> settings.edit().putLong("cf_birth_height", step.setBirth).commit()
                         step.removeBirth -> settings.edit().remove("cf_birth_height").commit()
@@ -2327,7 +2333,7 @@ class SyncService : Service() {
                     } else {
                         android.util.Log.i(
                             HistoryRebuildOnUpgrade.TAG,
-                            "scan floor: hint=$floorHint loaded=$loaded anchor=$anchor persisted=$persisted -> $step",
+                            "scan floor: hint=$floorHint pending=$floorPending loaded=$loaded anchor=$anchor persisted=$persisted -> $step",
                         )
                     }
                 }

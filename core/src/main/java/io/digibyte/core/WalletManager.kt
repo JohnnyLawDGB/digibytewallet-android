@@ -64,7 +64,8 @@ internal const val DEFAULT_RESTORE_CREATION_TIME = 1774252800L
 /**
  * The creation time handed to native on a restore. Native picks the header anchor (and
  * `getWalletBirthCheckpointHeight`) from it: the latest checkpoint at least a week older. After a
- * one-time history rebuild, [floorTime] is the oldest confirmed record the discarded cache held
+ * one-time history rebuild, [floorTime] is the lowest time the discarded cache gave — its records'
+ * times, confirmed or not, and the time of the checkpoint at or below its oldest confirmed height
  * (see [HistoryRebuildOnUpgrade.KEY_FLOOR_TIME]); lowering the time to it keeps that history above
  * the anchor, so the scan can reach it. Never raised; the stored preference is not changed.
  */

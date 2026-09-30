@@ -76,26 +76,34 @@ internal data class FloorHintStep(
 )
 
 /**
- * The step for [floorHint] given the native header [anchor] (`getWalletBirthCheckpointHeight`, a
- * compiled checkpoint; 0 is the genesis anchor, a valid one) and the persisted `cf_birth_height`.
+ * The step for a floor a one-time history rebuild left behind, given the native header [anchor]
+ * (`getWalletBirthCheckpointHeight`, a compiled checkpoint; 0 is the genesis anchor, a valid one)
+ * and the persisted `cf_birth_height`. The floor is [floorHint] (the oldest confirmed height the
+ * discarded cache held; 0 = none) and/or [floorPending] (a floor time was recorded, which is what
+ * lowered the anchor — possibly with no height at all, when the oldest records were unconfirmed).
  *
- * - no hint, or no wallet loaded (the anchor is then meaningless): nothing, the hint waits;
- * - anchor above the hint: nothing, the hint is kept (a height below the anchor cannot be
- *   resolved by the in-memory chain and the auto-fetch would clamp it back up);
- * - otherwise the floor is made to reach the hint: a persisted floor above the hint is lowered to
- *   the anchor (or removed when the anchor is genesis), a missing one is set to the anchor (so it
- *   survives restarts), and one already at or below the hint stays. The hint is then cleared.
- *
- * The anchor itself is lowered through the creation time the wallet is loaded with
- * (`creationTimeForRestore`), which the rebuild takes from the checkpoint at or below the hint.
+ * The target is min(hint if any, anchor): the scan must start at or below the anchor the floor time
+ * chose, which is at or below the hint.
+ * - no floor, or no wallet loaded (the anchor is then meaningless): nothing, the floor waits;
+ * - a hint the anchor is still above: nothing, the hint is kept (a height below the anchor cannot
+ *   be resolved by the in-memory chain and the auto-fetch would clamp it back up);
+ * - otherwise a persisted floor above the anchor is lowered to it (or removed when the anchor is
+ *   genesis, so the start falls back to the wallet birth), a missing one is set to the anchor (so
+ *   it survives restarts), one already at or below the anchor stays. The floor is then cleared.
  */
-internal fun floorHintStep(walletLoaded: Boolean, anchor: Long, persistedBirth: Long?, floorHint: Long): FloorHintStep {
-    if (floorHint <= 0L || !walletLoaded) return FloorHintStep()
-    if (anchor > floorHint) return FloorHintStep(anchorAboveHint = true)
+internal fun floorHintStep(
+    walletLoaded: Boolean,
+    anchor: Long,
+    persistedBirth: Long?,
+    floorHint: Long,
+    floorPending: Boolean = false,
+): FloorHintStep {
+    if ((floorHint <= 0L && !floorPending) || !walletLoaded) return FloorHintStep()
+    if (floorHint > 0L && anchor > floorHint) return FloorHintStep(anchorAboveHint = true)
     if (persistedBirth == null) {
         return if (anchor > 0L) FloorHintStep(setBirth = anchor, clearHint = true) else FloorHintStep(clearHint = true)
     }
-    if (persistedBirth <= floorHint) return FloorHintStep(clearHint = true)
+    if (persistedBirth <= anchor) return FloorHintStep(clearHint = true)
     return if (anchor > 0L) FloorHintStep(setBirth = anchor, clearHint = true) else FloorHintStep(removeBirth = true, clearHint = true)
 }
 

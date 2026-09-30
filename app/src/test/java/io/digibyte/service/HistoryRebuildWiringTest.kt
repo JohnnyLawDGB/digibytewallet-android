@@ -52,15 +52,53 @@ class HistoryRebuildWiringTest {
         )
     }
 
-    @Test fun aFloorAlreadyAtOrBelowTheHint_staysAsItIs() {
+    @Test fun aFloorAlreadyAtOrBelowTheAnchor_staysAsItIs() {
         assertEquals(
             FloorHintStep(clearHint = true),
             floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 15_000_000L, floorHint = 19_500_000L),
         )
         assertEquals(
             FloorHintStep(clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 19_000_000L, floorHint = 19_500_000L),
+        )
+    }
+
+    @Test fun aFloorBetweenTheAnchorAndTheHint_goesDownToTheAnchor() {
+        // The anchor was chosen from the floor time, which also covers unconfirmed records whose
+        // block may be below the hint: the scan starts at the anchor.
+        assertEquals(
+            FloorHintStep(setBirth = 19_000_000L, clearHint = true),
             floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 19_500_000L, floorHint = 19_500_000L),
         )
+    }
+
+    // ── floor time alone (no floor height) ───────────────────────────────
+
+    @Test fun noHintButAFloorPending_lowersAHigherFloorToTheAnchor() {
+        assertEquals(
+            FloorHintStep(setBirth = 19_000_000L, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 22_650_000L, floorHint = 0L, floorPending = true),
+        )
+        assertEquals(
+            FloorHintStep(setBirth = 19_000_000L, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = null, floorHint = 0L, floorPending = true),
+        )
+        assertEquals(
+            FloorHintStep(removeBirth = true, clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 0L, persistedBirth = 22_650_000L, floorHint = 0L, floorPending = true),
+        )
+        assertEquals(
+            FloorHintStep(clearHint = true),
+            floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 15_000_000L, floorHint = 0L, floorPending = true),
+        )
+    }
+
+    @Test fun noHintAndNothingPending_doesNothing() {
+        assertEquals(FloorHintStep(), floorHintStep(walletLoaded = true, anchor = 19_000_000L, persistedBirth = 22_650_000L, floorHint = 0L, floorPending = false))
+    }
+
+    @Test fun aPendingFloor_waitsForTheWallet() {
+        assertEquals(FloorHintStep(), floorHintStep(walletLoaded = false, anchor = 0L, persistedBirth = 22_650_000L, floorHint = 0L, floorPending = true))
     }
 
     @Test fun genesisAnchor_isAValidAnchor_notAnUnloadedWallet() {
@@ -111,6 +149,8 @@ class HistoryRebuildWiringTest {
         val between = service.substring(hint, firstBirth)
         assertTrue("the step is not the pure function", between.contains("floorHintStep("))
         assertTrue("gated on a loaded wallet, not on a non-zero anchor", between.contains("NativeBridge.isWalletLoaded()"))
+        assertTrue("a floor time alone is applied too", between.contains("HistoryRebuildOnUpgrade.floorPending("))
+        assertTrue(between.contains("floorHint > 0L || floorPending"))
         assertTrue(between.contains("\"cf_birth_height\""))
         val clear = between.indexOf("HistoryRebuildOnUpgrade.clearFloorHint(")
         assertTrue(clear >= 0)
@@ -138,5 +178,17 @@ class HistoryRebuildWiringTest {
         assertTrue("the reconcile does not take the gate", call >= 0)
         val gate = service.lastIndexOf("val pruneGateOpen = assetPruneGateOpen(", call)
         assertTrue("the gate is not computed before the reconcile", gate in 0 until call)
+    }
+
+    @Test fun everyPruneGateCallPassesTheScanFrontierAndTheHeaderTip() {
+        val sites = Regex("""assetPruneGateOpen\(""").findAll(service).map { it.range.first }.toList()
+        assertTrue("scanner is blind", sites.isNotEmpty())
+        for (at in sites) {
+            val window = service.substring(at, minOf(service.length, at + 900))
+            val scan = Regex("""scanFrontier = ([^,\n]+)""").find(window)?.groupValues?.get(1)?.trim()
+            val tip = Regex("""headerTip = ([^,\n]+)""").find(window)?.groupValues?.get(1)?.trim()
+            assertTrue("a prune gate call without the scan frontier at $at", scan != null && scan != "0L")
+            assertTrue("a prune gate call without the header tip at $at", tip != null && tip != "0L")
+        }
     }
 }
