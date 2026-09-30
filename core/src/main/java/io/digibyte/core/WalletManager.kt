@@ -7,9 +7,9 @@ import io.digibyte.core.asset.DeadSendPredicate
 import io.digibyte.core.asset.OrphanSendPredicate
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.model.SyncState
-import io.digibyte.core.sync.CfAbandonmentStore
-import io.digibyte.core.sync.CfScanLedgerStore
 import io.digibyte.core.sync.FilterHeaderStore
+import io.digibyte.core.sync.HistoryRebuildOnUpgrade
+import io.digibyte.core.sync.clearTransactionCacheForRebuild
 import io.digibyte.core.sync.SavedBlockStore
 import io.digibyte.core.security.EncryptedData
 import io.digibyte.core.security.KeyStoreManager
@@ -56,6 +56,22 @@ data class StuckSendResult(
  * Extracted so the recovery/rescan persistence decision is unit-testable without JNI.
  */
 internal fun cfBirthHeightToPersist(rawBirth: Long): Long? = rawBirth.takeIf { it > 0L }
+
+/** The creation time handed to native when the wallet is rebuilt from the stored seed before any
+ *  wallet_creation_time existed. */
+internal const val DEFAULT_RESTORE_CREATION_TIME = 1774252800L
+
+/**
+ * The creation time handed to native on a restore. Native picks the header anchor (and
+ * `getWalletBirthCheckpointHeight`) from it: the latest checkpoint at least a week older. After a
+ * one-time history rebuild, [floorTime] is the oldest confirmed record the discarded cache held
+ * (see [HistoryRebuildOnUpgrade.KEY_FLOOR_TIME]); lowering the time to it keeps that history above
+ * the anchor, so the scan can reach it. Never raised; the stored preference is not changed.
+ */
+internal fun creationTimeForRestore(stored: Long, floorTime: Long): Long {
+    val base = if (stored > 0L) stored else DEFAULT_RESTORE_CREATION_TIME
+    return if (floorTime > 0L) minOf(base, floorTime) else base
+}
 
 class WalletManager(
     private val context: Context,
@@ -298,7 +314,19 @@ class WalletManager(
             // Load saved transactions BEFORE creating wallet — recoverWallet uses them
             // so the wallet starts with full tx history and balance is immediately spendable.
             val syncPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
-            val savedTxHex = syncPrefs.getString("saved_transactions", null)
+            // Rebuild transaction history once after an update: a cache written by an earlier
+            // build is discarded here, before it is read. Normally already decided at process
+            // start (DigiByteApp.onCreate); this covers a network this process has not evaluated.
+            // A throw leaves it undone, to be retried on the next launch.
+            runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context) }
+                .onFailure { android.util.Log.w("WalletManager", "history rebuild check failed; retried next launch", it) }
+            // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
+            val savedTxHex = if (HistoryRebuildOnUpgrade.isInProgress(context)) {
+                android.util.Log.w("WalletManager", "history rebuild in progress; not loading the transaction cache")
+                null
+            } else {
+                syncPrefs.getString("saved_transactions", null)
+            }
             if (savedTxHex != null) {
                 // A bad tx cache must NEVER abort the restore or block the seed load
                 // below — it's just a cache re-derivable from chain. The naive
@@ -331,12 +359,11 @@ class WalletManager(
             // report a zero balance, on a wallet whose coins are perfectly safe. Null for the
             // overwhelming majority of wallets, which have no passphrase.
             val storedPass = loadPassphrase()
+            // After a one-time history rebuild the anchor goes no later than the oldest record
+            // the discarded cache held (creationTimeForRestore); otherwise unchanged.
+            val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))
             val success = try {
-                if (creationTime > 0) {
-                    NativeBridge.recoverWalletFromBytes(seedBytes, creationTime, storedPass)
-                } else {
-                    NativeBridge.recoverWalletFromBytes(seedBytes, 1774252800L, storedPass)
-                }
+                NativeBridge.recoverWalletFromBytes(seedBytes, restoreTime, storedPass)
             } finally {
                 storedPass?.fill(0)
             }
@@ -576,38 +603,14 @@ class WalletManager(
         // saved_transactions after we clear them (its final persist, if any, runs
         // before the clear below and is therefore overwritten).
         runCatching { NativeBridge.stopSync() }
-        val suffix = networkSuffix(context)
-        // NOTE: commit() (synchronous), NOT apply(). The caller kills the process
+        // NOTE: synchronous (commit), NOT apply(). The caller kills the process
         // (Runtime.exit) immediately after this returns to force a clean reload; an
         // async apply() would be dropped before it flushes, leaving the corrupt cache
         // in place (the tx graph would reload unchanged and the scan would stay at the
-        // tip instead of the birth floor).
-        context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
-            .remove("saved_transactions")   // corrupt/phantom tx graph — re-derived from chain
-            .remove("saved_filter_headers") // CF chain re-anchors at the birth floor
-            .remove("saved_blocks")         // legacy key belt-and-suspenders — file store is authoritative now
-            .remove("saved_blocks_tip")
-            .remove("has_synced")
-            .remove("last_balance")
-            .commit()
-        FilterHeaderStore.delete(context) // also nuke the file-backed CF-header chain (synchronous)
-        SavedBlockStore.delete(context)   // and the file-backed saved-blocks window (I2 fix)
-        // …and the file-backed CF SCAN LEDGER. This is load-bearing, not tidiness
-        // (paced-convoy fetch, spec Part E / GATE 3(iii)): on the forced restart
-        // startSync() Inits the native ledger fresh at `abandonedBelow = 0`, and
-        // SyncService then feeds whatever survives here straight into
-        // restoreCfScanLedger(), which Parses the OLD `abandonedBelow` right back
-        // over that Init. `abandonedBelow` is a monotonic hard floor clamping every
-        // CF request (BRCFScanLedger.c:433/600/666), so leaving the blob in place
-        // means the CF path can NEVER re-cover an abandoned band — the "a full
-        // rescan re-covers it" half of the recovery guarantee would be a lie, and
-        // the B2 valve's residual (it can only prove refusal by the peers it is
-        // connected to, so a servable height CAN be abandoned) would become
-        // permanent silent loss instead of a recoverable inconvenience.
-        CfScanLedgerStore.delete(context)
-        // The surfaced band goes with it: after the re-Init `abandonedBelow` really
-        // is 0, so there is nothing left to recover and nothing to nag about.
-        CfAbandonmentStore.clear(context)
+        // tip instead of the birth floor). The clear is shared with the one-time
+        // history rebuild after an update, so the two cannot drift; see
+        // clearTransactionCacheForRebuild for what it removes and why.
+        clearTransactionCacheForRebuild(context)
         OutgoingTxStore(context).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
@@ -619,6 +622,10 @@ class WalletManager(
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
             if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
         }.commit()
+        // Everything the cache holds from here on is re-derived by this build: the one-time
+        // rebuild after an update has nothing left to do for this network. Same wallet, so the
+        // floor it may have recorded stays.
+        HistoryRebuildOnUpgrade.markNotNeeded(context)
     }
 
     /**
@@ -1088,8 +1095,10 @@ class WalletManager(
     /** `internal` (not `private`) so [WalletManagerClearSyncDataTest] can call it
      *  directly without instantiating createWallet/recoverWallet's native path. */
     internal fun clearSyncData() {
+        // commit(), not apply(): the one-time history rebuild is stamped not needed below, and
+        // that stamp must not reach disk before the clear it relies on.
         context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
-            .edit().clear().apply()
+            .edit().clear().commit()
         // Drop ChainTipStore's in-memory mirror too — see the note in
         // AndroidWalletDataEraser.eraseSyncData. This helper backs createWallet and recoverWallet,
         // so without it a restored seed would inherit the previous wallet's confirmation counts
@@ -1101,6 +1110,10 @@ class WalletManager(
         // seed-fingerprint-mismatch restore (restoreFromDisk) would inherit the
         // PREVIOUS wallet's saved-blocks window from disk.
         SavedBlockStore.delete(context)
+        // A new wallet (create, recover, seed change): every record cached from here on is
+        // written by this build, so the one-time rebuild after an update has nothing to do. The
+        // floor a previous wallet's rebuild recorded does not belong to this one.
+        HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true)
     }
 
     /**
