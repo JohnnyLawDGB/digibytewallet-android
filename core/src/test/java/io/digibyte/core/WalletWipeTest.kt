@@ -346,7 +346,7 @@ class WalletWipeTest {
         /** Preference stores a wallet leaves behind, every one on both networks where suffixed. */
         val suffixedStores = listOf(
             "dgb_sync_data", "dgb_bloom_peers", "dgb_filter_peers", "dgb_dandelion_peers",
-            "dgb_reconcile", "dgb_cf_abandonment",
+            "dgb_reconcile", "dgb_cf_abandonment", "dgb_history_rebuild",
         )
         val sharedStores = listOf("dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key")
 
