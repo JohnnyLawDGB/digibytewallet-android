@@ -58,6 +58,55 @@ internal fun compactFilterBirthHeight(
     return if (wasSynced) resumeDefault else persistedBirth ?: resumeDefault
 }
 
+/**
+ * What the sync start does with the floor a one-time history rebuild left behind ([floorHint], the
+ * oldest confirmed height its discarded cache held). Nothing is written when [setBirth] is null and
+ * [removeBirth] is false; the hint is dropped only when [clearHint].
+ */
+internal data class FloorHintStep(
+    /** Persist this `cf_birth_height`. */
+    val setBirth: Long? = null,
+    /** Remove `cf_birth_height`, so the scan start falls back to the wallet birth (the genesis
+     *  anchor: a 0 floor is never persisted). */
+    val removeBirth: Boolean = false,
+    /** The floor is applied: forget the hint. */
+    val clearHint: Boolean = false,
+    /** The header anchor is still above the hint: keep the hint and say so. */
+    val anchorAboveHint: Boolean = false,
+)
+
+/**
+ * The step for a floor a one-time history rebuild left behind, given the native header [anchor]
+ * (`getWalletBirthCheckpointHeight`, a compiled checkpoint; 0 is the genesis anchor, a valid one)
+ * and the persisted `cf_birth_height`. The floor is [floorHint] (the oldest confirmed height the
+ * discarded cache held; 0 = none) and/or [floorPending] (a floor time was recorded, which is what
+ * lowered the anchor — possibly with no height at all, when the oldest records were unconfirmed).
+ *
+ * The target is min(hint if any, anchor): the scan must start at or below the anchor the floor time
+ * chose, which is at or below the hint.
+ * - no floor, or no wallet loaded (the anchor is then meaningless): nothing, the floor waits;
+ * - a hint the anchor is still above: nothing, the hint is kept (a height below the anchor cannot
+ *   be resolved by the in-memory chain and the auto-fetch would clamp it back up);
+ * - otherwise a persisted floor above the anchor is lowered to it (or removed when the anchor is
+ *   genesis, so the start falls back to the wallet birth), a missing one is set to the anchor (so
+ *   it survives restarts), one already at or below the anchor stays. The floor is then cleared.
+ */
+internal fun floorHintStep(
+    walletLoaded: Boolean,
+    anchor: Long,
+    persistedBirth: Long?,
+    floorHint: Long,
+    floorPending: Boolean = false,
+): FloorHintStep {
+    if ((floorHint <= 0L && !floorPending) || !walletLoaded) return FloorHintStep()
+    if (floorHint > 0L && anchor > floorHint) return FloorHintStep(anchorAboveHint = true)
+    if (persistedBirth == null) {
+        return if (anchor > 0L) FloorHintStep(setBirth = anchor, clearHint = true) else FloorHintStep(clearHint = true)
+    }
+    if (persistedBirth <= anchor) return FloorHintStep(clearHint = true)
+    return if (anchor > 0L) FloorHintStep(setBirth = anchor, clearHint = true) else FloorHintStep(removeBirth = true, clearHint = true)
+}
+
 private data class CfLedgerState(
     val scannedThrough: Long,
     val abandonedBelow: Long,

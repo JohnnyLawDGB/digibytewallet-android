@@ -15,6 +15,7 @@
 #include "bridge_status_stale.h"
 #include "BRPeerPenalty.h"
 #include "dandelion_state.h"
+#include "checkpoint_time.h"
 
 static void _applyDandelionState(void);   /* defined with the Dandelion JNI setters */
 
@@ -1260,6 +1261,24 @@ Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv 
         }
     }
     return (jlong)result;
+}
+
+/* ---------- getCheckpointTimeAtOrBelow ----------
+ *
+ * Timestamp of the highest compiled block checkpoint at or below [height] for the ACTIVE
+ * network, or 0 if there is none (or the height is negative). Needs no wallet and no peer
+ * manager: it reads the same table BRPeerManagerNewEx anchors the header chain from. Handing
+ * this time to recoverWalletFromBytes as the creation time makes the anchor (the latest
+ * checkpoint more than a week older) a checkpoint at or below [height]. See checkpoint_time.h.
+ */
+JNIEXPORT jlong JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_getCheckpointTimeAtOrBelow(JNIEnv *env, jobject thiz, jlong height) {
+    (void)env;
+    (void)thiz;
+
+    if (height < 0) return 0;
+    const BRChainParams *params = BRNetworkIsTestnet() ? &BRTestNetParams : &BRMainNetParams;
+    return (jlong)checkpoint_time_at_or_below(params->checkpoints, params->checkpointsCount, (uint64_t)height);
 }
 
 /* ---------- setCallbackHandler ---------- */

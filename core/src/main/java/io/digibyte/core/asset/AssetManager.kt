@@ -1735,11 +1735,15 @@ class AssetManager(
      * (chiefly the recipient marker of a send WE made) is removed while an unknowable row
      * is left alone. Returns the number of phantom rows deleted.
      */
-    suspend fun reconcileAssetRowsLocally(): Int =
-        reconcileAssetRowsLocallyImpl(buildOwnedScriptHexes()) { txid, vout ->
-            runCatching { NativeBridge.outpointSpentState(txid, vout) }
-                .getOrDefault(AssetSpentState.PROBE_ERROR)
-        }
+    suspend fun reconcileAssetRowsLocally(pruneUnowned: Boolean): Int =
+        reconcileAssetRowsLocallyImpl(
+            if (pruneUnowned) buildOwnedScriptHexes() else emptySet(),
+            spentState = { txid, vout ->
+                runCatching { NativeBridge.outpointSpentState(txid, vout) }
+                    .getOrDefault(AssetSpentState.PROBE_ERROR)
+            },
+            pruneUnowned = pruneUnowned,
+        )
 
     /**
      * Testable core of [reconcileAssetRowsLocally]; same host-JVM constraint as the other
@@ -1750,13 +1754,20 @@ class AssetManager(
      * DELETES: an empty [ownedScriptHexes] means the lookup failed rather than that we own
      * nothing, so nothing is pruned; and a row with no scriptPubKey is a real holding we
      * cannot judge, never a phantom.
+     *
+     * [pruneUnowned] must be false while the wallet may still be re-deriving its history (a
+     * rescan from a floor): its address set then covers only the fresh derivation window, and a
+     * row at a higher index would read as unowned. SyncService passes its maintenance gate
+     * (`assetPruneGateOpen`, synced this session); other callers pass false. The spent-state
+     * pass always runs: it leaves a row unchanged while its funding tx is unknown (-1).
      */
     internal suspend fun reconcileAssetRowsLocallyImpl(
         ownedScriptHexes: Set<String>,
         spentState: suspend (String, Int) -> Int,
+        pruneUnowned: Boolean = true,
     ): Int {
         var pruned = 0
-        if (ownedScriptHexes.isNotEmpty()) {
+        if (pruneUnowned && ownedScriptHexes.isNotEmpty()) {
             val phantoms = utxoDao.getAllAssetUtxosNow().filter {
                 it.scriptPubKey.isNotEmpty() && it.scriptPubKey.toHex() !in ownedScriptHexes
             }
