@@ -282,8 +282,18 @@
     <string name="as_send_failed">Не удалось отправить</string>
     <string name="as_balance">Баланс: %1$s</string>
     <string name="as_quantity">Количество</string>
-    <string name="as_tokens">токены</string>
-    <string name="as_units">единицы</string>
+    <plurals name="as_tokens">
+        <item quantity="one">токен</item>
+        <item quantity="few">токена</item>
+        <item quantity="many">токенов</item>
+        <item quantity="other">токена</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">единица</item>
+        <item quantity="few">единицы</item>
+        <item quantity="many">единиц</item>
+        <item quantity="other">единицы</item>
+    </plurals>
     <string name="as_fee_note">Для комиссии сети при операциях с активами нужны DGB</string>
     <string name="as_err_recipient">Введите адрес получателя</string>
     <string name="as_err_quantity">Введите корректное количество</string>
@@ -296,7 +306,12 @@
     <string name="as_change_marker">Маркер сдачи актива</string>
     <string name="as_network_fee_est">Комиссия сети (оценка)</string>
     <string name="as_total_dgb">Итого DGB</string>
-    <string name="as_stays">%1$s %2$s останутся в вашем кошельке</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s останется в вашем кошельке</item>
+        <item quantity="few">%1$s %2$s останутся в вашем кошельке</item>
+        <item quantity="many">%1$s %2$s останутся в вашем кошельке</item>
+        <item quantity="other">%1$s %2$s останутся в вашем кошельке</item>
+    </plurals>
     <string name="ad_title">Сведения об активе</string>
     <string name="ad_balance">Баланс</string>
     <string name="ad_info">Информация об активе</string>

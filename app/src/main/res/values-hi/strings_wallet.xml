@@ -282,8 +282,14 @@
     <string name="as_send_failed">भेजना विफल</string>
     <string name="as_balance">बैलेंस: %1$s</string>
     <string name="as_quantity">मात्रा</string>
-    <string name="as_tokens">टोकन</string>
-    <string name="as_units">इकाइयाँ</string>
+    <plurals name="as_tokens">
+        <item quantity="one">टोकन</item>
+        <item quantity="other">टोकन</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">इकाई</item>
+        <item quantity="other">इकाइयाँ</item>
+    </plurals>
     <string name="as_fee_note">एसेट लेनदेन के लिए नेटवर्क शुल्क हेतु DGB आवश्यक है</string>
     <string name="as_err_recipient">प्राप्तकर्ता का पता दर्ज करें</string>
     <string name="as_err_quantity">मान्य मात्रा दर्ज करें</string>
@@ -296,7 +302,10 @@
     <string name="as_change_marker">एसेट-चेंज मार्कर</string>
     <string name="as_network_fee_est">नेटवर्क शुल्क (अनुमानित)</string>
     <string name="as_total_dgb">कुल DGB</string>
-    <string name="as_stays">%1$s %2$s आपके वॉलेट में रहेंगे</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s आपके वॉलेट में रहेगा</item>
+        <item quantity="other">%1$s %2$s आपके वॉलेट में रहेंगे</item>
+    </plurals>
     <string name="ad_title">एसेट विवरण</string>
     <string name="ad_balance">बैलेंस</string>
     <string name="ad_info">एसेट जानकारी</string>

@@ -282,8 +282,12 @@
     <string name="as_send_failed">送信に失敗しました</string>
     <string name="as_balance">残高: %1$s</string>
     <string name="as_quantity">数量</string>
-    <string name="as_tokens">トークン</string>
-    <string name="as_units">単位</string>
+    <plurals name="as_tokens">
+        <item quantity="other">トークン</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">単位</item>
+    </plurals>
     <string name="as_fee_note">アセット取引にはネットワーク手数料として DGB が必要です</string>
     <string name="as_err_recipient">送金先アドレスを入力してください</string>
     <string name="as_err_quantity">有効な数量を入力してください</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">アセットのお釣りマーカー</string>
     <string name="as_network_fee_est">ネットワーク手数料（概算）</string>
     <string name="as_total_dgb">DGB 合計</string>
-    <string name="as_stays">%1$s %2$s はウォレットに残ります</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s はウォレットに残ります</item>
+    </plurals>
     <string name="ad_title">アセットの詳細</string>
     <string name="ad_balance">残高</string>
     <string name="ad_info">アセット情報</string>

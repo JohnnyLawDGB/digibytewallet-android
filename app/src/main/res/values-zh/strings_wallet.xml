@@ -282,8 +282,12 @@
     <string name="as_send_failed">发送失败</string>
     <string name="as_balance">余额：%1$s</string>
     <string name="as_quantity">数量</string>
-    <string name="as_tokens">代币</string>
-    <string name="as_units">单位</string>
+    <plurals name="as_tokens">
+        <item quantity="other">代币</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">单位</item>
+    </plurals>
     <string name="as_fee_note">资产交易需要 DGB 支付网络手续费</string>
     <string name="as_err_recipient">请输入收款地址</string>
     <string name="as_err_quantity">请输入有效数量</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">资产找零标记</string>
     <string name="as_network_fee_est">网络手续费（估算）</string>
     <string name="as_total_dgb">DGB 总计</string>
-    <string name="as_stays">%1$s %2$s 将留在您的钱包中</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s 将留在您的钱包中</item>
+    </plurals>
     <string name="ad_title">资产详情</string>
     <string name="ad_balance">余额</string>
     <string name="ad_info">资产信息</string>

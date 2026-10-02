@@ -73,6 +73,54 @@ class LocaleResourceParityTest {
         assertTrue(gaps.joinToString("\n"), gaps.isEmpty())
     }
 
+    @Test fun `every language translates every plural`() {
+        val english = pluralsIn(File(resDir, "values/strings_wallet.xml")).keys
+
+        val gaps = translated.mapNotNull { entry ->
+            val file = File(resDir, "${qualifier(entry.tag)}/strings_wallet.xml")
+            if (!file.isFile) return@mapNotNull "${entry.tag}: no strings_wallet.xml"
+            val missing = english - pluralsIn(file).keys
+            if (missing.isEmpty()) null else "${entry.tag}: missing plurals ${missing.sorted()}"
+        }
+        assertTrue(gaps.joinToString("\n"), gaps.isEmpty())
+    }
+
+    /**
+     * A plural is chosen by the number, and each language has its own set of forms: Japanese one,
+     * English two, Russian four. A language given fewer forms than it uses falls back to `other`
+     * for the rest ("1 токены"); one given a form it never uses carries text nobody reads. Each
+     * language here gets exactly the forms CLDR gives it for whole numbers.
+     */
+    @Test fun `every plural has exactly the forms its language uses`() {
+        val all = AppLocale.SUPPORTED.map { it.tag }
+        assertEquals("a supported language has no plural forms listed here", all.toSet(), PLURAL_FORMS.keys)
+
+        val wrong = all.flatMap { tag ->
+            val dir = if (tag == "en") "values" else qualifier(tag)
+            pluralsIn(File(resDir, "$dir/strings_wallet.xml")).mapNotNull { (name, items) ->
+                val forms = items.keys
+                if (forms == PLURAL_FORMS.getValue(tag)) null
+                else "$tag: $name has $forms, expected ${PLURAL_FORMS.getValue(tag)}"
+            }
+        }
+        assertTrue(wrong.joinToString("\n"), wrong.isEmpty())
+    }
+
+    @Test fun `every plural form keeps the English format arguments`() {
+        val english = pluralsIn(File(resDir, "values/strings_wallet.xml"))
+        val wrong = AppLocale.SUPPORTED.flatMap { entry ->
+            val dir = if (entry.tag == "en") "values" else qualifier(entry.tag)
+            pluralsIn(File(resDir, "$dir/strings_wallet.xml")).flatMap { (name, items) ->
+                val expected = english[name]?.get("other")?.let(::formatArguments) ?: return@flatMap emptyList()
+                items.mapNotNull { (form, text) ->
+                    val found = formatArguments(text)
+                    if (found == expected) null else "${entry.tag}: $name/$form has $found, expected $expected"
+                }
+            }
+        }
+        assertTrue(wrong.joinToString("\n"), wrong.isEmpty())
+    }
+
     /**
      * Android 13+ builds its own per-app language screen from this file. A language in the app's
      * picker but absent here is unreachable from the OS screen, and the two disagree about what
@@ -89,6 +137,38 @@ class LocaleResourceParityTest {
             "locales_config and AppLocale.SUPPORTED disagree",
             AppLocale.SUPPORTED.map { it.tag }.toSet(),
             listed,
+        )
+    }
+
+    /** Plural name to its items, form to text. */
+    private fun pluralsIn(file: File): Map<String, Map<String, String>> =
+        Regex("""<plurals\s+name="([^"]+)"\s*>(.*?)</plurals>""", RegexOption.DOT_MATCHES_ALL)
+            .findAll(file.readText())
+            .associate { block ->
+                block.groupValues[1] to Regex("""<item\s+quantity="([^"]+)"\s*>(.*?)</item>""", RegexOption.DOT_MATCHES_ALL)
+                    .findAll(block.groupValues[2])
+                    .associate { it.groupValues[1] to it.groupValues[2] }
+            }
+
+    private fun formatArguments(text: String): List<String> =
+        Regex("""%(\d+\$)?[sdf]""").findAll(text).map { it.value }.sorted().toList()
+
+    private companion object {
+        /** CLDR plural categories reachable by a whole number, per supported language. */
+        val PLURAL_FORMS: Map<String, Set<String>> = mapOf(
+            "en" to setOf("one", "other"),
+            "hi" to setOf("one", "other"),
+            "zh" to setOf("other"),
+            "ja" to setOf("other"),
+            "pt-BR" to setOf("one", "many", "other"),
+            "es" to setOf("one", "many", "other"),
+            "id" to setOf("other"),
+            "vi" to setOf("other"),
+            "tr" to setOf("one", "other"),
+            "ru" to setOf("one", "few", "many", "other"),
+            "de" to setOf("one", "other"),
+            "fr" to setOf("one", "many", "other"),
+            "fil" to setOf("one", "other"),
         )
     }
 

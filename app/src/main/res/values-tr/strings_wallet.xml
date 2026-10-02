@@ -282,8 +282,14 @@
     <string name="as_send_failed">Gönderim başarısız</string>
     <string name="as_balance">Bakiye: %1$s</string>
     <string name="as_quantity">Miktar</string>
-    <string name="as_tokens">token</string>
-    <string name="as_units">birim</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="other">token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">birim</item>
+        <item quantity="other">birim</item>
+    </plurals>
     <string name="as_fee_note">Varlık işlemleri ağ ücreti için DGB gerektirir</string>
     <string name="as_err_recipient">Bir alıcı adresi girin</string>
     <string name="as_err_quantity">Geçerli bir miktar girin</string>
@@ -296,7 +302,10 @@
     <string name="as_change_marker">Varlık para üstü işaretçisi</string>
     <string name="as_network_fee_est">Ağ ücreti (tahmini)</string>
     <string name="as_total_dgb">Toplam DGB</string>
-    <string name="as_stays">%1$s %2$s cüzdanınızda kalır</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s cüzdanınızda kalır</item>
+        <item quantity="other">%1$s %2$s cüzdanınızda kalır</item>
+    </plurals>
     <string name="ad_title">Varlık ayrıntıları</string>
     <string name="ad_balance">Bakiye</string>
     <string name="ad_info">Varlık bilgisi</string>

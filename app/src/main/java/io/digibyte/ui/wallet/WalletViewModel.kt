@@ -14,6 +14,7 @@ import io.digibyte.core.db.dao.TransactionDao
 import io.digibyte.core.db.dao.WalletConfigDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.ui.components.TxKind
+import io.digibyte.ui.components.TypedAmount
 import io.digibyte.ui.components.classifyTxKind
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
@@ -81,10 +82,10 @@ class WalletViewModel @Inject constructor(
     private val _txKinds = MutableStateFlow<Map<String, TxKind>>(emptyMap())
     val txKinds: StateFlow<Map<String, TxKind>> = _txKinds.asStateFlow()
 
-    // Pre-formatted type-appropriate amount per non-DGB tx: DigiDollar → "$X.XX",
-    // DigiAsset → "N Tokens". Absent → the row shows the plain DGB amount.
-    private val _txTypedAmounts = MutableStateFlow<Map<String, String>>(emptyMap())
-    val txTypedAmounts: StateFlow<Map<String, String>> = _txTypedAmounts.asStateFlow()
+    // Type-appropriate amount per non-DGB tx: DigiDollar → "$X.XX", DigiAsset → the
+    // units moved and the asset's name, worded by the UI. Absent → the row shows DGB.
+    private val _txTypedAmounts = MutableStateFlow<Map<String, TypedAmount>>(emptyMap())
+    val txTypedAmounts: StateFlow<Map<String, TypedAmount>> = _txTypedAmounts.asStateFlow()
 
     /** Pull-to-refresh spinner state for the wallet screen. */
     private val _isRefreshing = MutableStateFlow(false)
@@ -945,15 +946,15 @@ class WalletViewModel @Inject constructor(
                         .getOrDefault(emptySet())
                     val typedAmounts = sorted.mapNotNull { tx ->
                         val isSend = tx.amount < 0
-                        val display: String? = when (kinds[tx.txid]) {
+                        val display: TypedAmount? = when (kinds[tx.txid]) {
                             TxKind.DIGIDOLLAR -> {
                                 val cents = runCatching { NativeBridge.digiDollarTxAmount(tx.txid, isSend) }
                                     .getOrDefault(0L)
-                                if (cents > 0L) formatDigiDollar(cents) else null
+                                if (cents > 0L) TypedAmount.Formatted(formatDigiDollar(cents)) else null
                             }
                             TxKind.DIGIASSET -> runCatching {
-                                assetManager.assetAmountLabelForTx(tx.txid, isSend, ownedScripts)
-                            }.getOrNull()
+                                assetManager.assetAmountForTx(tx.txid, isSend, ownedScripts)
+                            }.getOrNull()?.let { TypedAmount.Asset(it) }
                             else -> null
                         }
                         display?.let { tx.txid to it }

@@ -284,8 +284,16 @@
     <string name="as_send_failed">Error al enviar</string>
     <string name="as_balance">Saldo: %1$s</string>
     <string name="as_quantity">Cantidad</string>
-    <string name="as_tokens">tokens</string>
-    <string name="as_units">unidades</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="many">tokens</item>
+        <item quantity="other">tokens</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">unidad</item>
+        <item quantity="many">unidades</item>
+        <item quantity="other">unidades</item>
+    </plurals>
     <string name="as_fee_note">Las transacciones de activos requieren DGB para las comisiones de red</string>
     <string name="as_err_recipient">Introduce una dirección de destinatario</string>
     <string name="as_err_quantity">Introduce una cantidad válida</string>
@@ -298,7 +306,11 @@
     <string name="as_change_marker">Marcador de cambio del activo</string>
     <string name="as_network_fee_est">Comisión de red (est.)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s se quedan en tu billetera</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s se queda en tu billetera</item>
+        <item quantity="many">%1$s %2$s se quedan en tu billetera</item>
+        <item quantity="other">%1$s %2$s se quedan en tu billetera</item>
+    </plurals>
     <string name="ad_title">Detalles del activo</string>
     <string name="ad_balance">Saldo</string>
     <string name="ad_info">Información del activo</string>

@@ -37,6 +37,7 @@ import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
 import io.digibyte.ui.theme.DigiByteRed
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import io.digibyte.R
 
@@ -72,7 +73,6 @@ fun AssetSendScreen(
     val refusedRuleBound = stringResource(R.string.as_refused_rule_bound)
     val refusedUnknown = stringResource(R.string.as_refused_rules_unknown)
     // Hoisted: used inside onClick lambdas and non-composable string fallbacks.
-    val tokensLabel = stringResource(R.string.as_tokens)
     val errRecipient = stringResource(R.string.as_err_recipient)
     val errQuantity = stringResource(R.string.as_err_quantity)
     val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
@@ -110,6 +110,7 @@ fun AssetSendScreen(
             recipientAddress = approved.address,
             quantityText = approved.amountText,
             quantityUnits = approved.units,
+            quantityDivisibility = approved.divisibility,
             feeSats = approved.feeEstimateSats,
             plannedCost = planned?.takeIf { it.approval === approved }?.cost,
             sending = sendState is AssetViewModel.SendState.Sending,
@@ -331,6 +332,10 @@ fun AssetSendScreen(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
+            // What the quantity field names as it is typed, in whole units: worded by the
+            // field's suffix and costed by the preview below. Review reads the field itself.
+            val typedUnits = AssetQuantity.parse(quantityInput, decimals)
+
             OutlinedTextField(
                 value = quantityInput,
                 onValueChange = {
@@ -368,7 +373,7 @@ fun AssetSendScreen(
                 },
                 suffix = {
                     Text(
-                        text = ownedAsset.metadata?.symbol ?: tokensLabel,
+                        text = ownedAsset.metadata?.symbol ?: tokensNoun(typedUnits ?: 0L, decimals),
                         color = DigiByteAccent,
                         fontWeight = FontWeight.Bold
                     )
@@ -474,7 +479,7 @@ fun AssetSendScreen(
             // planned yet, so no asset-change marker is claimed here; the
             // confirmation shows the planned one.
             CostPreviewCard(
-                units = AssetQuantity.parse(quantityInput, decimals),
+                units = typedUnits,
                 ownedAsset = ownedAsset,
                 feeSats = estimatedFeeSat,
                 cost = null,
@@ -531,6 +536,8 @@ private fun AssetSendConfirmDialog(
     quantityText: String,
     /** The approved quantity in whole asset units: what the send receives. */
     quantityUnits: Long,
+    /** The divisibility the approval was read at: what [quantityText] is written at. */
+    quantityDivisibility: Int,
     feeSats: Long,
     /** The markers and fee of the transfer as planned for this approval. */
     plannedCost: AssetSendCost?,
@@ -569,7 +576,7 @@ private fun AssetSendConfirmDialog(
                 )
                 AssetConfirmRow(
                     label = stringResource(R.string.as_quantity),
-                    value = quantityText + " " + (asset.metadata?.symbol ?: stringResource(R.string.as_tokens)),
+                    value = quantityText + " " + (asset.metadata?.symbol ?: tokensNoun(quantityUnits, quantityDivisibility)),
                 )
                 // Full address — never truncated per security requirement
                 AssetConfirmRow(label = stringResource(R.string.send_to), value = recipientAddress)
@@ -722,7 +729,7 @@ private val DA_MARKER_SATS_UI: Long = io.digibyte.core.asset.send.DA_MARKER_SATS
  * perspective and complicates the display, so we surface gross outflow.
  *
  * [units] is the quantity in whole asset units, or null when there is none: on the form, what the
- * quantity field names as it is typed; in the confirmation, the approved units. It sets the
+ * quantity field names as it is typed; in the confirmation, the approved units. It words the
  * "stays in your wallet" line, which is about the balance, not the markers.
  */
 @Composable
@@ -777,9 +784,14 @@ private fun CostPreviewCard(
             // the send, worded for that quantity.
             if (keptUnits > 0L) {
                 Spacer(modifier = Modifier.height(6.dp))
-                val symbol = ownedAsset.metadata?.symbol ?: stringResource(R.string.as_units)
+                val symbol = ownedAsset.metadata?.symbol ?: unitsNoun(keptUnits, decimals)
                 Text(
-                    text = stringResource(R.string.as_stays, AssetQuantity.format(keptUnits, decimals), symbol),
+                    text = pluralStringResource(
+                        R.plurals.as_stays,
+                        assetPluralCount(keptUnits, decimals),
+                        AssetQuantity.format(keptUnits, decimals),
+                        symbol,
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent,
                 )

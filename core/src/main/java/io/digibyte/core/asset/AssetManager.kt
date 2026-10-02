@@ -57,6 +57,24 @@ internal fun formatAssetCount(count: Long, decimals: Int): String {
 }
 
 /**
+ * What an asset transaction moved, for display: [units] in the asset's smallest unit, its
+ * [decimals], and its symbol or name when the metadata cache has them. No words are chosen
+ * here — the noun for an asset with neither is the UI's, in the user's language and agreeing
+ * with the quantity.
+ */
+data class AssetTxAmount(
+    val units: Long,
+    val decimals: Int,
+    /** The asset's symbol, else its name; null when neither is known. */
+    val label: String?,
+    /** The asset's name, when known. */
+    val name: String?,
+) {
+    /** [units] in human units at [decimals]: (5000, 2) -> "50.00". */
+    val quantityText: String get() = formatAssetCount(units, decimals)
+}
+
+/**
  * Parse [io.digibyte.core.bridge.NativeBridge.getSpendableDigiByteUtxos] output
  * ("txidHex|vout|amountSats|scriptPubKeyHex" lines) into [UtxoEntity] rows for the
  * asset-send DGB-fee selector. Sovereign DGB UTXO source (native wallet->utxos),
@@ -2135,27 +2153,25 @@ class AssetManager(
     }
 
     /**
-     * Activity-row asset amount label: token count + the asset's real name/symbol
-     * ("20 CHANG") when the assetId is resolved and has metadata, else a bare count
-     * ("20 Tokens"). Applies the asset's divisibility (decimals) to the count for
-     * human units ("50.00 CHANG"). Sovereign for the count (from the tx); the
-     * name/decimals come from the already-resolved metadata cache the Assets screen
-     * uses. Null when the tx has no resolvable token amount (row falls back to DGB).
+     * Activity-row asset amount: the token count moved ([assetTokenCountForTx]) with the asset's
+     * divisibility, symbol and name from the already-resolved metadata cache the Assets screen
+     * uses. Sovereign for the count (from the tx). Null when the tx has no resolvable token amount
+     * (the row falls back to DGB). The UI words it ([AssetTxAmount]).
      */
-    suspend fun assetAmountLabelForTx(
+    suspend fun assetAmountForTx(
         txHashHex: String,
         isSend: Boolean,
         ownedScriptHexes: Set<String>? = null,
-    ): String? {
+    ): AssetTxAmount? {
         val count = assetTokenCountForTx(txHashHex, isSend, ownedScriptHexes) ?: return null
         val meta = utxoDao.getResolvedAssetIdForTx(txHashHex)?.let { metadataDao.getMetadata(it) }
-        val amountStr = formatAssetCount(count, meta?.decimals ?: 0)
-        val label = meta?.symbol?.takeIf { it.isNotBlank() } ?: meta?.name?.takeIf { it.isNotBlank() }
-        return when {
-            label != null -> "$amountStr $label"
-            count == 1L && (meta?.decimals ?: 0) == 0 -> "$amountStr Token"
-            else -> "$amountStr Tokens"
-        }
+        val name = meta?.name?.takeIf { it.isNotBlank() }
+        return AssetTxAmount(
+            units = count,
+            decimals = meta?.decimals ?: 0,
+            label = meta?.symbol?.takeIf { it.isNotBlank() } ?: name,
+            name = name,
+        )
     }
 
     /**
