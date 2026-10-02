@@ -89,12 +89,23 @@ object AssetTxQuantity {
     fun implicitChange(header: DecodedAssetHeader, inputUnits: Long?, outputCount: Int): Long? {
         if (header.operation == AssetOperation.ISSUANCE) return 0L
         if (inputUnits == null) return null
+        val assigned = assignedUnits(header) ?: return null
+        return (inputUnits - assigned).coerceAtLeast(0L)
+    }
+
+    /**
+     * Units the instructions CONSUME from the inputs: a fixed instruction its amount, a range
+     * instruction `(outputIndex + 1) * amount`, a burn instruction its amount. Null when a
+     * percent instruction makes the total depend on per-input balances. The input total at which
+     * [implicitChange] is exactly zero.
+     */
+    fun assignedUnits(header: DecodedAssetHeader): Long? {
         var assigned = 0L
         for (inst in header.transferInstructions) {
             if (inst.percent) return null
             assigned += if (inst.range) (inst.outputIndex.toLong() + 1L) * inst.amount else inst.amount
         }
-        return (inputUnits - assigned).coerceAtLeast(0L)
+        return assigned
     }
 
     /** The output index [implicitChange] lands on: the transaction's last output, verbatim.
