@@ -589,8 +589,13 @@
     <string name="as_rules_retry">फिर से जाँचें</string>
     <string name="as_refused_rule_bound">रोका गया: इस एसेट के ऐसे ट्रांसफ़र नियम हैं जिन्हें यह वॉलेट अभी पूरा नहीं कर सकता। कुछ भी नहीं भेजा गया।</string>
     <string name="as_refused_rules_unknown">रोका गया: इस एसेट के ट्रांसफ़र नियमों की पुष्टि नहीं हो सकी। कुछ भी नहीं भेजा गया।</string>
+    <string name="as_refused_holding_unverified">रोका गया: इस एसेट के सिक्कों में क्या है, यह अभी जाँचा नहीं जा सका। कुछ नहीं भेजा गया। ऑनलाइन होने पर फिर से कोशिश करें।</string>
+    <string name="as_refused_holding_unconfirmed">रोका गया: इस एसेट के किसी भी सिक्के के केवल इसी एसेट को रखने की पुष्टि नहीं हो सकी। कुछ नहीं भेजा गया।</string>
+    <string name="as_refused_spans_addresses">रोका गया: यह राशि एक से अधिक पतों पर है। एक बार में अधिकतम %1$s भेजा जा सकता है। कुछ नहीं भेजा गया।</string>
     <string name="rf_move_refused_rule_bound">%1$s वहीं रहा: इस एसेट के ऐसे ट्रांसफ़र नियम हैं जिन्हें यह वॉलेट अभी पूरा नहीं कर सकता</string>
     <string name="rf_move_refused_unknown">%1$s वहीं रहा: इसके ट्रांसफ़र नियमों की पुष्टि नहीं हो सकी</string>
+    <string name="rf_move_refused_holding_unverified">%1$s जहाँ है वहीं रहा: इसमें क्या है, यह अभी जाँचा नहीं जा सका। ऑनलाइन होने पर फिर से कोशिश करें</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s जहाँ है वहीं रहा: इसमें ठीक एक एसेट नहीं है, इसलिए इसे ले जाना सुरक्षित नहीं है</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">वॉलेट मिटाना पूरा नहीं हुआ। कुछ वॉलेट डेटा अब भी इस डिवाइस पर हो सकता है। ऐप को फिर से शुरू करें और दोबारा प्रयास करें।</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

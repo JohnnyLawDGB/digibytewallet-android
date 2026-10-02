@@ -20,10 +20,13 @@ data class PlannedOutput(val role: Role, val sats: Long) {
         RECIPIENT_MARKER,
         /** The OP_RETURN carrying the transfer instructions: vout 1, zero value. */
         ASSET_DATA,
-        /** The sender's asset-change marker: vout 2, present only when units come back. */
-        ASSET_CHANGE_MARKER,
-        /** Plain DGB change, last; present only above the change dust threshold. */
+        /** Plain DGB change to the source address, before the last output; present only above
+         *  the change dust threshold. No instruction targets it and it is not last, so the
+         *  protocol puts no asset on it. */
         DGB_CHANGE,
+        /** Always the last output, always to the source address: the asset change (when units
+         *  come back) and the destination of every unit the instructions do not assign. */
+        ASSET_CHANGE_MARKER,
     }
 }
 
@@ -39,6 +42,8 @@ data class AssetTransferPlan(
     val opReturnScript: ByteArray,
     /** The fee the size estimate asked for. */
     val estimatedFeeSats: Long,
+    /** The one script every asset input pays to; the DGB change and the last output pay it too. */
+    val sourceScript: ByteArray,
 ) {
     /** Asset inputs first (the instructions are read against them in order), then fee inputs. */
     val inputs: List<UtxoEntity> get() = assetInputs + dgbInputs
@@ -66,25 +71,56 @@ object AssetTransferPlanner {
         data class Refused(val message: String) : Result
     }
 
+    /**
+     * The asset's outputs grouped by the script they pay to, keeping only the groups that can
+     * cover [quantity] alone, largest first. A send draws its asset inputs from one group, so
+     * every unit the transfer does not assign ends where it started (see [plan]).
+     */
+    fun sourceGroups(assetUtxos: List<UtxoEntity>, quantity: Long): List<List<UtxoEntity>> =
+        assetUtxos
+            .groupBy { it.scriptPubKey.toHexString() }
+            .values
+            .filter { group -> group.sumOf { it.assetQuantity } >= quantity }
+            .sortedByDescending { group -> group.sumOf { it.assetQuantity } }
+
+    /** The most of the asset any single address holds: the largest amount one send can move. */
+    fun largestSingleSource(assetUtxos: List<UtxoEntity>): Long =
+        assetUtxos.groupBy { it.scriptPubKey.toHexString() }.values.maxOfOrNull { g -> g.sumOf { it.assetQuantity } } ?: 0L
+
+    /**
+     * Whether a plain coin may pay the fee of a send from [sourceScript]. A fee input's assets,
+     * if it had any, would join the leftover and arrive at the source address from elsewhere. So
+     * a fee coin is either at the source address itself, or was created by a transaction with no
+     * data output, which the protocol cannot have put an asset on. [parentHasDataOutput] is null
+     * when the creating transaction cannot be read; such a coin is not used.
+     */
+    fun feeCoinEligible(coin: UtxoEntity, sourceScript: ByteArray, parentHasDataOutput: Boolean?): Boolean =
+        coin.scriptPubKey.contentEquals(sourceScript) || parentHasDataOutput == false
+
+    /**
+     * Plan a send of [quantity] from [assetUtxos], which must all pay to one script (the source),
+     * with the network fee and markers paid from [dgbUtxos] (already limited to eligible coins).
+     *
+     * Output layout: recipient marker, OP_RETURN, optional DGB change to the source, and LAST an
+     * asset-change marker to the source, emitted on every send. The protocol gives every unit the
+     * instructions do not assign to the last output, so under this layout such units stay at the
+     * address they came from.
+     */
     fun plan(
         assetUtxos: List<UtxoEntity>,
         dgbUtxos: List<UtxoEntity>,
         quantity: Long,
         feePerKb: Long,
     ): Result {
-        // The markers budgeted are the markers emitted: the recipient's always, the
-        // asset-change marker only when the chosen asset inputs hold more than the send. The
-        // selector decides the second from its own asset selection, which is fee-independent,
-        // so every select below budgets the same markers the output list emits.
+        val sourceScript = assetUtxos.firstOrNull()?.scriptPubKey
+            ?: return Result.Refused("No UTXOs for this asset")
+        if (assetUtxos.any { !it.scriptPubKey.contentEquals(sourceScript) }) {
+            return Result.Refused("Asset inputs must come from one address")
+        }
+        // Both markers are emitted on every send: the recipient's and the last output's.
         val markerSats = DA_MARKER_SATS
+        val bothMarkers = 2 * markerSats
 
-        // First (bootstrap) selection with a conservative typical-shape
-        // fee. The asset-input set and the OP_RETURN are FEE-INDEPENDENT
-        // (they depend only on the transfer quantity), so this select
-        // reveals the stable parts of the shape; only the DGB fee inputs
-        // and DGB change vary with the fee. The bootstrap's DGB-input count
-        // merely seeds the convergence loop below — it is NOT
-        // assumed to be within one input of the final count.
         val bootstrapFeeSats = AssetFeeEstimator.estimateAssetTxFeeSats(
             assetInputCount = 1,
             dgbInputCount = 1,
@@ -97,8 +133,7 @@ object AssetTransferPlanner {
             dgbUtxos = dgbUtxos,
             assetNeeded = quantity,
             feeSats = bootstrapFeeSats,
-            markerOutputSats = markerSats,
-            assetChangeMarkerSats = markerSats,
+            markerOutputSats = bothMarkers,
         )
         val ok0 = when (bootstrap) {
             is AssetCoinSelector.Result.InsufficientAsset ->
@@ -108,51 +143,15 @@ object AssetTransferPlanner {
             is AssetCoinSelector.Result.Ok -> bootstrap
         }
 
-        val hasAssetChange = ok0.assetChangeQty > 0L
-
-        // Output layout. Recipient marker at vout 0, OP_RETURN at vout 1,
-        // optional asset-change marker at vout 2, optional DGB change at
-        // the next free vout. Transfer instructions reference these vouts
-        // directly so we have to commit to the layout before encoding.
+        // The instructions' size does not depend on which vout the change instruction names (an
+        // output index below 32 is always 5 bits), so the fee loop can run on a provisional
+        // encoding and the final one is built once the DGB change is known.
         val recipientVout = 0
-        val assetChangeVout = if (hasAssetChange) 2 else -1
+        val provisional = encodeInstructions(ok0, quantity, recipientVout, assetChangeVout = 3)
+            ?: return Result.Refused("Could not build transfer instructions")
 
-        // Transfer instructions, built from the bootstrap selection's asset side — identical
-        // across every select since asset selection is fee-independent.
-        val instructions = buildTransferInstructions(
-            assetInputs = ok0.assetInputs,
-            quantityToRecipient = quantity,
-            assetChangeQty = ok0.assetChangeQty,
-            recipientVout = recipientVout,
-            assetChangeVout = assetChangeVout,
-        ) ?: return Result.Refused("Could not build transfer instructions")
-
-        val opReturnScript = try {
-            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
-        } catch (e: Exception) {
-            return Result.Refused("Encode failed: ${e.message}")
-        }
-
-        // Now that we know the real OP_RETURN length and the concrete
-        // output count (recipient + optional asset-change + a DGB-change
-        // output we conservatively assume is present), compute the actual
-        // size-aware fee and RE-select with it. Value-output count for the
-        // estimate: recipient(1) + asset-change(0/1) + dgb-change(1).
-        //
-        // CONVERGENCE LOOP (not a single pass): the size-aware fee is a
-        // function of the DGB-input count, and the DGB-input count is a
-        // function of the fee — a wallet whose DGB side is fragmented into
-        // many small UTXOs can pull far more inputs when the fee jumps from
-        // the bootstrap estimate to the real one than the estimator's fixed
-        // +1-input margin covers. If we only re-selected once, the built tx
-        // would pay below the 100 sat/byte min relay for its (larger) actual
-        // vsize and never relay. So iterate select→estimate→select, feeding
-        // the actual DGB-input count back into the next fee estimate, until
-        // the count stops growing. DGB-input count is monotonically
-        // non-decreasing in the fee and bounded by dgbUtxos.size, so the
-        // loop is guaranteed to reach a fixed point; the cap is a safety net.
-        val estimateOutputCount = 1 + (if (hasAssetChange) 1 else 0) + 1
-        // dgbUtxos.size distinct growth steps at most, +2 slack. Never below 2.
+        // Value-output count for the estimate: recipient + DGB change (assumed) + last output.
+        val estimateOutputCount = 3
         val maxFeeIterations = dgbUtxos.size + 2
         var estimatedForDgbInputs = ok0.dgbInputs.size
         var feeSats = bootstrapFeeSats
@@ -162,7 +161,7 @@ object AssetTransferPlanner {
                 assetInputCount = ok0.assetInputs.size,
                 dgbInputCount = estimatedForDgbInputs,
                 outputCount = estimateOutputCount,
-                opReturnBytes = opReturnScript.size,
+                opReturnBytes = provisional.size,
                 feePerKb = feePerKb,
             )
             val selection = AssetCoinSelector.select(
@@ -170,8 +169,7 @@ object AssetTransferPlanner {
                 dgbUtxos = dgbUtxos,
                 assetNeeded = quantity,
                 feeSats = feeSats,
-                markerOutputSats = markerSats,
-                assetChangeMarkerSats = markerSats,
+                markerOutputSats = bothMarkers,
             )
             ok = when (selection) {
                 is AssetCoinSelector.Result.InsufficientAsset ->
@@ -180,25 +178,25 @@ object AssetTransferPlanner {
                     return Result.Refused("Not enough DGB for fee: need ${selection.required}, have ${selection.available}")
                 is AssetCoinSelector.Result.Ok -> selection
             }
-            // Converged: the fee we just charged was estimated for at least as
-            // many DGB inputs as the selection actually pulled (the estimator's
-            // internal +1 margin then still leaves a cushion), so the built tx
-            // pays >= min relay for its real vsize.
             if (ok.dgbInputs.size <= estimatedForDgbInputs) break
             estimatedForDgbInputs = ok.dgbInputs.size
         }
 
-        // The output list — order locked to match the vout references baked into the transfer
-        // instructions above. The asset side of `ok` is identical to `ok0` (fee-independent);
-        // only the DGB inputs / change reflect the real fee.
         val outputs = mutableListOf(
             PlannedOutput(PlannedOutput.Role.RECIPIENT_MARKER, markerSats),
             PlannedOutput(PlannedOutput.Role.ASSET_DATA, 0L),
         )
-        if (hasAssetChange) outputs += PlannedOutput(PlannedOutput.Role.ASSET_CHANGE_MARKER, markerSats)
         val dgbChange = ok.dgbChangeSats
         if (dgbChange > DGB_CHANGE_DUST_THRESHOLD) {
             outputs += PlannedOutput(PlannedOutput.Role.DGB_CHANGE, dgbChange)
+        }
+        outputs += PlannedOutput(PlannedOutput.Role.ASSET_CHANGE_MARKER, markerSats)
+        val lastVout = outputs.lastIndex
+
+        val opReturnScript = encodeInstructions(ok0, quantity, recipientVout, assetChangeVout = lastVout)
+            ?: return Result.Refused("Could not build transfer instructions")
+        if (opReturnScript.size != provisional.size) {
+            return Result.Refused("Transfer instructions changed size")
         }
 
         val plan = AssetTransferPlan(
@@ -207,15 +205,36 @@ object AssetTransferPlanner {
             outputs = outputs,
             opReturnScript = opReturnScript,
             estimatedFeeSats = feeSats,
+            sourceScript = sourceScript,
         )
-        // Invariant: what the signed transaction pays is the estimated fee plus at most a DGB
-        // remainder below the change dust threshold. Checked on the final values, not assumed.
         val beyondEstimate = plan.paidFeeSats - plan.estimatedFeeSats
         if (beyondEstimate !in 0L..DGB_CHANGE_DUST_THRESHOLD) {
             return Result.Refused("Fee does not match the transaction: pays ${plan.paidFeeSats}, estimated ${plan.estimatedFeeSats}")
         }
         return Result.Ready(plan)
     }
+
+    private fun encodeInstructions(
+        selection: AssetCoinSelector.Result.Ok,
+        quantity: Long,
+        recipientVout: Int,
+        assetChangeVout: Int,
+    ): ByteArray? {
+        val instructions = buildTransferInstructions(
+            assetInputs = selection.assetInputs,
+            quantityToRecipient = quantity,
+            assetChangeQty = selection.assetChangeQty,
+            recipientVout = recipientVout,
+            assetChangeVout = assetChangeVout,
+        ) ?: return null
+        return try {
+            DigiAssetEncoder.encodeTransferScript(version = 3, instructions = instructions)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
 
     /**
      * Build the DA TRANSFER instruction list for a single-recipient send

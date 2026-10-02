@@ -586,8 +586,13 @@
     <string name="as_rules_retry">再確認</string>
     <string name="as_refused_rule_bound">ブロックされました：このアセットには、このウォレットがまだ満たせない転送ルールがあります。何も送信されていません。</string>
     <string name="as_refused_rules_unknown">ブロックされました：このアセットの転送ルールを確認できませんでした。何も送信されていません。</string>
+    <string name="as_refused_holding_unverified">ブロックされました：このアセットのコインの中身を今は確認できませんでした。何も送信されていません。オンラインになってから再試行してください。</string>
+    <string name="as_refused_holding_unconfirmed">ブロックされました：このアセットのどのコインも、このアセットだけを保持していると確認できませんでした。何も送信されていません。</string>
+    <string name="as_refused_spans_addresses">ブロックされました：この数量は複数のアドレスに分かれています。1 回の送信で移動できるのは最大 %1$s です。何も送信されていません。</string>
     <string name="rf_move_refused_rule_bound">%1$s はそのまま残りました：このアセットには、このウォレットがまだ満たせない転送ルールがあります</string>
     <string name="rf_move_refused_unknown">%1$s はそのまま残りました：転送ルールを確認できませんでした</string>
+    <string name="rf_move_refused_holding_unverified">%1$s はそのままです：中身を今は確認できませんでした。オンラインになってから再試行してください</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s はそのままです：ちょうど 1 種類のアセットだけを保持していないため、移動は安全ではありません</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">ウォレットの消去は完了しませんでした。一部のウォレットデータがこの端末に残っている可能性があります。アプリを再起動して、もう一度お試しください。</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

@@ -431,6 +431,12 @@ class AssetManager(
      *  process-lifetime memory; production passes a persistent store so a proof survives a
      *  restart and the startup replay does not hold the output out again. */
     private val remainderProofs: RemainderProofStore = InMemoryRemainderProofStore(),
+    /** Where an asset send confirms what each of its asset inputs holds. Null means no source,
+     *  and then no asset send or move is built (see [io.digibyte.core.asset.send.AssetSendSelection]). */
+    private val assetStackSource: io.digibyte.core.asset.send.AssetStackSource? = null,
+    /** Seam for "does the transaction that created this txid have a data output". Null in
+     *  production, where it reads the transaction's outputs through the bridge. */
+    private val parentHasDataOutput: ((String) -> Boolean?)? = null,
 ) {
 
     init {
@@ -438,6 +444,26 @@ class AssetManager(
         // Only stored here, and it touches the bridge only when run, so constructing an
         // AssetManager still loads nothing.
         SpendPreflight.install { holdAssetOutputsBeforeSpend() }
+    }
+
+    /** Chooses and confirms an asset send's inputs. One per manager, so what it confirms or sets
+     *  aside is remembered for the life of the process. */
+    private val sendSelection: io.digibyte.core.asset.send.AssetSendSelection by lazy {
+        io.digibyte.core.asset.send.AssetSendSelection(
+            stackSource = assetStackSource,
+            parentHasDataOutput = parentHasDataOutput ?: ::nativeParentHasDataOutput,
+        )
+    }
+
+    /** What the DigiAsset indexer says [txid]:[vout] holds; "no answer" when there is no source. */
+    suspend fun assetStackOf(txid: String, vout: Int): io.digibyte.core.asset.send.StackLookup =
+        assetStackSource?.stackOf(txid, vout) ?: io.digibyte.core.asset.send.StackLookup.Unavailable
+
+    /** Whether the wallet's copy of [txid] has an OP_RETURN output; null when it cannot be read. */
+    private fun nativeParentHasDataOutput(txid: String): Boolean? {
+        val outs = runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull() ?: return null
+        if (outs.isEmpty()) return null
+        return outs.any { line -> line.split("|").getOrNull(2)?.lowercase()?.startsWith("6a") == true }
     }
 
     /** Walks a transfer back to its issuance, resuming rather than restarting. The hop
@@ -2328,19 +2354,29 @@ class AssetManager(
         val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
         if (assetUtxos.isEmpty()) return notPlanned(TxResult.Error("No UTXOs for asset $assetId"))
 
-        // 2-5. Selection, transfer instructions, the size-aware fee and the output values: the
-        //      pure half of the send, in AssetTransferPlanner so the numbers signed below are
-        //      testable on the JVM.
+        // 2-5. One source address, coins confirmed by the indexer to hold exactly this asset,
+        //      then selection, transfer instructions, the size-aware fee and the output values.
+        //      Every unit the transfer does not assign returns to the source address.
         val plan = when (
-            val planned = io.digibyte.core.asset.send.AssetTransferPlanner.plan(
+            val chosen = sendSelection.choose(
+                assetId = assetId,
                 assetUtxos = assetUtxos,
                 dgbUtxos = dgbUtxos,
                 quantity = quantity,
                 feePerKb = feePerKb,
             )
         ) {
-            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Refused -> return notPlanned(TxResult.Error(planned.message))
-            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Ready -> planned.plan
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Planned -> chosen.plan
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unverified ->
+                return notPlanned(TxResult.Refused(SendRefusal.ASSET_HOLDING_UNVERIFIED))
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unconfirmed -> {
+                android.util.Log.w("AssetManager", "asset send: no confirmed coins cover it; set aside ${sendSelection.setAsideOutpoints().size}")
+                return notPlanned(TxResult.Refused(SendRefusal.ASSET_HOLDING_UNCONFIRMED))
+            }
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.SpansAddresses ->
+                return notPlanned(TxResult.Refused(SendRefusal.ASSET_SPANS_ADDRESSES, limit = chosen.largestSingleSource))
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.NotPlanned ->
+                return notPlanned(TxResult.Error(chosen.message))
         }
         return AssetTransferPlanning.Planned(plan)
     }
@@ -2412,22 +2448,14 @@ class AssetManager(
                     outAmounts += out.sats
                     outScripts += plan.opReturnScript.toHex()
                 }
-                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_CHANGE_MARKER -> {
-                    // Use change index 1 to keep this distinct from the DGB change
-                    // address — small privacy win + makes the wallet's own asset
-                    // marker easier to identify in tx history.
-                    val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
-                        ?: return TxResult.Error("Could not derive asset-change address")
-                    outAddresses += assetChangeAddr
-                    outAmounts += out.sats
-                    outScripts += ""
-                }
+                // Both change outputs pay the script the asset inputs came from (raw script, empty
+                // address): the last output must be the source address so every unit the
+                // instructions do not assign stays there.
+                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_CHANGE_MARKER,
                 io.digibyte.core.asset.send.PlannedOutput.Role.DGB_CHANGE -> {
-                    val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
-                        ?: return TxResult.Error("Could not derive change address")
-                    outAddresses += changeAddr
+                    outAddresses += ""
                     outAmounts += out.sats
-                    outScripts += ""
+                    outScripts += plan.sourceScript.toHex()
                 }
             }
         }

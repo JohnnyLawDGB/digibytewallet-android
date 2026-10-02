@@ -724,8 +724,13 @@
     <string name="as_rules_retry">Check again</string>
     <string name="as_refused_rule_bound">Blocked: this asset has transfer rules this wallet cannot satisfy yet. Nothing was sent.</string>
     <string name="as_refused_rules_unknown">Blocked: this asset\'s transfer rules could not be verified. Nothing was sent.</string>
+    <string name="as_refused_holding_unverified">Blocked: what this asset\'s coins hold could not be checked right now. Nothing was sent. Try again when you are online.</string>
+    <string name="as_refused_holding_unconfirmed">Blocked: none of this asset\'s coins could be confirmed to hold only this asset. Nothing was sent.</string>
+    <string name="as_refused_spans_addresses">Blocked: this amount is held at more than one address. One send can move up to %1$s. Nothing was sent.</string>
     <string name="rf_move_refused_rule_bound">%1$s stayed where it is: this asset has transfer rules this wallet cannot satisfy yet</string>
     <string name="rf_move_refused_unknown">%1$s stayed where it is: its transfer rules could not be verified</string>
+    <string name="rf_move_refused_holding_unverified">%1$s stayed where it is: what it holds could not be checked right now. Try again when you are online</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s stayed where it is: it does not hold exactly one asset, so moving it is not safe</string>
     <!-- Wallet wipe: the ONE message shown when a wipe could not be verified. The PIN stays in
          place when this is shown. Wipe wording, like the seed-phrase warnings, needs a native
          speaker in every language before it can be called done. -->

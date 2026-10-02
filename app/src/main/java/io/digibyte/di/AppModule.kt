@@ -388,6 +388,7 @@ object AppModule {
         persister: io.digibyte.core.WalletTxPersister,
         provenanceStore: io.digibyte.core.asset.ProvenanceStore,
         @ApplicationContext context: Context,
+        okHttpClient: OkHttpClient,
     ): AssetManager = AssetManager(
         utxoDao = utxoDao,
         transactionDao = transactionDao,
@@ -400,6 +401,9 @@ object AppModule {
         // Proofs that an asset transaction's last output carries no units, kept across restarts
         // so the startup replay does not hold that output out again.
         remainderProofs = io.digibyte.core.asset.PrefsRemainderProofStore(context),
+        // What each asset input holds is read from our own indexer, over the injected client
+        // (Tor when enabled) with the DigiScope pins added by the client itself.
+        assetStackSource = io.digibyte.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
     )
 
     @Provides @Singleton

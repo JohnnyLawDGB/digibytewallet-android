@@ -594,8 +594,13 @@
     <string name="as_rules_retry">Comprobar de nuevo</string>
     <string name="as_refused_rule_bound">Bloqueado: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir. No se envió nada.</string>
     <string name="as_refused_rules_unknown">Bloqueado: no se pudieron verificar las reglas de transferencia de este activo. No se envió nada.</string>
+    <string name="as_refused_holding_unverified">Bloqueado: no se pudo comprobar ahora qué contienen las monedas de este activo. No se envió nada. Inténtalo de nuevo cuando estés en línea.</string>
+    <string name="as_refused_holding_unconfirmed">Bloqueado: no se pudo confirmar que ninguna moneda de este activo contenga solo este activo. No se envió nada.</string>
+    <string name="as_refused_spans_addresses">Bloqueado: esta cantidad está en más de una dirección. Un envío puede mover hasta %1$s. No se envió nada.</string>
     <string name="rf_move_refused_rule_bound">%1$s se quedó donde estaba: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir</string>
     <string name="rf_move_refused_unknown">%1$s se quedó donde estaba: no se pudieron verificar sus reglas de transferencia</string>
+    <string name="rf_move_refused_holding_unverified">%1$s se quedó donde está: no se pudo comprobar ahora qué contiene. Inténtalo de nuevo cuando estés en línea</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s se quedó donde está: no contiene exactamente un activo, así que moverlo no es seguro</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">El borrado de la billetera no se completó. Es posible que algunos datos de la billetera sigan en este dispositivo. Reinicia la app e inténtalo de nuevo.</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

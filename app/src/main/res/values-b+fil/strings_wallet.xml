@@ -589,8 +589,13 @@
     <string name="as_rules_retry">Suriin muli</string>
     <string name="as_refused_rule_bound">Na-block: may mga panuntunan sa paglilipat ang asset na ito na hindi pa kayang tuparin ng wallet na ito. Walang naipadala.</string>
     <string name="as_refused_rules_unknown">Na-block: hindi ma-verify ang mga panuntunan sa paglilipat ng asset na ito. Walang naipadala.</string>
+    <string name="as_refused_holding_unverified">Na-block: hindi ma-check ngayon kung ano ang laman ng mga coin ng asset na ito. Walang naipadala. Subukan ulit kapag online ka.</string>
+    <string name="as_refused_holding_unconfirmed">Na-block: walang coin ng asset na ito ang makumpirmang ito lang na asset ang laman. Walang naipadala.</string>
+    <string name="as_refused_spans_addresses">Na-block: nasa higit sa isang address ang halagang ito. Hanggang %1$s lang ang maililipat ng isang padala. Walang naipadala.</string>
     <string name="rf_move_refused_rule_bound">%1$s ay nanatili sa kinaroroonan nito: may mga panuntunan sa paglilipat ang asset na ito na hindi pa kayang tuparin ng wallet na ito</string>
     <string name="rf_move_refused_unknown">%1$s ay nanatili sa kinaroroonan nito: hindi ma-verify ang mga panuntunan sa paglilipat nito</string>
+    <string name="rf_move_refused_holding_unverified">Nanatili ang %1$s kung nasaan ito: hindi ma-check ngayon kung ano ang laman nito. Subukan ulit kapag online ka</string>
+    <string name="rf_move_refused_holding_mismatch">Nanatili ang %1$s kung nasaan ito: hindi eksaktong isang asset ang laman nito, kaya hindi ligtas na ilipat ito</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Hindi nakumpleto ang pagbura ng wallet. Maaaring may data ng wallet na nananatili sa device na ito. I-restart ang app at subukang muli.</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

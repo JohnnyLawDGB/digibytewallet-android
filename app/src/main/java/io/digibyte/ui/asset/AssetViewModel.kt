@@ -343,7 +343,7 @@ class AssetViewModel @Inject constructor(
     private fun TxResult.toSendState(): SendState = when (this) {
         is TxResult.Success -> SendState.Success(txid)
         is TxResult.Error -> SendState.Failure(message)
-        is TxResult.Refused -> SendState.Refused(reason)
+        is TxResult.Refused -> SendState.Refused(reason, limit)
     }
 
     /** Decimals of [asset] as the wallet holds them: the scale its quantities are typed and shown at. */
@@ -425,7 +425,7 @@ class AssetViewModel @Inject constructor(
         object Sending : SendState()
         data class Success(val txid: String) : SendState()
         data class Failure(val message: String) : SendState()
-        data class Refused(val reason: SendRefusal) : SendState()
+        data class Refused(val reason: SendRefusal, val limit: Long? = null) : SendState()
     }
 
     companion object {

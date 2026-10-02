@@ -597,8 +597,13 @@
     <string name="as_rules_retry">Erneut prüfen</string>
     <string name="as_refused_rule_bound">Blockiert: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann. Es wurde nichts gesendet.</string>
     <string name="as_refused_rules_unknown">Blockiert: Die Übertragungsregeln dieses Assets konnten nicht überprüft werden. Es wurde nichts gesendet.</string>
+    <string name="as_refused_holding_unverified">Blockiert: Der Inhalt der Coins dieses Assets konnte gerade nicht geprüft werden. Es wurde nichts gesendet. Versuche es erneut, wenn du online bist.</string>
+    <string name="as_refused_holding_unconfirmed">Blockiert: Für keinen Coin dieses Assets ließ sich bestätigen, dass er nur dieses Asset enthält. Es wurde nichts gesendet.</string>
+    <string name="as_refused_spans_addresses">Blockiert: Dieser Betrag liegt auf mehr als einer Adresse. Ein Versand kann höchstens %1$s bewegen. Es wurde nichts gesendet.</string>
     <string name="rf_move_refused_rule_bound">%1$s bleibt, wo es ist: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann</string>
     <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
+    <string name="rf_move_refused_holding_unverified">%1$s bleibt, wo es ist: Sein Inhalt konnte gerade nicht geprüft werden. Versuche es erneut, wenn du online bist</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s bleibt, wo es ist: Es enthält nicht genau ein Asset, daher ist ein Verschieben nicht sicher</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Das Löschen der Wallet wurde nicht abgeschlossen. Einige Wallet-Daten befinden sich möglicherweise noch auf diesem Gerät. Starten Sie die App neu und versuchen Sie es erneut.</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

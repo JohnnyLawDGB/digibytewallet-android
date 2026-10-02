@@ -572,8 +572,13 @@
     <string name="as_rules_retry">Vérifier à nouveau</string>
     <string name="as_refused_rule_bound">Bloqué : cet actif a des règles de transfert que ce portefeuille ne peut pas encore respecter. Rien n\'a été envoyé.</string>
     <string name="as_refused_rules_unknown">Bloqué : les règles de transfert de cet actif n\'ont pas pu être vérifiées. Rien n\'a été envoyé.</string>
+    <string name="as_refused_holding_unverified">Bloqué : le contenu des pièces de cet actif n\'a pas pu être vérifié pour le moment. Rien n\'a été envoyé. Réessayez une fois en ligne.</string>
+    <string name="as_refused_holding_unconfirmed">Bloqué : aucune pièce de cet actif n\'a pu être confirmée comme ne contenant que cet actif. Rien n\'a été envoyé.</string>
+    <string name="as_refused_spans_addresses">Bloqué : ce montant est réparti sur plusieurs adresses. Un envoi peut déplacer au maximum %1$s. Rien n\'a été envoyé.</string>
     <string name="rf_move_refused_rule_bound">%1$s est resté en place : cet actif a des règles de transfert que ce portefeuille ne peut pas encore respecter</string>
     <string name="rf_move_refused_unknown">%1$s est resté en place : ses règles de transfert n\'ont pas pu être vérifiées</string>
+    <string name="rf_move_refused_holding_unverified">%1$s est resté en place : son contenu n\'a pas pu être vérifié pour le moment. Réessayez une fois en ligne</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s est resté en place : il ne contient pas exactement un actif, le déplacer n\'est donc pas sûr</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">L\'effacement du portefeuille n\'a pas abouti. Certaines données du portefeuille sont peut-être encore sur cet appareil. Redémarrez l\'application et réessayez.</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

@@ -586,8 +586,13 @@
     <string name="as_rules_retry">Kiểm tra lại</string>
     <string name="as_refused_rule_bound">Đã chặn: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng. Chưa gửi gì cả.</string>
     <string name="as_refused_rules_unknown">Đã chặn: không thể xác minh quy tắc chuyển của tài sản này. Chưa gửi gì cả.</string>
+    <string name="as_refused_holding_unverified">Đã chặn: hiện không thể kiểm tra các đồng của tài sản này chứa gì. Chưa gửi gì cả. Hãy thử lại khi có kết nối mạng.</string>
+    <string name="as_refused_holding_unconfirmed">Đã chặn: không xác nhận được đồng nào của tài sản này chỉ chứa riêng tài sản này. Chưa gửi gì cả.</string>
+    <string name="as_refused_spans_addresses">Đã chặn: số lượng này nằm ở nhiều hơn một địa chỉ. Một lần gửi có thể chuyển tối đa %1$s. Chưa gửi gì cả.</string>
     <string name="rf_move_refused_rule_bound">%1$s vẫn ở nguyên chỗ cũ: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng</string>
     <string name="rf_move_refused_unknown">%1$s vẫn ở nguyên chỗ cũ: không thể xác minh quy tắc chuyển của nó</string>
+    <string name="rf_move_refused_holding_unverified">%1$s vẫn ở nguyên chỗ: hiện không thể kiểm tra nó chứa gì. Hãy thử lại khi có kết nối mạng</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s vẫn ở nguyên chỗ: nó không chứa đúng một tài sản nên di chuyển không an toàn</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Việc xóa ví chưa hoàn tất. Một số dữ liệu ví có thể vẫn còn trên thiết bị này. Hãy khởi động lại ứng dụng và thử lại.</string>
     <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown

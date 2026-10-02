@@ -36,8 +36,9 @@ class AssetTransferPlanTest {
     private fun AssetTransferPlan.roles() = outputs.map { it.role }
     private fun AssetTransferPlan.sats(role: PlannedOutput.Role) = outputs.single { it.role == role }.sats
 
-    /** The whole balance of an asset held in one output: no units come back, so one marker is
-     *  emitted, and inputs minus that marker minus the DGB change is the fee. */
+    /** The whole balance of an asset held in one output: no units come back, but both markers are
+     *  emitted (the recipient's, and the last output back to the source), and inputs minus both
+     *  markers minus the DGB change is the fee. */
     @Test fun an_exact_send_pays_the_fee_it_estimated() {
         val plan = ready(
             AssetTransferPlanner.plan(
@@ -49,20 +50,23 @@ class AssetTransferPlanTest {
         )
 
         assertEquals(
-            listOf(PlannedOutput.Role.RECIPIENT_MARKER, PlannedOutput.Role.ASSET_DATA, PlannedOutput.Role.DGB_CHANGE),
+            listOf(
+                PlannedOutput.Role.RECIPIENT_MARKER, PlannedOutput.Role.ASSET_DATA,
+                PlannedOutput.Role.DGB_CHANGE, PlannedOutput.Role.ASSET_CHANGE_MARKER,
+            ),
             plan.roles(),
         )
         val inputs = plan.inputs.sumOf { it.satoshis }
         val change = plan.sats(PlannedOutput.Role.DGB_CHANGE)
         assertEquals(
-            "inputs - one marker - change must equal the fee",
+            "inputs - two markers - change must equal the fee",
             plan.estimatedFeeSats,
-            inputs - DA_MARKER_SATS - change,
+            inputs - 2 * DA_MARKER_SATS - change,
         )
         assertEquals(plan.estimatedFeeSats, plan.paidFeeSats)
     }
 
-    /** The asset input alone covers the fee and the marker, so no fee input is pulled; the
+    /** The asset input alone covers the fee and the markers, so no fee input is pulled; the
      *  change still carries everything but the fee. */
     @Test fun an_exact_send_with_no_fee_input_pays_the_fee_it_estimated() {
         val plan = ready(
@@ -78,31 +82,35 @@ class AssetTransferPlanTest {
         assertEquals(plan.estimatedFeeSats, plan.paidFeeSats)
     }
 
-    /** Two fee coins that cover the fee for their own size, with a remainder below the change
-     *  dust threshold. The remainder goes to the fee — and it is the only thing the send pays
-     *  beyond its estimate. At 100 sat/byte the shape (one asset input, two fee inputs, no asset
-     *  change) estimates 69,600 sat, so 60,000 + 10,000 leaves 400; a second marker budgeted on
-     *  top would need 75,600 and the send would be refused. */
+    /** A fee coin that covers the fee and both markers with a remainder below the change dust
+     *  threshold. The remainder goes to the fee, it is the only thing the send pays beyond its
+     *  estimate, and no DGB change output is emitted. The coin is found by search (the planner's
+     *  bootstrap estimate is more conservative than its final one, so a hand-sized coin is
+     *  fragile). */
     @Test fun an_exact_send_whose_remainder_is_dust_pays_only_that_remainder() {
-        val plan = ready(
-            AssetTransferPlanner.plan(
+        // Two fee coins, as in the original shape: the planner's bootstrap estimate sits above
+        // its final one by more than the dust threshold, so a single coin always leaves change.
+        val plan = (50_000L..120_000L step 50L).asSequence().mapNotNull { total ->
+            (AssetTransferPlanner.plan(
                 assetUtxos = listOf(assetUtxo("a", DA_MARKER_SATS, 100)),
-                dgbUtxos = listOf(dgbUtxo("d1", 60_000), dgbUtxo("d2", 10_000)),
+                dgbUtxos = listOf(dgbUtxo("d1", total - 10_000L), dgbUtxo("d2", 10_000L)),
                 quantity = 100,
                 feePerKb = feePerKb,
-            )
-        )
+            ) as? AssetTransferPlanner.Result.Ready)?.plan
+        }.firstOrNull { p -> p.outputs.none { it.role == PlannedOutput.Role.DGB_CHANGE } }
+            ?: run { fail("no coin value gave a dust remainder"); throw AssertionError() }
 
-        assertEquals(2, plan.dgbInputs.size)
-        assertEquals(listOf(PlannedOutput.Role.RECIPIENT_MARKER, PlannedOutput.Role.ASSET_DATA), plan.roles())
-        val remainder = plan.inputs.sumOf { it.satoshis } - DA_MARKER_SATS - plan.estimatedFeeSats
+        assertEquals(
+            listOf(PlannedOutput.Role.RECIPIENT_MARKER, PlannedOutput.Role.ASSET_DATA, PlannedOutput.Role.ASSET_CHANGE_MARKER),
+            plan.roles(),
+        )
+        val remainder = plan.paidFeeSats - plan.estimatedFeeSats
         assertTrue("remainder $remainder", remainder in 0..DGB_CHANGE_DUST_THRESHOLD)
-        assertEquals(plan.estimatedFeeSats + remainder, plan.paidFeeSats)
     }
 
-    /** GUARD (passes before and after): a partial send emits the recipient marker and the
-     *  asset-change marker, budgets both, and pays the fee it estimated. */
-    @Test fun guard_a_partial_send_emits_and_budgets_both_markers() {
+    /** A partial send emits the recipient marker and the last output back to the source, budgets
+     *  both, and pays the fee it estimated. */
+    @Test fun a_partial_send_emits_and_budgets_both_markers() {
         val plan = ready(
             AssetTransferPlanner.plan(
                 assetUtxos = listOf(assetUtxo("a", DA_MARKER_SATS, 100)),
@@ -115,7 +123,7 @@ class AssetTransferPlanTest {
         assertEquals(
             listOf(
                 PlannedOutput.Role.RECIPIENT_MARKER, PlannedOutput.Role.ASSET_DATA,
-                PlannedOutput.Role.ASSET_CHANGE_MARKER, PlannedOutput.Role.DGB_CHANGE,
+                PlannedOutput.Role.DGB_CHANGE, PlannedOutput.Role.ASSET_CHANGE_MARKER,
             ),
             plan.roles(),
         )
