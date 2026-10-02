@@ -630,7 +630,9 @@ class AssetManager(
                 "owned=${scriptHex in owned} -> ${if (keep) "COUNT" else "drop"}")
             if (!keep) continue
             qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
-            cnt[assetId] = (cnt[assetId] ?: 0) + 1
+            // "UTXOs Held" counts outputs that hold units. A send's plain change is stored as
+            // an asset row with quantity 0 and is held like any other; it holds none of the asset.
+            if (row.assetQuantity > 0L) cnt[assetId] = (cnt[assetId] ?: 0) + 1
         }
         val result = qty.mapValues { (id, q) -> HeldBalance(q, cnt[id] ?: 0) }
         android.util.Log.i("AssetManager",
