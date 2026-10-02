@@ -424,6 +424,10 @@ fun AppNavigation(
                             )
                         }
                     },
+                    // Cancel on the "not routed through Tor" notice: leave the Market unloaded.
+                    onCancel = {
+                        if (!navController.popBackStack()) navController.navigate(Screen.Wallet.route)
+                    },
                 )
             }
 
