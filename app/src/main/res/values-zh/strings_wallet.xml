@@ -600,4 +600,27 @@
     <string name="history_rebuild_notice_title">正在重建交易历史</string>
     <string name="history_rebuild_notice_body">此更新会从区块链一次性重建您的交易历史。您的币和恢复助记词不受影响。余额会随着扫描进度逐步显示，扫描完成后即可使用发送功能。</string>
     <string name="history_rebuild_deferred">您待处理的发送确认后，将重建您的交易历史。</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">链上找到的输出</string>
+    <string name="reconcile_found_not_compared">链上找到，未比对</string>
+    <string name="reconcile_spendable">可花费</string>
+    <string name="reconcile_wallet_spendable">钱包可花费余额</string>
+    <string name="reconcile_matches_wallet">与钱包的可花费余额一致。</string>
+    <string name="reconcile_does_not_match_wallet">与钱包的可花费余额不一致 — 见下文。</string>
+    <string name="reconcile_held_asset">为 DigiAsset 保留</string>
+    <string name="reconcile_held_unknown">保留：资产状态未知</string>
+    <string name="reconcile_proven_plain">普通 DGB，重启后可花费</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar 输出</string>
+    <string name="reconcile_immature">未成熟（尚不可花费）</string>
+    <string name="reconcile_pending">钱包中待确认</string>
+    <string name="reconcile_not_in_wallet">不在此钱包中</string>
+    <string name="reconcile_wallet_only">在钱包中，节点未报告</string>
+    <string name="reconcile_no_missing_funds">未发现缺失的资金。</string>
+    <string name="reconcile_txs_already_in_wallet">已在钱包中的交易</string>
+    <string name="reconcile_txs_not_added">未添加的交易（不属于此钱包）</string>
+    <string name="reconcile_stage_comparing">正在与钱包比对…</string>
+    <string name="market_tor_notice_title">市场不经过 Tor 路由</string>
+    <string name="market_tor_notice_body">市场不经过 Tor 路由；该网站将看到您的 IP 地址。</string>
+    <string name="market_tor_notice_continue">继续</string>
 </resources>

@@ -603,4 +603,27 @@
     <string name="history_rebuild_notice_title">लेनदेन इतिहास फिर से बनाया जा रहा है</string>
     <string name="history_rebuild_notice_body">यह अपडेट आपका लेनदेन इतिहास ब्लॉकचेन से एक बार फिर से बनाता है। आपके सिक्के और रिकवरी वाक्यांश अपरिवर्तित रहते हैं। स्कैन के आगे बढ़ने के साथ बैलेंस भरता जाएगा, और इसके पूरा होने पर भेजें उपलब्ध होगा।</string>
     <string name="history_rebuild_deferred">आपका लंबित भेजा गया लेनदेन पुष्ट होने के बाद आपका लेनदेन इतिहास फिर से बनाया जाएगा।</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">ब्लॉकचेन पर मिले आउटपुट</string>
+    <string name="reconcile_found_not_compared">ब्लॉकचेन पर मिले, तुलना नहीं की गई</string>
+    <string name="reconcile_spendable">खर्च योग्य</string>
+    <string name="reconcile_wallet_spendable">वॉलेट का खर्च योग्य बैलेंस</string>
+    <string name="reconcile_matches_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल खाता है।</string>
+    <string name="reconcile_does_not_match_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल नहीं खाता — नीचे देखें।</string>
+    <string name="reconcile_held_asset">DigiAsset के लिए रोका गया</string>
+    <string name="reconcile_held_unknown">रोका गया: एसेट की स्थिति अज्ञात</string>
+    <string name="reconcile_proven_plain">साधारण DGB, रीस्टार्ट के बाद खर्च योग्य</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar आउटपुट</string>
+    <string name="reconcile_immature">अपरिपक्व (अभी खर्च योग्य नहीं)</string>
+    <string name="reconcile_pending">वॉलेट में लंबित</string>
+    <string name="reconcile_not_in_wallet">इस वॉलेट में नहीं</string>
+    <string name="reconcile_wallet_only">वॉलेट में है, नोड ने रिपोर्ट नहीं किया</string>
+    <string name="reconcile_no_missing_funds">कोई छूटा हुआ फंड नहीं मिला।</string>
+    <string name="reconcile_txs_already_in_wallet">लेनदेन जो पहले से वॉलेट में हैं</string>
+    <string name="reconcile_txs_not_added">लेनदेन जो जोड़े नहीं गए (इस वॉलेट के नहीं)</string>
+    <string name="reconcile_stage_comparing">वॉलेट से तुलना की जा रही है…</string>
+    <string name="market_tor_notice_title">मार्केट Tor के ज़रिए रूट नहीं होता</string>
+    <string name="market_tor_notice_body">मार्केट Tor के ज़रिए रूट नहीं होता; साइट आपका IP पता देखेगी।</string>
+    <string name="market_tor_notice_continue">जारी रखें</string>
 </resources>

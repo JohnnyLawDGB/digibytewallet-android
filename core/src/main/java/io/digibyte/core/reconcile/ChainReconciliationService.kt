@@ -44,6 +44,12 @@ class ChainReconciliationService(
     private val appContext: android.content.Context? = null,
 ) {
 
+    companion object {
+        /** The stage shown while the scan compares what it found with the wallet. Named so the
+         *  screen can show it in the user's language. */
+        const val STAGE_COMPARING = "Comparing with the wallet…"
+    }
+
     sealed class State {
         object Idle : State()
         data class Scanning(val stage: String, val progress: Float = 0f) : State()
@@ -202,7 +208,7 @@ class ChainReconciliationService(
 
             // Classify AFTER the import, so what this scan added is classified as the wallet now
             // holds it. Then try to prove the held remainders zero.
-            _state.value = State.Scanning("Comparing with the wallet…", progress = 1f)
+            _state.value = State.Scanning(STAGE_COMPARING, progress = 1f)
             var partition = classify(utxos)
             if (partition != null && assetManager != null) {
                 partition = proveHeldRemainders(

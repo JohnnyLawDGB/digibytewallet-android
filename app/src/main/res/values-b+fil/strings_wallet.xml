@@ -603,4 +603,27 @@
     <string name="history_rebuild_notice_title">Binubuo muli ang kasaysayan ng transaksyon</string>
     <string name="history_rebuild_notice_body">Minsang binubuo muli ng update na ito ang kasaysayan ng transaksyon mo mula sa blockchain. Hindi ginagalaw ang mga coin at recovery phrase mo. Mapupuno ang balanse habang humahabol ang scan, at magagamit ang Magpadala kapag natapos ito.</string>
     <string name="history_rebuild_deferred">Bubuuin muli ang kasaysayan ng transaksyon mo kapag nakumpirma na ang nakabinbing padala mo.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Mga output na nakita sa blockchain</string>
+    <string name="reconcile_found_not_compared">Nakita sa blockchain, hindi naikumpara</string>
+    <string name="reconcile_spendable">Magagastos</string>
+    <string name="reconcile_wallet_spendable">Magagastos na balanse ng wallet</string>
+    <string name="reconcile_matches_wallet">Tugma sa magagastos na balanse ng wallet.</string>
+    <string name="reconcile_does_not_match_wallet">Hindi tugma sa magagastos na balanse ng wallet — tingnan sa ibaba.</string>
+    <string name="reconcile_held_asset">Nakalaan para sa isang DigiAsset</string>
+    <string name="reconcile_held_unknown">Nakalaan: hindi alam ang estado ng asset</string>
+    <string name="reconcile_proven_plain">Karaniwang DGB, magagastos pagkatapos mag-restart</string>
+    <string name="reconcile_digidollar_outputs">Mga output ng DigiDollar</string>
+    <string name="reconcile_immature">Hindi pa hinog (hindi pa magagastos)</string>
+    <string name="reconcile_pending">Nakabinbin sa wallet</string>
+    <string name="reconcile_not_in_wallet">Wala sa wallet na ito</string>
+    <string name="reconcile_wallet_only">Nasa wallet, hindi iniulat ng node</string>
+    <string name="reconcile_no_missing_funds">Walang nakitang nawawalang pondo.</string>
+    <string name="reconcile_txs_already_in_wallet">Mga transaksyong nasa wallet na</string>
+    <string name="reconcile_txs_not_added">Mga transaksyong hindi naidagdag (hindi sa wallet na ito)</string>
+    <string name="reconcile_stage_comparing">Ikinukumpara sa wallet…</string>
+    <string name="market_tor_notice_title">Hindi dumadaan sa Tor ang Market</string>
+    <string name="market_tor_notice_body">Hindi dumadaan sa Tor ang Market; makikita ng site ang iyong IP address.</string>
+    <string name="market_tor_notice_continue">Magpatuloy</string>
 </resources>

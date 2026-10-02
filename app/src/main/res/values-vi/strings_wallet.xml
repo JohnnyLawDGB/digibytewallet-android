@@ -600,4 +600,27 @@
     <string name="history_rebuild_notice_title">Đang dựng lại lịch sử giao dịch</string>
     <string name="history_rebuild_notice_body">Bản cập nhật này dựng lại lịch sử giao dịch của bạn từ blockchain một lần. Tiền và cụm từ khôi phục của bạn không bị ảnh hưởng. Số dư sẽ được cập nhật dần khi quá trình quét tiến triển, và chức năng Gửi sẽ khả dụng khi quét xong.</string>
     <string name="history_rebuild_deferred">Lịch sử giao dịch của bạn sẽ được dựng lại sau khi giao dịch gửi đang chờ của bạn được xác nhận.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Đầu ra tìm thấy trên blockchain</string>
+    <string name="reconcile_found_not_compared">Tìm thấy trên blockchain, chưa so sánh</string>
+    <string name="reconcile_spendable">Có thể chi tiêu</string>
+    <string name="reconcile_wallet_spendable">Số dư có thể chi tiêu của ví</string>
+    <string name="reconcile_matches_wallet">Khớp với số dư có thể chi tiêu của ví.</string>
+    <string name="reconcile_does_not_match_wallet">Không khớp với số dư có thể chi tiêu của ví — xem bên dưới.</string>
+    <string name="reconcile_held_asset">Được giữ cho một DigiAsset</string>
+    <string name="reconcile_held_unknown">Được giữ: trạng thái tài sản không rõ</string>
+    <string name="reconcile_proven_plain">DGB thông thường, có thể chi tiêu sau khi khởi động lại</string>
+    <string name="reconcile_digidollar_outputs">Đầu ra DigiDollar</string>
+    <string name="reconcile_immature">Chưa trưởng thành (chưa thể chi tiêu)</string>
+    <string name="reconcile_pending">Đang chờ trong ví</string>
+    <string name="reconcile_not_in_wallet">Không có trong ví này</string>
+    <string name="reconcile_wallet_only">Có trong ví, nút không báo cáo</string>
+    <string name="reconcile_no_missing_funds">Không tìm thấy tiền bị thiếu.</string>
+    <string name="reconcile_txs_already_in_wallet">Giao dịch đã có trong ví</string>
+    <string name="reconcile_txs_not_added">Giao dịch không được thêm (không thuộc ví này)</string>
+    <string name="reconcile_stage_comparing">Đang so sánh với ví…</string>
+    <string name="market_tor_notice_title">Chợ không đi qua Tor</string>
+    <string name="market_tor_notice_body">Chợ không đi qua Tor; trang web sẽ thấy địa chỉ IP của bạn.</string>
+    <string name="market_tor_notice_continue">Tiếp tục</string>
 </resources>

@@ -740,4 +740,27 @@
     <string name="history_rebuild_notice_title">Rebuilding transaction history</string>
     <string name="history_rebuild_notice_body">This update rebuilds your transaction history from the blockchain once. Your coins and recovery phrase are untouched. The balance fills in as the scan catches up, and Send is available when it finishes.</string>
     <string name="history_rebuild_deferred">Your transaction history will be rebuilt after your pending send confirms.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Outputs found on chain</string>
+    <string name="reconcile_found_not_compared">Found on chain, not compared</string>
+    <string name="reconcile_spendable">Spendable</string>
+    <string name="reconcile_wallet_spendable">Wallet spendable balance</string>
+    <string name="reconcile_matches_wallet">Matches the wallet\'s spendable balance.</string>
+    <string name="reconcile_does_not_match_wallet">Does not match the wallet\'s spendable balance — see below.</string>
+    <string name="reconcile_held_asset">Held for a DigiAsset</string>
+    <string name="reconcile_held_unknown">Held: asset state unknown</string>
+    <string name="reconcile_proven_plain">Plain DGB, spendable after restart</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar outputs</string>
+    <string name="reconcile_immature">Immature (not yet spendable)</string>
+    <string name="reconcile_pending">Pending in the wallet</string>
+    <string name="reconcile_not_in_wallet">Not in this wallet</string>
+    <string name="reconcile_wallet_only">In the wallet, not reported by the node</string>
+    <string name="reconcile_no_missing_funds">No missing funds found.</string>
+    <string name="reconcile_txs_already_in_wallet">Transactions already in wallet</string>
+    <string name="reconcile_txs_not_added">Transactions not added (not this wallet\'s)</string>
+    <string name="reconcile_stage_comparing">Comparing with the wallet…</string>
+    <string name="market_tor_notice_title">Market is not routed through Tor</string>
+    <string name="market_tor_notice_body">Market is not routed through Tor; the site will see your IP address.</string>
+    <string name="market_tor_notice_continue">Continue</string>
 </resources>

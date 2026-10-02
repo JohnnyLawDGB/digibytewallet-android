@@ -600,4 +600,27 @@
     <string name="history_rebuild_notice_title">取引履歴を再構築しています</string>
     <string name="history_rebuild_notice_body">このアップデートでは、取引履歴をブロックチェーンから一度だけ再構築します。コインとリカバリーフレーズには影響しません。残高はスキャンの進行に合わせて反映され、完了すると送金が利用できるようになります。</string>
     <string name="history_rebuild_deferred">保留中の送金が承認された後に、取引履歴が再構築されます。</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">ブロックチェーン上で見つかったアウトプット</string>
+    <string name="reconcile_found_not_compared">ブロックチェーン上で見つかりました（比較なし）</string>
+    <string name="reconcile_spendable">使用可能</string>
+    <string name="reconcile_wallet_spendable">ウォレットの使用可能残高</string>
+    <string name="reconcile_matches_wallet">ウォレットの使用可能残高と一致しています。</string>
+    <string name="reconcile_does_not_match_wallet">ウォレットの使用可能残高と一致しません — 下記を参照してください。</string>
+    <string name="reconcile_held_asset">DigiAsset 用に確保</string>
+    <string name="reconcile_held_unknown">確保：アセットの状態は不明</string>
+    <string name="reconcile_proven_plain">通常の DGB（再起動後に使用可能）</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar アウトプット</string>
+    <string name="reconcile_immature">未成熟（まだ使用できません）</string>
+    <string name="reconcile_pending">ウォレット内で保留中</string>
+    <string name="reconcile_not_in_wallet">このウォレットにはありません</string>
+    <string name="reconcile_wallet_only">ウォレットにありますが、ノードから報告されていません</string>
+    <string name="reconcile_no_missing_funds">不足している資金は見つかりませんでした。</string>
+    <string name="reconcile_txs_already_in_wallet">すでにウォレットにある取引</string>
+    <string name="reconcile_txs_not_added">追加されなかった取引（このウォレットのものではありません）</string>
+    <string name="reconcile_stage_comparing">ウォレットと比較しています…</string>
+    <string name="market_tor_notice_title">マーケットは Tor を経由しません</string>
+    <string name="market_tor_notice_body">マーケットは Tor を経由しません。サイトにはあなたの IP アドレスが見えます。</string>
+    <string name="market_tor_notice_continue">続行</string>
 </resources>

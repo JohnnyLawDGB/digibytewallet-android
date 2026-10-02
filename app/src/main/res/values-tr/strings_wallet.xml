@@ -603,4 +603,27 @@
     <string name="history_rebuild_notice_title">İşlem geçmişi yeniden oluşturuluyor</string>
     <string name="history_rebuild_notice_body">Bu güncelleme işlem geçmişinizi blok zincirinden bir kez yeniden oluşturur. Coinleriniz ve kurtarma ifadeniz etkilenmez. Tarama ilerledikçe bakiye dolar ve tarama bittiğinde Gönder kullanılabilir olur.</string>
     <string name="history_rebuild_deferred">İşlem geçmişiniz, bekleyen gönderiminiz onaylandıktan sonra yeniden oluşturulacak.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Blok zincirinde bulunan çıktılar</string>
+    <string name="reconcile_found_not_compared">Blok zincirinde bulundu, karşılaştırılmadı</string>
+    <string name="reconcile_spendable">Harcanabilir</string>
+    <string name="reconcile_wallet_spendable">Cüzdanın harcanabilir bakiyesi</string>
+    <string name="reconcile_matches_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşiyor.</string>
+    <string name="reconcile_does_not_match_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşmiyor — aşağıya bakın.</string>
+    <string name="reconcile_held_asset">Bir DigiAsset için tutuluyor</string>
+    <string name="reconcile_held_unknown">Tutuluyor: varlık durumu bilinmiyor</string>
+    <string name="reconcile_proven_plain">Normal DGB, yeniden başlattıktan sonra harcanabilir</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar çıktıları</string>
+    <string name="reconcile_immature">Olgunlaşmamış (henüz harcanamaz)</string>
+    <string name="reconcile_pending">Cüzdanda beklemede</string>
+    <string name="reconcile_not_in_wallet">Bu cüzdanda değil</string>
+    <string name="reconcile_wallet_only">Cüzdanda var, düğüm tarafından bildirilmedi</string>
+    <string name="reconcile_no_missing_funds">Eksik bakiye bulunamadı.</string>
+    <string name="reconcile_txs_already_in_wallet">Zaten cüzdanda olan işlemler</string>
+    <string name="reconcile_txs_not_added">Eklenmeyen işlemler (bu cüzdana ait değil)</string>
+    <string name="reconcile_stage_comparing">Cüzdanla karşılaştırılıyor…</string>
+    <string name="market_tor_notice_title">Pazar Tor üzerinden geçmiyor</string>
+    <string name="market_tor_notice_body">Pazar Tor üzerinden geçmiyor; site IP adresinizi görecek.</string>
+    <string name="market_tor_notice_continue">Devam</string>
 </resources>

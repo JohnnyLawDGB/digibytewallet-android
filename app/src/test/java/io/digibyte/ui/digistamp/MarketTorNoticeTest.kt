@@ -22,7 +22,10 @@ class MarketTorNoticeTest {
     }
 
     @Test fun `the notice says what the site sees`() {
-        assertTrue(MarketTorNotice.BODY.contains("not routed through Tor"))
-        assertTrue(MarketTorNotice.BODY.contains("IP address"))
+        val english = java.io.File("src/main/res/values/strings_wallet.xml").readText()
+        val body = Regex("""<string name="market_tor_notice_body">(.*?)</string>""").find(english)?.groupValues?.get(1)
+        assertTrue("no market_tor_notice_body", body != null)
+        assertTrue(body!!.contains("not routed through Tor"))
+        assertTrue(body.contains("IP address"))
     }
 }

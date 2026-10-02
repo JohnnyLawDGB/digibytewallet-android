@@ -600,4 +600,27 @@
     <string name="history_rebuild_notice_title">Membangun ulang riwayat transaksi</string>
     <string name="history_rebuild_notice_body">Pembaruan ini membangun ulang riwayat transaksi Anda dari blockchain satu kali. Koin dan frasa pemulihan Anda tidak diubah. Saldo akan terisi seiring pemindaian berjalan, dan Kirim tersedia setelah pemindaian selesai.</string>
     <string name="history_rebuild_deferred">Riwayat transaksi Anda akan dibangun ulang setelah pengiriman Anda yang tertunda dikonfirmasi.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Output yang ditemukan di blockchain</string>
+    <string name="reconcile_found_not_compared">Ditemukan di blockchain, tidak dibandingkan</string>
+    <string name="reconcile_spendable">Dapat dibelanjakan</string>
+    <string name="reconcile_wallet_spendable">Saldo dompet yang dapat dibelanjakan</string>
+    <string name="reconcile_matches_wallet">Cocok dengan saldo dompet yang dapat dibelanjakan.</string>
+    <string name="reconcile_does_not_match_wallet">Tidak cocok dengan saldo dompet yang dapat dibelanjakan — lihat di bawah.</string>
+    <string name="reconcile_held_asset">Ditahan untuk DigiAsset</string>
+    <string name="reconcile_held_unknown">Ditahan: status aset tidak diketahui</string>
+    <string name="reconcile_proven_plain">DGB biasa, dapat dibelanjakan setelah mulai ulang</string>
+    <string name="reconcile_digidollar_outputs">Output DigiDollar</string>
+    <string name="reconcile_immature">Belum matang (belum dapat dibelanjakan)</string>
+    <string name="reconcile_pending">Menunggu di dompet</string>
+    <string name="reconcile_not_in_wallet">Tidak ada di dompet ini</string>
+    <string name="reconcile_wallet_only">Ada di dompet, tidak dilaporkan oleh node</string>
+    <string name="reconcile_no_missing_funds">Tidak ditemukan dana yang hilang.</string>
+    <string name="reconcile_txs_already_in_wallet">Transaksi yang sudah ada di dompet</string>
+    <string name="reconcile_txs_not_added">Transaksi yang tidak ditambahkan (bukan milik dompet ini)</string>
+    <string name="reconcile_stage_comparing">Membandingkan dengan dompet…</string>
+    <string name="market_tor_notice_title">Pasar tidak melewati Tor</string>
+    <string name="market_tor_notice_body">Pasar tidak melewati Tor; situs akan melihat alamat IP Anda.</string>
+    <string name="market_tor_notice_continue">Lanjutkan</string>
 </resources>

@@ -611,4 +611,27 @@
     <string name="history_rebuild_notice_title">Transaktionsverlauf wird neu aufgebaut</string>
     <string name="history_rebuild_notice_body">Dieses Update baut Ihren Transaktionsverlauf einmalig aus der Blockchain neu auf. Ihre Coins und Ihre Wiederherstellungsphrase bleiben unberührt. Das Guthaben füllt sich, während der Scan aufholt, und Senden ist verfügbar, sobald er abgeschlossen ist.</string>
     <string name="history_rebuild_deferred">Ihr Transaktionsverlauf wird neu aufgebaut, sobald Ihre ausstehende Sendung bestätigt ist.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Auf der Blockchain gefundene Outputs</string>
+    <string name="reconcile_found_not_compared">Auf der Blockchain gefunden, nicht verglichen</string>
+    <string name="reconcile_spendable">Ausgabefähig</string>
+    <string name="reconcile_wallet_spendable">Ausgabefähiges Guthaben der Wallet</string>
+    <string name="reconcile_matches_wallet">Stimmt mit dem ausgabefähigen Guthaben der Wallet überein.</string>
+    <string name="reconcile_does_not_match_wallet">Stimmt nicht mit dem ausgabefähigen Guthaben der Wallet überein — siehe unten.</string>
+    <string name="reconcile_held_asset">Für ein DigiAsset zurückgehalten</string>
+    <string name="reconcile_held_unknown">Zurückgehalten: Asset-Status unbekannt</string>
+    <string name="reconcile_proven_plain">Einfache DGB, nach einem Neustart ausgabefähig</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar-Outputs</string>
+    <string name="reconcile_immature">Unreif (noch nicht ausgabefähig)</string>
+    <string name="reconcile_pending">In der Wallet ausstehend</string>
+    <string name="reconcile_not_in_wallet">Nicht in dieser Wallet</string>
+    <string name="reconcile_wallet_only">In der Wallet, vom Knoten nicht gemeldet</string>
+    <string name="reconcile_no_missing_funds">Keine fehlenden Guthaben gefunden.</string>
+    <string name="reconcile_txs_already_in_wallet">Transaktionen bereits in der Wallet</string>
+    <string name="reconcile_txs_not_added">Nicht hinzugefügte Transaktionen (nicht von dieser Wallet)</string>
+    <string name="reconcile_stage_comparing">Abgleich mit der Wallet…</string>
+    <string name="market_tor_notice_title">Markt wird nicht über Tor geleitet</string>
+    <string name="market_tor_notice_body">Markt wird nicht über Tor geleitet; die Website sieht Ihre IP-Adresse.</string>
+    <string name="market_tor_notice_continue">Weiter</string>
 </resources>

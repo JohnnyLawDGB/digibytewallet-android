@@ -94,11 +94,11 @@ interface DigistampEntryPoint {
 private fun MarketTorNoticeDialog(onContinue: () -> Unit, onCancel: () -> Unit) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onCancel,
-        title = { androidx.compose.material3.Text(MarketTorNotice.TITLE) },
-        text = { androidx.compose.material3.Text(MarketTorNotice.BODY) },
+        title = { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.market_tor_notice_title)) },
+        text = { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.market_tor_notice_body)) },
         confirmButton = {
             androidx.compose.material3.TextButton(onClick = onContinue) {
-                androidx.compose.material3.Text(MarketTorNotice.CONTINUE)
+                androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.market_tor_notice_continue))
             }
         },
         dismissButton = {

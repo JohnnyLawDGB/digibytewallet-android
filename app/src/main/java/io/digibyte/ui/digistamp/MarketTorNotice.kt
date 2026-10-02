@@ -8,12 +8,10 @@ package io.digibyte.ui.digistamp
  * the screen asks before anything loads. A "Continue" holds for the rest of the session (the
  * process); "Cancel" leaves the screen and asks again next time.
  *
- * The text is English only for now; it is listed for localisation.
+ * The text is in the string resources, in every language: `market_tor_notice_title`,
+ * `market_tor_notice_body` and `market_tor_notice_continue`.
  */
 object MarketTorNotice {
-    const val TITLE = "Market is not routed through Tor"
-    const val BODY = "Market is not routed through Tor; the site will see your IP address."
-    const val CONTINUE = "Continue"
 
     @Volatile private var acceptedThisSession = false
 

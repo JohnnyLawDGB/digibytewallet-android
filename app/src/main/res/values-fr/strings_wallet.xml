@@ -586,4 +586,27 @@
     <string name="history_rebuild_notice_title">Reconstruction de l\'historique des transactions</string>
     <string name="history_rebuild_notice_body">Cette mise à jour reconstruit une fois votre historique des transactions à partir de la blockchain. Vos pièces et votre phrase de récupération ne sont pas modifiées. Le solde se complète à mesure que l\'analyse progresse, et Envoyer est disponible une fois qu\'elle est terminée.</string>
     <string name="history_rebuild_deferred">Votre historique des transactions sera reconstruit une fois votre envoi en attente confirmé.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Sorties trouvées sur la blockchain</string>
+    <string name="reconcile_found_not_compared">Trouvé sur la blockchain, non comparé</string>
+    <string name="reconcile_spendable">Dépensable</string>
+    <string name="reconcile_wallet_spendable">Solde dépensable du portefeuille</string>
+    <string name="reconcile_matches_wallet">Correspond au solde dépensable du portefeuille.</string>
+    <string name="reconcile_does_not_match_wallet">Ne correspond pas au solde dépensable du portefeuille — voir ci-dessous.</string>
+    <string name="reconcile_held_asset">Retenu pour un DigiAsset</string>
+    <string name="reconcile_held_unknown">Retenu : état de l\'actif inconnu</string>
+    <string name="reconcile_proven_plain">DGB ordinaire, dépensable après redémarrage</string>
+    <string name="reconcile_digidollar_outputs">Sorties DigiDollar</string>
+    <string name="reconcile_immature">Immature (pas encore dépensable)</string>
+    <string name="reconcile_pending">En attente dans le portefeuille</string>
+    <string name="reconcile_not_in_wallet">Pas dans ce portefeuille</string>
+    <string name="reconcile_wallet_only">Dans le portefeuille, non signalé par le nœud</string>
+    <string name="reconcile_no_missing_funds">Aucun fonds manquant trouvé.</string>
+    <string name="reconcile_txs_already_in_wallet">Transactions déjà dans le portefeuille</string>
+    <string name="reconcile_txs_not_added">Transactions non ajoutées (pas de ce portefeuille)</string>
+    <string name="reconcile_stage_comparing">Comparaison avec le portefeuille…</string>
+    <string name="market_tor_notice_title">Le Marché ne passe pas par Tor</string>
+    <string name="market_tor_notice_body">Le Marché ne passe pas par Tor ; le site verra votre adresse IP.</string>
+    <string name="market_tor_notice_continue">Continuer</string>
 </resources>

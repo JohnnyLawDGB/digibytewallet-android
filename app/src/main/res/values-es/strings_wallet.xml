@@ -608,4 +608,27 @@
     <string name="history_rebuild_notice_title">Reconstruyendo el historial de transacciones</string>
     <string name="history_rebuild_notice_body">Esta actualización reconstruye tu historial de transacciones desde la blockchain una sola vez. Tus monedas y tu frase de recuperación no se modifican. El saldo se irá completando a medida que avance el escaneo, y Enviar estará disponible cuando termine.</string>
     <string name="history_rebuild_deferred">Tu historial de transacciones se reconstruirá cuando se confirme tu envío pendiente.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Salidas encontradas en la blockchain</string>
+    <string name="reconcile_found_not_compared">Encontrado en la blockchain, sin comparar</string>
+    <string name="reconcile_spendable">Gastable</string>
+    <string name="reconcile_wallet_spendable">Saldo gastable de la billetera</string>
+    <string name="reconcile_matches_wallet">Coincide con el saldo gastable de la billetera.</string>
+    <string name="reconcile_does_not_match_wallet">No coincide con el saldo gastable de la billetera — ver abajo.</string>
+    <string name="reconcile_held_asset">Retenido para un DigiAsset</string>
+    <string name="reconcile_held_unknown">Retenido: estado del activo desconocido</string>
+    <string name="reconcile_proven_plain">DGB normal, gastable tras reiniciar</string>
+    <string name="reconcile_digidollar_outputs">Salidas de DigiDollar</string>
+    <string name="reconcile_immature">Inmaduro (aún no gastable)</string>
+    <string name="reconcile_pending">Pendiente en la billetera</string>
+    <string name="reconcile_not_in_wallet">No está en esta billetera</string>
+    <string name="reconcile_wallet_only">En la billetera, no informado por el nodo</string>
+    <string name="reconcile_no_missing_funds">No se encontraron fondos faltantes.</string>
+    <string name="reconcile_txs_already_in_wallet">Transacciones ya en la billetera</string>
+    <string name="reconcile_txs_not_added">Transacciones no añadidas (no son de esta billetera)</string>
+    <string name="reconcile_stage_comparing">Comparando con la billetera…</string>
+    <string name="market_tor_notice_title">El Mercado no pasa por Tor</string>
+    <string name="market_tor_notice_body">El Mercado no pasa por Tor; el sitio verá tu dirección IP.</string>
+    <string name="market_tor_notice_continue">Continuar</string>
 </resources>
