@@ -6,7 +6,6 @@ import io.digibyte.core.asset.send.DA_MARKER_SATS
 import io.digibyte.core.asset.send.PlannedOutput
 import io.digibyte.core.db.entity.UtxoEntity
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -14,10 +13,10 @@ import org.junit.Test
 /**
  * The confirmation's markers and total are the planned transfer's, run through the real planner.
  *
- * The cases are the two ways the displayed balance and the plan part: a coin holding exactly the
- * amount sent while the balance is larger (no change marker, though the balance says units stay),
- * and a "whole balance" send whose coins hold more than the balance shows (a change marker the
- * balance would not predict).
+ * The planner emits the asset-change marker on every send, as the last output, back to the source
+ * address: the protocol gives every unit the instructions do not assign to the last output. So the
+ * confirmation shows that marker and counts it in the total whether or not units come back — for a
+ * coin spent whole as much as for a coin holding more than the amount sent.
  */
 class AssetSendCostTest {
 
@@ -39,16 +38,18 @@ class AssetSendCostTest {
             is AssetTransferPlanner.Result.Refused -> { fail("refused: ${r.message}"); throw AssertionError() }
         }
 
-    @Test fun `a coin holding exactly the amount sent plans no change marker, whatever the balance says`() {
-        // The displayed balance is 2 (two coins of 1); the send of 1 spends one whole coin.
+    @Test fun `a coin holding exactly the amount sent still plans the change marker, last, and counts it`() {
+        // The displayed balance is 2 (two coins of 1); the send of 1 spends one whole coin. No units
+        // come back, and the last output is still the source's marker.
         val plan = plan(listOf(assetCoin('a', 1), assetCoin('b', 1)), units = 1)
         val cost = AssetSendCost.of(plan)
 
-        assertFalse("a change marker for a coin spent whole", cost.hasChangeMarker)
-        assertEquals(0L, cost.changeMarkerSats)
+        assertEquals("the last output is not the asset-change marker", PlannedOutput.Role.ASSET_CHANGE_MARKER, plan.outputs.last().role)
+        assertTrue("no change marker for a coin spent whole", cost.hasChangeMarker)
+        assertEquals(DA_MARKER_SATS, cost.changeMarkerSats)
         assertEquals(DA_MARKER_SATS, cost.recipientMarkerSats)
         assertEquals(plan.paidFeeSats, cost.feeSats)
-        assertEquals(DA_MARKER_SATS + plan.paidFeeSats, cost.totalSats)
+        assertEquals(2 * DA_MARKER_SATS + plan.paidFeeSats, cost.totalSats)
     }
 
     @Test fun `coins holding more than the balance shows plan the change marker and count it in the total`() {
@@ -70,5 +71,17 @@ class AssetSendCostTest {
         }.sumOf { it.sats }
         assertEquals(markers + plan.paidFeeSats, cost.totalSats)
         assertEquals(plan.outputs.any { it.role == PlannedOutput.Role.ASSET_CHANGE_MARKER }, cost.hasChangeMarker)
+    }
+
+    @Test fun `before a plan exists the estimate names the same markers as every plan`() {
+        for ((coins, units) in listOf(
+            listOf(assetCoin('a', 1), assetCoin('b', 1)) to 1L,
+            listOf(assetCoin('c', 5)) to 1L,
+            listOf(assetCoin('d', 3), assetCoin('e', 2)) to 4L,
+        )) {
+            val plan = plan(coins, units)
+            assertEquals("the form's estimate and the plan differ in markers",
+                AssetSendCost.of(plan), AssetSendCost.beforePlan(plan.paidFeeSats))
+        }
     }
 }

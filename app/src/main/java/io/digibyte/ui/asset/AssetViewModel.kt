@@ -89,9 +89,9 @@ class RequestedAssetQuantity {
 
 /**
  * The DGB an asset send moves, read from the transfer as planned: the markers it emits and the fee
- * it pays. The planner emits an asset-change marker only when the coins it selected hold more than
- * the amount sent — which the displayed balance, a sum over every coin, cannot tell — so the
- * confirmation's marker lines and total come from here, from the same plan as its fee.
+ * it pays. The confirmation's marker lines and total come from here, from the same plan as its fee,
+ * rather than from the displayed balance. (The planner emits the asset-change marker on every send,
+ * as the last output to the source address; [changeMarkerSats] still reads it from the plan.)
  */
 data class AssetSendCost(
     /** The recipient's marker. */
@@ -105,6 +105,14 @@ data class AssetSendCost(
     val totalSats: Long get() = recipientMarkerSats + changeMarkerSats + feeSats
 
     companion object {
+        /** Before anything is planned (the form): the two markers every send emits — the
+         *  recipient's and the last output's — and the estimated fee. */
+        fun beforePlan(estimatedFeeSats: Long): AssetSendCost = AssetSendCost(
+            recipientMarkerSats = io.digibyte.core.asset.send.DA_MARKER_SATS,
+            changeMarkerSats = io.digibyte.core.asset.send.DA_MARKER_SATS,
+            feeSats = estimatedFeeSats,
+        )
+
         fun of(plan: AssetTransferPlan): AssetSendCost = AssetSendCost(
             recipientMarkerSats = plan.outputs.filter { it.role == PlannedOutput.Role.RECIPIENT_MARKER }.sumOf { it.sats },
             changeMarkerSats = plan.outputs.filter { it.role == PlannedOutput.Role.ASSET_CHANGE_MARKER }.sumOf { it.sats },

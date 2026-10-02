@@ -11,11 +11,10 @@ import java.io.File
  * planned — the same plan whose fee the confirmation shows and the send signs — never from the
  * displayed balance.
  *
- * The planner adds an asset-change marker only when the coins it selects hold more than the amount
- * sent. The displayed balance is the sum over every coin, so comparing the amount with it listed a
- * marker for a send from a coin holding exactly that amount, and could leave one out when the
- * displayed balance and the planner's coins disagree. The arithmetic is tested on the JVM in
- * AssetSendCostTest against the real planner; this pins that the screen uses it.
+ * Comparing the amount with the displayed balance (a sum over every coin) once decided the
+ * asset-change marker; the planner's own outputs decide it. The planner now emits that marker on
+ * every send, so before a plan exists the form shows both markers. The arithmetic is tested on the
+ * JVM in AssetSendCostTest against the real planner; this pins that the screen uses it.
  */
 class AssetCostFromPlanGateTest {
 
@@ -33,6 +32,17 @@ class AssetCostFromPlanGateTest {
         val decided = Regex("""until\s+ownedAsset\s*\.\s*quantity|<\s*ownedAsset\s*\.\s*quantity""")
             .containsMatchIn(screen.code.substring(card))
         assertTrue("the cost card decides the change marker from the displayed balance", !decided)
+    }
+
+    @Test fun `before a plan exists the card shows the markers every send emits`() {
+        // The planner emits the asset-change marker on every send (last output, to the source), so
+        // the form's estimate names it too rather than claiming none.
+        val card = screen.function("CostPreviewCard", "fun CostRow(")
+        val code = screen.code.substring(card)
+        assertTrue("the form's cost card does not fall back to the every-send markers",
+            code.contains("cost ?: AssetSendCost.beforePlan(feeSats)"))
+        assertTrue("the form's cost card still claims no change marker before a plan",
+            !Regex("""changeMarkerSats\s*\?:\s*0L""").containsMatchIn(code))
     }
 
     @Test fun `the confirmation draws its cost card from the planned transfer`() {

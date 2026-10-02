@@ -721,21 +721,17 @@ private fun AssetConfirmRow(label: String, value: String) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Marker value shown in the cost preview. Single source of truth — the same
- *  constant the send path emits — so the preview can never drift from the
- *  actual on-chain marker (it was hardcoded at the old 700 and understated the
- *  DGB cost after the dust-driven bump to 6,000). */
-private val DA_MARKER_SATS_UI: Long = io.digibyte.core.asset.send.DA_MARKER_SATS
+// The cost preview's marker value comes from AssetSendCost (the planner's own DA_MARKER_SATS), so
+// the preview cannot drift from the on-chain marker.
 
 /**
  * Card showing the DGB outflow breakdown for the in-progress send.
  *
  * With [cost] — the transfer as planned, in the confirmation — every line is the plan's: the
- * recipient's marker, the asset-change marker only when the plan emits one (its selected coins hold
- * more than the amount sent), the fee it pays, and their total. Without one — on the form, before
- * anything is planned — the card shows the recipient's marker and the estimated fee, and claims no
- * asset-change marker: whether there is one depends on the coins the planner selects, which the
- * displayed balance cannot tell.
+ * recipient's marker, the asset-change marker the plan emits, the fee it pays, and their total.
+ * Without one — on the form, before anything is planned — the card shows the two markers every
+ * send emits (the planner always ends with the asset-change marker to the source address) and the
+ * estimated fee ([AssetSendCost.beforePlan]).
  *
  * Doesn't account for DGB-fee-input contribution (the marker sats already in
  * the asset UTXO partly fund the new markers); that's a wash from the user's
@@ -754,10 +750,11 @@ private fun CostPreviewCard(
 ) {
     val decimals = ownedAsset.metadata?.decimals ?: 0
 
-    val recipientMarkerSats = cost?.recipientMarkerSats ?: DA_MARKER_SATS_UI
-    val changeMarkerSats = cost?.changeMarkerSats ?: 0L
-    val shownFeeSats = cost?.feeSats ?: feeSats
-    val totalSats = cost?.totalSats ?: (recipientMarkerSats + shownFeeSats)
+    val shown = cost ?: AssetSendCost.beforePlan(feeSats)
+    val recipientMarkerSats = shown.recipientMarkerSats
+    val changeMarkerSats = shown.changeMarkerSats
+    val shownFeeSats = shown.feeSats
+    val totalSats = shown.totalSats
     // What the balance keeps after the send: the displayed balance less the amount.
     val keptUnits = if (units != null && units > 0L) ownedAsset.quantity - units else 0L
 
