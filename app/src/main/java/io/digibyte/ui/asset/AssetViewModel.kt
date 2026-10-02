@@ -11,6 +11,8 @@ import io.digibyte.core.asset.rules.TransferRuleState
 import io.digibyte.core.db.dao.AssetMetadataDao
 import io.digibyte.core.db.entity.TransactionEntity
 import io.digibyte.core.asset.send.AssetFeeEstimator
+import io.digibyte.core.asset.send.AssetTransferPlan
+import io.digibyte.core.asset.send.PlannedOutput
 import io.digibyte.core.model.ApprovedSend
 import io.digibyte.core.model.AssetQuantity
 import io.digibyte.core.model.OwnedAsset
@@ -85,6 +87,35 @@ class RequestedAssetQuantity {
     fun textToApprove(fieldText: String, divisibility: Int): String = fieldText(divisibility) ?: fieldText
 }
 
+/**
+ * The DGB an asset send moves, read from the transfer as planned: the markers it emits and the fee
+ * it pays. The planner emits an asset-change marker only when the coins it selected hold more than
+ * the amount sent — which the displayed balance, a sum over every coin, cannot tell — so the
+ * confirmation's marker lines and total come from here, from the same plan as its fee.
+ */
+data class AssetSendCost(
+    /** The recipient's marker. */
+    val recipientMarkerSats: Long,
+    /** The marker that carries asset change back to the wallet; 0 when the plan returns none. */
+    val changeMarkerSats: Long,
+    /** What the planned transaction pays the network. */
+    val feeSats: Long,
+) {
+    val hasChangeMarker: Boolean get() = changeMarkerSats > 0L
+    val totalSats: Long get() = recipientMarkerSats + changeMarkerSats + feeSats
+
+    companion object {
+        fun of(plan: AssetTransferPlan): AssetSendCost = AssetSendCost(
+            recipientMarkerSats = plan.outputs.filter { it.role == PlannedOutput.Role.RECIPIENT_MARKER }.sumOf { it.sats },
+            changeMarkerSats = plan.outputs.filter { it.role == PlannedOutput.Role.ASSET_CHANGE_MARKER }.sumOf { it.sats },
+            feeSats = plan.paidFeeSats,
+        )
+    }
+}
+
+/** The planned cost of one approval: shown only while that approval is the one on screen. */
+class PlannedAssetCost(val approval: ApprovedSend.Asset, val cost: AssetSendCost)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AssetViewModel @Inject constructor(
@@ -120,6 +151,10 @@ class AssetViewModel @Inject constructor(
 
     /** The approval the confirmation is drawn from, or null when no confirmation is up. */
     val approval: StateFlow<ApprovedSend.Asset?> = confirmation.approval
+
+    /** The cost of the plan the confirmation was opened with, keyed to that approval. */
+    private val _plannedCost = MutableStateFlow<PlannedAssetCost?>(null)
+    val plannedCost: StateFlow<PlannedAssetCost?> = _plannedCost.asStateFlow()
 
     /** What a transfer request asked for, while the quantity field still shows it. */
     val requestedQuantity = RequestedAssetQuantity()
@@ -230,7 +265,10 @@ class AssetViewModel @Inject constructor(
         val needsCheck = _selectedAssetId.value != assetId ||
             _ruleCheck.value == RuleCheckState.UNVERIFIED
         // An approval is for one asset: it does not outlive the selection it was made under.
-        if (_selectedAssetId.value != assetId) confirmation.close()
+        if (_selectedAssetId.value != assetId) {
+            confirmation.close()
+            _plannedCost.value = null
+        }
         // Set BEFORE launching: checkRules writes its result only while this asset is still the
         // selected one, and that guard is meaningless if the selection lands after the launch.
         _selectedAssetId.value = assetId
@@ -284,8 +322,13 @@ class AssetViewModel @Inject constructor(
             // An answer for an asset no longer selected is not the user's current send.
             if (_selectedAssetId.value != approved.assetId) return@launch
             when (planned) {
-                is AssetManager.AssetTransferPlanning.Planned ->
-                    confirmation.open(approved.withPlannedFee(planned.plan.paidFeeSats))
+                is AssetManager.AssetTransferPlanning.Planned -> {
+                    // Fee, markers and total from one plan: the one the send then signs.
+                    val cost = AssetSendCost.of(planned.plan)
+                    if (confirmation.open(approved.withPlannedFee(planned.plan.paidFeeSats))) {
+                        _plannedCost.value = confirmation.approval.value?.let { PlannedAssetCost(it, cost) }
+                    }
+                }
                 is AssetManager.AssetTransferPlanning.NotPlanned -> finish(planned.result.toSendState())
             }
         }
@@ -310,12 +353,14 @@ class AssetViewModel @Inject constructor(
     fun cancelConfirm() {
         planJob?.cancel()
         confirmation.close()
+        _plannedCost.value = null
         _sendState.value = SendState.Idle
     }
 
     /** A result is in. It takes the confirmation's place on screen. */
     private fun finish(result: SendState) {
         confirmation.close()
+        _plannedCost.value = null
         _sendState.value = result
     }
 
