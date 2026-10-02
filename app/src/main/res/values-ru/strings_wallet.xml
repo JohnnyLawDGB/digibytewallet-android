@@ -580,8 +580,13 @@
     <string name="as_rules_retry">Проверить снова</string>
     <string name="as_refused_rule_bound">Заблокировано: у этого актива есть правила передачи, которые этот кошелёк пока не может выполнить. Ничего не отправлено.</string>
     <string name="as_refused_rules_unknown">Заблокировано: не удалось проверить правила передачи этого актива. Ничего не отправлено.</string>
+    <string name="as_refused_holding_unverified">Заблокировано: сейчас не удалось проверить содержимое монет этого актива. Ничего не отправлено. Повторите попытку, когда будете в сети.</string>
+    <string name="as_refused_holding_unconfirmed">Заблокировано: ни для одной монеты этого актива не удалось подтвердить, что она содержит только этот актив. Ничего не отправлено.</string>
+    <string name="as_refused_spans_addresses">Заблокировано: эта сумма хранится на нескольких адресах. За одну отправку можно переместить не более %1$s. Ничего не отправлено.</string>
     <string name="rf_move_refused_rule_bound">%1$s остался на месте: у этого актива есть правила передачи, которые этот кошелёк пока не может выполнить</string>
     <string name="rf_move_refused_unknown">%1$s остался на месте: не удалось проверить его правила передачи</string>
+    <string name="rf_move_refused_holding_unverified">%1$s остался на месте: сейчас не удалось проверить его содержимое. Повторите попытку, когда будете в сети</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s остался на месте: он содержит не ровно один актив, поэтому перемещать его небезопасно</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Удаление кошелька не завершено. Часть данных кошелька могла остаться на этом устройстве. Перезапустите приложение и повторите попытку.</string>
 </resources>

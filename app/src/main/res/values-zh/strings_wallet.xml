@@ -580,8 +580,13 @@
     <string name="as_rules_retry">重新检查</string>
     <string name="as_refused_rule_bound">已阻止：此资产带有本钱包尚无法满足的转账规则。未发送任何内容。</string>
     <string name="as_refused_rules_unknown">已阻止：无法验证此资产的转账规则。未发送任何内容。</string>
+    <string name="as_refused_holding_unverified">已阻止：暂时无法检查此资产的币中包含什么。未发送任何内容。请在联网后重试。</string>
+    <string name="as_refused_holding_unconfirmed">已阻止：无法确认此资产的任何一枚币只包含此资产。未发送任何内容。</string>
+    <string name="as_refused_spans_addresses">已阻止：此数量分布在多个地址上。单次发送最多可转移 %1$s。未发送任何内容。</string>
     <string name="rf_move_refused_rule_bound">%1$s 留在原处：此资产带有本钱包尚无法满足的转账规则</string>
     <string name="rf_move_refused_unknown">%1$s 留在原处：无法验证其转账规则</string>
+    <string name="rf_move_refused_holding_unverified">%1$s 保持原处：暂时无法检查其中包含什么。请在联网后重试</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s 保持原处：它并非恰好包含一种资产，因此移动它不安全</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">钱包清除未完成。部分钱包数据可能仍在本设备上。请重启应用后重试。</string>
 </resources>

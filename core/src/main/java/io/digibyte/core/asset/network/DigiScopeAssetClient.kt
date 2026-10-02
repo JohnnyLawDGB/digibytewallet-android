@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 class DigiScopeAssetClient(
     baseClient: OkHttpClient = OkHttpClient(),
     private val baseUrl: String = DEFAULT_BASE_URL,
-) : AssetNetworkClient {
+) : AssetNetworkClient, io.digibyte.core.asset.send.AssetStackSource {
 
     override val endpointLabel: String = "digiscope.me"
 
@@ -33,6 +33,29 @@ class DigiScopeAssetClient(
         // pin here previously killed the M3 asset parent-walk → "metadata offline".
         .certificatePinner(io.digibyte.core.network.DigiScopePins.certificatePinner())
         .build()
+
+    /**
+     * The DigiAsset stack on one unspent output, straight from the indexer
+     * (`GET /digiassets/txout/:txid/:vout`). 404 is the indexer saying the output is not unspent;
+     * every other failure is "no answer".
+     */
+    override suspend fun stackOf(txid: String, vout: Int): io.digibyte.core.asset.send.StackLookup = try {
+        val req = Request.Builder().url("$baseUrl/digiassets/txout/${txid.lowercase()}/$vout").get().build()
+        client.newCall(req).execute().use { resp ->
+            when {
+                resp.code == 404 -> io.digibyte.core.asset.send.StackLookup.NotUnspent
+                !resp.isSuccessful -> io.digibyte.core.asset.send.StackLookup.Unavailable
+                else -> {
+                    val body = resp.body?.string()
+                    if (body.isNullOrEmpty()) io.digibyte.core.asset.send.StackLookup.Unavailable
+                    else DigiScopeAssetParsing.txOutStack(JSONObject(body), txid, vout)
+                }
+            }
+        }
+    } catch (t: Throwable) {
+        android.util.Log.w("DigiScopeAssetClient", "txout ${txid.take(12)}:$vout threw ${t::class.java.simpleName}")
+        io.digibyte.core.asset.send.StackLookup.Unavailable
+    }
 
     override suspend fun getAssetData(assetId: String): AssetDataResponse? {
         val json = getJson("$baseUrl/digiassets/asset/$assetId") as? JSONObject ?: return null

@@ -13,6 +13,12 @@ enum class SendRefusal {
     RULE_BOUND_ASSET,
     /** The asset's rules could not be established; refused rather than guessed. */
     RULES_UNKNOWN,
+    /** What the asset's coins hold could not be confirmed right now; nothing is sent on a guess. */
+    ASSET_HOLDING_UNVERIFIED,
+    /** No coin confirmed to hold only this asset covers the amount. */
+    ASSET_HOLDING_UNCONFIRMED,
+    /** The amount needs coins held at more than one address; one send moves up to [TxResult.Refused.limit]. */
+    ASSET_SPANS_ADDRESSES,
 }
 
 sealed class TxResult {
@@ -20,7 +26,7 @@ sealed class TxResult {
     data class Error(val message: String) : TxResult()
     /** Refused by policy, not by failure: nothing was selected, built, signed or broadcast.
      *  Typed so the screen can say why in the user's language. */
-    data class Refused(val reason: SendRefusal) : TxResult()
+    data class Refused(val reason: SendRefusal, val limit: Long? = null) : TxResult()
 }
 
 /**

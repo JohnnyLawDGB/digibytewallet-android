@@ -580,8 +580,13 @@
     <string name="as_rules_retry">Verificar novamente</string>
     <string name="as_refused_rule_bound">Bloqueado: este ativo tem regras de transferência que esta carteira ainda não consegue cumprir. Nada foi enviado.</string>
     <string name="as_refused_rules_unknown">Bloqueado: não foi possível verificar as regras de transferência deste ativo. Nada foi enviado.</string>
+    <string name="as_refused_holding_unverified">Bloqueado: não foi possível verificar agora o que as moedas deste ativo contêm. Nada foi enviado. Tente novamente quando estiver online.</string>
+    <string name="as_refused_holding_unconfirmed">Bloqueado: não foi possível confirmar que alguma moeda deste ativo contém apenas este ativo. Nada foi enviado.</string>
+    <string name="as_refused_spans_addresses">Bloqueado: este valor está em mais de um endereço. Um envio pode mover até %1$s. Nada foi enviado.</string>
     <string name="rf_move_refused_rule_bound">%1$s ficou onde estava: este ativo tem regras de transferência que esta carteira ainda não consegue cumprir</string>
     <string name="rf_move_refused_unknown">%1$s ficou onde estava: não foi possível verificar suas regras de transferência</string>
+    <string name="rf_move_refused_holding_unverified">%1$s ficou onde está: não foi possível verificar agora o que contém. Tente novamente quando estiver online</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s ficou onde está: não contém exatamente um ativo, então movê-lo não é seguro</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">A carteira não foi apagada por completo. Alguns dados da carteira ainda podem estar neste dispositivo. Reinicie o app e tente novamente.</string>
 </resources>

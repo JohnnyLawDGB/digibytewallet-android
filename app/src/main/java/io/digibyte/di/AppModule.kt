@@ -387,6 +387,7 @@ object AppModule {
         outgoing: io.digibyte.core.OutgoingTxStore,
         persister: io.digibyte.core.WalletTxPersister,
         provenanceStore: io.digibyte.core.asset.ProvenanceStore,
+        okHttpClient: OkHttpClient,
     ): AssetManager = AssetManager(
         utxoDao = utxoDao,
         transactionDao = transactionDao,
@@ -396,6 +397,9 @@ object AppModule {
         outgoingTxStore = outgoing,
         walletTxPersister = persister,
         provenanceStore = provenanceStore,
+        // What each asset input holds is read from our own indexer, over the injected client
+        // (Tor when enabled) with the DigiScope pins added by the client itself.
+        assetStackSource = io.digibyte.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
     )
 
     @Provides @Singleton

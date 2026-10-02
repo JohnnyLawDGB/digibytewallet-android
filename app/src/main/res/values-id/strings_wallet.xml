@@ -580,8 +580,13 @@
     <string name="as_rules_retry">Periksa lagi</string>
     <string name="as_refused_rule_bound">Diblokir: aset ini memiliki aturan transfer yang belum dapat dipenuhi dompet ini. Tidak ada yang dikirim.</string>
     <string name="as_refused_rules_unknown">Diblokir: aturan transfer aset ini tidak dapat diverifikasi. Tidak ada yang dikirim.</string>
+    <string name="as_refused_holding_unverified">Diblokir: isi koin aset ini tidak dapat diperiksa saat ini. Tidak ada yang dikirim. Coba lagi saat Anda online.</string>
+    <string name="as_refused_holding_unconfirmed">Diblokir: tidak ada koin aset ini yang dapat dipastikan hanya berisi aset ini. Tidak ada yang dikirim.</string>
+    <string name="as_refused_spans_addresses">Diblokir: jumlah ini tersimpan di lebih dari satu alamat. Satu pengiriman dapat memindahkan hingga %1$s. Tidak ada yang dikirim.</string>
     <string name="rf_move_refused_rule_bound">%1$s tetap di tempatnya: aset ini memiliki aturan transfer yang belum dapat dipenuhi dompet ini</string>
     <string name="rf_move_refused_unknown">%1$s tetap di tempatnya: aturan transfernya tidak dapat diverifikasi</string>
+    <string name="rf_move_refused_holding_unverified">%1$s tetap di tempatnya: isinya tidak dapat diperiksa saat ini. Coba lagi saat Anda online</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s tetap di tempatnya: tidak berisi tepat satu aset, jadi memindahkannya tidak aman</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Penghapusan dompet tidak selesai. Sebagian data dompet mungkin masih ada di perangkat ini. Mulai ulang aplikasi dan coba lagi.</string>
 </resources>

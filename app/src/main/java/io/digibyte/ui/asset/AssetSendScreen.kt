@@ -71,6 +71,8 @@ fun AssetSendScreen(
     val ruleCheck by viewModel.ruleCheck.collectAsStateWithLifecycle()
     val refusedRuleBound = stringResource(R.string.as_refused_rule_bound)
     val refusedUnknown = stringResource(R.string.as_refused_rules_unknown)
+    val refusedUnverified = stringResource(R.string.as_refused_holding_unverified)
+    val refusedUnconfirmed = stringResource(R.string.as_refused_holding_unconfirmed)
     // Hoisted: used inside onClick lambdas and non-composable string fallbacks.
     val tokensLabel = stringResource(R.string.as_tokens)
     val errRecipient = stringResource(R.string.as_err_recipient)
@@ -171,7 +173,18 @@ fun AssetSendScreen(
             is AssetViewModel.SendState.Refused -> SendResultBanner(
                 success = false,
                 title = stringResource(R.string.as_send_failed),
-                detail = if (s.reason == io.digibyte.core.SendRefusal.RULE_BOUND_ASSET) refusedRuleBound else refusedUnknown,
+                detail = when (s.reason) {
+                    io.digibyte.core.SendRefusal.RULE_BOUND_ASSET -> refusedRuleBound
+                    io.digibyte.core.SendRefusal.RULES_UNKNOWN -> refusedUnknown
+                    io.digibyte.core.SendRefusal.ASSET_HOLDING_UNVERIFIED -> refusedUnverified
+                    io.digibyte.core.SendRefusal.ASSET_HOLDING_UNCONFIRMED -> refusedUnconfirmed
+                    io.digibyte.core.SendRefusal.ASSET_SPANS_ADDRESSES -> stringResource(
+                        R.string.as_refused_spans_addresses,
+                        java.math.BigDecimal.valueOf(s.limit ?: 0L)
+                            .movePointLeft(asset?.metadata?.decimals ?: 0)
+                            .stripTrailingZeros().toPlainString(),
+                    )
+                },
                 onDismiss = { viewModel.resetSendState() }
             )
             else -> {}
