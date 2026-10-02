@@ -37,6 +37,7 @@ import io.digibyte.ui.theme.DigiByteBlue
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteNavy
 import io.digibyte.ui.theme.DigiByteRed
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import io.digibyte.R
 
@@ -72,7 +73,6 @@ fun AssetSendScreen(
     val refusedRuleBound = stringResource(R.string.as_refused_rule_bound)
     val refusedUnknown = stringResource(R.string.as_refused_rules_unknown)
     // Hoisted: used inside onClick lambdas and non-composable string fallbacks.
-    val tokensLabel = stringResource(R.string.as_tokens)
     val errRecipient = stringResource(R.string.as_err_recipient)
     val errQuantity = stringResource(R.string.as_err_quantity)
     val isCustomFee by viewModel.isCustomFee.collectAsStateWithLifecycle()
@@ -102,13 +102,17 @@ fun AssetSendScreen(
     // model closes it when the send ends, so the result banner below the form is what remains.
     val shownAsset = asset
     val approved = approval
+    // The markers and total of the plan this approval was opened with; never another's.
+    val planned by viewModel.plannedCost.collectAsStateWithLifecycle()
     if (approved != null && shownAsset != null) {
         AssetSendConfirmDialog(
             asset = shownAsset,
             recipientAddress = approved.address,
             quantityText = approved.amountText,
             quantityUnits = approved.units,
+            quantityDivisibility = approved.divisibility,
             feeSats = approved.feeEstimateSats,
+            plannedCost = planned?.takeIf { it.approval === approved }?.cost,
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
                 coroutineScope.launch {
@@ -328,6 +332,10 @@ fun AssetSendScreen(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
+            // What the quantity field names as it is typed, in whole units: worded by the
+            // field's suffix and costed by the preview below. Review reads the field itself.
+            val typedUnits = AssetQuantity.parse(quantityInput, decimals)
+
             OutlinedTextField(
                 value = quantityInput,
                 onValueChange = {
@@ -365,7 +373,7 @@ fun AssetSendScreen(
                 },
                 suffix = {
                     Text(
-                        text = ownedAsset.metadata?.symbol ?: tokensLabel,
+                        text = ownedAsset.metadata?.symbol ?: tokensNoun(typedUnits ?: 0L, decimals),
                         color = DigiByteAccent,
                         fontWeight = FontWeight.Bold
                     )
@@ -467,11 +475,14 @@ fun AssetSendScreen(
 
             // ── DGB cost preview ─────────────────────────────────────────
             // Updates as the user types quantity / edits the fee so the DGB
-            // outflow is visible before the confirm dialog ever opens.
+            // outflow is visible before the confirm dialog ever opens. Nothing is
+            // planned yet, so no asset-change marker is claimed here; the
+            // confirmation shows the planned one.
             CostPreviewCard(
-                units = AssetQuantity.parse(quantityInput, decimals),
+                units = typedUnits,
                 ownedAsset = ownedAsset,
                 feeSats = estimatedFeeSat,
+                cost = null,
             )
 
             Spacer(modifier = Modifier.height(28.dp))
@@ -525,7 +536,11 @@ private fun AssetSendConfirmDialog(
     quantityText: String,
     /** The approved quantity in whole asset units: what the send receives. */
     quantityUnits: Long,
+    /** The divisibility the approval was read at: what [quantityText] is written at. */
+    quantityDivisibility: Int,
     feeSats: Long,
+    /** The markers and fee of the transfer as planned for this approval. */
+    plannedCost: AssetSendCost?,
     sending: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
@@ -561,7 +576,7 @@ private fun AssetSendConfirmDialog(
                 )
                 AssetConfirmRow(
                     label = stringResource(R.string.as_quantity),
-                    value = quantityText + " " + (asset.metadata?.symbol ?: stringResource(R.string.as_tokens)),
+                    value = quantityText + " " + (asset.metadata?.symbol ?: tokensNoun(quantityUnits, quantityDivisibility)),
                 )
                 // Full address — never truncated per security requirement
                 AssetConfirmRow(label = stringResource(R.string.send_to), value = recipientAddress)
@@ -575,6 +590,7 @@ private fun AssetSendConfirmDialog(
                     units = quantityUnits,
                     ownedAsset = asset,
                     feeSats = feeSats,
+                    cost = plannedCost,
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -701,34 +717,36 @@ private val DA_MARKER_SATS_UI: Long = io.digibyte.core.asset.send.DA_MARKER_SATS
 /**
  * Card showing the DGB outflow breakdown for the in-progress send.
  *
- * Mirrors the math the AssetCoinSelector + sendAsset path uses on submit:
- *   - 1 marker ([DA_MARKER_SATS_UI] sats) for the recipient
- *   - 1 marker ([DA_MARKER_SATS_UI] sats) for asset change, only if the user
- *     is sending less than their full balance for this asset
- *   - The estimated network fee (size-aware, at the chosen fee rate)
+ * With [cost] — the transfer as planned, in the confirmation — every line is the plan's: the
+ * recipient's marker, the asset-change marker only when the plan emits one (its selected coins hold
+ * more than the amount sent), the fee it pays, and their total. Without one — on the form, before
+ * anything is planned — the card shows the recipient's marker and the estimated fee, and claims no
+ * asset-change marker: whether there is one depends on the coins the planner selects, which the
+ * displayed balance cannot tell.
  *
  * Doesn't account for DGB-fee-input contribution (the marker sats already in
  * the asset UTXO partly fund the new markers); that's a wash from the user's
  * perspective and complicates the display, so we surface gross outflow.
  *
  * [units] is the quantity in whole asset units, or null when there is none: on the form, what the
- * quantity field names as it is typed; in the confirmation, the approved units.
+ * quantity field names as it is typed; in the confirmation, the approved units. It words the
+ * "stays in your wallet" line, which is about the balance, not the markers.
  */
 @Composable
 private fun CostPreviewCard(
     units: Long?,
     ownedAsset: io.digibyte.core.model.OwnedAsset,
     feeSats: Long,
+    cost: AssetSendCost?,
 ) {
     val decimals = ownedAsset.metadata?.decimals ?: 0
 
-    // Asset change emitted iff user is sending less than their full balance
-    // (and there is a quantity at all).
-    val needsAssetChange = units != null &&
-        units in 1 until ownedAsset.quantity
-    val markerCount = if (needsAssetChange) 2 else 1
-    val markerSats = DA_MARKER_SATS_UI * markerCount
-    val totalSats = markerSats + feeSats
+    val recipientMarkerSats = cost?.recipientMarkerSats ?: DA_MARKER_SATS_UI
+    val changeMarkerSats = cost?.changeMarkerSats ?: 0L
+    val shownFeeSats = cost?.feeSats ?: feeSats
+    val totalSats = cost?.totalSats ?: (recipientMarkerSats + shownFeeSats)
+    // What the balance keeps after the send: the displayed balance less the amount.
+    val keptUnits = if (units != null && units > 0L) ownedAsset.quantity - units else 0L
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -749,11 +767,11 @@ private fun CostPreviewCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(8.dp))
-            CostRow(stringResource(R.string.as_recipient_marker), "${formatSats(DA_MARKER_SATS_UI)} sats")
-            if (needsAssetChange) {
-                CostRow(stringResource(R.string.as_change_marker), "${formatSats(DA_MARKER_SATS_UI)} sats")
+            CostRow(stringResource(R.string.as_recipient_marker), "${formatSats(recipientMarkerSats)} sats")
+            if (changeMarkerSats > 0L) {
+                CostRow(stringResource(R.string.as_change_marker), "${formatSats(changeMarkerSats)} sats")
             }
-            CostRow(stringResource(R.string.as_network_fee_est), "≈ ${formatSats(feeSats)} sats")
+            CostRow(stringResource(R.string.as_network_fee_est), "≈ ${formatSats(shownFeeSats)} sats")
             Spacer(modifier = Modifier.height(6.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
             Spacer(modifier = Modifier.height(6.dp))
@@ -762,14 +780,18 @@ private fun CostPreviewCard(
                 value = "≈ ${formatSats(totalSats)} sats (${formatDgb(totalSats)} DGB)",
                 emphasize = true,
             )
-            // Partial-transfer hint — shows the user the change UTXO they'll
-            // hold after the send so the new partial path doesn't surprise.
-            if (needsAssetChange && units != null) {
+            // Partial-transfer hint — shows the user what their balance keeps after
+            // the send, worded for that quantity.
+            if (keptUnits > 0L) {
                 Spacer(modifier = Modifier.height(6.dp))
-                val keptInternal = ownedAsset.quantity - units
-                val symbol = ownedAsset.metadata?.symbol ?: stringResource(R.string.as_units)
+                val symbol = ownedAsset.metadata?.symbol ?: unitsNoun(keptUnits, decimals)
                 Text(
-                    text = stringResource(R.string.as_stays, AssetQuantity.format(keptInternal, decimals), symbol),
+                    text = pluralStringResource(
+                        R.plurals.as_stays,
+                        assetPluralCount(keptUnits, decimals),
+                        AssetQuantity.format(keptUnits, decimals),
+                        symbol,
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteAccent,
                 )

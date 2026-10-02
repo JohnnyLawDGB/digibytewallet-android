@@ -282,8 +282,12 @@
     <string name="as_send_failed">发送失败</string>
     <string name="as_balance">余额：%1$s</string>
     <string name="as_quantity">数量</string>
-    <string name="as_tokens">代币</string>
-    <string name="as_units">单位</string>
+    <plurals name="as_tokens">
+        <item quantity="other">代币</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">单位</item>
+    </plurals>
     <string name="as_fee_note">资产交易需要 DGB 支付网络手续费</string>
     <string name="as_err_recipient">请输入收款地址</string>
     <string name="as_err_quantity">请输入有效数量</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">资产找零标记</string>
     <string name="as_network_fee_est">网络手续费（估算）</string>
     <string name="as_total_dgb">DGB 总计</string>
-    <string name="as_stays">%1$s %2$s 将留在您的钱包中</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s 将留在您的钱包中</item>
+    </plurals>
     <string name="ad_title">资产详情</string>
     <string name="ad_balance">余额</string>
     <string name="ad_info">资产信息</string>
@@ -584,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s 留在原处：无法验证其转账规则</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">钱包清除未完成。部分钱包数据可能仍在本设备上。请重启应用后重试。</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">正在重建交易历史</string>
+    <string name="history_rebuild_notice_body">此更新会从区块链一次性重建您的交易历史。您的币和恢复助记词不受影响。余额会随着扫描进度逐步显示，扫描完成后即可使用发送功能。</string>
+    <string name="history_rebuild_deferred">您待处理的发送确认后，将重建您的交易历史。</string>
 </resources>

@@ -115,7 +115,7 @@ class AssetSendBindingWiringTest {
         assertEquals("the dialog has ${quantityRows.size} quantity rows — the gate reads exactly one", 1, quantityRows.size)
         assertEquals(
             "the dialog's quantity row is not the approved text, as it stands, and the asset's symbol",
-            "quantityText + \" \" + (asset.metadata?.symbol ?: stringResource(R.string.as_tokens))",
+            "quantityText + \" \" + (asset.metadata?.symbol ?: tokensNoun(quantityUnits, quantityDivisibility))",
             quantityRows.single().named["value"],
         )
         val costRows = screenGate.calls("CostPreviewCard", within = declared)

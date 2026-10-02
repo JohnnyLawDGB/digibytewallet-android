@@ -355,8 +355,14 @@
     <string name="as_send_failed">Send failed</string>
     <string name="as_balance">Balance: %1$s</string>
     <string name="as_quantity">Quantity</string>
-    <string name="as_tokens">tokens</string>
-    <string name="as_units">units</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="other">tokens</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">unit</item>
+        <item quantity="other">units</item>
+    </plurals>
     <string name="as_fee_note">Asset transactions require DGB for network fees</string>
     <string name="as_err_recipient">Enter a recipient address</string>
     <string name="as_err_quantity">Enter a valid quantity</string>
@@ -370,7 +376,10 @@
     <string name="as_change_marker">Asset-change marker</string>
     <string name="as_network_fee_est">Network fee (est.)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s stays in your wallet</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s stays in your wallet</item>
+        <item quantity="other">%1$s %2$s stay in your wallet</item>
+    </plurals>
 
     <!-- ── DigiAsset detail ─────────────────────────────────────────────────────── -->
     <string name="ad_title">Asset Details</string>
@@ -721,4 +730,9 @@
          place when this is shown. Wipe wording, like the seed-phrase warnings, needs a native
          speaker in every language before it can be called done. -->
     <string name="wipe_incomplete">The wallet wipe did not complete. Some wallet data may still be on this device. Restart the app and try again.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Rebuilding transaction history</string>
+    <string name="history_rebuild_notice_body">This update rebuilds your transaction history from the blockchain once. Your coins and recovery phrase are untouched. The balance fills in as the scan catches up, and Send is available when it finishes.</string>
+    <string name="history_rebuild_deferred">Your transaction history will be rebuilt after your pending send confirms.</string>
 </resources>

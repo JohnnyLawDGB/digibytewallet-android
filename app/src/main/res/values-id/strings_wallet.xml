@@ -282,8 +282,12 @@
     <string name="as_send_failed">Pengiriman gagal</string>
     <string name="as_balance">Saldo: %1$s</string>
     <string name="as_quantity">Jumlah</string>
-    <string name="as_tokens">token</string>
-    <string name="as_units">unit</string>
+    <plurals name="as_tokens">
+        <item quantity="other">token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">unit</item>
+    </plurals>
     <string name="as_fee_note">Transaksi aset memerlukan DGB untuk biaya jaringan</string>
     <string name="as_err_recipient">Masukkan alamat penerima</string>
     <string name="as_err_quantity">Masukkan jumlah yang valid</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">Penanda kembalian aset</string>
     <string name="as_network_fee_est">Biaya jaringan (perkiraan)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s tetap di dompet Anda</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s tetap di dompet Anda</item>
+    </plurals>
     <string name="ad_title">Detail Aset</string>
     <string name="ad_balance">Saldo</string>
     <string name="ad_info">Info Aset</string>
@@ -584,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s tetap di tempatnya: aturan transfernya tidak dapat diverifikasi</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Penghapusan dompet tidak selesai. Sebagian data dompet mungkin masih ada di perangkat ini. Mulai ulang aplikasi dan coba lagi.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Membangun ulang riwayat transaksi</string>
+    <string name="history_rebuild_notice_body">Pembaruan ini membangun ulang riwayat transaksi Anda dari blockchain satu kali. Koin dan frasa pemulihan Anda tidak diubah. Saldo akan terisi seiring pemindaian berjalan, dan Kirim tersedia setelah pemindaian selesai.</string>
+    <string name="history_rebuild_deferred">Riwayat transaksi Anda akan dibangun ulang setelah pengiriman Anda yang tertunda dikonfirmasi.</string>
 </resources>

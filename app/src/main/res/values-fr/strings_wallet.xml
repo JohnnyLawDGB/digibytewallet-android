@@ -272,8 +272,16 @@
     <string name="as_send_failed">Échec de l\'envoi</string>
     <string name="as_balance">Solde : %1$s</string>
     <string name="as_quantity">Quantité</string>
-    <string name="as_tokens">jetons</string>
-    <string name="as_units">unités</string>
+    <plurals name="as_tokens">
+        <item quantity="one">jeton</item>
+        <item quantity="many">jetons</item>
+        <item quantity="other">jetons</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">unité</item>
+        <item quantity="many">unités</item>
+        <item quantity="other">unités</item>
+    </plurals>
     <string name="as_fee_note">Les transactions d\'actifs nécessitent des DGB pour les frais de réseau</string>
     <string name="as_err_recipient">Saisissez une adresse de destinataire</string>
     <string name="as_err_quantity">Saisissez une quantité valide</string>
@@ -286,7 +294,11 @@
     <string name="as_change_marker">Marqueur de monnaie d\'actif</string>
     <string name="as_network_fee_est">Frais de réseau (est.)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s restent dans votre portefeuille</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s reste dans votre portefeuille</item>
+        <item quantity="many">%1$s %2$s restent dans votre portefeuille</item>
+        <item quantity="other">%1$s %2$s restent dans votre portefeuille</item>
+    </plurals>
     <string name="ad_title">Détails de l\'actif</string>
     <string name="ad_balance">Solde</string>
     <string name="ad_info">Infos sur l\'actif</string>
@@ -564,4 +576,9 @@
     <string name="rf_move_refused_unknown">%1$s est resté en place : ses règles de transfert n\'ont pas pu être vérifiées</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">L\'effacement du portefeuille n\'a pas abouti. Certaines données du portefeuille sont peut-être encore sur cet appareil. Redémarrez l\'application et réessayez.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Reconstruction de l\'historique des transactions</string>
+    <string name="history_rebuild_notice_body">Cette mise à jour reconstruit une fois votre historique des transactions à partir de la blockchain. Vos pièces et votre phrase de récupération ne sont pas modifiées. Le solde se complète à mesure que l\'analyse progresse, et Envoyer est disponible une fois qu\'elle est terminée.</string>
+    <string name="history_rebuild_deferred">Votre historique des transactions sera reconstruit une fois votre envoi en attente confirmé.</string>
 </resources>

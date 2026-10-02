@@ -282,8 +282,16 @@
     <string name="as_send_failed">Falha no envio</string>
     <string name="as_balance">Saldo: %1$s</string>
     <string name="as_quantity">Quantidade</string>
-    <string name="as_tokens">tokens</string>
-    <string name="as_units">unidades</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="many">tokens</item>
+        <item quantity="other">tokens</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">unidade</item>
+        <item quantity="many">unidades</item>
+        <item quantity="other">unidades</item>
+    </plurals>
     <string name="as_fee_note">Transações de ativos exigem DGB para as taxas de rede</string>
     <string name="as_err_recipient">Digite um endereço de destinatário</string>
     <string name="as_err_quantity">Digite uma quantidade válida</string>
@@ -296,7 +304,11 @@
     <string name="as_change_marker">Marcador de troco do ativo</string>
     <string name="as_network_fee_est">Taxa de rede (est.)</string>
     <string name="as_total_dgb">Total em DGB</string>
-    <string name="as_stays">%1$s %2$s permanecem na sua carteira</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s permanece na sua carteira</item>
+        <item quantity="many">%1$s %2$s permanecem na sua carteira</item>
+        <item quantity="other">%1$s %2$s permanecem na sua carteira</item>
+    </plurals>
     <string name="ad_title">Detalhes do ativo</string>
     <string name="ad_balance">Saldo</string>
     <string name="ad_info">Informações do ativo</string>
@@ -584,4 +596,9 @@
     <string name="rf_move_refused_unknown">%1$s ficou onde estava: não foi possível verificar suas regras de transferência</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">A carteira não foi apagada por completo. Alguns dados da carteira ainda podem estar neste dispositivo. Reinicie o app e tente novamente.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Reconstruindo o histórico de transações</string>
+    <string name="history_rebuild_notice_body">Esta atualização reconstrói seu histórico de transações a partir da blockchain uma única vez. Suas moedas e sua frase de recuperação não são alteradas. O saldo vai sendo preenchido conforme a varredura avança, e Enviar fica disponível quando ela terminar.</string>
+    <string name="history_rebuild_deferred">Seu histórico de transações será reconstruído depois que seu envio pendente for confirmado.</string>
 </resources>

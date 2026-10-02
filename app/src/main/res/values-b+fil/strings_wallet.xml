@@ -282,8 +282,14 @@
     <string name="as_send_failed">Nabigo ang pagpapadala</string>
     <string name="as_balance">Balanse: %1$s</string>
     <string name="as_quantity">Dami</string>
-    <string name="as_tokens">token</string>
-    <string name="as_units">yunit</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="other">token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">yunit</item>
+        <item quantity="other">yunit</item>
+    </plurals>
     <string name="as_fee_note">Kailangan ng DGB ang mga transaksyon ng asset para sa bayad sa network</string>
     <string name="as_err_recipient">Maglagay ng address ng tatanggap</string>
     <string name="as_err_quantity">Maglagay ng wastong dami</string>
@@ -296,7 +302,10 @@
     <string name="as_change_marker">Marker ng sukli ng asset</string>
     <string name="as_network_fee_est">Bayad sa network (tantiya)</string>
     <string name="as_total_dgb">Kabuuang DGB</string>
-    <string name="as_stays">%1$s %2$s ang mananatili sa wallet mo</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s ang mananatili sa wallet mo</item>
+        <item quantity="other">%1$s %2$s ang mananatili sa wallet mo</item>
+    </plurals>
     <string name="ad_title">Mga Detalye ng Asset</string>
     <string name="ad_balance">Balanse</string>
     <string name="ad_info">Impormasyon ng Asset</string>
@@ -584,4 +593,9 @@
     <string name="rf_move_refused_unknown">%1$s ay nanatili sa kinaroroonan nito: hindi ma-verify ang mga panuntunan sa paglilipat nito</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Hindi nakumpleto ang pagbura ng wallet. Maaaring may data ng wallet na nananatili sa device na ito. I-restart ang app at subukang muli.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Binubuo muli ang kasaysayan ng transaksyon</string>
+    <string name="history_rebuild_notice_body">Minsang binubuo muli ng update na ito ang kasaysayan ng transaksyon mo mula sa blockchain. Hindi ginagalaw ang mga coin at recovery phrase mo. Mapupuno ang balanse habang humahabol ang scan, at magagamit ang Magpadala kapag natapos ito.</string>
+    <string name="history_rebuild_deferred">Bubuuin muli ang kasaysayan ng transaksyon mo kapag nakumpirma na ang nakabinbing padala mo.</string>
 </resources>

@@ -290,8 +290,14 @@
     <string name="as_send_failed">Senden fehlgeschlagen</string>
     <string name="as_balance">Guthaben: %1$s</string>
     <string name="as_quantity">Menge</string>
-    <string name="as_tokens">Token</string>
-    <string name="as_units">Einheiten</string>
+    <plurals name="as_tokens">
+        <item quantity="one">Token</item>
+        <item quantity="other">Token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">Einheit</item>
+        <item quantity="other">Einheiten</item>
+    </plurals>
     <string name="as_fee_note">Asset-Transaktionen benötigen DGB für Netzwerkgebühren</string>
     <string name="as_err_recipient">Geben Sie eine Empfängeradresse ein</string>
     <string name="as_err_quantity">Geben Sie eine gültige Menge ein</string>
@@ -304,7 +310,10 @@
     <string name="as_change_marker">Asset-Wechselgeld-Marker</string>
     <string name="as_network_fee_est">Netzwerkgebühr (geschätzt)</string>
     <string name="as_total_dgb">DGB gesamt</string>
-    <string name="as_stays">%1$s %2$s bleiben in Ihrer Wallet</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s bleibt in Ihrer Wallet</item>
+        <item quantity="other">%1$s %2$s bleiben in Ihrer Wallet</item>
+    </plurals>
     <string name="ad_title">Asset-Details</string>
     <string name="ad_balance">Guthaben</string>
     <string name="ad_info">Asset-Info</string>
@@ -592,4 +601,9 @@
     <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Das Löschen der Wallet wurde nicht abgeschlossen. Einige Wallet-Daten befinden sich möglicherweise noch auf diesem Gerät. Starten Sie die App neu und versuchen Sie es erneut.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Transaktionsverlauf wird neu aufgebaut</string>
+    <string name="history_rebuild_notice_body">Dieses Update baut Ihren Transaktionsverlauf einmalig aus der Blockchain neu auf. Ihre Coins und Ihre Wiederherstellungsphrase bleiben unberührt. Das Guthaben füllt sich, während der Scan aufholt, und Senden ist verfügbar, sobald er abgeschlossen ist.</string>
+    <string name="history_rebuild_deferred">Ihr Transaktionsverlauf wird neu aufgebaut, sobald Ihre ausstehende Sendung bestätigt ist.</string>
 </resources>

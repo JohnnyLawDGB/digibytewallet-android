@@ -282,8 +282,12 @@
     <string name="as_send_failed">送信に失敗しました</string>
     <string name="as_balance">残高: %1$s</string>
     <string name="as_quantity">数量</string>
-    <string name="as_tokens">トークン</string>
-    <string name="as_units">単位</string>
+    <plurals name="as_tokens">
+        <item quantity="other">トークン</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">単位</item>
+    </plurals>
     <string name="as_fee_note">アセット取引にはネットワーク手数料として DGB が必要です</string>
     <string name="as_err_recipient">送金先アドレスを入力してください</string>
     <string name="as_err_quantity">有効な数量を入力してください</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">アセットのお釣りマーカー</string>
     <string name="as_network_fee_est">ネットワーク手数料（概算）</string>
     <string name="as_total_dgb">DGB 合計</string>
-    <string name="as_stays">%1$s %2$s はウォレットに残ります</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s はウォレットに残ります</item>
+    </plurals>
     <string name="ad_title">アセットの詳細</string>
     <string name="ad_balance">残高</string>
     <string name="ad_info">アセット情報</string>
@@ -584,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s はそのまま残りました：転送ルールを確認できませんでした</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">ウォレットの消去は完了しませんでした。一部のウォレットデータがこの端末に残っている可能性があります。アプリを再起動して、もう一度お試しください。</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">取引履歴を再構築しています</string>
+    <string name="history_rebuild_notice_body">このアップデートでは、取引履歴をブロックチェーンから一度だけ再構築します。コインとリカバリーフレーズには影響しません。残高はスキャンの進行に合わせて反映され、完了すると送金が利用できるようになります。</string>
+    <string name="history_rebuild_deferred">保留中の送金が承認された後に、取引履歴が再構築されます。</string>
 </resources>
