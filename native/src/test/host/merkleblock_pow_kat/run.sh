@@ -78,11 +78,11 @@ if ! grep -q '^#define DGB_HEADER_POW_CHECK 0' "$CORE_DIR/BRMerkleBlock.h"; then
     echo "GATE FAILURE: BRMerkleBlock.h does not default DGB_HEADER_POW_CHECK to 0."
     exit 1
 fi
-if ! grep -q 'DDGB_HEADER_POW_CHECK=1' "$REPO_ROOT/native/build.gradle.kts"; then
-    echo "GATE FAILURE: native/build.gradle.kts does not set the shipped level (expected -DDGB_HEADER_POW_CHECK=1)."
+if ! grep -q 'DDGB_HEADER_POW_CHECK=2' "$REPO_ROOT/native/build.gradle.kts"; then
+    echo "GATE FAILURE: native/build.gradle.kts does not set the shipped level (expected -DDGB_HEADER_POW_CHECK=2)."
     exit 1
 fi
-echo "seam gate OK (level macro present in the sources; header default 0; app build sets level 1)"
+echo "seam gate OK (level macro present in the sources; header default 0; app build sets level 2)"
 
 FAIL=0
 
