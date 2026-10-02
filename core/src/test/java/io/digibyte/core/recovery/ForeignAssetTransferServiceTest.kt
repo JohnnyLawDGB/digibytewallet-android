@@ -96,8 +96,16 @@ class ForeignAssetTransferServiceTest {
         broadcast: (ByteArray) -> String? = { "txid-moved" },
         parse: (ByteArray) -> List<ForeignAssetQuantity.Output>? = { parentOutputs },
         assetClassifier: ForeignUtxoAssetClassifier = classifier(),
+        stackOf: (suspend (String, Int) -> io.digibyte.core.asset.send.StackLookup)? = { txid, _ ->
+            if (txid == "a55e7") io.digibyte.core.asset.send.StackLookup.Found(listOf(io.digibyte.core.asset.send.StackEntry("La-test", 1L)))
+            else io.digibyte.core.asset.send.StackLookup.Found(emptyList())
+        },
+        ruleStateOf: suspend (String) -> io.digibyte.core.asset.rules.TransferRuleState =
+            { io.digibyte.core.asset.rules.TransferRuleState.NONE },
     ) = ForeignAssetTransferService(
         assetClassifier = assetClassifier,
+        stackOf = stackOf,
+        ruleStateOf = ruleStateOf,
         parents = book.binding,
         parseOutputs = parse,
         sign = sign,
@@ -120,6 +128,76 @@ class ForeignAssetTransferServiceTest {
         assertEquals("txid-moved", move.txid)
         assertTrue(move.moved)
         assertTrue(r.allMoved)
+    }
+
+    // ── What the indexer says the outputs hold ─────────────────────────────────────────────
+
+    private fun stack(vararg e: Pair<String, Long>) =
+        io.digibyte.core.asset.send.StackLookup.Found(e.map { io.digibyte.core.asset.send.StackEntry(it.first, it.second) })
+
+    /** No source, or no answer: nothing moves, and the asset is named with the reason. */
+    @Test fun `an asset whose holding cannot be checked stays where it is`() {
+        val sources: List<(suspend (String, Int) -> io.digibyte.core.asset.send.StackLookup)?> =
+            listOf(null, { _, _ -> io.digibyte.core.asset.send.StackLookup.Unavailable })
+        for (source in sources) {
+            var signed = false
+            val r = run(service(stackOf = source, sign = { _, _, _, _ -> signed = true; "00ff" }), listOf(profileResult()))
+            val move = r.moves.single()
+            assertEquals(MoveRefusal.HOLDING_UNVERIFIED, move.refusal)
+            assertFalse(move.moved)
+            assertFalse(signed)
+        }
+    }
+
+    /** An output holding two assets, or none, or reported spent, is not moved. */
+    @Test fun `an output that does not hold exactly one asset stays where it is`() {
+        for (l in listOf(
+            stack("La-test" to 1L, "Ua-other" to 2L),
+            stack(),
+            io.digibyte.core.asset.send.StackLookup.NotUnspent,
+        )) {
+            val r = run(service(stackOf = { txid, _ -> if (txid == "a55e7") l else stack() }), listOf(profileResult()))
+            assertEquals(MoveRefusal.HOLDING_MISMATCH, r.moves.single().refusal)
+        }
+    }
+
+    /** The rule gate runs on the asset the indexer says is there, not on the classifier's guess:
+     *  the classifier says rule-free, the output actually holds a rule-bound asset. */
+    @Test fun `the rule gate judges the asset that is actually on the output`() {
+        val r = run(
+            service(
+                stackOf = { txid, _ -> if (txid == "a55e7") stack("Ua-ruled" to 10L) else stack() },
+                ruleStateOf = { id ->
+                    if (id == "Ua-ruled") io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND
+                    else io.digibyte.core.asset.rules.TransferRuleState.NONE
+                },
+            ),
+            listOf(profileResult()),
+        )
+        assertEquals(MoveRefusal.RULE_BOUND, r.moves.single().refusal)
+    }
+
+    /** A fee coin holding an asset is not used to pay for a move; one the indexer cannot answer
+     *  for stops every move on the profile. */
+    @Test fun `fee coins must hold no asset`() {
+        var seen: ForeignAssetTransferPlan.Plan? = null
+        val held = run(
+            service(
+                stackOf = { txid, _ -> if (txid == "a55e7") stack("La-test" to 10L) else stack("Ua-hidden" to 1L) },
+                sign = { p, _, _, _ -> seen = p; "00ff" },
+            ),
+            listOf(profileResult()),
+        )
+        assertTrue("no plan spends the asset-holding fee coin", seen == null || seen!!.inputs.none { it.txid == "feeee" })
+        assertFalse(held.moves.single().moved)
+
+        val unanswered = run(
+            service(stackOf = { txid, _ ->
+                if (txid == "a55e7") stack("La-test" to 10L) else io.digibyte.core.asset.send.StackLookup.Unavailable
+            }),
+            listOf(profileResult()),
+        )
+        assertEquals(MoveRefusal.HOLDING_UNVERIFIED, unanswered.moves.single().refusal)
     }
 
     /** The asset input must be spent, and every output must belong to the destination. */
@@ -297,6 +375,11 @@ class ForeignAssetTransferServiceTest {
                 // would make this test assert the opposite of what it is named for.
                 resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             ),
+            stackOf = { txid, _ ->
+                if (txid.startsWith("asset")) io.digibyte.core.asset.send.StackLookup.Found(listOf(io.digibyte.core.asset.send.StackEntry("La-test", 1L)))
+                else io.digibyte.core.asset.send.StackLookup.Found(emptyList())
+            },
+            ruleStateOf = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             parents = book.binding,
             parseOutputs = { parentOutputs },
             sign = { _, _, _, _ -> "00ff" },
@@ -338,6 +421,11 @@ class ForeignAssetTransferServiceTest {
                 // would make this test assert the opposite of what it is named for.
                 resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             ),
+            stackOf = { txid, _ ->
+                if (txid.startsWith("asset")) io.digibyte.core.asset.send.StackLookup.Found(listOf(io.digibyte.core.asset.send.StackEntry("La-test", 1L)))
+                else io.digibyte.core.asset.send.StackLookup.Found(emptyList())
+            },
+            ruleStateOf = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
             parents = book.binding,
             parseOutputs = { parentOutputs },
             sign = { _, _, _, _ -> "00ff" },
