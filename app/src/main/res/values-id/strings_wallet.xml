@@ -590,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s tetap di tempatnya: aturan transfernya tidak dapat diverifikasi</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Penghapusan dompet tidak selesai. Sebagian data dompet mungkin masih ada di perangkat ini. Mulai ulang aplikasi dan coba lagi.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Membangun ulang riwayat transaksi</string>
+    <string name="history_rebuild_notice_body">Pembaruan ini membangun ulang riwayat transaksi Anda dari blockchain satu kali. Koin dan frasa pemulihan Anda tidak diubah. Saldo akan terisi seiring pemindaian berjalan, dan Kirim tersedia setelah pemindaian selesai.</string>
+    <string name="history_rebuild_deferred">Riwayat transaksi Anda akan dibangun ulang setelah pengiriman Anda yang tertunda dikonfirmasi.</string>
 </resources>

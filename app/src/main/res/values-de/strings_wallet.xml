@@ -601,4 +601,9 @@
     <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Das Löschen der Wallet wurde nicht abgeschlossen. Einige Wallet-Daten befinden sich möglicherweise noch auf diesem Gerät. Starten Sie die App neu und versuchen Sie es erneut.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Transaktionsverlauf wird neu aufgebaut</string>
+    <string name="history_rebuild_notice_body">Dieses Update baut Ihren Transaktionsverlauf einmalig aus der Blockchain neu auf. Ihre Coins und Ihre Wiederherstellungsphrase bleiben unberührt. Das Guthaben füllt sich, während der Scan aufholt, und Senden ist verfügbar, sobald er abgeschlossen ist.</string>
+    <string name="history_rebuild_deferred">Ihr Transaktionsverlauf wird neu aufgebaut, sobald Ihre ausstehende Sendung bestätigt ist.</string>
 </resources>

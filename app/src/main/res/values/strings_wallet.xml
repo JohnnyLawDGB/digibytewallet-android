@@ -730,4 +730,9 @@
          place when this is shown. Wipe wording, like the seed-phrase warnings, needs a native
          speaker in every language before it can be called done. -->
     <string name="wipe_incomplete">The wallet wipe did not complete. Some wallet data may still be on this device. Restart the app and try again.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Rebuilding transaction history</string>
+    <string name="history_rebuild_notice_body">This update rebuilds your transaction history from the blockchain once. Your coins and recovery phrase are untouched. The balance fills in as the scan catches up, and Send is available when it finishes.</string>
+    <string name="history_rebuild_deferred">Your transaction history will be rebuilt after your pending send confirms.</string>
 </resources>

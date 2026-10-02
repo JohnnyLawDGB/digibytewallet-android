@@ -593,4 +593,9 @@
     <string name="rf_move_refused_unknown">%1$s olduğu yerde kaldı: transfer kuralları doğrulanamadı</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Cüzdan silme işlemi tamamlanmadı. Bazı cüzdan verileri bu cihazda kalmış olabilir. Uygulamayı yeniden başlatıp tekrar deneyin.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">İşlem geçmişi yeniden oluşturuluyor</string>
+    <string name="history_rebuild_notice_body">Bu güncelleme işlem geçmişinizi blok zincirinden bir kez yeniden oluşturur. Coinleriniz ve kurtarma ifadeniz etkilenmez. Tarama ilerledikçe bakiye dolar ve tarama bittiğinde Gönder kullanılabilir olur.</string>
+    <string name="history_rebuild_deferred">İşlem geçmişiniz, bekleyen gönderiminiz onaylandıktan sonra yeniden oluşturulacak.</string>
 </resources>

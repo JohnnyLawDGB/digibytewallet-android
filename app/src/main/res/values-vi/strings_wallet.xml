@@ -590,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s vẫn ở nguyên chỗ cũ: không thể xác minh quy tắc chuyển của nó</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Việc xóa ví chưa hoàn tất. Một số dữ liệu ví có thể vẫn còn trên thiết bị này. Hãy khởi động lại ứng dụng và thử lại.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Đang dựng lại lịch sử giao dịch</string>
+    <string name="history_rebuild_notice_body">Bản cập nhật này dựng lại lịch sử giao dịch của bạn từ blockchain một lần. Tiền và cụm từ khôi phục của bạn không bị ảnh hưởng. Số dư sẽ được cập nhật dần khi quá trình quét tiến triển, và chức năng Gửi sẽ khả dụng khi quét xong.</string>
+    <string name="history_rebuild_deferred">Lịch sử giao dịch của bạn sẽ được dựng lại sau khi giao dịch gửi đang chờ của bạn được xác nhận.</string>
 </resources>

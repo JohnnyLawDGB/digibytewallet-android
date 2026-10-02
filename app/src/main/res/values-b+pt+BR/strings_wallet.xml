@@ -596,4 +596,9 @@
     <string name="rf_move_refused_unknown">%1$s ficou onde estava: não foi possível verificar suas regras de transferência</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">A carteira não foi apagada por completo. Alguns dados da carteira ainda podem estar neste dispositivo. Reinicie o app e tente novamente.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Reconstruindo o histórico de transações</string>
+    <string name="history_rebuild_notice_body">Esta atualização reconstrói seu histórico de transações a partir da blockchain uma única vez. Suas moedas e sua frase de recuperação não são alteradas. O saldo vai sendo preenchido conforme a varredura avança, e Enviar fica disponível quando ela terminar.</string>
+    <string name="history_rebuild_deferred">Seu histórico de transações será reconstruído depois que seu envio pendente for confirmado.</string>
 </resources>

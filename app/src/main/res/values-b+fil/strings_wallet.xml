@@ -593,4 +593,9 @@
     <string name="rf_move_refused_unknown">%1$s ay nanatili sa kinaroroonan nito: hindi ma-verify ang mga panuntunan sa paglilipat nito</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Hindi nakumpleto ang pagbura ng wallet. Maaaring may data ng wallet na nananatili sa device na ito. I-restart ang app at subukang muli.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Binubuo muli ang kasaysayan ng transaksyon</string>
+    <string name="history_rebuild_notice_body">Minsang binubuo muli ng update na ito ang kasaysayan ng transaksyon mo mula sa blockchain. Hindi ginagalaw ang mga coin at recovery phrase mo. Mapupuno ang balanse habang humahabol ang scan, at magagamit ang Magpadala kapag natapos ito.</string>
+    <string name="history_rebuild_deferred">Bubuuin muli ang kasaysayan ng transaksyon mo kapag nakumpirma na ang nakabinbing padala mo.</string>
 </resources>

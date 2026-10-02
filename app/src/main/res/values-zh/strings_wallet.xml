@@ -590,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s 留在原处：无法验证其转账规则</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">钱包清除未完成。部分钱包数据可能仍在本设备上。请重启应用后重试。</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">正在重建交易历史</string>
+    <string name="history_rebuild_notice_body">此更新会从区块链一次性重建您的交易历史。您的币和恢复助记词不受影响。余额会随着扫描进度逐步显示，扫描完成后即可使用发送功能。</string>
+    <string name="history_rebuild_deferred">您待处理的发送确认后，将重建您的交易历史。</string>
 </resources>

@@ -598,4 +598,9 @@
     <string name="rf_move_refused_unknown">%1$s se quedó donde estaba: no se pudieron verificar sus reglas de transferencia</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">El borrado de la billetera no se completó. Es posible que algunos datos de la billetera sigan en este dispositivo. Reinicia la app e inténtalo de nuevo.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Reconstruyendo el historial de transacciones</string>
+    <string name="history_rebuild_notice_body">Esta actualización reconstruye tu historial de transacciones desde la blockchain una sola vez. Tus monedas y tu frase de recuperación no se modifican. El saldo se irá completando a medida que avance el escaneo, y Enviar estará disponible cuando termine.</string>
+    <string name="history_rebuild_deferred">Tu historial de transacciones se reconstruirá cuando se confirme tu envío pendiente.</string>
 </resources>

@@ -593,4 +593,9 @@
     <string name="rf_move_refused_unknown">%1$s वहीं रहा: इसके ट्रांसफ़र नियमों की पुष्टि नहीं हो सकी</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">वॉलेट मिटाना पूरा नहीं हुआ। कुछ वॉलेट डेटा अब भी इस डिवाइस पर हो सकता है। ऐप को फिर से शुरू करें और दोबारा प्रयास करें।</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">लेनदेन इतिहास फिर से बनाया जा रहा है</string>
+    <string name="history_rebuild_notice_body">यह अपडेट आपका लेनदेन इतिहास ब्लॉकचेन से एक बार फिर से बनाता है। आपके सिक्के और रिकवरी वाक्यांश अपरिवर्तित रहते हैं। स्कैन के आगे बढ़ने के साथ बैलेंस भरता जाएगा, और इसके पूरा होने पर भेजें उपलब्ध होगा।</string>
+    <string name="history_rebuild_deferred">आपका लंबित भेजा गया लेनदेन पुष्ट होने के बाद आपका लेनदेन इतिहास फिर से बनाया जाएगा।</string>
 </resources>

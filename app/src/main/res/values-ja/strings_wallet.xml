@@ -590,4 +590,9 @@
     <string name="rf_move_refused_unknown">%1$s はそのまま残りました：転送ルールを確認できませんでした</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">ウォレットの消去は完了しませんでした。一部のウォレットデータがこの端末に残っている可能性があります。アプリを再起動して、もう一度お試しください。</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">取引履歴を再構築しています</string>
+    <string name="history_rebuild_notice_body">このアップデートでは、取引履歴をブロックチェーンから一度だけ再構築します。コインとリカバリーフレーズには影響しません。残高はスキャンの進行に合わせて反映され、完了すると送金が利用できるようになります。</string>
+    <string name="history_rebuild_deferred">保留中の送金が承認された後に、取引履歴が再構築されます。</string>
 </resources>

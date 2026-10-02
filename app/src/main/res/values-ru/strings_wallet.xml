@@ -599,4 +599,9 @@
     <string name="rf_move_refused_unknown">%1$s остался на месте: не удалось проверить его правила передачи</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Удаление кошелька не завершено. Часть данных кошелька могла остаться на этом устройстве. Перезапустите приложение и повторите попытку.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Восстановление истории транзакций</string>
+    <string name="history_rebuild_notice_body">Это обновление один раз восстанавливает историю ваших транзакций по данным блокчейна. Ваши монеты и фраза восстановления не затрагиваются. Баланс будет заполняться по мере сканирования, а отправка станет доступна после его завершения.</string>
+    <string name="history_rebuild_deferred">История транзакций будет восстановлена после подтверждения вашей ожидающей отправки.</string>
 </resources>
