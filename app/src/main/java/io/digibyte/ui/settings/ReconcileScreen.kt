@@ -38,6 +38,8 @@ import java.util.Locale
 interface ReconcileScreenEntryPoint {
     fun assetManager(): AssetManager
     fun walletManager(): io.digibyte.core.WalletManager
+    /** The reconcile client Hilt builds on the shared client (Tor routing and DigiScope pins). */
+    fun dgbNodeClient(): DgbNodeClient
 }
 
 /**
@@ -53,7 +55,6 @@ interface ReconcileScreenEntryPoint {
 @Composable
 fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val client = remember { DgbNodeClient(context) }
     // Pull the app-scoped AssetManager via a Hilt entry point so reconcile
     // can refresh asset UTXOs after tx import. Without this the Assets tab
     // stayed empty even after a successful scan.
@@ -63,6 +64,8 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             ReconcileScreenEntryPoint::class.java,
         )
     }
+    // The injected client: it carries the Tor routing and the DigiScope pins.
+    val client = remember { entryPoint.dgbNodeClient() }
     val assetManager = remember { entryPoint.assetManager() }
     val walletManager = remember { entryPoint.walletManager() }
     val service = remember {

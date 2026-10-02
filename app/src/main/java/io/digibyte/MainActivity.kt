@@ -78,6 +78,8 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var digiScopeClient: DigiScopeClient
     @Inject lateinit var okHttpClient: OkHttpClient
     @Inject lateinit var assetManager: io.digibyte.core.asset.AssetManager
+    /** The reconcile client, built by Hilt on [okHttpClient] (Tor routing and DigiScope pins). */
+    @Inject lateinit var dgbNodeClient: io.digibyte.core.reconcile.DgbNodeClient
 
     /** Pending Digi-ID URI from a deep link — processed after PIN unlock. */
     var pendingDigiIdUri: String? = null
@@ -161,7 +163,13 @@ class MainActivity : FragmentActivity() {
             walletManager.walletState
                 .filterIsInstance<WalletState.Unlocked>()
                 .first()
-            PostUpgradeReconciler.runIfNeeded(applicationContext, assetManager)
+            // Tor on and still starting: its requests would be held and then refused, which this
+            // reconcile reports as a failed balance refresh. Wait for Tor (or the announced
+            // clearnet fallback, or Tor turned off) first.
+            while (io.digibyte.di.NetworkModule.torRoute(torManager) is io.digibyte.core.tor.TorRoute.Blocked) {
+                delay(2_000L)
+            }
+            PostUpgradeReconciler.runIfNeeded(applicationContext, dgbNodeClient, assetManager)
         }
 
         // In-foreground inactivity lock. Settings → Security's auto-lock timeout was stored
@@ -263,6 +271,13 @@ class MainActivity : FragmentActivity() {
                     // excludes prereleases, so nobody is pushed an unverified build.
                     val wantsBeta = getSharedPreferences("dgb_settings", MODE_PRIVATE)
                         .getBoolean("beta_updates", false)
+                    // Tor on and not connected yet (it starts after unlock and takes a while to
+                    // bootstrap): requests are held and then refused rather than sent direct, so
+                    // a check made now would simply fail. Wait for Tor — or the announced
+                    // clearnet fallback, or the user turning Tor off — and check then.
+                    while (io.digibyte.di.NetworkModule.torRoute(torManager) is io.digibyte.core.tor.TorRoute.Blocked) {
+                        delay(2_000L)
+                    }
                     val update = UpdateChecker(okHttpClient)
                         .checkForUpdate(currentVersion, includePrereleases = wantsBeta)
                     if (update != null) pendingUpdate = update

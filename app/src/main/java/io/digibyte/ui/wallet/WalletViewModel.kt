@@ -46,6 +46,8 @@ class WalletViewModel @Inject constructor(
     private val walletConfigDao: WalletConfigDao,
     private val assetManager: io.digibyte.core.asset.AssetManager,
     private val outgoingTxStore: OutgoingTxStore,
+    /** The reconcile client, built by Hilt on the shared client (Tor routing and DigiScope pins). */
+    private val dgbNodeClient: io.digibyte.core.reconcile.DgbNodeClient,
 ) : ViewModel() {
 
     private val prefs = application.getSharedPreferences("dgb_sync_data" + networkSuffix(application), 0)
@@ -433,7 +435,7 @@ class WalletViewModel @Inject constructor(
     fun retryPostUpgradeReconcile() {
         viewModelScope.launch {
             io.digibyte.core.reconcile.PostUpgradeReconciler.runIfNeeded(
-                application, assetManager,
+                application, dgbNodeClient, assetManager,
             )
         }
     }
