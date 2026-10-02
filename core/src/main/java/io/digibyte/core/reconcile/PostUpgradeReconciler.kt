@@ -85,13 +85,17 @@ object PostUpgradeReconciler {
      * Production overload. [assetManager] is optional — when provided, the
      * reconcile also refreshes the local utxos table's asset rows so the
      * Assets tab doesn't require an app restart after an import.
+     *
+     * [nodeClient] is the injected reconcile client (built on the shared client, so it carries
+     * the Tor routing and the DigiScope pins); this object never builds one of its own.
      */
     suspend fun runIfNeeded(
         context: Context,
+        nodeClient: DgbNodeClient,
         assetManager: io.digibyte.core.asset.AssetManager? = null,
     ) {
         runIfNeeded(context) { ctx ->
-            ChainReconciliationService(DgbNodeClient(ctx), assetManager, appContext = ctx)
+            ChainReconciliationService(nodeClient, assetManager, appContext = ctx)
         }
     }
 

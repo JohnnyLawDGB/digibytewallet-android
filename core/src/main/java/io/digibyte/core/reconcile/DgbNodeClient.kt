@@ -30,7 +30,13 @@ import java.util.concurrent.TimeUnit
  */
 class DgbNodeClient(
     private val context: Context,
-    private val baseClient: OkHttpClient = OkHttpClient(),
+    /**
+     * The client every request is derived from. Required, with no default: in the app it is the
+     * shared client (Hilt's provider is the one place this class is built), which carries the
+     * Tor routing and the DigiScope pins. A client made here would carry neither, so a reconcile
+     * started with Tor on would leave from the device's own address.
+     */
+    private val baseClient: OkHttpClient,
 ) {
     companion object {
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
@@ -72,8 +78,8 @@ class DgbNodeClient(
         }
     }
 
-    /** OkHttp client with cert pinning for the default digiscope.me endpoint.
-     *  Cert-pinning is skipped for custom endpoints (user's own node). */
+    /** OkHttp client with cert pinning for the default digiscope.me endpoint. Derived from
+     *  [baseClient], so the Tor routing applies; the base already pins the same host. */
     private val pinnedClient: OkHttpClient = baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS) // scantxoutset takes 20–60s on the server
@@ -102,9 +108,9 @@ class DgbNodeClient(
         }
     }
 
-    /** Select the right OkHttp client for the current endpoint — we only
-     *  cert-pin the default (digiscope.me). A user running their own node
-     *  gets standard TLS (their choice of CA). */
+    /** Select the right OkHttp client for the current endpoint. A user running their own node
+     *  gets standard TLS (their choice of CA) — the pins apply only to the DigiScope host, which
+     *  is pinned on whichever client reaches it. Both clients route through Tor when it is on. */
     private fun client(url: String): OkHttpClient =
         if (url.startsWith(DEFAULT_BASE_URL)) pinnedClient else unpinnedClient
 

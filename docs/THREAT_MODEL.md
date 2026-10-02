@@ -72,7 +72,7 @@ exposure. Bold entries are known residual risks.
 | | A1 seed | A3 addresses | A4 tx history |
 |--|---------|---------------|---------------|
 | T1 casual observer | `FLAG_SECURE` on seed screens blocks screenshots | — | — |
-| T2 network observer | TLS on all HTTP; P2P traffic is encrypted-by-content only, not transport | TLS hides host; compact-filter sync sends no address data to peers, so P2P traffic no longer leaks the address set | TLS hides host, **block-request patterns leak tx interest** |
+| T2 network observer | TLS on all HTTP (connections to `api.digiscope.me` certificate-pinned); P2P traffic is encrypted-by-content only, not transport | TLS hides content, not the host: DNS and the TLS server name still name it unless Tor is on. Compact-filter sync sends no address data to peers, so P2P traffic no longer leaks the address set. With Tor on, app HTTP, P2P and reconcile calls go through Tor; **the in-app Market (a WebView) does not** — the wallet says so before it loads | **Block-request patterns leak tx interest** (to the serving peer; with Tor off, timing and volume also to the network) |
 | T3 honest peer | — | Compact filters (BIP 157/158) are built by the peer and matched on-device; the wallet sends no address data, so the address set never leaves the device via sync | Wallet fetches full blocks on filter match (no merkleblock/bloom path); **which blocks it fetches still leaks tx interest to the serving peer** |
 | T4 malicious peer | — | Same as T3 — no address data sent | Same as T3, plus **filter-header-source trust**: the CF filter-header chain is trust-on-first-use, checkpoint-anchored; with a single peer the wallet can TOFU-accept a divergent chain. v3.10.25 added an observe-and-log checkpoint cross-check (compiled-in mainnet checkpoints), not yet enforcing |
 | T5 compromised peer seeder | — | Can bias peer selection / eclipse the wallet onto hostile peers (then T3/T4 apply, including filter-header TOFU adoption) | Same |
@@ -137,12 +137,29 @@ exposure. Bold entries are known residual risks.
 
 ### Network layer
 
-- Tor (optional, opt-in today): kmp-tor exec mode, separate process
-  for crash isolation. Routes P2P traffic and peer-seeder HTTP
-  through SOCKS5 when enabled. **Silent fallback to clearnet on Tor
-  failure is a known gap — Phase 2 surfaces a loud warning.**
-- Certificate pinning on `api.digiscope.me` to defend against
-  upstream MitM on the Hub and seeder endpoints.
+- Tor (optional, opt-in): kmp-tor in no-exec mode, loaded in-process
+  (the earlier exec mode's separate process is gone). When enabled,
+  P2P traffic goes through its SOCKS5 proxy, and so does every request
+  made on the app's shared HTTP client: seeder, prices, update check,
+  Hub REST and WebSocket, Digi-ID callbacks, asset metadata and IPFS,
+  images, and the reconcile calls ("Scan for missing funds", the
+  post-upgrade and pending-confirmation reconciles). While Tor is
+  enabled but not yet connected those requests wait and then fail;
+  they are not sent direct. Name lookups stay off the device's
+  resolver while Tor is on: HTTP host names are resolved by Tor, the
+  native core skips its DNS-seed lookup while a SOCKS proxy is set,
+  and an own-node host name is refused (an IPv4 address is needed
+  while Tor is on). If Tor fails, the wallet falls back to clearnet
+  only after raising the "Tor unavailable" banner (risk 5).
+  **Not covered:** the in-app Market is a WebView whose network stack
+  ignores the app's proxy; while Tor is on the wallet says so and
+  loads it only if the user continues.
+- Certificate pinning on `api.digiscope.me` (leaf + intermediate,
+  one pin set) on the app's shared HTTP client, so every connection
+  to that host is pinned whichever component makes it: Hub REST and
+  WebSocket, seeder, Digi-ID callback, asset metadata, the first IPFS
+  gateway, reconcile. Other hosts use ordinary TLS validation against
+  the system CAs (user-added CAs are not trusted).
 
 ### Update integrity
 
@@ -195,7 +212,10 @@ Named explicitly so they don't go unfixed by being unspoken.
    degrades to clearnet with an amber wallet-screen banner naming the IP
    exposure, plus a "Retry now" action; recovery re-wires the proxy and
    drops the clearnet peers so already-open direct connections cannot
-   keep leaking. Residual: the fallback is still clearnet by design —
+   keep leaking. The app's HTTP traffic follows the same rule: while
+   Tor is enabled it goes direct only once the banner is up (until
+   then it waits for Tor and fails), and returns to Tor when Tor
+   reconnects. Residual: the fallback is still clearnet by design —
    a "Tor or nothing" mode does not exist.
 6. **Digi-ID identity: per-site since the key-isolation change**
    (docs/specs/digiid-key-isolation.md). New domains get an unlinkable
@@ -240,5 +260,11 @@ Named explicitly so they don't go unfixed by being unspoken.
   v3.10.25 shipped an observe-mode checkpoint cross-check ahead of
   Phase 2 enforcement. Peer/observer matrix rows and the seeder row
   updated.
+- v4.0.86 — network layer true-up: one DigiScope pin set on the shared
+  HTTP client (Hub WebSocket, Digi-ID callback and IPFS gateway
+  included); reconcile calls through Tor; while Tor is enabled and not
+  connected, HTTP waits instead of going direct, and goes direct only
+  after the fallback banner; no DNS-seed or own-node name lookup while
+  Tor is on; the Market WebView's Tor gap is stated before it loads.
 - (Phase 2) — closes residual risks 3, 4, 5, 6; enforces filter-header
   checkpoints (risk 1).

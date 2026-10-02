@@ -155,6 +155,8 @@ class SyncService : Service() {
     @Inject lateinit var assetHistoryBackfill: io.digibyte.core.asset.AssetHistoryBackfill
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var okHttpClient: OkHttpClient
+    /** The reconcile client, built by Hilt on [okHttpClient] (Tor routing and DigiScope pins). */
+    @Inject lateinit var dgbNodeClient: DgbNodeClient
     /** Every seeder request goes through this; see [SeederClient]. Derived once, after injection. */
     private val seederClient by lazy { SeederClient(okHttpClient) }
 
@@ -540,7 +542,7 @@ class SyncService : Service() {
                         "Tor failed (" + st.reason + ") — degrading to clearnet, raising banner")
                     NativeBridge.clearSocksProxy()
                     torProxyActive = false
-                    _torFailureActive.value = true
+                    raiseTorFallback()
                 }
             }
         }
@@ -1216,7 +1218,7 @@ class SyncService : Service() {
                             // Surface the degradation to the UI so the user knows
                             // they're no longer routed through Tor — same banner
                             // the bootstrap-failure watchdog raises.
-                            _torFailureActive.value = true
+                            raiseTorFallback()
                             // Don't auto-restart Tor — just stay on direct connections.
                             // The user can re-enable Tor from Settings if they want to
                             // try again. Auto-restart would re-set the proxy and kill
@@ -2014,6 +2016,20 @@ class SyncService : Service() {
     }
 
     /**
+     * The clearnet fallback while the user's Tor setting is on, in its required order: FIRST raise
+     * the "Tor unavailable" banner (the flag the wallet screen draws it from), THEN tell TorManager
+     * the fallback is announced — from that call on, the app's OkHttp traffic may go direct
+     * (NetworkModule / TorRoute). Before it, that traffic waits for Tor and then fails. Every path
+     * that degrades to clearnet goes through here: bootstrap failure (startSyncWithTor), a failed
+     * Tor state seen by the state observer, the dead-proxy watchdog in the keepalive, and
+     * runTorFallbackWatchdog. Cleared when Tor reaches Connected again (both flags).
+     */
+    private fun raiseTorFallback() {
+        _torFailureActive.value = true
+        torManager.announceClearnetFallback()
+    }
+
+    /**
      * Tor watchdog. Runs in parallel with startSyncWithTor(). If Tor was
      * enabled but the wallet is still at 0 peers after TOR_FALLBACK_TIMEOUT_MS,
      * force a clearnet fallback: stop the daemon, clear the C-core SOCKS
@@ -2052,7 +2068,7 @@ class SyncService : Service() {
             NativeBridge.clearSocksProxy()
             torProxyActive = false
             torReconnectFailures = 0
-            _torFailureActive.value = true
+            raiseTorFallback()
             injectPeers()
             injectCustomNode()
             NativeBridge.startSync()
@@ -2086,7 +2102,7 @@ class SyncService : Service() {
                 )
                 NativeBridge.clearSocksProxy()
                 torProxyActive = false
-                _torFailureActive.value = true
+                raiseTorFallback()
             }
         } else {
             // Tor disabled — ensure no stale proxy from a previous session.
@@ -3220,7 +3236,9 @@ class SyncService : Service() {
      * the hostname off the native peer lock (injectPeerByIp resolves under PEER_GUARD)
      * and passes an IPv4 literal (its live-manager re-add path uses inet_pton) — DNS
      * never touches the native peer lock. No-op unless the toggle is on, the address
-     * parses, and it resolves to an IPv4.
+     * parses, and it resolves to an IPv4. While the user's Tor setting is on only an
+     * IPv4 address is used: a host name is not resolved (the lookup would leave Tor)
+     * and the node is not pinned — see OwnNodeAddress.
      */
     private suspend fun injectCustomNode() {
         if (!CustomNodePrefs.isEnabled(this@SyncService)) {
@@ -3241,17 +3259,25 @@ class SyncService : Service() {
             NativeBridge.clearPinnedPeer()
             return
         }
-        val ip = withContext(Dispatchers.IO) {
-            try {
-                java.net.InetAddress.getAllByName(node.host)
-                    .firstOrNull { it is java.net.Inet4Address }?.hostAddress
-            } catch (e: Exception) {
-                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host}", e)
-                null
+        // While the user's Tor setting is on, a host name is refused rather than resolved: the
+        // device's resolver would send the query beside Tor (OwnNodeAddress).
+        val found = withContext(Dispatchers.IO) {
+            OwnNodeAddress.resolve(node.host, torEnabled = torManager.isEnabled)
+        }
+        val ip = when (found) {
+            is OwnNodeAddress.Result.Address -> found.ipv4
+            OwnNodeAddress.Result.RefusedUnderTor -> {
+                android.util.Log.w("SyncService",
+                    "own node is given by host name and Tor is on — not resolved (the lookup would " +
+                        "leave Tor), not pinned; an IPv4 address is needed while Tor is on")
+                NativeBridge.clearPinnedPeer()
+                return
             }
-        } ?: run {
-            NativeBridge.clearPinnedPeer()
-            return
+            is OwnNodeAddress.Result.Unresolved -> {
+                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${found.reason})")
+                NativeBridge.clearPinnedPeer()
+                return
+            }
         }
         // Session escape hatch override: while ownNodeAdditiveSessionOverride is
         // true (set by ACTION_OWN_NODE_ADDITIVE_SESSION, cleared by a deliberate
@@ -3277,7 +3303,8 @@ class SyncService : Service() {
      * configured host to an IPv4 literal and queries native status off the main
      * thread: compactFilterPeerStatus takes PEER_GUARD (manager->lock) in the C core,
      * same constraint as injectCustomNode's resolve above, so this must never run on
-     * Dispatchers.Main.
+     * Dispatchers.Main. A host name with Tor on is not resolved (OwnNodeAddress) and
+     * reads as DARK: the node is not pinned and not in use.
      */
     private fun refreshOwnNodeHealth() {
         if (!CustomNodePrefs.isEnabled(this@SyncService)) {
@@ -3289,13 +3316,19 @@ class SyncService : Service() {
                           else CustomNode.MAINNET_DEFAULT_PORT
         val node = CustomNode.parse(raw, defaultPort) ?: return
         serviceScope.launch(Dispatchers.IO) {
-            val ip = try {
-                java.net.InetAddress.getAllByName(node.host)
-                    .firstOrNull { it is java.net.Inet4Address }?.hostAddress
-            } catch (e: Exception) {
-                android.util.Log.w("SyncService", "own-node health: DNS resolve failed: ${node.host}", e)
-                null
-            } ?: return@launch
+            val ip = when (val found = OwnNodeAddress.resolve(node.host, torEnabled = torManager.isEnabled)) {
+                is OwnNodeAddress.Result.Address -> found.ipv4
+                // Tor on and a host name: not resolved and not pinned (injectCustomNode), so the
+                // node is not in use — say so rather than leave a stale state up.
+                OwnNodeAddress.Result.RefusedUnderTor -> {
+                    _ownNodeHealth.value = OwnNodeHealth.DARK
+                    return@launch
+                }
+                is OwnNodeAddress.Result.Unresolved -> {
+                    android.util.Log.w("SyncService", "own-node health: DNS resolve failed: ${node.host} (${found.reason})")
+                    return@launch
+                }
+            }
             _ownNodeHealth.value = when (NativeBridge.compactFilterPeerStatus(ip, node.port)) {
                 3 -> OwnNodeHealth.SERVING             // connected + answered cfheaders
                 1 -> OwnNodeHealth.CONNECTING          // in pool, socket not yet up
@@ -3807,7 +3840,7 @@ class SyncService : Service() {
                 // transactions is what this path is for and discloses only txids we
                 // broadcast ourselves.
                 val service = ChainReconciliationService(
-                    DgbNodeClient(this@SyncService), assetManager,
+                    dgbNodeClient, assetManager,
                     appContext = this@SyncService,
                 )
                 val promoted = service.confirmPendingTransactions()
