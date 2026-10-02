@@ -507,6 +507,19 @@ object NativeBridge {
      *  transaction validity, not the asset-UTXO array. */
     external fun outpointSpentState(txHashHex: String, vout: Int): Int
 
+    /** Where the wallet's balance rule put each outpoint ("txidHex|vout", display order), one code
+     *  per line in order: 1 spendable, 2 held (carries DigiAsset units, explicitly or registered),
+     *  3 DigiDollar, 4 immature coin generation, 5 not credited (does not pay a derived address),
+     *  6 in a pending transaction, 0 spent by a wallet transaction, -1 transaction not held,
+     *  -2 transaction held but invalid, -3 line unreadable. Null when no wallet is loaded. See
+     *  [io.digibyte.core.reconcile.WalletOutpointCode]. */
+    external fun classifyOutpoints(outpoints: Array<String>): IntArray?
+
+    /** How many of the wallet's spendable outputs are NOT among [outpoints] ("txidHex|vout"), and
+     *  their total satoshis, as [count, sat]: the part of the spendable balance a scan's source did
+     *  not report. Lists no outpoint. Null when no wallet is loaded. */
+    external fun spendableNotListed(outpoints: Array<String>): LongArray?
+
     /** Hold an outpoint OUT of the spendable DGB UTXO set because it carries DigiAsset
      *  units the native tx-local classifier cannot see — chiefly implicit change, the
      *  units a transfer's instructions leave unassigned, which the protocol credits to

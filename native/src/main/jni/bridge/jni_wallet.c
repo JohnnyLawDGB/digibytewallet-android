@@ -928,6 +928,169 @@ Java_io_digibyte_core_bridge_NativeBridge_outpointSpentState(JNIEnv *env, jobjec
     return state;
 }
 
+/* ---------- classifyOutpoints ---------- */
+/* Where the wallet's own balance computation put each outpoint, so a caller holding a list of
+ * outputs from elsewhere (the node a scan asked) can partition them by the wallet's rule
+ * instead of summing them. One code per input "txidHex|vout" line, in order:
+ *    1 SPENDABLE     in the spendable set (BRWalletUTXOs) -- what the DGB balance sums
+ *    2 HELD          an owned, valid, unspent output kept out of the spendable set because it
+ *                    carries DigiAsset units (explicitly, or registered by the asset layer)
+ *    3 DIGIDOLLAR    a DigiDollar token output (BRWalletDigiDollarUTXOs)
+ *    4 IMMATURE      an owned coin-generation output that has not matured
+ *    5 NOT_CREDITED  the wallet holds the transaction but the output does not pay one of its
+ *                    derived addresses (a watched-only pin, or a script with no address)
+ *    6 PENDING       the wallet holds the transaction as pending (not credited until it confirms)
+ *    0 SPENT         the wallet holds a transaction spending the outpoint (a send not yet
+ *                    confirmed, since the caller's source reports it unspent)
+ *   -1 NOT_HELD      the wallet does not hold the transaction, or it has no such output
+ *   -2 CONFLICTED    the wallet holds the transaction but considers it invalid
+ *   -3 UNREADABLE    the line did not parse
+ * Returns NULL when no wallet is loaded or on allocation failure.
+ *
+ * Narrowest query for the purpose: the partition arrays (utxos / ddUtxos / assetUtxos) are
+ * private to BRWallet.c and only utxos and ddUtxos have locked copy accessors, so HELD is
+ * answered by elimination from the same rule _BRWalletUpdateBalance applies to an owned output
+ * of a valid, credited transaction: DigiDollar, else asset, else spendable (immature coinbase
+ * aside). "Owned" is "derived" -- the derived prefix of one BRWalletCopyAllAddrs snapshot --
+ * because the wallet credits only derived addresses. */
+static int _cmpAddrStr(const void *a, const void *b)
+{
+    return strcmp(((const BRAddress *)a)->s, ((const BRAddress *)b)->s);
+}
+
+static int _utxoListHas(const BRUTXO *list, size_t n, UInt256 hash, uint32_t idx)
+{
+    for (size_t i = 0; i < n; i++) if (list[i].n == idx && UInt256Eq(list[i].hash, hash)) return 1;
+    return 0;
+}
+
+JNIEXPORT jintArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_classifyOutpoints(JNIEnv *env, jobject thiz,
+                                                            jobjectArray outpoints)
+{
+    (void)thiz;
+    if (!g_wallet || !outpoints) return NULL;
+    jsize count = (*env)->GetArrayLength(env, outpoints);
+    jint *codes = (jint *)calloc(count > 0 ? (size_t)count : 1, sizeof(jint));
+    if (!codes) return NULL;
+
+    /* One snapshot of each set for the whole call. */
+    size_t nAddr = 0;
+    BRWalletAddrOrigins origins = { 0, 0 };
+    BRAddress *addrs = BRWalletCopyAllAddrs(g_wallet, &nAddr, &origins);
+    size_t nDerived = addrs ? origins.derived : 0;
+    if (addrs && nDerived > 1) qsort(addrs, nDerived, sizeof(*addrs), _cmpAddrStr);
+
+    size_t nUtxo = BRWalletUTXOs(g_wallet, NULL, 0);
+    BRUTXO *utxos = (BRUTXO *)malloc((nUtxo ? nUtxo : 1) * sizeof(BRUTXO));
+    size_t nDd = BRWalletDigiDollarUTXOs(g_wallet, NULL, 0);
+    BRUTXO *dds = (BRUTXO *)malloc((nDd ? nDd : 1) * sizeof(BRUTXO));
+    if (!utxos || !dds || (nAddr > 0 && !addrs)) {
+        free(codes); free(addrs); free(utxos); free(dds);
+        return NULL;
+    }
+    nUtxo = BRWalletUTXOs(g_wallet, utxos, nUtxo);
+    nDd = BRWalletDigiDollarUTXOs(g_wallet, dds, nDd);
+
+    for (jsize k = 0; k < count; k++) {
+        jint code = -3;
+        jstring line = (jstring)(*env)->GetObjectArrayElement(env, outpoints, k);
+        const char *s = line ? (*env)->GetStringUTFChars(env, line, NULL) : NULL;
+        if (s && strlen(s) > 65 && s[64] == '|') {
+            char hex[65];
+            char *end = NULL;
+            memcpy(hex, s, 64);
+            hex[64] = '\0';
+            unsigned long v = strtoul(s + 65, &end, 10);
+            if (end && *end == '\0' && end != s + 65 && v <= UINT32_MAX) {
+                UInt256 hash = UInt256Reverse(uint256(hex)); /* display BE -> internal LE */
+                uint32_t n = (uint32_t)v;
+                BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+                if (!tx || n >= tx->outCount) code = -1;
+                else if (!BRWalletTransactionIsValid(g_wallet, tx)) code = -2;
+                else if (_utxoListHas(utxos, nUtxo, hash, n)) code = 1;
+                else if (_utxoListHas(dds, nDd, hash, n)) code = 3;
+                else if (BRWalletOutpointSpent(g_wallet, hash, n)) code = 0;
+                else if (BRWalletTransactionIsPending(g_wallet, tx)) code = 6;
+                else {
+                    BRAddress key = BR_ADDRESS_NONE;
+                    strncpy(key.s, tx->outputs[n].address, sizeof(key.s) - 1);
+                    int derived = key.s[0] != '\0' && nDerived > 0 &&
+                                  bsearch(&key, addrs, nDerived, sizeof(*addrs), _cmpAddrStr) != NULL;
+                    int coinbase = tx->inCount == 1 && UInt256IsZero(tx->inputs[0].txHash) &&
+                                   tx->inputs[0].index == UINT32_MAX;
+                    if (!derived) code = 5;
+                    else if (coinbase) code = 4;
+                    else code = 2;
+                }
+            }
+        }
+        if (s) (*env)->ReleaseStringUTFChars(env, line, s);
+        if (line) (*env)->DeleteLocalRef(env, line);
+        codes[k] = code;
+    }
+
+    free(addrs); free(utxos); free(dds);
+    jintArray result = (*env)->NewIntArray(env, count);
+    if (result) (*env)->SetIntArrayRegion(env, result, 0, count, codes);
+    free(codes);
+    return result;
+}
+
+/* ---------- spendableNotListed ---------- */
+/* The other half of a scan's comparison: how many of the wallet's spendable outputs
+ * (BRWalletUTXOs) are NOT among the given "txidHex|vout" lines, and their total value, as
+ * [count, satoshis]. A non-zero answer means the wallet counts something the caller's source did
+ * not report. Read-only and builds nothing; it lists no outpoint. Null when no wallet is loaded or
+ * on allocation failure. */
+JNIEXPORT jlongArray JNICALL
+Java_io_digibyte_core_bridge_NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz,
+                                                             jobjectArray outpoints)
+{
+    (void)thiz;
+    if (!g_wallet || !outpoints) return NULL;
+    jsize count = (*env)->GetArrayLength(env, outpoints);
+    BRUTXO *listed = (BRUTXO *)calloc(count > 0 ? (size_t)count : 1, sizeof(BRUTXO));
+    if (!listed) return NULL;
+    size_t nListed = 0;
+    for (jsize k = 0; k < count; k++) {
+        jstring line = (jstring)(*env)->GetObjectArrayElement(env, outpoints, k);
+        const char *s = line ? (*env)->GetStringUTFChars(env, line, NULL) : NULL;
+        if (s && strlen(s) > 65 && s[64] == '|') {
+            char hex[65];
+            char *end = NULL;
+            memcpy(hex, s, 64);
+            hex[64] = '\0';
+            unsigned long v = strtoul(s + 65, &end, 10);
+            if (end && *end == '\0' && end != s + 65 && v <= UINT32_MAX) {
+                listed[nListed].hash = UInt256Reverse(uint256(hex));
+                listed[nListed].n = (uint32_t)v;
+                nListed++;
+            }
+        }
+        if (s) (*env)->ReleaseStringUTFChars(env, line, s);
+        if (line) (*env)->DeleteLocalRef(env, line);
+    }
+
+    size_t nUtxo = BRWalletUTXOs(g_wallet, NULL, 0);
+    BRUTXO *utxos = (BRUTXO *)malloc((nUtxo ? nUtxo : 1) * sizeof(BRUTXO));
+    if (!utxos) { free(listed); return NULL; }
+    nUtxo = BRWalletUTXOs(g_wallet, utxos, nUtxo);
+
+    jlong out[2] = { 0, 0 };
+    for (size_t i = 0; i < nUtxo; i++) {
+        if (_utxoListHas(listed, nListed, utxos[i].hash, utxos[i].n)) continue;
+        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, utxos[i].hash);
+        out[0]++;
+        if (tx && utxos[i].n < tx->outCount) out[1] += (jlong)tx->outputs[utxos[i].n].amount;
+    }
+    free(listed); free(utxos);
+
+    jlongArray result = (*env)->NewLongArray(env, 2);
+    if (result) (*env)->SetLongArrayRegion(env, result, 0, 2, out);
+    return result;
+}
+
 /**
  * This wallet's DigiDollar taproot output key X(Q), as hex.
  *
