@@ -299,10 +299,13 @@ def main():
     # (with it on, the reference disagrees with the chain). The KAT turns it on over the testnet range and requires
     # the wallet to reach these same counts.
     tn = out[-1][2]
-    min_rule = dict(match=0, mismatch=0, skip=0)
+    min_rule = dict(match=0, mismatch=0, skip=0, first=0, match_before=0, skip_before=0)
     for i in range(1, len(tn)):
         e = v4(tn, i, "test", allow_min=True)
-        min_rule["skip" if e is None else ("match" if e == tn[i]["bits"] else "mismatch")] += 1
+        verdict = "skip" if e is None else ("match" if e == tn[i]["bits"] else "mismatch")
+        if verdict == "mismatch" and not min_rule["first"]:  # level 2 refuses here; nothing above it connects
+            min_rule.update(first=i, match_before=min_rule["match"], skip_before=min_rule["skip"])
+        min_rule[verdict] += 1
     print("testnet range with the minimum-difficulty rule on: match=%d mismatch=%d skip=%d" % (
         min_rule["match"], min_rule["mismatch"], min_rule["skip"]))
     assert min_rule["mismatch"] > 0
@@ -334,8 +337,11 @@ def main():
         f.write("};\n\n")
         f.write("// The testnet range judged with fPowAllowMinDifficultyBlocks turned on (it is off on both networks): the\n")
         f.write("// counts the reference reaches. The chain was built without the rule, so most of its mismatches are real.\n")
-        f.write("static const uint32_t kMinRuleMatch = %d, kMinRuleMismatch = %d, kMinRuleSkip = %d;\n\n" % (
+        f.write("// Level 2 refuses the first mismatching row (kMinRuleFirstMismatch); the counts up to it are the *Before ones.\n")
+        f.write("static const uint32_t kMinRuleMatch = %d, kMinRuleMismatch = %d, kMinRuleSkip = %d;\n" % (
             min_rule["match"], min_rule["mismatch"], min_rule["skip"]))
+        f.write("static const uint32_t kMinRuleFirstMismatch = %d, kMinRuleMatchBefore = %d, kMinRuleSkipBefore = %d;\n\n" % (
+            min_rule["first"], min_rule["match_before"], min_rule["skip_before"]))
         f.write("// Synthetic inputs for BRDifficultyV4Target at the parameter edges; expected from the reference above.\n")
         f.write("typedef struct { int testnet; uint32_t lastTimes[11], firstTimes[11], bits, distance, expected;\n"
                 "                 const char *what; } DiffInputVector;\n\n")

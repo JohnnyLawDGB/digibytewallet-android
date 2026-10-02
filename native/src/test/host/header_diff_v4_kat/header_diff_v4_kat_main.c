@@ -435,6 +435,7 @@ static const char *case_unknown_algorithm(void)
 // The minimum-difficulty rule (fPowAllowMinDifficultyBlocks) is off on both networks, as in the reference client and
 // on the testnet26 chain. Turned on over the testnet range, the wallet must reach exactly the counts the generator's
 // independent reference reaches with it on (a chain built without the rule: most of those mismatches are real).
+// At level 2 the first of them is refused and the chain stops below it.
 static const char *case_min_difficulty_rule(void)
 {
     static BRChainParams params;
@@ -452,7 +453,16 @@ static const char *case_min_difficulty_rule(void)
     deliverRange(&f, 1, r->count);
     Counts d = delta(c0, counts());
     char s[200];
-#if DGB_HEADER_DIFF_CHECK >= 1
+#if DGB_HEADER_DIFF_CHECK >= 2
+    // refused at the first mismatching row: nothing above it connects, so nothing above it is judged
+    snprintf(s, sizeof(s), "rule on, level 2: refused at row %" PRIu32 " (tip %" PRIu32 "); match %" PRIu32
+             " (reference %" PRIu32 "), mismatch %" PRIu32 " (1), skip %" PRIu32 " (%" PRIu32 ")",
+             kMinRuleFirstMismatch, tipHeight(&f), d.match, kMinRuleMatchBefore, d.mismatch, d.skip,
+             kMinRuleSkipBefore);
+    check(d.match == kMinRuleMatchBefore && d.mismatch == 1 && d.skip == kMinRuleSkipBefore &&
+          tipHeight(&f) == r->firstHeight + kMinRuleFirstMismatch - 1 && ! resident(&f, rows[kMinRuleFirstMismatch]),
+          s);
+#elif DGB_HEADER_DIFF_CHECK >= 1
     snprintf(s, sizeof(s), "rule on: match %" PRIu32 " (reference %" PRIu32 "), mismatch %" PRIu32 " (%" PRIu32
              "), skip %" PRIu32 " (%" PRIu32 ")", d.match, kMinRuleMatch, d.mismatch, kMinRuleMismatch, d.skip,
              kMinRuleSkip);
