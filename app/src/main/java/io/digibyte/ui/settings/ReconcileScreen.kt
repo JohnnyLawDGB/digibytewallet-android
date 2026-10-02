@@ -25,6 +25,8 @@ import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.reconcile.ChainReconciliationService
 import io.digibyte.core.reconcile.DgbNodeClient
+import io.digibyte.core.reconcile.ClassTotal
+import io.digibyte.core.reconcile.ScanClass
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import kotlinx.coroutines.Dispatchers
@@ -412,11 +414,13 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                 }
 
                 is ChainReconciliationService.State.Done -> {
-                    val totalDgb = s.totalChainBalanceSat / 100_000_000.0
                     val fmt = NumberFormat.getNumberInstance(Locale.US).apply {
                         minimumFractionDigits = 2
                         maximumFractionDigits = 8
                     }
+                    fun dgb(sat: Long) = "${fmt.format(sat / 100_000_000.0)} DGB"
+                    fun line(t: ClassTotal) = "${t.count} · ${dgb(t.sat)}"
+                    val p = s.partition
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -434,14 +438,56 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         )
                         Spacer(Modifier.height(8.dp))
                         ResultRow("Addresses scanned", "${s.scannedAddresses}")
-                        ResultRow("UTXOs on-chain", "${s.utxosSeenOnChain}")
-                        ResultRow("Total chain balance", "${fmt.format(totalDgb)} DGB")
+                        ResultRow("Outputs found on chain", "${s.utxosSeenOnChain}")
+                        if (p == null) {
+                            // No wallet to compare with: say so rather than show a raw sum as a balance.
+                            ResultRow("Found on chain, not compared", dgb(s.totalChainBalanceSat))
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            ResultRow("Spendable", dgb(p.spendableSat), emphasize = true)
+                            ResultRow("Wallet spendable balance", dgb(p.walletSpendableSat))
+                            Text(
+                                if (p.matchesWallet) "Matches the wallet's spendable balance."
+                                else "Does not match the wallet's spendable balance — see below.",
+                                color = if (p.matchesWallet) Color(0xFF6BE8A3) else Color(0xFFFFB74D),
+                                fontSize = 12.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            val held = p.total(ScanClass.HELD_ASSET)
+                            if (held.count > 0) ResultRow("Held for a DigiAsset", line(held))
+                            val unknown = p.total(ScanClass.HELD_UNKNOWN)
+                            if (unknown.count > 0) ResultRow("Held: asset state unknown", line(unknown))
+                            val proven = p.total(ScanClass.PROVEN_PLAIN)
+                            if (proven.count > 0) ResultRow("Plain DGB, spendable after restart", line(proven))
+                            val dd = p.total(ScanClass.DIGIDOLLAR)
+                            if (dd.count > 0) ResultRow("DigiDollar outputs", "${dd.count}")
+                            val immature = p.total(ScanClass.IMMATURE)
+                            if (immature.count > 0) ResultRow("Immature (not yet spendable)", line(immature))
+                            val pending = p.total(ScanClass.PENDING)
+                            if (pending.count > 0) ResultRow("Pending in the wallet", line(pending))
+                            val missing = p.total(ScanClass.NOT_IN_WALLET)
+                            ResultRow("Not in this wallet", line(missing), emphasize = missing.count > 0)
+                            if (p.walletOnly.count > 0) {
+                                ResultRow("In the wallet, not reported by the node", line(p.walletOnly))
+                            }
+                            if (missing.count == 0) {
+                                Text(
+                                    "No missing funds found.",
+                                    color = Color(0xFFB0BEC5),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
                         ResultRow(
                             "Transactions imported",
                             "${s.txsImported}",
                             emphasize = s.txsImported > 0
                         )
-                        ResultRow("Already in wallet", "${s.alreadyKnown}")
+                        ResultRow("Transactions already in wallet", "${s.alreadyKnown}")
+                        if (s.txsNotAdded > 0) {
+                            ResultRow("Transactions not added (not this wallet's)", "${s.txsNotAdded}")
+                        }
                         if (s.historyTxsImported > 0) {
                             ResultRow(
                                 "Recovered from history",

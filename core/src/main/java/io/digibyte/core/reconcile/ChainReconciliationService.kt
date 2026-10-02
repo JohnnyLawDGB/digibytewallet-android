@@ -48,12 +48,22 @@ class ChainReconciliationService(
         object Idle : State()
         data class Scanning(val stage: String, val progress: Float = 0f) : State()
         data class Done(
+            /** Distinct addresses sent to the node. */
             val scannedAddresses: Int,
+            /** Distinct outputs the node reported. */
             val utxosSeenOnChain: Int,
             val txsImported: Int,
+            /** Transactions the node returned that the wallet already held before this scan. */
             val alreadyKnown: Int,
+            /** Sum of the distinct outputs the node reported, every class together. */
             val totalChainBalanceSat: Long,
             val historyTxsImported: Int = 0,
+            /** Transactions the node returned that were neither held nor added (they do not
+             *  touch the wallet, or did not parse). */
+            val txsNotAdded: Int = 0,
+            /** The node's outputs by the wallet's own classes; null when the wallet could not
+             *  be asked (not loaded). */
+            val partition: ScanPartition? = null,
         ) : State()
         data class Failed(val reason: String) : State()
     }
@@ -102,8 +112,9 @@ class ChainReconciliationService(
             if (lastHistoryPassCovered) markAbandonedBandRecovered()
 
             _state.value = State.Scanning("Listing wallet addresses…")
-            val addrs = NativeBridge.dumpAllAddresses()
-                .trim().lines().filter { it.isNotBlank() }
+            // Each address once: the node answers per address occurrence, so a repeated
+            // address would come back as repeated rows.
+            val addrs = distinctAddresses(NativeBridge.dumpAllAddresses().trim().lines())
             if (addrs.isEmpty()) {
                 val failed = State.Failed("No addresses available (wallet not loaded?)")
                 _state.value = failed
@@ -129,7 +140,14 @@ class ChainReconciliationService(
                 return@withContext failed
             }
 
-            if (result.utxos.isEmpty()) {
+            // Each outpoint once, before anything is counted or summed.
+            val utxos = distinctOutpoints(result.utxos)
+            if (utxos.size != result.utxos.size) {
+                android.util.Log.i("ChainReconciliation",
+                    "node reported ${result.utxos.size - utxos.size} repeated output row(s); counted once")
+            }
+
+            if (utxos.isEmpty()) {
                 val done = State.Done(
                     scannedAddresses = addrs.size,
                     utxosSeenOnChain = 0,
@@ -137,6 +155,7 @@ class ChainReconciliationService(
                     alreadyKnown = 0,
                     totalChainBalanceSat = 0L,
                     historyTxsImported = historyImported,
+                    partition = classify(utxos),
                 )
                 _state.value = done
                 return@withContext done
@@ -154,7 +173,8 @@ class ChainReconciliationService(
             val uniqueTxids = result.rawTxs.keys.toList()
             var imported = 0
             var alreadyKnown = 0
-            val totalBalance = result.utxos.sumOf { it.amountSatoshi }
+            var notAdded = 0
+            val totalBalance = utxos.sumOf { it.amountSatoshi }
 
             for ((idx, txid) in uniqueTxids.withIndex()) {
                 _state.value = State.Scanning(
@@ -162,20 +182,48 @@ class ChainReconciliationService(
                     progress = (idx + 1).toFloat() / uniqueTxids.size,
                 )
                 val rawTx = result.rawTxs[txid] ?: continue
-                val rawBytes = runCatching { hexToBytes(rawTx.hex) }.getOrNull() ?: continue
-                val ok = NativeBridge.registerRawTransaction(
+                // Held before this scan? Asked first, so "already in wallet" counts exactly that;
+                // a `false` from the registration alone also means "does not touch the wallet".
+                // A held transaction is still registered: that is what promotes one stuck at
+                // pending to the confirming height the node reports.
+                val heldBefore = runCatching { NativeBridge.getSerializedTransactionForHash(txid) != null }
+                    .getOrDefault(false)
+                val rawBytes = runCatching { hexToBytes(rawTx.hex) }.getOrNull()
+                val ok = rawBytes != null && NativeBridge.registerRawTransaction(
                     rawBytes, rawTx.blockHeight, rawTx.blockTime
                 )
-                if (ok) imported++ else alreadyKnown++
+                when {
+                    heldBefore -> alreadyKnown++
+                    ok -> imported++
+                    else -> notAdded++
+                }
+            }
+
+            // Classify AFTER the import, so what this scan added is classified as the wallet now
+            // holds it. Then try to prove the held remainders zero.
+            _state.value = State.Scanning("Comparing with the wallet…", progress = 1f)
+            var partition = classify(utxos)
+            if (partition != null && assetManager != null) {
+                partition = proveHeldRemainders(
+                    partition = partition,
+                    prove = { u -> remainderWalk.proveLastOutputCarriesNoUnits(u.txid, u.vout) },
+                    record = { txid -> assetManager.recordRemainderProof(txid) },
+                    onVerdict = { u, verdict ->
+                        android.util.Log.i("ChainReconciliation",
+                            "remainder of ${u.txid.take(12)}:${u.vout}: $verdict")
+                    },
+                )
             }
 
             val done = State.Done(
                 scannedAddresses = addrs.size,
-                utxosSeenOnChain = result.utxos.size,
+                utxosSeenOnChain = utxos.size,
                 txsImported = imported,
                 alreadyKnown = alreadyKnown,
                 totalChainBalanceSat = totalBalance,
                 historyTxsImported = historyImported,
+                txsNotAdded = notAdded,
+                partition = partition,
             )
             _state.value = done
             done
@@ -184,6 +232,73 @@ class ChainReconciliationService(
             _state.value = failed
             failed
         }
+    }
+
+    /**
+     * The node's outputs by the wallet's own partition; null when the wallet cannot answer.
+     * Spendable / DigiDollar / immature / pending / held / not credited come from the native
+     * balance rule ([NativeBridge.classifyOutpoints]); for a held output, the asset layer says
+     * whether it is held for its units or because its remainder is unknown.
+     */
+    private suspend fun classify(utxos: List<UtxoEntry>): ScanPartition? {
+        val lines = utxos.map { "${it.txid.lowercase()}|${it.vout}" }.toTypedArray()
+        val codes = runCatching { NativeBridge.classifyOutpoints(lines) }.getOrNull()
+        val walletOnly = runCatching { walletOnlyOf(NativeBridge.spendableNotListed(lines)) }.getOrNull()
+        val balance = runCatching { NativeBridge.getBalance() }.getOrDefault(0L)
+        return partitionScan(
+            utxos = utxos,
+            codes = codes,
+            heldKind = { u -> heldKindOf(assetManager?.heldOutputFacts(u.txid.lowercase(), u.vout), u.vout) },
+            walletOnly = walletOnly,
+            walletSpendableSat = balance,
+        )
+    }
+
+    /** One walk per service: outputs of one scan that share ancestry are read once. Reads the
+     *  wallet's own copy first, then the node this scan already talks to; every transaction is
+     *  accepted only when its bytes hash to the id asked for. */
+    private val remainderWalk: io.digibyte.core.asset.RemainderProofWalk by lazy {
+        io.digibyte.core.asset.RemainderProofWalk(
+            fetch = { id -> fetchTransactionBytes(id) },
+            txidOf = { NativeBridge.rawTransactionId(it) },
+            parse = ::parseWalkTx,
+        )
+    }
+
+    /** The first source whose bytes hash to [txid]; when none does, the last bytes any source
+     *  gave (the walk then rejects them), or null. */
+    private suspend fun fetchTransactionBytes(txid: String): ByteArray? {
+        val sources: List<suspend () -> ByteArray?> = listOf(
+            { runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull() },
+            { nodeClient.fetchRawTransaction(txid) },
+            { nodeClient.fetchRawTx(txid, 0L)?.hex?.let { runCatching { hexToBytes(it) }.getOrNull() } },
+        )
+        var lastSeen: ByteArray? = null
+        for (source in sources) {
+            val bytes = runCatching { source() }.getOrNull() ?: continue
+            if (runCatching { NativeBridge.rawTransactionId(bytes) }.getOrNull()?.lowercase() == txid.lowercase()) {
+                return bytes
+            }
+            lastSeen = bytes
+        }
+        return lastSeen
+    }
+
+    private fun parseWalkTx(bytes: ByteArray): io.digibyte.core.asset.WalkTx? {
+        val ins = NativeBridge.getRawTransactionInputs(bytes) ?: return null
+        val outs = NativeBridge.getRawTransactionOutputs(bytes) ?: return null
+        val inputs = ins.map { line ->
+            val p = line.split("|", limit = 2)
+            val vout = p.getOrNull(1)?.toLongOrNull() ?: return null
+            if (p[0].length != 64) return null
+            p[0].lowercase() to (if (vout > Int.MAX_VALUE) -1 else vout.toInt())
+        }
+        val scripts = outs.map { line ->
+            val p = line.split("|", limit = 3)
+            val hex = p.getOrNull(2) ?: return null
+            if (hex.isEmpty()) ByteArray(0) else runCatching { hexToBytes(hex) }.getOrNull() ?: return null
+        }
+        return io.digibyte.core.asset.WalkTx(inputs, scripts)
     }
 
     /** Run the local asset-row tidy-up if an AssetManager is wired in. Local only —
@@ -222,7 +337,9 @@ class ChainReconciliationService(
      */
     suspend fun reconcileAddressHistory(): Int {
         lastHistoryPassCovered = false
-        val addrs = NativeBridge.dumpAllAddresses().trim().lines().filter { it.isNotBlank() }
+        // Each address once (the plan below already folds repeated txids; this keeps the request
+        // itself to one mention per address).
+        val addrs = distinctAddresses(NativeBridge.dumpAllAddresses().trim().lines())
         if (addrs.isEmpty()) return 0
         // UNCAPPED known set — load-bearing for the GATE-3 coverage proof, see
         // [knownTxidsForHistoryPlan]. getTransactionDetails() alone caps at the 100
@@ -314,6 +431,36 @@ class ChainReconciliationService(
         }
         return out
     }
+}
+
+/**
+ * Put each output held for an unknown remainder to [prove]; a [RemainderProofWalk.Verdict.Proven]
+ * output is recorded ([record]) and moves to [ScanClass.PROVEN_PLAIN]. Every other verdict leaves
+ * it held. Each transaction is asked once.
+ */
+internal suspend fun proveHeldRemainders(
+    partition: ScanPartition,
+    prove: suspend (UtxoEntry) -> io.digibyte.core.asset.RemainderProofWalk.Verdict,
+    record: (String) -> Unit,
+    onVerdict: (UtxoEntry, io.digibyte.core.asset.RemainderProofWalk.Verdict) -> Unit = { _, _ -> },
+): ScanPartition {
+    val proven = ArrayList<UtxoEntry>()
+    val asked = HashMap<Pair<String, Int>, io.digibyte.core.asset.RemainderProofWalk.Verdict>()
+    for (u in partition.members[ScanClass.HELD_UNKNOWN].orEmpty()) {
+        val key = outpointKey(u)
+        val verdict = asked[key] ?: try {
+            prove(u)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            io.digibyte.core.asset.RemainderProofWalk.Verdict.Held(io.digibyte.core.asset.RemainderProofWalk.Reason.UNAVAILABLE)
+        }.also { asked[key] = it }
+        onVerdict(u, verdict)
+        if (verdict == io.digibyte.core.asset.RemainderProofWalk.Verdict.Proven) {
+            if (runCatching { record(u.txid.lowercase()) }.isSuccess) proven += u
+        }
+    }
+    return partition.move(proven, ScanClass.HELD_UNKNOWN, ScanClass.PROVEN_PLAIN)
 }
 
 /**

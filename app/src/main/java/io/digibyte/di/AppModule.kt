@@ -387,6 +387,7 @@ object AppModule {
         outgoing: io.digibyte.core.OutgoingTxStore,
         persister: io.digibyte.core.WalletTxPersister,
         provenanceStore: io.digibyte.core.asset.ProvenanceStore,
+        @ApplicationContext context: Context,
     ): AssetManager = AssetManager(
         utxoDao = utxoDao,
         transactionDao = transactionDao,
@@ -396,6 +397,9 @@ object AppModule {
         outgoingTxStore = outgoing,
         walletTxPersister = persister,
         provenanceStore = provenanceStore,
+        // Proofs that an asset transaction's last output carries no units, kept across restarts
+        // so the startup replay does not hold that output out again.
+        remainderProofs = io.digibyte.core.asset.PrefsRemainderProofStore(context),
     )
 
     @Provides @Singleton

@@ -184,6 +184,17 @@ internal class ZeroRowInputs {
     var otherUnits: Long = 0L
 }
 
+/** What the hold rule reads about one output of an asset transaction the wallet holds; see
+ *  [AssetManager.heldOutputFacts]. [heldByRuleNow] is the startup replay's answer for the output
+ *  today: true held, false not held (its remainder is known, or proven, to be zero), null no answer. */
+class HeldOutputFacts(
+    val header: DecodedAssetHeader,
+    val firstNonOpReturnVout: Int?,
+    val outputCount: Int,
+    val heldByRuleNow: Boolean?,
+    val rowQuantity: Long?,
+)
+
 /** What [outputIsTargeted] reads of the transaction that created an output. */
 internal class AssetTxShape(
     val header: DecodedAssetHeader,
@@ -226,7 +237,8 @@ internal suspend fun outputIsTargeted(
     rowQuantity: suspend (String, Int) -> Long?,
     isAssetTx: suspend (String) -> Boolean?,
     settled: MutableMap<String, Long?>? = null,
-): Boolean? = TargetingWalk(shapeOf, rowQuantity, isAssetTx, settled).answer(txid, vout)
+    provenInputUnits: (String, DecodedAssetHeader) -> Long? = { _, _ -> null },
+): Boolean? = TargetingWalk(shapeOf, rowQuantity, isAssetTx, settled, provenInputUnits).answer(txid, vout)
 
 /**
  * One question put to [outputIsTargeted], and everything it read on the way: the shapes, rows and
@@ -238,6 +250,7 @@ private class TargetingWalk(
     private val rowQuantity: suspend (String, Int) -> Long?,
     private val isAssetTx: suspend (String) -> Boolean?,
     private val settled: MutableMap<String, Long?>?,
+    private val provenInputUnits: (String, DecodedAssetHeader) -> Long?,
 ) {
     private val shapes = HashMap<String, AssetTxShape?>()
     private val inputLists = HashMap<String, List<Pair<String, Int>>?>()
@@ -317,7 +330,7 @@ private class TargetingWalk(
             rowQuantity = { funding, vout -> row(funding, vout) },
             isAssetTx = isAssetTx,
             rowIsTargeted = { funding, vout -> answerFromTotals(funding, vout) },
-        )
+        ) ?: provenInputUnits(txid, tx.header)
     }
 
     /** The targeting answer for one output, from the payload and the totals already resolved. */
@@ -395,6 +408,11 @@ class AssetManager(
     /** Seam for the pass [sendAsset] runs before it reads a coin. Null in production, where it is
      *  [holdAssetOutputsBeforeSpend]; a test injects a recording fake. */
     private val beforeSpend: (suspend () -> Unit)? = null,
+    /** Transactions whose last output is proven to carry no units ([RemainderProofWalk]). Every
+     *  hold path reads it where the wallet's own rows leave a remainder unknown. Defaults to
+     *  process-lifetime memory; production passes a persistent store so a proof survives a
+     *  restart and the startup replay does not hold the output out again. */
+    private val remainderProofs: RemainderProofStore = InMemoryRemainderProofStore(),
 ) {
 
     init {
@@ -854,7 +872,7 @@ class AssetManager(
                 inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
             },
             unresolved = zeroRowInputs,
-        )
+        ) ?: provenInputUnits(txHashHex, header)
         val outputCount = outputLines.size
 
         // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
@@ -1537,7 +1555,7 @@ class AssetManager(
                 val isAssetTx: suspend (String) -> Boolean? =
                     { txid -> if (txid in plainTxs) false else hasAssetPayload(outputsOf(txid)) }
                 val zeroRowInputs = ZeroRowInputs()
-                val inputUnits = if (inputs.any { it == null }) null else resolveInputAssetUnits(
+                val inputUnits = (if (inputs.any { it == null }) null else resolveInputAssetUnits(
                     inputs = inputs.filterNotNull(),
                     rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
                     isAssetTx = isAssetTx,
@@ -1545,7 +1563,7 @@ class AssetManager(
                         inputRowIsTargeted(txid, vout, outputsOf, inputsOf, inputUnitsThisPass, isAssetTx)
                     },
                     unresolved = zeroRowInputs,
-                )
+                )) ?: provenInputUnits(txHash, header)
                 inputUnitsThisPass[txHash] = inputUnits
 
                 // The same ownership rule detection applies: with an owned set, only what is ours;
@@ -1800,7 +1818,57 @@ class AssetManager(
         rowQuantity = { t, v -> utxoDao.getAssetUtxoAt(t, v)?.assetQuantity },
         isAssetTx = isAssetTx,
         settled = settled,
+        provenInputUnits = ::provenInputUnits,
     )
+
+    /**
+     * What [txid]'s inputs carried, as far as its remainder is concerned, when a proof says its
+     * last output carries no units: exactly what its instructions consume, so
+     * [AssetTxQuantity.implicitChange] is zero. Null without a proof — the remainder stays
+     * unknown and the hold rule keeps the last output out of the spendable set.
+     */
+    private fun provenInputUnits(txid: String, header: DecodedAssetHeader): Long? =
+        if (runCatching { remainderProofs.isProven(txid) }.getOrDefault(false)) {
+            AssetTxQuantity.assignedUnits(header)
+        } else null
+
+    /** Record [RemainderProofWalk]'s proof that [txid]'s last output carries no units. From the
+     *  next time the wallet's spendable set is built (the next start), no hold path holds that
+     *  output out: the native exclusion list only grows within a process. */
+    fun recordRemainderProof(txid: String) {
+        remainderProofs.markProven(txid)
+        android.util.Log.i("AssetManager", "remainder proven zero for ${txid.take(12)}: last output leaves the hold from the next start")
+    }
+
+    /** Has [txid]'s last output been proven to carry no units? */
+    fun hasRemainderProof(txid: String): Boolean =
+        runCatching { remainderProofs.isProven(txid) }.getOrDefault(false)
+
+    /**
+     * Why the wallet holds output [vout] of [txHashHex] out of the spendable set, for a report: the
+     * header as the hold rule reads it, the row's stored quantity, and the startup replay's own
+     * answer for the output now ([defaultResolveRowTargets], which reads recorded proofs). Null
+     * when the transaction cannot be read or carries no payload.
+     */
+    suspend fun heldOutputFacts(txHashHex: String, vout: Int): HeldOutputFacts? = withContext(Dispatchers.IO) {
+        val outputLines = runCatching { NativeBridge.getTransactionOutputsForHash(txHashHex) }.getOrNull()
+            ?: return@withContext null
+        val shape = assetTxShape(outputLines) { heldInputLines(txHashHex) } ?: return@withContext null
+        val heldNow = try {
+            defaultResolveRowTargets(txHashHex, vout)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        HeldOutputFacts(
+            header = shape.header,
+            firstNonOpReturnVout = shape.firstNonOpReturnVout,
+            outputCount = shape.outputCount,
+            heldByRuleNow = heldNow,
+            rowQuantity = utxoDao.getAssetUtxoAt(txHashHex, vout)?.assetQuantity,
+        )
+    }
 
     /** [AssetTxShape] from bridge lines. Null — no answer — for a transaction that is not held,
      *  carries no payload that decodes, or has an output line that cannot be read; an input line
@@ -2070,7 +2138,7 @@ class AssetManager(
             throw e
         } catch (e: Exception) {
             null
-        }
+        } ?: provenInputUnits(txHashHex, header)
         if (heldOnlyForZeroRows(header, vout, firstNonOpReturn, outputLines.size, zeroRowInputs)) {
             heldForZeroRows?.addAll(zeroRowInputs.rows)
         }
