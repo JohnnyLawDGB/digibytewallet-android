@@ -16,8 +16,9 @@
 #   scripts/run-host-kats.sh              # run all KATs
 #   scripts/run-host-kats.sh watched      # run only KATs whose name matches "watched"
 #
-# Every suite is built at the header proof-of-work level the app ships (read from
-# native/build.gradle.kts, printed in the header line) unless the suite names a level itself.
+# Every suite is built at the header check levels the app ships -- proof of work and difficulty
+# target, both read from native/build.gradle.kts and printed in the header line -- unless the suite
+# names that level itself.
 #
 # Exit code 0 = every KAT passed, 1 = at least one failed or has no runner.
 set -uo pipefail
@@ -40,20 +41,27 @@ fi
 . "$SCRIPT_DIR/find-clang.sh"
 find_host_clang || exit 1
 
-# THE SHIPPED LEVEL. The header proof-of-work check is compiled in at a level, DGB_HEADER_POW_CHECK
-# (BRMerkleBlock.h). The app build sets it in native/build.gradle.kts; the C header defaults to 0. A suite
-# that does not name a level would therefore be built at 0, a level no app build ships, and a sweep would
-# test a different verdict from the one users run. Read the level the way merkleblock_pow_kat's seam gate
-# does, and have the `clang` every run.sh calls append it, unless that call names a level itself (suites
-# with their own 0/1/2 arms keep them). Through the same shim directory find-clang.sh uses for its
+# THE SHIPPED LEVELS. Two header checks are compiled in at a level each (BRMerkleBlock.h):
+# DGB_HEADER_POW_CHECK (proof of work, allowed algorithm by height) and DGB_HEADER_DIFF_CHECK (the
+# MultiShield V4 difficulty target). The app build sets both in native/build.gradle.kts; the C header
+# defaults each to 0. A suite that does not name a level would therefore be built at 0, a level no app
+# build ships, and a sweep would test a different verdict from the one users run. Read each level the
+# way the seam gates do (merkleblock_pow_kat, header_diff_v4_kat), and have the `clang` every run.sh
+# calls append it, unless that call names that level itself (suites with their own 0/1/2 arms keep
+# them; each flag is judged on its own). Through the same shim directory find-clang.sh uses for its
 # compiler link; run.sh files that use "${CC:-clang}" resolve to it as well.
 GRADLE_NATIVE="$REPO_ROOT/native/build.gradle.kts"
-pow_levels="$(grep -o 'DDGB_HEADER_POW_CHECK=[0-9][0-9]*' "$GRADLE_NATIVE" 2>/dev/null | sort -u)"
-if [ "$(printf '%s' "$pow_levels" | grep -c .)" -ne 1 ]; then
-    echo "error: expected exactly one -DDGB_HEADER_POW_CHECK=<level> in $GRADLE_NATIVE, found: ${pow_levels:-none}" >&2
-    exit 1
-fi
-SHIPPED_POW_LEVEL="${pow_levels#DDGB_HEADER_POW_CHECK=}"
+shipped_level() {   # $1 = macro name; prints its one level, or fails
+    local found
+    found="$(grep -o "D$1=[0-9][0-9]*" "$GRADLE_NATIVE" 2>/dev/null | sort -u)"
+    if [ "$(printf '%s' "$found" | grep -c .)" -ne 1 ]; then
+        echo "error: expected exactly one -D$1=<level> in $GRADLE_NATIVE, found: ${found:-none}" >&2
+        return 1
+    fi
+    printf '%s' "${found#D$1=}"
+}
+SHIPPED_POW_LEVEL="$(shipped_level DGB_HEADER_POW_CHECK)" || exit 1
+SHIPPED_DIFF_LEVEL="$(shipped_level DGB_HEADER_DIFF_CHECK)" || exit 1
 if [ -z "${HOST_CLANG_SHIM:-}" ]; then
     HOST_CLANG_SHIM="$(mktemp -d)"
     PATH="$HOST_CLANG_SHIM:$PATH"
@@ -62,11 +70,16 @@ fi
 rm -f "$HOST_CLANG_SHIM/clang"
 cat > "$HOST_CLANG_SHIM/clang" <<SHIM
 #!/usr/bin/env bash
-# run-host-kats.sh: build at the shipped header proof-of-work level unless the caller names a level.
+# run-host-kats.sh: build at the shipped header check levels unless the caller names a level.
+pow=1; diff=1
 for a in "\$@"; do
-    case "\$a" in *DGB_HEADER_POW_CHECK*) exec "$HOST_CLANG" "\$@" ;; esac
+    case "\$a" in *DGB_HEADER_POW_CHECK*) pow=0 ;; esac
+    case "\$a" in *DGB_HEADER_DIFF_CHECK*) diff=0 ;; esac
 done
-exec "$HOST_CLANG" "\$@" -DDGB_HEADER_POW_CHECK=$SHIPPED_POW_LEVEL
+extra=()
+[ \$pow -eq 1 ] && extra+=(-DDGB_HEADER_POW_CHECK=$SHIPPED_POW_LEVEL)
+[ \$diff -eq 1 ] && extra+=(-DDGB_HEADER_DIFF_CHECK=$SHIPPED_DIFF_LEVEL)
+exec "$HOST_CLANG" "\$@" "\${extra[@]}"
 SHIM
 chmod +x "$HOST_CLANG_SHIM/clang"
 trap 'rm -rf "$HOST_CLANG_SHIM"' EXIT
@@ -74,9 +87,10 @@ if [ "$(command -v clang)" != "$HOST_CLANG_SHIM/clang" ]; then
     echo "error: the level shim is not the clang on the PATH ($(command -v clang))" >&2
     exit 1
 fi
+LEVELS="proof-of-work level $SHIPPED_POW_LEVEL, difficulty-target level $SHIPPED_DIFF_LEVEL"
 
 echo "compiler: $HOST_CLANG ($("$HOST_CLANG" --version 2>/dev/null | head -1))"
-echo "header proof-of-work level: $SHIPPED_POW_LEVEL (shipped, from native/build.gradle.kts; a suite that names its own level keeps it)"
+echo "header checks: $LEVELS (shipped, from native/build.gradle.kts; a suite that names its own level keeps it)"
 echo
 
 pass=0; fail=0; norunner=0
@@ -114,7 +128,7 @@ for dir in "$HOST_DIR"/*/; do
 done
 
 echo
-echo "host KATs: $pass passed, $fail failed, $norunner without a runner  ($((SECONDS - start))s, level $SHIPPED_POW_LEVEL)"
+echo "host KATs: $pass passed, $fail failed, $norunner without a runner  ($((SECONDS - start))s, $LEVELS)"
 [ -n "$failed_kats" ]   && echo "failed:  $failed_kats"
 [ -n "$norunner_kats" ] && echo "no runner:$norunner_kats"
 
