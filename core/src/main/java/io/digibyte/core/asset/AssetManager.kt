@@ -2377,9 +2377,14 @@ class AssetManager(
                 feePerKb = feePerKb,
             )
         ) {
-            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Planned -> chosen.plan
-            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unverified ->
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Planned -> {
+                android.util.Log.i("AssetManager", "asset send: ${chosen.plan.assetInputs.size} asset input(s) confirmed by the indexer; set aside ${sendSelection.setAsideOutpoints().size}")
+                chosen.plan
+            }
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unverified -> {
+                android.util.Log.w("AssetManager", "asset send: the indexer could not confirm the asset inputs")
                 return notPlanned(TxResult.Refused(SendRefusal.ASSET_HOLDING_UNVERIFIED))
+            }
             is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unconfirmed -> {
                 android.util.Log.w("AssetManager", "asset send: no confirmed coins cover it; set aside ${sendSelection.setAsideOutpoints().size}")
                 return notPlanned(TxResult.Refused(SendRefusal.ASSET_HOLDING_UNCONFIRMED))
