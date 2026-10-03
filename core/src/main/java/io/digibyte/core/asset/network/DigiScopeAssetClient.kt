@@ -47,7 +47,7 @@ class DigiScopeAssetClient(
         val req = Request.Builder().url("$baseUrl/digiassets/txout/${txid.lowercase()}/$vout").get().build()
         client.newCall(req).execute().use { resp ->
             when {
-                resp.code == 404 -> io.digibyte.core.asset.send.StackLookup.NotUnspent
+                resp.code == 404 -> DigiScopeAssetParsing.notFound(resp.body?.string())
                 !resp.isSuccessful -> io.digibyte.core.asset.send.StackLookup.Unavailable
                 else -> {
                     val body = resp.body?.string()

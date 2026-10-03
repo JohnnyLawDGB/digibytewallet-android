@@ -40,4 +40,13 @@ class TxOutStackParsingTest {
         )
         for (b in bad) assertEquals(b, StackLookup.Unavailable, parse(b))
     }
+
+    /** A 404 means "not unspent" only when it is the endpoint's own answer; any other 404 (the route
+     *  not deployed, a proxy page) is no answer, so the send says it could not check. */
+    @Test fun only_the_endpoints_own_404_means_not_unspent() {
+        assertEquals(StackLookup.NotUnspent, DigiScopeAssetParsing.notFound("""{"unspent":false}"""))
+        for (b in listOf(null, "", "Cannot GET /api/digiassets/txout/x/0", """{"error":"not found"}""", """{"unspent":true}""", "<html>404</html>")) {
+            assertEquals("$b", StackLookup.Unavailable, DigiScopeAssetParsing.notFound(b))
+        }
+    }
 }

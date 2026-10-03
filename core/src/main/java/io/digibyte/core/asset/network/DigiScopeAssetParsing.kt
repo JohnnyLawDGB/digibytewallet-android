@@ -60,6 +60,14 @@ internal object DigiScopeAssetParsing {
         return StackLookup.Found(entries)
     }
 
+    /** A 404 from `GET /digiassets/txout/...`: "not unspent" only when the body is the endpoint's own
+     *  `{"unspent": false}`. Anything else — a route that is not deployed, a proxy's page — is no answer. */
+    fun notFound(body: String?): StackLookup {
+        if (body.isNullOrBlank()) return StackLookup.Unavailable
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return StackLookup.Unavailable
+        return if (json.has("unspent") && json.opt("unspent") == false) StackLookup.NotUnspent else StackLookup.Unavailable
+    }
+
     private fun toMap(obj: JSONObject): Map<String, Any?> {
         val out = mutableMapOf<String, Any?>()
         val keys = obj.keys()
