@@ -49,7 +49,8 @@ class PrefsRemainderProofStore(context: Context) : RemainderProofStore {
 
     private companion object {
         const val PREFS_NAME = "dgb_reconcile"
-        const val KEY_PROVEN = "remainder_proven_txids"
+        // Versioned: a proof recorded under an earlier, looser rule is not carried over.
+        const val KEY_PROVEN = "remainder_proven_txids_v2"
     }
 }
 
@@ -193,9 +194,13 @@ class RemainderProofWalk(
      *  DigiAsset marker, decoded as a transfer whose instructions re-encode to exactly its bytes
      *  (so no instruction was dropped by a lenient parse). */
     private fun payloadOf(tx: WalkTx): Payload {
-        val marked = tx.outputScripts.filter { it.isNotEmpty() && it[0] == OP_RETURN && decoder.containsAsset(it) }
-        if (marked.isEmpty()) return Payload.None
-        if (marked.size > 1) return Payload.Other
+        val dataOutputs = tx.outputScripts.filter { it.isNotEmpty() && it[0] == OP_RETURN }
+        if (dataOutputs.isEmpty()) return Payload.None
+        // More than one data output: which one the protocol reads is not something this walk
+        // decides, so nothing about this transaction is proven.
+        if (dataOutputs.size > 1) return Payload.Other
+        val marked = dataOutputs.filter { decoder.containsAsset(it) }
+        if (marked.isEmpty()) return Payload.Other
         val script = marked[0]
         val header = decoder.decode(script) ?: return Payload.Other
         if (header.operation != AssetOperation.TRANSFER) return Payload.Other
@@ -257,9 +262,15 @@ class RemainderProofWalk(
                     return if (only.amount == 0L) Units.Zero else Units.Chunk(only.amount)
                 }
                 if (naming.isNotEmpty()) return Units.Unknown(Reason.NOT_PROVABLE)
+                // Earlier transfer versions skip every instruction when the first input holds no
+                // asset, leaving all units to the last output: only version 3 is proven here.
+                if (payload.header.version != 3) return Units.Unknown(Reason.NOT_PROVABLE)
                 // A skip moves the instructions on to the next input, so they need not draw the
                 // one holding whole; that is outside what this rule proves.
                 if (instructions.any { it.skip }) return Units.Unknown(Reason.NOT_PROVABLE)
+                // A zero amount after the holding is used up reads past the inputs; the protocol
+                // then abandons the instructions and gives every unit to the last output.
+                if (instructions.any { it.amount == 0L }) return Units.Unknown(Reason.NOT_PROVABLE)
                 val consumed = AssetTxQuantity.assignedUnits(payload.header)
                     ?: return Units.Unknown(Reason.NOT_PROVABLE)
                 return when (val pool = poolOf(tx, depth)) {
