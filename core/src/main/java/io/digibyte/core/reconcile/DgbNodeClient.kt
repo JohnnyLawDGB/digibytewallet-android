@@ -83,6 +83,8 @@ class DgbNodeClient(
     private val pinnedClient: OkHttpClient = baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS) // scantxoutset takes 20–60s on the server
+        // The shared client caps a whole call at 45 s; a scan batch needs longer.
+        .callTimeout(120, TimeUnit.SECONDS)
         // Shared pin set — see io.digibyte.core.network.DigiScopePins. Pinning the
         // LE intermediate (not just the leaf) survives routine ~90-day leaf renewals;
         // a stale leaf-only pin previously killed "Scan for missing funds" for everyone.
@@ -92,6 +94,7 @@ class DgbNodeClient(
     private val unpinnedClient: OkHttpClient = baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
         .build()
 
     private val prefs = context.getSharedPreferences(PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE)

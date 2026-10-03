@@ -56,4 +56,20 @@ class DgbNodeClientConstructionTest {
             assertEquals("$field lost the interceptors", base.interceptors, derived.interceptors)
         }
     }
+
+    /** A scan batch can take up to a minute on the server (90 s read timeout). The shared client's
+     *  45 s whole-call limit must not cut it short: both derived clients allow at least the read
+     *  timeout for the whole call. */
+    @Test fun `a slow scan batch is not cut off by the shared call limit`() {
+        val base = OkHttpClient.Builder().callTimeout(45, java.util.concurrent.TimeUnit.SECONDS).build()
+        val node = DgbNodeClient(mockk<Context>(relaxed = true), base)
+        for (field in listOf("pinnedClient", "unpinnedClient")) {
+            val derived = DgbNodeClient::class.java.getDeclaredField(field)
+                .apply { isAccessible = true }.get(node) as OkHttpClient
+            assertTrue(
+                "$field callTimeout ${derived.callTimeoutMillis} ms cuts off a ${derived.readTimeoutMillis} ms read",
+                derived.callTimeoutMillis == 0 || derived.callTimeoutMillis >= derived.readTimeoutMillis,
+            )
+        }
+    }
 }
