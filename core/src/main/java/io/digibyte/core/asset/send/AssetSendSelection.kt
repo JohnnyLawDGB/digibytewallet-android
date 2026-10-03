@@ -35,8 +35,9 @@ class AssetSendSelection(
         data class NotPlanned(val message: String) : Outcome
     }
 
-    /** Outpoints confirmed (key includes asset and quantity) and outpoints that failed, kept for
-     *  the life of the process: an unspent output's stack does not change. */
+    /** Outpoints confirmed (key includes asset and quantity), and outpoints the indexer reported
+     *  holding something other than exactly the asset, kept for the life of the process: an
+     *  unspent output's stack does not change. */
     private val verified = ConcurrentHashMap.newKeySet<String>()
     private val setAside = ConcurrentHashMap.newKeySet<String>()
 
@@ -53,8 +54,11 @@ class AssetSendSelection(
 
         // Each round either plans and confirms, stops, or sets at least one more coin aside; the
         // coin count bounds the rounds.
+        // Left out of this send only: outputs the indexer does not (yet) report as unspent or
+        // holding anything — unconfirmed, or the indexer behind. A later send asks again.
+        val notYet = HashSet<String>()
         for (round in 0..assetUtxos.size) {
-            val candidates = assetUtxos.filter { outpoint(it) !in setAside }
+            val candidates = assetUtxos.filter { outpoint(it) !in setAside && outpoint(it) !in notYet }
             val groups = AssetTransferPlanner.sourceGroups(candidates, quantity)
             if (groups.isEmpty()) {
                 return if (candidates.sumOf { it.assetQuantity } >= quantity) {
@@ -80,10 +84,13 @@ class AssetSendSelection(
             for (input in plan.assetInputs) {
                 val key = confirmedKey(input, assetId)
                 if (key in verified) continue
-                when (AssetInputCheck.judge(source.stackOf(input.txid, input.vout), assetId, input.assetQuantity)) {
+                val lookup = source.stackOf(input.txid, input.vout)
+                when (AssetInputCheck.judge(lookup, assetId, input.assetQuantity)) {
                     AssetInputCheck.Verdict.VERIFIED -> verified += key
                     AssetInputCheck.Verdict.MISMATCH -> {
-                        setAside += outpoint(input)
+                        // Remembered only when the indexer positively reports other contents.
+                        if (lookup is StackLookup.Found && lookup.entries.isNotEmpty()) setAside += outpoint(input)
+                        else notYet += outpoint(input)
                         allConfirmed = false
                     }
                     AssetInputCheck.Verdict.UNAVAILABLE -> return Outcome.Unverified

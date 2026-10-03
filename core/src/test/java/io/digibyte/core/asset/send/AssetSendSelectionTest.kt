@@ -127,4 +127,26 @@ class AssetSendSelectionTest {
         }
         assertEquals(listOf("a"), src.asked)
     }
+
+    /** An output the indexer has not seen yet (unconfirmed, or the indexer behind) is left out of
+     *  this send only; once the indexer reports it, a later send may use it. An output the indexer
+     *  reports holding something else stays set aside. */
+    @Test fun an_output_the_indexer_has_not_seen_yet_is_asked_again_later() {
+        var answer: StackLookup = StackLookup.NotUnspent
+        val src = object : AssetStackSource {
+            override suspend fun stackOf(txid: String, vout: Int) =
+                if (txid == "new") answer else found(other to 9)
+        }
+        val sel = AssetSendSelection(src) { false }
+        runBlocking {
+            assertEquals(AssetSendSelection.Outcome.Unconfirmed, sel.choose(asset, listOf(row("new", 5)), listOf(fee("f")), 3, 100_000L))
+            answer = found(asset to 5)
+            val out = sel.choose(asset, listOf(row("new", 5)), listOf(fee("f")), 3, 100_000L)
+            assertTrue(out is AssetSendSelection.Outcome.Planned)
+
+            assertEquals(AssetSendSelection.Outcome.Unconfirmed, sel.choose(asset, listOf(row("wrong", 9)), listOf(fee("f")), 3, 100_000L))
+            assertTrue("held as set aside", sel.setAsideOutpoints().any { it.startsWith("wrong:") })
+            assertTrue("not held as set aside", sel.setAsideOutpoints().none { it.startsWith("new:") })
+        }
+    }
 }
