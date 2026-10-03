@@ -34,6 +34,16 @@ class TorFallbackOrderGateTest {
         assertTrue("the fallback is announced before the banner is raised", sets.single() < announces.single().range.first)
     }
 
+    @Test fun `the banner is lowered when the user turns Tor off`() {
+        val collects = Regex("""torManager\.enabled\.collect\s*\{""").findAll(sync.code).toList()
+        assertEquals("the sync service does not observe the Tor setting", 1, collects.size)
+        val block = sync.blockAt(sync.code.indexOf('{', collects.single().range.first)) ?: error("unbalanced")
+        assertTrue(
+            "the setting observer does not lower the banner",
+            Regex("""_torFailureActive\.value\s*=\s*false""").containsMatchIn(sync.code.substring(block.first, block.last + 1)),
+        )
+    }
+
     @Test fun `every path that degrades to clearnet raises the banner through it`() {
         for (site in listOf("startSyncWithTor", "runTorFallbackWatchdog", "runPeerKeepalive")) {
             assertTrue("$site does not degrade through raiseTorFallback", sync.calls("raiseTorFallback", body(site)).isNotEmpty())

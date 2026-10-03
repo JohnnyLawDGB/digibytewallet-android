@@ -80,7 +80,8 @@ class TorManager(private val context: Context) {
      * unavailable" banner, raised by the sync service when Tor fails to start or its proxy dies)
      * until Tor is connected again. While the user's Tor setting is on, app traffic outside the
      * peer-to-peer core goes direct ONLY while this is true; before it, such traffic waits for
-     * Tor and then fails ([TorRoute]). Process-lifetime, like the banner it follows.
+     * Tor and then fails ([TorRoute]). Process-lifetime, like the banner it follows; turning the
+     * Tor setting off also ends it.
      */
     private val _clearnetFallbackAnnounced = MutableStateFlow(false)
     val clearnetFallbackAnnounced: StateFlow<Boolean> = _clearnetFallbackAnnounced.asStateFlow()
@@ -100,9 +101,19 @@ class TorManager(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("dgb_tor", Context.MODE_PRIVATE)
 
+    private val _enabled = MutableStateFlow(prefs.getBoolean("tor_enabled", false))
+    /** The user's Tor setting, as [isEnabled] last wrote it. */
+    val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
+
     var isEnabled: Boolean
         get() = prefs.getBoolean("tor_enabled", false)
-        set(value) { prefs.edit().putBoolean("tor_enabled", value).apply() }
+        set(value) {
+            prefs.edit().putBoolean("tor_enabled", value).apply()
+            // Off: nothing waits for Tor, so an announced fallback is over. Turning Tor back on
+            // starts again from "wait for Tor" until it connects or a new banner is raised.
+            if (!value) _clearnetFallbackAnnounced.value = false
+            _enabled.value = value
+        }
 
     var upgradePromptShown: Boolean
         get() = prefs.getBoolean("upgrade_prompt_shown", false)

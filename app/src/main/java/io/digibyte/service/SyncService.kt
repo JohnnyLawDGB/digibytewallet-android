@@ -548,6 +548,18 @@ class SyncService : Service() {
             }
         }
 
+        // The user turned Tor off: nothing is degraded any more, so a "Tor unavailable"
+        // banner from the period it was on comes down. The degradation paths above leave
+        // the setting on, so they never lower it.
+        serviceScope.launch {
+            torManager.enabled.collect { on ->
+                if (!on && _torFailureActive.value) {
+                    _torFailureActive.value = false
+                    android.util.Log.i("SyncService", "Tor turned off — cleared degradation banner")
+                }
+            }
+        }
+
         // Run the v5 per-asset-history backfill exactly once per install.
         // Fast path is a single correlated SQL statement against the utxos
         // table; fallback pass decodes orphaned rows' rawBytes OP_RETURN.
