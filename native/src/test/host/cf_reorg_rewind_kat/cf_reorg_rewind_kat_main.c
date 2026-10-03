@@ -299,6 +299,63 @@ static void case_deep_reorg_below_chain_start_reanchors(void)
     fxFree(&f);
 }
 
+// Relay a longer branch that joins the best chain at J and runs to `tip`; f->best follows it.
+static void reorgFrom(Fx *f, uint32_t J, uint32_t tip, uint8_t tag)
+{
+    UInt256 prev = f->best[J - LOW]->blockHash;
+    for (uint32_t h = J + 1; h <= tip; h++) {
+        BRMerkleBlock *b = mkBlock(h, prev, tag);
+        UInt256 hash = b->blockHash;
+        prev = hash;
+        _peerRelayedBlock(&f->inf[0], b);
+        f->best[h - LOW] = BRSetGet(f->m->blocks, &hash);
+    }
+    f->T = tip;
+}
+static void rebuildAfterReanchor(Fx *f, int via);
+static void quorumDisagree(Fx *f, uint8_t salt);
+
+// A re-anchor drops the filter-header chain and restarts above the scanned heights; a reorg that
+// lands before the next cfheaders batch replaces some of those scanned heights.
+static void case_reorg_while_chain_rebuilds_rescans_replaced(void)
+{
+    Fx f; fxInit(&f, CF_START + 8);
+    uint32_t T = f.T;
+    extend(&f, 0xA1);                                       // T+1, its cfheader not yet held
+    quorumDisagree(&f, 0xDA);
+    check(f.m->compactFilterChain == NULL && f.m->autoFetchCFiltersStart == T + 1,
+          "setup: a re-anchor drops the chain and restarts at T+1 (scanned through T)");
+    int mb = f.m->misbehavinCount;
+    uint32_t J = T - 2;
+    reorgFrom(&f, J, T + 2, 0xA2);                          // replaces T-1 .. T+1, new tip T+2
+    check(UInt256Eq(f.m->lastBlock->blockHash, f.best[f.T - LOW]->blockHash), "the header chain reorganised onto the new branch");
+    check(f.m->autoFetchCFiltersStart == J + 1 && BRCFScanLedgerLowestNeededHeight(&f.m->cfLedger) == J + 1,
+          "the rebuild now starts at the fork J+1, below the old restart point");
+    rebuildAfterReanchor(&f, 1);
+    check(f.m->compactFilterChain && BRCompactFilterChainStartHeight(f.m->compactFilterChain) == J + 1,
+          "the rebuilt chain starts at the fork");
+    check(outstandingHas(f.m, J + 1) && outstandingHas(f.m, T), "the replaced blocks at J+1 .. T are filter-requested");
+    serveOutstanding(&f, 2);
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == f.T, "...and every block of the new branch is scanned");
+    check(f.m->misbehavinCount == mb, "no peer closed as misbehaving");
+    fxFree(&f);
+}
+
+// The scan sits below the resident block floor when a reorg forks below the chain start: the first
+// floor re-anchor surfaces the band, the second rebuilds the chain. The band must still be readable.
+static void case_reorg_rebuild_keeps_surfaced_band(void)
+{
+    Fx f; fxInit(&f, CF_START + 5);
+    uint32_t floor = _BRPeerManagerBlockFloor(f.m);
+    check(floor == LOW, "setup: the block floor is the lowest resident block");
+    BRCFScanLedgerRewindTo(&f.m->cfLedger, floor - 5);     // scan frontier below the floor
+    reorgFrom(&f, CF_START - 5, f.T + 1, 0xB1);             // fork below the chain start
+    check(f.m->compactFilterChain == NULL, "the chain is rebuilt");
+    check(BRPeerManagerAbandonedBelow(f.m) == floor,
+          "the band below the floor stays surfaced (abandonedBelow = floor) after the rebuild");
+    fxFree(&f);
+}
+
 static void case_stale_cfheaders_for_replaced_block_ignored(void)
 {
     Fx f; fxInit(&f, CF_START + 5);
@@ -556,6 +613,8 @@ static const Case CASES[] = {
     { "one_block_reorg_rescans_replacement",            case_one_block_reorg_rescans_replacement },
     { "four_reorgs_no_park",                            case_four_reorgs_no_park },
     { "deep_reorg_below_chain_start_reanchors",         case_deep_reorg_below_chain_start_reanchors },
+    { "reorg_while_chain_rebuilds_rescans_replaced",    case_reorg_while_chain_rebuilds_rescans_replaced },
+    { "reorg_rebuild_keeps_surfaced_band",              case_reorg_rebuild_keeps_surfaced_band },
     { "stale_cfheaders_for_replaced_block_ignored",     case_stale_cfheaders_for_replaced_block_ignored },
     { "orphan_credited_tx_unconfirmed",                 case_orphan_credited_tx_unconfirmed },
     { "cfilter_below_chain_start_no_penalty",           case_cfilter_below_chain_start_no_penalty },

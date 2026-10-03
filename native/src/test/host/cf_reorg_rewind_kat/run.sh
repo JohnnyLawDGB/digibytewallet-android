@@ -15,6 +15,8 @@
 #   -DCF_PARK_BELOW_START_UNFIXED        the never-brick park goes to the checkpoint, below the chain
 #   -DCF_BAND_SCANNED_UNFIXED            an abandoned band may include heights already evaluated
 #   -DCF_DISAGREER_PORT_UNFIXED          disagreeing peers are counted by address alone
+#   -DCF_REORG_CHAINLESS_UNFIXED         a reorg while the chain is being rebuilt leaves the restart point alone
+#   -DCF_REORG_BAND_KEPT_UNFIXED         the rebuild after a reorg zeroes a band its first step surfaced
 # RED cases must FAIL in their arm and PASS in green. GUARD cases must PASS in every arm built.
 # Every case, every arm, both word sizes: no sanitizer report. A build error is never evidence.
 set -uo pipefail   # not -e: the red arms' nonzero exits must be captured
@@ -36,9 +38,12 @@ declare -A RED=(
     [CF_PARK_BELOW_START_UNFIXED]="park_never_below_chain_start"
     [CF_BAND_SCANNED_UNFIXED]="abandoned_band_excludes_scanned_heights"
     [CF_DISAGREER_PORT_UNFIXED]="disagreers_distinct_by_address_and_port"
+    [CF_REORG_CHAINLESS_UNFIXED]="reorg_while_chain_rebuilds_rescans_replaced"
+    [CF_REORG_BAND_KEPT_UNFIXED]="reorg_rebuild_keeps_surfaced_band"
 )
 ARMS=(CF_REORG_REWIND_UNFIXED CF_OUTSIDE_CHAIN_PENALTY_UNFIXED CF_REANCHOR_REFUND_UNFIXED
-      CF_PARK_BELOW_START_UNFIXED CF_BAND_SCANNED_UNFIXED CF_DISAGREER_PORT_UNFIXED)
+      CF_PARK_BELOW_START_UNFIXED CF_BAND_SCANNED_UNFIXED CF_DISAGREER_PORT_UNFIXED
+      CF_REORG_CHAINLESS_UNFIXED CF_REORG_BAND_KEPT_UNFIXED)
 GUARD_CASES=(cfilter_contradicting_held_header_penalised reanchor_budget_bounds_a_run_of_failures ledger_rewind_unit
              orphan_credited_tx_unconfirmed)
 
@@ -77,6 +82,8 @@ seam CF_REANCHOR_REFUND_UNFIXED BRPeerManager.c
 seam CF_PARK_BELOW_START_UNFIXED BRPeerManager.c
 seam CF_BAND_SCANNED_UNFIXED BRCFScanLedger.c
 seam CF_DISAGREER_PORT_UNFIXED BRPeerManager.c
+seam CF_REORG_CHAINLESS_UNFIXED BRPeerManager.c
+seam CF_REORG_BAND_KEPT_UNFIXED BRPeerManager.c
 
 FAIL=0
 run_case() {   # run_case <bin> <case> -> OUT, RC
