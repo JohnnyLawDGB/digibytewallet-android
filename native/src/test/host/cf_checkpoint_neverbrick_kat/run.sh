@@ -102,7 +102,7 @@ if [ "$RED_STATUS" -eq 0 ]; then
     sed 's/^/             | /' "$BUILD_DIR/red.log"
     exit 1
 fi
-if ! grep -q "FAIL: neverbrick: autoFetchCFiltersStart snapped to the TRUSTED checkpoint height (compiled-in table value)" "$BUILD_DIR/red.log"; then
+if ! grep -q "FAIL: neverbrick: autoFetchCFiltersStart snapped to the TRUSTED checkpoint height, raised to the chain's start" "$BUILD_DIR/red.log"; then
     echo "GATE FAILED: the UNFIXED build did not fail at the expected cursor-"
     echo "             snap assertion -- the -D flag is not reaching the"
     echo "             exhaustion decision, so RED is not actually the pre-"
