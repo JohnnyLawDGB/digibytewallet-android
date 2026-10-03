@@ -9,17 +9,18 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * What a send built by [AssetTransferPlanner] does under the protocol's own rules
- * ([DigiAssetTransferModel], a port of DigiAsset Core's transfer decode and rule check), when an
- * asset input carries something the wallet's row does not show.
+ * Where a send built by [AssetTransferPlanner] leaves every unit, under the protocol's own
+ * assignment rules ([DigiAssetTransferModel], a port of DigiAsset Core's transfer decode and rule
+ * check): the units its instructions name go where they say, and every other unit on its inputs
+ * stays at the source address.
  *
  * The planner is run for real and its outputs and encoded instructions are fed to the model, so
  * these follow the layout the wallet actually signs.
  */
-class AssetSendLeavesUnseenAssetsTest {
+class AssetSendSourceAddressTest {
 
     private val asset = "La2ih1bm2u4dVcWGNHKesrY132xTDtKShnYQch"
-    private val ruledAsset = "Ua7Q1ruledAssetIdForTheModel000000000"
+    private val otherAsset = "Ua7Q1otherAssetIdForTheModel000000000"
     private val source = byteArrayOf(0x00, 0x14, 1, 2, 3)          // the address the asset sits at
     private val elsewhere = byteArrayOf(0x00, 0x14, 9, 9, 9)       // another address of this wallet
 
@@ -59,25 +60,24 @@ class AssetSendLeavesUnseenAssetsTest {
             inputs = p.inputs.map { DigiAssetTransferModel.Input(addr(it.scriptPubKey), stacks[it.txid] ?: emptyList()) },
             outputAddresses = outputAddresses(p),
             instructions = instructions(p),
-            ruled = setOf(ruledAsset),
+            ruleBearing = setOf(otherAsset),
         )
 
-    /** A ruled asset under the instructed one on the same input: the send moves what the wallet
-     *  intended and the unseen asset stays at the source. */
-    @Test fun an_unseen_asset_below_the_sent_one_stays_at_the_source() {
+    /** A second entry under the sent asset on the same input: the send moves what its
+     *  instructions name, and the second entry stays at the source. */
+    @Test fun units_the_instructions_do_not_assign_stay_at_the_source() {
         val p = plan(listOf(assetRow("p", 5)), listOf(feeCoin("f", source)), qty = 2)
-        val r = run(p, mapOf("p" to listOf(asset to 5L, ruledAsset to 3L)))
+        val r = run(p, mapOf("p" to listOf(asset to 5L, otherAsset to 3L)))
 
-        assertFalse("nothing is cleared", r.cleared)
+        assertFalse(r.ruleCheckFailed)
         assertEquals(listOf(asset to 2L), r.outputs[0])
-        assertEquals(listOf(asset to 3L, ruledAsset to 3L), r.outputs.last())
+        assertEquals(listOf(asset to 3L, otherAsset to 3L), r.outputs.last())
         assertEquals(addr(source), outputAddresses(p).last())
     }
 
     /** Red arm, the layout this replaces: asset change at a change address and DGB change last at
-     *  another. The same input then sends the unseen ruled asset to a new address, its rule check
-     *  fails, and every output is cleared. */
-    @Test fun red_the_previous_layout_clears_every_output() {
+     *  another. The unassigned units then arrive at an address they did not come from. */
+    @Test fun red_the_previous_layout_moves_unassigned_units_away_from_the_source() {
         val p = plan(listOf(assetRow("p", 5)), listOf(feeCoin("f", source)), qty = 2)
         val oldAddresses = listOf("recipient", "", "asset-change-address", "dgb-change-address")
         val oldInstructions = listOf(
@@ -86,57 +86,57 @@ class AssetSendLeavesUnseenAssetsTest {
         )
         val r = DigiAssetTransferModel.apply(
             inputs = p.inputs.map {
-                DigiAssetTransferModel.Input(addr(it.scriptPubKey), if (it.txid == "p") listOf(asset to 5L, ruledAsset to 3L) else emptyList())
+                DigiAssetTransferModel.Input(addr(it.scriptPubKey), if (it.txid == "p") listOf(asset to 5L, otherAsset to 3L) else emptyList())
             },
             outputAddresses = oldAddresses,
             instructions = oldInstructions,
-            ruled = setOf(ruledAsset),
+            ruleBearing = setOf(otherAsset),
         )
-        assertTrue(r.cleared)
+        assertTrue(r.ruleCheckFailed)
     }
 
-    /** The whole holding sent, with the unseen asset under it: still nothing cleared. */
-    @Test fun sending_the_whole_holding_leaves_the_unseen_asset_at_the_source() {
+    /** The whole holding sent, with a second entry under it: the second entry stays at the source. */
+    @Test fun sending_the_whole_holding_keeps_other_entries_at_the_source() {
         val p = plan(listOf(assetRow("p", 5)), listOf(feeCoin("f", source)), qty = 5)
-        val r = run(p, mapOf("p" to listOf(asset to 5L, ruledAsset to 3L)))
-        assertFalse(r.cleared)
+        val r = run(p, mapOf("p" to listOf(asset to 5L, otherAsset to 3L)))
+        assertFalse(r.ruleCheckFailed)
         assertEquals(listOf(asset to 5L), r.outputs[0])
-        assertEquals(listOf(ruledAsset to 3L), r.outputs.last())
+        assertEquals(listOf(otherAsset to 3L), r.outputs.last())
     }
 
-    /** The row over-states the asset (an unseen asset counted as this one): the instruction runs
-     *  into the other asset, the protocol abandons the instructions and returns everything to the
-     *  last output — the source. The send moves nothing, and nothing is lost. */
-    @Test fun an_over_counted_row_returns_everything_to_the_source() {
+    /** The row states more units than the input's first entry holds: the instruction runs into the
+     *  next entry, the protocol abandons the instructions and returns everything to the last
+     *  output — the source. The send moves nothing. */
+    @Test fun a_quantity_above_the_first_entry_returns_everything_to_the_source() {
         val p = plan(listOf(assetRow("p", 8)), listOf(feeCoin("f", source)), qty = 8)
-        val r = run(p, mapOf("p" to listOf(asset to 5L, ruledAsset to 3L)))
-        assertFalse(r.cleared)
+        val r = run(p, mapOf("p" to listOf(asset to 5L, otherAsset to 3L)))
+        assertFalse(r.ruleCheckFailed)
         assertTrue(r.outputs[0].isEmpty())
-        assertEquals(listOf(asset to 5L, ruledAsset to 3L), r.outputs.last())
+        assertEquals(listOf(asset to 5L, otherAsset to 3L), r.outputs.last())
     }
 
-    /** The case the layout alone cannot cover: the row names this asset, the output holds the
-     *  ruled one on top. The instruction moves the ruled asset to the recipient and every output
-     *  is cleared. This is why every asset input is confirmed against the indexer first:
-     *  [AssetInputCheck] refuses exactly this output. */
-    @Test fun an_output_that_holds_another_asset_on_top_is_refused_by_the_input_check() {
+    /** The layout covers units the instructions do not assign; it cannot cover an input whose
+     *  first entry is not the asset the row names, because the instruction itself moves that
+     *  entry. Every asset input is therefore confirmed against the indexer first, and
+     *  [AssetInputCheck] refuses exactly this input. */
+    @Test fun an_input_whose_first_entry_is_another_asset_is_refused_by_the_input_check() {
         val p = plan(listOf(assetRow("p", 3)), listOf(feeCoin("f", source)), qty = 3)
-        val r = run(p, mapOf("p" to listOf(ruledAsset to 3L)))
-        assertTrue("the layout alone does not save this output", r.cleared)
+        val r = run(p, mapOf("p" to listOf(otherAsset to 3L)))
+        assertTrue("the layout alone does not keep this input's entry at the source", r.ruleCheckFailed)
 
         val verdict = AssetInputCheck.judge(
-            StackLookup.Found(listOf(StackEntry(ruledAsset, 3L))), expectedAssetId = asset, recordedQuantity = 3,
+            StackLookup.Found(listOf(StackEntry(otherAsset, 3L))), expectedAssetId = asset, recordedQuantity = 3,
         )
         assertEquals(AssetInputCheck.Verdict.MISMATCH, verdict)
     }
 
-    /** A fee coin at another address carrying an unseen asset would add it to the leftover, which
-     *  arrives at the source from elsewhere: rule check, everything cleared. Such a coin is not an
-     *  eligible fee input unless the transaction that created it had no data output. */
+    /** A fee coin at another address with an asset entry would add it to the leftover, which then
+     *  arrives at the source from elsewhere. Such a coin is not an eligible fee input unless the
+     *  transaction that created it had no data output. */
     @Test fun a_fee_coin_from_elsewhere_must_come_from_a_transaction_without_data() {
         val p = plan(listOf(assetRow("p", 5)), listOf(feeCoin("z", elsewhere)), qty = 2)
-        val r = run(p, mapOf("p" to listOf(asset to 5L), "z" to listOf(ruledAsset to 1L)))
-        assertTrue("an unseen asset on a fee coin from elsewhere is a gain at the source", r.cleared)
+        val r = run(p, mapOf("p" to listOf(asset to 5L), "z" to listOf(otherAsset to 1L)))
+        assertTrue("an entry on a fee coin from elsewhere arrives at the source", r.ruleCheckFailed)
 
         val z = feeCoin("z", elsewhere)
         assertFalse(AssetTransferPlanner.feeCoinEligible(z, source, parentHasDataOutput = true))
@@ -145,12 +145,12 @@ class AssetSendLeavesUnseenAssetsTest {
         assertTrue(AssetTransferPlanner.feeCoinEligible(feeCoin("x", source), source, parentHasDataOutput = true))
     }
 
-    /** A fee coin at the source itself may carry anything: it stays at the source. */
-    @Test fun a_fee_coin_at_the_source_keeps_its_unseen_asset_there() {
+    /** A fee coin at the source itself keeps whatever it holds at the source. */
+    @Test fun a_fee_coin_at_the_source_keeps_its_entries_there() {
         val p = plan(listOf(assetRow("p", 5)), listOf(feeCoin("f", source)), qty = 2)
-        val r = run(p, mapOf("p" to listOf(asset to 5L), "f" to listOf(ruledAsset to 1L)))
-        assertFalse(r.cleared)
-        assertTrue(r.outputs.last().contains(ruledAsset to 1L))
+        val r = run(p, mapOf("p" to listOf(asset to 5L), "f" to listOf(otherAsset to 1L)))
+        assertFalse(r.ruleCheckFailed)
+        assertTrue(r.outputs.last().contains(otherAsset to 1L))
     }
 
     /** Every send's last output pays the source, and the asset-change instruction (when there is

@@ -166,9 +166,9 @@ class ForeignAssetTransferServiceTest {
     @Test fun `the rule gate judges the asset that is actually on the output`() {
         val r = run(
             service(
-                stackOf = { txid, _ -> if (txid == "a55e7") stack("Ua-ruled" to 10L) else stack() },
+                stackOf = { txid, _ -> if (txid == "a55e7") stack("Ua-bound" to 10L) else stack() },
                 ruleStateOf = { id ->
-                    if (id == "Ua-ruled") io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND
+                    if (id == "Ua-bound") io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND
                     else io.digibyte.core.asset.rules.TransferRuleState.NONE
                 },
             ),
@@ -183,7 +183,7 @@ class ForeignAssetTransferServiceTest {
         var seen: ForeignAssetTransferPlan.Plan? = null
         val held = run(
             service(
-                stackOf = { txid, _ -> if (txid == "a55e7") stack("La-test" to 10L) else stack("Ua-hidden" to 1L) },
+                stackOf = { txid, _ -> if (txid == "a55e7") stack("La-test" to 10L) else stack("Ua-other" to 1L) },
                 sign = { p, _, _, _ -> seen = p; "00ff" },
             ),
             listOf(profileResult()),

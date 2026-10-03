@@ -8,8 +8,9 @@ package io.digibyte.core.asset.send
  * early return when no address gains the asset). Range and percent instructions and hybrid
  * assets are not modelled; the wallet emits none of them.
  *
- * Rules are reduced to one fact: an asset in [ruled] fails its rule check whenever the check
- * runs, and a failure clears every output (DigiByteTransaction::decodeAssetTX).
+ * Rules are reduced to one fact: an asset in [ruleBearing] fails its rule check whenever the check
+ * runs; [Result.ruleCheckFailed] records that, and it voids the transfer's asset assignments
+ * (DigiByteTransaction::decodeAssetTX).
  */
 internal object DigiAssetTransferModel {
 
@@ -19,15 +20,15 @@ internal object DigiAssetTransferModel {
     data class Result(
         /** Per output, the assets it ends up with, in order. */
         val outputs: List<List<Pair<String, Long>>>,
-        /** True when a rule check failed and every output was cleared. */
-        val cleared: Boolean,
+        /** True when a rule check ran and failed (the transfer's asset assignments are void). */
+        val ruleCheckFailed: Boolean,
     )
 
     fun apply(
         inputs: List<Input>,
         outputAddresses: List<String>,
         instructions: List<Instruction>,
-        ruled: Set<String>,
+        ruleBearing: Set<String>,
     ): Result {
         fun freshStacks() = inputs.filter { it.stack.isNotEmpty() }
             .map { inp -> inp.stack.map { it.first to it.second }.toMutableList() }.toMutableList()
@@ -83,18 +84,18 @@ internal object DigiAssetTransferModel {
         val last = outs.lastIndex
         for (stack in stacks) for ((id, n) in stack) if (n > 0) addTo(last, id, n)
 
-        // Rule check, per ruled asset on the inputs: skipped when no address gains it.
-        val ruledOnInputs = inputs.flatMap { it.stack }.map { it.first }.filter { it in ruled }.toSet()
-        for (asset in ruledOnInputs) {
+        // Rule check, per rule-bearing asset on the inputs: skipped when no address gains it.
+        val ruleBearingOnInputs = inputs.flatMap { it.stack }.map { it.first }.filter { it in ruleBearing }.toSet()
+        for (asset in ruleBearingOnInputs) {
             val change = HashMap<String, Long>()
             for (inp in inputs) for ((id, n) in inp.stack) if (id == asset) change.merge(inp.address, -n, Long::plus)
             for ((o, held) in outs.withIndex()) for ((id, n) in held) if (id == asset) change.merge(outputAddresses[o], n, Long::plus)
             if (change.values.any { it > 0 }) {
-                return Result(outputs = List(outs.size) { emptyList() }, cleared = true)
+                return Result(outputs = List(outs.size) { emptyList() }, ruleCheckFailed = true)
             }
         }
         // Assets on a data output are burned.
         val final = outs.mapIndexed { o, held -> if (outputAddresses[o].isEmpty()) emptyList() else held.toList() }
-        return Result(outputs = final, cleared = false)
+        return Result(outputs = final, ruleCheckFailed = false)
     }
 }
