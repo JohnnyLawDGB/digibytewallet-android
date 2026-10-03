@@ -21,7 +21,9 @@
 // [cp->height .. tip] through the same _BRPeerManagerSurfaceUnscannableLocked
 // funnel every other unscannable-band site in this file uses (raises
 // abandonedBelow, WARNs, drives the Kotlin "Scan for missing transactions"
-// banner).
+// banner). The park height is that checkpoint raised to the filter-header chain's
+// own start when the checkpoint lies below it (a cfilter below the chain's start
+// has no header to verify against), and the surfaced band starts there too.
 //
 // THE JUDGMENT CALL this KAT locks in: WHICH cursor field actually governs
 // where the next forward fetch resumes. Every getcfilters/getcfheaders
@@ -318,11 +320,18 @@ static void test_budget_exhausted_parks_at_checkpoint_and_surfaces(void)
           "neverbrick: cfReanchorCount did NOT grow past the cap -- the exhaustion path never re-anchors");
     check(manager->compactFilterChain != NULL,
           "neverbrick: compactFilterChain was NOT torn down -- this is a park+surface, not a re-anchor");
-    check(manager->autoFetchCFiltersStart == cp->height,
-          "neverbrick: autoFetchCFiltersStart snapped to the TRUSTED checkpoint height (compiled-in table value)");
-    check(manager->autoFetchCFiltersStart == topCpHeight,
-          "neverbrick: ...and that value is exactly the real BRMainNetCFCheckpoints top entry, never peerSuppliedPrev");
-    check(manager->autoFetchCFiltersThrough == cp->height - 1,
+    // The park height is the trusted checkpoint, raised to the filter-header chain's own
+    // start when the checkpoint lies below it: a cfilter below the chain's start has no
+    // header to verify against, so a fetch parked there could only fail. Here the chain
+    // was primed at topCpHeight + 1, one above the checkpoint.
+    uint32_t chainStart4 = BRCompactFilterChainStartHeight(manager->compactFilterChain);
+    uint32_t parkAt = (cp->height > chainStart4) ? cp->height : chainStart4;
+    check(parkAt == topCpHeight + 1, "neverbrick: sanity -- round 4's chain starts one above the top checkpoint");
+    check(manager->autoFetchCFiltersStart == parkAt,
+          "neverbrick: autoFetchCFiltersStart snapped to the TRUSTED checkpoint height, raised to the chain's start");
+    check(manager->autoFetchCFiltersStart >= topCpHeight && manager->autoFetchCFiltersStart >= chainStart4,
+          "neverbrick: ...and that value comes from the checkpoint table and our own chain, never peerSuppliedPrev");
+    check(manager->autoFetchCFiltersThrough == parkAt - 1,
           "neverbrick: autoFetchCFiltersThrough snapped to checkpoint-1 -- THIS is the field that actually governs "
           "reqStart = autoFetchCFiltersThrough + 1 at every forward-fetch request site; Start alone would have been "
           "a no-op here since Through already sat at floorHeight-1 (24000000-1), well above the checkpoint");
@@ -364,7 +373,7 @@ static void test_budget_exhausted_parks_at_checkpoint_and_surfaces(void)
 
     check(manager->cfReanchorCount == CF_CONTINUITY_REANCHOR_MAX,
           "neverbrick: bounded -- 2 more post-exhaustion mismatches still did not grow cfReanchorCount");
-    check(manager->autoFetchCFiltersStart == cp->height && manager->autoFetchCFiltersThrough == cp->height - 1,
+    check(manager->autoFetchCFiltersStart == parkAt && manager->autoFetchCFiltersThrough == parkAt - 1,
           "neverbrick: bounded -- cursor stays pinned at the same checkpoint, not re-derived or drifting");
     // Repeats here come from DIFFERENT peers sharing peerSuppliedPrev, so cfDisagreedCount
     // accumulates. Once the largest agreeing bucket clears the floor AND a majority, the
@@ -375,7 +384,7 @@ static void test_budget_exhausted_parks_at_checkpoint_and_surfaces(void)
           "neverbrick: bounded -- abandonedBelow either stayed put or advanced exactly once, to tip+1, "
           "when the divergence became corroborated (never drifting or unbounded)");
     check(manager->cfAbandonedHeightsTotal == totalBeforeRepeat ||
-          manager->cfAbandonedHeightsTotal == (size_t)(tip + 1 - cp->height),
+          manager->cfAbandonedHeightsTotal == (size_t)(tip + 1 - parkAt),
           "neverbrick: bounded -- the abandoned total is either unchanged or exactly the one band's size");
     check(manager->misbehavinCount == 0,
           "neverbrick: bounded -- still nobody banned after the repeat mismatches");
