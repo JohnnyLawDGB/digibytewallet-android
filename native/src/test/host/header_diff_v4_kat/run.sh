@@ -98,7 +98,7 @@ build() {
     # UBSan minus vla-bound: _peerRelayedBlockOnce (BRPeerManager.c) sizes a zero-length array for every header
     # (txCount 0) -- outside this suite, recorded, not fixed here.
     clang -w -include stdint.h -g -DDEBUG -fsanitize=address,undefined -fno-sanitize=vla-bound \
-        -fno-sanitize-recover=undefined -fno-omit-frame-pointer -DDGB_HEADER_POW_CHECK=1 "${m[@]}" "$@" \
+        -fno-sanitize-recover=undefined -fno-omit-frame-pointer -DDGB_HEADER_POW_CHECK="${POW_LEVEL:-1}" "${m[@]}" "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" -I "$SCRIPT_DIR" \
         "$SCRIPT_DIR/header_diff_v4_kat_main.c" "${UNITS[@]}" "$BUILD_DIR/vendor$bits"/*.o \
         -lm -lpthread -o "$out"
@@ -167,6 +167,8 @@ run_bits() {
     build "$BUILD_DIR/l1_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=1 || { echo "GATE FAILURE: ${bits}-bit level-1 arm did not compile."; FAIL=1; return; }
     build "$BUILD_DIR/l0_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=0 || { echo "GATE FAILURE: ${bits}-bit level-0 arm did not compile."; FAIL=1; return; }
     build "$BUILD_DIR/red_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=1 -DHEADER_DIFF_V4_UNFIXED || { echo "GATE FAILURE: ${bits}-bit red arm did not compile."; FAIL=1; return; }
+    # The combination the app ships: header proof of work at 2, difficulty target at 1.
+    POW_LEVEL=2 build "$BUILD_DIR/ship_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=1 || { echo "GATE FAILURE: ${bits}-bit shipped arm did not compile."; FAIL=1; return; }
 
     local known listed
     known="$("$BUILD_DIR/l1_$bits" list | sort | tr '\n' ' ')"
@@ -185,6 +187,14 @@ run_bits() {
     echo "--- level 1 (shipped, observe): the same counts; the easiest-target header accepted with one mismatch ---"
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do expect "$BUILD_DIR/l1_$bits" "$bits L1" "$c" pass; done
     expect "$BUILD_DIR/l1_$bits" "$bits L1" level_easiest_target accepted_counted
+
+    echo "--- shipped (proof of work 2, difficulty 1): the level-1 results hold with the stricter proof-of-work check ---"
+    echo "    (unknown_algorithm is not run here: at proof-of-work level 2 such a header is refused before its target is judged)"
+    for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
+        [ "$c" = unknown_algorithm ] && continue
+        expect "$BUILD_DIR/ship_$bits" "$bits ship" "$c" pass
+    done
+    expect "$BUILD_DIR/ship_$bits" "$bits ship" level_easiest_target accepted_counted
 
     echo "--- level 0 (COMPARISON ARM / GUARD): nothing computed or counted; the easiest-target header ACCEPTED ---"
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do expect "$BUILD_DIR/l0_$bits" "$bits L0" "$c" pass; done
