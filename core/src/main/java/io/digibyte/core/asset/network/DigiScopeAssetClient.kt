@@ -39,7 +39,11 @@ class DigiScopeAssetClient(
      * (`GET /digiassets/txout/:txid/:vout`). 404 is the indexer saying the output is not unspent;
      * every other failure is "no answer".
      */
-    override suspend fun stackOf(txid: String, vout: Int): io.digibyte.core.asset.send.StackLookup = try {
+    override suspend fun stackOf(txid: String, vout: Int): io.digibyte.core.asset.send.StackLookup =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { readStack(txid, vout) }
+
+    /** Blocking; [stackOf] runs it on the IO dispatcher (its callers include the main thread). */
+    private fun readStack(txid: String, vout: Int): io.digibyte.core.asset.send.StackLookup = try {
         val req = Request.Builder().url("$baseUrl/digiassets/txout/${txid.lowercase()}/$vout").get().build()
         client.newCall(req).execute().use { resp ->
             when {
