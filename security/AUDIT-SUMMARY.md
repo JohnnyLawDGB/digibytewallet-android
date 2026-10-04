@@ -319,8 +319,8 @@ is bounded, but `SecureRandom` is a free upgrade. **Fixed in v3.5.31.**
 
 - Clear-text traffic disabled globally
 - Tap-jacking protection on confirm dialogs (`filterTouchesWhenObscured`)
-- Cert pinning to `api.digiscope.me` — at the time of this scan only on some clients; since
-  v4.0.86 one pin set sits on the app's shared HTTP client, so every connection to that host
+- Cert pinning to `api.digiscope.me` — one pin set sits on the app's shared HTTP client, so every
+  connection to that host
   (Hub REST and WebSocket, Digi-ID callback, seeder, asset metadata, first IPFS gateway,
   reconcile) is pinned
 - Root detection capabilities present

@@ -74,12 +74,9 @@ class ForeignAssetTransferService(
         if (level == 'w') android.util.Log.w(TAG, message) else android.util.Log.i(TAG, message)
     },
     /**
-     * What the DigiAsset indexer says an output holds. A move gives every unit its instructions do
-     * not assign to its last output, which pays the destination; an asset on an input that the
-     * wallet did not see would arrive there from another address and face its own transfer rules.
-     * So every input of a move is checked: each asset input holds exactly one asset, and that
-     * asset passes the rule gate; each fee input holds none. Null means no source, and then no
-     * asset is moved.
+     * What the DigiAsset indexer says an output holds. Every input of a move is checked before it
+     * is built: each asset input holds exactly one asset, and that asset passes the rule gate; each
+     * fee input holds none. Null means no source, and then no asset is moved.
      */
     private val stackOf: (suspend (txid: String, vout: Int) -> io.digibyte.core.asset.send.StackLookup)? = null,
     /** The rule gate's verdict for an asset id: applied to the asset the indexer says is there. */
