@@ -21,13 +21,14 @@
 /* Pull in chain params and the peer protocol constants we patched. */
 #include "BRChainParams.h"   /* BRMainNetParams, BRMainNetDNSSeeds, BRMainNetCheckpoints */
 #include "BRPeerManager.h"   /* BRPeerManagerNew — just for the header; we don't call it */
+#include "jni_class_paths.h"
 
 #define LOG_TAG "DGB-PeerTest"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 /* ------------------------------------------------------------------ */
-/* Java_io_digibyte_native_1core_PeerTest_testPeerDiscovery            */
+/* PeerTest_testPeerDiscovery (registered by dgb_register_peer_test) */
 /*                                                                      */
 /* Returns a positive bitmask on success, 0 on any failure:            */
 /*   bit 0  — protocol version constant compiled as 70019              */
@@ -56,8 +57,8 @@
 #define MIN_SEEDS                 5
 #define MIN_CHECKPOINTS           40   /* 37 original + patched extras */
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_native_1core_PeerTest_testPeerDiscovery(JNIEnv *env, jclass clazz) {
+static jint JNICALL
+PeerTest_testPeerDiscovery(JNIEnv *env, jclass clazz) {
     LOGI("=== DGB-PeerTest: testPeerDiscovery START ===");
 
     jint result = 0;
@@ -120,4 +121,24 @@ Java_io_digibyte_native_1core_PeerTest_testPeerDiscovery(JNIEnv *env, jclass cla
 
     LOGI("=== DGB-PeerTest: testPeerDiscovery result = 0x%02x ===", result);
     return result;
+}
+
+/* Registered from jni_registry.c (Debug builds only). PeerTest exists only in :native's
+ * instrumented test APK, so in any other process the class is absent and this is a no-op. */
+int dgb_register_peer_test(JNIEnv *env) {
+    static const JNINativeMethod methods[] = {
+        { "testPeerDiscovery", "()I", (void *) PeerTest_testPeerDiscovery },
+    };
+    jclass cls = (*env)->FindClass(env, DGB_JNI_PEERTEST_CLASS);
+    if (!cls) {
+        (*env)->ExceptionClear(env);
+        return 0;
+    }
+    int ok = (*env)->RegisterNatives(env, cls, methods, 1) == JNI_OK;
+    if (!ok) {
+        (*env)->ExceptionClear(env);
+        LOGE("PeerTest: RegisterNatives(%s.testPeerDiscovery) failed", DGB_JNI_PEERTEST_CLASS);
+    }
+    (*env)->DeleteLocalRef(env, cls);
+    return ok ? 1 : -1;
 }

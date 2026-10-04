@@ -30,8 +30,8 @@
 #define CF_RECOVERY_BIT_DROP_FILTER_CHAIN 1
 #define CF_RECOVERY_BIT_DROP_SCAN_LEDGER  2
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_cfRecoveryDecide(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_cfRecoveryDecide(JNIEnv *env, jobject thiz,
                                                             jint reason) {
     (void)env;
     (void)thiz;

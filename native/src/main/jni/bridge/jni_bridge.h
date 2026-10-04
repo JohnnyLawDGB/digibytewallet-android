@@ -45,6 +45,9 @@
 /* Cached JVM pointer — set in JNI_OnLoad */
 extern JavaVM *g_jvm;
 
+/* jni_registry.c: binds NativeBridge's natives; 0 on success. Called once from JNI_OnLoad. */
+int dgb_register_natives(JNIEnv *env);
+
 /* Wallet and peer manager — owned by the C core, managed by jni_wallet.c / jni_peer.c */
 extern BRWallet     *g_wallet;
 extern BRPeerManager *g_peerManager;

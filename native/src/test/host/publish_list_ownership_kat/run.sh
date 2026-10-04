@@ -90,7 +90,7 @@ fi
 # tx_publish_ownership_kat's gate over the publish entry points. Needles are matched with white
 # space collapsed, so a re-indentation does not move the gate.
 BRIDGE_C="$REPO_ROOT/native/src/main/jni/bridge/jni_transaction.c"
-REMOVE_FN="$(awk '/^Java_io_digibyte_core_bridge_NativeBridge_removeTransaction/,/^\}/' "$BRIDGE_C" | tr -s '[:space:]' ' ')"
+REMOVE_FN="$(awk '/^NativeBridge_removeTransaction/,/^\}/' "$BRIDGE_C" | tr -s '[:space:]' ' ')"
 if [ -z "$REMOVE_FN" ]; then
     echo "GATE FAILED: removeTransaction was not found in jni_transaction.c. Re-anchor the gate."
     exit 1

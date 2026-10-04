@@ -40,8 +40,8 @@
  * Deserializes rawTx and calls BRTXContainsAsset().
  * Returns JNI_FALSE on any error (null input, parse failure, empty tx).
  */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_isAssetTransaction(JNIEnv *env, jobject thiz,
+jboolean JNICALL
+NativeBridge_isAssetTransaction(JNIEnv *env, jobject thiz,
                                                               jbyteArray rawTx) {
     (void)thiz;
 
@@ -90,8 +90,8 @@ Java_io_digibyte_core_bridge_NativeBridge_isAssetTransaction(JNIEnv *env, jobjec
  * length byte(s) so that the Kotlin DigiAssetDecoder sees the same format
  * it expects from a raw scriptPubKey.
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getOpReturnData(JNIEnv *env, jobject thiz,
+jbyteArray JNICALL
+NativeBridge_getOpReturnData(JNIEnv *env, jobject thiz,
                                                            jbyteArray rawTx) {
     (void)thiz;
 
@@ -171,8 +171,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getOpReturnData(JNIEnv *env, jobject t
  * entry point uses — rather than a second parser written in Kotlin. Returns
  * NULL on a null/empty array or a parse failure; never partially-valid data.
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionOutputs(JNIEnv *env, jobject thiz,
+jobjectArray JNICALL
+NativeBridge_getRawTransactionOutputs(JNIEnv *env, jobject thiz,
                                                                      jbyteArray rawTx) {
     (void)thiz;
 
@@ -260,8 +260,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionOutputs(JNIEnv *env, 
  * go through BRTransactionParse — the same hardened parser every other raw-tx
  * entry point uses. Returns NULL on a null/empty array or a parse failure.
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionInputs(JNIEnv *env, jobject thiz,
+jobjectArray JNICALL
+NativeBridge_getRawTransactionInputs(JNIEnv *env, jobject thiz,
                                                                     jbyteArray rawTx) {
     (void)thiz;
 
@@ -333,8 +333,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getRawTransactionInputs(JNIEnv *env, j
  * outputs natively without parsing raw tx bytes in Kotlin. Returns NULL
  * if the wallet has never seen this tx or the hex is malformed.
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz,
+jobjectArray JNICALL
+NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz,
                                                                          jstring txHashHex) {
     (void)thiz;
 
@@ -413,8 +413,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionOutputsForHash(JNIEnv *e
  *
  * Returns null if the txid isn't in BRWallet.
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactionForHash(JNIEnv *env, jobject thiz,
+jbyteArray JNICALL
+NativeBridge_getSerializedTransactionForHash(JNIEnv *env, jobject thiz,
                                                                             jstring txHashHex) {
     (void)thiz;
     if (!g_wallet || !txHashHex) return NULL;
@@ -455,8 +455,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactionForHash(JNIEnv
  * M3 parent-walk will need to recurse backward from a transfer to its
  * issuance. Returns null if the wallet hasn't seen this txid.
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getTransactionInputsForHash(JNIEnv *env, jobject thiz,
+jobjectArray JNICALL
+NativeBridge_getTransactionInputsForHash(JNIEnv *env, jobject thiz,
                                                                         jstring txHashHex) {
     (void)thiz;
     if (!g_wallet || !txHashHex) return NULL;
@@ -532,8 +532,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getTransactionInputsForHash(JNIEnv *en
  * @param divisibility 0..7 (decimal places)
  * @return base58check asset ID, or NULL on any failure.
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_deriveIssuanceAssetId(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_deriveIssuanceAssetId(JNIEnv *env, jobject thiz,
                                                                   jstring firstInputTxidHex,
                                                                   jint firstInputVout,
                                                                   jboolean locked,

@@ -20,15 +20,17 @@
 # Annotations drive Room, Hilt and serialization; signatures drive generics.
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,Exceptions
 
-# ---- JNI: the C core resolves these by name --------------------------------
-# Native functions are exported as Java_io_digibyte_core_bridge_NativeBridge_<m>.
-# Rename the class or a method and the link fails at runtime with
-# UnsatisfiedLinkError — on the very first wallet operation.
+# ---- JNI: the C core binds these by name -----------------------------------
+# JNI_OnLoad registers every native with RegisterNatives against the class path in
+# native/src/main/jni/bridge/jni_class_paths.h, by method NAME and DESCRIPTOR.
+# Rename the class or a method and System.loadLibrary fails at startup.
 -keep class io.digibyte.core.bridge.NativeBridge { *; }
 
 # jni_peer.c takes GetObjectClass(handler) then GetMethodID by NAME and
-# SIGNATURE (onSyncProgress, onSaveBlocks, onSaveCfLedger, …). The class itself
-# comes from the object so it may be renamed; the METHOD names may not.
+# SIGNATURE (onSyncProgress, onSaveBlocks, onSaveCfLedger, …), so the METHOD
+# names may not be renamed. The interface's own NAME is part of
+# setCallbackHandler's registered descriptor (DGB_JNI_NATIVECALLBACK_SIG), so
+# it may not be renamed either.
 -keep class io.digibyte.core.bridge.NativeCallback { *; }
 -keep class * implements io.digibyte.core.bridge.NativeCallback { *; }
 
@@ -37,11 +39,6 @@
     native <methods>;
 }
 
-# NOTE: bridge/core.c and PeerManager.c also FindClass on
-# io/digibyte/presenter/entities/* and io/digibyte/wallet/BR*Manager. Every one
-# of those classes is ABSENT from this app — they are dead bread-wallet paths
-# whose lookups already fail at runtime. Deliberately NOT kept: keeping absent
-# classes would be a rule that silently protects nothing.
 
 # ---- Enums -----------------------------------------------------------------
 # values()/valueOf()/$VALUES are the reflective surface every enum needs; keeping

@@ -33,8 +33,8 @@
 #define PUBLISH_BIT_SHOULD_RETRY 0x04
 #define PUBLISH_BIT_IS_TERMINAL  0x08
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_publishOutcomeOf(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_publishOutcomeOf(JNIEnv *env, jobject thiz,
                                                             jint error) {
     (void)env;
     (void)thiz;
@@ -55,8 +55,8 @@ Java_io_digibyte_core_bridge_NativeBridge_publishOutcomeOf(JNIEnv *env, jobject 
  * compiled for iOS returns Darwin's, which is what makes the Swift side correct
  * without anyone maintaining a second table.
  */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_publishErrnoValue(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_publishErrnoValue(JNIEnv *env, jobject thiz,
                                                              jint index) {
     (void)env;
     (void)thiz;

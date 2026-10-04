@@ -35,7 +35,7 @@ class WipeNativeStepsGateTest {
 
     /** Every JNI entry point defined in [c]: its name and its body, braces matched. */
     private fun entryPoints(c: String): Map<String, String> =
-        Regex("""\bJava_io_digibyte_core_bridge_NativeBridge_(\w+)\s*\([^)]*\)\s*\{""").findAll(c).associate { head ->
+        Regex("""\bNativeBridge_(\w+)\s*\([^)]*\)\s*\{""").findAll(c).associate { head ->
             val open = c.indexOf('{', head.range.first)
             var depth = 0
             var close = open

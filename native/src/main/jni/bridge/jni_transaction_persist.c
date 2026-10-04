@@ -18,8 +18,8 @@
  *   [4 bytes: timestamp]
  *   [N bytes: serialized tx data]
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz) {
+jbyteArray JNICALL
+NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz) {
     (void)thiz;
 
     if (!g_wallet) return NULL;
@@ -67,8 +67,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactions(JNIEnv *env,
 BRTransaction **g_savedTransactions = NULL;
 size_t g_savedTransactionCount = 0;
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
                                                                        jbyteArray data) {
     (void)thiz;
 

@@ -87,8 +87,8 @@ static void _refreshBridgeStatusMirror(void) {
 
 /* ---------- setSocksProxy / clearSocksProxy ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setSocksProxy(
+void JNICALL
+NativeBridge_setSocksProxy(
     JNIEnv *env, jobject thiz, jstring host, jint port)
 {
     (void)thiz;
@@ -101,8 +101,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setSocksProxy(
     LOGI("setSocksProxy: proxy configured (port=%d)", (int)port);
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_clearSocksProxy(
+void JNICALL
+NativeBridge_clearSocksProxy(
     JNIEnv *env, jobject thiz)
 {
     (void)env;
@@ -609,8 +609,8 @@ static void _injectPriorityPeer(const char *hostname, uint16_t port, uint64_t se
 
 /* ---------- injectPeerByIp ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
+void JNICALL
+NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
                                                            jstring ipStr, jint port,
                                                            jlong servicesHex) {
     (void)thiz;
@@ -688,8 +688,8 @@ Java_io_digibyte_core_bridge_NativeBridge_injectPeerByIp(JNIEnv *env, jobject th
  * priority-peer prepend; the caller (Kotlin injectCustomNode) is responsible
  * for ALSO adding this peer to the live pool via injectPeerByIp — this
  * function only pins + sets the exclusivity flag. */
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thiz,
+void JNICALL
+NativeBridge_setPinnedPeer(JNIEnv *env, jobject thiz,
                                                         jstring ipStr, jint port, jboolean exclusive) {
     (void)thiz;
     PEER_GUARD();
@@ -721,8 +721,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setPinnedPeer(JNIEnv *env, jobject thi
     _refreshBridgeStatusMirror();
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_clearPinnedPeer(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_clearPinnedPeer(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     g_ownNodeExclusive = 0;
@@ -734,8 +734,8 @@ Java_io_digibyte_core_bridge_NativeBridge_clearPinnedPeer(JNIEnv *env, jobject t
 }
 
 /* 0=UNKNOWN, 1=CONNECTING, 2=CONNECTED_NOT_SERVING, 3=SERVING. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_compactFilterPeerStatus(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_compactFilterPeerStatus(JNIEnv *env, jobject thiz,
                                                                   jstring ipStr, jint port) {
     (void)thiz;
     PEER_GUARD();
@@ -758,8 +758,8 @@ Java_io_digibyte_core_bridge_NativeBridge_compactFilterPeerStatus(JNIEnv *env, j
  * still occupy the connection slots so BRPeerManagerConnect won't dial fresh ones).
  * The caller must follow with startSync(), which tears the manager down and rebuilds
  * a fresh one that re-dials from g_savedPeers + the digiscope.me priority peer. */
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_forceReconnect(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_forceReconnect(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) {
@@ -777,8 +777,8 @@ Java_io_digibyte_core_bridge_NativeBridge_forceReconnect(JNIEnv *env, jobject th
  * small count once synced so idle wallets stop pinning slots on the shared filter-node fleet.
  * Reducing gently disconnects the excess (never the download peer or pinned own-node); increasing
  * tops back up. No-op if no manager yet (startSync creates it at the default full count). */
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setMaxPeerConnections(JNIEnv *env, jobject thiz, jint count) {
+void JNICALL
+NativeBridge_setMaxPeerConnections(JNIEnv *env, jobject thiz, jint count) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return;
@@ -790,8 +790,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setMaxPeerConnections(JNIEnv *env, job
 
 /* ---------- startSync ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_startSync(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
 
@@ -1021,8 +1021,8 @@ Java_io_digibyte_core_bridge_NativeBridge_startSync(JNIEnv *env, jobject thiz) {
 
 /* ---------- stopSync ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_stopSync(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_stopSync(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     PEER_GUARD();
@@ -1036,8 +1036,8 @@ Java_io_digibyte_core_bridge_NativeBridge_stopSync(JNIEnv *env, jobject thiz) {
 
 /* ---------- rescan ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_rescan(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_rescan(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     PEER_GUARD();
@@ -1059,8 +1059,8 @@ Java_io_digibyte_core_bridge_NativeBridge_rescan(JNIEnv *env, jobject thiz) {
  * only way a consumer learns the sample is old (frozen loop) or never taken
  * (cold start before the first refresh). Pure atomic_load + the pure predicate
  * — no PEER_GUARD, no g_peerManager deref. */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_isStatusStale(JNIEnv *env, jobject thiz) {
+jboolean JNICALL
+NativeBridge_isStatusStale(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     int64_t last = atomic_load_explicit(&g_mirrorLastRefreshMonotonicMs, memory_order_relaxed);
     return bridge_status_is_stale(last, _nowMonotonicMs(), STATUS_STALE_MS) ? JNI_TRUE : JNI_FALSE;
@@ -1079,8 +1079,8 @@ Java_io_digibyte_core_bridge_NativeBridge_isStatusStale(JNIEnv *env, jobject thi
  * The release-time [CF-SLOW] profiler cannot cover this case: it logs on unlock, so a lock that is
  * never released produces no output at all. Three separate device runs showed 40+ minute holds
  * with zero [CF-SLOW] lines for exactly that reason. */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_lockHolderInfo(JNIEnv *env, jobject thiz) {
+jstring JNICALL
+NativeBridge_lockHolderInfo(JNIEnv *env, jobject thiz) {
     (void)thiz;
     /* BOTH locks, because they are different and confusing them wasted an afternoon:
      *   PEER_GUARD (g_peerManagerMutex) — the JNI-level recursive guard every bridge entry point
@@ -1110,8 +1110,8 @@ Java_io_digibyte_core_bridge_NativeBridge_lockHolderInfo(JNIEnv *env, jobject th
  * safe site; reading it here removes the UAF window the guard existed to close
  * (we no longer touch the freeable pointer) AND the teardown-serialization that
  * was pure harm for a scalar read. Same treatment for the four accessors below. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getPeerCount(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorPeerCount, memory_order_relaxed);
@@ -1124,8 +1124,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getPeerCount(JNIEnv *env, jobject thiz
  * peers and hands it back on the next start. Deadlines are absolute, so a blob whose
  * windows have all lapsed restores nothing. */
 
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz) {
+jbyteArray JNICALL
+NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz) {
     (void)thiz;
     PEER_GUARD();
 
@@ -1148,8 +1148,8 @@ Java_io_digibyte_core_bridge_NativeBridge_serializePeerPenalties(JNIEnv *env, jo
     return out;
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_loadPeerPenalties(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_loadPeerPenalties(JNIEnv *env, jobject thiz,
                                                             jbyteArray blob) {
     (void)thiz;
     if (! blob) return 0;
@@ -1187,8 +1187,8 @@ Java_io_digibyte_core_bridge_NativeBridge_loadPeerPenalties(JNIEnv *env, jobject
 
 /* ---------- keepAlivePeers ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_keepAlivePeers(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_keepAlivePeers(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     PEER_GUARD();
@@ -1201,8 +1201,8 @@ Java_io_digibyte_core_bridge_NativeBridge_keepAlivePeers(JNIEnv *env, jobject th
 
 /* ---------- getEstimatedBlockHeight ---------- */
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getEstimatedBlockHeight(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getEstimatedBlockHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     return (jlong)atomic_load_explicit(&g_mirrorEstimatedHeight, memory_order_relaxed);
@@ -1210,8 +1210,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getEstimatedBlockHeight(JNIEnv *env, j
 
 /* ---------- getLastBlockHeight ---------- */
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getLastBlockHeight(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getLastBlockHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     return (jlong)atomic_load_explicit(&g_mirrorLastHeight, memory_order_relaxed);
@@ -1224,8 +1224,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getLastBlockHeight(JNIEnv *env, jobjec
  * to call between loadSavedBlocks() and startSync(). SyncService uses this
  * to pick the BIP 158 birth height before the peer manager exists.
  */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
 
@@ -1245,8 +1245,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject
  * the BIP 158 birth-height anchor for fresh wallets that have not yet
  * persisted any blocks.
  */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getWalletBirthCheckpointHeight(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
 
@@ -1271,8 +1271,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getWalletBirthCheckpointHeight(JNIEnv 
  * this time to recoverWalletFromBytes as the creation time makes the anchor (the latest
  * checkpoint more than a week older) a checkpoint at or below [height]. See checkpoint_time.h.
  */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCheckpointTimeAtOrBelow(JNIEnv *env, jobject thiz, jlong height) {
+jlong JNICALL
+NativeBridge_getCheckpointTimeAtOrBelow(JNIEnv *env, jobject thiz, jlong height) {
     (void)env;
     (void)thiz;
 
@@ -1283,8 +1283,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getCheckpointTimeAtOrBelow(JNIEnv *env
 
 /* ---------- setCallbackHandler ---------- */
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz,
+void JNICALL
+NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz,
                                                               jobject handler) {
     (void)thiz;
 
@@ -1338,8 +1338,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setCallbackHandler(JNIEnv *env, jobjec
 
 /* ── Load saved blocks/peers ─────────────────────────────────────────── */
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_loadSavedBlocks(JNIEnv *env, jobject thiz,
                                                            jbyteArray data) {
     (void)thiz;
     if (!data) return 0;
@@ -1400,8 +1400,8 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSavedBlocks(JNIEnv *env, jobject t
  * blocks load step has finished (whether or not any blocks existed), so the
  * peer manager is only ever built AFTER the saved chain is in memory and thus
  * anchors at the saved tip instead of the birth checkpoint. */
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_markSavedBlocksLoadComplete(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_markSavedBlocksLoadComplete(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     g_savedBlocksLoadComplete = 1;
@@ -1415,16 +1415,16 @@ Java_io_digibyte_core_bridge_NativeBridge_markSavedBlocksLoadComplete(JNIEnv *en
  * block re-download. A wallet that has synced before (has_synced) already did
  * that scan in a prior session and resumes at the saved tip, so the rescan is
  * pointless and harmful. SyncService calls this at startup for such wallets. */
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_markInitialSyncDone(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_markInitialSyncDone(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     g_initialSyncDone = 1;
     LOGI("markInitialSyncDone: post-first-sync rescan suppressed (wallet already synced)");
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_loadSavedPeers(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_loadSavedPeers(JNIEnv *env, jobject thiz,
                                                           jbyteArray data) {
     (void)thiz;
     if (!data) return 0;
@@ -1625,8 +1625,8 @@ static void bridge_saveCFLedger(void *info, const uint8_t *bytes, size_t len) {
     (*env)->DeleteLocalRef(env, jbuf);
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz, jint mode) {
+void JNICALL
+NativeBridge_setSyncMode(JNIEnv *env, jobject thiz, jint mode) {
     (void)env; (void)thiz;
     PEER_GUARD();
     BRSyncMode m = (BRSyncMode)mode;
@@ -1646,8 +1646,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setSyncMode(JNIEnv *env, jobject thiz,
     _refreshBridgeStatusMirror();
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSyncMode(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getSyncMode(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorSyncMode, memory_order_relaxed);
 }
@@ -1668,8 +1668,8 @@ static void _applyDandelionState(void) {
     LOGI("Dandelion: applied enabled=%d, %zu capable peer(s)", g_dandelion.enabled, g_dandelion.count);
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setDandelionEnabled(JNIEnv *env, jobject thiz, jboolean enabled) {
+void JNICALL
+NativeBridge_setDandelionEnabled(JNIEnv *env, jobject thiz, jboolean enabled) {
     (void)env; (void)thiz;
     PEER_GUARD();
     dandelion_state_set_enabled(&g_dandelion, enabled ? 1 : 0);
@@ -1677,8 +1677,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setDandelionEnabled(JNIEnv *env, jobje
     LOGI("setDandelionEnabled: %d%s", enabled ? 1 : 0, g_peerManager ? "" : " (remembered for the next peer manager)");
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_addDandelionPeer(JNIEnv *env, jobject thiz, jstring ipStr) {
+void JNICALL
+NativeBridge_addDandelionPeer(JNIEnv *env, jobject thiz, jstring ipStr) {
     (void)thiz;
     PEER_GUARD();
     if (!ipStr) return;
@@ -1694,16 +1694,16 @@ Java_io_digibyte_core_bridge_NativeBridge_addDandelionPeer(JNIEnv *env, jobject 
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);
 }
 
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_hasDandelionPeer(JNIEnv *env, jobject thiz) {
+jboolean JNICALL
+NativeBridge_hasDandelionPeer(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return JNI_FALSE;
     return BRPeerManagerHasDandelionPeer(g_peerManager) ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getCFChainTipHeight(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorCFTip, memory_order_relaxed);
 }
@@ -1711,14 +1711,14 @@ Java_io_digibyte_core_bridge_NativeBridge_getCFChainTipHeight(JNIEnv *env, jobje
 /* --- pkg 5.2: filter-header corroboration, observe-only readouts. Lock-free
  * mirrors exactly like getCFChainTipHeight (refreshed by _refreshBridgeStatusMirror);
  * nothing in the wallet decides on them — they are for logcat / Network Info. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCFCorroboratedThrough(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getCFCorroboratedThrough(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorCFCorroboratedThrough, memory_order_relaxed);
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCFCheckptDisagreeCount(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getCFCheckptDisagreeCount(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorCFCheckptDisagreeCount, memory_order_relaxed);
 }
@@ -1730,8 +1730,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getCFCheckptDisagreeCount(JNIEnv *env,
  * scalar mirror to read, so the guard that closes the teardown UAF window must
  * stay. Counts are polled at cadence; ranges are pulled occasionally by a human. */
 
-JNIEXPORT jlongArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerCounts(JNIEnv *env, jobject thiz) {
+jlongArray JNICALL
+NativeBridge_getCfScanLedgerCounts(JNIEnv *env, jobject thiz) {
     (void)thiz;
     PEER_GUARD();
     uint32_t scannedThrough = 0, outstanding = 0, gaveUp = 0, pending = 0;
@@ -1744,8 +1744,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerCounts(JNIEnv *env, job
     return out;
 }
 
-JNIEXPORT jlongArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerHoleRanges(JNIEnv *env, jobject thiz) {
+jlongArray JNICALL
+NativeBridge_getCfScanLedgerHoleRanges(JNIEnv *env, jobject thiz) {
     (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return (*env)->NewLongArray(env, 0);
@@ -1770,8 +1770,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getCfScanLedgerHoleRanges(JNIEnv *env,
     return out;
 }
 
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jbyteArray data) {
+jboolean JNICALL
+NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jbyteArray data) {
     (void)thiz;
     PEER_GUARD();
     if (!g_peerManager || !data) return JNI_FALSE;
@@ -1792,16 +1792,16 @@ Java_io_digibyte_core_bridge_NativeBridge_restoreCfScanLedger(JNIEnv *env, jobje
  * (these dereference g_peerManager->cfLedger via a locked manager call, so
  * there is no lock-free scalar mirror to read). */
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getLowestNeededHeight(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getLowestNeededHeight(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
     return (jlong)BRPeerManagerLowestNeededHeight(g_peerManager);
 }
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getAbandonedBelow(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getAbandonedBelow(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
@@ -1813,24 +1813,24 @@ Java_io_digibyte_core_bridge_NativeBridge_getAbandonedBelow(JNIEnv *env, jobject
  * THIS call. Driven from Kotlin rather than BRPeerManagerKeepAlive because KeepAlive
  * already holds manager->lock and the step takes it itself — calling it there would
  * deadlock. Driving it from the sync tick also keeps progress observable. */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_backfillAbandonedBandStep(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_backfillAbandonedBandStep(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
     return (jlong)BRPeerManagerBackfillAbandonedBandStep(g_peerManager);
 }
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getScanLedgerStart(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getScanLedgerStart(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
     return (jlong)BRPeerManagerScanLedgerStart(g_peerManager);
 }
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getAbandonedCount(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
@@ -1842,8 +1842,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getAbandonedCount(JNIEnv *env, jobject
  * floor, so it reads ZERO right after the largest abandonment event in the system; this
  * one sums the heights the ledger actually reports as dropped and survives the re-Init.
  * Use it — and only it — when judging whether a change reduced abandonment. */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getAbandonedHeightsTotal(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getAbandonedHeightsTotal(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
@@ -1856,16 +1856,16 @@ Java_io_digibyte_core_bridge_NativeBridge_getAbandonedHeightsTotal(JNIEnv *env, 
  * must remain suppressed while this signal is active.
  *
  * LOCKING: BRPeerManagerHasPendingAbandonment takes manager->lock itself. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getConvoyAbandonmentPending(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getConvoyAbandonmentPending(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;
     return (jint)BRPeerManagerHasPendingAbandonment(g_peerManager);
 }
 
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz) {
+jboolean JNICALL
+NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) {
@@ -1877,8 +1877,8 @@ Java_io_digibyte_core_bridge_NativeBridge_reanchorCompactFilterChainAtFloor(JNIE
     return r ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_rerequestHeadersFromTip(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_rerequestHeadersFromTip(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) {
@@ -1890,8 +1890,8 @@ Java_io_digibyte_core_bridge_NativeBridge_rerequestHeadersFromTip(JNIEnv *env, j
     return (jint)sent;
 }
 
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getCompactFilterChain(JNIEnv *env, jobject thiz) {
+jbyteArray JNICALL
+NativeBridge_getCompactFilterChain(JNIEnv *env, jobject thiz) {
     (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return NULL;
@@ -1912,8 +1912,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getCompactFilterChain(JNIEnv *env, job
     return jbuf;
 }
 
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data) {
+jboolean JNICALL
+NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data) {
     (void)thiz;
     PEER_GUARD();
     if (!data) return JNI_FALSE;
@@ -1951,8 +1951,8 @@ Java_io_digibyte_core_bridge_NativeBridge_setCompactFilterChain(JNIEnv *env, job
     return JNI_TRUE;
 }
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_requestCompactFilters(JNIEnv *env, jobject thiz,
+jlong JNICALL
+NativeBridge_requestCompactFilters(JNIEnv *env, jobject thiz,
                                                                 jlong startHeight, jlong stopHeight) {
     (void)env; (void)thiz;
     PEER_GUARD();
@@ -1963,8 +1963,8 @@ Java_io_digibyte_core_bridge_NativeBridge_requestCompactFilters(JNIEnv *env, job
     return (jlong)n;
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_enableAutoCompactFilterFetch(JNIEnv *env, jobject thiz,
+void JNICALL
+NativeBridge_enableAutoCompactFilterFetch(JNIEnv *env, jobject thiz,
                                                                        jlong startHeight) {
     (void)env; (void)thiz;
     PEER_GUARD();
@@ -1984,8 +1984,8 @@ Java_io_digibyte_core_bridge_NativeBridge_enableAutoCompactFilterFetch(JNIEnv *e
     LOGI("enableAutoCompactFilterFetch: startHeight=%ld", (long)startHeight);
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz) {
+void JNICALL
+NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     /* Forget the sticky state so a subsequent recreate does NOT re-arm auto-fetch
@@ -2004,8 +2004,8 @@ Java_io_digibyte_core_bridge_NativeBridge_disableAutoCompactFilterFetch(JNIEnv *
  * re-requesting already-scanned history on the next forward-fetch tick. Returns
  * the resulting cursor (post-snap) so the Kotlin caller can log before/after
  * without a second round-trip. */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_snapAutoFetchThroughToScanFrontier(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_snapAutoFetchThroughToScanFrontier(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) {
@@ -2028,22 +2028,22 @@ Java_io_digibyte_core_bridge_NativeBridge_snapAutoFetchThroughToScanFrontier(JNI
  *
  * No PEER_GUARD and no g_peerManager access: these are pure constant readers, so
  * they are valid before the peer manager exists (and cannot deadlock anything). */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getConvoyWindow(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getConvoyWindow(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)BRPeerManagerConvoyWindow();
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getConvoyRearmMax(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_getConvoyRearmMax(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)BRPeerManagerConvoyRearmMax();
 }
 
 /* Read back the current forward-fetch cursor (autoFetchCFiltersThrough), for
  * before/after logging around snapAutoFetchThroughToScanFrontier above. */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getAutoFetchCFiltersThrough(JNIEnv *env, jobject thiz) {
+jlong JNICALL
+NativeBridge_getAutoFetchCFiltersThrough(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     PEER_GUARD();
     if (!g_peerManager) return 0;

@@ -23,8 +23,8 @@
 #include "BRPeerPenaltyPersist.h"
 
 /* 0 = Keep, 1 = Clear, 2 = Store. Mirrors BRPeerPenaltyAction. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_peerPenaltyDecide(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_peerPenaltyDecide(JNIEnv *env, jobject thiz,
                                                              jbyteArray blob) {
     (void)thiz;
 
@@ -40,8 +40,8 @@ Java_io_digibyte_core_bridge_NativeBridge_peerPenaltyDecide(JNIEnv *env, jobject
 }
 
 /* The same decision from a length alone, for a caller that has no buffer. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_peerPenaltyDecideLength(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_peerPenaltyDecideLength(JNIEnv *env, jobject thiz,
                                                                    jint length) {
     (void)env; (void)thiz;
     if (length < 0) return (jint)BRPeerPenaltyActionKeep;
@@ -50,14 +50,14 @@ Java_io_digibyte_core_bridge_NativeBridge_peerPenaltyDecideLength(JNIEnv *env, j
 
 /* BRPeerPenalty.h's wire-format constants, so the Kotlin mirror can assert
  * against the serializer instead of against a comment. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_peerPenaltyHeaderBytes(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_peerPenaltyHeaderBytes(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)BR_PEER_PENALTY_HEADER_BYTES;
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_peerPenaltyEntryBytes(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_peerPenaltyEntryBytes(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)BR_PEER_PENALTY_ENTRY_BYTES;
 }

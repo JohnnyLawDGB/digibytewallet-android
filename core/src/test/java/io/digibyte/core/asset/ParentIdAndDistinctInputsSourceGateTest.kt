@@ -85,7 +85,7 @@ class ParentIdAndDistinctInputsSourceGateTest {
 
         val jni = c(File(repo, "native/src/main/jni/bridge/jni_asset_send.c"))
         assertTrue(jni.contains("#include \"asset_tx_checks.h\""))
-        val accessor = jni.section("Java_io_digibyte_core_bridge_NativeBridge_rawTransactionId(", "\n}\n")
+        val accessor = jni.section("NativeBridge_rawTransactionId(", "\n}\n")
         assertTrue("rawTransactionId does not use raw_tx_id", accessor.contains("raw_tx_id("))
     }
 
@@ -99,7 +99,7 @@ class ParentIdAndDistinctInputsSourceGateTest {
         }
 
         val jni = c(File(repo, "native/src/main/jni/bridge/jni_asset_send.c"))
-        val build = jni.section("Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(", "\n}\n")
+        val build = jni.section("NativeBridge_buildAndSignAssetTransferTx(", "\n}\n")
         assertBefore(build, "tx_inputs_distinct(tx)", "seed_sign_transaction(")
     }
 }
