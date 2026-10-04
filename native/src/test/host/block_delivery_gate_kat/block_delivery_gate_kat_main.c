@@ -652,6 +652,138 @@ static void case_manager_confirm_needs_verified(Fx *f)
     check(rb && rb->blockHeight == TX_UNCONFIRMED, "not confirmed by a list that does not hash to the root");
 }
 
+// ---- the close tag of a header refused for its proof of work ---------------------------------------
+// These cases follow the level the build sets (DGB_HEADER_POW_CHECK): at level >= 2 they assert the
+// refusal and its tag, below it the comparison (the header is accepted and nothing carries the tag).
+// run.sh runs them in every arm and in a dedicated level-2 arm.
+
+// A header with no proof of work for its algorithm (24278145': the fixture's nonce is not ground), sent by
+// the download peer through the real "headers" parser. At level >= 2 the message is refused; the close that
+// follows (what the peer thread does with a 0 verdict: EPROTO, then the disconnected callback) is counted
+// under the header-pow tag, and the peer gets the existing misbehaving penalty. The peer here is not owned
+// by the fixture: the disconnected callback frees it. connectFailureCount is pinned at its cap so the host
+// run does not dial.
+static void case_header_pow_close_tag(Fx *f)
+{
+    BRPeerCallbackInfo *info = calloc(1, sizeof(*info));
+    info->manager = f->m;
+    info->peer = BRPeerNew(f->m->params->magicNumber);
+    BRPeer *peer = info->peer;
+    peer->address = (UInt128) { .u8 = { 0,0,0,0,0,0,0,0,0,0,0xff,0xff, 198,51,100,7 } };
+    peer->port = 12024;
+    BRPeerSetCallbacks(peer, info, _peerConnected, _peerDisconnected, _peerRelayedPeers,
+                       katRelayedTx, _peerHasTx, _peerRejectedTx, _peerRelayedBlock, katRelayedBlockTxns,
+                       _peerRelayedBlockInv, _peerDataNotfound, _peerSetFeePerKb, _peerRequestedTx,
+                       _peerNetworkIsReachable, _peerThreadCleanup);
+    BRPeerSetCompactFiltersOnly(peer, 1);
+    uint8_t m[1 + 81];
+    m[0] = 1; memcpy(&m[1], f->nextHdr, 80); m[81] = 0;
+
+    MGR_LOCK(f->m);
+    f->m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+    array_add(f->m->peers, *peer);
+    array_add(f->m->connectedPeers, peer);
+    f->m->downloadPeer = peer;
+    f->m->connectFailureCount = MAX_CONNECT_FAILURES;
+    int mis0 = f->m->misbehavinCount;
+    uint32_t tagged0 = f->m->closeTagCounts[BR_DISC_TAG_HEADER_POW], tip0 = f->m->lastBlock->height;
+    MGR_UNLOCK(f->m);
+
+    int r = deliver(peer, m, sizeof(m), MSG_HEADERS);
+    BRPeerDisconnectTag tag = BRPeerDisconnectTagOf(peer);
+    if (r == 0) _peerDisconnected(info, EPROTO);   // the peer thread's path for a 0 verdict; frees the peer
+
+    MGR_LOCK(f->m);
+    int mis1 = f->m->misbehavinCount;
+    uint32_t tagged1 = f->m->closeTagCounts[BR_DISC_TAG_HEADER_POW], tip1 = f->m->lastBlock->height;
+    int resident = BRSetGet(f->m->blocks, &f->nextHash) != NULL;
+    if (r != 0) {   // kept: detach it so the manager does not outlive-reference it
+        for (size_t i = array_count(f->m->connectedPeers); i > 0; i--)
+            if (f->m->connectedPeers[i - 1] == peer) array_rm(f->m->connectedPeers, i - 1);
+        f->m->downloadPeer = NULL;
+    }
+    MGR_UNLOCK(f->m);
+    if (r != 0) BRPeerFree(peer);
+    free(info);
+
+    printf("\nNOTE: level %d: headers r=%d tag=%s header-pow closes %u -> %u misbehavin %d -> %d tip %u -> %u "
+           "resident=%d\n", DGB_HEADER_POW_CHECK, r, BRPeerDisconnectTagName(tag), tagged0, tagged1, mis0, mis1,
+           tip0, tip1, resident);
+#if DGB_HEADER_POW_CHECK >= 2
+    check(r == 0 && ! resident && tip1 == tip0, "level 2: a header with no proof of work is refused and never resident");
+    check(tag == BR_DISC_TAG_HEADER_POW, "level 2: the refusal tags the peer's close header-pow");
+    check(tagged1 == tagged0 + 1, "level 2: the close ledger counts exactly one header-pow close");
+    check(mis1 == mis0 + 1, "level 2: the peer gets the existing misbehaving penalty");
+#else
+    check(r == 1 && resident, "below level 2: the header is accepted (comparison)");
+    check(tag != BR_DISC_TAG_HEADER_POW && tagged1 == tagged0 && mis1 == mis0,
+          "below level 2: no close, no header-pow tag, no penalty");
+#endif
+}
+
+// A header on top of the tip that names an algorithm not allowed at its height (groestl at 24278145, refused
+// from 23,808,000), handed to the manager's own header handler as the peer layer would hand it on. At level
+// >= 2 the manager refuses it and closes the peer with the header-pow tag, with the existing misbehaving
+// penalty. Synthetic header: it is not passed through the proof-of-work hash, only the height rule is
+// exercised (as in algo_height_verifier_kat).
+static void case_algo_height_close_tag(Fx *f)
+{
+    BRPeer *peer = fxPeer(f);
+    BRPeerCallbackInfo *info = f->infos[f->infoCount - 1];
+    uint8_t hdr[80];
+    memcpy(hdr, f->nextHdr, 80);
+    UInt32SetLE(&hdr[0], 0x20000002u | BLOCK_VERSION_GROESTL);
+    BRMerkleBlock *block = BRMerkleBlockParse(hdr, 80);
+    UInt256 id = block->blockHash;
+    const char *algo = BRMerkleBlockAlgoName(BRMerkleBlockAlgo(block));
+
+    MGR_LOCK(f->m);
+    f->m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
+    int mis0 = f->m->misbehavinCount;
+    uint32_t tip0 = f->m->lastBlock->height;
+    MGR_UNLOCK(f->m);
+
+    _peerRelayedBlock(info, block);   // the manager owns block from here (kept or freed)
+    BRPeerDisconnectTag tag = BRPeerDisconnectTagOf(peer);
+
+    MGR_LOCK(f->m);
+    int mis1 = f->m->misbehavinCount;
+    uint32_t tip1 = f->m->lastBlock->height;
+    int resident = BRSetGet(f->m->blocks, &id) != NULL;
+    MGR_UNLOCK(f->m);
+
+    printf("\nNOTE: level %d: algorithm %s at %u, tag=%s misbehavin %d -> %d tip %u -> %u resident=%d\n",
+           DGB_HEADER_POW_CHECK, algo, tip0 + 1, BRPeerDisconnectTagName(tag),
+           mis0, mis1, tip0, tip1, resident);
+#if DGB_HEADER_POW_CHECK >= 2
+    check(! resident && tip1 == tip0, "level 2: a header whose algorithm is not allowed at its height is refused");
+    check(tag == BR_DISC_TAG_HEADER_POW, "level 2: the refusal closes the peer with the header-pow tag");
+    check(mis1 == mis0 + 1, "level 2: the peer gets the existing misbehaving penalty");
+#else
+    check(resident && tip1 == tip0 + 1, "below level 2: the header is accepted (comparison)");
+    check(tag != BR_DISC_TAG_HEADER_POW && mis1 == mis0, "below level 2: no header-pow tag, no penalty");
+#endif
+}
+
+// The tag is specific: a header refused for its time (two days ahead of now) is refused at every level, and
+// its close does not carry the header-pow tag.
+static void case_future_header_not_pow_tag(Fx *f)
+{
+    BRPeer *peer = fxPeer(f);
+    uint8_t m[1 + 81];
+    m[0] = 1; memcpy(&m[1], f->nextHdr, 80); m[81] = 0;
+    UInt32SetLE(&m[1 + 68], (uint32_t)time(NULL) + 2*24*60*60);
+    BRPeerSetCompactFiltersOnly(peer, 1);
+
+    uint32_t before = BRMerkleBlockPoWMismatchCount();
+    int r = deliver(peer, m, sizeof(m), MSG_HEADERS);
+    BRPeerDisconnectTag tag = BRPeerDisconnectTagOf(peer);
+    printf("\nNOTE: level %d: headers r=%d tag=%s pow-mismatch +%u\n", DGB_HEADER_POW_CHECK, r,
+           BRPeerDisconnectTagName(tag), BRMerkleBlockPoWMismatchCount() - before);
+    check(r == 0, "a header timestamped beyond the allowed drift is refused at every level");
+    check(tag != BR_DISC_TAG_HEADER_POW, "a refusal for the time does not carry the header-pow tag");
+}
+
 typedef struct { const char *name; void (*fn)(Fx *); } Case;
 
 static const Case kCases[] = {
@@ -669,6 +801,9 @@ static const Case kCases[] = {
     { "request_set_bound",                     case_request_set_bound },
     { "notfound_consumes_request",             case_notfound_consumes_request },
     { "manager_confirm_needs_verified",        case_manager_confirm_needs_verified },
+    { "header_pow_close_tag",                  case_header_pow_close_tag },
+    { "algo_height_close_tag",                 case_algo_height_close_tag },
+    { "future_header_not_pow_tag",             case_future_header_not_pow_tag },
 };
 
 int main(int argc, char **argv)

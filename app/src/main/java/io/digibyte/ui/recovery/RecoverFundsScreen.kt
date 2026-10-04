@@ -967,6 +967,10 @@ private fun AssetMoveSection(
                             stringResource(R.string.rf_move_refused_rule_bound, failed.outpoint)
                         io.digibyte.core.recovery.MoveRefusal.RULES_UNKNOWN ->
                             stringResource(R.string.rf_move_refused_unknown, failed.outpoint)
+                        io.digibyte.core.recovery.MoveRefusal.HOLDING_UNVERIFIED ->
+                            stringResource(R.string.rf_move_refused_holding_unverified, failed.outpoint)
+                        io.digibyte.core.recovery.MoveRefusal.HOLDING_MISMATCH ->
+                            stringResource(R.string.rf_move_refused_holding_mismatch, failed.outpoint)
                         null -> stringResource(
                             R.string.rf_move_failed,
                             failed.outpoint,

@@ -417,6 +417,10 @@ class RecoverFundsViewModel @Inject constructor(
                 assetClassifier = classifier,
                 outgoingTxStore = outgoingTxStore,
                 walletTxPersister = walletTxPersister,
+                // Every input of a move is checked against the indexer, and the rule gate runs on
+                // the asset actually there (see ForeignAssetTransferService.stackOf).
+                stackOf = { txid, vout -> assetManager.assetStackOf(txid, vout) },
+                ruleStateOf = { assetId -> assetManager.transferRuleState(assetId) },
             ).moveAssets(
                 seedBytes = seed,
                 results = current,

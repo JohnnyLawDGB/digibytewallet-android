@@ -282,8 +282,18 @@
     <string name="as_send_failed">Не удалось отправить</string>
     <string name="as_balance">Баланс: %1$s</string>
     <string name="as_quantity">Количество</string>
-    <string name="as_tokens">токены</string>
-    <string name="as_units">единицы</string>
+    <plurals name="as_tokens">
+        <item quantity="one">токен</item>
+        <item quantity="few">токена</item>
+        <item quantity="many">токенов</item>
+        <item quantity="other">токена</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">единица</item>
+        <item quantity="few">единицы</item>
+        <item quantity="many">единиц</item>
+        <item quantity="other">единицы</item>
+    </plurals>
     <string name="as_fee_note">Для комиссии сети при операциях с активами нужны DGB</string>
     <string name="as_err_recipient">Введите адрес получателя</string>
     <string name="as_err_quantity">Введите корректное количество</string>
@@ -296,7 +306,12 @@
     <string name="as_change_marker">Маркер сдачи актива</string>
     <string name="as_network_fee_est">Комиссия сети (оценка)</string>
     <string name="as_total_dgb">Итого DGB</string>
-    <string name="as_stays">%1$s %2$s останутся в вашем кошельке</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s останется в вашем кошельке</item>
+        <item quantity="few">%1$s %2$s останутся в вашем кошельке</item>
+        <item quantity="many">%1$s %2$s останутся в вашем кошельке</item>
+        <item quantity="other">%1$s %2$s останутся в вашем кошельке</item>
+    </plurals>
     <string name="ad_title">Сведения об активе</string>
     <string name="ad_balance">Баланс</string>
     <string name="ad_info">Информация об активе</string>
@@ -580,8 +595,41 @@
     <string name="as_rules_retry">Проверить снова</string>
     <string name="as_refused_rule_bound">Заблокировано: у этого актива есть правила передачи, которые этот кошелёк пока не может выполнить. Ничего не отправлено.</string>
     <string name="as_refused_rules_unknown">Заблокировано: не удалось проверить правила передачи этого актива. Ничего не отправлено.</string>
+    <string name="as_refused_holding_unverified">Заблокировано: сейчас не удалось проверить содержимое монет этого актива. Ничего не отправлено. Повторите попытку, когда будете в сети.</string>
+    <string name="as_refused_holding_unconfirmed">Заблокировано: ни для одной монеты этого актива не удалось подтвердить, что она содержит только этот актив. Ничего не отправлено.</string>
+    <string name="as_refused_spans_addresses">Заблокировано: эта сумма хранится на нескольких адресах. За одну отправку можно переместить не более %1$s. Ничего не отправлено.</string>
     <string name="rf_move_refused_rule_bound">%1$s остался на месте: у этого актива есть правила передачи, которые этот кошелёк пока не может выполнить</string>
     <string name="rf_move_refused_unknown">%1$s остался на месте: не удалось проверить его правила передачи</string>
+    <string name="rf_move_refused_holding_unverified">%1$s остался на месте: сейчас не удалось проверить его содержимое. Повторите попытку, когда будете в сети</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s остался на месте: он содержит не ровно один актив, поэтому перемещать его небезопасно</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Удаление кошелька не завершено. Часть данных кошелька могла остаться на этом устройстве. Перезапустите приложение и повторите попытку.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Восстановление истории транзакций</string>
+    <string name="history_rebuild_notice_body">Это обновление один раз восстанавливает историю ваших транзакций по данным блокчейна. Ваши монеты и фраза восстановления не затрагиваются. Баланс будет заполняться по мере сканирования, а отправка станет доступна после его завершения.</string>
+    <string name="history_rebuild_deferred">История транзакций будет восстановлена после подтверждения вашей ожидающей отправки.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Выходы, найденные в блокчейне</string>
+    <string name="reconcile_found_not_compared">Найдено в блокчейне, не сравнивалось</string>
+    <string name="reconcile_spendable">Расходуемые</string>
+    <string name="reconcile_wallet_spendable">Расходуемый баланс кошелька</string>
+    <string name="reconcile_matches_wallet">Совпадает с расходуемым балансом кошелька.</string>
+    <string name="reconcile_does_not_match_wallet">Не совпадает с расходуемым балансом кошелька — см. ниже.</string>
+    <string name="reconcile_held_asset">Удерживается для DigiAsset</string>
+    <string name="reconcile_held_unknown">Удерживается: состояние актива неизвестно</string>
+    <string name="reconcile_proven_plain">Обычные DGB, станут расходуемыми после перезапуска</string>
+    <string name="reconcile_digidollar_outputs">Выходы DigiDollar</string>
+    <string name="reconcile_immature">Незрелые (пока не расходуемые)</string>
+    <string name="reconcile_pending">Ожидают в кошельке</string>
+    <string name="reconcile_not_in_wallet">Нет в этом кошельке</string>
+    <string name="reconcile_wallet_only">В кошельке, но узел о них не сообщил</string>
+    <string name="reconcile_no_missing_funds">Пропавших средств не найдено.</string>
+    <string name="reconcile_txs_already_in_wallet">Транзакции, уже находящиеся в кошельке</string>
+    <string name="reconcile_txs_not_added">Не добавленные транзакции (не из этого кошелька)</string>
+    <string name="reconcile_stage_comparing">Сравнение с кошельком…</string>
+    <string name="market_tor_notice_title">Маркет не проходит через Tor</string>
+    <string name="market_tor_notice_body">Маркет не проходит через Tor; сайт увидит ваш IP-адрес.</string>
+    <string name="market_tor_notice_continue">Продолжить</string>
 </resources>

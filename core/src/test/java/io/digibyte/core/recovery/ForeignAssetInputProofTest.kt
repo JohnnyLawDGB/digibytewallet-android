@@ -73,6 +73,11 @@ class ForeignAssetInputProofTest {
             isAssetTx = { it.contentEquals(byteArrayOf(1)) },
             resolveRuleState = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
         ),
+        stackOf = { txid, _ ->
+            if (txid.startsWith("asset")) io.digibyte.core.asset.send.StackLookup.Found(listOf(io.digibyte.core.asset.send.StackEntry("La-test", 1L)))
+            else io.digibyte.core.asset.send.StackLookup.Found(emptyList())
+        },
+        ruleStateOf = { io.digibyte.core.asset.rules.TransferRuleState.NONE },
         parents = book.binding,
         parseOutputs = { markerOutputs },
         sign = { plan, _, _, _ -> signed += plan; "00ff" },

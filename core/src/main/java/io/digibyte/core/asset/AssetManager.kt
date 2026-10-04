@@ -57,6 +57,24 @@ internal fun formatAssetCount(count: Long, decimals: Int): String {
 }
 
 /**
+ * What an asset transaction moved, for display: [units] in the asset's smallest unit, its
+ * [decimals], and its symbol or name when the metadata cache has them. No words are chosen
+ * here — the noun for an asset with neither is the UI's, in the user's language and agreeing
+ * with the quantity.
+ */
+data class AssetTxAmount(
+    val units: Long,
+    val decimals: Int,
+    /** The asset's symbol, else its name; null when neither is known. */
+    val label: String?,
+    /** The asset's name, when known. */
+    val name: String?,
+) {
+    /** [units] in human units at [decimals]: (5000, 2) -> "50.00". */
+    val quantityText: String get() = formatAssetCount(units, decimals)
+}
+
+/**
  * Parse [io.digibyte.core.bridge.NativeBridge.getSpendableDigiByteUtxos] output
  * ("txidHex|vout|amountSats|scriptPubKeyHex" lines) into [UtxoEntity] rows for the
  * asset-send DGB-fee selector. Sovereign DGB UTXO source (native wallet->utxos),
@@ -184,6 +202,17 @@ internal class ZeroRowInputs {
     var otherUnits: Long = 0L
 }
 
+/** What the hold rule reads about one output of an asset transaction the wallet holds; see
+ *  [AssetManager.heldOutputFacts]. [heldByRuleNow] is the startup replay's answer for the output
+ *  today: true held, false not held (its remainder is known, or proven, to be zero), null no answer. */
+class HeldOutputFacts(
+    val header: DecodedAssetHeader,
+    val firstNonOpReturnVout: Int?,
+    val outputCount: Int,
+    val heldByRuleNow: Boolean?,
+    val rowQuantity: Long?,
+)
+
 /** What [outputIsTargeted] reads of the transaction that created an output. */
 internal class AssetTxShape(
     val header: DecodedAssetHeader,
@@ -226,7 +255,8 @@ internal suspend fun outputIsTargeted(
     rowQuantity: suspend (String, Int) -> Long?,
     isAssetTx: suspend (String) -> Boolean?,
     settled: MutableMap<String, Long?>? = null,
-): Boolean? = TargetingWalk(shapeOf, rowQuantity, isAssetTx, settled).answer(txid, vout)
+    provenInputUnits: (String, DecodedAssetHeader) -> Long? = { _, _ -> null },
+): Boolean? = TargetingWalk(shapeOf, rowQuantity, isAssetTx, settled, provenInputUnits).answer(txid, vout)
 
 /**
  * One question put to [outputIsTargeted], and everything it read on the way: the shapes, rows and
@@ -238,6 +268,7 @@ private class TargetingWalk(
     private val rowQuantity: suspend (String, Int) -> Long?,
     private val isAssetTx: suspend (String) -> Boolean?,
     private val settled: MutableMap<String, Long?>?,
+    private val provenInputUnits: (String, DecodedAssetHeader) -> Long?,
 ) {
     private val shapes = HashMap<String, AssetTxShape?>()
     private val inputLists = HashMap<String, List<Pair<String, Int>>?>()
@@ -317,7 +348,7 @@ private class TargetingWalk(
             rowQuantity = { funding, vout -> row(funding, vout) },
             isAssetTx = isAssetTx,
             rowIsTargeted = { funding, vout -> answerFromTotals(funding, vout) },
-        )
+        ) ?: provenInputUnits(txid, tx.header)
     }
 
     /** The targeting answer for one output, from the payload and the totals already resolved. */
@@ -395,6 +426,17 @@ class AssetManager(
     /** Seam for the pass [sendAsset] runs before it reads a coin. Null in production, where it is
      *  [holdAssetOutputsBeforeSpend]; a test injects a recording fake. */
     private val beforeSpend: (suspend () -> Unit)? = null,
+    /** Transactions whose last output is proven to carry no units ([RemainderProofWalk]). Every
+     *  hold path reads it where the wallet's own rows leave a remainder unknown. Defaults to
+     *  process-lifetime memory; production passes a persistent store so a proof survives a
+     *  restart and the startup replay does not hold the output out again. */
+    private val remainderProofs: RemainderProofStore = InMemoryRemainderProofStore(),
+    /** Where an asset send confirms what each of its asset inputs holds. Null means no source,
+     *  and then no asset send or move is built (see [io.digibyte.core.asset.send.AssetSendSelection]). */
+    private val assetStackSource: io.digibyte.core.asset.send.AssetStackSource? = null,
+    /** Seam for "does the transaction that created this txid have a data output". Null in
+     *  production, where it reads the transaction's outputs through the bridge. */
+    private val parentHasDataOutput: ((String) -> Boolean?)? = null,
 ) {
 
     init {
@@ -402,6 +444,26 @@ class AssetManager(
         // Only stored here, and it touches the bridge only when run, so constructing an
         // AssetManager still loads nothing.
         SpendPreflight.install { holdAssetOutputsBeforeSpend() }
+    }
+
+    /** Chooses and confirms an asset send's inputs. One per manager, so what it confirms or sets
+     *  aside is remembered for the life of the process. */
+    private val sendSelection: io.digibyte.core.asset.send.AssetSendSelection by lazy {
+        io.digibyte.core.asset.send.AssetSendSelection(
+            stackSource = assetStackSource,
+            parentHasDataOutput = parentHasDataOutput ?: ::nativeParentHasDataOutput,
+        )
+    }
+
+    /** What the DigiAsset indexer says [txid]:[vout] holds; "no answer" when there is no source. */
+    suspend fun assetStackOf(txid: String, vout: Int): io.digibyte.core.asset.send.StackLookup =
+        assetStackSource?.stackOf(txid, vout) ?: io.digibyte.core.asset.send.StackLookup.Unavailable
+
+    /** Whether the wallet's copy of [txid] has an OP_RETURN output; null when it cannot be read. */
+    private fun nativeParentHasDataOutput(txid: String): Boolean? {
+        val outs = runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull() ?: return null
+        if (outs.isEmpty()) return null
+        return outs.any { line -> line.split("|").getOrNull(2)?.lowercase()?.startsWith("6a") == true }
     }
 
     /** Walks a transfer back to its issuance, resuming rather than restarting. The hop
@@ -630,7 +692,9 @@ class AssetManager(
                 "owned=${scriptHex in owned} -> ${if (keep) "COUNT" else "drop"}")
             if (!keep) continue
             qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
-            cnt[assetId] = (cnt[assetId] ?: 0) + 1
+            // "UTXOs Held" counts outputs that hold units. A send's plain change is stored as
+            // an asset row with quantity 0 and is held like any other; it holds none of the asset.
+            if (row.assetQuantity > 0L) cnt[assetId] = (cnt[assetId] ?: 0) + 1
         }
         val result = qty.mapValues { (id, q) -> HeldBalance(q, cnt[id] ?: 0) }
         android.util.Log.i("AssetManager",
@@ -854,7 +918,7 @@ class AssetManager(
                 inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
             },
             unresolved = zeroRowInputs,
-        )
+        ) ?: provenInputUnits(txHashHex, header)
         val outputCount = outputLines.size
 
         // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
@@ -1537,7 +1601,7 @@ class AssetManager(
                 val isAssetTx: suspend (String) -> Boolean? =
                     { txid -> if (txid in plainTxs) false else hasAssetPayload(outputsOf(txid)) }
                 val zeroRowInputs = ZeroRowInputs()
-                val inputUnits = if (inputs.any { it == null }) null else resolveInputAssetUnits(
+                val inputUnits = (if (inputs.any { it == null }) null else resolveInputAssetUnits(
                     inputs = inputs.filterNotNull(),
                     rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
                     isAssetTx = isAssetTx,
@@ -1545,7 +1609,7 @@ class AssetManager(
                         inputRowIsTargeted(txid, vout, outputsOf, inputsOf, inputUnitsThisPass, isAssetTx)
                     },
                     unresolved = zeroRowInputs,
-                )
+                )) ?: provenInputUnits(txHash, header)
                 inputUnitsThisPass[txHash] = inputUnits
 
                 // The same ownership rule detection applies: with an owned set, only what is ours;
@@ -1671,11 +1735,15 @@ class AssetManager(
      * (chiefly the recipient marker of a send WE made) is removed while an unknowable row
      * is left alone. Returns the number of phantom rows deleted.
      */
-    suspend fun reconcileAssetRowsLocally(): Int =
-        reconcileAssetRowsLocallyImpl(buildOwnedScriptHexes()) { txid, vout ->
-            runCatching { NativeBridge.outpointSpentState(txid, vout) }
-                .getOrDefault(AssetSpentState.PROBE_ERROR)
-        }
+    suspend fun reconcileAssetRowsLocally(pruneUnowned: Boolean): Int =
+        reconcileAssetRowsLocallyImpl(
+            if (pruneUnowned) buildOwnedScriptHexes() else emptySet(),
+            spentState = { txid, vout ->
+                runCatching { NativeBridge.outpointSpentState(txid, vout) }
+                    .getOrDefault(AssetSpentState.PROBE_ERROR)
+            },
+            pruneUnowned = pruneUnowned,
+        )
 
     /**
      * Testable core of [reconcileAssetRowsLocally]; same host-JVM constraint as the other
@@ -1686,13 +1754,20 @@ class AssetManager(
      * DELETES: an empty [ownedScriptHexes] means the lookup failed rather than that we own
      * nothing, so nothing is pruned; and a row with no scriptPubKey is a real holding we
      * cannot judge, never a phantom.
+     *
+     * [pruneUnowned] must be false while the wallet may still be re-deriving its history (a
+     * rescan from a floor): its address set then covers only the fresh derivation window, and a
+     * row at a higher index would read as unowned. SyncService passes its maintenance gate
+     * (`assetPruneGateOpen`, synced this session); other callers pass false. The spent-state
+     * pass always runs: it leaves a row unchanged while its funding tx is unknown (-1).
      */
     internal suspend fun reconcileAssetRowsLocallyImpl(
         ownedScriptHexes: Set<String>,
         spentState: suspend (String, Int) -> Int,
+        pruneUnowned: Boolean = true,
     ): Int {
         var pruned = 0
-        if (ownedScriptHexes.isNotEmpty()) {
+        if (pruneUnowned && ownedScriptHexes.isNotEmpty()) {
             val phantoms = utxoDao.getAllAssetUtxosNow().filter {
                 it.scriptPubKey.isNotEmpty() && it.scriptPubKey.toHex() !in ownedScriptHexes
             }
@@ -1800,7 +1875,57 @@ class AssetManager(
         rowQuantity = { t, v -> utxoDao.getAssetUtxoAt(t, v)?.assetQuantity },
         isAssetTx = isAssetTx,
         settled = settled,
+        provenInputUnits = ::provenInputUnits,
     )
+
+    /**
+     * What [txid]'s inputs carried, as far as its remainder is concerned, when a proof says its
+     * last output carries no units: exactly what its instructions consume, so
+     * [AssetTxQuantity.implicitChange] is zero. Null without a proof — the remainder stays
+     * unknown and the hold rule keeps the last output out of the spendable set.
+     */
+    private fun provenInputUnits(txid: String, header: DecodedAssetHeader): Long? =
+        if (runCatching { remainderProofs.isProven(txid) }.getOrDefault(false)) {
+            AssetTxQuantity.assignedUnits(header)
+        } else null
+
+    /** Record [RemainderProofWalk]'s proof that [txid]'s last output carries no units. From the
+     *  next time the wallet's spendable set is built (the next start), no hold path holds that
+     *  output out: the native exclusion list only grows within a process. */
+    fun recordRemainderProof(txid: String) {
+        remainderProofs.markProven(txid)
+        android.util.Log.i("AssetManager", "remainder proven zero for ${txid.take(12)}: last output leaves the hold from the next start")
+    }
+
+    /** Has [txid]'s last output been proven to carry no units? */
+    fun hasRemainderProof(txid: String): Boolean =
+        runCatching { remainderProofs.isProven(txid) }.getOrDefault(false)
+
+    /**
+     * Why the wallet holds output [vout] of [txHashHex] out of the spendable set, for a report: the
+     * header as the hold rule reads it, the row's stored quantity, and the startup replay's own
+     * answer for the output now ([defaultResolveRowTargets], which reads recorded proofs). Null
+     * when the transaction cannot be read or carries no payload.
+     */
+    suspend fun heldOutputFacts(txHashHex: String, vout: Int): HeldOutputFacts? = withContext(Dispatchers.IO) {
+        val outputLines = runCatching { NativeBridge.getTransactionOutputsForHash(txHashHex) }.getOrNull()
+            ?: return@withContext null
+        val shape = assetTxShape(outputLines) { heldInputLines(txHashHex) } ?: return@withContext null
+        val heldNow = try {
+            defaultResolveRowTargets(txHashHex, vout)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        HeldOutputFacts(
+            header = shape.header,
+            firstNonOpReturnVout = shape.firstNonOpReturnVout,
+            outputCount = shape.outputCount,
+            heldByRuleNow = heldNow,
+            rowQuantity = utxoDao.getAssetUtxoAt(txHashHex, vout)?.assetQuantity,
+        )
+    }
 
     /** [AssetTxShape] from bridge lines. Null — no answer — for a transaction that is not held,
      *  carries no payload that decodes, or has an output line that cannot be read; an input line
@@ -2070,7 +2195,7 @@ class AssetManager(
             throw e
         } catch (e: Exception) {
             null
-        }
+        } ?: provenInputUnits(txHashHex, header)
         if (heldOnlyForZeroRows(header, vout, firstNonOpReturn, outputLines.size, zeroRowInputs)) {
             heldForZeroRows?.addAll(zeroRowInputs.rows)
         }
@@ -2133,27 +2258,25 @@ class AssetManager(
     }
 
     /**
-     * Activity-row asset amount label: token count + the asset's real name/symbol
-     * ("20 CHANG") when the assetId is resolved and has metadata, else a bare count
-     * ("20 Tokens"). Applies the asset's divisibility (decimals) to the count for
-     * human units ("50.00 CHANG"). Sovereign for the count (from the tx); the
-     * name/decimals come from the already-resolved metadata cache the Assets screen
-     * uses. Null when the tx has no resolvable token amount (row falls back to DGB).
+     * Activity-row asset amount: the token count moved ([assetTokenCountForTx]) with the asset's
+     * divisibility, symbol and name from the already-resolved metadata cache the Assets screen
+     * uses. Sovereign for the count (from the tx). Null when the tx has no resolvable token amount
+     * (the row falls back to DGB). The UI words it ([AssetTxAmount]).
      */
-    suspend fun assetAmountLabelForTx(
+    suspend fun assetAmountForTx(
         txHashHex: String,
         isSend: Boolean,
         ownedScriptHexes: Set<String>? = null,
-    ): String? {
+    ): AssetTxAmount? {
         val count = assetTokenCountForTx(txHashHex, isSend, ownedScriptHexes) ?: return null
         val meta = utxoDao.getResolvedAssetIdForTx(txHashHex)?.let { metadataDao.getMetadata(it) }
-        val amountStr = formatAssetCount(count, meta?.decimals ?: 0)
-        val label = meta?.symbol?.takeIf { it.isNotBlank() } ?: meta?.name?.takeIf { it.isNotBlank() }
-        return when {
-            label != null -> "$amountStr $label"
-            count == 1L && (meta?.decimals ?: 0) == 0 -> "$amountStr Token"
-            else -> "$amountStr Tokens"
-        }
+        val name = meta?.name?.takeIf { it.isNotBlank() }
+        return AssetTxAmount(
+            units = count,
+            decimals = meta?.decimals ?: 0,
+            label = meta?.symbol?.takeIf { it.isNotBlank() } ?: name,
+            name = name,
+        )
     }
 
     /**
@@ -2242,19 +2365,34 @@ class AssetManager(
         val dgbUtxos = parseNativeDgbUtxos(NativeBridge.getSpendableDigiByteUtxos())
         if (assetUtxos.isEmpty()) return notPlanned(TxResult.Error("No UTXOs for asset $assetId"))
 
-        // 2-5. Selection, transfer instructions, the size-aware fee and the output values: the
-        //      pure half of the send, in AssetTransferPlanner so the numbers signed below are
-        //      testable on the JVM.
+        // 2-5. One source address, coins confirmed by the indexer to hold exactly this asset,
+        //      then selection, transfer instructions, the size-aware fee and the output values.
+        //      Every unit the transfer does not assign returns to the source address.
         val plan = when (
-            val planned = io.digibyte.core.asset.send.AssetTransferPlanner.plan(
+            val chosen = sendSelection.choose(
+                assetId = assetId,
                 assetUtxos = assetUtxos,
                 dgbUtxos = dgbUtxos,
                 quantity = quantity,
                 feePerKb = feePerKb,
             )
         ) {
-            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Refused -> return notPlanned(TxResult.Error(planned.message))
-            is io.digibyte.core.asset.send.AssetTransferPlanner.Result.Ready -> planned.plan
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Planned -> {
+                android.util.Log.i("AssetManager", "asset send: ${chosen.plan.assetInputs.size} asset input(s) confirmed by the indexer; set aside ${sendSelection.setAsideOutpoints().size}")
+                chosen.plan
+            }
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unverified -> {
+                android.util.Log.w("AssetManager", "asset send: the indexer could not confirm the asset inputs")
+                return notPlanned(TxResult.Refused(SendRefusal.ASSET_HOLDING_UNVERIFIED))
+            }
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.Unconfirmed -> {
+                android.util.Log.w("AssetManager", "asset send: no confirmed coins cover it; set aside ${sendSelection.setAsideOutpoints().size}")
+                return notPlanned(TxResult.Refused(SendRefusal.ASSET_HOLDING_UNCONFIRMED))
+            }
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.SpansAddresses ->
+                return notPlanned(TxResult.Refused(SendRefusal.ASSET_SPANS_ADDRESSES, limit = chosen.largestSingleSource))
+            is io.digibyte.core.asset.send.AssetSendSelection.Outcome.NotPlanned ->
+                return notPlanned(TxResult.Error(chosen.message))
         }
         return AssetTransferPlanning.Planned(plan)
     }
@@ -2326,22 +2464,14 @@ class AssetManager(
                     outAmounts += out.sats
                     outScripts += plan.opReturnScript.toHex()
                 }
-                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_CHANGE_MARKER -> {
-                    // Use change index 1 to keep this distinct from the DGB change
-                    // address — small privacy win + makes the wallet's own asset
-                    // marker easier to identify in tx history.
-                    val assetChangeAddr = NativeBridge.getChangeAddress(1, format = 2)
-                        ?: return TxResult.Error("Could not derive asset-change address")
-                    outAddresses += assetChangeAddr
-                    outAmounts += out.sats
-                    outScripts += ""
-                }
+                // Both change outputs pay the script the asset inputs came from (raw script, empty
+                // address): the last output must be the source address so every unit the
+                // instructions do not assign stays there.
+                io.digibyte.core.asset.send.PlannedOutput.Role.ASSET_CHANGE_MARKER,
                 io.digibyte.core.asset.send.PlannedOutput.Role.DGB_CHANGE -> {
-                    val changeAddr = NativeBridge.getChangeAddress(0, format = 2)
-                        ?: return TxResult.Error("Could not derive change address")
-                    outAddresses += changeAddr
+                    outAddresses += ""
                     outAmounts += out.sats
-                    outScripts += ""
+                    outScripts += plan.sourceScript.toHex()
                 }
             }
         }

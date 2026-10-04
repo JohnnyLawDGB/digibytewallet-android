@@ -43,6 +43,18 @@ GUARD_CASES=(
     solicited_block_header_not_resident
     requested_tx_registered
     merkleblock_proven_tx
+    header_pow_close_tag
+    algo_height_close_tag
+    future_header_not_pow_tag
+)
+# The close tag of a header refused for its proof of work. These cases follow the build's level (above:
+# whatever the caller compiles at; the aggregate runner passes the shipped level). They are also run in a
+# dedicated level-2 arm below, which names its level itself. GUARD: the tag is new, so there is no
+# earlier shape for a red arm to build.
+TAG_CASES=(
+    header_pow_close_tag
+    algo_height_close_tag
+    future_header_not_pow_tag
 )
 # Cases in which nothing may reach the wallet: their green arm is also run leak-checked.
 LEAK_CASES=(
@@ -202,12 +214,37 @@ run_bits() {
         || { echo "  [$bits green] GATE FAILURE: the root-mismatch log line is missing"; FAIL=1; }
 }
 
+# Level-2 arm (the shipped level): the tag cases must assert the refusal, the header-pow tag and the
+# existing misbehaving penalty. The binary prints its level in each NOTE line; require "level 2".
+run_tag_level2() {
+    local bits="$1"
+    echo "======================================================================"
+    echo "=== ${bits}-bit build, DGB_HEADER_POW_CHECK=2: header-pow close tag (GUARD) ==="
+    echo "======================================================================"
+    if ! build "$BUILD_DIR/tag2_${bits}" "$bits" -DDGB_HEADER_POW_CHECK=2; then
+        echo "GATE FAILURE: ${bits}-bit level-2 arm did not compile."
+        FAIL=1; return
+    fi
+    for c in "${TAG_CASES[@]}"; do
+        run_case "$BUILD_DIR/tag2_${bits}" "$c" 0
+        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass" \
+           && echo "$OUT" | grep -q "^NOTE: level 2:"; then
+            echo "  [$bits level2 $c] passed: $(echo "$OUT" | grep -m1 '^NOTE:')"
+        else
+            echo "  [$bits level2 $c] GATE FAILURE (rc=$RC)"
+            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
+        fi
+    done
+}
+
 run_bits 64
 run_bits 32
+run_tag_level2 64
+run_tag_level2 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: block_delivery_gate_kat (${#RED_CASES[@]} red-then-green, ${#GUARD_CASES[@]} guards; 64-bit and 32-bit, ASan)"
+    echo "PASS: block_delivery_gate_kat (${#RED_CASES[@]} red-then-green, ${#GUARD_CASES[@]} guards, ${#TAG_CASES[@]} also at level 2; 64-bit and 32-bit, ASan)"
     exit 0
 else
     echo "FAIL: block_delivery_gate_kat"

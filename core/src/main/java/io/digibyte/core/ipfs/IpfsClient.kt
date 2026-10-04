@@ -2,6 +2,7 @@ package io.digibyte.core.ipfs
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import io.digibyte.core.tor.TorNotReadyException
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -9,8 +10,10 @@ import okhttp3.Request
  * Fetches IPFS content from public gateways and verifies the payload against the CID.
  *
  * Security guarantees:
- *  - Every response is hashed and compared to the CID digest before it is returned.
- *    A malicious or misconfigured gateway cannot inject fake metadata.
+ *  - Every response is hashed and compared to the CID digest before it is returned,
+ *    with one exception: a dag-pb CID answered by the DigiScope gateway, which is
+ *    accepted on that server's pinned identity instead (see [TRUSTED_GATEWAY_PREFIXES]).
+ *    Any other gateway cannot substitute content.
  *  - Responses larger than [MAX_RESPONSE_SIZE] are rejected to prevent OOM.
  *  - Gateways are tried in order; failures (network or hash mismatch) cause a
  *    transparent fall-through to the next gateway.
@@ -59,13 +62,15 @@ class IpfsClient(
         /** Maximum allowed response body size (5 MiB). */
         const val MAX_RESPONSE_SIZE = 5 * 1024 * 1024L // 5 MB as Long for contentLength check
 
-        /** URL prefixes whose TLS certificate we've pinned via [OkHttpClient]
-         *  elsewhere. For CIDv0 fetches we accept content from these gateways
-         *  without re-verifying the content hash — CIDv0 hashes the dag-pb/
-         *  UnixFS wrapper which unwrapping gateways (like ours) strip before
-         *  serving, so local rehash would always fail. Cert pinning is our
-         *  trust anchor in that narrow case. CIDv1 fetches stay strictly
-         *  content-verified across all gateways. */
+        /** Gateways whose answer for a dag-pb CID (CIDv0 `Qm…`, CIDv1 `bafybe…`) is accepted
+         *  without re-verifying the content hash: a dag-pb CID hashes the UnixFS wrapper, which
+         *  this unwrapping gateway strips before serving, so a local rehash would always fail.
+         *  For those CIDs the trust anchor is the server's identity: the DigiScope host is
+         *  certificate-pinned on the shared client this class is given (NetworkModule; the pins
+         *  are host-scoped, so only gateway #1 is pinned — the public gateways are not, and stay
+         *  strictly content-verified). That is a server-identity check, not a content check:
+         *  the pinned server itself is still trusted for these bytes. CIDv1 raw (`bafkre…`)
+         *  fetches are content-verified on every gateway. */
         val TRUSTED_GATEWAY_PREFIXES = listOf(
             "https://api.digiscope.me/"
         )
@@ -93,7 +98,14 @@ class IpfsClient(
         }
         android.util.Log.i(TAG, "fetchVerified: cid=$cid")
         for (gateway in gateways) {
-            val result = tryGateway(gateway, cid)
+            val result = try {
+                tryGateway(gateway, cid)
+            } catch (e: TorNotReadyException) {
+                // Tor is on and not connected: every gateway would wait and be refused the same
+                // way, so stop here rather than wait out each one in turn.
+                android.util.Log.i(TAG, "fetchVerified: waiting for Tor; not fetched")
+                return@withContext null
+            }
             if (result != null) {
                 android.util.Log.i(TAG, "fetchVerified: OK via $gateway (${result.size}b)")
                 return@withContext result
@@ -141,15 +153,14 @@ class IpfsClient(
                 // CIDv0 (Qm…) carries the dag-pb / UnixFS wrapper hash,
                 // not the raw content hash. Our gateway serves the unwrapped
                 // bytes, so content-hash verification would always fail here.
-                // For CIDv0 specifically, we defer trust to TLS cert pinning
-                // on the trusted gateway list — that's a well-scoped
-                // weakening documented at [TRUSTED_GATEWAY_PREFIXES].
-                // CIDv1 fetches stay strictly content-verified.
+                // For those CIDs, trust rests on the pinned server identity of
+                // the gateway in [TRUSTED_GATEWAY_PREFIXES] — a weakening
+                // documented there. CIDv1 raw fetches stay strictly content-verified.
                 val isTrustedGateway = TRUSTED_GATEWAY_PREFIXES.any { gateway.startsWith(it) }
                 // dag-pb / UnixFS CIDs hash the WRAPPER block, not the raw file content —
                 // CIDv0 (Qm…) AND CIDv1 dag-pb (bafybe…). Content-hash verification against
                 // the assembled bytes our trusted (cert-pinned) gateway serves can never
-                // pass, so defer to TLS trust for those. Only CIDv1 RAW codec (bafkre…)
+                // pass, so defer to the pinned server for those. Only CIDv1 RAW codec (bafkre…)
                 // hashes the raw content and stays strictly content-verified. Without the
                 // bafybe… case, dag-pb v1 images (e.g. CHANG token art) failed verify on the
                 // real 279KB file and "passed" on the 108-byte dag root from a ?format=raw
@@ -169,6 +180,8 @@ class IpfsClient(
                     null
                 }
             }
+        } catch (e: TorNotReadyException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.d(TAG, "tryGateway: $gateway threw for $cid — ${e.javaClass.simpleName}: ${e.message}")
             null

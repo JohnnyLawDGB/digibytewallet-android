@@ -22,9 +22,13 @@ import androidx.navigation.NavController
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import androidx.compose.ui.res.stringResource
+import io.digibyte.R
 import io.digibyte.core.asset.AssetManager
 import io.digibyte.core.reconcile.ChainReconciliationService
 import io.digibyte.core.reconcile.DgbNodeClient
+import io.digibyte.core.reconcile.ClassTotal
+import io.digibyte.core.reconcile.ScanClass
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteBlue
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +42,8 @@ import java.util.Locale
 interface ReconcileScreenEntryPoint {
     fun assetManager(): AssetManager
     fun walletManager(): io.digibyte.core.WalletManager
+    /** The reconcile client Hilt builds on the shared client (Tor routing and DigiScope pins). */
+    fun dgbNodeClient(): DgbNodeClient
 }
 
 /**
@@ -53,7 +59,6 @@ interface ReconcileScreenEntryPoint {
 @Composable
 fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val client = remember { DgbNodeClient(context) }
     // Pull the app-scoped AssetManager via a Hilt entry point so reconcile
     // can refresh asset UTXOs after tx import. Without this the Assets tab
     // stayed empty even after a successful scan.
@@ -63,6 +68,8 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             ReconcileScreenEntryPoint::class.java,
         )
     }
+    // The injected client: it carries the Tor routing and the DigiScope pins.
+    val client = remember { entryPoint.dgbNodeClient() }
     val assetManager = remember { entryPoint.assetManager() }
     val walletManager = remember { entryPoint.walletManager() }
     val service = remember {
@@ -397,7 +404,14 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             )
                             .padding(16.dp)
                     ) {
-                        Text(s.stage, color = Color.White, fontSize = 14.sp)
+                        Text(
+                            when (s.stage) {
+                                ChainReconciliationService.STAGE_COMPARING -> stringResource(R.string.reconcile_stage_comparing)
+                                else -> s.stage
+                            },
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
                         Spacer(Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = s.progress.coerceIn(0f, 1f),
@@ -409,11 +423,13 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                 }
 
                 is ChainReconciliationService.State.Done -> {
-                    val totalDgb = s.totalChainBalanceSat / 100_000_000.0
                     val fmt = NumberFormat.getNumberInstance(Locale.US).apply {
                         minimumFractionDigits = 2
                         maximumFractionDigits = 8
                     }
+                    fun dgb(sat: Long) = "${fmt.format(sat / 100_000_000.0)} DGB"
+                    fun line(t: ClassTotal) = "${t.count} · ${dgb(t.sat)}"
+                    val p = s.partition
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -431,14 +447,56 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         )
                         Spacer(Modifier.height(8.dp))
                         ResultRow("Addresses scanned", "${s.scannedAddresses}")
-                        ResultRow("UTXOs on-chain", "${s.utxosSeenOnChain}")
-                        ResultRow("Total chain balance", "${fmt.format(totalDgb)} DGB")
+                        ResultRow(stringResource(R.string.reconcile_outputs_found), "${s.utxosSeenOnChain}")
+                        if (p == null) {
+                            // No wallet to compare with: say so rather than show a raw sum as a balance.
+                            ResultRow(stringResource(R.string.reconcile_found_not_compared), dgb(s.totalChainBalanceSat))
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            ResultRow(stringResource(R.string.reconcile_spendable), dgb(p.spendableSat), emphasize = true)
+                            ResultRow(stringResource(R.string.reconcile_wallet_spendable), dgb(p.walletSpendableSat))
+                            Text(
+                                if (p.matchesWallet) stringResource(R.string.reconcile_matches_wallet)
+                                else stringResource(R.string.reconcile_does_not_match_wallet),
+                                color = if (p.matchesWallet) Color(0xFF6BE8A3) else Color(0xFFFFB74D),
+                                fontSize = 12.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            val held = p.total(ScanClass.HELD_ASSET)
+                            if (held.count > 0) ResultRow(stringResource(R.string.reconcile_held_asset), line(held))
+                            val unknown = p.total(ScanClass.HELD_UNKNOWN)
+                            if (unknown.count > 0) ResultRow(stringResource(R.string.reconcile_held_unknown), line(unknown))
+                            val proven = p.total(ScanClass.PROVEN_PLAIN)
+                            if (proven.count > 0) ResultRow(stringResource(R.string.reconcile_proven_plain), line(proven))
+                            val dd = p.total(ScanClass.DIGIDOLLAR)
+                            if (dd.count > 0) ResultRow(stringResource(R.string.reconcile_digidollar_outputs), "${dd.count}")
+                            val immature = p.total(ScanClass.IMMATURE)
+                            if (immature.count > 0) ResultRow(stringResource(R.string.reconcile_immature), line(immature))
+                            val pending = p.total(ScanClass.PENDING)
+                            if (pending.count > 0) ResultRow(stringResource(R.string.reconcile_pending), line(pending))
+                            val missing = p.total(ScanClass.NOT_IN_WALLET)
+                            ResultRow(stringResource(R.string.reconcile_not_in_wallet), line(missing), emphasize = missing.count > 0)
+                            if (p.walletOnly.count > 0) {
+                                ResultRow(stringResource(R.string.reconcile_wallet_only), line(p.walletOnly))
+                            }
+                            if (missing.count == 0) {
+                                Text(
+                                    stringResource(R.string.reconcile_no_missing_funds),
+                                    color = Color(0xFFB0BEC5),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
                         ResultRow(
                             "Transactions imported",
                             "${s.txsImported}",
                             emphasize = s.txsImported > 0
                         )
-                        ResultRow("Already in wallet", "${s.alreadyKnown}")
+                        ResultRow(stringResource(R.string.reconcile_txs_already_in_wallet), "${s.alreadyKnown}")
+                        if (s.txsNotAdded > 0) {
+                            ResultRow(stringResource(R.string.reconcile_txs_not_added), "${s.txsNotAdded}")
+                        }
                         if (s.historyTxsImported > 0) {
                             ResultRow(
                                 "Recovered from history",

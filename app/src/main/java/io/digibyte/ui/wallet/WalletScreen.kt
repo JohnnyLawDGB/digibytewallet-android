@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.digibyte.core.isTestnet
 import io.digibyte.core.model.SyncProgressInfo
 import io.digibyte.core.model.SyncStage
+import io.digibyte.core.sync.HistoryRebuildOnUpgrade
 import io.digibyte.core.tor.TorState
 import io.digibyte.service.SyncService.Companion.OwnNodeHealth
 import io.digibyte.ui.components.BalanceDisplay
@@ -71,6 +72,9 @@ fun WalletScreen(
     val reconcileFailed by viewModel.postUpgradeReconcileFailed.collectAsStateWithLifecycle()
     val torFailure by viewModel.torFailureActive.collectAsStateWithLifecycle()
     val ownNodeHealth by viewModel.ownNodeHealth.collectAsStateWithLifecycle()
+    // The one-time history rebuild's outcome in this process, and the notices dismissed in it.
+    val rebuildOutcome by HistoryRebuildOnUpgrade.lastOutcome.collectAsStateWithLifecycle()
+    val rebuildDismissed by HistoryRebuildNoticeDismissals.dismissed.collectAsStateWithLifecycle()
 
     // Runtime network selection (Task 6, dev-gated toggle in Settings > Advanced).
     // Read once — a restart is required to change it (see SettingsViewModel
@@ -156,6 +160,17 @@ fun WalletScreen(
                         tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                     )
                 }
+            }
+        }
+
+        // History rebuild notice: after an update rebuilt the transaction history from the chain
+        // (or deferred that until a pending send confirms), say so once; dismissed for the process.
+        HistoryRebuildNotice.of(rebuildOutcome, rebuildDismissed)?.let { notice ->
+            item {
+                HistoryRebuildNoticeBanner(
+                    notice = notice,
+                    onDismiss = { HistoryRebuildNoticeDismissals.dismiss(notice.kind) },
+                )
             }
         }
 
@@ -922,6 +937,70 @@ private fun AbandonedBandBanner(
                     containerColor = DigiByteAccent,
                 ),
             ) { Text(stringResource(R.string.wallet_scan_missing)) }
+        }
+    }
+}
+
+/**
+ * The history rebuild notice ([HistoryRebuildNotice]): an informational card with the notice's
+ * title, when it has one, its body, and a dismiss action.
+ */
+@androidx.compose.runtime.Composable
+private fun HistoryRebuildNoticeBanner(
+    notice: HistoryRebuildNotice,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = DigiByteAccent.copy(alpha = 0.15f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = DigiByteAccent,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(notice.title ?: notice.body),
+                    style = if (notice.title != null) {
+                        MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                    } else {
+                        MaterialTheme.typography.bodySmall
+                    },
+                    color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (notice.title != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(notice.body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+                )
+            }
+            androidx.compose.material3.TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(
+                    text = stringResource(R.string.common_dismiss),
+                    color = DigiByteAccent,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
         }
     }
 }

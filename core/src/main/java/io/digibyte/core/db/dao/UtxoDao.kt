@@ -90,7 +90,9 @@ interface UtxoDao {
     // HAVING SUM > 0: an asset you hold 0 of (e.g. fully sent, leaving only a
     // spent or 0-quantity row) must drop off the Assets tab, not linger as
     // "<name> — 0 held". Also guards against a 0/negative-quantity phantom row.
-    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, COUNT(*) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id HAVING SUM(asset_quantity) > 0")
+    // utxoCount counts only rows holding units: a send's plain change is stored as
+    // a 0-quantity asset row and holds none of the asset.
+    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, SUM(CASE WHEN asset_quantity > 0 THEN 1 ELSE 0 END) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id HAVING SUM(asset_quantity) > 0")
     fun getAssetBalances(): Flow<List<AssetBalance>>
 
     /** All asset rows of a given provenance (unspent + spent). Used by the

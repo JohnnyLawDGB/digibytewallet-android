@@ -282,8 +282,12 @@
     <string name="as_send_failed">Pengiriman gagal</string>
     <string name="as_balance">Saldo: %1$s</string>
     <string name="as_quantity">Jumlah</string>
-    <string name="as_tokens">token</string>
-    <string name="as_units">unit</string>
+    <plurals name="as_tokens">
+        <item quantity="other">token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">unit</item>
+    </plurals>
     <string name="as_fee_note">Transaksi aset memerlukan DGB untuk biaya jaringan</string>
     <string name="as_err_recipient">Masukkan alamat penerima</string>
     <string name="as_err_quantity">Masukkan jumlah yang valid</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">Penanda kembalian aset</string>
     <string name="as_network_fee_est">Biaya jaringan (perkiraan)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s tetap di dompet Anda</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s tetap di dompet Anda</item>
+    </plurals>
     <string name="ad_title">Detail Aset</string>
     <string name="ad_balance">Saldo</string>
     <string name="ad_info">Info Aset</string>
@@ -580,8 +586,41 @@
     <string name="as_rules_retry">Periksa lagi</string>
     <string name="as_refused_rule_bound">Diblokir: aset ini memiliki aturan transfer yang belum dapat dipenuhi dompet ini. Tidak ada yang dikirim.</string>
     <string name="as_refused_rules_unknown">Diblokir: aturan transfer aset ini tidak dapat diverifikasi. Tidak ada yang dikirim.</string>
+    <string name="as_refused_holding_unverified">Diblokir: isi koin aset ini tidak dapat diperiksa saat ini. Tidak ada yang dikirim. Coba lagi saat Anda online.</string>
+    <string name="as_refused_holding_unconfirmed">Diblokir: tidak ada koin aset ini yang dapat dipastikan hanya berisi aset ini. Tidak ada yang dikirim.</string>
+    <string name="as_refused_spans_addresses">Diblokir: jumlah ini tersimpan di lebih dari satu alamat. Satu pengiriman dapat memindahkan hingga %1$s. Tidak ada yang dikirim.</string>
     <string name="rf_move_refused_rule_bound">%1$s tetap di tempatnya: aset ini memiliki aturan transfer yang belum dapat dipenuhi dompet ini</string>
     <string name="rf_move_refused_unknown">%1$s tetap di tempatnya: aturan transfernya tidak dapat diverifikasi</string>
+    <string name="rf_move_refused_holding_unverified">%1$s tetap di tempatnya: isinya tidak dapat diperiksa saat ini. Coba lagi saat Anda online</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s tetap di tempatnya: tidak berisi tepat satu aset, jadi memindahkannya tidak aman</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Penghapusan dompet tidak selesai. Sebagian data dompet mungkin masih ada di perangkat ini. Mulai ulang aplikasi dan coba lagi.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Membangun ulang riwayat transaksi</string>
+    <string name="history_rebuild_notice_body">Pembaruan ini membangun ulang riwayat transaksi Anda dari blockchain satu kali. Koin dan frasa pemulihan Anda tidak diubah. Saldo akan terisi seiring pemindaian berjalan, dan Kirim tersedia setelah pemindaian selesai.</string>
+    <string name="history_rebuild_deferred">Riwayat transaksi Anda akan dibangun ulang setelah pengiriman Anda yang tertunda dikonfirmasi.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Output yang ditemukan di blockchain</string>
+    <string name="reconcile_found_not_compared">Ditemukan di blockchain, tidak dibandingkan</string>
+    <string name="reconcile_spendable">Dapat dibelanjakan</string>
+    <string name="reconcile_wallet_spendable">Saldo dompet yang dapat dibelanjakan</string>
+    <string name="reconcile_matches_wallet">Cocok dengan saldo dompet yang dapat dibelanjakan.</string>
+    <string name="reconcile_does_not_match_wallet">Tidak cocok dengan saldo dompet yang dapat dibelanjakan — lihat di bawah.</string>
+    <string name="reconcile_held_asset">Ditahan untuk DigiAsset</string>
+    <string name="reconcile_held_unknown">Ditahan: status aset tidak diketahui</string>
+    <string name="reconcile_proven_plain">DGB biasa, dapat dibelanjakan setelah mulai ulang</string>
+    <string name="reconcile_digidollar_outputs">Output DigiDollar</string>
+    <string name="reconcile_immature">Belum matang (belum dapat dibelanjakan)</string>
+    <string name="reconcile_pending">Menunggu di dompet</string>
+    <string name="reconcile_not_in_wallet">Tidak ada di dompet ini</string>
+    <string name="reconcile_wallet_only">Ada di dompet, tidak dilaporkan oleh node</string>
+    <string name="reconcile_no_missing_funds">Tidak ditemukan dana yang hilang.</string>
+    <string name="reconcile_txs_already_in_wallet">Transaksi yang sudah ada di dompet</string>
+    <string name="reconcile_txs_not_added">Transaksi yang tidak ditambahkan (bukan milik dompet ini)</string>
+    <string name="reconcile_stage_comparing">Membandingkan dengan dompet…</string>
+    <string name="market_tor_notice_title">Pasar tidak melewati Tor</string>
+    <string name="market_tor_notice_body">Pasar tidak melewati Tor; situs akan melihat alamat IP Anda.</string>
+    <string name="market_tor_notice_continue">Lanjutkan</string>
 </resources>

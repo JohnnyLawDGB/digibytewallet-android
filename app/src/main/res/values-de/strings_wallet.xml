@@ -290,8 +290,14 @@
     <string name="as_send_failed">Senden fehlgeschlagen</string>
     <string name="as_balance">Guthaben: %1$s</string>
     <string name="as_quantity">Menge</string>
-    <string name="as_tokens">Token</string>
-    <string name="as_units">Einheiten</string>
+    <plurals name="as_tokens">
+        <item quantity="one">Token</item>
+        <item quantity="other">Token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">Einheit</item>
+        <item quantity="other">Einheiten</item>
+    </plurals>
     <string name="as_fee_note">Asset-Transaktionen benötigen DGB für Netzwerkgebühren</string>
     <string name="as_err_recipient">Geben Sie eine Empfängeradresse ein</string>
     <string name="as_err_quantity">Geben Sie eine gültige Menge ein</string>
@@ -304,7 +310,10 @@
     <string name="as_change_marker">Asset-Wechselgeld-Marker</string>
     <string name="as_network_fee_est">Netzwerkgebühr (geschätzt)</string>
     <string name="as_total_dgb">DGB gesamt</string>
-    <string name="as_stays">%1$s %2$s bleiben in Ihrer Wallet</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s bleibt in Ihrer Wallet</item>
+        <item quantity="other">%1$s %2$s bleiben in Ihrer Wallet</item>
+    </plurals>
     <string name="ad_title">Asset-Details</string>
     <string name="ad_balance">Guthaben</string>
     <string name="ad_info">Asset-Info</string>
@@ -588,8 +597,41 @@
     <string name="as_rules_retry">Erneut prüfen</string>
     <string name="as_refused_rule_bound">Blockiert: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann. Es wurde nichts gesendet.</string>
     <string name="as_refused_rules_unknown">Blockiert: Die Übertragungsregeln dieses Assets konnten nicht überprüft werden. Es wurde nichts gesendet.</string>
+    <string name="as_refused_holding_unverified">Blockiert: Der Inhalt der Coins dieses Assets konnte gerade nicht geprüft werden. Es wurde nichts gesendet. Versuchen Sie es erneut, wenn Sie online sind.</string>
+    <string name="as_refused_holding_unconfirmed">Blockiert: Für keinen Coin dieses Assets ließ sich bestätigen, dass er nur dieses Asset enthält. Es wurde nichts gesendet.</string>
+    <string name="as_refused_spans_addresses">Blockiert: Dieser Betrag liegt auf mehr als einer Adresse. Ein Versand kann höchstens %1$s bewegen. Es wurde nichts gesendet.</string>
     <string name="rf_move_refused_rule_bound">%1$s bleibt, wo es ist: Dieses Asset hat Übertragungsregeln, die diese Wallet noch nicht erfüllen kann</string>
     <string name="rf_move_refused_unknown">%1$s bleibt, wo es ist: Seine Übertragungsregeln konnten nicht überprüft werden</string>
+    <string name="rf_move_refused_holding_unverified">%1$s bleibt, wo es ist: Sein Inhalt konnte gerade nicht geprüft werden. Versuchen Sie es erneut, wenn Sie online sind</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s bleibt, wo es ist: Es enthält nicht genau ein Asset, daher ist ein Verschieben nicht sicher</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Das Löschen der Wallet wurde nicht abgeschlossen. Einige Wallet-Daten befinden sich möglicherweise noch auf diesem Gerät. Starten Sie die App neu und versuchen Sie es erneut.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Transaktionsverlauf wird neu aufgebaut</string>
+    <string name="history_rebuild_notice_body">Dieses Update baut Ihren Transaktionsverlauf einmalig aus der Blockchain neu auf. Ihre Coins und Ihre Wiederherstellungsphrase bleiben unberührt. Das Guthaben füllt sich, während der Scan aufholt, und Senden ist verfügbar, sobald er abgeschlossen ist.</string>
+    <string name="history_rebuild_deferred">Ihr Transaktionsverlauf wird neu aufgebaut, sobald Ihre ausstehende Sendung bestätigt ist.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Auf der Blockchain gefundene Outputs</string>
+    <string name="reconcile_found_not_compared">Auf der Blockchain gefunden, nicht verglichen</string>
+    <string name="reconcile_spendable">Ausgabefähig</string>
+    <string name="reconcile_wallet_spendable">Ausgabefähiges Guthaben der Wallet</string>
+    <string name="reconcile_matches_wallet">Stimmt mit dem ausgabefähigen Guthaben der Wallet überein.</string>
+    <string name="reconcile_does_not_match_wallet">Stimmt nicht mit dem ausgabefähigen Guthaben der Wallet überein — siehe unten.</string>
+    <string name="reconcile_held_asset">Für ein DigiAsset zurückgehalten</string>
+    <string name="reconcile_held_unknown">Zurückgehalten: Asset-Status unbekannt</string>
+    <string name="reconcile_proven_plain">Einfache DGB, nach einem Neustart ausgabefähig</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar-Outputs</string>
+    <string name="reconcile_immature">Unreif (noch nicht ausgabefähig)</string>
+    <string name="reconcile_pending">In der Wallet ausstehend</string>
+    <string name="reconcile_not_in_wallet">Nicht in dieser Wallet</string>
+    <string name="reconcile_wallet_only">In der Wallet, vom Knoten nicht gemeldet</string>
+    <string name="reconcile_no_missing_funds">Keine fehlenden Guthaben gefunden.</string>
+    <string name="reconcile_txs_already_in_wallet">Transaktionen bereits in der Wallet</string>
+    <string name="reconcile_txs_not_added">Nicht hinzugefügte Transaktionen (nicht von dieser Wallet)</string>
+    <string name="reconcile_stage_comparing">Abgleich mit der Wallet…</string>
+    <string name="market_tor_notice_title">Markt wird nicht über Tor geleitet</string>
+    <string name="market_tor_notice_body">Markt wird nicht über Tor geleitet; die Website sieht Ihre IP-Adresse.</string>
+    <string name="market_tor_notice_continue">Weiter</string>
 </resources>

@@ -282,8 +282,12 @@
     <string name="as_send_failed">送信に失敗しました</string>
     <string name="as_balance">残高: %1$s</string>
     <string name="as_quantity">数量</string>
-    <string name="as_tokens">トークン</string>
-    <string name="as_units">単位</string>
+    <plurals name="as_tokens">
+        <item quantity="other">トークン</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">単位</item>
+    </plurals>
     <string name="as_fee_note">アセット取引にはネットワーク手数料として DGB が必要です</string>
     <string name="as_err_recipient">送金先アドレスを入力してください</string>
     <string name="as_err_quantity">有効な数量を入力してください</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">アセットのお釣りマーカー</string>
     <string name="as_network_fee_est">ネットワーク手数料（概算）</string>
     <string name="as_total_dgb">DGB 合計</string>
-    <string name="as_stays">%1$s %2$s はウォレットに残ります</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s はウォレットに残ります</item>
+    </plurals>
     <string name="ad_title">アセットの詳細</string>
     <string name="ad_balance">残高</string>
     <string name="ad_info">アセット情報</string>
@@ -580,8 +586,41 @@
     <string name="as_rules_retry">再確認</string>
     <string name="as_refused_rule_bound">ブロックされました：このアセットには、このウォレットがまだ満たせない転送ルールがあります。何も送信されていません。</string>
     <string name="as_refused_rules_unknown">ブロックされました：このアセットの転送ルールを確認できませんでした。何も送信されていません。</string>
+    <string name="as_refused_holding_unverified">ブロックされました：このアセットのコインの中身を今は確認できませんでした。何も送信されていません。オンラインになってから再試行してください。</string>
+    <string name="as_refused_holding_unconfirmed">ブロックされました：このアセットのどのコインも、このアセットだけを保持していると確認できませんでした。何も送信されていません。</string>
+    <string name="as_refused_spans_addresses">ブロックされました：この数量は複数のアドレスに分かれています。1 回の送信で移動できるのは最大 %1$s です。何も送信されていません。</string>
     <string name="rf_move_refused_rule_bound">%1$s はそのまま残りました：このアセットには、このウォレットがまだ満たせない転送ルールがあります</string>
     <string name="rf_move_refused_unknown">%1$s はそのまま残りました：転送ルールを確認できませんでした</string>
+    <string name="rf_move_refused_holding_unverified">%1$s はそのままです：中身を今は確認できませんでした。オンラインになってから再試行してください</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s はそのままです：ちょうど 1 種類のアセットだけを保持していないため、移動は安全ではありません</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">ウォレットの消去は完了しませんでした。一部のウォレットデータがこの端末に残っている可能性があります。アプリを再起動して、もう一度お試しください。</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">取引履歴を再構築しています</string>
+    <string name="history_rebuild_notice_body">このアップデートでは、取引履歴をブロックチェーンから一度だけ再構築します。コインとリカバリーフレーズには影響しません。残高はスキャンの進行に合わせて反映され、完了すると送金が利用できるようになります。</string>
+    <string name="history_rebuild_deferred">保留中の送金が承認された後に、取引履歴が再構築されます。</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">ブロックチェーン上で見つかったアウトプット</string>
+    <string name="reconcile_found_not_compared">ブロックチェーン上で見つかりました（比較なし）</string>
+    <string name="reconcile_spendable">使用可能</string>
+    <string name="reconcile_wallet_spendable">ウォレットの使用可能残高</string>
+    <string name="reconcile_matches_wallet">ウォレットの使用可能残高と一致しています。</string>
+    <string name="reconcile_does_not_match_wallet">ウォレットの使用可能残高と一致しません — 下記を参照してください。</string>
+    <string name="reconcile_held_asset">DigiAsset 用に確保</string>
+    <string name="reconcile_held_unknown">確保：アセットの状態は不明</string>
+    <string name="reconcile_proven_plain">通常の DGB（再起動後に使用可能）</string>
+    <string name="reconcile_digidollar_outputs">DigiDollar アウトプット</string>
+    <string name="reconcile_immature">未成熟（まだ使用できません）</string>
+    <string name="reconcile_pending">ウォレット内で保留中</string>
+    <string name="reconcile_not_in_wallet">このウォレットにはありません</string>
+    <string name="reconcile_wallet_only">ウォレットにありますが、ノードから報告されていません</string>
+    <string name="reconcile_no_missing_funds">不足している資金は見つかりませんでした。</string>
+    <string name="reconcile_txs_already_in_wallet">すでにウォレットにある取引</string>
+    <string name="reconcile_txs_not_added">追加されなかった取引（このウォレットのものではありません）</string>
+    <string name="reconcile_stage_comparing">ウォレットと比較しています…</string>
+    <string name="market_tor_notice_title">マーケットは Tor を経由しません</string>
+    <string name="market_tor_notice_body">マーケットは Tor を経由しません。サイトにはあなたの IP アドレスが見えます。</string>
+    <string name="market_tor_notice_continue">続行</string>
 </resources>

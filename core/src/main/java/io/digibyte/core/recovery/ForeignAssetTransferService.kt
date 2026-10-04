@@ -10,7 +10,14 @@ import kotlinx.coroutines.withContext
 
 /** Why an asset was deliberately left on the old seed. Typed so the screen can say it in the
  *  user's language; [ForeignAssetTransferService.Move.failureReason] stays for genuine failures. */
-enum class MoveRefusal { RULE_BOUND, RULES_UNKNOWN }
+enum class MoveRefusal {
+    RULE_BOUND,
+    RULES_UNKNOWN,
+    /** What the output holds could not be checked right now. */
+    HOLDING_UNVERIFIED,
+    /** The output holds something other than exactly one asset, so moving it is not safe. */
+    HOLDING_MISMATCH,
+}
 
 /**
  * Moves the DigiAssets a sweep deliberately left behind into the user's current wallet.
@@ -66,6 +73,14 @@ class ForeignAssetTransferService(
     private val log: (level: Char, message: String) -> Unit = { level, message ->
         if (level == 'w') android.util.Log.w(TAG, message) else android.util.Log.i(TAG, message)
     },
+    /**
+     * What the DigiAsset indexer says an output holds. Every input of a move is checked before it
+     * is built: each asset input holds exactly one asset, and that asset passes the rule gate; each
+     * fee input holds none. Null means no source, and then no asset is moved.
+     */
+    private val stackOf: (suspend (txid: String, vout: Int) -> io.digibyte.core.asset.send.StackLookup)? = null,
+    /** The rule gate's verdict for an asset id: applied to the asset the indexer says is there. */
+    private val ruleStateOf: (suspend (assetId: String) -> io.digibyte.core.asset.rules.TransferRuleState)? = null,
     private val recordOutgoing: (
         txid: String, sentSats: Long, feeSats: Long, toAddress: String, isSelfTransfer: Boolean,
     ) -> Unit = { txid, sent, fee, to, self ->
@@ -262,6 +277,13 @@ class ForeignAssetTransferService(
                     continue
                 }
 
+                val holding = holdingRefusal(utxo.txid, utxo.vout)
+                if (holding != null) {
+                    log('w', "${utxo.txid}:${utxo.vout}: not moved — holding check $holding")
+                    moves += Move("${utxo.txid}:${utxo.vout}", 0L, null, null, refusal = holding)
+                    continue
+                }
+
                 val provenAsset = checked.proven(utxo)
                 if (provenAsset == null) {
                     log('w', "${utxo.txid}:${utxo.vout}: not moved — its parent transaction was " +
@@ -295,7 +317,27 @@ class ForeignAssetTransferService(
             // Every plain-DGB outpoint, not a reserved subset. The sweep has not run yet, so
             // all of it is still available — and what these plans spend is what the sweep will
             // exclude. Nothing is estimated.
-            val feePool = provenPlain.mapNotNull { toSpend(it, byAddress) }
+            // A fee coin must hold no asset: its units would join the remainder and reach the
+            // destination from another address. Coins the indexer reports otherwise are left out;
+            // if it cannot answer, nothing on this profile moves.
+            val feeCandidates = provenPlain.mapNotNull { toSpend(it, byAddress) }
+            val feePool = mutableListOf<ForeignAssetTransferPlan.Spend>()
+            var feeUnverified = false
+            for (coin in feeCandidates) {
+                when (val l = stackOf?.invoke(coin.txid, coin.vout) ?: io.digibyte.core.asset.send.StackLookup.Unavailable) {
+                    is io.digibyte.core.asset.send.StackLookup.Found -> if (l.entries.isEmpty()) feePool += coin
+                    is io.digibyte.core.asset.send.StackLookup.NotUnspent -> Unit
+                    is io.digibyte.core.asset.send.StackLookup.Unavailable -> { feeUnverified = true; break }
+                }
+            }
+            if (feeUnverified) {
+                for (item in assets) {
+                    val op = "${item.spend.txid}:${item.spend.vout}"
+                    log('w', "$op: not moved — fee coins could not be checked")
+                    moves += Move(op, 0L, null, null, refusal = MoveRefusal.HOLDING_UNVERIFIED)
+                }
+                continue
+            }
 
             log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s) / " +
                     "${feePool.sumOf { it.amountSat }} sats; units=" +
@@ -363,6 +405,25 @@ class ForeignAssetTransferService(
         }
 
         Result(moves)
+    }
+
+    /** Null when the output may be moved; otherwise why it stays on the old seed. The unit count
+     *  is not compared: a move sends every unit of a one-asset output to the destination whether
+     *  its instruction under- or over-states them (the remainder goes to the last output, which
+     *  pays the destination). */
+    private suspend fun holdingRefusal(txid: String, vout: Int): MoveRefusal? {
+        val lookup = stackOf?.invoke(txid, vout) ?: return MoveRefusal.HOLDING_UNVERIFIED
+        val entry = when (lookup) {
+            is io.digibyte.core.asset.send.StackLookup.Unavailable -> return MoveRefusal.HOLDING_UNVERIFIED
+            is io.digibyte.core.asset.send.StackLookup.NotUnspent -> return MoveRefusal.HOLDING_MISMATCH
+            is io.digibyte.core.asset.send.StackLookup.Found ->
+                lookup.entries.singleOrNull() ?: return MoveRefusal.HOLDING_MISMATCH
+        }
+        return when (ruleStateOf?.invoke(entry.assetId) ?: io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN) {
+            io.digibyte.core.asset.rules.TransferRuleState.NONE -> null
+            io.digibyte.core.asset.rules.TransferRuleState.RULE_BOUND -> MoveRefusal.RULE_BOUND
+            io.digibyte.core.asset.rules.TransferRuleState.UNKNOWN -> MoveRefusal.RULES_UNKNOWN
+        }
     }
 
     private fun ForeignAssetTransferPlan.Plan.outpoints(): List<String> =

@@ -284,8 +284,16 @@
     <string name="as_send_failed">Error al enviar</string>
     <string name="as_balance">Saldo: %1$s</string>
     <string name="as_quantity">Cantidad</string>
-    <string name="as_tokens">tokens</string>
-    <string name="as_units">unidades</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="many">tokens</item>
+        <item quantity="other">tokens</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">unidad</item>
+        <item quantity="many">unidades</item>
+        <item quantity="other">unidades</item>
+    </plurals>
     <string name="as_fee_note">Las transacciones de activos requieren DGB para las comisiones de red</string>
     <string name="as_err_recipient">Introduce una dirección de destinatario</string>
     <string name="as_err_quantity">Introduce una cantidad válida</string>
@@ -298,7 +306,11 @@
     <string name="as_change_marker">Marcador de cambio del activo</string>
     <string name="as_network_fee_est">Comisión de red (est.)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s se quedan en tu billetera</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s se queda en tu billetera</item>
+        <item quantity="many">%1$s %2$s se quedan en tu billetera</item>
+        <item quantity="other">%1$s %2$s se quedan en tu billetera</item>
+    </plurals>
     <string name="ad_title">Detalles del activo</string>
     <string name="ad_balance">Saldo</string>
     <string name="ad_info">Información del activo</string>
@@ -582,8 +594,41 @@
     <string name="as_rules_retry">Comprobar de nuevo</string>
     <string name="as_refused_rule_bound">Bloqueado: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir. No se envió nada.</string>
     <string name="as_refused_rules_unknown">Bloqueado: no se pudieron verificar las reglas de transferencia de este activo. No se envió nada.</string>
+    <string name="as_refused_holding_unverified">Bloqueado: no se pudo comprobar ahora qué contienen las monedas de este activo. No se envió nada. Inténtalo de nuevo cuando estés en línea.</string>
+    <string name="as_refused_holding_unconfirmed">Bloqueado: no se pudo confirmar que ninguna moneda de este activo contenga solo este activo. No se envió nada.</string>
+    <string name="as_refused_spans_addresses">Bloqueado: esta cantidad está en más de una dirección. Un envío puede mover hasta %1$s. No se envió nada.</string>
     <string name="rf_move_refused_rule_bound">%1$s se quedó donde estaba: este activo tiene reglas de transferencia que esta billetera aún no puede cumplir</string>
     <string name="rf_move_refused_unknown">%1$s se quedó donde estaba: no se pudieron verificar sus reglas de transferencia</string>
+    <string name="rf_move_refused_holding_unverified">%1$s se quedó donde está: no se pudo comprobar ahora qué contiene. Inténtalo de nuevo cuando estés en línea</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s se quedó donde está: no contiene exactamente un activo, así que moverlo no es seguro</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">El borrado de la billetera no se completó. Es posible que algunos datos de la billetera sigan en este dispositivo. Reinicia la app e inténtalo de nuevo.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Reconstruyendo el historial de transacciones</string>
+    <string name="history_rebuild_notice_body">Esta actualización reconstruye tu historial de transacciones desde la blockchain una sola vez. Tus monedas y tu frase de recuperación no se modifican. El saldo se irá completando a medida que avance el escaneo, y Enviar estará disponible cuando termine.</string>
+    <string name="history_rebuild_deferred">Tu historial de transacciones se reconstruirá cuando se confirme tu envío pendiente.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Salidas encontradas en la blockchain</string>
+    <string name="reconcile_found_not_compared">Encontrado en la blockchain, sin comparar</string>
+    <string name="reconcile_spendable">Gastable</string>
+    <string name="reconcile_wallet_spendable">Saldo gastable de la billetera</string>
+    <string name="reconcile_matches_wallet">Coincide con el saldo gastable de la billetera.</string>
+    <string name="reconcile_does_not_match_wallet">No coincide con el saldo gastable de la billetera — ver abajo.</string>
+    <string name="reconcile_held_asset">Retenido para un DigiAsset</string>
+    <string name="reconcile_held_unknown">Retenido: estado del activo desconocido</string>
+    <string name="reconcile_proven_plain">DGB normal, gastable tras reiniciar</string>
+    <string name="reconcile_digidollar_outputs">Salidas de DigiDollar</string>
+    <string name="reconcile_immature">Inmaduro (aún no gastable)</string>
+    <string name="reconcile_pending">Pendiente en la billetera</string>
+    <string name="reconcile_not_in_wallet">No está en esta billetera</string>
+    <string name="reconcile_wallet_only">En la billetera, no informado por el nodo</string>
+    <string name="reconcile_no_missing_funds">No se encontraron fondos faltantes.</string>
+    <string name="reconcile_txs_already_in_wallet">Transacciones ya en la billetera</string>
+    <string name="reconcile_txs_not_added">Transacciones no añadidas (no son de esta billetera)</string>
+    <string name="reconcile_stage_comparing">Comparando con la billetera…</string>
+    <string name="market_tor_notice_title">El Mercado no pasa por Tor</string>
+    <string name="market_tor_notice_body">El Mercado no pasa por Tor; el sitio verá tu dirección IP.</string>
+    <string name="market_tor_notice_continue">Continuar</string>
 </resources>

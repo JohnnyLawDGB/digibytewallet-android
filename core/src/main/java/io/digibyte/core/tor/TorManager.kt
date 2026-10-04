@@ -39,7 +39,8 @@ sealed class TorState {
  *
  * Tor runs in-process but on its own threads — if it fails, the wallet continues
  * functioning normally. SyncService calls [start] before sync when
- * [isEnabled] is true, and falls back to direct connections on failure.
+ * [isEnabled] is true, and on failure falls back to direct connections only
+ * after raising the "Tor unavailable" banner ([announceClearnetFallback]).
  */
 class TorManager(private val context: Context) {
     // Internal scope for fire-and-forget starts from the UI. Survives
@@ -67,16 +68,52 @@ class TorManager(private val context: Context) {
     private fun maybeEmitConnected() {
         val port = _socksPort
         if (port != null && _bootstrapProgress.value >= 100 && _state.value !is TorState.Connected) {
+            // Connected again: traffic goes through Tor, so an announced fallback is over.
+            _clearnetFallbackAnnounced.value = false
             _state.value = TorState.Connected(port)
             Log.i(TAG, "Tor connected — SOCKS5 on 127.0.0.1:$port (bootstrap 100%)")
         }
     }
 
+    /**
+     * True from the moment the wallet has told the user that traffic is going direct (the "Tor
+     * unavailable" banner, raised by the sync service when Tor fails to start or its proxy dies)
+     * until Tor is connected again. While the user's Tor setting is on, app traffic outside the
+     * peer-to-peer core goes direct ONLY while this is true; before it, such traffic waits for
+     * Tor and then fails ([TorRoute]). Process-lifetime, like the banner it follows; turning the
+     * Tor setting off also ends it.
+     */
+    private val _clearnetFallbackAnnounced = MutableStateFlow(false)
+    val clearnetFallbackAnnounced: StateFlow<Boolean> = _clearnetFallbackAnnounced.asStateFlow()
+
+    /**
+     * Record that the clearnet fallback has been announced to the user. Call it only AFTER the
+     * banner flag is raised: from this call on, app traffic may go direct. Cleared when Tor
+     * reaches Connected again.
+     */
+    fun announceClearnetFallback() {
+        if (!_clearnetFallbackAnnounced.value) Log.w(TAG, "clearnet fallback announced — app traffic may go direct until Tor reconnects")
+        _clearnetFallbackAnnounced.value = true
+    }
+
+    /** Where an app-made connection may go right now; see [TorRoute]. */
+    fun route(): TorRoute = TorRoute.of(isEnabled, getSocksPort(), _clearnetFallbackAnnounced.value)
+
     private val prefs = context.getSharedPreferences("dgb_tor", Context.MODE_PRIVATE)
+
+    private val _enabled = MutableStateFlow(prefs.getBoolean("tor_enabled", false))
+    /** The user's Tor setting, as [isEnabled] last wrote it. */
+    val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
     var isEnabled: Boolean
         get() = prefs.getBoolean("tor_enabled", false)
-        set(value) { prefs.edit().putBoolean("tor_enabled", value).apply() }
+        set(value) {
+            prefs.edit().putBoolean("tor_enabled", value).apply()
+            // Off: nothing waits for Tor, so an announced fallback is over. Turning Tor back on
+            // starts again from "wait for Tor" until it connects or a new banner is raised.
+            if (!value) _clearnetFallbackAnnounced.value = false
+            _enabled.value = value
+        }
 
     var upgradePromptShown: Boolean
         get() = prefs.getBoolean("upgrade_prompt_shown", false)
@@ -166,9 +203,15 @@ class TorManager(private val context: Context) {
             // SafeSocks=1 Tor instantly rejected every peer dial — the handshake
             // failed (~3ms, REP!=0), the core mapped it to ECONNREFUSED, and the
             // wallet degraded to direct every session (device-confirmed Note 8).
-            // SafeSocks guards against local-DNS leaks, which don't apply to
-            // IP-based P2P — peers are public node addresses, not hostnames, and
-            // the seeder's HTTP already routes through this same proxy.
+            // SafeSocks only REFUSES an IP-address request after the fact; it does not
+            // stop a local name lookup from happening. With it off, keeping lookups off
+            // the device's resolver while Tor is on is the app's job, and it is done in
+            // each place a lookup could happen: the shared OkHttp client hands host
+            // names to Tor unresolved and resolves nothing locally while Tor is on
+            // (NetworkModule), the C core skips its seed-name lookup while a SOCKS
+            // proxy is set (BRPeerManager.c _BRPeerManagerFindPeers), and an own-node
+            // host name is refused rather than resolved while Tor is on (OwnNodeAddress).
+            // P2P peers themselves are dialled by IP address.
             config {
                 TorOption.__SocksPort.configure { auto() }
                 TorOption.SafeSocks.configure(false)

@@ -272,8 +272,16 @@
     <string name="as_send_failed">Échec de l\'envoi</string>
     <string name="as_balance">Solde : %1$s</string>
     <string name="as_quantity">Quantité</string>
-    <string name="as_tokens">jetons</string>
-    <string name="as_units">unités</string>
+    <plurals name="as_tokens">
+        <item quantity="one">jeton</item>
+        <item quantity="many">jetons</item>
+        <item quantity="other">jetons</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">unité</item>
+        <item quantity="many">unités</item>
+        <item quantity="other">unités</item>
+    </plurals>
     <string name="as_fee_note">Les transactions d\'actifs nécessitent des DGB pour les frais de réseau</string>
     <string name="as_err_recipient">Saisissez une adresse de destinataire</string>
     <string name="as_err_quantity">Saisissez une quantité valide</string>
@@ -286,7 +294,11 @@
     <string name="as_change_marker">Marqueur de monnaie d\'actif</string>
     <string name="as_network_fee_est">Frais de réseau (est.)</string>
     <string name="as_total_dgb">Total DGB</string>
-    <string name="as_stays">%1$s %2$s restent dans votre portefeuille</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s reste dans votre portefeuille</item>
+        <item quantity="many">%1$s %2$s restent dans votre portefeuille</item>
+        <item quantity="other">%1$s %2$s restent dans votre portefeuille</item>
+    </plurals>
     <string name="ad_title">Détails de l\'actif</string>
     <string name="ad_balance">Solde</string>
     <string name="ad_info">Infos sur l\'actif</string>
@@ -560,8 +572,41 @@
     <string name="as_rules_retry">Vérifier à nouveau</string>
     <string name="as_refused_rule_bound">Bloqué : cet actif a des règles de transfert que ce portefeuille ne peut pas encore respecter. Rien n\'a été envoyé.</string>
     <string name="as_refused_rules_unknown">Bloqué : les règles de transfert de cet actif n\'ont pas pu être vérifiées. Rien n\'a été envoyé.</string>
+    <string name="as_refused_holding_unverified">Bloqué : le contenu des pièces de cet actif n\'a pas pu être vérifié pour le moment. Rien n\'a été envoyé. Réessayez une fois en ligne.</string>
+    <string name="as_refused_holding_unconfirmed">Bloqué : aucune pièce de cet actif n\'a pu être confirmée comme ne contenant que cet actif. Rien n\'a été envoyé.</string>
+    <string name="as_refused_spans_addresses">Bloqué : ce montant est réparti sur plusieurs adresses. Un envoi peut déplacer au maximum %1$s. Rien n\'a été envoyé.</string>
     <string name="rf_move_refused_rule_bound">%1$s est resté en place : cet actif a des règles de transfert que ce portefeuille ne peut pas encore respecter</string>
     <string name="rf_move_refused_unknown">%1$s est resté en place : ses règles de transfert n\'ont pas pu être vérifiées</string>
+    <string name="rf_move_refused_holding_unverified">%1$s est resté en place : son contenu n\'a pas pu être vérifié pour le moment. Réessayez une fois en ligne</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s est resté en place : il ne contient pas exactement un actif, le déplacer n\'est donc pas sûr</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">L\'effacement du portefeuille n\'a pas abouti. Certaines données du portefeuille sont peut-être encore sur cet appareil. Redémarrez l\'application et réessayez.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Reconstruction de l\'historique des transactions</string>
+    <string name="history_rebuild_notice_body">Cette mise à jour reconstruit une fois votre historique des transactions à partir de la blockchain. Vos pièces et votre phrase de récupération ne sont pas modifiées. Le solde se complète à mesure que l\'analyse progresse, et Envoyer est disponible une fois qu\'elle est terminée.</string>
+    <string name="history_rebuild_deferred">Votre historique des transactions sera reconstruit une fois votre envoi en attente confirmé.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Sorties trouvées sur la blockchain</string>
+    <string name="reconcile_found_not_compared">Trouvé sur la blockchain, non comparé</string>
+    <string name="reconcile_spendable">Dépensable</string>
+    <string name="reconcile_wallet_spendable">Solde dépensable du portefeuille</string>
+    <string name="reconcile_matches_wallet">Correspond au solde dépensable du portefeuille.</string>
+    <string name="reconcile_does_not_match_wallet">Ne correspond pas au solde dépensable du portefeuille — voir ci-dessous.</string>
+    <string name="reconcile_held_asset">Retenu pour un DigiAsset</string>
+    <string name="reconcile_held_unknown">Retenu : état de l\'actif inconnu</string>
+    <string name="reconcile_proven_plain">DGB ordinaire, dépensable après redémarrage</string>
+    <string name="reconcile_digidollar_outputs">Sorties DigiDollar</string>
+    <string name="reconcile_immature">Immature (pas encore dépensable)</string>
+    <string name="reconcile_pending">En attente dans le portefeuille</string>
+    <string name="reconcile_not_in_wallet">Pas dans ce portefeuille</string>
+    <string name="reconcile_wallet_only">Dans le portefeuille, non signalé par le nœud</string>
+    <string name="reconcile_no_missing_funds">Aucun fonds manquant trouvé.</string>
+    <string name="reconcile_txs_already_in_wallet">Transactions déjà dans le portefeuille</string>
+    <string name="reconcile_txs_not_added">Transactions non ajoutées (pas de ce portefeuille)</string>
+    <string name="reconcile_stage_comparing">Comparaison avec le portefeuille…</string>
+    <string name="market_tor_notice_title">Le Marché ne passe pas par Tor</string>
+    <string name="market_tor_notice_body">Le Marché ne passe pas par Tor ; le site verra votre adresse IP.</string>
+    <string name="market_tor_notice_continue">Continuer</string>
 </resources>

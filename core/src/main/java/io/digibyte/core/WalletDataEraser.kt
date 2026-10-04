@@ -52,6 +52,7 @@ interface WalletDataEraser {
      * Clear the per-wallet state no other step owns: the filter-peer and Dandelion peer caches
      * (`dgb_filter_peers<net>`, `dgb_dandelion_peers<net>`), the asset history bookkeeping
      * (`dgb_asset_backfill`, `dgb_asset_heal`), the reconcile bookkeeping (`dgb_reconcile<net>`)
+     * with the one-time history rebuild state (`dgb_history_rebuild<net>`),
      * and the compact-filter scan floor (`cf_birth_height` in `dgb_settings`). The scan floor
      * belongs to the wallet that set it: the next wallet starts from its own birthday. Nothing
      * else in `dgb_settings` is wallet state — the language and the network selection stay.
@@ -253,7 +254,9 @@ class AndroidWalletDataEraser internal constructor(
     override fun eraseLeftoverState(): Boolean {
         val filterPeers = clearPrefsOnEveryNetwork("dgb_filter_peers")
         val dandelionPeers = clearPrefsOnEveryNetwork("dgb_dandelion_peers")
-        val reconcile = clearPrefsOnEveryNetwork("dgb_reconcile")
+        // Upgrade bookkeeping: the reconcile's and the one-time history rebuild's. Both are
+        // always attempted (`and` does not short-circuit).
+        val reconcile = clearPrefsOnEveryNetwork("dgb_reconcile") and clearPrefsOnEveryNetwork("dgb_history_rebuild")
         val assetBackfill = clearPrefs("dgb_asset_backfill")
         val assetHeal = clearPrefs("dgb_asset_heal")
         // ONE key, not the file: dgb_settings also holds the language and the network selection.

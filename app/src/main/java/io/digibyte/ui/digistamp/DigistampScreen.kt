@@ -53,6 +53,67 @@ import io.digibyte.core.digistamp.DigistampUris
 fun DigistampScreen(
     onWalletAction: (Uri) -> Unit = {},
     startUrl: String = DigistampUris.BASE_URL,
+    onCancel: () -> Unit = {},
+) {
+    // The WebView's network stack does not use the app's proxy, so with the user's Tor setting
+    // on the site would see the device's own address. Say so BEFORE anything loads, and load only
+    // if the user continues; the answer is remembered for the session (MarketTorNotice).
+    val context = LocalContext.current
+    val torEnabled = remember {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            DigistampEntryPoint::class.java,
+        ).torManager().isEnabled
+    }
+    var asking by remember { mutableStateOf(MarketTorNotice.mustAsk(torEnabled)) }
+    if (asking) {
+        MarketTorNoticeDialog(
+            onContinue = {
+                MarketTorNotice.accept()
+                asking = false
+            },
+            onCancel = {
+                // A destination asked for by another screen is not carried into a later visit.
+                DigistampWebViewHost.pendingUrl = null
+                onCancel()
+            },
+        )
+    } else {
+        DigistampWebContent(onWalletAction = onWalletAction, startUrl = startUrl)
+    }
+}
+
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface DigistampEntryPoint {
+    fun torManager(): io.digibyte.core.tor.TorManager
+}
+
+/** The notice shown before the Market loads while the user's Tor setting is on. */
+@Composable
+private fun MarketTorNoticeDialog(onContinue: () -> Unit, onCancel: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onCancel,
+        title = { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.market_tor_notice_title)) },
+        text = { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.market_tor_notice_body)) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onContinue) {
+                androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.market_tor_notice_continue))
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onCancel) {
+                androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(io.digibyte.R.string.common_cancel))
+            }
+        },
+    )
+}
+
+/** The Market itself: the retained WebView. Reached only past the Tor notice ([DigistampScreen]). */
+@Composable
+private fun DigistampWebContent(
+    onWalletAction: (Uri) -> Unit,
+    startUrl: String,
 ) {
     val context = LocalContext.current
     // A revisit re-attaches an already-loaded view, so onPageFinished will not fire again and a

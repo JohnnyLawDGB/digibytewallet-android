@@ -282,8 +282,14 @@
     <string name="as_send_failed">Nabigo ang pagpapadala</string>
     <string name="as_balance">Balanse: %1$s</string>
     <string name="as_quantity">Dami</string>
-    <string name="as_tokens">token</string>
-    <string name="as_units">yunit</string>
+    <plurals name="as_tokens">
+        <item quantity="one">token</item>
+        <item quantity="other">token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="one">yunit</item>
+        <item quantity="other">yunit</item>
+    </plurals>
     <string name="as_fee_note">Kailangan ng DGB ang mga transaksyon ng asset para sa bayad sa network</string>
     <string name="as_err_recipient">Maglagay ng address ng tatanggap</string>
     <string name="as_err_quantity">Maglagay ng wastong dami</string>
@@ -296,7 +302,10 @@
     <string name="as_change_marker">Marker ng sukli ng asset</string>
     <string name="as_network_fee_est">Bayad sa network (tantiya)</string>
     <string name="as_total_dgb">Kabuuang DGB</string>
-    <string name="as_stays">%1$s %2$s ang mananatili sa wallet mo</string>
+    <plurals name="as_stays">
+        <item quantity="one">%1$s %2$s ang mananatili sa wallet mo</item>
+        <item quantity="other">%1$s %2$s ang mananatili sa wallet mo</item>
+    </plurals>
     <string name="ad_title">Mga Detalye ng Asset</string>
     <string name="ad_balance">Balanse</string>
     <string name="ad_info">Impormasyon ng Asset</string>
@@ -580,8 +589,41 @@
     <string name="as_rules_retry">Suriin muli</string>
     <string name="as_refused_rule_bound">Na-block: may mga panuntunan sa paglilipat ang asset na ito na hindi pa kayang tuparin ng wallet na ito. Walang naipadala.</string>
     <string name="as_refused_rules_unknown">Na-block: hindi ma-verify ang mga panuntunan sa paglilipat ng asset na ito. Walang naipadala.</string>
+    <string name="as_refused_holding_unverified">Na-block: hindi ma-check ngayon kung ano ang laman ng mga coin ng asset na ito. Walang naipadala. Subukan ulit kapag online ka.</string>
+    <string name="as_refused_holding_unconfirmed">Na-block: walang coin ng asset na ito ang makumpirmang ito lang na asset ang laman. Walang naipadala.</string>
+    <string name="as_refused_spans_addresses">Na-block: nasa higit sa isang address ang halagang ito. Hanggang %1$s lang ang maililipat ng isang padala. Walang naipadala.</string>
     <string name="rf_move_refused_rule_bound">%1$s ay nanatili sa kinaroroonan nito: may mga panuntunan sa paglilipat ang asset na ito na hindi pa kayang tuparin ng wallet na ito</string>
     <string name="rf_move_refused_unknown">%1$s ay nanatili sa kinaroroonan nito: hindi ma-verify ang mga panuntunan sa paglilipat nito</string>
+    <string name="rf_move_refused_holding_unverified">Nanatili ang %1$s kung nasaan ito: hindi ma-check ngayon kung ano ang laman nito. Subukan ulit kapag online ka</string>
+    <string name="rf_move_refused_holding_mismatch">Nanatili ang %1$s kung nasaan ito: hindi eksaktong isang asset ang laman nito, kaya hindi ligtas na ilipat ito</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Hindi nakumpleto ang pagbura ng wallet. Maaaring may data ng wallet na nananatili sa device na ito. I-restart ang app at subukang muli.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Binubuo muli ang kasaysayan ng transaksyon</string>
+    <string name="history_rebuild_notice_body">Minsang binubuo muli ng update na ito ang kasaysayan ng transaksyon mo mula sa blockchain. Hindi ginagalaw ang mga coin at recovery phrase mo. Mapupuno ang balanse habang humahabol ang scan, at magagamit ang Magpadala kapag natapos ito.</string>
+    <string name="history_rebuild_deferred">Bubuuin muli ang kasaysayan ng transaksyon mo kapag nakumpirma na ang nakabinbing padala mo.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Mga output na nakita sa blockchain</string>
+    <string name="reconcile_found_not_compared">Nakita sa blockchain, hindi naikumpara</string>
+    <string name="reconcile_spendable">Magagastos</string>
+    <string name="reconcile_wallet_spendable">Magagastos na balanse ng wallet</string>
+    <string name="reconcile_matches_wallet">Tugma sa magagastos na balanse ng wallet.</string>
+    <string name="reconcile_does_not_match_wallet">Hindi tugma sa magagastos na balanse ng wallet — tingnan sa ibaba.</string>
+    <string name="reconcile_held_asset">Nakalaan para sa isang DigiAsset</string>
+    <string name="reconcile_held_unknown">Nakalaan: hindi alam ang estado ng asset</string>
+    <string name="reconcile_proven_plain">Karaniwang DGB, magagastos pagkatapos mag-restart</string>
+    <string name="reconcile_digidollar_outputs">Mga output ng DigiDollar</string>
+    <string name="reconcile_immature">Hindi pa hinog (hindi pa magagastos)</string>
+    <string name="reconcile_pending">Nakabinbin sa wallet</string>
+    <string name="reconcile_not_in_wallet">Wala sa wallet na ito</string>
+    <string name="reconcile_wallet_only">Nasa wallet, hindi iniulat ng node</string>
+    <string name="reconcile_no_missing_funds">Walang nakitang nawawalang pondo.</string>
+    <string name="reconcile_txs_already_in_wallet">Mga transaksyong nasa wallet na</string>
+    <string name="reconcile_txs_not_added">Mga transaksyong hindi naidagdag (hindi sa wallet na ito)</string>
+    <string name="reconcile_stage_comparing">Ikinukumpara sa wallet…</string>
+    <string name="market_tor_notice_title">Hindi dumadaan sa Tor ang Market</string>
+    <string name="market_tor_notice_body">Hindi dumadaan sa Tor ang Market; makikita ng site ang iyong IP address.</string>
+    <string name="market_tor_notice_continue">Magpatuloy</string>
 </resources>

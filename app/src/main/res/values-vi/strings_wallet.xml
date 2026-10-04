@@ -282,8 +282,12 @@
     <string name="as_send_failed">Gửi thất bại</string>
     <string name="as_balance">Số dư: %1$s</string>
     <string name="as_quantity">Số lượng</string>
-    <string name="as_tokens">token</string>
-    <string name="as_units">đơn vị</string>
+    <plurals name="as_tokens">
+        <item quantity="other">token</item>
+    </plurals>
+    <plurals name="as_units">
+        <item quantity="other">đơn vị</item>
+    </plurals>
     <string name="as_fee_note">Giao dịch tài sản cần DGB để trả phí mạng</string>
     <string name="as_err_recipient">Nhập địa chỉ người nhận</string>
     <string name="as_err_quantity">Nhập số lượng hợp lệ</string>
@@ -296,7 +300,9 @@
     <string name="as_change_marker">Dấu tiền thừa tài sản</string>
     <string name="as_network_fee_est">Phí mạng (ước tính)</string>
     <string name="as_total_dgb">Tổng DGB</string>
-    <string name="as_stays">%1$s %2$s ở lại trong ví của bạn</string>
+    <plurals name="as_stays">
+        <item quantity="other">%1$s %2$s ở lại trong ví của bạn</item>
+    </plurals>
     <string name="ad_title">Chi tiết tài sản</string>
     <string name="ad_balance">Số dư</string>
     <string name="ad_info">Thông tin tài sản</string>
@@ -580,8 +586,41 @@
     <string name="as_rules_retry">Kiểm tra lại</string>
     <string name="as_refused_rule_bound">Đã chặn: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng. Chưa gửi gì cả.</string>
     <string name="as_refused_rules_unknown">Đã chặn: không thể xác minh quy tắc chuyển của tài sản này. Chưa gửi gì cả.</string>
+    <string name="as_refused_holding_unverified">Đã chặn: hiện không thể kiểm tra các đồng của tài sản này chứa gì. Chưa gửi gì cả. Hãy thử lại khi có kết nối mạng.</string>
+    <string name="as_refused_holding_unconfirmed">Đã chặn: không xác nhận được đồng nào của tài sản này chỉ chứa riêng tài sản này. Chưa gửi gì cả.</string>
+    <string name="as_refused_spans_addresses">Đã chặn: số lượng này nằm ở nhiều hơn một địa chỉ. Một lần gửi có thể chuyển tối đa %1$s. Chưa gửi gì cả.</string>
     <string name="rf_move_refused_rule_bound">%1$s vẫn ở nguyên chỗ cũ: tài sản này có quy tắc chuyển mà ví này chưa thể đáp ứng</string>
     <string name="rf_move_refused_unknown">%1$s vẫn ở nguyên chỗ cũ: không thể xác minh quy tắc chuyển của nó</string>
+    <string name="rf_move_refused_holding_unverified">%1$s vẫn ở nguyên chỗ: hiện không thể kiểm tra nó chứa gì. Hãy thử lại khi có kết nối mạng</string>
+    <string name="rf_move_refused_holding_mismatch">%1$s vẫn ở nguyên chỗ: nó không chứa đúng một tài sản nên di chuyển không an toàn</string>
     <!-- Wallet wipe: shown when a wipe could not be verified. Machine-assisted; needs a native speaker. -->
     <string name="wipe_incomplete">Việc xóa ví chưa hoàn tất. Một số dữ liệu ví có thể vẫn còn trên thiết bị này. Hãy khởi động lại ứng dụng và thử lại.</string>
+    <!-- One-time history rebuild on upgrade: the notice shown while it runs, and the line shown
+         while it waits for a pending send to confirm. -->
+    <string name="history_rebuild_notice_title">Đang dựng lại lịch sử giao dịch</string>
+    <string name="history_rebuild_notice_body">Bản cập nhật này dựng lại lịch sử giao dịch của bạn từ blockchain một lần. Tiền và cụm từ khôi phục của bạn không bị ảnh hưởng. Số dư sẽ được cập nhật dần khi quá trình quét tiến triển, và chức năng Gửi sẽ khả dụng khi quét xong.</string>
+    <string name="history_rebuild_deferred">Lịch sử giao dịch của bạn sẽ được dựng lại sau khi giao dịch gửi đang chờ của bạn được xác nhận.</string>
+    <!-- Funds scan result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen).
+         Machine-assisted. -->
+    <string name="reconcile_outputs_found">Đầu ra tìm thấy trên blockchain</string>
+    <string name="reconcile_found_not_compared">Tìm thấy trên blockchain, chưa so sánh</string>
+    <string name="reconcile_spendable">Có thể chi tiêu</string>
+    <string name="reconcile_wallet_spendable">Số dư có thể chi tiêu của ví</string>
+    <string name="reconcile_matches_wallet">Khớp với số dư có thể chi tiêu của ví.</string>
+    <string name="reconcile_does_not_match_wallet">Không khớp với số dư có thể chi tiêu của ví — xem bên dưới.</string>
+    <string name="reconcile_held_asset">Được giữ cho một DigiAsset</string>
+    <string name="reconcile_held_unknown">Được giữ: trạng thái tài sản không rõ</string>
+    <string name="reconcile_proven_plain">DGB thông thường, có thể chi tiêu sau khi khởi động lại</string>
+    <string name="reconcile_digidollar_outputs">Đầu ra DigiDollar</string>
+    <string name="reconcile_immature">Chưa trưởng thành (chưa thể chi tiêu)</string>
+    <string name="reconcile_pending">Đang chờ trong ví</string>
+    <string name="reconcile_not_in_wallet">Không có trong ví này</string>
+    <string name="reconcile_wallet_only">Có trong ví, nút không báo cáo</string>
+    <string name="reconcile_no_missing_funds">Không tìm thấy tiền bị thiếu.</string>
+    <string name="reconcile_txs_already_in_wallet">Giao dịch đã có trong ví</string>
+    <string name="reconcile_txs_not_added">Giao dịch không được thêm (không thuộc ví này)</string>
+    <string name="reconcile_stage_comparing">Đang so sánh với ví…</string>
+    <string name="market_tor_notice_title">Chợ không đi qua Tor</string>
+    <string name="market_tor_notice_body">Chợ không đi qua Tor; trang web sẽ thấy địa chỉ IP của bạn.</string>
+    <string name="market_tor_notice_continue">Tiếp tục</string>
 </resources>

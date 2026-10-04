@@ -1,5 +1,7 @@
 package io.digibyte.core.asset.network
 
+import io.digibyte.core.asset.send.StackEntry
+import io.digibyte.core.asset.send.StackLookup
 import org.json.JSONObject
 
 /**
@@ -28,6 +30,42 @@ internal object DigiScopeAssetParsing {
             ipfs = null,
             rules = json.optJSONObject("rules")?.let { toMap(it) },
         )
+    }
+
+    /**
+     * The body of `GET /digiassets/txout/:txid/:vout` to a [StackLookup]. The reply must name the
+     * output that was asked for, and every entry must carry an asset id and a whole, non-negative
+     * count; anything else is [StackLookup.Unavailable] (no answer), never an empty stack, which
+     * would read as "no assets here".
+     */
+    fun txOutStack(json: JSONObject, txid: String, vout: Int): StackLookup {
+        if (json.has("error")) return StackLookup.Unavailable
+        if (!json.optString("txid").equals(txid, ignoreCase = true)) return StackLookup.Unavailable
+        if (!json.has("vout") || json.optInt("vout", -1) != vout) return StackLookup.Unavailable
+        val arr = json.optJSONArray("assets") ?: return StackLookup.Unavailable
+        val entries = ArrayList<StackEntry>(arr.length())
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONObject(i) ?: return StackLookup.Unavailable
+            val id = a.optString("assetId").takeIf { it.isNotEmpty() && it != "null" }
+                ?: return StackLookup.Unavailable
+            val raw = a.opt("count")
+            val count = when (raw) {
+                is Int -> raw.toLong()
+                is Long -> raw
+                else -> return StackLookup.Unavailable
+            }
+            if (count < 0L) return StackLookup.Unavailable
+            entries += StackEntry(id, count)
+        }
+        return StackLookup.Found(entries)
+    }
+
+    /** A 404 from `GET /digiassets/txout/...`: "not unspent" only when the body is the endpoint's own
+     *  `{"unspent": false}`. Anything else — a route that is not deployed, a proxy's page — is no answer. */
+    fun notFound(body: String?): StackLookup {
+        if (body.isNullOrBlank()) return StackLookup.Unavailable
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return StackLookup.Unavailable
+        return if (json.has("unspent") && json.opt("unspent") == false) StackLookup.NotUnspent else StackLookup.Unavailable
     }
 
     private fun toMap(obj: JSONObject): Map<String, Any?> {

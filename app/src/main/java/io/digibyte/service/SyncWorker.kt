@@ -13,6 +13,7 @@ import dagger.hilt.components.SingletonComponent
 import io.digibyte.core.bridge.NativeBridge
 import io.digibyte.core.isTestnet
 import io.digibyte.core.networkSuffix
+import io.digibyte.core.tor.TorManager
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 
@@ -46,6 +47,9 @@ class SyncWorker @AssistedInject constructor(
     interface SyncWorkerEntryPoint {
         /** The shared client (Tor-aware); the seeder request is derived from it, see [SeederClient]. */
         fun okHttpClient(): OkHttpClient
+
+        /** The user's Tor setting and, when Tor is connected in this process, its SOCKS port. */
+        fun torManager(): TorManager
     }
 
     override suspend fun doWork(): Result {
@@ -73,8 +77,23 @@ class SyncWorker @AssistedInject constructor(
                 return Result.retry()
             }
 
+            // With the Tor setting on, peers go through Tor or not at all. This process may never
+            // have run SyncService, so nothing here has set the native SOCKS proxy: set it from
+            // Tor's live port, or start nothing and let WorkManager try again later.
+            val torManager = EntryPointAccessors
+                .fromApplication(applicationContext, SyncWorkerEntryPoint::class.java)
+                .torManager()
+            val route = WorkerPeerRoute.of(torEnabled = torManager.isEnabled, socksPort = torManager.getSocksPort())
+            if (route is WorkerPeerRoute.Wait) {
+                android.util.Log.i("SyncWorker", "background catch-up deferred: Tor is on but not connected")
+                return Result.retry()
+            }
+
             // Refresh filter-capable peers from the seeder API (cached hourly)
             fetchBloomPeers()
+            if (route is WorkerPeerRoute.ViaSocks) {
+                NativeBridge.setSocksProxy("127.0.0.1", route.port)
+            }
             NativeBridge.startSync()
             // Allow 30 seconds for header catch-up.
             delay(SYNC_DURATION_MS)

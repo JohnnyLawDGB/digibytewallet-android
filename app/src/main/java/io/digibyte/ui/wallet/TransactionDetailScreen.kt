@@ -26,8 +26,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.digibyte.core.asset.AssetTxAmount
 import io.digibyte.core.db.entity.TransactionEntity
+import io.digibyte.ui.asset.assetAmountText
 import io.digibyte.ui.components.CONFIRMED_THRESHOLD
+import io.digibyte.ui.components.TxKind
+import io.digibyte.ui.components.TypedAmount
 import io.digibyte.ui.theme.DigiByteAccent
 import io.digibyte.ui.theme.DigiByteGreen
 import io.digibyte.ui.theme.DigiByteRed
@@ -38,6 +42,14 @@ import kotlin.math.abs
 import androidx.compose.ui.res.stringResource
 import io.digibyte.R
 
+/**
+ * The asset amount the details of [kind] lead with, or null when they lead with DGB. Only an asset
+ * transaction whose amount the activity list resolved has one; the list and the details read the
+ * same entry, so the two never disagree.
+ */
+internal fun assetAmountForDetail(kind: TxKind?, typed: TypedAmount?): AssetTxAmount? =
+    if (kind == TxKind.DIGIASSET) (typed as? TypedAmount.Asset)?.amount else null
+
 @Composable
 fun TransactionDetailScreen(
     txid: String,
@@ -46,6 +58,10 @@ fun TransactionDetailScreen(
 ) {
     val allTxs by viewModel.transactions.collectAsStateWithLifecycle()
     val tx = allTxs.firstOrNull { it.txid == txid }
+    // The activity list's own classification and amounts: an asset transaction leads with the
+    // asset it moved, not with the DGB marker value.
+    val txKinds by viewModel.txKinds.collectAsStateWithLifecycle()
+    val txTypedAmounts by viewModel.txTypedAmounts.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -82,13 +98,19 @@ fun TransactionDetailScreen(
             return@Column
         }
 
-        TransactionDetailContent(tx = tx, onNavigateBack = onNavigateBack)
+        TransactionDetailContent(
+            tx = tx,
+            assetAmount = assetAmountForDetail(txKinds[tx.txid], txTypedAmounts[tx.txid]),
+            onNavigateBack = onNavigateBack,
+        )
     }
 }
 
 @Composable
 private fun TransactionDetailContent(
     tx: TransactionEntity,
+    /** The asset and quantity an asset transaction moved; null for any other transaction. */
+    assetAmount: AssetTxAmount?,
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -140,12 +162,38 @@ private fun TransactionDetailContent(
                     modifier = Modifier.size(36.dp)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "$amountPrefix$amountFormatted DGB",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = amountColor,
-                    textAlign = TextAlign.Center
-                )
+                if (assetAmount != null) {
+                    // An asset transaction: the asset and quantity first, the asset's name when
+                    // the headline shows its symbol, and the DGB the transaction moved under them.
+                    Text(
+                        text = amountPrefix + assetAmountText(assetAmount),
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = amountColor,
+                        textAlign = TextAlign.Center
+                    )
+                    val name = assetAmount.name
+                    if (name != null && name != assetAmount.label) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                    Text(
+                        text = "$amountPrefix$amountFormatted DGB",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                } else {
+                    Text(
+                        text = "$amountPrefix$amountFormatted DGB",
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = amountColor,
+                        textAlign = TextAlign.Center
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 ConfirmationsBadge(tx.confirmations)
             }
