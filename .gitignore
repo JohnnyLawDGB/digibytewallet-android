@@ -80,3 +80,7 @@ test-fixtures/*.apk
 test-results/
 dgb-wallet-release.jks
 *.jks
+
+# Signing material never enters the repo (scripts/create-signing-key.sh writes outside it).
+*.p12
+keystore.properties
