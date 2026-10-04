@@ -105,7 +105,7 @@ class TaprootReloadBalanceTest {
         val phraseBytes = mnemonic.toByteArray(Charsets.UTF_8)
         assertTrue(
             "recoverWalletFromBytes (the reload) should succeed",
-            NativeBridge.recoverWalletFromBytes(phraseBytes, blockTs),
+            NativeBridge.recoverWalletFromBytes(phraseBytes, blockTs, null),
         )
 
         // LOAD-BEARING: after reload, the P2TR output must still be in the balance.

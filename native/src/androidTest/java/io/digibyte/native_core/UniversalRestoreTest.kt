@@ -46,7 +46,7 @@ class UniversalRestoreTest {
     fun crossValidate_bip84_newVsOld() {
         // Create a wallet from the test mnemonic via the old code path.
         val phraseBytes = TEST_MNEMONIC.toByteArray(Charsets.UTF_8)
-        val created = NativeBridge.createWalletFromBytes(phraseBytes)
+        val created = NativeBridge.createWalletFromBytes(phraseBytes, null)
         assertTrue("wallet should create successfully", created)
 
         // Get the first BIP84 address via the old code path.

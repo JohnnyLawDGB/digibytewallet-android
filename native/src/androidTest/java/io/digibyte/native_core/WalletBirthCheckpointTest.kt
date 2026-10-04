@@ -31,7 +31,7 @@ class WalletBirthCheckpointTest {
     @Test
     fun freshWalletAnchorsToRecentCheckpoint() {
         val phrase = MNEMONIC.toByteArray()
-        val ok = NativeBridge.createWalletFromBytes(phrase)
+        val ok = NativeBridge.createWalletFromBytes(phrase, null)
         phrase.fill(0)
         assertTrue("createWalletFromBytes must succeed", ok)
 
