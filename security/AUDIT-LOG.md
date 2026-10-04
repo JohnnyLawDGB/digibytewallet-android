@@ -3,7 +3,7 @@
 Machine-read by `scripts/check-security-cycle.sh`. **Keep the marker line's format exactly** —
 the gate parses it, and a reformatted line reads as "never audited".
 
-<!-- LAST_AUDITED_VERSION_CODE: 40076 -->
+<!-- LAST_AUDITED_VERSION_CODE: 40086 -->
 
 The cycle runs **every 10 releases**. The gate fails a release build when the current
 `versionCode` is 10 or more beyond the marker above.
@@ -704,3 +704,87 @@ else is UNKNOWN. `AssetManager.sendAsset` refuses before it reads a UTXO;
 
 **Residual (recorded by the final review):** an outpoint carrying more than one asset is outside
 the gate — see the report's "Residual" bullet. Rare; follow-up.
+
+## Cycle at v4.0.86 (40086) — 2026-10-04
+
+### v4.0.86 — 2026-10-04 (automated half)
+
+The APK scanned is `:app:assembleMainnetRelease` of `develop` @ `011b5f79` — the v4.0.86 content, built
+before the version bump, so its `versionName` still reads 4.0.85. It was signed with the local Android
+debug keystore for scanning only and never installed. SHA256 `646d8cc5c7627eb1ed6fa171f9ccdd4770dc8f73fa82bfa40363f1a6bcddbad5`.
+The script prints its header from that `versionName`, so the header line is replaced here; the rest is verbatim.
+
+**Dependencies**
+    Resolving mainnetReleaseRuntimeClasspath ...
+    Querying OSV for 227 package(s) ...
+    ok: no known vulnerabilities across 227 package(s)
+
+**Native hardening** (arm64 `libcore-lib.so`)
+    - PIE: yes
+    - NX: yes
+    - RELRO: FULL
+    - stack canary: yes
+    - fortify: 10 checked libc call(s)
+    - symbols: stripped
+
+**Embedded secrets**
+    - none found
+
+**Hosts in the dex**
+         19 https://api.digiscope.me
+          4 https://github.com
+          4 https://assets.digistamp.co
+          3 https://issuetracker.google.com
+          3 https://digiscope.me
+          2 https://api.github.com
+          1 https://youtrack.jetbrains.com
+          1 https://trustless-gateway.link
+          1 https://ipfs.io
+          1 https://goo.gle
+          1 https://dweb.link
+          1 https://digibyte.org
+          1 https://developer.android.com
+          1 https://chainz.cryptoid.info
+          1 https://api.digiassets.net
+
+Same 15 hosts as the 40076 cycle; the new asset-input check calls `api.digiscope.me`, already pinned.
+
+### Manual half — changed surface v4.0.76 → v4.0.86
+
+The trains between these cycles each went through adversarial release reviews (chain, funds,
+privacy/integration lenses) and host-KAT gates before landing. Findings that are not yet
+disclosed are tracked in draft security advisories and will be summarised here when they are
+published. What changed hands, by surface:
+
+- **Manifest / intents:** `AndroidManifest.xml` unchanged since v4.0.76.
+- **Crypto / keys:** the seed key is bound to device authentication (v4.0.77, `SeedKeyBinding`);
+  per-site Digi-ID identity keys.
+- **JNI boundary:** new entry points:
+  - read-only queries: checkpoint time by height, CF corroboration counters, recreate steps, publish
+    outcome;
+  - parsers of caller-supplied data: raw transaction id from raw bytes, the peer-penalty decision blob, the
+    wallet's own partition of given outpoint strings;
+  - two signers that use seed-derived keys inside native code: `signMessage` and the per-site Digi-ID
+    `signIdentityMessage` (v4.0.77). The seed itself does not cross the boundary.
+- **Native parsing / peer layer:** a transaction is accepted only as the answer to this wallet's own
+  request or inside a requested block whose transactions hash to its header's merkle root. Header
+  proof of work is enforced (level 2); the MultiShield V4 difficulty target is checked at audit level.
+  The filter-header chain follows reorgs and its size limit, and a peer is penalised only for filter
+  data that contradicts a header the wallet holds. No seed-name lookups while peers go through a SOCKS proxy.
+- **Network:** one DigiScope pin set on the shared HTTP client. While Tor is on, app traffic waits for
+  Tor and goes direct only after the fallback banner. The background worker dials through Tor's SOCKS
+  port. The Market WebView states that it is outside Tor.
+- **DigiAssets:** each asset input of a send or recovery move is confirmed with the indexer
+  (`GET /api/digiassets/txout`) to hold exactly the asset being moved, and the send fails closed
+  without an answer. This closes the residual recorded under the 2026-09-07 bounty entry above
+  (an outpoint carrying more than one asset).
+
+Verified for v4.0.86:
+- full host-KAT sweep 101/101 at the shipped header levels, 64- and 32-bit, ASan;
+- unit suites in both flavours (core 1424, app 564);
+- device runs on arm64 (in-place upgrade) and armv7 (restore across the filter-header chain's size
+  limit, 0 header-check mismatches over 3.8M headers).
+
+### Still owed
+
+MobSF re-scan and the R8 keep-rule pass on the shipped v4.0.86 release asset.
