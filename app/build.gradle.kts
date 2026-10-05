@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -15,6 +17,60 @@ plugins {
 // build is byte-for-byte unaffected and there is no way to ship this by forgetting to revert an
 // edit. (That failure mode cost a day on 2026-08-04.)
 val asanNative = (project.findProperty("asanNative") as String?)?.toBoolean() ?: false
+
+// ── Release signing (app.aroundtheblock.wallet) ─────────────────────────────────────────────────
+// The release key is the app's identity on Play AND on the digiscope.me download, so it lives only
+// with its owner: never in this repo, never generated here (scripts/create-signing-key.sh, run once,
+// offline). A build finds it in, first to last:
+//
+//   ATB_SIGNING_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD   (CI, or a one-off shell)
+//   keystore.properties at the repo root: storeFile, storePassword, keyAlias, keyPassword (gitignored)
+//
+// keyAlias defaults to aroundtheblock-wallet and keyPassword to storePassword (PKCS12 has one).
+// With neither present, every non-release build works as before, and a release build STOPS with
+// the message below. It never falls back to the debug key and never writes an unsigned APK.
+// docs/SIGNING.md has the whole procedure.
+data class ReleaseSigning(val storeFile: File, val storePassword: String, val keyAlias: String, val keyPassword: String)
+
+val releaseSigning: ReleaseSigning? = run {
+    val props = Properties()
+    val propsFile = rootProject.file("keystore.properties")
+    if (propsFile.isFile) propsFile.inputStream().use { props.load(it) }
+    fun pick(env: String, prop: String): String? =
+        System.getenv(env)?.takeIf { it.isNotEmpty() } ?: props.getProperty(prop)?.takeIf { it.isNotEmpty() }
+    val store = pick("ATB_SIGNING_STORE_FILE", "storeFile") ?: return@run null
+    val storePassword = pick("ATB_SIGNING_STORE_PASSWORD", "storePassword") ?: return@run null
+    ReleaseSigning(
+        storeFile = rootProject.file(store),
+        storePassword = storePassword,
+        keyAlias = pick("ATB_SIGNING_KEY_ALIAS", "keyAlias") ?: "aroundtheblock-wallet",
+        keyPassword = pick("ATB_SIGNING_KEY_PASSWORD", "keyPassword") ?: storePassword,
+    )
+}
+
+// Checked when the task graph is known, so only a build that would SIGN a release pays for it —
+// tests, lint, debug and minifiedDebug never see it.
+gradle.taskGraph.whenReady {
+    val signsRelease = allTasks.any { t ->
+        t.project == project && t.name.contains("Release") && !t.name.contains("Debug") &&
+            (t.name.startsWith("package") || t.name.startsWith("bundle") || t.name.startsWith("sign") ||
+                t.name.startsWith("validateSigning"))
+    }
+    if (!signsRelease) return@whenReady
+    val problem = when {
+        releaseSigning == null ->
+            "no release key configured"
+        !releaseSigning.storeFile.isFile ->
+            "the keystore ${releaseSigning.storeFile} does not exist"
+        else -> null
+    }
+    if (problem != null) throw GradleException(
+        "Release signing: $problem.\n" +
+            "Set ATB_SIGNING_STORE_FILE and ATB_SIGNING_STORE_PASSWORD, or create keystore.properties at the\n" +
+            "repo root (storeFile=, storePassword=). A release is never signed with the debug key.\n" +
+            "See docs/SIGNING.md."
+    )
+}
 
 android {
     namespace = "app.aroundtheblock.wallet"
@@ -50,10 +106,13 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "../dgb-wallet-release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "dgb-wallet-release"
-            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            // Left empty without a key; the taskGraph check above stops a release build first.
+            releaseSigning?.let {
+                storeFile = it.storeFile
+                storePassword = it.storePassword
+                keyAlias = it.keyAlias
+                keyPassword = it.keyPassword
+            }
         }
     }
 

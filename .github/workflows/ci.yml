@@ -64,6 +64,11 @@ jobs:
       - name: JNI registration table is current
         run: python3 scripts/gen-jni-registry.py --check
 
+      # The release key signs every build on Play and on the download page. Fail if any keystore,
+      # private key or keystore.properties is ever tracked, whatever it is named.
+      - name: No signing material in the repo
+        run: ./scripts/check-no-keystore-tracked.sh
+
       # README and CLAUDE.md both drifted more than ten releases behind the app while each
       # claimed to be current. A version recorded where it cannot update is wrong by default.
       - name: Docs state the shipped version
