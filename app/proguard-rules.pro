@@ -24,15 +24,15 @@
 # JNI_OnLoad registers every native with RegisterNatives against the class path in
 # native/src/main/jni/bridge/jni_class_paths.h, by method NAME and DESCRIPTOR.
 # Rename the class or a method and System.loadLibrary fails at startup.
--keep class io.digibyte.core.bridge.NativeBridge { *; }
+-keep class app.aroundtheblock.wallet.core.bridge.NativeBridge { *; }
 
 # jni_peer.c takes GetObjectClass(handler) then GetMethodID by NAME and
 # SIGNATURE (onSyncProgress, onSaveBlocks, onSaveCfLedger, …), so the METHOD
 # names may not be renamed. The interface's own NAME is part of
 # setCallbackHandler's registered descriptor (DGB_JNI_NATIVECALLBACK_SIG), so
 # it may not be renamed either.
--keep class io.digibyte.core.bridge.NativeCallback { *; }
--keep class * implements io.digibyte.core.bridge.NativeCallback { *; }
+-keep class app.aroundtheblock.wallet.core.bridge.NativeCallback { *; }
+-keep class * implements app.aroundtheblock.wallet.core.bridge.NativeCallback { *; }
 
 # Belt and braces for anything else annotated as native.
 -keepclasseswithmembernames class * {
@@ -65,12 +65,12 @@
 # read back as `valueOf(prefs.getString(...))` (:407). A renamed constant does not
 # crash — it silently stops matching stored data, which is the worst failure mode
 # available to a wallet.
--keep class io.digibyte.ui.wallet.WalletViewModel$DisplayCurrency { *; }
+-keep class app.aroundtheblock.wallet.ui.wallet.WalletViewModel$DisplayCurrency { *; }
 
 # `stage.name` is embedded in the bug-report URL (SettingsScreen.kt:169). Renaming
 # it would not break anything; it would just turn every user-submitted report into
 # "stage=a", which is worse than the leak this narrowing is closing.
--keep class io.digibyte.core.model.SyncStage { *; }
+-keep class app.aroundtheblock.wallet.core.model.SyncStage { *; }
 
 # ---- SQLCipher: JNI-backed, loaded reflectively -----------------------------
 # If these are stripped the encrypted database fails to open, which in this app
@@ -84,7 +84,7 @@
 # ---- Room ------------------------------------------------------------------
 # Entity field names map to column names; generated DAO impls are resolved by
 # name at runtime.
--keep class io.digibyte.core.db.entity.** { *; }
+-keep class app.aroundtheblock.wallet.core.db.entity.** { *; }
 -keep class * extends androidx.room.RoomDatabase { *; }
 -dontwarn androidx.room.paging.**
 

@@ -70,7 +70,6 @@ crash.txt
 .idea/copyright/
 /app/google-services.json
 /.idea/markdown-navigator/
-/app/src/main/java/io/digibyte/presenter/fragments/FragmentBreadSignal.java
 /fastlane/
 fastlane/
 .superpowers/

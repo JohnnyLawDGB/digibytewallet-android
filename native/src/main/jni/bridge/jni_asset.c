@@ -9,7 +9,7 @@
  *   getTransactionOutputsForHash - walks a wallet-known tx's outputs by txid hex
  *   getRawTransactionOutputs    - same, but from raw bytes (foreign/unregistered tx)
  *
- * All JNI function names match io.digibyte.core.bridge.NativeBridge.
+ * All JNI function names match app.aroundtheblock.wallet.core.bridge.NativeBridge.
  * Raw transaction bytes are deserialized via BRTransactionParse() and freed
  * after use; no ownership is retained.
  *

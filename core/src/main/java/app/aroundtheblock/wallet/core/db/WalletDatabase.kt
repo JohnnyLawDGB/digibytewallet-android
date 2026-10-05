@@ -1,0 +1,74 @@
+package app.aroundtheblock.wallet.core.db
+
+import android.content.Context
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import app.aroundtheblock.wallet.core.db.dao.*
+import app.aroundtheblock.wallet.core.db.entity.*
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+
+/** The schema version this build opens the database at. A fresh install is created here and runs
+ *  none of [WALLET_DB_MIGRATIONS]; an existing install runs each step from its version up to it. */
+internal const val WALLET_DB_VERSION = 11
+
+/** Every step between schema versions, in order. [WalletDatabase.create] registers exactly these. */
+internal val WALLET_DB_MIGRATIONS: Array<Migration> = arrayOf(
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+)
+
+@Database(
+    entities = [
+        TransactionEntity::class,
+        UtxoEntity::class,
+        HeaderEntity::class,
+        PeerEntity::class,
+        WalletConfigEntity::class,
+        PriceCacheEntity::class,
+        AssetMetadataEntity::class,
+        DigiIdHistoryEntity::class,
+        CachedMessageEntity::class,
+        AssetProvenanceEntity::class,
+        AssetWalkFrontierEntity::class
+    ],
+    version = WALLET_DB_VERSION,
+    exportSchema = true
+)
+abstract class WalletDatabase : RoomDatabase() {
+    abstract fun transactionDao(): TransactionDao
+    abstract fun utxoDao(): UtxoDao
+    abstract fun headerDao(): HeaderDao
+    abstract fun peerDao(): PeerDao
+    abstract fun priceCacheDao(): PriceCacheDao
+    abstract fun walletConfigDao(): WalletConfigDao
+    abstract fun assetMetadataDao(): AssetMetadataDao
+    abstract fun digiIdHistoryDao(): DigiIdHistoryDao
+    abstract fun cachedMessageDao(): CachedMessageDao
+    abstract fun assetProvenanceDao(): AssetProvenanceDao
+
+    companion object {
+        /**
+         * @param dbFileName Room DB file name. Defaults to the historical
+         *   mainnet name `"wallet.db"` so any caller that doesn't pass one
+         *   (tests, older call sites) is behavior-identical to before the
+         *   per-network toggle existed. The app's DI module passes a
+         *   `_testnet`-suffixed name when the testnet network is selected,
+         *   so a testnet session never opens the mainnet DB file.
+         */
+        fun create(context: Context, passphrase: ByteArray, dbFileName: String = "wallet.db"): WalletDatabase {
+            System.loadLibrary("sqlcipher")
+            val factory = SupportOpenHelperFactory(passphrase)
+            return Room.databaseBuilder(
+                context.applicationContext,
+                WalletDatabase::class.java,
+                dbFileName
+            )
+                .openHelperFactory(factory)
+                .addMigrations(*WALLET_DB_MIGRATIONS)
+                .fallbackToDestructiveMigration()
+                .build()
+        }
+    }
+}

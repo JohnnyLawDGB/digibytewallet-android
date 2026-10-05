@@ -4,7 +4,7 @@
  * JNI bridge for wallet operations: mnemonic generation, wallet creation,
  * session management, address derivation, balance, and address validation.
  *
- * All JNI function names match io.digibyte.core.bridge.NativeBridge.
+ * All JNI function names match app.aroundtheblock.wallet.core.bridge.NativeBridge.
  */
 
 #include "jni_bridge.h"

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "io.digibyte.game"
+    namespace = "app.aroundtheblock.wallet.game"
     compileSdk = 35
     defaultConfig { minSdk = 26 }
 

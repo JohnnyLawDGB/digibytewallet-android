@@ -1,0 +1,506 @@
+package app.aroundtheblock.wallet.core.recovery
+
+import app.aroundtheblock.wallet.core.asset.DigiAssetEncoder
+import app.aroundtheblock.wallet.core.asset.send.DA_MARKER_SATS
+import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Driving the asset move: which asset got which money, and what is reported when one fails.
+ *
+ * The native touchpoints — parsing, signing, broadcasting — are injected, so what is under test
+ * here is the orchestration, which is where the interesting failures live. A transfer that
+ * fails to sign, fails to broadcast, or cannot be mapped to a signing key must all come back as
+ * a NAMED asset that did not move. An asset that quietly disappears from the report reads to
+ * the user as one that moved.
+ */
+class ForeignAssetTransferServiceTest {
+
+    private val dest = "dgb1qgapugthjpsqnh80jn7un0f34u2qusl8y7gg76f"
+    private val assetAddr = "DAsset1111111111111111111111111111"
+    private val feeAddr = "DFee2222222222222222222222222222222"
+    private val script = "76a914aabbccddeeff00112233445566778899aabbccdd88ac"
+
+    /** A transfer marker moving 10 units to vout 0 — what the parent tx looked like. */
+    private val parentOutputs = listOf(
+        ForeignAssetQuantity.Output(0, DA_MARKER_SATS, ByteArray(25) { 0x11 }),
+        ForeignAssetQuantity.Output(
+            1, 0L,
+            DigiAssetEncoder.encodeTransferScript(
+                version = 3,
+                instructions = listOf(
+                    DigiAssetEncoder.TransferInstruction(
+                        skip = false, range = false, percent = false, outputIndex = 0, amount = 10L,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    /** Every UTXO made here gets a parent that states exactly what was reported for it. */
+    private val book = TxBook()
+
+    private fun utxo(txid: String, addr: String, sats: Long, vout: Int = 0) = UtxoEntry(
+        txid = txid, vout = vout, amountSatoshi = sats, address = addr,
+        blockHeight = 24_000_000L, scriptPubKeyHex = script,
+    ).also { book.honest(it) }
+
+    private val assetUtxo = utxo("a55e7", assetAddr, DA_MARKER_SATS)
+    private val feeUtxo = utxo("feeee", feeAddr, 300_000L)
+
+    private fun profileResult(
+        utxos: List<UtxoEntry> = listOf(assetUtxo, feeUtxo),
+        derived: List<DerivedAddress> = listOf(
+            DerivedAddress(assetAddr, chain = 0, index = 4),
+            DerivedAddress(feeAddr, chain = 1, index = 2),
+        ),
+    ) = RecoveryScanService.ProfileResult(
+        profile = DerivationProfile(
+            label = "BIP44", description = "legacy",
+            hmacKey = DerivationProfile.HMAC_STANDARD,
+            prefixPath = intArrayOf(44, 20, 0), addressFormat = 1, isNative = false,
+        ),
+        addresses = derived.map { it.address },
+        derivedAddresses = derived,
+        utxos = utxos,
+        rawTxs = book.rawTxs(utxos),
+        reachableBackend = true,
+    )
+
+    /** Only the asset UTXO's parent carries a marker; the fee UTXO's parent is plain. */
+    private fun classifier(
+        ruleState: app.aroundtheblock.wallet.core.asset.rules.TransferRuleState =
+            app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE,
+    ) = ForeignUtxoAssetClassifier(
+        fetchRawTx = { txid -> if (txid == "a55e7") byteArrayOf(1) else byteArrayOf(2) },
+        isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+        resolveRuleState = { ruleState },
+    )
+
+    /** Everything handed to OutgoingTxStore, so the self-transfer flag can be asserted. */
+    data class Recorded(
+        val txid: String, val sentSats: Long, val feeSats: Long,
+        val toAddress: String, val isSelfTransfer: Boolean,
+    )
+
+    private val recorded = mutableListOf<Recorded>()
+
+    private fun service(
+        sign: (ForeignAssetTransferPlan.Plan, ByteArray, DerivationProfile, Long) -> String? =
+            { _, _, _, _ -> "00ff" },
+        broadcast: (ByteArray) -> String? = { "txid-moved" },
+        parse: (ByteArray) -> List<ForeignAssetQuantity.Output>? = { parentOutputs },
+        assetClassifier: ForeignUtxoAssetClassifier = classifier(),
+        stackOf: (suspend (String, Int) -> app.aroundtheblock.wallet.core.asset.send.StackLookup)? = { txid, _ ->
+            if (txid == "a55e7") app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(listOf(app.aroundtheblock.wallet.core.asset.send.StackEntry("La-test", 1L)))
+            else app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(emptyList())
+        },
+        ruleStateOf: suspend (String) -> app.aroundtheblock.wallet.core.asset.rules.TransferRuleState =
+            { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+    ) = ForeignAssetTransferService(
+        assetClassifier = assetClassifier,
+        stackOf = stackOf,
+        ruleStateOf = ruleStateOf,
+        parents = book.binding,
+        parseOutputs = parse,
+        sign = sign,
+        broadcast = broadcast,
+        // android.util.Log is an unmocked stub on the JVM and throws when called.
+        log = { _, _ -> },
+        recordOutgoing = { t, s, f, to, self -> recorded += Recorded(t, s, f, to, self) },
+    )
+
+    private fun run(svc: ForeignAssetTransferService, results: List<RecoveryScanService.ProfileResult>) =
+        runBlocking { svc.moveAssets(ByteArray(64) { 7 }, results, dest) }
+
+    // ---- the happy path -----------------------------------------------------------------------
+
+    @Test fun `an asset is moved and its txid reported`() {
+        val r = run(service(), listOf(profileResult()))
+        val move = r.moves.single()
+        assertEquals("a55e7:0", move.outpoint)
+        assertEquals(10L, move.units)
+        assertEquals("txid-moved", move.txid)
+        assertTrue(move.moved)
+        assertTrue(r.allMoved)
+    }
+
+    // ── What the indexer says the outputs hold ─────────────────────────────────────────────
+
+    private fun stack(vararg e: Pair<String, Long>) =
+        app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(e.map { app.aroundtheblock.wallet.core.asset.send.StackEntry(it.first, it.second) })
+
+    /** No source, or no answer: nothing moves, and the asset is named with the reason. */
+    @Test fun `an asset whose holding cannot be checked stays where it is`() {
+        val sources: List<(suspend (String, Int) -> app.aroundtheblock.wallet.core.asset.send.StackLookup)?> =
+            listOf(null, { _, _ -> app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable })
+        for (source in sources) {
+            var signed = false
+            val r = run(service(stackOf = source, sign = { _, _, _, _ -> signed = true; "00ff" }), listOf(profileResult()))
+            val move = r.moves.single()
+            assertEquals(MoveRefusal.HOLDING_UNVERIFIED, move.refusal)
+            assertFalse(move.moved)
+            assertFalse(signed)
+        }
+    }
+
+    /** An output holding two assets, or none, or reported spent, is not moved. */
+    @Test fun `an output that does not hold exactly one asset stays where it is`() {
+        for (l in listOf(
+            stack("La-test" to 1L, "Ua-other" to 2L),
+            stack(),
+            app.aroundtheblock.wallet.core.asset.send.StackLookup.NotUnspent,
+        )) {
+            val r = run(service(stackOf = { txid, _ -> if (txid == "a55e7") l else stack() }), listOf(profileResult()))
+            assertEquals(MoveRefusal.HOLDING_MISMATCH, r.moves.single().refusal)
+        }
+    }
+
+    /** The rule gate runs on the asset the indexer says is there, not on the classifier's guess:
+     *  the classifier says rule-free, the output actually holds a rule-bound asset. */
+    @Test fun `the rule gate judges the asset that is actually on the output`() {
+        val r = run(
+            service(
+                stackOf = { txid, _ -> if (txid == "a55e7") stack("Ua-bound" to 10L) else stack() },
+                ruleStateOf = { id ->
+                    if (id == "Ua-bound") app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.RULE_BOUND
+                    else app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE
+                },
+            ),
+            listOf(profileResult()),
+        )
+        assertEquals(MoveRefusal.RULE_BOUND, r.moves.single().refusal)
+    }
+
+    /** A fee coin holding an asset is not used to pay for a move; one the indexer cannot answer
+     *  for stops every move on the profile. */
+    @Test fun `fee coins must hold no asset`() {
+        var seen: ForeignAssetTransferPlan.Plan? = null
+        val held = run(
+            service(
+                stackOf = { txid, _ -> if (txid == "a55e7") stack("La-test" to 10L) else stack("Ua-other" to 1L) },
+                sign = { p, _, _, _ -> seen = p; "00ff" },
+            ),
+            listOf(profileResult()),
+        )
+        assertTrue("no plan spends the asset-holding fee coin", seen == null || seen!!.inputs.none { it.txid == "feeee" })
+        assertFalse(held.moves.single().moved)
+
+        val unanswered = run(
+            service(stackOf = { txid, _ ->
+                if (txid == "a55e7") stack("La-test" to 10L) else app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+            }),
+            listOf(profileResult()),
+        )
+        assertEquals(MoveRefusal.HOLDING_UNVERIFIED, unanswered.moves.single().refusal)
+    }
+
+    /** The asset input must be spent, and every output must belong to the destination. */
+    @Test fun `the signed plan spends the asset and pays everything to the destination`() {
+        var seen: ForeignAssetTransferPlan.Plan? = null
+        run(service(sign = { p, _, _, _ -> seen = p; "00ff" }), listOf(profileResult()))
+
+        val plan = seen!!
+        assertEquals("a55e7", plan.inputs.first().txid)
+        assertTrue("the reserved fee UTXO paid for it", plan.inputs.any { it.txid == "feeee" })
+        assertTrue(plan.outputs.filter { it.address.isNotEmpty() }.all { it.address == dest })
+        assertEquals(dest, plan.outputs.last().address)
+    }
+
+    /** The signing key position comes from DerivedAddress, not from a list index. */
+    @Test fun `each input carries its own derivation position`() {
+        var seen: ForeignAssetTransferPlan.Plan? = null
+        run(service(sign = { p, _, _, _ -> seen = p; "00ff" }), listOf(profileResult()))
+
+        val asset = seen!!.inputs.first { it.txid == "a55e7" }
+        assertEquals(0, asset.chain)
+        assertEquals(4, asset.index)
+        val fee = seen!!.inputs.first { it.txid == "feeee" }
+        assertEquals(1, fee.chain)
+        assertEquals(2, fee.index)
+    }
+
+    // ---- the failures, each of which must NAME the asset ---------------------------------------
+
+    @Test fun `a native signing refusal is reported against the asset`() {
+        val r = run(service(sign = { _, _, _, _ -> null }), listOf(profileResult()))
+        val move = r.moves.single()
+        assertNull(move.txid)
+        assertFalse(move.moved)
+        assertTrue(move.failureReason!!.contains("sign"))
+    }
+
+    @Test fun `a broadcast failure is reported against the asset`() {
+        val r = run(service(broadcast = { null }), listOf(profileResult()))
+        assertFalse(r.moves.single().moved)
+        assertTrue(r.moves.single().failureReason!!.contains("roadcast"))
+    }
+
+    @Test fun `malformed signed hex is reported, not broadcast`() {
+        var broadcasts = 0
+        val r = run(
+            service(sign = { _, _, _, _ -> "not-hex" }, broadcast = { broadcasts++; "x" }),
+            listOf(profileResult()),
+        )
+        assertEquals("nothing was broadcast", 0, broadcasts)
+        assertFalse(r.moves.single().moved)
+    }
+
+    /**
+     * An asset whose address is missing from the derivation list cannot be signed for. Dropping
+     * it from the report would show the user a clean run that left an asset behind.
+     */
+    @Test fun `an asset with no signing key is reported, not silently dropped`() {
+        val r = run(
+            service(),
+            listOf(profileResult(derived = listOf(DerivedAddress(feeAddr, chain = 1, index = 2)))),
+        )
+        assertEquals("the asset is still accounted for", 1, r.moves.size)
+        assertEquals("a55e7:0", r.moves.single().outpoint)
+        assertFalse(r.moves.single().moved)
+    }
+
+    /**
+     * A classifier-confirmed asset whose exact quantity we could not read (parent tx unparseable)
+     * is no longer refused — it is moved via the remainder rule, with the units reported as the
+     * honest 0 (unknown). The whole layout still pays the destination, so every unit lands with
+     * the user (DGB-1007 fix).
+     */
+    @Test fun `an asset with an unreadable quantity is moved via the remainder rule`() {
+        var seen: ForeignAssetTransferPlan.Plan? = null
+        val r = run(
+            service(parse = { null }, sign = { p, _, _, _ -> seen = p; "00ff" }),
+            listOf(profileResult()),
+        )
+        val move = r.moves.single()
+        assertTrue("the asset was moved, not refused", move.moved)
+        assertEquals("units are honestly reported as unknown (0)", 0L, move.units)
+        // The signed plan encodes a minimal 1-unit instruction; the remainder rides to the last
+        // output, which is the destination.
+        val opReturn = seen!!.outputs[1].scriptHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val inst = app.aroundtheblock.wallet.core.asset.DigiAssetDecoder().decode(opReturn)!!.transferInstructions.single()
+        assertEquals(1L, inst.amount)
+        assertEquals(dest, seen!!.outputs.last().address)
+    }
+
+    /**
+     * The real DGB-1007 shape: the held asset sits on a transfer's IMPLICIT-REMAINDER output. The
+     * parent's only instruction pays a DIFFERENT output, so [ForeignAssetQuantity] reads 0 units
+     * on the held vout — yet the asset is real and must move. Before the fix this outpoint was
+     * stranded; now it moves.
+     */
+    @Test fun `an asset held on a remainder output is moved, not stranded`() {
+        // Held UTXO is vout 0; the parent's single instruction assigns to vout 1, so vout 0 reads 0.
+        val remainderShaped = listOf(
+            ForeignAssetQuantity.Output(0, DA_MARKER_SATS, ByteArray(25) { 0x11 }),
+            ForeignAssetQuantity.Output(
+                1, 0L,
+                DigiAssetEncoder.encodeTransferScript(
+                    version = 3,
+                    instructions = listOf(
+                        DigiAssetEncoder.TransferInstruction(
+                            skip = false, range = false, percent = false, outputIndex = 1, amount = 7L,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val r = run(service(parse = { remainderShaped }), listOf(profileResult()))
+        val move = r.moves.single()
+        assertTrue("a remainder-held asset must move, not strand", move.moved)
+        assertEquals(0L, move.units)
+    }
+
+    @Test fun `a profile with no assets produces no moves`() {
+        val plainOnly = profileResult(
+            utxos = listOf(feeUtxo),
+            derived = listOf(DerivedAddress(feeAddr, chain = 1, index = 2)),
+        )
+        val r = run(service(), listOf(plainOnly))
+        assertTrue(r.moves.isEmpty())
+        assertFalse("an empty batch moved nothing, so it is not 'all moved'", r.allMoved)
+    }
+
+    /**
+     * The move must be recorded as a SELF transfer.
+     *
+     * Observed on mainnet 2026-08-28: the asset arrived and the balance went 90 -> 91, and the
+     * activity list showed it as "Sent". The destination is this wallet's own receive address, so
+     * the C core categorizes the transaction as a receive; recording it as an ordinary outgoing
+     * send makes the list override that categorization and show a balance-INCREASING transaction
+     * as money leaving. The swept DGB rendered correctly in the same run because
+     * LegacySweepService passes the flag and this did not.
+     *
+     * See OutgoingTxStore.shouldApplyOutgoingOverride — the rule already existed; this path just
+     * never opted into it.
+     */
+    @Test fun `the move is recorded as a self transfer, not an outgoing send`() {
+        run(service(), listOf(profileResult()))
+
+        val rec = recorded.single()
+        assertEquals("txid-moved", rec.txid)
+        assertEquals(dest, rec.toAddress)
+        assertTrue(
+            "recorded as an external send — the activity list will render this " +
+                "balance-increasing asset move as \"Sent\"",
+            rec.isSelfTransfer,
+        )
+    }
+
+    // ---- the fan-out: more assets than spendable outputs ---------------------------------------
+
+    /**
+     * Three assets, one plain output. Each asset moves in its own transaction and two transactions
+     * cannot spend the same UTXO, so without a fan-out exactly one asset moves and the other two
+     * are stranded with no DGB behind them — needing a deposit into a wallet the user is leaving.
+     *
+     * The service must split the output FIRST and move nothing this round, because the split has
+     * to confirm before its outputs can be spent.
+     */
+    @Test fun `more assets than outputs fans out instead of moving one and stranding the rest`() {
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 5_000_000L)
+        val svc = ForeignAssetTransferService(
+            assetClassifier = ForeignUtxoAssetClassifier(
+                fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
+                isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+                // These assets MOVE. The classifier's default rule state is UNKNOWN, which the
+                // gate refuses — and a fan-out for assets that are all going to be refused is
+                // exactly the waste the movable-only count removes, so leaving it defaulted
+                // would make this test assert the opposite of what it is named for.
+                resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+            ),
+            stackOf = { txid, _ ->
+                if (txid.startsWith("asset")) app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(listOf(app.aroundtheblock.wallet.core.asset.send.StackEntry("La-test", 1L)))
+                else app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(emptyList())
+            },
+            ruleStateOf = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+            parents = book.binding,
+            parseOutputs = { parentOutputs },
+            sign = { _, _, _, _ -> "00ff" },
+            broadcast = { "fanout-txid" },
+            log = { _, _ -> },
+            recordOutgoing = { _, _, _, _, _ -> },
+        )
+        val r = runBlocking {
+            svc.moveAssets(ByteArray(64) { 7 }, listOf(profileResult(utxos = assets + plain)), dest)
+        }
+
+        val fan = r.fanOut as? ForeignAssetTransferService.FanOut.Broadcast
+        assertTrue("expected a fan-out, got ${r.fanOut}", fan != null)
+        assertEquals("one fee output per asset", 3, fan!!.feeOutputCount)
+        assertTrue("nothing moves until the split confirms", r.moves.isEmpty())
+    }
+
+    /** With an output per asset already, no fan-out — splitting would cost a fee and gain nothing. */
+    @Test fun `enough outputs already means no fan-out`() {
+        val r = run(service(), listOf(profileResult()))
+        assertEquals(ForeignAssetTransferService.FanOut.NotNeeded, r.fanOut)
+    }
+
+    /**
+     * A wallet too poor to fund the split must be told BEFORE anything is broadcast. Discovering
+     * it after two assets have moved and the money has run out is the worst version.
+     */
+    @Test fun `too little DGB to split is refused with its figure, and nothing is broadcast`() {
+        var broadcasts = 0
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 20_000L)
+        val svc = ForeignAssetTransferService(
+            assetClassifier = ForeignUtxoAssetClassifier(
+                fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
+                isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+                // These assets MOVE. The classifier's default rule state is UNKNOWN, which the
+                // gate refuses — and a fan-out for assets that are all going to be refused is
+                // exactly the waste the movable-only count removes, so leaving it defaulted
+                // would make this test assert the opposite of what it is named for.
+                resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+            ),
+            stackOf = { txid, _ ->
+                if (txid.startsWith("asset")) app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(listOf(app.aroundtheblock.wallet.core.asset.send.StackEntry("La-test", 1L)))
+                else app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(emptyList())
+            },
+            ruleStateOf = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+            parents = book.binding,
+            parseOutputs = { parentOutputs },
+            sign = { _, _, _, _ -> "00ff" },
+            broadcast = { broadcasts++; "x" },
+            log = { _, _ -> },
+            recordOutgoing = { _, _, _, _, _ -> },
+        )
+        val r = runBlocking {
+            svc.moveAssets(ByteArray(64) { 7 }, listOf(profileResult(utxos = assets + plain)), dest)
+        }
+        val no = r.fanOut as? ForeignAssetTransferService.FanOut.Refused
+        assertTrue("expected a refusal, got ${r.fanOut}", no != null)
+        assertTrue("the shortfall must be stated", no!!.shortfallSat > 0)
+        assertEquals("nothing may be broadcast", 0, broadcasts)
+    }
+
+    // ---- transfer rules ------------------------------------------------------------------------
+
+    @Test fun `a rule-bound asset is not signed, not broadcast, and reported as refused`() {
+        var signed = 0
+        var broadcastCount = 0
+        val svc = service(
+            sign = { _, _, _, _ -> signed++; "00ff" },
+            broadcast = { broadcastCount++; "txid-moved" },
+            assetClassifier = classifier(app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.RULE_BOUND),
+        )
+        val r = run(svc, listOf(profileResult()))
+        val move = r.moves.single()
+        assertEquals("a55e7:0", move.outpoint)
+        assertFalse(move.moved)
+        assertEquals(MoveRefusal.RULE_BOUND, move.refusal)
+        assertEquals(0, signed)
+        assertEquals(0, broadcastCount)
+        assertTrue(move.spentInputs.isEmpty())
+    }
+
+    /**
+     * The fan-out exists to give every MOVABLE asset its own output, so it must count only the
+     * assets that are actually going to move. Counting every asset-bearing outpoint counts ones
+     * the rule gate has already refused — and a wallet whose only asset is rule-bound was then
+     * told "not enough DGB to split" and shown ZERO rows, because the fan-out refusal returns
+     * before the loop that records refusals. The one thing the user needed to read — WHICH asset
+     * stayed behind and WHY — was exactly what went missing.
+     *
+     * Here the asset marker is the wallet's only output, so the fee pool is empty: the old code
+     * could not afford a split it never needed.
+     */
+    @Test fun `a refused asset is not counted into the fan-out, so its refusal is reported`() {
+        val r = run(
+            service(assetClassifier = classifier(app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.RULE_BOUND)),
+            listOf(profileResult(
+                utxos = listOf(assetUtxo),
+                derived = listOf(DerivedAddress(assetAddr, chain = 0, index = 4)),
+            )),
+        )
+        assertEquals(
+            "nothing movable, so there is nothing to split",
+            ForeignAssetTransferService.FanOut.NotNeeded, r.fanOut,
+        )
+        val move = r.moves.single()
+        assertEquals("a55e7:0", move.outpoint)
+        assertEquals(MoveRefusal.RULE_BOUND, move.refusal)
+        assertFalse(move.moved)
+    }
+
+    @Test fun `an asset whose rules are unknown is refused as unknown`() {
+        val svc = service(assetClassifier = classifier(app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.UNKNOWN))
+        val move = run(svc, listOf(profileResult())).moves.single()
+        assertFalse(move.moved)
+        assertEquals(MoveRefusal.RULES_UNKNOWN, move.refusal)
+    }
+
+    @Test fun `a rule-free asset still moves`() {
+        val move = run(service(), listOf(profileResult())).moves.single()
+        assertTrue(move.moved)
+        assertNull(move.refusal)
+    }
+}

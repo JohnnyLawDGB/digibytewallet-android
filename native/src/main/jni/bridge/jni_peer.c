@@ -4,7 +4,7 @@
  * JNI bridge for peer/sync operations: start/stop sync, progress,
  * peer count, block heights, and callback handler registration.
  *
- * All JNI function names match io.digibyte.core.bridge.NativeBridge.
+ * All JNI function names match app.aroundtheblock.wallet.core.bridge.NativeBridge.
  */
 
 #include <stdatomic.h>

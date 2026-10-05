@@ -56,7 +56,7 @@ set -e
 # A stale-LOW mirror does not crash; it silently WEAKENS the eclipse guard. That is
 # exactly the kind of degradation nothing else would ever surface, so assert it here
 # rather than leave another reminder.
-SYNC_KT="$REPO_ROOT/app/src/main/java/io/digibyte/service/SyncService.kt"
+SYNC_KT="$REPO_ROOT/app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt"
 [ -f "$SYNC_KT" ] || { echo "FAIL: cannot find $SYNC_KT to cross-check LATEST_CHECKPOINT_HEIGHT" >&2; exit 1; }
 
 kt_h="$( { grep -oE 'LATEST_CHECKPOINT_HEIGHT[[:space:]]*=[[:space:]]*[0-9_]+' "$SYNC_KT" || true; } \
@@ -76,7 +76,7 @@ fi
 if [ "$kt_h" != "$c_h" ]; then
     echo "FAIL: SyncService.kt LATEST_CHECKPOINT_HEIGHT ($kt_h) != newest BRMainNetCheckpoints ($c_h)"
     echo "      The Kotlin anti-eclipse floor is a hand-copied mirror of the C table and has drifted."
-    echo "      Set LATEST_CHECKPOINT_HEIGHT = ${c_h} in app/src/main/java/io/digibyte/service/SyncService.kt"
+    echo "      Set LATEST_CHECKPOINT_HEIGHT = ${c_h} in app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt"
     exit 1
 fi
 echo "PASS: SyncService.kt LATEST_CHECKPOINT_HEIGHT ($kt_h) matches newest BRMainNetCheckpoints"

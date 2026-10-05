@@ -28,8 +28,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE = os.path.join(ROOT, "native/src/main/jni/bridge")
 OUT = os.path.join(BRIDGE, "jni_registry_gen.h")
-MAIN_KT = os.path.join(ROOT, "core/src/main/java/io/digibyte/core/bridge/NativeBridge.kt")
-TEST_KT = os.path.join(ROOT, "native/src/androidTest/java/io/digibyte/core/bridge/NativeBridge.kt")
+MAIN_KT = os.path.join(ROOT, "core/src/main/java/app/aroundtheblock/wallet/core/bridge/NativeBridge.kt")
+TEST_KT = os.path.join(ROOT, "native/src/androidTest/java/app/aroundtheblock/wallet/core/bridge/NativeBridge.kt")
 
 # The callback interface is the one non-java/lang object type in any signature; its descriptor
 # comes from the same header as the class path, so a package move is one edit.

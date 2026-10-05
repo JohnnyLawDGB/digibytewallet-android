@@ -11,7 +11,7 @@
       wallet. Pinning here rather than only in OkHttp is deliberate: a platform pin-set covers
       WebView traffic too, so one declaration protects both the pages and the API calls.
 
-      Leaf + Let's Encrypt intermediate, matching io.digibyte.core.network.DigistampPins — keep
+      Leaf + Let's Encrypt intermediate, matching app.aroundtheblock.wallet.core.network.DigistampPins — keep
       the two in step. Captured 2026-08-23.
     -->
     <domain-config cleartextTrafficPermitted="false">

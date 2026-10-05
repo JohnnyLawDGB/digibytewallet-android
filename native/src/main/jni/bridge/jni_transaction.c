@@ -3,7 +3,7 @@
  *
  * JNI bridge for transaction operations: create, sign, publish, fee estimation.
  *
- * All JNI function names match io.digibyte.core.bridge.NativeBridge.
+ * All JNI function names match app.aroundtheblock.wallet.core.bridge.NativeBridge.
  *
  * Note: The C core uses RFC 6979 deterministic nonces for ECDSA signing
  * (via secp256k1_nonce_function_rfc6979 in BRKey.c / BRKeySign).

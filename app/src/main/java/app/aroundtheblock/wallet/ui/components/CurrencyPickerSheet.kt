@@ -1,0 +1,120 @@
+package app.aroundtheblock.wallet.ui.components
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
+import app.aroundtheblock.wallet.ui.wallet.WalletViewModel.DisplayCurrency
+import androidx.compose.ui.res.stringResource
+import app.aroundtheblock.wallet.R
+
+/**
+ * Picks the currency the hero balance is quoted in.
+ *
+ * Replaces a tap that cycled USD → BTC → PHP. Cycling is a fine gesture for three options and a
+ * bad one for nineteen: it took up to eighteen taps to return to where you started, and the
+ * available choices were invisible until you had tapped through them all.
+ *
+ * The list is deliberately ordered by how many DigiByte users are likely to want each rather
+ * than alphabetically — someone looking for rupees should not have to scroll past the rand to
+ * find them. [DisplayCurrency]'s declaration order is that order, so there is one place to
+ * change it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CurrencyPickerSheet(
+    selected: DisplayCurrency,
+    onSelect: (DisplayCurrency) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Text(
+            text = stringResource(R.string.cur_title),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 4.dp),
+        )
+        Text(
+            text = stringResource(R.string.cur_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
+        )
+        HorizontalDivider()
+
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            items(DisplayCurrency.entries) { currency ->
+                val isSelected = currency == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(currency) }
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = currencyDisplayName(currency),
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = currency.name,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    )
+                    // Ticked rather than only bolded: weight alone is easy to miss, and this is
+                    // the one row the reader is looking for.
+                    Spacer(modifier = Modifier.width(12.dp))
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(R.string.lang_selected),
+                            tint = DigiByteAccent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            item { Spacer(modifier = Modifier.height(24.dp)) }
+        }
+    }
+}
+
+/**
+ * A currency's name in the CURRENT locale — "Euro" in English, "欧元" in Chinese, "Евро" in
+ * Russian. [java.util.Currency] already knows all of them, so the enum's English
+ * [DisplayCurrency.label] is only a fallback: it covers BTC, which is not an ISO-4217 currency
+ * and therefore has no platform name.
+ */
+internal fun currencyDisplayName(currency: DisplayCurrency): String =
+    runCatching {
+        java.util.Currency.getInstance(currency.name)
+            .getDisplayName(java.util.Locale.getDefault())
+    }.getOrNull()?.takeIf { it.isNotBlank() && it != currency.name } ?: currency.label

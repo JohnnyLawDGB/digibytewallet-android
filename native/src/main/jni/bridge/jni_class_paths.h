@@ -16,11 +16,11 @@
 #define DGB_JNI_CLASS_PATHS_H
 
 #ifndef DGB_JNI_NATIVEBRIDGE_CLASS
-#define DGB_JNI_NATIVEBRIDGE_CLASS "io/digibyte/core/bridge/NativeBridge"
+#define DGB_JNI_NATIVEBRIDGE_CLASS "app/aroundtheblock/wallet/core/bridge/NativeBridge"
 #endif
 
 #ifndef DGB_JNI_NATIVECALLBACK_CLASS
-#define DGB_JNI_NATIVECALLBACK_CLASS "io/digibyte/core/bridge/NativeCallback"
+#define DGB_JNI_NATIVECALLBACK_CLASS "app/aroundtheblock/wallet/core/bridge/NativeCallback"
 #endif
 
 /* JNI type descriptor of NativeCallback, for setCallbackHandler's signature. */
@@ -28,7 +28,7 @@
 
 /* Debug builds only (jni_test.c): the instrumented PeerTest in :native's androidTest. */
 #ifndef DGB_JNI_PEERTEST_CLASS
-#define DGB_JNI_PEERTEST_CLASS "io/digibyte/native_core/PeerTest"
+#define DGB_JNI_PEERTEST_CLASS "app/aroundtheblock/wallet/native_core/PeerTest"
 #endif
 
 #endif /* DGB_JNI_CLASS_PATHS_H */

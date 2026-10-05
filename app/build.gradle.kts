@@ -17,7 +17,7 @@ plugins {
 val asanNative = (project.findProperty("asanNative") as String?)?.toBoolean() ?: false
 
 android {
-    namespace = "io.digibyte"
+    namespace = "app.aroundtheblock.wallet"
     compileSdk = 35
 
     defaultConfig {
