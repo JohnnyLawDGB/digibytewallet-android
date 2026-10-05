@@ -161,27 +161,30 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
 
         item {
             SettingsCategory(title = stringResource(R.string.set_cat_info)) {
-                SettingsRow(
-                    icon = Icons.Default.BugReport,
-                    iconTint = Color(0xFFFF6D00),
-                    title = stringResource(R.string.set_beta),
-                    subtitle = if (betaUpdatesEnabled)
-                        stringResource(R.string.set_beta_on)
-                    else
-                        stringResource(R.string.set_beta_off),
-                    onClick = { viewModel.setBetaUpdatesEnabled(!betaUpdatesEnabled) },
-                    trailing = {
-                        Switch(
-                            checked = betaUpdatesEnabled,
-                            onCheckedChange = { viewModel.setBetaUpdatesEnabled(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFFF6D00)
+                // The beta channel is a GitHub-release channel: sideload builds only.
+                if (app.aroundtheblock.wallet.BuildConfig.SELF_UPDATE) {
+                    SettingsRow(
+                        icon = Icons.Default.BugReport,
+                        iconTint = Color(0xFFFF6D00),
+                        title = stringResource(R.string.set_beta),
+                        subtitle = if (betaUpdatesEnabled)
+                            stringResource(R.string.set_beta_on)
+                        else
+                            stringResource(R.string.set_beta_off),
+                        onClick = { viewModel.setBetaUpdatesEnabled(!betaUpdatesEnabled) },
+                        trailing = {
+                            Switch(
+                                checked = betaUpdatesEnabled,
+                                onCheckedChange = { viewModel.setBetaUpdatesEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFFF6D00)
+                                )
                             )
-                        )
-                    }
-                )
-                SettingsRowDivider()
+                        }
+                    )
+                    SettingsRowDivider()
+                }
                 SettingsRow(
                     icon = Icons.Default.Info,
                     iconTint = DigiByteBlue,

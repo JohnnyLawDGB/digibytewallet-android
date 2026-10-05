@@ -14,7 +14,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG="${1:-mainnetReleaseRuntimeClasspath}"
+CONFIG="${1:-mainnetPlayReleaseRuntimeClasspath}"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 echo "Resolving $CONFIG ..."

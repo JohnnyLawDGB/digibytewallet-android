@@ -87,12 +87,29 @@ android {
     }
 
     // Match native module flavors
-    flavorDimensions += "network"
+    flavorDimensions += listOf("network", "distribution")
     productFlavors {
         create("mainnet") { dimension = "network" }
         create("digiTestnet") {
             dimension = "network"
             applicationIdSuffix = ".testnet"
+        }
+
+        // How the APK reaches people. Play forbids an app it distributes from updating itself
+        // outside Play, so the GitHub self-updater exists only in src/sideload; src/play has an
+        // empty twin. Same applicationId and key for both: a sideloaded install and a Play
+        // install are the same app, and either can update the other.
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
+            buildConfigField("String", "RELEASES_REPO", "\"\"")
+        }
+        create("sideload") {
+            dimension = "distribution"
+            buildConfigField("boolean", "SELF_UPDATE", "true")
+            // This app's sideload builds, published apart from the source repository: io.digibyte
+            // installs read that repository's releases with no tag filter.
+            buildConfigField("String", "RELEASES_REPO", "\"JohnnyLawDGB/aroundtheblock-wallet-releases\"")
         }
     }
 

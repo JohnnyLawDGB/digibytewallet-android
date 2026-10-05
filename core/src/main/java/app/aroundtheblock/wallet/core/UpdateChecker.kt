@@ -17,19 +17,20 @@ data class AppUpdate(
     val isPrerelease: Boolean = false
 )
 
-class UpdateChecker(private val client: OkHttpClient) {
+/**
+ * @param repo the GitHub repository whose releases ARE this app's sideload builds, as "owner/name".
+ *   Deliberately not this source repository: io.digibyte installs already in the wild read ITS
+ *   releases with no tag filter, so a new-app build published there would be offered to them.
+ */
+class UpdateChecker(private val client: OkHttpClient, repo: String) {
 
-    companion object {
-        private const val REPO = "JohnnyLawDGB/digibytewallet-android"
+    /** Stable channel. GitHub's /releases/latest EXCLUDES prereleases by definition —
+     *  which is exactly why tagging `-beta` stops it notifying anyone, and is the
+     *  point of the tag rather than a defect in it. */
+    private val latestUrl = "https://api.github.com/repos/$repo/releases/latest"
 
-        /** Stable channel. GitHub's /releases/latest EXCLUDES prereleases by definition —
-         *  which is exactly why tagging `-beta` stops it notifying anyone, and is the
-         *  point of the tag rather than a defect in it. */
-        private const val LATEST_URL = "https://api.github.com/repos/$REPO/releases/latest"
-
-        /** Beta channel: the full list, newest first, INCLUDING prereleases. */
-        private const val ALL_URL = "https://api.github.com/repos/$REPO/releases?per_page=10"
-    }
+    /** Beta channel: the full list, newest first, INCLUDING prereleases. */
+    private val allUrl = "https://api.github.com/repos/$repo/releases?per_page=10"
 
     /**
      * Check whether a newer version is available.
@@ -43,7 +44,7 @@ class UpdateChecker(private val client: OkHttpClient) {
     ): AppUpdate? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
-                .url(if (includePrereleases) ALL_URL else LATEST_URL)
+                .url(if (includePrereleases) allUrl else latestUrl)
                 .header("Accept", "application/vnd.github.v3+json")
                 .build()
 

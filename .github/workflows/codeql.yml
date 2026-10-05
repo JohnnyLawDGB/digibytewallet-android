@@ -4,7 +4,7 @@
 #
 # This workflow keeps a buildless scan for GitHub Actions YAML, and traces a
 # real compile for C and Kotlin using the same Gradle target CI already ships:
-# `:app:assembleMainnetDebug` (includes the NDK native module).
+# `:app:assembleMainnetSideloadDebug` (includes the NDK native module).
 
 name: "CodeQL Advanced"
 
@@ -81,7 +81,7 @@ jobs:
           queries: security-extended
 
       - name: Build (traced)
-        run: ./gradlew :app:assembleMainnetDebug
+        run: ./gradlew :app:assembleMainnetSideloadDebug
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

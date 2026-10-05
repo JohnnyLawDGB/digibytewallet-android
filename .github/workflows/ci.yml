@@ -81,7 +81,9 @@ jobs:
         run: ./scripts/osv-scan.sh
 
       - name: Unit Tests
-        run: ./gradlew testMainnetDebugUnitTest
+        # :app has a second flavor dimension (play / sideload), so its tasks are named per flavor and
+        # the root-level testMainnetDebugUnitTest would silently skip it. Name both.
+        run: ./gradlew testMainnetDebugUnitTest :app:testMainnetSideloadDebugUnitTest :app:testMainnetPlayDebugUnitTest
 
       # ASan known-answer tests compiled against the live C submodule sources. These cover
       # memory safety and wire/protocol invariants the JVM tests structurally cannot reach:
@@ -100,14 +102,14 @@ jobs:
       - name: Native host KATs
         run: ./scripts/run-host-kats.sh
 
-      - name: Build Debug APK
-        run: ./gradlew :app:assembleMainnetDebug
+      - name: Build Debug APKs (sideload + play)
+        run: ./gradlew :app:assembleMainnetSideloadDebug :app:assembleMainnetPlayDebug
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: app/build/outputs/apk/mainnet/debug/*.apk
+          path: app/build/outputs/apk/mainnet*/debug/*.apk
           retention-days: 30
 
   # Weekly native sweep, on a quiet repository too. Needs no SDK, no JDK and no Gradle: the

@@ -19,13 +19,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import dagger.hilt.android.AndroidEntryPoint
-import app.aroundtheblock.wallet.core.AppUpdate
-import app.aroundtheblock.wallet.core.UpdateChecker
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.WalletState
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.reconcile.PostUpgradeReconciler
-import app.aroundtheblock.wallet.ui.components.UpdateDialog
 import okhttp3.OkHttpClient
 import app.aroundtheblock.wallet.core.db.dao.WalletConfigDao
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
@@ -261,33 +258,9 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
-                // Update check
-                var pendingUpdate by remember { mutableStateOf<AppUpdate?>(null) }
-                androidx.compose.runtime.LaunchedEffect(Unit) {
-                    val currentVersion = try {
-                        packageManager.getPackageInfo(packageName, 0).versionName ?: "0"
-                    } catch (e: Exception) { "0" }
-                    // Opt-in beta channel (Settings). Default false: /releases/latest
-                    // excludes prereleases, so nobody is pushed an unverified build.
-                    val wantsBeta = getSharedPreferences("dgb_settings", MODE_PRIVATE)
-                        .getBoolean("beta_updates", false)
-                    // Tor on and not connected yet (it starts after unlock and takes a while to
-                    // bootstrap): requests are held and then refused rather than sent direct, so
-                    // a check made now would simply fail. Wait for Tor — or the announced
-                    // clearnet fallback, or the user turning Tor off — and check then.
-                    while (app.aroundtheblock.wallet.di.NetworkModule.torRoute(torManager) is app.aroundtheblock.wallet.core.tor.TorRoute.Blocked) {
-                        delay(2_000L)
-                    }
-                    val update = UpdateChecker(okHttpClient)
-                        .checkForUpdate(currentVersion, includePrereleases = wantsBeta)
-                    if (update != null) pendingUpdate = update
-                }
-                if (pendingUpdate != null) {
-                    UpdateDialog(
-                        update = pendingUpdate!!,
-                        onDismiss = { pendingUpdate = null }
-                    )
-                }
+                // Self-update from GitHub: sideload builds only. The play flavor's version is empty —
+                // Play updates the app itself and forbids any other way (see src/play).
+                app.aroundtheblock.wallet.update.SelfUpdatePrompt(okHttpClient, torManager)
 
                 // Background-sync (battery optimization) nudge. Doze / One UI suspends the
                 // whole process when the screen is off, dropping peers to 0 until the app is
