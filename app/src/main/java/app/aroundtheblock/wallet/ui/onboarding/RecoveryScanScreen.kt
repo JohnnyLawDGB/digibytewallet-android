@@ -274,9 +274,10 @@ private fun DoneBody(
             Spacer(Modifier.height(10.dp))
         }
 
-        if (verdict == app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.Outcome.LIKELY_TYPO) {
+        // Set only when a passphrase was entered. Without one, an empty result needs no caveat.
+        if (verdict != null && verdict != app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.Outcome.FOUND) {
             Text(
-                stringResource(R.string.restore_likely_typo),
+                stringResource(R.string.restore_pass_nothing_found),
                 color = Color(0xFFFFCC66),
                 fontSize = 13.sp,
             )

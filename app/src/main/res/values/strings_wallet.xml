@@ -797,7 +797,7 @@
     <string name="restore_unreachable_body">The check could not run. Sync will still find this wallet\'s own formats after you continue; retry, or use Settings → Recover funds later for other apps\' formats.</string>
     <string name="restore_none_body">Nothing unspent on the formats checked. Sync will still find this wallet\'s own transactions after you continue.</string>
     <string name="restore_nonnative_note">%1$s DGB is on another app\'s address format. After the restore you will be taken to Recover funds to move it into this wallet — nothing is moved until you confirm there.</string>
-    <string name="restore_likely_typo">This phrase has funds WITHOUT the passphrase you entered. If you did not set one when you created the wallet, go back and close the passphrase field; if you did, check it for a typo — a wrong passphrase opens a different, empty wallet.</string>
+    <string name="restore_pass_nothing_found">Nothing was found with the passphrase you entered. A passphrase has no checksum: a wrong one opens a different, empty wallet without any error. Check it for a typo — or, if you did not set one when you created the wallet, go back and close the passphrase field.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d address scanned</item>
         <item quantity="other">%1$s · %2$d addresses scanned</item>

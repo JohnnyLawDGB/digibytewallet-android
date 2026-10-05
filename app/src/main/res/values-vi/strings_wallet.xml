@@ -656,7 +656,7 @@
     <string name="restore_unreachable_body">Không thể chạy kiểm tra. Sau khi bạn tiếp tục, đồng bộ vẫn sẽ tìm thấy các định dạng riêng của ví này; hãy thử lại, hoặc sau này dùng Cài đặt → Khôi phục tiền từ ví khác cho định dạng của các ứng dụng khác.</string>
     <string name="restore_none_body">Không có khoản chưa chi tiêu nào trên các định dạng đã kiểm tra. Sau khi bạn tiếp tục, đồng bộ vẫn sẽ tìm thấy các giao dịch riêng của ví này.</string>
     <string name="restore_nonnative_note">%1$s DGB đang nằm trên định dạng địa chỉ của một ứng dụng khác. Sau khi khôi phục, bạn sẽ được đưa đến Khôi phục tiền từ ví khác để chuyển số tiền này vào ví này — không có gì được chuyển cho đến khi bạn xác nhận ở đó.</string>
-    <string name="restore_likely_typo">Cụm từ này có tiền KHI KHÔNG dùng cụm mật khẩu bạn đã nhập. Nếu bạn không đặt cụm mật khẩu khi tạo ví, hãy quay lại và đóng ô cụm mật khẩu; nếu có, hãy kiểm tra lỗi gõ — cụm mật khẩu sai sẽ mở một ví khác, trống.</string>
+    <string name="restore_pass_nothing_found">Không tìm thấy gì với cụm mật khẩu bạn đã nhập. Cụm mật khẩu không có mã kiểm tra: nhập sai sẽ mở một ví khác, trống, mà không báo lỗi. Hãy kiểm tra lỗi gõ — hoặc, nếu bạn không đặt cụm mật khẩu khi tạo ví, hãy quay lại và đóng ô cụm mật khẩu.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="other">%1$s · đã quét %2$d địa chỉ</item>
     </plurals>

@@ -141,32 +141,21 @@ class OnboardingViewModel @Inject constructor(
                 passBytes?.fill(0)
             }
 
-            // When a passphrase was supplied and found nothing, ask the other question too:
-            // does this phrase have funds WITHOUT it? A BIP39 passphrase has no checksum, so a
-            // typo derives a valid empty wallet and the scan honestly reports nothing — which
-            // reads to the user as stolen coins. One extra pass turns that into "check the
-            // passphrase", which is a five-second fix instead of a panic.
-            val comparison: Long? =
-                if (hadPassphrase &&
-                    result is app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done &&
-                    result.totalBalanceSat == 0L &&
-                    !result.anyBackendUnreachable
-                ) {
-                    (recoveryScanService.scan(phrase, null)
-                        as? app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done)
-                        ?.totalBalanceSat
+            // NO second, passphrase-less scan here. Re-scanning without the passphrase would answer
+            // "is it a typo?", but it sends a SECOND wallet's addresses to the backend from the same
+            // IP — and the people who use a passphrase include those who keep a decoy wallet on the
+            // bare phrase. That would link the two at DigiScope, which is exactly what a hidden
+            // wallet exists to prevent, and the user only agreed to send THIS phrase's addresses.
+            // The screen says plainly what an empty passphrase result can mean instead.
+            _passphraseVerdict.value =
+                if (hadPassphrase && result is app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done) {
+                    app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
+                        withPassphraseSat = result.totalBalanceSat,
+                        withoutPassphraseSat = null,
+                        incomplete = result.anyBackendUnreachable,
+                    )
                 } else null
 
-            _passphraseVerdict.value = if (result is app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done) {
-                app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
-                    withPassphraseSat = result.totalBalanceSat,
-                    withoutPassphraseSat = comparison,
-                    incomplete = result.anyBackendUnreachable,
-                )
-            } else null
-
-            // The comparison scan overwrote the observable state; put the real answer back so the
-            // UI never shows funds that belong to a wallet the user is not restoring.
             _scanResults.value = result
         }
     }

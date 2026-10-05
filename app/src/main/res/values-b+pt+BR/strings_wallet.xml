@@ -664,7 +664,7 @@
     <string name="restore_unreachable_body">A verificação não pôde ser executada. A sincronização ainda encontrará os formatos próprios desta carteira depois que você continuar; tente novamente, ou use depois Configurações → Recuperar fundos de outra carteira para os formatos de outros apps.</string>
     <string name="restore_none_body">Nada não gasto nos formatos verificados. A sincronização ainda encontrará as transações próprias desta carteira depois que você continuar.</string>
     <string name="restore_nonnative_note">%1$s DGB estão no formato de endereço de outro app. Após a restauração, você será levado a Recuperar fundos de outra carteira para movê-los para esta carteira — nada é movido até você confirmar lá.</string>
-    <string name="restore_likely_typo">Esta frase tem fundos SEM a frase-senha que você digitou. Se você não definiu uma ao criar a carteira, volte e feche o campo de frase-senha; se definiu, verifique se há erro de digitação — uma frase-senha errada abre outra carteira, vazia.</string>
+    <string name="restore_pass_nothing_found">Nada foi encontrado com a frase-senha informada. Uma frase-senha não tem soma de verificação: uma errada abre outra carteira, vazia, sem nenhum erro. Verifique se há erro de digitação — ou, se você não definiu uma ao criar a carteira, volte e feche o campo da frase-senha.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d endereço verificado</item>
         <item quantity="many">%1$s · %2$d endereços verificados</item>

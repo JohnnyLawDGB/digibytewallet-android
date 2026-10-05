@@ -660,7 +660,7 @@
     <string name="restore_unreachable_body">Hindi natuloy ang pagsusuri. Mahahanap pa rin ng sync ang sariling mga format ng wallet na ito pagkatapos mong magpatuloy; subukan ulit, o gamitin mamaya ang Mga Setting → Bawiin ang pondo mula sa ibang wallet para sa mga format ng ibang app.</string>
     <string name="restore_none_body">Walang hindi pa nagagastos sa mga format na sinuri. Mahahanap pa rin ng sync ang sariling mga transaksyon ng wallet na ito pagkatapos mong magpatuloy.</string>
     <string name="restore_nonnative_note">Ang %1$s DGB ay nasa address format ng ibang app. Pagkatapos ng restore, dadalhin ka sa Bawiin ang pondo mula sa ibang wallet para mailipat ito sa wallet na ito — walang ililipat hangga\'t hindi mo kinukumpirma roon.</string>
-    <string name="restore_likely_typo">May pondo ang phrase na ito nang WALA ang passphrase na inilagay mo. Kung hindi ka nag-set ng passphrase noong ginawa mo ang wallet, bumalik at isara ang passphrase field; kung nag-set ka, suriin kung may typo — ang maling passphrase ay magbubukas ng ibang wallet na walang laman.</string>
+    <string name="restore_pass_nothing_found">Walang nahanap gamit ang passphrase na inilagay mo. Walang checksum ang passphrase: ang mali ay magbubukas ng ibang wallet na walang laman, nang walang anumang error. Tingnan kung may mali sa pag-type — o, kung hindi ka nagtakda nito noong ginawa mo ang wallet, bumalik at isara ang field ng passphrase.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d address ang na-scan</item>
         <item quantity="other">%1$s · %2$d address ang na-scan</item>

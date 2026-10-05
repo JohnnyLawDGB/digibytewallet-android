@@ -666,7 +666,7 @@
     <string name="restore_unreachable_body">No se pudo realizar la comprobación. La sincronización seguirá encontrando los formatos propios de esta billetera cuando continúes; reinténtalo, o usa más tarde Ajustes → Recuperar fondos de otra billetera para los formatos de otras apps.</string>
     <string name="restore_none_body">No hay nada sin gastar en los formatos comprobados. La sincronización seguirá encontrando las transacciones propias de esta billetera cuando continúes.</string>
     <string name="restore_nonnative_note">%1$s DGB están en el formato de dirección de otra app. Tras la restauración irás a Recuperar fondos de otra billetera para moverlos a esta billetera — no se mueve nada hasta que lo confirmes allí.</string>
-    <string name="restore_likely_typo">Esta frase tiene fondos SIN la frase de contraseña que introdujiste. Si no configuraste una al crear la billetera, vuelve atrás y cierra el campo de la frase de contraseña; si lo hiciste, revisa si tiene una errata — una frase de contraseña incorrecta abre otra billetera, vacía.</string>
+    <string name="restore_pass_nothing_found">No se encontró nada con la frase de contraseña que introdujiste. Una frase de contraseña no tiene suma de verificación: una incorrecta abre otra billetera, vacía, sin ningún error. Revisa si tiene un error de escritura o, si no la configuraste al crear la billetera, vuelve atrás y cierra el campo de la frase de contraseña.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d dirección comprobada</item>
         <item quantity="many">%1$s · %2$d direcciones comprobadas</item>

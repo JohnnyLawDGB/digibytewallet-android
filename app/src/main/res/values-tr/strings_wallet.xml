@@ -660,7 +660,7 @@
     <string name="restore_unreachable_body">Kontrol çalıştırılamadı. Devam ettikten sonra eşitleme bu cüzdanın kendi biçimlerini yine de bulur; yeniden deneyin veya diğer uygulamaların biçimleri için daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünü kullanın.</string>
     <string name="restore_none_body">Kontrol edilen biçimlerde harcanmamış bir şey yok. Devam ettikten sonra eşitleme bu cüzdanın kendi işlemlerini yine de bulur.</string>
     <string name="restore_nonnative_note">%1$s DGB başka bir uygulamanın adres biçiminde. Geri yüklemeden sonra bunu bu cüzdana taşımak için Başka bir cüzdandan bakiye kurtar ekranına yönlendirileceksiniz — orada onaylayana kadar hiçbir şey taşınmaz.</string>
-    <string name="restore_likely_typo">Bu ifadenin, girdiğiniz parola OLMADAN bakiyesi var. Cüzdanı oluştururken parola belirlemediyseniz geri dönün ve parola alanını kapatın; belirlediyseniz yazım hatası olup olmadığını kontrol edin — yanlış parola başka, boş bir cüzdan açar.</string>
+    <string name="restore_pass_nothing_found">Girdiğiniz parolayla hiçbir şey bulunamadı. Parolanın sağlama toplamı yoktur: yanlış bir parola hiçbir hata vermeden başka, boş bir cüzdan açar. Yazım hatası olup olmadığını kontrol edin — ya da cüzdanı oluştururken parola belirlemediyseniz geri dönüp parola alanını kapatın.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d adres tarandı</item>
         <item quantity="other">%1$s · %2$d adres tarandı</item>

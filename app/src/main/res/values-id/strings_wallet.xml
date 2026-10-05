@@ -656,7 +656,7 @@
     <string name="restore_unreachable_body">Pemeriksaan tidak dapat dijalankan. Sinkronisasi tetap akan menemukan format milik dompet ini setelah Anda melanjutkan; coba lagi, atau gunakan Pengaturan → Pulihkan dana dari dompet lain nanti untuk format aplikasi lain.</string>
     <string name="restore_none_body">Tidak ada yang belum terpakai di format yang diperiksa. Sinkronisasi tetap akan menemukan transaksi milik dompet ini setelah Anda melanjutkan.</string>
     <string name="restore_nonnative_note">%1$s DGB berada di format alamat aplikasi lain. Setelah pemulihan, Anda akan dibawa ke Pulihkan dana dari dompet lain untuk memindahkannya ke dompet ini — tidak ada yang dipindahkan sampai Anda mengonfirmasi di sana.</string>
-    <string name="restore_likely_typo">Frasa ini punya dana TANPA frasa sandi yang Anda masukkan. Jika Anda tidak menetapkannya saat membuat dompet, kembali dan tutup kolom frasa sandi; jika ya, periksa salah ketik — frasa sandi yang salah membuka dompet lain yang kosong.</string>
+    <string name="restore_pass_nothing_found">Tidak ada yang ditemukan dengan frasa sandi yang Anda masukkan. Frasa sandi tidak punya checksum: frasa sandi yang salah membuka dompet lain yang kosong tanpa pesan kesalahan. Periksa apakah ada salah ketik — atau, jika Anda tidak menetapkannya saat membuat dompet, kembali dan tutup kolom frasa sandi.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="other">%1$s · %2$d alamat dipindai</item>
     </plurals>

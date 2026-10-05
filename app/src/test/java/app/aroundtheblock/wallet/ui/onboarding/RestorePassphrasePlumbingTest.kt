@@ -92,4 +92,26 @@ class RestorePassphrasePlumbingTest {
 
         io.mockk.coVerify(exactly = 0) { scanService.scan(any(), any()) }
     }
+
+    /**
+     * A passphrase scan that finds nothing must not quietly scan again WITHOUT the passphrase.
+     * That second scan sends another wallet's addresses — for some users a decoy on the bare
+     * phrase — to the backend from the same IP, linking the two. The user agreed to send this
+     * phrase's addresses, once.
+     */
+    @Test fun `an empty passphrase scan does not re-scan the bare phrase`() {
+        val empty = mockk<RecoveryScanService.State.Done>(relaxed = true)
+        every { empty.totalBalanceSat } returns 0L
+        every { empty.anyBackendUnreachable } returns false
+        io.mockk.coEvery { scanService.scan(any(), any()) } returns empty
+
+        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        vm.setRecoveryMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+        vm.setPassphrase("correct horse")
+        vm.runRecoveryScan()
+
+        io.mockk.coVerify(exactly = 1) { scanService.scan(any(), any()) }
+        io.mockk.coVerify(exactly = 0) { scanService.scan(any(), null) }
+    }
 }
+

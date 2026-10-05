@@ -668,7 +668,7 @@
     <string name="restore_unreachable_body">Die Prüfung konnte nicht ausgeführt werden. Die Synchronisierung findet die eigenen Formate dieser Wallet trotzdem, nachdem Sie fortfahren; versuchen Sie es erneut oder nutzen Sie später Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen für die Formate anderer Apps.</string>
     <string name="restore_none_body">Auf den geprüften Formaten liegt nichts Unausgegebenes. Die Synchronisierung findet die eigenen Transaktionen dieser Wallet trotzdem, nachdem Sie fortfahren.</string>
     <string name="restore_nonnative_note">%1$s DGB liegen auf dem Adressformat einer anderen App. Nach der Wiederherstellung werden Sie zu „Guthaben aus einer anderen Wallet wiederherstellen“ weitergeleitet, um sie in diese Wallet zu übertragen — nichts wird übertragen, bevor Sie dort bestätigen.</string>
-    <string name="restore_likely_typo">Diese Phrase hat Guthaben OHNE die eingegebene Passphrase. Wenn Sie beim Erstellen der Wallet keine festgelegt haben, gehen Sie zurück und schließen Sie das Passphrase-Feld; falls doch, prüfen Sie sie auf Tippfehler — eine falsche Passphrase öffnet eine andere, leere Wallet.</string>
+    <string name="restore_pass_nothing_found">Mit der eingegebenen Passphrase wurde nichts gefunden. Eine Passphrase hat keine Prüfsumme: Eine falsche öffnet ohne Fehlermeldung eine andere, leere Wallet. Prüfen Sie sie auf Tippfehler — oder, falls Sie beim Erstellen der Wallet keine festgelegt haben, gehen Sie zurück und schließen Sie das Passphrase-Feld.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d Adresse geprüft</item>
         <item quantity="other">%1$s · %2$d Adressen geprüft</item>

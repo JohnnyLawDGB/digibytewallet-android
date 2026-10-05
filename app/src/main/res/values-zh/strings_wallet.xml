@@ -656,7 +656,7 @@
     <string name="restore_unreachable_body">检查未能运行。继续后，同步仍会找到本钱包自身的格式；请重试，或稍后使用“设置 → 从其他钱包恢复资金”查找其他应用的格式。</string>
     <string name="restore_none_body">所检查的格式上没有未花费的资金。继续后，同步仍会找到本钱包自身的交易。</string>
     <string name="restore_nonnative_note">%1$s DGB 位于其他应用的地址格式上。恢复完成后，您将被带到“从其他钱包恢复资金”以将其转入本钱包 — 在您于该处确认之前，不会转移任何资金。</string>
-    <string name="restore_likely_typo">此助记词在【不使用】您输入的密码短语时有资金。如果您创建钱包时没有设置密码短语，请返回并关闭密码短语栏；如果设置过，请检查是否输错 — 错误的密码短语会打开另一个空钱包。</string>
+    <string name="restore_pass_nothing_found">使用您输入的密码短语未找到任何资金。密码短语没有校验码：输错会在没有任何错误提示的情况下打开另一个空钱包。请检查是否有拼写错误；如果您创建钱包时没有设置密码短语，请返回并关闭密码短语栏。</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="other">%1$s · 已扫描 %2$d 个地址</item>
     </plurals>
