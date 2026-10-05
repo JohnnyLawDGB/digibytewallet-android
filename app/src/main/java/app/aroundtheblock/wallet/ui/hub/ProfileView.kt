@@ -29,6 +29,7 @@ import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
+import app.aroundtheblock.wallet.ui.util.openExternalUrl
 
 @Composable
 fun ProfileScreen(
@@ -432,6 +433,9 @@ private fun RegisterHandleContent(
     }
 }
 
+/** The privacy policy's account-deletion section — also the link registered with Play. */
+private const val DELETE_ACCOUNT_URL = "https://digiscope.me/wallet/privacy-policy#delete-account"
+
 // ── Profile display (has handle) ──────────────────────────────────────────
 
 @Composable
@@ -574,6 +578,20 @@ private fun ProfileContent(
             )
             Spacer(Modifier.width(8.dp))
             Text("Unlink DigiScope Account")
+        }
+
+        // Unlinking only forgets the session on this device. Play requires an in-app way to ask for
+        // the account itself to be deleted; the request goes by email, and this page says how and
+        // what is deleted and kept. Shown only here, where an account exists.
+        val context = LocalContext.current
+        TextButton(
+            onClick = { openExternalUrl(context, DELETE_ACCOUNT_URL) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                "Delete my DigiScope account",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
