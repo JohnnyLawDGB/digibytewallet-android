@@ -85,3 +85,6 @@ dgb-wallet-release.jks
 *.pfx
 *.pepk
 keystore.properties
+
+# scripts/build-release.sh output: signed artifacts and R8 mappings, never committed.
+/dist/
