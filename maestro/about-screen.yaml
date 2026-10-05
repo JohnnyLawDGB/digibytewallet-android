@@ -1,4 +1,4 @@
-appId: io.digibyte
+appId: app.aroundtheblock.wallet.debug
 name: "About screen — version + wallet info"
 tags:
   - requires-wallet

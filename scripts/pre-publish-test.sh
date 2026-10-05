@@ -19,8 +19,10 @@ PREVIOUS_APK="$PROJECT_DIR/test-fixtures/previous-release.apk"
 RESULTS_DIR="$PROJECT_DIR/test-results"
 TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"
 RESULT_FILE="$RESULTS_DIR/$TIMESTAMP.txt"
-PACKAGE="io.digibyte"
-ACTIVITY="$PACKAGE/.MainActivity"
+# The debug build carries the .debug suffix, but its classes stay in the namespace, so the
+# activity must be named in full ("$PACKAGE/.MainActivity" would look in ...debug.MainActivity).
+PACKAGE="app.aroundtheblock.wallet.debug"
+ACTIVITY="$PACKAGE/app.aroundtheblock.wallet.MainActivity"
 
 # API levels to test
 ALL_API_LEVELS=(28 33 34 35)
