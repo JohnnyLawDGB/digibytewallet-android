@@ -46,6 +46,9 @@
     <string name="unlock_locked">Bloqueado — tente novamente em %1$s</string>
     <string name="unlock_unlocking">Desbloqueando…</string>
     <string name="unlock_biometrics_cd">Desbloquear com biometria</string>
+    <string name="recover_title">Recuperar carteira</string>
+    <string name="recover_body">Digite sua frase de recuperação para restaurar sua carteira.</string>
+    <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Tentar novamente</string>
     <string name="verify_next">Avançar</string>
@@ -629,4 +632,52 @@
     <string name="market_tor_notice_title">O Mercado não passa pelo Tor</string>
     <string name="market_tor_notice_body">O Mercado não passa pelo Tor; o site verá seu endereço IP.</string>
     <string name="market_tor_notice_continue">Continuar</string>
+    <string name="restore_pass_toggle">Usei uma frase-senha</string>
+    <string name="restore_pass_body">Somente se você adicionou uma ao criar esta carteira. Uma frase-senha errada abre outra carteira, vazia — sem nenhum aviso de erro.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Digite todas as %1$d palavras.</string>
+    <string name="restore_err_invalid_words">Palavra(s) inválida(s): %1$s</string>
+    <string name="restore_err_checksum">Esta frase de recuperação não é válida. Confira cada palavra e a ordem delas.</string>
+    <string name="restore_scan_title">Restaurar com privacidade</string>
+    <string name="restore_scan_body">Depois que você continuar, este celular encontrará sozinho as transações da sua carteira — endereços nativos (dgb1q…), legacy (D…), Taproot e DigiDollar — sem enviar seus endereços a ninguém.</string>
+    <string name="restore_other_title">Frase de outro app de carteira?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor e algumas carteiras antigas guardam moedas em formatos de endereço que esta carteira não usa, então a sincronização não consegue vê-las. Uma verificação pode encontrá-las, mas ela envia os endereços derivados da sua frase para a DigiScope (api.digiscope.me), que informa os fundos que houver neles. Não é necessária para uma frase desta DigiByte Wallet. Você também pode executá-la depois em Configurações → Recuperar fundos de outra carteira.</string>
+    <string name="restore_other_check">Verificar outros formatos</string>
+    <string name="restore_scan_deriving">Derivando endereços…</string>
+    <string name="restore_scan_duration">Isso pode levar de 30 a 90 segundos, dependendo do nó.</string>
+    <string name="restore_scan_failed">Falha na varredura</string>
+    <string name="restore_scan_retry">Tentar a verificação novamente</string>
+    <string name="restore_found_title">Fundos encontrados</string>
+    <string name="restore_unreachable_title">Não foi possível acessar a DigiScope</string>
+    <string name="restore_none_title">Nenhum fundo detectado ainda</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB em %2$d caminho</item>
+        <item quantity="many">%1$s DGB em %2$d caminhos</item>
+        <item quantity="other">%1$s DGB em %2$d caminhos</item>
+    </plurals>
+    <string name="restore_unreachable_body">A verificação não pôde ser executada. A sincronização ainda encontrará os formatos próprios desta carteira depois que você continuar; tente novamente, ou use depois Configurações → Recuperar fundos de outra carteira para os formatos de outros apps.</string>
+    <string name="restore_none_body">Nada não gasto nos formatos verificados. A sincronização ainda encontrará as transações próprias desta carteira depois que você continuar.</string>
+    <string name="restore_nonnative_note">%1$s DGB estão no formato de endereço de outro app. Após a restauração, você será levado a Recuperar fundos de outra carteira para movê-los para esta carteira — nada é movido até você confirmar lá.</string>
+    <string name="restore_likely_typo">Esta frase tem fundos SEM a frase-senha que você digitou. Se você não definiu uma ao criar a carteira, volte e feche o campo de frase-senha; se definiu, verifique se há erro de digitação — uma frase-senha errada abre outra carteira, vazia.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d endereço verificado</item>
+        <item quantity="many">%1$s · %2$d endereços verificados</item>
+        <item quantity="other">%1$s · %2$d endereços verificados</item>
+    </plurals>
+    <string name="restore_date_title">Quando você criou esta carteira?</string>
+    <string name="restore_date_body">Isso nos ajuda a pular a varredura desnecessária da blockchain e sincronizar mais rápido.</string>
+    <string name="restore_date_unsure">Não lembro</string>
+    <string name="restore_date_unsure_sub">Varredura completa da blockchain (a mais lenta — use se não tiver certeza)</string>
+    <string name="restore_date_warning">Transações anteriores ao ano selecionado não serão detectadas. Se sua carteira pode ter um histórico mais antigo, escolha um ano anterior — ou “Não lembro” para cobertura completa (mais lento).</string>
+    <string name="restore_date_start">Iniciar recuperação</string>
+    <string name="restore_date_restoring">Restaurando carteira…</string>
+    <string name="restore_date_onwards">A partir de jan. %1$d</string>
+    <string name="restore_date_range">jan. %1$d – dez. %1$d</string>
+    <string name="restore_date_genesis">O DigiByte foi lançado em janeiro de 2014</string>
 </resources>

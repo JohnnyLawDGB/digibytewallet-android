@@ -46,6 +46,9 @@
     <string name="unlock_locked">Заблокировано — повторите через %1$s</string>
     <string name="unlock_unlocking">Разблокировка…</string>
     <string name="unlock_biometrics_cd">Разблокировать по биометрии</string>
+    <string name="recover_title">Восстановить кошелёк</string>
+    <string name="recover_body">Введите фразу восстановления, чтобы восстановить кошелёк.</string>
+    <string name="recover_continue">Продолжить</string>
 
     <string name="seed_retry">Повторить</string>
     <string name="verify_next">Далее</string>
@@ -632,4 +635,54 @@
     <string name="market_tor_notice_title">Маркет не проходит через Tor</string>
     <string name="market_tor_notice_body">Маркет не проходит через Tor; сайт увидит ваш IP-адрес.</string>
     <string name="market_tor_notice_continue">Продолжить</string>
+    <string name="restore_pass_toggle">Я использовал(а) парольную фразу</string>
+    <string name="restore_pass_body">Только если вы добавили её при создании этого кошелька. Неверная парольная фраза открывает другой, пустой кошелёк — без сообщения об ошибке.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Введите все слова (%1$d).</string>
+    <string name="restore_err_invalid_words">Недопустимые слова: %1$s</string>
+    <string name="restore_err_checksum">Эта фраза восстановления недействительна. Проверьте каждое слово и их порядок.</string>
+    <string name="restore_scan_title">Приватное восстановление</string>
+    <string name="restore_scan_body">После продолжения этот телефон сам найдёт транзакции вашего кошелька — нативные (dgb1q…), legacy (D…), Taproot- и DigiDollar-адреса — никому не отправляя ваши адреса.</string>
+    <string name="restore_other_title">Фраза из другого приложения-кошелька?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor и некоторые старые кошельки хранят монеты на форматах адресов, которые этот кошелёк не использует, поэтому синхронизация их не видит. Проверка может их найти, но она отправляет адреса, производные от вашей фразы, в DigiScope (api.digiscope.me), который сообщает о средствах на них. Для фразы из этого DigiByte Wallet не требуется. Её также можно запустить позже: Настройки → Восстановить средства из другого кошелька.</string>
+    <string name="restore_other_check">Проверить другие форматы</string>
+    <string name="restore_scan_deriving">Деривация адресов…</string>
+    <string name="restore_scan_duration">Это может занять 30–90 секунд в зависимости от узла.</string>
+    <string name="restore_scan_failed">Сбой сканирования</string>
+    <string name="restore_scan_retry">Повторить проверку</string>
+    <string name="restore_found_title">Средства найдены</string>
+    <string name="restore_unreachable_title">Не удалось связаться с DigiScope</string>
+    <string name="restore_none_title">Средства пока не обнаружены</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB на %2$d пути</item>
+        <item quantity="few">%1$s DGB на %2$d путях</item>
+        <item quantity="many">%1$s DGB на %2$d путях</item>
+        <item quantity="other">%1$s DGB на %2$d путях</item>
+    </plurals>
+    <string name="restore_unreachable_body">Проверку не удалось выполнить. После продолжения синхронизация всё равно найдёт собственные форматы этого кошелька; повторите попытку или позже воспользуйтесь разделом Настройки → Восстановить средства из другого кошелька для форматов других приложений.</string>
+    <string name="restore_none_body">На проверенных форматах нет неизрасходованных средств. После продолжения синхронизация всё равно найдёт собственные транзакции этого кошелька.</string>
+    <string name="restore_nonnative_note">%1$s DGB находятся на формате адресов другого приложения. После восстановления вы перейдёте в «Восстановить средства из другого кошелька», чтобы перевести их в этот кошелёк — ничего не будет перемещено, пока вы не подтвердите там.</string>
+    <string name="restore_likely_typo">У этой фразы есть средства БЕЗ введённой вами парольной фразы. Если вы не задавали её при создании кошелька, вернитесь назад и закройте поле парольной фразы; если задавали — проверьте её на опечатку: неверная парольная фраза открывает другой, пустой кошелёк.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · проверен %2$d адрес</item>
+        <item quantity="few">%1$s · проверено %2$d адреса</item>
+        <item quantity="many">%1$s · проверено %2$d адресов</item>
+        <item quantity="other">%1$s · проверено %2$d адреса</item>
+    </plurals>
+    <string name="restore_date_title">Когда вы создали этот кошелёк?</string>
+    <string name="restore_date_body">Это поможет пропустить лишнее сканирование блокчейна и синхронизироваться быстрее.</string>
+    <string name="restore_date_unsure">Не помню</string>
+    <string name="restore_date_unsure_sub">Полное сканирование блокчейна (самое медленное — выберите, если не уверены)</string>
+    <string name="restore_date_warning">Транзакции старше выбранного года не будут обнаружены. Если у кошелька может быть более ранняя история, выберите более ранний год — или «Не помню» для полного охвата (медленнее).</string>
+    <string name="restore_date_start">Начать восстановление</string>
+    <string name="restore_date_restoring">Восстановление кошелька…</string>
+    <string name="restore_date_onwards">С января %1$d</string>
+    <string name="restore_date_range">янв. %1$d – дек. %1$d</string>
+    <string name="restore_date_genesis">DigiByte запущен в январе 2014 г.</string>
 </resources>

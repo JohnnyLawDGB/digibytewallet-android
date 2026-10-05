@@ -46,6 +46,9 @@
     <string name="unlock_locked">已锁定——请在 %1$s 后重试</string>
     <string name="unlock_unlocking">正在解锁…</string>
     <string name="unlock_biometrics_cd">使用生物识别解锁</string>
+    <string name="recover_title">恢复钱包</string>
+    <string name="recover_body">输入您的助记词以恢复钱包。</string>
+    <string name="recover_continue">继续</string>
 
     <string name="seed_retry">重试</string>
     <string name="verify_next">下一步</string>
@@ -623,4 +626,48 @@
     <string name="market_tor_notice_title">市场不经过 Tor 路由</string>
     <string name="market_tor_notice_body">市场不经过 Tor 路由；该网站将看到您的 IP 地址。</string>
     <string name="market_tor_notice_continue">继续</string>
+    <string name="restore_pass_toggle">我设置过密码短语</string>
+    <string name="restore_pass_body">仅当您创建此钱包时添加过密码短语才需填写。密码短语错误会打开另一个空钱包，且不会有任何错误提示。</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">请输入全部 %1$d 个词。</string>
+    <string name="restore_err_invalid_words">无效的词：%1$s</string>
+    <string name="restore_err_checksum">此助记词无效。请仔细检查每个词及其顺序。</string>
+    <string name="restore_scan_title">私密恢复</string>
+    <string name="restore_scan_body">继续后，这部手机会自行查找您钱包的交易 — 原生 (dgb1q…)、Legacy (D…)、Taproot 和 DigiDollar 地址 — 不会将您的地址发送给任何人。</string>
+    <string name="restore_other_title">助记词来自其他钱包应用？</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自本 DigiByte Wallet，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
+    <string name="restore_other_check">检查其他格式</string>
+    <string name="restore_scan_deriving">正在派生地址…</string>
+    <string name="restore_scan_duration">根据节点不同，这可能需要 30-90 秒。</string>
+    <string name="restore_scan_failed">扫描失败</string>
+    <string name="restore_scan_retry">重试检查</string>
+    <string name="restore_found_title">已找到资金</string>
+    <string name="restore_unreachable_title">无法连接 DigiScope</string>
+    <string name="restore_none_title">尚未检测到资金</string>
+    <plurals name="restore_found_body">
+        <item quantity="other">%2$d 条路径上共 %1$s DGB</item>
+    </plurals>
+    <string name="restore_unreachable_body">检查未能运行。继续后，同步仍会找到本钱包自身的格式；请重试，或稍后使用“设置 → 从其他钱包恢复资金”查找其他应用的格式。</string>
+    <string name="restore_none_body">所检查的格式上没有未花费的资金。继续后，同步仍会找到本钱包自身的交易。</string>
+    <string name="restore_nonnative_note">%1$s DGB 位于其他应用的地址格式上。恢复完成后，您将被带到“从其他钱包恢复资金”以将其转入本钱包 — 在您于该处确认之前，不会转移任何资金。</string>
+    <string name="restore_likely_typo">此助记词在【不使用】您输入的密码短语时有资金。如果您创建钱包时没有设置密码短语，请返回并关闭密码短语栏；如果设置过，请检查是否输错 — 错误的密码短语会打开另一个空钱包。</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="other">%1$s · 已扫描 %2$d 个地址</item>
+    </plurals>
+    <string name="restore_date_title">您是什么时候创建这个钱包的？</string>
+    <string name="restore_date_body">这有助于跳过不必要的区块链扫描，加快同步速度。</string>
+    <string name="restore_date_unsure">我不记得了</string>
+    <string name="restore_date_unsure_sub">完整区块链扫描（最慢 — 不确定时使用）</string>
+    <string name="restore_date_warning">早于所选年份的交易将不会被检测到。如果您的钱包可能有更早的记录，请选择更早的年份 — 或选择“我不记得了”以完整覆盖（较慢）。</string>
+    <string name="restore_date_start">开始恢复</string>
+    <string name="restore_date_restoring">正在恢复钱包…</string>
+    <string name="restore_date_onwards">%1$d年1月起</string>
+    <string name="restore_date_range">%1$d年1月 – %1$d年12月</string>
+    <string name="restore_date_genesis">DigiByte 于 2014 年 1 月上线</string>
 </resources>

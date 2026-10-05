@@ -59,6 +59,9 @@
     <string name="unlock_biometrics_cd">Unlock with biometrics</string>
 
     <!-- ── Recover ──────────────────────────────────────────────────────────────── -->
+    <string name="recover_title">Recover Wallet</string>
+    <string name="recover_body">Enter your seed phrase to restore your wallet.</string>
+    <string name="recover_continue">Continue</string>
 
     <!-- ── Seed display / verification ──────────────────────────────────────────── -->
     <string name="seed_retry">Retry</string>
@@ -763,4 +766,50 @@
     <string name="market_tor_notice_title">Market is not routed through Tor</string>
     <string name="market_tor_notice_body">Market is not routed through Tor; the site will see your IP address.</string>
     <string name="market_tor_notice_continue">Continue</string>
+    <string name="restore_pass_toggle">I used a passphrase</string>
+    <string name="restore_pass_body">Only if you added one when you created this wallet. A wrong passphrase opens a different, empty wallet — no error will warn you.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Please enter all %1$d words.</string>
+    <string name="restore_err_invalid_words">Invalid word(s): %1$s</string>
+    <string name="restore_err_checksum">This recovery phrase isn\'t valid. Double-check each word and its order.</string>
+    <string name="restore_scan_title">Restore privately</string>
+    <string name="restore_scan_body">After you continue, this phone finds your wallet\'s transactions itself — native (dgb1q…), legacy (D…), Taproot and DigiDollar addresses — without sending your addresses to anyone.</string>
+    <string name="restore_other_title">Phrase from a different wallet app?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from this DigiByte Wallet. You can also run it later from Settings → Recover funds.</string>
+    <string name="restore_other_check">Check other formats</string>
+    <string name="restore_scan_deriving">Deriving addresses…</string>
+    <string name="restore_scan_duration">This can take 30-90 seconds depending on the node.</string>
+    <string name="restore_scan_failed">Scan failed</string>
+    <string name="restore_scan_retry">Retry the check</string>
+    <string name="restore_found_title">Funds found</string>
+    <string name="restore_unreachable_title">Couldn\'t reach DigiScope</string>
+    <string name="restore_none_title">No funds detected yet</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB across %2$d path</item>
+        <item quantity="other">%1$s DGB across %2$d paths</item>
+    </plurals>
+    <string name="restore_unreachable_body">The check could not run. Sync will still find this wallet\'s own formats after you continue; retry, or use Settings → Recover funds later for other apps\' formats.</string>
+    <string name="restore_none_body">Nothing unspent on the formats checked. Sync will still find this wallet\'s own transactions after you continue.</string>
+    <string name="restore_nonnative_note">%1$s DGB is on another app\'s address format. After the restore you will be taken to Recover funds to move it into this wallet — nothing is moved until you confirm there.</string>
+    <string name="restore_likely_typo">This phrase has funds WITHOUT the passphrase you entered. If you did not set one when you created the wallet, go back and close the passphrase field; if you did, check it for a typo — a wrong passphrase opens a different, empty wallet.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d address scanned</item>
+        <item quantity="other">%1$s · %2$d addresses scanned</item>
+    </plurals>
+    <string name="restore_date_title">When did you create this wallet?</string>
+    <string name="restore_date_body">This helps us skip unnecessary blockchain scanning and sync faster.</string>
+    <string name="restore_date_unsure">I don\'t remember</string>
+    <string name="restore_date_unsure_sub">Full blockchain scan (slowest — use if unsure)</string>
+    <string name="restore_date_warning">Transactions older than the selected year will not be detected. If your wallet may have older history, choose an earlier year — or \"I don\'t remember\" for full coverage (slower).</string>
+    <string name="restore_date_start">Start Recovery</string>
+    <string name="restore_date_restoring">Restoring wallet…</string>
+    <string name="restore_date_onwards">Jan %1$d onwards</string>
+    <string name="restore_date_range">Jan %1$d – Dec %1$d</string>
+    <string name="restore_date_genesis">DigiByte launched January 2014</string>
 </resources>

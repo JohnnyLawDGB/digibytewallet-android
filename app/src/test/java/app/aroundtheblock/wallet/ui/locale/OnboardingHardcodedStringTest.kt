@@ -76,6 +76,12 @@ class OnboardingHardcodedStringTest {
         "ui/components/TransactionItem.kt",
         "ui/components/CurrencyPickerSheet.kt",
         "ui/onboarding/PassphraseSection.kt",
+        // The restore path: phrase entry, the restore-privately / other-formats opt-in, and the
+        // wallet-birth date. Forced for anyone restoring, and the opt-in is a privacy disclosure
+        // (what is sent to api.digiscope.me) that has to be readable in the user's language.
+        "ui/onboarding/MnemonicInputScreen.kt",
+        "ui/onboarding/RecoveryScanScreen.kt",
+        "ui/onboarding/RecoveryDateScreen.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -85,7 +91,7 @@ class OnboardingHardcodedStringTest {
     /** Navigation routes — identifiers the code matches on, never shown to anyone. */
     private val ROUTES = setOf(
         "onboarding", "wallet", "unlock", "pin_setup", "seed_verify", "seed_passphrase",
-        "recover_funds",
+        "recover_funds", "mnemonic_input", "recovery_scan", "recovery_date",
         "seed_display/{wordCount}", "seed_display/\$selectedWordCount",
         "settings_security", "settings_network", "settings_display", "settings_reconcile",
         "settings_about",
@@ -145,6 +151,9 @@ class OnboardingHardcodedStringTest {
         " else ",
         "Captured Digi-ID deep link for \${intent.data?.host}",
         "\$number", "• \$tip", "%d:%02d", ", ", "DigiByte",
+        // Restore: a word field's label is its 1-based position number, and a scanned path's
+        // balance is a value plus the ticker — neither has a sentence to translate.
+        "\${index + 1}", "\${fmt.format(dgb)} DGB",
     )
 
     private val quoted = Regex("\"([^\"\\n]{2,})\"")

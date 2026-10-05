@@ -114,22 +114,34 @@ fun OnboardingScreen(
                 )
             }
 
-            // NO RESTORE AT FIRST RUN — deliberate, and a security decision rather than a
-            // UX one.
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // RESTORE IS BACK AT FIRST RUN (owner decision 2026-10-03), reversing 1557a121.
             //
-            // Restoring an old phrase re-imports its keys, including legacy derivations whose
-            // public keys may already be exposed on-chain. P2PK outputs carry the public key
-            // in the output script itself, and any legacy address that has ever been SPENT from
-            // has published its key in the spending input. Those coins are readable to anyone
-            // holding a sufficiently capable quantum computer, whenever that arrives.
+            // That commit removed it for a real reason: restoring re-imports an old phrase's keys,
+            // legacy derivations included, and any address ever spent from has published its public
+            // key. Sweeping to fresh keys leaves that exposure behind; importing carries it forward.
             //
-            // So the wallet creates fresh keys here, and an older wallet's funds are TRANSFERRED
-            // in from Settings instead — landing on never-spent addresses whose keys are still
-            // behind a hash. Importing would carry the exposure forward; sweeping leaves it behind.
-            //
-            // Transferring an older wallet's funds in is Settings -> Recover funds (a sweep into
-            // this wallet's fresh keys). There is no restore-in-place: the screens that used to do
-            // it were unreachable after this change and have been removed.
+            // What changed is the move to app.aroundtheblock.wallet. Everyone on io.digibyte has to
+            // come across, and restoring is the move that touches nothing on chain: no fee, no
+            // waiting, and every asset comes along, including ones with transfer rules that a sweep
+            // would have to satisfy. Sweeping stays one tap away in Settings -> Recover funds for
+            // anyone who wants fresh keys.
+            OutlinedButton(
+                onClick = { navController.navigate("mnemonic_input") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DigiByteAccent),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = DigiByteAccent)
+            ) {
+                Text(
+                    text = stringResource(R.string.onb_recover),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
 
             Spacer(modifier = Modifier.height(40.dp))
 

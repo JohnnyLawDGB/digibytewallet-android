@@ -46,6 +46,9 @@
     <string name="unlock_locked">ロック中 — %1$s 後に再試行してください</string>
     <string name="unlock_unlocking">ロック解除中…</string>
     <string name="unlock_biometrics_cd">生体認証でロック解除</string>
+    <string name="recover_title">ウォレットを復元</string>
+    <string name="recover_body">ウォレットを復元するにはリカバリーフレーズを入力してください。</string>
+    <string name="recover_continue">続ける</string>
 
     <string name="seed_retry">再試行</string>
     <string name="verify_next">次へ</string>
@@ -623,4 +626,48 @@
     <string name="market_tor_notice_title">マーケットは Tor を経由しません</string>
     <string name="market_tor_notice_body">マーケットは Tor を経由しません。サイトにはあなたの IP アドレスが見えます。</string>
     <string name="market_tor_notice_continue">続行</string>
+    <string name="restore_pass_toggle">パスフレーズを設定した</string>
+    <string name="restore_pass_body">このウォレットの作成時にパスフレーズを追加した場合のみ入力してください。パスフレーズが違うと、別の空のウォレットが開きます。エラーは表示されません。</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">%1$d 単語すべてを入力してください。</string>
+    <string name="restore_err_invalid_words">無効な単語: %1$s</string>
+    <string name="restore_err_checksum">このリカバリーフレーズは無効です。各単語とその順番をもう一度確認してください。</string>
+    <string name="restore_scan_title">プライベートに復元</string>
+    <string name="restore_scan_body">続行すると、このスマートフォン自身がウォレットの取引（ネイティブ (dgb1q…)、Legacy (D…)、Taproot、DigiDollar の各アドレス）を見つけます。アドレスを誰にも送信しません。</string>
+    <string name="restore_other_title">別のウォレットアプリのフレーズですか？</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor や一部の古いウォレットは、このウォレットが使わないアドレス形式でコインを保管しているため、同期では見つけられません。チェックを実行すると見つけられますが、その際、フレーズから導出したアドレスを DigiScope (api.digiscope.me) に送信し、DigiScope がそれらのアドレス上の資金を報告します。この DigiByte Wallet のフレーズであれば不要です。後から「設定 → 別のウォレットから資金を復元」で実行することもできます。</string>
+    <string name="restore_other_check">他の形式をチェック</string>
+    <string name="restore_scan_deriving">アドレスを導出しています…</string>
+    <string name="restore_scan_duration">ノードによっては 30〜90 秒かかることがあります。</string>
+    <string name="restore_scan_failed">スキャンに失敗しました</string>
+    <string name="restore_scan_retry">チェックを再試行</string>
+    <string name="restore_found_title">資金が見つかりました</string>
+    <string name="restore_unreachable_title">DigiScope に接続できませんでした</string>
+    <string name="restore_none_title">まだ資金は検出されていません</string>
+    <plurals name="restore_found_body">
+        <item quantity="other">%2$d 個のパスに %1$s DGB</item>
+    </plurals>
+    <string name="restore_unreachable_body">チェックを実行できませんでした。続行後も、このウォレット独自の形式は同期で見つかります。再試行するか、他のアプリの形式については後で「設定 → 別のウォレットから資金を復元」を使用してください。</string>
+    <string name="restore_none_body">チェックした形式に未使用の残高はありません。続行後も、このウォレット自身の取引は同期で見つかります。</string>
+    <string name="restore_nonnative_note">%1$s DGB が別のアプリのアドレス形式上にあります。復元後、このウォレットへ移すために「別のウォレットから資金を復元」に移動します。そこで確認するまで何も移動されません。</string>
+    <string name="restore_likely_typo">このフレーズには、入力したパスフレーズを「使わない」場合に資金があります。ウォレット作成時にパスフレーズを設定していない場合は、戻ってパスフレーズ欄を閉じてください。設定した場合は入力ミスがないか確認してください。パスフレーズが違うと、別の空のウォレットが開きます。</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="other">%1$s · %2$d 件のアドレスをスキャン済み</item>
+    </plurals>
+    <string name="restore_date_title">このウォレットはいつ作成しましたか？</string>
+    <string name="restore_date_body">不要なブロックチェーンのスキャンを省き、より速く同期できます。</string>
+    <string name="restore_date_unsure">覚えていない</string>
+    <string name="restore_date_unsure_sub">ブロックチェーン全体をスキャン（最も遅い — 不明な場合に選択）</string>
+    <string name="restore_date_warning">選択した年より前の取引は検出されません。ウォレットにそれ以前の履歴がある可能性がある場合は、より前の年を選ぶか、すべて検出するには「覚えていない」を選んでください（時間がかかります）。</string>
+    <string name="restore_date_start">復元を開始</string>
+    <string name="restore_date_restoring">ウォレットを復元しています…</string>
+    <string name="restore_date_onwards">%1$d年1月以降</string>
+    <string name="restore_date_range">%1$d年1月～12月</string>
+    <string name="restore_date_genesis">DigiByte は 2014 年 1 月にローンチ</string>
 </resources>

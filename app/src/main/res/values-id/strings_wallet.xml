@@ -46,6 +46,9 @@
     <string name="unlock_locked">Terkunci — coba lagi dalam %1$s</string>
     <string name="unlock_unlocking">Membuka…</string>
     <string name="unlock_biometrics_cd">Buka dengan biometrik</string>
+    <string name="recover_title">Pulihkan Dompet</string>
+    <string name="recover_body">Masukkan frasa pemulihan Anda untuk memulihkan dompet.</string>
+    <string name="recover_continue">Lanjutkan</string>
 
     <string name="seed_retry">Coba lagi</string>
     <string name="verify_next">Berikutnya</string>
@@ -623,4 +626,48 @@
     <string name="market_tor_notice_title">Pasar tidak melewati Tor</string>
     <string name="market_tor_notice_body">Pasar tidak melewati Tor; situs akan melihat alamat IP Anda.</string>
     <string name="market_tor_notice_continue">Lanjutkan</string>
+    <string name="restore_pass_toggle">Saya memakai frasa sandi</string>
+    <string name="restore_pass_body">Hanya jika Anda menambahkannya saat membuat dompet ini. Frasa sandi yang salah membuka dompet lain yang kosong — tanpa pesan kesalahan.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Masukkan semua %1$d kata.</string>
+    <string name="restore_err_invalid_words">Kata tidak valid: %1$s</string>
+    <string name="restore_err_checksum">Frasa pemulihan ini tidak valid. Periksa kembali setiap kata dan urutannya.</string>
+    <string name="restore_scan_title">Pulihkan secara privat</string>
+    <string name="restore_scan_body">Setelah Anda melanjutkan, ponsel ini menemukan sendiri transaksi dompet Anda — alamat native (dgb1q…), legacy (D…), Taproot, dan DigiDollar — tanpa mengirim alamat Anda ke siapa pun.</string>
+    <string name="restore_other_title">Frasa dari aplikasi dompet lain?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor, dan beberapa dompet lama menyimpan koin di format alamat yang tidak dipakai dompet ini, sehingga sinkronisasi tidak bisa melihatnya. Pemeriksaan dapat menemukannya, tetapi pemeriksaan itu mengirim alamat yang diturunkan dari frasa Anda ke DigiScope (api.digiscope.me), yang melaporkan dana apa pun di alamat tersebut. Tidak diperlukan untuk frasa dari DigiByte Wallet ini. Anda juga bisa menjalankannya nanti dari Pengaturan → Pulihkan dana dari dompet lain.</string>
+    <string name="restore_other_check">Periksa format lain</string>
+    <string name="restore_scan_deriving">Menurunkan alamat…</string>
+    <string name="restore_scan_duration">Ini bisa memakan waktu 30-90 detik, tergantung node.</string>
+    <string name="restore_scan_failed">Pemindaian gagal</string>
+    <string name="restore_scan_retry">Coba lagi pemeriksaan</string>
+    <string name="restore_found_title">Dana ditemukan</string>
+    <string name="restore_unreachable_title">Tidak dapat menghubungi DigiScope</string>
+    <string name="restore_none_title">Belum ada dana terdeteksi</string>
+    <plurals name="restore_found_body">
+        <item quantity="other">%1$s DGB di %2$d jalur</item>
+    </plurals>
+    <string name="restore_unreachable_body">Pemeriksaan tidak dapat dijalankan. Sinkronisasi tetap akan menemukan format milik dompet ini setelah Anda melanjutkan; coba lagi, atau gunakan Pengaturan → Pulihkan dana dari dompet lain nanti untuk format aplikasi lain.</string>
+    <string name="restore_none_body">Tidak ada yang belum terpakai di format yang diperiksa. Sinkronisasi tetap akan menemukan transaksi milik dompet ini setelah Anda melanjutkan.</string>
+    <string name="restore_nonnative_note">%1$s DGB berada di format alamat aplikasi lain. Setelah pemulihan, Anda akan dibawa ke Pulihkan dana dari dompet lain untuk memindahkannya ke dompet ini — tidak ada yang dipindahkan sampai Anda mengonfirmasi di sana.</string>
+    <string name="restore_likely_typo">Frasa ini punya dana TANPA frasa sandi yang Anda masukkan. Jika Anda tidak menetapkannya saat membuat dompet, kembali dan tutup kolom frasa sandi; jika ya, periksa salah ketik — frasa sandi yang salah membuka dompet lain yang kosong.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="other">%1$s · %2$d alamat dipindai</item>
+    </plurals>
+    <string name="restore_date_title">Kapan Anda membuat dompet ini?</string>
+    <string name="restore_date_body">Ini membantu kami melewati pemindaian blockchain yang tidak perlu dan menyinkronkan lebih cepat.</string>
+    <string name="restore_date_unsure">Saya tidak ingat</string>
+    <string name="restore_date_unsure_sub">Pemindaian blockchain penuh (paling lambat — pilih jika ragu)</string>
+    <string name="restore_date_warning">Transaksi yang lebih lama dari tahun yang dipilih tidak akan terdeteksi. Jika dompet Anda mungkin punya riwayat lebih lama, pilih tahun yang lebih awal — atau \"Saya tidak ingat\" untuk cakupan penuh (lebih lambat).</string>
+    <string name="restore_date_start">Mulai Pemulihan</string>
+    <string name="restore_date_restoring">Memulihkan dompet…</string>
+    <string name="restore_date_onwards">Sejak Jan %1$d</string>
+    <string name="restore_date_range">Jan %1$d – Des %1$d</string>
+    <string name="restore_date_genesis">DigiByte diluncurkan Januari 2014</string>
 </resources>

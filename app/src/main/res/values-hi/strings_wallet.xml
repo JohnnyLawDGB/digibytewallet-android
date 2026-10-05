@@ -46,6 +46,9 @@
     <string name="unlock_locked">लॉक — %1$s में पुनः प्रयास करें</string>
     <string name="unlock_unlocking">अनलॉक हो रहा है…</string>
     <string name="unlock_biometrics_cd">बायोमेट्रिक्स से अनलॉक करें</string>
+    <string name="recover_title">वॉलेट पुनर्प्राप्त करें</string>
+    <string name="recover_body">अपना वॉलेट पुनर्स्थापित करने के लिए अपना रिकवरी वाक्यांश दर्ज करें।</string>
+    <string name="recover_continue">जारी रखें</string>
 
     <string name="seed_retry">फिर से कोशिश करें</string>
     <string name="verify_next">आगे</string>
@@ -626,4 +629,50 @@
     <string name="market_tor_notice_title">मार्केट Tor के ज़रिए रूट नहीं होता</string>
     <string name="market_tor_notice_body">मार्केट Tor के ज़रिए रूट नहीं होता; साइट आपका IP पता देखेगी।</string>
     <string name="market_tor_notice_continue">जारी रखें</string>
+    <string name="restore_pass_toggle">मैंने पासफ़्रेज़ इस्तेमाल किया था</string>
+    <string name="restore_pass_body">सिर्फ़ तभी, जब आपने यह वॉलेट बनाते समय पासफ़्रेज़ जोड़ा था। गलत पासफ़्रेज़ एक अलग, खाली वॉलेट खोलता है — कोई त्रुटि संदेश नहीं दिखता।</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">कृपया सभी %1$d शब्द दर्ज करें।</string>
+    <string name="restore_err_invalid_words">अमान्य शब्द: %1$s</string>
+    <string name="restore_err_checksum">यह रिकवरी वाक्यांश मान्य नहीं है। हर शब्द और उनका क्रम दोबारा जाँचें।</string>
+    <string name="restore_scan_title">निजी रूप से पुनर्स्थापित करें</string>
+    <string name="restore_scan_body">आगे बढ़ने के बाद, यह फ़ोन आपके वॉलेट के लेन-देन खुद ढूँढता है — नेटिव (dgb1q…), legacy (D…), Taproot और DigiDollar पते — आपके पते किसी को भेजे बिना।</string>
+    <string name="restore_other_title">किसी दूसरे वॉलेट ऐप का वाक्यांश?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor और कुछ पुराने वॉलेट सिक्के ऐसे पता फ़ॉर्मैट पर रखते हैं जिनका यह वॉलेट उपयोग नहीं करता, इसलिए सिंक उन्हें नहीं देख सकता। एक जाँच उन्हें ढूँढ सकती है, लेकिन यह आपके वाक्यांश से बने पते DigiScope (api.digiscope.me) को भेजती है, जो उन पर मौजूद किसी भी फंड की जानकारी देता है। इस DigiByte Wallet के वाक्यांश के लिए ज़रूरी नहीं। आप इसे बाद में सेटिंग्स → दूसरे वॉलेट से फंड पुनर्प्राप्त करें से भी चला सकते हैं।</string>
+    <string name="restore_other_check">अन्य फ़ॉर्मैट जाँचें</string>
+    <string name="restore_scan_deriving">पते बनाए जा रहे हैं…</string>
+    <string name="restore_scan_duration">नोड के अनुसार इसमें 30-90 सेकंड लग सकते हैं।</string>
+    <string name="restore_scan_failed">स्कैन विफल</string>
+    <string name="restore_scan_retry">जाँच फिर से करें</string>
+    <string name="restore_found_title">फंड मिले</string>
+    <string name="restore_unreachable_title">DigiScope तक नहीं पहुँच सके</string>
+    <string name="restore_none_title">अभी तक कोई फंड नहीं मिला</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%2$d पाथ पर %1$s DGB</item>
+        <item quantity="other">%2$d पाथ पर %1$s DGB</item>
+    </plurals>
+    <string name="restore_unreachable_body">जाँच नहीं चल सकी। आगे बढ़ने के बाद सिंक फिर भी इस वॉलेट के अपने फ़ॉर्मैट ढूँढ लेगा; फिर से कोशिश करें, या दूसरे ऐप्स के फ़ॉर्मैट के लिए बाद में सेटिंग्स → दूसरे वॉलेट से फंड पुनर्प्राप्त करें का उपयोग करें।</string>
+    <string name="restore_none_body">जाँचे गए फ़ॉर्मैट पर कुछ भी अनखर्चा नहीं है। आगे बढ़ने के बाद सिंक फिर भी इस वॉलेट के अपने लेन-देन ढूँढ लेगा।</string>
+    <string name="restore_nonnative_note">%1$s DGB किसी दूसरे ऐप के पता फ़ॉर्मैट पर है। पुनर्स्थापना के बाद आपको इसे इस वॉलेट में लाने के लिए \"दूसरे वॉलेट से फंड पुनर्प्राप्त करें\" पर ले जाया जाएगा — जब तक आप वहाँ पुष्टि नहीं करते, कुछ भी नहीं ले जाया जाता।</string>
+    <string name="restore_likely_typo">इस वाक्यांश में आपके दर्ज किए गए पासफ़्रेज़ के बिना फंड हैं। अगर आपने वॉलेट बनाते समय पासफ़्रेज़ सेट नहीं किया था, तो वापस जाएँ और पासफ़्रेज़ फ़ील्ड बंद करें; अगर किया था, तो उसमें टाइपिंग गलती जाँचें — गलत पासफ़्रेज़ एक अलग, खाली वॉलेट खोलता है।</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d पता स्कैन किया गया</item>
+        <item quantity="other">%1$s · %2$d पते स्कैन किए गए</item>
+    </plurals>
+    <string name="restore_date_title">आपने यह वॉलेट कब बनाया था?</string>
+    <string name="restore_date_body">इससे हम अनावश्यक ब्लॉकचेन स्कैनिंग छोड़कर तेज़ी से सिंक कर पाते हैं।</string>
+    <string name="restore_date_unsure">मुझे याद नहीं</string>
+    <string name="restore_date_unsure_sub">पूरा ब्लॉकचेन स्कैन (सबसे धीमा — संदेह हो तो इसे चुनें)</string>
+    <string name="restore_date_warning">चुने गए वर्ष से पुराने लेन-देन नहीं मिलेंगे। अगर आपके वॉलेट का इतिहास पुराना हो सकता है, तो पहले का वर्ष चुनें — या पूरी कवरेज के लिए \"मुझे याद नहीं\" (धीमा)।</string>
+    <string name="restore_date_start">रिकवरी शुरू करें</string>
+    <string name="restore_date_restoring">वॉलेट पुनर्स्थापित हो रहा है…</string>
+    <string name="restore_date_onwards">जनवरी %1$d से आगे</string>
+    <string name="restore_date_range">जनवरी %1$d – दिसंबर %1$d</string>
+    <string name="restore_date_genesis">DigiByte जनवरी 2014 में लॉन्च हुआ</string>
 </resources>

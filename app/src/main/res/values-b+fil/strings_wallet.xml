@@ -46,6 +46,9 @@
     <string name="unlock_locked">Naka-lock — subukan ulit sa %1$s</string>
     <string name="unlock_unlocking">Ina-unlock…</string>
     <string name="unlock_biometrics_cd">I-unlock gamit ang biometrics</string>
+    <string name="recover_title">I-recover ang Wallet</string>
+    <string name="recover_body">Ilagay ang iyong recovery phrase para maibalik ang iyong wallet.</string>
+    <string name="recover_continue">Magpatuloy</string>
 
     <string name="seed_retry">Subukan ulit</string>
     <string name="verify_next">Susunod</string>
@@ -626,4 +629,50 @@
     <string name="market_tor_notice_title">Hindi dumadaan sa Tor ang Market</string>
     <string name="market_tor_notice_body">Hindi dumadaan sa Tor ang Market; makikita ng site ang iyong IP address.</string>
     <string name="market_tor_notice_continue">Magpatuloy</string>
+    <string name="restore_pass_toggle">Gumamit ako ng passphrase</string>
+    <string name="restore_pass_body">Kung nagdagdag ka lang ng isa noong ginawa mo ang wallet na ito. Ang maling passphrase ay magbubukas ng ibang wallet na walang laman — walang lalabas na error.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Pakilagay ang lahat ng %1$d salita.</string>
+    <string name="restore_err_invalid_words">Hindi wastong salita: %1$s</string>
+    <string name="restore_err_checksum">Hindi wasto ang recovery phrase na ito. Suriing mabuti ang bawat salita at ang pagkakasunod-sunod nito.</string>
+    <string name="restore_scan_title">I-restore nang pribado</string>
+    <string name="restore_scan_body">Pagkatapos mong magpatuloy, ang phone na ito mismo ang maghahanap ng mga transaksyon ng iyong wallet — native (dgb1q…), legacy (D…), Taproot at DigiDollar na address — nang hindi ipinapadala ang iyong mga address kaninuman.</string>
+    <string name="restore_other_title">Phrase mula sa ibang wallet app?</string>
+    <string name="restore_other_body">Ang Coinomi, Ledger, Trezor at ilang lumang wallet ay naglalagay ng coin sa mga address format na hindi ginagamit ng wallet na ito, kaya hindi ito nakikita ng sync. Mahahanap ito ng isang pagsusuri, pero ipinapadala nito ang mga address na nagmumula sa iyong phrase sa DigiScope (api.digiscope.me), na mag-uulat ng anumang pondo sa mga ito. Hindi kailangan para sa phrase mula sa DigiByte Wallet na ito. Maaari mo rin itong patakbuhin mamaya mula sa Mga Setting → Bawiin ang pondo mula sa ibang wallet.</string>
+    <string name="restore_other_check">Suriin ang ibang format</string>
+    <string name="restore_scan_deriving">Dine-derive ang mga address…</string>
+    <string name="restore_scan_duration">Maaaring tumagal ito nang 30-90 segundo depende sa node.</string>
+    <string name="restore_scan_failed">Nabigo ang scan</string>
+    <string name="restore_scan_retry">Subukan ulit ang pagsusuri</string>
+    <string name="restore_found_title">May nahanap na pondo</string>
+    <string name="restore_unreachable_title">Hindi maabot ang DigiScope</string>
+    <string name="restore_none_title">Wala pang nakitang pondo</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB sa %2$d path</item>
+        <item quantity="other">%1$s DGB sa %2$d path</item>
+    </plurals>
+    <string name="restore_unreachable_body">Hindi natuloy ang pagsusuri. Mahahanap pa rin ng sync ang sariling mga format ng wallet na ito pagkatapos mong magpatuloy; subukan ulit, o gamitin mamaya ang Mga Setting → Bawiin ang pondo mula sa ibang wallet para sa mga format ng ibang app.</string>
+    <string name="restore_none_body">Walang hindi pa nagagastos sa mga format na sinuri. Mahahanap pa rin ng sync ang sariling mga transaksyon ng wallet na ito pagkatapos mong magpatuloy.</string>
+    <string name="restore_nonnative_note">Ang %1$s DGB ay nasa address format ng ibang app. Pagkatapos ng restore, dadalhin ka sa Bawiin ang pondo mula sa ibang wallet para mailipat ito sa wallet na ito — walang ililipat hangga\'t hindi mo kinukumpirma roon.</string>
+    <string name="restore_likely_typo">May pondo ang phrase na ito nang WALA ang passphrase na inilagay mo. Kung hindi ka nag-set ng passphrase noong ginawa mo ang wallet, bumalik at isara ang passphrase field; kung nag-set ka, suriin kung may typo — ang maling passphrase ay magbubukas ng ibang wallet na walang laman.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d address ang na-scan</item>
+        <item quantity="other">%1$s · %2$d address ang na-scan</item>
+    </plurals>
+    <string name="restore_date_title">Kailan mo ginawa ang wallet na ito?</string>
+    <string name="restore_date_body">Makakatulong ito para malaktawan ang hindi kailangang pag-scan ng blockchain at mas mabilis na mag-sync.</string>
+    <string name="restore_date_unsure">Hindi ko maalala</string>
+    <string name="restore_date_unsure_sub">Buong scan ng blockchain (pinakamabagal — gamitin kung hindi sigurado)</string>
+    <string name="restore_date_warning">Hindi made-detect ang mga transaksyong mas luma sa napiling taon. Kung maaaring may mas lumang history ang iyong wallet, pumili ng mas maagang taon — o \"Hindi ko maalala\" para sa buong saklaw (mas mabagal).</string>
+    <string name="restore_date_start">Simulan ang Recovery</string>
+    <string name="restore_date_restoring">Nire-restore ang wallet…</string>
+    <string name="restore_date_onwards">Mula Ene %1$d</string>
+    <string name="restore_date_range">Ene %1$d – Dis %1$d</string>
+    <string name="restore_date_genesis">Inilunsad ang DigiByte noong Enero 2014</string>
 </resources>

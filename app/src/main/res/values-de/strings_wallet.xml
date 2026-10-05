@@ -54,6 +54,9 @@
     <string name="unlock_unlocking">Wird entsperrt…</string>
     <string name="unlock_biometrics_cd">Mit Biometrie entsperren</string>
 
+    <string name="recover_title">Wallet wiederherstellen</string>
+    <string name="recover_body">Geben Sie Ihre Wiederherstellungsphrase ein, um Ihre Wallet wiederherzustellen.</string>
+    <string name="recover_continue">Weiter</string>
 
     <string name="seed_retry">Erneut versuchen</string>
     <string name="verify_next">Weiter</string>
@@ -634,4 +637,50 @@
     <string name="market_tor_notice_title">Markt wird nicht über Tor geleitet</string>
     <string name="market_tor_notice_body">Markt wird nicht über Tor geleitet; die Website sieht Ihre IP-Adresse.</string>
     <string name="market_tor_notice_continue">Weiter</string>
+    <string name="restore_pass_toggle">Ich habe eine Passphrase verwendet</string>
+    <string name="restore_pass_body">Nur wenn Sie beim Erstellen dieser Wallet eine hinzugefügt haben. Eine falsche Passphrase öffnet eine andere, leere Wallet — ohne Fehlermeldung.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Bitte geben Sie alle %1$d Wörter ein.</string>
+    <string name="restore_err_invalid_words">Ungültige Wörter: %1$s</string>
+    <string name="restore_err_checksum">Diese Wiederherstellungsphrase ist ungültig. Prüfen Sie jedes Wort und die Reihenfolge.</string>
+    <string name="restore_scan_title">Privat wiederherstellen</string>
+    <string name="restore_scan_body">Sobald Sie fortfahren, findet dieses Telefon die Transaktionen Ihrer Wallet selbst — native (dgb1q…), Legacy- (D…), Taproot- und DigiDollar-Adressen — ohne Ihre Adressen an irgendjemanden zu senden.</string>
+    <string name="restore_other_title">Phrase aus einer anderen Wallet-App?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus dieser DigiByte Wallet nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
+    <string name="restore_other_check">Andere Formate prüfen</string>
+    <string name="restore_scan_deriving">Adressen werden abgeleitet…</string>
+    <string name="restore_scan_duration">Dies kann je nach Node 30–90 Sekunden dauern.</string>
+    <string name="restore_scan_failed">Scan fehlgeschlagen</string>
+    <string name="restore_scan_retry">Prüfung wiederholen</string>
+    <string name="restore_found_title">Guthaben gefunden</string>
+    <string name="restore_unreachable_title">DigiScope nicht erreichbar</string>
+    <string name="restore_none_title">Noch kein Guthaben erkannt</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB auf %2$d Pfad</item>
+        <item quantity="other">%1$s DGB auf %2$d Pfaden</item>
+    </plurals>
+    <string name="restore_unreachable_body">Die Prüfung konnte nicht ausgeführt werden. Die Synchronisierung findet die eigenen Formate dieser Wallet trotzdem, nachdem Sie fortfahren; versuchen Sie es erneut oder nutzen Sie später Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen für die Formate anderer Apps.</string>
+    <string name="restore_none_body">Auf den geprüften Formaten liegt nichts Unausgegebenes. Die Synchronisierung findet die eigenen Transaktionen dieser Wallet trotzdem, nachdem Sie fortfahren.</string>
+    <string name="restore_nonnative_note">%1$s DGB liegen auf dem Adressformat einer anderen App. Nach der Wiederherstellung werden Sie zu „Guthaben aus einer anderen Wallet wiederherstellen“ weitergeleitet, um sie in diese Wallet zu übertragen — nichts wird übertragen, bevor Sie dort bestätigen.</string>
+    <string name="restore_likely_typo">Diese Phrase hat Guthaben OHNE die eingegebene Passphrase. Wenn Sie beim Erstellen der Wallet keine festgelegt haben, gehen Sie zurück und schließen Sie das Passphrase-Feld; falls doch, prüfen Sie sie auf Tippfehler — eine falsche Passphrase öffnet eine andere, leere Wallet.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d Adresse geprüft</item>
+        <item quantity="other">%1$s · %2$d Adressen geprüft</item>
+    </plurals>
+    <string name="restore_date_title">Wann haben Sie diese Wallet erstellt?</string>
+    <string name="restore_date_body">So können wir unnötiges Durchsuchen der Blockchain überspringen und schneller synchronisieren.</string>
+    <string name="restore_date_unsure">Ich weiß es nicht mehr</string>
+    <string name="restore_date_unsure_sub">Vollständiger Blockchain-Scan (am langsamsten — im Zweifel wählen)</string>
+    <string name="restore_date_warning">Transaktionen vor dem gewählten Jahr werden nicht erkannt. Wenn Ihre Wallet einen älteren Verlauf haben könnte, wählen Sie ein früheres Jahr — oder „Ich weiß es nicht mehr“ für vollständige Abdeckung (langsamer).</string>
+    <string name="restore_date_start">Wiederherstellung starten</string>
+    <string name="restore_date_restoring">Wallet wird wiederhergestellt…</string>
+    <string name="restore_date_onwards">ab Jan. %1$d</string>
+    <string name="restore_date_range">Jan. %1$d – Dez. %1$d</string>
+    <string name="restore_date_genesis">DigiByte startete im Januar 2014</string>
 </resources>

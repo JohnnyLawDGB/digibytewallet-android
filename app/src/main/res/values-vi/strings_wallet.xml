@@ -46,6 +46,9 @@
     <string name="unlock_locked">Đã khóa — thử lại sau %1$s</string>
     <string name="unlock_unlocking">Đang mở khóa…</string>
     <string name="unlock_biometrics_cd">Mở khóa bằng sinh trắc học</string>
+    <string name="recover_title">Khôi phục ví</string>
+    <string name="recover_body">Nhập cụm từ khôi phục để khôi phục ví của bạn.</string>
+    <string name="recover_continue">Tiếp tục</string>
 
     <string name="seed_retry">Thử lại</string>
     <string name="verify_next">Tiếp theo</string>
@@ -623,4 +626,48 @@
     <string name="market_tor_notice_title">Chợ không đi qua Tor</string>
     <string name="market_tor_notice_body">Chợ không đi qua Tor; trang web sẽ thấy địa chỉ IP của bạn.</string>
     <string name="market_tor_notice_continue">Tiếp tục</string>
+    <string name="restore_pass_toggle">Tôi đã dùng cụm mật khẩu</string>
+    <string name="restore_pass_body">Chỉ khi bạn đã thêm nó lúc tạo ví này. Cụm mật khẩu sai sẽ mở một ví khác, trống — không có thông báo lỗi nào.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Vui lòng nhập đủ %1$d từ.</string>
+    <string name="restore_err_invalid_words">Từ không hợp lệ: %1$s</string>
+    <string name="restore_err_checksum">Cụm từ khôi phục này không hợp lệ. Hãy kiểm tra lại từng từ và thứ tự của chúng.</string>
+    <string name="restore_scan_title">Khôi phục riêng tư</string>
+    <string name="restore_scan_body">Sau khi bạn tiếp tục, điện thoại này tự tìm các giao dịch của ví — địa chỉ native (dgb1q…), legacy (D…), Taproot và DigiDollar — mà không gửi địa chỉ của bạn cho bất kỳ ai.</string>
+    <string name="restore_other_title">Cụm từ từ một ứng dụng ví khác?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor và một số ví cũ giữ coin trên các định dạng địa chỉ mà ví này không dùng, nên đồng bộ không thấy được. Một lần kiểm tra có thể tìm ra chúng, nhưng nó gửi các địa chỉ được dẫn xuất từ cụm từ của bạn đến DigiScope (api.digiscope.me), nơi sẽ báo cáo số tiền trên các địa chỉ đó. Không cần thiết cho cụm từ từ DigiByte Wallet này. Bạn cũng có thể chạy sau trong Cài đặt → Khôi phục tiền từ ví khác.</string>
+    <string name="restore_other_check">Kiểm tra các định dạng khác</string>
+    <string name="restore_scan_deriving">Đang dẫn xuất địa chỉ…</string>
+    <string name="restore_scan_duration">Việc này có thể mất 30-90 giây tùy vào node.</string>
+    <string name="restore_scan_failed">Quét thất bại</string>
+    <string name="restore_scan_retry">Thử kiểm tra lại</string>
+    <string name="restore_found_title">Đã tìm thấy tiền</string>
+    <string name="restore_unreachable_title">Không thể kết nối DigiScope</string>
+    <string name="restore_none_title">Chưa phát hiện tiền</string>
+    <plurals name="restore_found_body">
+        <item quantity="other">%1$s DGB trên %2$d đường dẫn</item>
+    </plurals>
+    <string name="restore_unreachable_body">Không thể chạy kiểm tra. Sau khi bạn tiếp tục, đồng bộ vẫn sẽ tìm thấy các định dạng riêng của ví này; hãy thử lại, hoặc sau này dùng Cài đặt → Khôi phục tiền từ ví khác cho định dạng của các ứng dụng khác.</string>
+    <string name="restore_none_body">Không có khoản chưa chi tiêu nào trên các định dạng đã kiểm tra. Sau khi bạn tiếp tục, đồng bộ vẫn sẽ tìm thấy các giao dịch riêng của ví này.</string>
+    <string name="restore_nonnative_note">%1$s DGB đang nằm trên định dạng địa chỉ của một ứng dụng khác. Sau khi khôi phục, bạn sẽ được đưa đến Khôi phục tiền từ ví khác để chuyển số tiền này vào ví này — không có gì được chuyển cho đến khi bạn xác nhận ở đó.</string>
+    <string name="restore_likely_typo">Cụm từ này có tiền KHI KHÔNG dùng cụm mật khẩu bạn đã nhập. Nếu bạn không đặt cụm mật khẩu khi tạo ví, hãy quay lại và đóng ô cụm mật khẩu; nếu có, hãy kiểm tra lỗi gõ — cụm mật khẩu sai sẽ mở một ví khác, trống.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="other">%1$s · đã quét %2$d địa chỉ</item>
+    </plurals>
+    <string name="restore_date_title">Bạn tạo ví này khi nào?</string>
+    <string name="restore_date_body">Điều này giúp bỏ qua việc quét blockchain không cần thiết và đồng bộ nhanh hơn.</string>
+    <string name="restore_date_unsure">Tôi không nhớ</string>
+    <string name="restore_date_unsure_sub">Quét toàn bộ blockchain (chậm nhất — dùng nếu không chắc)</string>
+    <string name="restore_date_warning">Các giao dịch cũ hơn năm đã chọn sẽ không được phát hiện. Nếu ví của bạn có thể có lịch sử cũ hơn, hãy chọn năm sớm hơn — hoặc \"Tôi không nhớ\" để quét đầy đủ (chậm hơn).</string>
+    <string name="restore_date_start">Bắt đầu khôi phục</string>
+    <string name="restore_date_restoring">Đang khôi phục ví…</string>
+    <string name="restore_date_onwards">Từ tháng 1/%1$d trở đi</string>
+    <string name="restore_date_range">Tháng 1/%1$d – Tháng 12/%1$d</string>
+    <string name="restore_date_genesis">DigiByte ra mắt tháng 1/2014</string>
 </resources>
