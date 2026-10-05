@@ -21,7 +21,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.digibyte"
+        // The new app's permanent identity on Play and every device (rebrand 2026-10). It is a
+        // different app from io.digibyte: it installs beside it, never over it.
+        applicationId = "app.aroundtheblock.wallet"
         minSdk = 26
         targetSdk = 35
         versionCode = 40086 // x-release-please-version-code
@@ -56,6 +58,12 @@ android {
     }
 
     buildTypes {
+        // Debug-signed builds get their own ID so they install beside a release build instead of
+        // failing on its signature. minifiedDebug inherits this through initWith(debug).
+        debug {
+            applicationIdSuffix = ".debug"
+        }
+
         release {
             // R8 ON, obfuscation included. The APK is distributed publicly, so it is the
             // artifact an attacker works from — shipping readable class names while the source
