@@ -302,6 +302,10 @@ class MainActivity : FragmentActivity() {
                 val walletState by walletManager.walletState.collectAsState()
                 androidx.compose.runtime.LaunchedEffect(walletState) {
                     if (walletState is app.aroundtheblock.wallet.core.WalletState.Unlocked && !batteryPromptChecked) {
+                        // A restore unlocks the wallet on the date screen, BEFORE the PIN exists;
+                        // prompting then lands the dialog on top of PIN setup. Wait for the PIN —
+                        // create already has one by the time it unlocks, so this costs it nothing.
+                        while (!pinManager.hasPin()) kotlinx.coroutines.delay(500)
                         batteryPromptChecked = true
                         val prefs = this@MainActivity.getSharedPreferences(
                             "dgb_settings", android.content.Context.MODE_PRIVATE)
