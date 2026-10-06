@@ -74,16 +74,16 @@ gradle.taskGraph.whenReady {
 
 android {
     namespace = "app.aroundtheblock.wallet"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         // The new app's permanent identity on Play and every device (rebrand 2026-10). It is a
         // different app from io.digibyte: it installs beside it, never over it.
         applicationId = "app.aroundtheblock.wallet"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 40086 // x-release-please-version-code
-        versionName = "4.0.86" // x-release-please-version
+        targetSdk = 36
+        versionCode = 40087 // x-release-please-version-code
+        versionName = "4.0.87" // x-release-please-version
     }
 
     // Match native module flavors

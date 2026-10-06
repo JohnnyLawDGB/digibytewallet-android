@@ -20,7 +20,7 @@ val asanNative = (project.findProperty("asanNative") as String?)?.toBoolean() ?:
 
 android {
     namespace = "app.aroundtheblock.wallet.native_core"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     defaultConfig {

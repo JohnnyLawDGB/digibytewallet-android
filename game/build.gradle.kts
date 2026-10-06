@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "app.aroundtheblock.wallet.game"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig { minSdk = 26 }
 
     flavorDimensions += "network"

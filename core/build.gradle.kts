@@ -12,7 +12,7 @@ detekt {
 
 android {
     namespace = "app.aroundtheblock.wallet.core"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26
