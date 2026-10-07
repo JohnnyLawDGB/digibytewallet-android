@@ -267,6 +267,28 @@ class MainActivity : FragmentActivity() {
                 // reopened. Battery-exempting the app is the single biggest prevention lever.
                 // Show ONCE, only for an unlocked-and-not-yet-exempt wallet; a Settings entry
                 // re-opens it anytime. Uses the Play-safe settings-list intent (no permission).
+                // Notification permission (Android 13+). Without it the sync service still runs but its
+                // ongoing notification is hidden, so the user cannot see that sync is working or stop
+                // it — and a foreground service is meant to be visible. Asked ONCE, after the PIN exists
+                // (same reason as the battery prompt below: a restore unlocks before PIN setup).
+                val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                ) { }
+                val walletStateForNotif by walletManager.walletState.collectAsState()
+                androidx.compose.runtime.LaunchedEffect(walletStateForNotif) {
+                    if (android.os.Build.VERSION.SDK_INT < 33) return@LaunchedEffect
+                    if (walletStateForNotif !is app.aroundtheblock.wallet.core.WalletState.Unlocked) return@LaunchedEffect
+                    while (!pinManager.hasPin()) kotlinx.coroutines.delay(500)
+                    val prefs = this@MainActivity.getSharedPreferences("dgb_settings", android.content.Context.MODE_PRIVATE)
+                    val granted = ContextCompat.checkSelfPermission(
+                        this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (!granted && !prefs.getBoolean("notification_permission_asked", false)) {
+                        prefs.edit().putBoolean("notification_permission_asked", true).apply()
+                        notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+
                 var showBatteryPrompt by remember { mutableStateOf(false) }
                 var batteryPromptChecked by remember { mutableStateOf(false) }
                 // OBSERVE the wallet state (don't snapshot it once): at app launch the wallet

@@ -101,7 +101,7 @@ class OnboardingHardcodedStringTest {
     private val NON_PROSE = setOf(
         "question_transition", "pin_step_label", "UnlockScreen", "MainActivity",
         // Log messages and pref keys, never rendered.
-        "battery_prompt_dismissed", "beta_updates",
+        "battery_prompt_dismissed", "notification_permission_asked", "beta_updates",
         "dgb_settings", "digiid://", "connection refused", "backstop wipe failed",
         // Ticker, network name and unit — brand-class, never translated (see strings_wallet.xml).
         "DGB", "TESTNET", "USD",
