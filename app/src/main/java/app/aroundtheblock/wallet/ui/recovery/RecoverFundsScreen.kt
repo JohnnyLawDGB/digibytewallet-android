@@ -325,12 +325,10 @@ private fun FindingsBody(
                     // answer to a question the wallet did not finish asking — and a user who
                     // reads it stops looking. Distinct outcome, distinct wording, distinct icon.
                     val incomplete = partialFailurePaths.isNotEmpty()
-                    // A passphrase was supplied and found nothing, but the SAME phrase has funds
-                    // without one. That is the most actionable thing we can say, and it takes
-                    // priority over both "nothing found" and "couldn't finish" — see
-                    // PassphraseScanVerdict for why a positive observation outranks an
-                    // incomplete scan.
-                    val typo = verdict == app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.Outcome.LIKELY_TYPO
+                    // A passphrase was supplied and a complete scan found nothing. A passphrase has no
+                    // checksum, so a typo opens a different, empty wallet without any error; say so
+                    // rather than a bare "no funds".
+                    val typo = verdict == app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.Outcome.NONE_ANYWHERE
                     Icon(
                         imageVector = if (incomplete || typo) Icons.Default.ErrorOutline
                                       else Icons.Default.CheckCircle,

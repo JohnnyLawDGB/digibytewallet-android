@@ -561,7 +561,7 @@
     <string name="pass_none">Keine Passphrase</string>
     <string name="pass_restore_label">Passphrase (leer lassen, wenn Sie keine verwendet haben)</string>
     <string name="pass_restore_none">Mit dieser Passphrase wurde kein Guthaben gefunden.</string>
-    <string name="pass_restore_typo">Kein Guthaben mit dieser Passphrase — aber diese Wiederherstellungsphrase HAT Guthaben ohne Passphrase. Prüfen Sie die Passphrase auf Tippfehler oder lassen Sie sie leer.</string>
+    <string name="pass_restore_typo">Eine Passphrase hat keine Prüfsumme: Eine falsche öffnet ohne Fehlermeldung eine andere, leere Wallet. Prüfen Sie sie auf Tippfehler, oder lassen Sie das Feld leer, falls diese Phrase nie mit einer Passphrase verwendet wurde.</string>
     <string name="pass_restore_retry">Andere Passphrase versuchen</string>
 
     <string name="verify_show_phrase">Wiederherstellungsphrase erneut anzeigen</string>

@@ -553,7 +553,7 @@
     <string name="pass_none">Parola yok</string>
     <string name="pass_restore_label">Parola (kullanmadıysanız boş bırakın)</string>
     <string name="pass_restore_none">Bu parolayla hiçbir bakiye bulunamadı.</string>
-    <string name="pass_restore_typo">Bu parolayla bakiye yok — ancak bu kurtarma ifadesinin parolasız bakiyesi VAR. Parolada yazım hatası olup olmadığını kontrol edin veya boş bırakın.</string>
+    <string name="pass_restore_typo">Parolanın sağlama toplamı yoktur: yanlış bir parola hiçbir hata vermeden başka, boş bir cüzdan açar. Yazım hatası olup olmadığını kontrol edin ya da bu ifade hiç parolayla kullanılmadıysa alanı boş bırakın.</string>
     <string name="pass_restore_retry">Başka bir parola dene</string>
 
     <string name="verify_show_phrase">Kurtarma ifademi tekrar göster</string>

@@ -550,7 +550,7 @@
     <string name="pass_none">Không có cụm mật khẩu</string>
     <string name="pass_restore_label">Cụm mật khẩu (để trống nếu bạn không dùng)</string>
     <string name="pass_restore_none">Không tìm thấy tiền với cụm mật khẩu này.</string>
-    <string name="pass_restore_typo">Không có tiền với cụm mật khẩu đó — nhưng cụm từ khôi phục này CÓ tiền khi không dùng cụm mật khẩu. Hãy kiểm tra lỗi gõ, hoặc để trống.</string>
+    <string name="pass_restore_typo">Cụm mật khẩu không có mã kiểm tra: nhập sai sẽ mở một ví khác, trống, mà không báo lỗi. Hãy kiểm tra lỗi gõ, hoặc để trống nếu cụm từ này chưa từng dùng cụm mật khẩu.</string>
     <string name="pass_restore_retry">Thử cụm mật khẩu khác</string>
 
     <string name="verify_show_phrase">Hiện lại cụm từ khôi phục của tôi</string>
