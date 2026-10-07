@@ -553,7 +553,7 @@
     <string name="pass_none">Sem frase-senha</string>
     <string name="pass_restore_label">Frase-senha (deixe em branco se você não usou uma)</string>
     <string name="pass_restore_none">Nenhum fundo encontrado com esta frase-senha.</string>
-    <string name="pass_restore_typo">Nenhum fundo com essa frase-senha — mas esta frase de recuperação TEM fundos sem nenhuma. Verifique se há erro de digitação, ou deixe em branco.</string>
+    <string name="pass_restore_typo">Uma frase-senha não tem soma de verificação: uma errada abre outra carteira, vazia, sem nenhum erro. Verifique se há erro de digitação ou deixe em branco se esta frase nunca foi usada com uma.</string>
     <string name="pass_restore_retry">Tentar outra frase-senha</string>
 
     <string name="verify_show_phrase">Mostrar minha frase de recuperação novamente</string>
@@ -629,4 +629,7 @@
     <string name="market_tor_notice_title">O Mercado não passa pelo Tor</string>
     <string name="market_tor_notice_body">O Mercado não passa pelo Tor; o site verá seu endereço IP.</string>
     <string name="market_tor_notice_continue">Continuar</string>
+    <string name="move_title">DigiByte Wallet agora é DigiByte Mobile</string>
+    <string name="move_body">Este app não receberá mais atualizações. Instale o DigiByte Mobile pelo Google Play, escolha Recuperar carteira existente e digite a frase de recuperação desta carteira — nada é movido na blockchain. Mantenha este app até que seu saldo apareça no novo.</string>
+    <string name="move_how">Como migrar</string>
 </resources>

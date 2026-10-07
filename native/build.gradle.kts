@@ -39,9 +39,12 @@ android {
                     // The host KAT runner reads this line and builds every suite at the same level.
                     "-DDGB_HEADER_POW_CHECK=2",
                     // Header difficulty-target (MultiShield V4) check level (see BRMerkleBlock.h):
-                    // 1 = compute from the resident ancestors, log "diff-mismatch" / "diff-skip" and count,
-                    // never reject. Raise to 2 only after full syncs on both ABIs show zero mismatches.
-                    "-DDGB_HEADER_DIFF_CHECK=1"
+                    // 2 = a header whose target is not the one MultiShield V4 computes from its resident
+                    //     ancestors is rejected and the peer treated as misbehaving.
+                    // (1 = compute, log "diff-mismatch" / "diff-skip" and count, never reject: v4.0.86's
+                    //  audit level. Raised to 2 after full syncs on arm64 and x86_64 judged every header
+                    //  with zero mismatches, as v4.0.86's notes announced.)
+                    "-DDGB_HEADER_DIFF_CHECK=2"
                 )
                 if (asanNative) {
                     // -fno-omit-frame-pointer so the report carries a usable stack; -O1 keeps it

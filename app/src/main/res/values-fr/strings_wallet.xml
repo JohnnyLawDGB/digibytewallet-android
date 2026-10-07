@@ -535,7 +535,7 @@
     <string name="pass_none">Aucune phrase secrète</string>
     <string name="pass_restore_label">Phrase secrète (laissez vide si vous n\'en avez pas utilisé)</string>
     <string name="pass_restore_none">Aucun fonds trouvé avec cette phrase secrète.</string>
-    <string name="pass_restore_typo">Aucun fonds avec cette phrase secrète — mais cette phrase de récupération EN CONTIENT sans phrase secrète. Vérifiez qu\'il n\'y a pas de faute de frappe, ou laissez le champ vide.</string>
+    <string name="pass_restore_typo">Une phrase secrète n’a pas de somme de contrôle : une phrase erronée ouvre un autre portefeuille, vide, sans aucune erreur. Vérifiez qu’elle ne contient pas de faute de frappe, ou laissez le champ vide si cette phrase n’a jamais été utilisée avec une phrase secrète.</string>
     <string name="pass_restore_retry">Essayer une autre phrase secrète</string>
     <string name="verify_show_phrase">Afficher à nouveau ma phrase de récupération</string>
     <string name="rf_move_assets">Déplacer mes DigiAssets ici</string>
@@ -609,4 +609,7 @@
     <string name="market_tor_notice_title">Le Marché ne passe pas par Tor</string>
     <string name="market_tor_notice_body">Le Marché ne passe pas par Tor ; le site verra votre adresse IP.</string>
     <string name="market_tor_notice_continue">Continuer</string>
+    <string name="move_title">DigiByte Wallet devient DigiByte Mobile</string>
+    <string name="move_body">Cette appli ne recevra plus de mises à jour. Installez DigiByte Mobile depuis Google Play, choisissez Récupérer un portefeuille existant et saisissez la phrase de récupération de ce portefeuille — rien ne bouge sur la chaîne. Gardez cette appli jusqu’à ce que votre solde apparaisse dans la nouvelle.</string>
+    <string name="move_how">Comment migrer</string>
 </resources>

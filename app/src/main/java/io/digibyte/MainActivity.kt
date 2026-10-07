@@ -47,7 +47,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
+/** Where io.digibyte users learn how to move to DigiByte Mobile (steps + the current Play link). */
+private const val MOVE_URL = "https://digiscope.me/wallet#moving"
+
 @AndroidEntryPoint
+
 class MainActivity : FragmentActivity() {
 
     private companion object {
@@ -337,6 +341,38 @@ class MainActivity : FragmentActivity() {
                                     .edit().putBoolean("battery_prompt_dismissed", true).apply()
                                 showBatteryPrompt = false
                             }) { Text(stringResource(R.string.common_not_now)) }
+                        }
+                    )
+                }
+
+                // This is io.digibyte's FINAL release: the wallet continues as DigiByte Mobile
+                // (app.aroundtheblock.wallet), a separate app people move to by restoring their
+                // recovery phrase. Say so once per launch, after unlock, so the person reading it is
+                // the one holding the wallet. The page behind the button tracks Play's open-testing /
+                // production state, so this text never goes stale.
+                var moveNoticeChecked by remember { mutableStateOf(false) }
+                var showMoveNotice by remember { mutableStateOf(false) }
+                androidx.compose.runtime.LaunchedEffect(walletState) {
+                    if (walletState is io.digibyte.core.WalletState.Unlocked && !moveNoticeChecked) {
+                        moveNoticeChecked = true
+                        showMoveNotice = true
+                    }
+                }
+                if (showMoveNotice && !showBatteryPrompt) {
+                    AlertDialog(
+                        onDismissRequest = { showMoveNotice = false },
+                        title = { Text(stringResource(R.string.move_title)) },
+                        text = { Text(stringResource(R.string.move_body)) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                io.digibyte.ui.util.openExternalUrl(this@MainActivity, MOVE_URL)
+                                showMoveNotice = false
+                            }) { Text(stringResource(R.string.move_how)) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showMoveNotice = false }) {
+                                Text(stringResource(R.string.common_not_now))
+                            }
                         }
                     )
                 }

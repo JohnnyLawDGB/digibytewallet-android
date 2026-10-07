@@ -550,7 +550,7 @@
     <string name="pass_none">Walang passphrase</string>
     <string name="pass_restore_label">Passphrase (iwanang blangko kung wala kang ginamit)</string>
     <string name="pass_restore_none">Walang pondong nakita gamit ang passphrase na ito.</string>
-    <string name="pass_restore_typo">Walang pondo sa passphrase na iyon — pero MAY pondo ang recovery phrase na ito kapag walang passphrase. Suriin kung may typo, o iwanang blangko.</string>
+    <string name="pass_restore_typo">Walang checksum ang passphrase: ang mali ay magbubukas ng ibang wallet na walang laman, nang walang anumang error. Tingnan kung may mali sa pag-type, o iwanang blangko kung hindi kailanman ginamit ang phrase na ito na may passphrase.</string>
     <string name="pass_restore_retry">Sumubok ng ibang passphrase</string>
 
     <string name="verify_show_phrase">Ipakita ulit ang recovery phrase ko</string>
@@ -626,4 +626,7 @@
     <string name="market_tor_notice_title">Hindi dumadaan sa Tor ang Market</string>
     <string name="market_tor_notice_body">Hindi dumadaan sa Tor ang Market; makikita ng site ang iyong IP address.</string>
     <string name="market_tor_notice_continue">Magpatuloy</string>
+    <string name="move_title">Ang DigiByte Wallet ay DigiByte Mobile na ngayon</string>
+    <string name="move_body">Hindi na makakatanggap ng update ang app na ito. I-install ang DigiByte Mobile mula sa Google Play, piliin ang I-recover ang Umiiral na Wallet at ilagay ang recovery phrase ng wallet na ito — walang gagalaw sa chain. Itago ang app na ito hanggang lumabas ang balanse mo sa bago.</string>
+    <string name="move_how">Paano lumipat</string>
 </resources>

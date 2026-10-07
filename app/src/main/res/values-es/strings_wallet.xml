@@ -555,7 +555,7 @@
     <string name="pass_none">Sin frase de contraseña</string>
     <string name="pass_restore_label">Frase de contraseña (déjala en blanco si no usaste una)</string>
     <string name="pass_restore_none">No se encontraron fondos con esta frase de contraseña.</string>
-    <string name="pass_restore_typo">Sin fondos con esa frase de contraseña — pero esta frase de recuperación SÍ tiene fondos sin ninguna. Revisa si hay una errata, o déjala en blanco.</string>
+    <string name="pass_restore_typo">Una frase de contraseña no tiene suma de verificación: una incorrecta abre otra billetera, vacía, sin ningún error. Revisa si tiene un error de escritura o déjala en blanco si esta frase nunca se usó con una.</string>
     <string name="pass_restore_retry">Probar otra frase de contraseña</string>
 
     <string name="verify_show_phrase">Ver de nuevo mi frase de recuperación</string>
@@ -631,4 +631,7 @@
     <string name="market_tor_notice_title">El Mercado no pasa por Tor</string>
     <string name="market_tor_notice_body">El Mercado no pasa por Tor; el sitio verá tu dirección IP.</string>
     <string name="market_tor_notice_continue">Continuar</string>
+    <string name="move_title">DigiByte Wallet ahora es DigiByte Mobile</string>
+    <string name="move_body">Esta app ya no recibirá actualizaciones. Instala DigiByte Mobile desde Google Play, elige Recuperar billetera existente e introduce la frase de recuperación de esta billetera: nada se mueve en la cadena. Conserva esta app hasta que tu saldo aparezca en la nueva.</string>
+    <string name="move_how">Cómo cambiar</string>
 </resources>

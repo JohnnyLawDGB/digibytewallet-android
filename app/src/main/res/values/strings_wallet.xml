@@ -680,7 +680,7 @@
     <string name="pass_restore_label">Passphrase (leave blank if you did not use one)</string>
     <!-- WARNING: a wrong passphrase finds an empty wallet and looks exactly like lost coins. -->
     <string name="pass_restore_none">No funds found with this passphrase.</string>
-    <string name="pass_restore_typo">No funds with that passphrase — but this recovery phrase DOES have funds without one. Check the passphrase for a typo, or leave it blank.</string>
+    <string name="pass_restore_typo">A passphrase has no checksum: a wrong one opens a different, empty wallet without any error. Check it for a typo, or leave it blank if this phrase was never used with one.</string>
     <string name="pass_restore_retry">Try a different passphrase</string>
 
     <!-- Shown after a failed verification. The retry copy tells the user to review their
@@ -763,4 +763,7 @@
     <string name="market_tor_notice_title">Market is not routed through Tor</string>
     <string name="market_tor_notice_body">Market is not routed through Tor; the site will see your IP address.</string>
     <string name="market_tor_notice_continue">Continue</string>
+    <string name="move_title">DigiByte Wallet is now DigiByte Mobile</string>
+    <string name="move_body">This app will get no more updates. Install DigiByte Mobile from Google Play, choose Recover Existing Wallet and enter this wallet\'s recovery phrase — nothing moves on chain. Keep this app until your balance shows in the new one.</string>
+    <string name="move_how">How to move</string>
 </resources>

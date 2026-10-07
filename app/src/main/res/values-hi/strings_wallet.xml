@@ -550,7 +550,7 @@
     <string name="pass_none">कोई पासफ़्रेज़ नहीं</string>
     <string name="pass_restore_label">पासफ़्रेज़ (यदि आपने उपयोग नहीं किया तो खाली छोड़ें)</string>
     <string name="pass_restore_none">इस पासफ़्रेज़ के साथ कोई फंड नहीं मिला।</string>
-    <string name="pass_restore_typo">उस पासफ़्रेज़ के साथ कोई फंड नहीं — लेकिन इस रिकवरी वाक्यांश में बिना पासफ़्रेज़ के फंड हैं। पासफ़्रेज़ में टाइपिंग गलती जाँचें, या इसे खाली छोड़ें।</string>
+    <string name="pass_restore_typo">पासफ़्रेज़ में कोई चेकसम नहीं होता: गलत पासफ़्रेज़ बिना किसी त्रुटि के एक अलग, खाली वॉलेट खोलता है। टाइपिंग की गलती जाँचें, या अगर यह वाक्यांश कभी पासफ़्रेज़ के साथ इस्तेमाल नहीं हुआ तो इसे खाली छोड़ दें।</string>
     <string name="pass_restore_retry">कोई दूसरा पासफ़्रेज़ आज़माएँ</string>
 
     <string name="verify_show_phrase">मेरा रिकवरी वाक्यांश फिर से दिखाएँ</string>
@@ -626,4 +626,7 @@
     <string name="market_tor_notice_title">मार्केट Tor के ज़रिए रूट नहीं होता</string>
     <string name="market_tor_notice_body">मार्केट Tor के ज़रिए रूट नहीं होता; साइट आपका IP पता देखेगी।</string>
     <string name="market_tor_notice_continue">जारी रखें</string>
+    <string name="move_title">DigiByte Wallet अब DigiByte Mobile है</string>
+    <string name="move_body">इस ऐप को अब कोई अपडेट नहीं मिलेगा। Google Play से DigiByte Mobile इंस्टॉल करें, मौजूदा वॉलेट पुनर्प्राप्त करें चुनें और इस वॉलेट का रिकवरी वाक्यांश डालें — चेन पर कुछ भी नहीं हिलता। जब तक नए ऐप में आपका बैलेंस न दिखे, इस ऐप को रखें।</string>
+    <string name="move_how">कैसे बदलें</string>
 </resources>
