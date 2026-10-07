@@ -117,11 +117,11 @@ fi
 if ! grep -q 'HEADER_DIFF_V4_UNFIXED' "$CORE_DIR/BRMerkleBlock.c"; then
     echo "GATE FAILURE: BRMerkleBlock.c has no HEADER_DIFF_V4_UNFIXED seam; the red arm would be inert."; exit 1
 fi
-if ! grep -q 'DDGB_HEADER_DIFF_CHECK=1' "$REPO_ROOT/native/build.gradle.kts"; then
-    echo "GATE FAILURE: native/build.gradle.kts does not set the shipped level (expected -DDGB_HEADER_DIFF_CHECK=1)."
+if ! grep -q 'DDGB_HEADER_DIFF_CHECK=2' "$REPO_ROOT/native/build.gradle.kts"; then
+    echo "GATE FAILURE: native/build.gradle.kts does not set the shipped level (expected -DDGB_HEADER_DIFF_CHECK=2)."
     exit 1
 fi
-echo "seam gate OK (level macro present in the sources; header default 0; app build sets level 1; red seam present)"
+echo "seam gate OK (level macro present in the sources; header default 0; app build sets level 2; red seam present)"
 
 FAIL=0
 
@@ -167,8 +167,8 @@ run_bits() {
     build "$BUILD_DIR/l1_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=1 || { echo "GATE FAILURE: ${bits}-bit level-1 arm did not compile."; FAIL=1; return; }
     build "$BUILD_DIR/l0_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=0 || { echo "GATE FAILURE: ${bits}-bit level-0 arm did not compile."; FAIL=1; return; }
     build "$BUILD_DIR/red_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=1 -DHEADER_DIFF_V4_UNFIXED || { echo "GATE FAILURE: ${bits}-bit red arm did not compile."; FAIL=1; return; }
-    # The combination the app ships: header proof of work at 2, difficulty target at 1.
-    POW_LEVEL=2 build "$BUILD_DIR/ship_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=1 || { echo "GATE FAILURE: ${bits}-bit shipped arm did not compile."; FAIL=1; return; }
+    # The combination the app ships: header proof of work at 2, difficulty target at 2 (enforce).
+    POW_LEVEL=2 build "$BUILD_DIR/ship_$bits" "$bits" -DDGB_HEADER_DIFF_CHECK=2 || { echo "GATE FAILURE: ${bits}-bit shipped arm did not compile."; FAIL=1; return; }
 
     local known listed
     known="$("$BUILD_DIR/l1_$bits" list | sort | tr '\n' ' ')"
@@ -188,13 +188,13 @@ run_bits() {
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do expect "$BUILD_DIR/l1_$bits" "$bits L1" "$c" pass; done
     expect "$BUILD_DIR/l1_$bits" "$bits L1" level_easiest_target accepted_counted
 
-    echo "--- shipped (proof of work 2, difficulty 1): the level-1 results hold with the stricter proof-of-work check ---"
+    echo "--- shipped (proof of work 2, difficulty 2): real data passes; the easiest-target header is REFUSED ---"
     echo "    (unknown_algorithm is not run here: at proof-of-work level 2 such a header is refused before its target is judged)"
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
         [ "$c" = unknown_algorithm ] && continue
         expect "$BUILD_DIR/ship_$bits" "$bits ship" "$c" pass
     done
-    expect "$BUILD_DIR/ship_$bits" "$bits ship" level_easiest_target accepted_counted
+    expect "$BUILD_DIR/ship_$bits" "$bits ship" level_easiest_target refused
 
     echo "--- level 0 (COMPARISON ARM / GUARD): nothing computed or counted; the easiest-target header ACCEPTED ---"
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do expect "$BUILD_DIR/l0_$bits" "$bits L0" "$c" pass; done

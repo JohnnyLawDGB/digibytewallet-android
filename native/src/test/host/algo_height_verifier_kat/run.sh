@@ -43,10 +43,14 @@ UNITS=(
     "${SHA3_SRCS[@]}"
 )
 
+# The difficulty-target check is held at 0 here, named so the runner does not add the shipped level:
+# these synthetic headers sit on algorithm boundaries with targets nobody mined to, and at the shipped
+# level 2 every one is refused for its TARGET before the algorithm rule this suite isolates is reached
+# (that is what enforcement is for). The target check has its own suite, header_diff_v4_kat.
 build() { # $1=level $2=bits $3=output
     local m=(); [ "$2" = "32" ] && m=(-m32)
     clang -w -include stdint.h -fsanitize=address -fno-omit-frame-pointer -g "${m[@]}" \
-        -DDGB_HEADER_POW_CHECK="$1" -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
+        -DDGB_HEADER_POW_CHECK="$1" -DDGB_HEADER_DIFF_CHECK=0 -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/algo_height_verifier_kat_main.c" "${UNITS[@]}" \
         -lm -lpthread -o "$3"
 }
