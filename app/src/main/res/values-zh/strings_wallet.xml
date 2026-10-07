@@ -547,7 +547,7 @@
     <string name="pass_none">无密码短语</string>
     <string name="pass_restore_label">密码短语（未使用则留空）</string>
     <string name="pass_restore_none">使用此密码短语未找到任何资金。</string>
-    <string name="pass_restore_typo">使用该密码短语未找到资金 — 但这组恢复助记词在不使用密码短语时确实有资金。请检查密码短语是否输错，或将其留空。</string>
+    <string name="pass_restore_typo">密码短语没有校验码：输错会在没有任何错误提示的情况下打开另一个空钱包。请检查是否有拼写错误；如果这组助记词从未配合密码短语使用，请留空。</string>
     <string name="pass_restore_retry">尝试其他密码短语</string>
 
     <string name="verify_show_phrase">再次显示我的恢复助记词</string>

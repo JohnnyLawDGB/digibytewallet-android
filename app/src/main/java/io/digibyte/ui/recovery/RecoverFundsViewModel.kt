@@ -599,30 +599,17 @@ class RecoverFundsViewModel @Inject constructor(
                         val set = sweepSet(s, isForeign = true)      // includes native
                         val total = set.sumOf { it.totalSat }
 
-                        // A passphrase was supplied and found nothing. Ask the OTHER question:
-                        // does this phrase have funds without it? A BIP39 passphrase has no
-                        // checksum, so a typo derives a valid EMPTY wallet and the honest answer
-                        // — "no funds" — reads to the user as stolen coins. One more scan turns
-                        // that into "check the passphrase".
-                        val bareTotal: Long? =
-                            if (pendingForeignPassphrase != null && total == 0L) {
-                                val bare = NativeBridge.mnemonicToSeed(phrase.toByteArray(), null)
-                                bare?.let {
-                                    try {
-                                        (withContext(Dispatchers.IO) { scanService.scanFromSeed(it) }
-                                            as? RecoveryScanService.State.Done)
-                                            ?.let { d -> sweepSet(d, isForeign = true).sumOf { f -> f.totalSat } }
-                                    } finally {
-                                        it.fill(0)
-                                    }
-                                }
-                            } else null
-
+                        // NO second scan of the same phrase WITHOUT the passphrase. It would tell a typo
+                        // from an empty wallet, but it sends a second wallet's addresses to the backend
+                        // from the same IP — and people who use a passphrase include those who keep a
+                        // decoy on the bare phrase, which that would link to the hidden one. The user
+                        // agreed to scan this phrase, once. The screen says what an empty passphrase
+                        // result can mean instead.
                         _passphraseVerdict.value =
                             if (pendingForeignPassphrase == null) null
                             else io.digibyte.core.recovery.PassphraseScanVerdict.of(
                                 withPassphraseSat = total,
-                                withoutPassphraseSat = bareTotal,
+                                withoutPassphraseSat = null,
                                 incomplete = s.unreachableProfileLabels.isNotEmpty(),
                             )
 

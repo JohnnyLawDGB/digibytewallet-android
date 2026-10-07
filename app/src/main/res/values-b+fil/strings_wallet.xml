@@ -550,7 +550,7 @@
     <string name="pass_none">Walang passphrase</string>
     <string name="pass_restore_label">Passphrase (iwanang blangko kung wala kang ginamit)</string>
     <string name="pass_restore_none">Walang pondong nakita gamit ang passphrase na ito.</string>
-    <string name="pass_restore_typo">Walang pondo sa passphrase na iyon — pero MAY pondo ang recovery phrase na ito kapag walang passphrase. Suriin kung may typo, o iwanang blangko.</string>
+    <string name="pass_restore_typo">Walang checksum ang passphrase: ang mali ay magbubukas ng ibang wallet na walang laman, nang walang anumang error. Tingnan kung may mali sa pag-type, o iwanang blangko kung hindi kailanman ginamit ang phrase na ito na may passphrase.</string>
     <string name="pass_restore_retry">Sumubok ng ibang passphrase</string>
 
     <string name="verify_show_phrase">Ipakita ulit ang recovery phrase ko</string>

@@ -680,7 +680,7 @@
     <string name="pass_restore_label">Passphrase (leave blank if you did not use one)</string>
     <!-- WARNING: a wrong passphrase finds an empty wallet and looks exactly like lost coins. -->
     <string name="pass_restore_none">No funds found with this passphrase.</string>
-    <string name="pass_restore_typo">No funds with that passphrase — but this recovery phrase DOES have funds without one. Check the passphrase for a typo, or leave it blank.</string>
+    <string name="pass_restore_typo">A passphrase has no checksum: a wrong one opens a different, empty wallet without any error. Check it for a typo, or leave it blank if this phrase was never used with one.</string>
     <string name="pass_restore_retry">Try a different passphrase</string>
 
     <!-- Shown after a failed verification. The retry copy tells the user to review their

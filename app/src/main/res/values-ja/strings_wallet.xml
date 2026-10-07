@@ -547,7 +547,7 @@
     <string name="pass_none">パスフレーズなし</string>
     <string name="pass_restore_label">パスフレーズ（使っていない場合は空欄）</string>
     <string name="pass_restore_none">このパスフレーズでは資金が見つかりませんでした。</string>
-    <string name="pass_restore_typo">そのパスフレーズでは資金が見つかりませんでしたが、このリカバリーフレーズにはパスフレーズなしで資金があります。パスフレーズの入力ミスを確認するか、空欄にしてください。</string>
+    <string name="pass_restore_typo">パスフレーズにはチェックサムがないため、間違っていてもエラーは出ず、別の空のウォレットが開きます。入力ミスがないか確認するか、このフレーズでパスフレーズを使ったことがなければ空欄のままにしてください。</string>
     <string name="pass_restore_retry">別のパスフレーズを試す</string>
 
     <string name="verify_show_phrase">リカバリーフレーズをもう一度表示</string>

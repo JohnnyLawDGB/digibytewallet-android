@@ -555,7 +555,7 @@
     <string name="pass_none">Sin frase de contraseña</string>
     <string name="pass_restore_label">Frase de contraseña (déjala en blanco si no usaste una)</string>
     <string name="pass_restore_none">No se encontraron fondos con esta frase de contraseña.</string>
-    <string name="pass_restore_typo">Sin fondos con esa frase de contraseña — pero esta frase de recuperación SÍ tiene fondos sin ninguna. Revisa si hay una errata, o déjala en blanco.</string>
+    <string name="pass_restore_typo">Una frase de contraseña no tiene suma de verificación: una incorrecta abre otra billetera, vacía, sin ningún error. Revisa si tiene un error de escritura o déjala en blanco si esta frase nunca se usó con una.</string>
     <string name="pass_restore_retry">Probar otra frase de contraseña</string>
 
     <string name="verify_show_phrase">Ver de nuevo mi frase de recuperación</string>
