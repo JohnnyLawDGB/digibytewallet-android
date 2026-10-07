@@ -632,4 +632,7 @@
     <string name="market_tor_notice_title">Маркет не проходит через Tor</string>
     <string name="market_tor_notice_body">Маркет не проходит через Tor; сайт увидит ваш IP-адрес.</string>
     <string name="market_tor_notice_continue">Продолжить</string>
+    <string name="move_title">DigiByte Wallet теперь DigiByte Mobile</string>
+    <string name="move_body">Это приложение больше не будет обновляться. Установите DigiByte Mobile из Google Play, выберите «Восстановить существующий кошелёк» и введите фразу восстановления этого кошелька — в блокчейне ничего не перемещается. Не удаляйте это приложение, пока баланс не появится в новом.</string>
+    <string name="move_how">Как перейти</string>
 </resources>

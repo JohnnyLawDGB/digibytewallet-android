@@ -631,4 +631,7 @@
     <string name="market_tor_notice_title">El Mercado no pasa por Tor</string>
     <string name="market_tor_notice_body">El Mercado no pasa por Tor; el sitio verá tu dirección IP.</string>
     <string name="market_tor_notice_continue">Continuar</string>
+    <string name="move_title">DigiByte Wallet ahora es DigiByte Mobile</string>
+    <string name="move_body">Esta app ya no recibirá actualizaciones. Instala DigiByte Mobile desde Google Play, elige Recuperar billetera existente e introduce la frase de recuperación de esta billetera: nada se mueve en la cadena. Conserva esta app hasta que tu saldo aparezca en la nueva.</string>
+    <string name="move_how">Cómo cambiar</string>
 </resources>

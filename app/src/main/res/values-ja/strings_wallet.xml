@@ -623,4 +623,7 @@
     <string name="market_tor_notice_title">マーケットは Tor を経由しません</string>
     <string name="market_tor_notice_body">マーケットは Tor を経由しません。サイトにはあなたの IP アドレスが見えます。</string>
     <string name="market_tor_notice_continue">続行</string>
+    <string name="move_title">DigiByte Wallet は DigiByte Mobile になりました</string>
+    <string name="move_body">このアプリは今後アップデートされません。Google Play から DigiByte Mobile をインストールし、「既存のウォレットを復元」を選んで、このウォレットのリカバリーフレーズを入力してください。チェーン上で資産は移動しません。新しいアプリに残高が表示されるまで、このアプリは残しておいてください。</string>
+    <string name="move_how">移行方法</string>
 </resources>

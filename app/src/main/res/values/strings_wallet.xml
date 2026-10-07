@@ -763,4 +763,7 @@
     <string name="market_tor_notice_title">Market is not routed through Tor</string>
     <string name="market_tor_notice_body">Market is not routed through Tor; the site will see your IP address.</string>
     <string name="market_tor_notice_continue">Continue</string>
+    <string name="move_title">DigiByte Wallet is now DigiByte Mobile</string>
+    <string name="move_body">This app will get no more updates. Install DigiByte Mobile from Google Play, choose Recover Existing Wallet and enter this wallet\'s recovery phrase — nothing moves on chain. Keep this app until your balance shows in the new one.</string>
+    <string name="move_how">How to move</string>
 </resources>

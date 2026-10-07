@@ -623,4 +623,7 @@
     <string name="market_tor_notice_title">市场不经过 Tor 路由</string>
     <string name="market_tor_notice_body">市场不经过 Tor 路由；该网站将看到您的 IP 地址。</string>
     <string name="market_tor_notice_continue">继续</string>
+    <string name="move_title">DigiByte Wallet 现已更名为 DigiByte Mobile</string>
+    <string name="move_body">此应用将不再更新。请从 Google Play 安装 DigiByte Mobile，选择“恢复现有钱包”，并输入本钱包的助记词——链上不会转移任何资产。在新应用中看到余额之前，请保留此应用。</string>
+    <string name="move_how">如何迁移</string>
 </resources>

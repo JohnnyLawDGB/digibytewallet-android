@@ -626,4 +626,7 @@
     <string name="market_tor_notice_title">Hindi dumadaan sa Tor ang Market</string>
     <string name="market_tor_notice_body">Hindi dumadaan sa Tor ang Market; makikita ng site ang iyong IP address.</string>
     <string name="market_tor_notice_continue">Magpatuloy</string>
+    <string name="move_title">Ang DigiByte Wallet ay DigiByte Mobile na ngayon</string>
+    <string name="move_body">Hindi na makakatanggap ng update ang app na ito. I-install ang DigiByte Mobile mula sa Google Play, piliin ang I-recover ang Umiiral na Wallet at ilagay ang recovery phrase ng wallet na ito — walang gagalaw sa chain. Itago ang app na ito hanggang lumabas ang balanse mo sa bago.</string>
+    <string name="move_how">Paano lumipat</string>
 </resources>

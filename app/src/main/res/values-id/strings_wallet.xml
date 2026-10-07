@@ -623,4 +623,7 @@
     <string name="market_tor_notice_title">Pasar tidak melewati Tor</string>
     <string name="market_tor_notice_body">Pasar tidak melewati Tor; situs akan melihat alamat IP Anda.</string>
     <string name="market_tor_notice_continue">Lanjutkan</string>
+    <string name="move_title">DigiByte Wallet kini menjadi DigiByte Mobile</string>
+    <string name="move_body">Aplikasi ini tidak akan mendapat pembaruan lagi. Pasang DigiByte Mobile dari Google Play, pilih Pulihkan Dompet yang Ada, lalu masukkan frasa pemulihan dompet ini — tidak ada yang berpindah di blockchain. Simpan aplikasi ini sampai saldo Anda tampil di aplikasi baru.</string>
+    <string name="move_how">Cara pindah</string>
 </resources>

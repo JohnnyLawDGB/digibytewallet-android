@@ -634,4 +634,7 @@
     <string name="market_tor_notice_title">Markt wird nicht über Tor geleitet</string>
     <string name="market_tor_notice_body">Markt wird nicht über Tor geleitet; die Website sieht Ihre IP-Adresse.</string>
     <string name="market_tor_notice_continue">Weiter</string>
+    <string name="move_title">DigiByte Wallet heißt jetzt DigiByte Mobile</string>
+    <string name="move_body">Diese App erhält keine Updates mehr. Installieren Sie DigiByte Mobile aus Google Play, wählen Sie „Bestehende Wallet wiederherstellen“ und geben Sie die Wiederherstellungsphrase dieser Wallet ein — auf der Blockchain wird nichts bewegt. Behalten Sie diese App, bis Ihr Guthaben in der neuen App angezeigt wird.</string>
+    <string name="move_how">So wechseln Sie</string>
 </resources>

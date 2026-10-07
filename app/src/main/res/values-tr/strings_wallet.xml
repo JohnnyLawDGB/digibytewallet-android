@@ -626,4 +626,7 @@
     <string name="market_tor_notice_title">Pazar Tor üzerinden geçmiyor</string>
     <string name="market_tor_notice_body">Pazar Tor üzerinden geçmiyor; site IP adresinizi görecek.</string>
     <string name="market_tor_notice_continue">Devam</string>
+    <string name="move_title">DigiByte Wallet artık DigiByte Mobile</string>
+    <string name="move_body">Bu uygulama artık güncelleme almayacak. Google Play\'den DigiByte Mobile\'ı yükleyin, Mevcut Cüzdanı Kurtar\'ı seçin ve bu cüzdanın kurtarma ifadesini girin — zincirde hiçbir şey taşınmaz. Bakiyeniz yeni uygulamada görünene kadar bu uygulamayı silmeyin.</string>
+    <string name="move_how">Nasıl geçilir</string>
 </resources>

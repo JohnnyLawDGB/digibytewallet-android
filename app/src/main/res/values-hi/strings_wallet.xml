@@ -626,4 +626,7 @@
     <string name="market_tor_notice_title">मार्केट Tor के ज़रिए रूट नहीं होता</string>
     <string name="market_tor_notice_body">मार्केट Tor के ज़रिए रूट नहीं होता; साइट आपका IP पता देखेगी।</string>
     <string name="market_tor_notice_continue">जारी रखें</string>
+    <string name="move_title">DigiByte Wallet अब DigiByte Mobile है</string>
+    <string name="move_body">इस ऐप को अब कोई अपडेट नहीं मिलेगा। Google Play से DigiByte Mobile इंस्टॉल करें, मौजूदा वॉलेट पुनर्प्राप्त करें चुनें और इस वॉलेट का रिकवरी वाक्यांश डालें — चेन पर कुछ भी नहीं हिलता। जब तक नए ऐप में आपका बैलेंस न दिखे, इस ऐप को रखें।</string>
+    <string name="move_how">कैसे बदलें</string>
 </resources>

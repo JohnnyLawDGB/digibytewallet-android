@@ -623,4 +623,7 @@
     <string name="market_tor_notice_title">Chợ không đi qua Tor</string>
     <string name="market_tor_notice_body">Chợ không đi qua Tor; trang web sẽ thấy địa chỉ IP của bạn.</string>
     <string name="market_tor_notice_continue">Tiếp tục</string>
+    <string name="move_title">DigiByte Wallet nay là DigiByte Mobile</string>
+    <string name="move_body">Ứng dụng này sẽ không còn được cập nhật. Hãy cài DigiByte Mobile từ Google Play, chọn Khôi phục ví hiện có và nhập cụm từ khôi phục của ví này — không có gì bị di chuyển trên chuỗi. Giữ ứng dụng này cho đến khi số dư hiện trong ứng dụng mới.</string>
+    <string name="move_how">Cách chuyển</string>
 </resources>

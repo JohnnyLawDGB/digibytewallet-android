@@ -609,4 +609,7 @@
     <string name="market_tor_notice_title">Le Marché ne passe pas par Tor</string>
     <string name="market_tor_notice_body">Le Marché ne passe pas par Tor ; le site verra votre adresse IP.</string>
     <string name="market_tor_notice_continue">Continuer</string>
+    <string name="move_title">DigiByte Wallet devient DigiByte Mobile</string>
+    <string name="move_body">Cette appli ne recevra plus de mises à jour. Installez DigiByte Mobile depuis Google Play, choisissez Récupérer un portefeuille existant et saisissez la phrase de récupération de ce portefeuille — rien ne bouge sur la chaîne. Gardez cette appli jusqu’à ce que votre solde apparaisse dans la nouvelle.</string>
+    <string name="move_how">Comment migrer</string>
 </resources>
