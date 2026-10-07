@@ -15,7 +15,7 @@ agp = "8.7.3"
 # KSP versions are Kotlin-derived (<kotlin>-<ksp>) and MUST be bumped together
 # with `kotlin`; the Compose compiler plugin ships in the Kotlin release.
 kotlin = "2.2.21"
-ksp = "2.2.21-2.0.4"
+ksp = "2.3.11"
 detekt = "1.23.7"
 
 # --- Lockstep families -------------------------------------------------------
