@@ -18,7 +18,7 @@
     <string name="onb_create">Gumawa ng Bagong Wallet</string>
     <string name="onb_recover">I-recover ang Umiiral na Wallet</string>
     <string name="onb_footer">DigiByte — Ligtas, Mabilis, Desentralisado</string>
-    <string name="app_name_display">DigiByte Wallet</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Naka-block ang screenshot. Isulat ang mga salitang ito — hindi na ito mababawi.</string>
     <string name="seed_title">Ang Iyong Recovery Phrase</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Maling PIN. Natitirang subok: %1$d</string>
     <string name="battery_title">Panatilihing tumatakbo ang sync sa background</string>
     <string name="battery_body">Maaaring patulugin ng Android ang wallet na ito kapag naka-off ang screen, kaya nawawala ang koneksyon nito sa DigiByte network at maaaring maiwan sa 0 peers hanggang buksan mo ulit.\n\nPayagan itong tumakbo nang walang restriksyon para magpatuloy ang sync.</string>
-    <string name="battery_body_samsung">\n\nSa Samsung, buksan din ang Device Care → Battery → \"Never sleeping apps\" at idagdag ang DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nSa Samsung, buksan din ang Device Care → Battery → \"Never sleeping apps\" at idagdag ang DigiByte Mobile.</string>
     <string name="battery_open_settings">Buksan ang mga setting</string>
     <string name="tor_title">Bagong Feature sa Privacy</string>
     <string name="tor_body">Available na ang Tor routing. Kapag naka-enable, kumokonekta ang iyong wallet sa DigiByte network sa pamamagitan ng Tor, na itinatago ang iyong IP address sa mga peer.\n\nI-enable ang Tor routing?</string>
@@ -644,7 +644,7 @@
     <string name="restore_scan_title">I-restore nang pribado</string>
     <string name="restore_scan_body">Pagkatapos mong magpatuloy, ang phone na ito mismo ang maghahanap ng mga transaksyon ng iyong wallet — native (dgb1q…), legacy (D…), Taproot at DigiDollar na address — nang hindi ipinapadala ang iyong mga address kaninuman.</string>
     <string name="restore_other_title">Phrase mula sa ibang wallet app?</string>
-    <string name="restore_other_body">Ang Coinomi, Ledger, Trezor at ilang lumang wallet ay naglalagay ng coin sa mga address format na hindi ginagamit ng wallet na ito, kaya hindi ito nakikita ng sync. Mahahanap ito ng isang pagsusuri, pero ipinapadala nito ang mga address na nagmumula sa iyong phrase sa DigiScope (api.digiscope.me), na mag-uulat ng anumang pondo sa mga ito. Hindi kailangan para sa phrase mula sa DigiByte Wallet na ito. Maaari mo rin itong patakbuhin mamaya mula sa Mga Setting → Bawiin ang pondo mula sa ibang wallet.</string>
+    <string name="restore_other_body">Ang Coinomi, Ledger, Trezor at ilang lumang wallet ay naglalagay ng coin sa mga address format na hindi ginagamit ng wallet na ito, kaya hindi ito nakikita ng sync. Mahahanap ito ng isang pagsusuri, pero ipinapadala nito ang mga address na nagmumula sa iyong phrase sa DigiScope (api.digiscope.me), na mag-uulat ng anumang pondo sa mga ito. Hindi kailangan para sa phrase mula sa DigiByte Mobile o sa lumang DigiByte Wallet app. Maaari mo rin itong patakbuhin mamaya mula sa Mga Setting → Bawiin ang pondo mula sa ibang wallet.</string>
     <string name="restore_other_check">Suriin ang ibang format</string>
     <string name="restore_scan_deriving">Dine-derive ang mga address…</string>
     <string name="restore_scan_duration">Maaaring tumagal ito nang 30-90 segundo depende sa node.</string>

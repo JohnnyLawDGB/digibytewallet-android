@@ -22,7 +22,7 @@
     <string name="onb_create">Créer un nouveau portefeuille</string>
     <string name="onb_recover">Récupérer un portefeuille existant</string>
     <string name="onb_footer">DigiByte — Sécurisé, rapide, décentralisé</string>
-    <string name="app_name_display">DigiByte Wallet</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <string name="seed_screenshot_blocked">Les captures d\'écran sont bloquées. Notez ces mots — ils ne pourront pas être récupérés.</string>
     <string name="seed_title">Votre phrase de récupération</string>
     <string name="seed_word_count">Phrase de récupération de %1$d mots</string>
@@ -70,7 +70,7 @@
     <string name="unlock_attempts_left">Code PIN incorrect. Tentatives restantes : %1$d</string>
     <string name="battery_title">Maintenir la synchronisation en arrière-plan</string>
     <string name="battery_body">Android peut mettre ce portefeuille en veille lorsque l\'écran est éteint, ce qui coupe sa connexion au réseau DigiByte et peut le bloquer à 0 pair jusqu\'à ce que vous le rouvriez.\n\nAutorisez-le à fonctionner sans restriction pour que la synchronisation continue.</string>
-    <string name="battery_body_samsung">\n\nSur Samsung, ouvrez également Entretien de l\'appareil → Batterie → « Applis jamais en veille » et ajoutez DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nSur Samsung, ouvrez également Entretien de l\'appareil → Batterie → « Applis jamais en veille » et ajoutez DigiByte Mobile.</string>
     <string name="battery_open_settings">Ouvrir les paramètres</string>
     <string name="tor_title">Nouvelle fonctionnalité de confidentialité</string>
     <string name="tor_body">Le routage Tor est désormais disponible. Une fois activé, votre portefeuille se connecte au réseau DigiByte via Tor, ce qui masque votre adresse IP aux pairs.\n\nActiver le routage Tor ?</string>
@@ -627,7 +627,7 @@
     <string name="restore_scan_title">Restaurer en toute confidentialité</string>
     <string name="restore_scan_body">Une fois que vous continuez, ce téléphone retrouve lui-même les transactions de votre portefeuille — adresses natives (dgb1q…), legacy (D…), Taproot et DigiDollar — sans envoyer vos adresses à qui que ce soit.</string>
     <string name="restore_other_title">Phrase issue d’une autre application de portefeuille ?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor et certains anciens portefeuilles conservent les pièces sur des formats d’adresse que ce portefeuille n’utilise pas, la synchronisation ne peut donc pas les voir. Une vérification peut les trouver, mais elle envoie les adresses dérivées de votre phrase à DigiScope (api.digiscope.me), qui signale les fonds qu’elles détiennent. Inutile pour une phrase issue de ce DigiByte Wallet. Vous pouvez aussi la lancer plus tard depuis Paramètres → Récupérer les fonds d’un autre portefeuille.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor et certains anciens portefeuilles conservent les pièces sur des formats d’adresse que ce portefeuille n’utilise pas, la synchronisation ne peut donc pas les voir. Une vérification peut les trouver, mais elle envoie les adresses dérivées de votre phrase à DigiScope (api.digiscope.me), qui signale les fonds qu’elles détiennent. Inutile pour une phrase issue de DigiByte Mobile ou de l’ancienne appli DigiByte Wallet. Vous pouvez aussi la lancer plus tard depuis Paramètres → Récupérer les fonds d’un autre portefeuille.</string>
     <string name="restore_other_check">Vérifier d’autres formats</string>
     <string name="restore_scan_deriving">Dérivation des adresses…</string>
     <string name="restore_scan_duration">Cela peut prendre 30 à 90 secondes selon le nœud.</string>

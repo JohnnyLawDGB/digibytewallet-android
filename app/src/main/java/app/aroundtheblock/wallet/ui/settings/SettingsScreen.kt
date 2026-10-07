@@ -250,7 +250,7 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
         item {
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "DigiByte Wallet v$versionName",
+                text = "DigiByte Mobile v$versionName",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF546E7A),
                 modifier = Modifier

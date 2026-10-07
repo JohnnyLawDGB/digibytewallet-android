@@ -3830,7 +3830,7 @@ class SyncService : Service() {
         val indeterminate = pct == 0 && peerCount == 0
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("DigiByte Wallet")
+            .setContentTitle("DigiByte Mobile")
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setProgress(100, pct, indeterminate)

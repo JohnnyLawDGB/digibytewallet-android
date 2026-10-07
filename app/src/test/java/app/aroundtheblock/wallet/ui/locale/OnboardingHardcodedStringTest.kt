@@ -111,7 +111,7 @@ class OnboardingHardcodedStringTest {
         // Send: literal address prefixes and value+ticker composites.
         "TD…", "DD…", "%.8f DGB", "\$amountDgb DGB", "\$\$amountFiat", "txid",
         // Build flavour, a version fallback, and the brand+version footer.
-        "digiTestnet", "unknown", "DigiByte Wallet v\$versionName",
+        "digiTestnet", "unknown", "DigiByte Mobile v\$versionName",
         // Asset screens: truncated ids, unit composites ("sats" is a unit like DGB) and format
         // patterns. Each is a value plus a symbol, with no sentence to translate.
         "txid \${s.txid.take(12)}…\${s.txid.takeLast(8)}",
@@ -133,7 +133,7 @@ class OnboardingHardcodedStringTest {
         // localised), URLs, the derivation path, and format-only fragments.
         "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "KRW", "BRL", "MXN", "INR", "ZAR",
         "SEK", "NOK", "\$it — \${currencyName(it)}", "CoinGecko · Binance",
-        "m/84\'/20\'/0\'", "DigiByte Wallet", "v\$versionName",
+        "m/84\'/20\'/0\'", "DigiByte Mobile", "v\$versionName",
         "github.com/JohnnyLawDGB/digibytewallet-android", "digibyte.org",
         "github.com/JohnnyLawDGB/digibytewallet-android/issues",
         "• \$range", "  ·  \$it", "10.0.0.5  or  node.example.com:12024",

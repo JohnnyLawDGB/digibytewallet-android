@@ -23,7 +23,7 @@
     <string name="onb_create">Create New Wallet</string>
     <string name="onb_recover">Recover Existing Wallet</string>
     <string name="onb_footer">DigiByte — Secure, Fast, Decentralized</string>
-    <string name="app_name_display">DigiByte Wallet</string>
+    <string name="app_name_display">DigiByte Mobile</string>
 
     <!-- ── Seed display ─────────────────────────────────────────────────────────── -->
     <!-- WARNING: "cannot be recovered" is the whole point. Do not soften it. -->
@@ -99,7 +99,7 @@
     <!-- Appended to battery_body on Samsung devices only. Device Care, Battery and the quoted
          setting name are Samsung\'s own UI labels — match the wording Samsung ships in that
          language, or the user cannot find the screen being described. -->
-    <string name="battery_body_samsung">\n\nOn Samsung, also open Device Care → Battery → \"Never sleeping apps\" and add DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nOn Samsung, also open Device Care → Battery → \"Never sleeping apps\" and add DigiByte Mobile.</string>
     <string name="battery_open_settings">Open settings</string>
 
     <!-- ── Tor prompt ───────────────────────────────────────────────────────────── -->
@@ -781,7 +781,7 @@
     <string name="restore_scan_title">Restore privately</string>
     <string name="restore_scan_body">After you continue, this phone finds your wallet\'s transactions itself — native (dgb1q…), legacy (D…), Taproot and DigiDollar addresses — without sending your addresses to anyone.</string>
     <string name="restore_other_title">Phrase from a different wallet app?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from this DigiByte Wallet. You can also run it later from Settings → Recover funds.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from DigiByte Mobile or the older DigiByte Wallet app. You can also run it later from Settings → Recover funds.</string>
     <string name="restore_other_check">Check other formats</string>
     <string name="restore_scan_deriving">Deriving addresses…</string>
     <string name="restore_scan_duration">This can take 30-90 seconds depending on the node.</string>

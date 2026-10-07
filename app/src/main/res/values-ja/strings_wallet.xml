@@ -18,7 +18,7 @@
     <string name="onb_create">新しいウォレットを作成</string>
     <string name="onb_recover">既存のウォレットを復元</string>
     <string name="onb_footer">DigiByte — 安全、高速、分散型</string>
-    <string name="app_name_display">DigiByte ウォレット</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">スクリーンショットは無効です。これらの単語を書き留めてください — 復元することはできません。</string>
     <string name="seed_title">あなたのリカバリーフレーズ</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">PIN が正しくありません。残りの試行回数: %1$d</string>
     <string name="battery_title">バックグラウンドで同期を続ける</string>
     <string name="battery_body">画面がオフのとき、Android がこのウォレットをスリープさせることがあります。その場合 DigiByte ネットワークとの接続が切れ、アプリを開き直すまでピア数が 0 のままになることがあります。\n\n同期を続けられるよう、制限なしで実行することを許可してください。</string>
-    <string name="battery_body_samsung">\n\nSamsung では、デバイスケア → バッテリー → \"スリープにしないアプリ\" も開き、DigiByte Wallet を追加してください。</string>
+    <string name="battery_body_samsung">\n\nSamsung では、デバイスケア → バッテリー → \"スリープにしないアプリ\" も開き、DigiByte Mobile を追加してください。</string>
     <string name="battery_open_settings">設定を開く</string>
     <string name="tor_title">新しいプライバシー機能</string>
     <string name="tor_body">Tor ルーティングが利用可能になりました。有効にすると、ウォレットは Tor 経由で DigiByte ネットワークに接続し、ピアから IP アドレスを隠します。\n\nTor ルーティングを有効にしますか？</string>
@@ -641,7 +641,7 @@
     <string name="restore_scan_title">プライベートに復元</string>
     <string name="restore_scan_body">続行すると、このスマートフォン自身がウォレットの取引（ネイティブ (dgb1q…)、Legacy (D…)、Taproot、DigiDollar の各アドレス）を見つけます。アドレスを誰にも送信しません。</string>
     <string name="restore_other_title">別のウォレットアプリのフレーズですか？</string>
-    <string name="restore_other_body">Coinomi、Ledger、Trezor や一部の古いウォレットは、このウォレットが使わないアドレス形式でコインを保管しているため、同期では見つけられません。チェックを実行すると見つけられますが、その際、フレーズから導出したアドレスを DigiScope (api.digiscope.me) に送信し、DigiScope がそれらのアドレス上の資金を報告します。この DigiByte Wallet のフレーズであれば不要です。後から「設定 → 別のウォレットから資金を復元」で実行することもできます。</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor や一部の古いウォレットは、このウォレットが使わないアドレス形式でコインを保管しているため、同期では見つけられません。チェックを実行すると見つけられますが、その際、フレーズから導出したアドレスを DigiScope (api.digiscope.me) に送信し、DigiScope がそれらのアドレス上の資金を報告します。DigiByte Mobile または旧アプリ DigiByte Wallet のフレーズであれば不要です。後から「設定 → 別のウォレットから資金を復元」で実行することもできます。</string>
     <string name="restore_other_check">他の形式をチェック</string>
     <string name="restore_scan_deriving">アドレスを導出しています…</string>
     <string name="restore_scan_duration">ノードによっては 30〜90 秒かかることがあります。</string>

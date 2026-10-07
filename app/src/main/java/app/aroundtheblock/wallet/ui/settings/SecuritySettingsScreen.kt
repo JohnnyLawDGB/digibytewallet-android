@@ -413,7 +413,7 @@ fun SecuritySettingsScreen(
                                             if (activity != null && biometricAvailable) {
                                                 val result = biometricAuth.authenticate(
                                                     activity,
-                                                    title = "DigiByte Wallet",
+                                                    title = "DigiByte Mobile",
                                                     subtitle = authViewPhraseMsg
                                                 )
                                                 if (result is BiometricResult.Success) {

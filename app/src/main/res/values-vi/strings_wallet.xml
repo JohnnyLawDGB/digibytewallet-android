@@ -18,7 +18,7 @@
     <string name="onb_create">Tạo ví mới</string>
     <string name="onb_recover">Khôi phục ví hiện có</string>
     <string name="onb_footer">DigiByte — An toàn, Nhanh chóng, Phi tập trung</string>
-    <string name="app_name_display">Ví DigiByte</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Ảnh chụp màn hình đã bị chặn. Hãy ghi lại những từ này — chúng không thể khôi phục được.</string>
     <string name="seed_title">Cụm từ khôi phục của bạn</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Mã PIN không đúng. Số lần thử còn lại: %1$d</string>
     <string name="battery_title">Giữ đồng bộ chạy ở nền</string>
     <string name="battery_body">Android có thể đưa ví này vào chế độ ngủ khi tắt màn hình, làm mất kết nối với mạng DigiByte và có thể khiến ví dừng ở 0 peer cho đến khi bạn mở lại.\n\nHãy cho phép ví chạy không giới hạn để tiếp tục đồng bộ.</string>
-    <string name="battery_body_samsung">\n\nTrên Samsung, hãy mở thêm Chăm sóc thiết bị → Pin → \"Ứng dụng không bao giờ ngủ\" và thêm DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nTrên Samsung, hãy mở thêm Chăm sóc thiết bị → Pin → \"Ứng dụng không bao giờ ngủ\" và thêm DigiByte Mobile.</string>
     <string name="battery_open_settings">Mở cài đặt</string>
     <string name="tor_title">Tính năng riêng tư mới</string>
     <string name="tor_body">Đã có định tuyến Tor. Khi bật, ví của bạn kết nối tới mạng DigiByte qua Tor, ẩn địa chỉ IP của bạn khỏi các peer.\n\nBật định tuyến Tor?</string>
@@ -641,7 +641,7 @@
     <string name="restore_scan_title">Khôi phục riêng tư</string>
     <string name="restore_scan_body">Sau khi bạn tiếp tục, điện thoại này tự tìm các giao dịch của ví — địa chỉ native (dgb1q…), legacy (D…), Taproot và DigiDollar — mà không gửi địa chỉ của bạn cho bất kỳ ai.</string>
     <string name="restore_other_title">Cụm từ từ một ứng dụng ví khác?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor và một số ví cũ giữ coin trên các định dạng địa chỉ mà ví này không dùng, nên đồng bộ không thấy được. Một lần kiểm tra có thể tìm ra chúng, nhưng nó gửi các địa chỉ được dẫn xuất từ cụm từ của bạn đến DigiScope (api.digiscope.me), nơi sẽ báo cáo số tiền trên các địa chỉ đó. Không cần thiết cho cụm từ từ DigiByte Wallet này. Bạn cũng có thể chạy sau trong Cài đặt → Khôi phục tiền từ ví khác.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor và một số ví cũ giữ coin trên các định dạng địa chỉ mà ví này không dùng, nên đồng bộ không thấy được. Một lần kiểm tra có thể tìm ra chúng, nhưng nó gửi các địa chỉ được dẫn xuất từ cụm từ của bạn đến DigiScope (api.digiscope.me), nơi sẽ báo cáo số tiền trên các địa chỉ đó. Không cần thiết cho cụm từ từ DigiByte Mobile hoặc ứng dụng DigiByte Wallet cũ. Bạn cũng có thể chạy sau trong Cài đặt → Khôi phục tiền từ ví khác.</string>
     <string name="restore_other_check">Kiểm tra các định dạng khác</string>
     <string name="restore_scan_deriving">Đang dẫn xuất địa chỉ…</string>
     <string name="restore_scan_duration">Việc này có thể mất 30-90 giây tùy vào node.</string>

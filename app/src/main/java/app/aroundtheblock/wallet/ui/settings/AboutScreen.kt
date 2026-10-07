@@ -87,7 +87,7 @@ fun AboutScreen(navController: NavController) {
                             modifier = Modifier.size(64.dp)
                         )
                         Text(
-                            text = "DigiByte Wallet",
+                            text = "DigiByte Mobile",
                             style = MaterialTheme.typography.titleLarge,
                             color = Color.White,
                             fontWeight = FontWeight.Bold

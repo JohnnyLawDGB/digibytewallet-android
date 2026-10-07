@@ -18,7 +18,7 @@
     <string name="onb_create">Buat Dompet Baru</string>
     <string name="onb_recover">Pulihkan Dompet yang Ada</string>
     <string name="onb_footer">DigiByte — Aman, Cepat, Terdesentralisasi</string>
-    <string name="app_name_display">Dompet DigiByte</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Tangkapan layar diblokir. Tulis kata-kata ini: kata-kata ini tidak dapat dipulihkan.</string>
     <string name="seed_title">Frasa Pemulihan Anda</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">PIN salah. Sisa percobaan: %1$d</string>
     <string name="battery_title">Jaga sinkronisasi tetap berjalan di latar belakang</string>
     <string name="battery_body">Android dapat menidurkan dompet ini saat layar mati, sehingga koneksinya ke jaringan DigiByte terputus dan bisa tertahan di 0 peer sampai Anda membukanya kembali.\n\nIzinkan berjalan tanpa batasan agar sinkronisasi terus berlanjut.</string>
-    <string name="battery_body_samsung">\n\nDi Samsung, buka juga Device Care → Baterai → \"Aplikasi yang tidak pernah tidur\" lalu tambahkan DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nDi Samsung, buka juga Device Care → Baterai → \"Aplikasi yang tidak pernah tidur\" lalu tambahkan DigiByte Mobile.</string>
     <string name="battery_open_settings">Buka pengaturan</string>
     <string name="tor_title">Fitur Privasi Baru</string>
     <string name="tor_body">Perutean Tor kini tersedia. Saat diaktifkan, dompet Anda terhubung ke jaringan DigiByte melalui Tor sehingga alamat IP Anda tersembunyi dari peer.\n\nAktifkan perutean Tor?</string>
@@ -641,7 +641,7 @@
     <string name="restore_scan_title">Pulihkan secara privat</string>
     <string name="restore_scan_body">Setelah Anda melanjutkan, ponsel ini menemukan sendiri transaksi dompet Anda — alamat native (dgb1q…), legacy (D…), Taproot, dan DigiDollar — tanpa mengirim alamat Anda ke siapa pun.</string>
     <string name="restore_other_title">Frasa dari aplikasi dompet lain?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor, dan beberapa dompet lama menyimpan koin di format alamat yang tidak dipakai dompet ini, sehingga sinkronisasi tidak bisa melihatnya. Pemeriksaan dapat menemukannya, tetapi pemeriksaan itu mengirim alamat yang diturunkan dari frasa Anda ke DigiScope (api.digiscope.me), yang melaporkan dana apa pun di alamat tersebut. Tidak diperlukan untuk frasa dari DigiByte Wallet ini. Anda juga bisa menjalankannya nanti dari Pengaturan → Pulihkan dana dari dompet lain.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor, dan beberapa dompet lama menyimpan koin di format alamat yang tidak dipakai dompet ini, sehingga sinkronisasi tidak bisa melihatnya. Pemeriksaan dapat menemukannya, tetapi pemeriksaan itu mengirim alamat yang diturunkan dari frasa Anda ke DigiScope (api.digiscope.me), yang melaporkan dana apa pun di alamat tersebut. Tidak diperlukan untuk frasa dari DigiByte Mobile atau aplikasi lama DigiByte Wallet. Anda juga bisa menjalankannya nanti dari Pengaturan → Pulihkan dana dari dompet lain.</string>
     <string name="restore_other_check">Periksa format lain</string>
     <string name="restore_scan_deriving">Menurunkan alamat…</string>
     <string name="restore_scan_duration">Ini bisa memakan waktu 30-90 detik, tergantung node.</string>

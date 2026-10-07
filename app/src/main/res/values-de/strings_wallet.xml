@@ -26,7 +26,7 @@
     <string name="onb_create">Neue Wallet erstellen</string>
     <string name="onb_recover">Bestehende Wallet wiederherstellen</string>
     <string name="onb_footer">DigiByte — Sicher, schnell, dezentral</string>
-    <string name="app_name_display">DigiByte Wallet</string>
+    <string name="app_name_display">DigiByte Mobile</string>
 
     <string name="seed_screenshot_blocked">Screenshots sind blockiert. Schreiben Sie diese Wörter auf — sie können nicht wiederhergestellt werden.</string>
     <string name="seed_title">Ihre Wiederherstellungsphrase</string>
@@ -80,7 +80,7 @@
     <string name="unlock_attempts_left">Falsche PIN. Verbleibende Versuche: %1$d</string>
     <string name="battery_title">Synchronisierung im Hintergrund fortsetzen</string>
     <string name="battery_body">Android kann diese Wallet in den Ruhezustand versetzen, wenn der Bildschirm aus ist. Dabei bricht die Verbindung zum DigiByte-Netzwerk ab und die Wallet bleibt möglicherweise bei 0 Peers stehen, bis Sie sie erneut öffnen.\n\nErlauben Sie die uneingeschränkte Ausführung, damit die Synchronisierung weiterläuft.</string>
-    <string name="battery_body_samsung">\n\nÖffnen Sie auf Samsung-Geräten zusätzlich Gerätewartung → Akku → \"Nie deaktivierte Apps\" und fügen Sie DigiByte Wallet hinzu.</string>
+    <string name="battery_body_samsung">\n\nÖffnen Sie auf Samsung-Geräten zusätzlich Gerätewartung → Akku → \"Nie deaktivierte Apps\" und fügen Sie DigiByte Mobile hinzu.</string>
     <string name="battery_open_settings">Einstellungen öffnen</string>
     <string name="tor_title">Neue Datenschutzfunktion</string>
     <string name="tor_body">Tor-Routing ist jetzt verfügbar. Wenn es aktiviert ist, verbindet sich Ihre Wallet über Tor mit dem DigiByte-Netzwerk und verbirgt Ihre IP-Adresse vor Peers.\n\nTor-Routing aktivieren?</string>
@@ -652,7 +652,7 @@
     <string name="restore_scan_title">Privat wiederherstellen</string>
     <string name="restore_scan_body">Sobald Sie fortfahren, findet dieses Telefon die Transaktionen Ihrer Wallet selbst — native (dgb1q…), Legacy- (D…), Taproot- und DigiDollar-Adressen — ohne Ihre Adressen an irgendjemanden zu senden.</string>
     <string name="restore_other_title">Phrase aus einer anderen Wallet-App?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus dieser DigiByte Wallet nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus DigiByte Mobile oder der älteren App DigiByte Wallet nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
     <string name="restore_other_check">Andere Formate prüfen</string>
     <string name="restore_scan_deriving">Adressen werden abgeleitet…</string>
     <string name="restore_scan_duration">Dies kann je nach Node 30–90 Sekunden dauern.</string>

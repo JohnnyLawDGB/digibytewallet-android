@@ -18,7 +18,7 @@
     <string name="onb_create">Yeni Cüzdan Oluştur</string>
     <string name="onb_recover">Mevcut Cüzdanı Kurtar</string>
     <string name="onb_footer">DigiByte — Güvenli, Hızlı, Merkeziyetsiz</string>
-    <string name="app_name_display">DigiByte Cüzdanı</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Ekran görüntüleri engellendi. Bu kelimeleri yazın — geri getirilemezler.</string>
     <string name="seed_title">Kurtarma İfadeniz</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Yanlış PIN. Kalan deneme: %1$d</string>
     <string name="battery_title">Eşitlemeyi arka planda çalışır durumda tut</string>
     <string name="battery_body">Ekran kapalıyken Android bu cüzdanı uyku moduna alabilir; bu, DigiByte ağıyla bağlantısını keser ve siz uygulamayı yeniden açana kadar 0 eşte takılı kalmasına yol açabilir.\n\nEşitlemeyi sürdürebilmesi için kısıtlamasız çalışmasına izin verin.</string>
-    <string name="battery_body_samsung">\n\nSamsung cihazlarda ayrıca Cihaz bakımı → Pil → \"Hiç uyumayan uygulamalar\" bölümünü açıp DigiByte Wallet\'ı ekleyin.</string>
+    <string name="battery_body_samsung">\n\nSamsung cihazlarda ayrıca Cihaz bakımı → Pil → \"Hiç uyumayan uygulamalar\" bölümünü açıp DigiByte Mobile\'ı ekleyin.</string>
     <string name="battery_open_settings">Ayarları aç</string>
     <string name="tor_title">Yeni Gizlilik Özelliği</string>
     <string name="tor_body">Tor yönlendirmesi artık kullanılabilir. Etkinleştirildiğinde cüzdanınız DigiByte ağına Tor üzerinden bağlanır ve IP adresinizi eşlerden gizler.\n\nTor yönlendirmesi etkinleştirilsin mi?</string>
@@ -644,7 +644,7 @@
     <string name="restore_scan_title">Gizli şekilde geri yükle</string>
     <string name="restore_scan_body">Devam ettikten sonra bu telefon, cüzdanınızın işlemlerini kendisi bulur — yerel (dgb1q…), legacy (D…), Taproot ve DigiDollar adresleri — adreslerinizi kimseye göndermeden.</string>
     <string name="restore_other_title">Başka bir cüzdan uygulamasından bir ifade mi?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor ve bazı eski cüzdanlar coin\'leri bu cüzdanın kullanmadığı adres biçimlerinde tutar, bu yüzden eşitleme onları göremez. Bir kontrol onları bulabilir, ancak ifadenizden türetilen adresleri DigiScope\'a (api.digiscope.me) gönderir; DigiScope bu adreslerdeki bakiyeleri bildirir. Bu DigiByte Wallet\'tan gelen bir ifade için gerekmez. Kontrolü daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünden de çalıştırabilirsiniz.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor ve bazı eski cüzdanlar coin\'leri bu cüzdanın kullanmadığı adres biçimlerinde tutar, bu yüzden eşitleme onları göremez. Bir kontrol onları bulabilir, ancak ifadenizden türetilen adresleri DigiScope\'a (api.digiscope.me) gönderir; DigiScope bu adreslerdeki bakiyeleri bildirir. DigiByte Mobile\'dan ya da eski DigiByte Wallet uygulamasından gelen bir ifade için gerekmez. Kontrolü daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünden de çalıştırabilirsiniz.</string>
     <string name="restore_other_check">Diğer biçimleri kontrol et</string>
     <string name="restore_scan_deriving">Adresler türetiliyor…</string>
     <string name="restore_scan_duration">Bu, düğüme bağlı olarak 30-90 saniye sürebilir.</string>

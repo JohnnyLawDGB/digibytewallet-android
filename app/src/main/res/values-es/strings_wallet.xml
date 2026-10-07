@@ -18,7 +18,7 @@
     <string name="onb_create">Crear billetera nueva</string>
     <string name="onb_recover">Recuperar billetera existente</string>
     <string name="onb_footer">DigiByte — Segura, rápida, descentralizada</string>
-    <string name="app_name_display">Billetera DigiByte</string>
+    <string name="app_name_display">DigiByte Mobile</string>
 
     <!-- WARNING: "no se pueden recuperar" must stay as absolute as the English. -->
     <string name="seed_screenshot_blocked">Las capturas de pantalla están bloqueadas. Anota estas palabras: no se pueden recuperar.</string>
@@ -74,7 +74,7 @@
     <string name="unlock_attempts_left">PIN incorrecto. Intentos restantes: %1$d</string>
     <string name="battery_title">Mantener la sincronización en segundo plano</string>
     <string name="battery_body">Android puede suspender esta billetera cuando la pantalla está apagada, lo que corta su conexión con la red DigiByte y puede dejarla en 0 pares hasta que la vuelvas a abrir.\n\nPermite que se ejecute sin restricciones para que siga sincronizando.</string>
-    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade DigiByte Mobile.</string>
     <string name="battery_open_settings">Abrir ajustes</string>
     <string name="tor_title">Nueva función de privacidad</string>
     <string name="tor_body">El enrutamiento Tor ya está disponible. Cuando se activa, tu billetera se conecta a la red DigiByte a través de Tor, ocultando tu dirección IP a los pares.\n\n¿Activar el enrutamiento Tor?</string>
@@ -649,7 +649,7 @@
     <string name="restore_scan_title">Restaurar de forma privada</string>
     <string name="restore_scan_body">Cuando continúes, este teléfono encontrará por sí mismo las transacciones de tu billetera — direcciones nativas (dgb1q…), legacy (D…), Taproot y DigiDollar — sin enviar tus direcciones a nadie.</string>
     <string name="restore_other_title">¿Frase de otra app de billetera?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor y algunas billeteras antiguas guardan monedas en formatos de dirección que esta billetera no usa, así que la sincronización no puede verlas. Una comprobación puede encontrarlas, pero envía las direcciones que derivan de tu frase a DigiScope (api.digiscope.me), que informa de los fondos que tengan. No es necesaria para una frase de esta DigiByte Wallet. También puedes ejecutarla más tarde desde Ajustes → Recuperar fondos de otra billetera.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor y algunas billeteras antiguas guardan monedas en formatos de dirección que esta billetera no usa, así que la sincronización no puede verlas. Una comprobación puede encontrarlas, pero envía las direcciones que derivan de tu frase a DigiScope (api.digiscope.me), que informa de los fondos que tengan. No es necesaria para una frase de DigiByte Mobile o de la antigua app DigiByte Wallet. También puedes ejecutarla más tarde desde Ajustes → Recuperar fondos de otra billetera.</string>
     <string name="restore_other_check">Comprobar otros formatos</string>
     <string name="restore_scan_deriving">Derivando direcciones…</string>
     <string name="restore_scan_duration">Esto puede tardar entre 30 y 90 segundos según el nodo.</string>

@@ -18,7 +18,7 @@
     <string name="onb_create">Создать новый кошелёк</string>
     <string name="onb_recover">Восстановить существующий кошелёк</string>
     <string name="onb_footer">DigiByte — безопасно, быстро, децентрализованно</string>
-    <string name="app_name_display">Кошелёк DigiByte</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Снимки экрана заблокированы. Запишите эти слова — восстановить их невозможно.</string>
     <string name="seed_title">Ваша фраза восстановления</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Неверный PIN-код. Осталось попыток: %1$d</string>
     <string name="battery_title">Продолжать синхронизацию в фоне</string>
     <string name="battery_body">Когда экран выключен, Android может перевести кошелёк в спящий режим. Это разрывает соединение с сетью DigiByte, и кошелёк может остаться с 0 узлов, пока вы не откроете приложение снова.\n\nРазрешите работу без ограничений, чтобы синхронизация продолжалась.</string>
-    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте DigiByte Mobile.</string>
     <string name="battery_open_settings">Открыть настройки</string>
     <string name="tor_title">Новая функция приватности</string>
     <string name="tor_body">Маршрутизация через Tor теперь доступна. При включении кошелёк подключается к сети DigiByte через Tor, скрывая ваш IP-адрес от узлов.\n\nВключить маршрутизацию Tor?</string>
@@ -650,7 +650,7 @@
     <string name="restore_scan_title">Приватное восстановление</string>
     <string name="restore_scan_body">После продолжения этот телефон сам найдёт транзакции вашего кошелька — нативные (dgb1q…), legacy (D…), Taproot- и DigiDollar-адреса — никому не отправляя ваши адреса.</string>
     <string name="restore_other_title">Фраза из другого приложения-кошелька?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor и некоторые старые кошельки хранят монеты на форматах адресов, которые этот кошелёк не использует, поэтому синхронизация их не видит. Проверка может их найти, но она отправляет адреса, производные от вашей фразы, в DigiScope (api.digiscope.me), который сообщает о средствах на них. Для фразы из этого DigiByte Wallet не требуется. Её также можно запустить позже: Настройки → Восстановить средства из другого кошелька.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor и некоторые старые кошельки хранят монеты на форматах адресов, которые этот кошелёк не использует, поэтому синхронизация их не видит. Проверка может их найти, но она отправляет адреса, производные от вашей фразы, в DigiScope (api.digiscope.me), который сообщает о средствах на них. Для фразы из DigiByte Mobile или из старого приложения DigiByte Wallet не требуется. Её также можно запустить позже: Настройки → Восстановить средства из другого кошелька.</string>
     <string name="restore_other_check">Проверить другие форматы</string>
     <string name="restore_scan_deriving">Деривация адресов…</string>
     <string name="restore_scan_duration">Это может занять 30–90 секунд в зависимости от узла.</string>

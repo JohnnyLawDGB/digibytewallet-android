@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <resources>
-  <string name="app_name" translatable="false">DigiByte Wallet</string>
+  <string name="app_name" translatable="false">DigiByte Mobile</string>
   <string name="tab_wallet">Wallet</string>
   <string name="tab_hub">Hub</string>
   <string name="tab_digi_id">Digi-ID</string>

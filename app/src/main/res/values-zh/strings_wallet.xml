@@ -18,7 +18,7 @@
     <string name="onb_create">创建新钱包</string>
     <string name="onb_recover">恢复现有钱包</string>
     <string name="onb_footer">DigiByte — 安全、快速、去中心化</string>
-    <string name="app_name_display">DigiByte 钱包</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">截图已被禁用。请把这些词抄写下来——它们无法找回。</string>
     <string name="seed_title">您的助记词</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">PIN 码错误。剩余尝试次数：%1$d</string>
     <string name="battery_title">保持后台同步</string>
     <string name="battery_body">息屏时 Android 可能会让此钱包休眠，从而中断它与 DigiByte 网络的连接，并可能使其停留在 0 个节点，直到您重新打开应用。\n\n请允许其无限制运行，以便持续同步。</string>
-    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 DigiByte Wallet。</string>
+    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 DigiByte Mobile。</string>
     <string name="battery_open_settings">打开设置</string>
     <string name="tor_title">新的隐私功能</string>
     <string name="tor_body">现已支持 Tor 路由。启用后，您的钱包将通过 Tor 连接到 DigiByte 网络，向节点隐藏您的 IP 地址。\n\n是否启用 Tor 路由？</string>
@@ -641,7 +641,7 @@
     <string name="restore_scan_title">私密恢复</string>
     <string name="restore_scan_body">继续后，这部手机会自行查找您钱包的交易 — 原生 (dgb1q…)、Legacy (D…)、Taproot 和 DigiDollar 地址 — 不会将您的地址发送给任何人。</string>
     <string name="restore_other_title">助记词来自其他钱包应用？</string>
-    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自本 DigiByte Wallet，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自 DigiByte Mobile 或旧版 DigiByte Wallet 应用，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
     <string name="restore_other_check">检查其他格式</string>
     <string name="restore_scan_deriving">正在派生地址…</string>
     <string name="restore_scan_duration">根据节点不同，这可能需要 30-90 秒。</string>
