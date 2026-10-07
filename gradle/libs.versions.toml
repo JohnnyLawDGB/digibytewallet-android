@@ -26,7 +26,7 @@ composeBom = "2024.12.01"
 hilt = "2.56.2"
 # androidx.hilt — versioned independently of Dagger/Hilt above.
 androidxHilt = "1.2.0"
-room = "2.7.1"
+room = "2.8.4"
 lifecycle = "2.8.7"
 camerax = "1.4.1"
 coroutines = "1.8.1"
