@@ -193,12 +193,18 @@ NativeBridge_createTransaction(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    /* Set fee rate if specified */
+    /* Build at the caller's rate, if specified, then put the wallet's rate back -- whether or not
+     * the build succeeds. The rate is wallet-wide state that later builds read (asset sends,
+     * sweeps, a later send at the default rate), so a custom rate is for this one build only. */
+    uint64_t savedFeePerKb = BRWalletFeePerKb(g_wallet);
     if (feePerKb > 0) {
         BRWalletSetFeePerKb(g_wallet, (uint64_t)feePerKb);
     }
 
     BRTransaction *tx = BRWalletCreateTransaction(g_wallet, (uint64_t)amountSatoshis, addrChars);
+    if (feePerKb > 0) {
+        BRWalletSetFeePerKb(g_wallet, savedFeePerKb);
+    }
     (*env)->ReleaseStringUTFChars(env, toAddress, addrChars);
 
     if (!tx) {
