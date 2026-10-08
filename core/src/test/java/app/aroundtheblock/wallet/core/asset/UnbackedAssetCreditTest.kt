@@ -317,6 +317,16 @@ class UnbackedAssetCreditTest {
         assertEquals(emptyMap<String, Long>(), balances(mgr))
     }
 
+    /** The walk's facts are accepted only for the asset a row is credited with. */
+    @Test fun walk_facts_are_taken_only_for_the_named_asset() = runTest {
+        fun facts(id: String) = ResolvedAssetFacts(id, 100, 0, null, 1, true)
+        val byTx = mapOf("start" to facts(X), "p1" to facts(X), "p2" to facts(Y))
+        val found = factsForNamedAsset(Y, "start", { listOf("p1", "p2") }, { null }) { byTx[it] }
+        assertEquals(Y, found?.assetId)
+        val none = factsForNamedAsset(A, "start", { listOf("p1", "p2") }, { null }) { byTx[it] }
+        assertNull("another lineage's asset is never returned", none)
+    }
+
     // ── Offline, retries, finality ───────────────────────────────────────────────────────────
 
     @Test fun with_no_indexer_an_unknown_receipt_stays_unchecked_and_uncounted() = runTest {

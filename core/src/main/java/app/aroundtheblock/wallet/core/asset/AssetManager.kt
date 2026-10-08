@@ -255,6 +255,30 @@ internal suspend fun transferOutputCredits(
     return vouts.associateWith { vout -> AssetCreditRules.forOutput(allocation, header, vout, outputCount) }
 }
 
+/**
+ * On-chain facts for [assetId], found by walking back from [startTxid] and, when that walk names
+ * another asset, from each of [otherParents]. A walk's answer is accepted only when it is
+ * [assetId] itself: the id is derived from its issuance, so reaching that issuance from any
+ * starting point yields the asset's own facts, while the asset some other lineage reaches says
+ * nothing about this one. [known] short-circuits with facts already proven. Null when no walk
+ * reaches [assetId].
+ */
+internal suspend fun factsForNamedAsset(
+    assetId: String,
+    startTxid: String,
+    otherParents: suspend () -> List<String>,
+    known: suspend (String) -> ResolvedAssetFacts?,
+    resolve: suspend (String) -> ResolvedAssetFacts?,
+): ResolvedAssetFacts? {
+    known(assetId)?.let { if (it.assetId == assetId) return it }
+    resolve(startTxid)?.let { if (it.assetId == assetId) return it }
+    for (parent in otherParents().distinct()) {
+        if (parent == startTxid) continue
+        resolve(parent)?.let { if (it.assetId == assetId) return it }
+    }
+    return null
+}
+
 /** Filled by [resolveInputAssetUnits] when stored-zero rows are the whole reason its answer is
  *  "unknown": which rows, and what every other input carried. Left empty otherwise. */
 internal class ZeroRowInputs {
@@ -569,9 +593,18 @@ class AssetManager(
      * the JVM, and this catch IS reached from a JVM test — the walk's first act is a NativeBridge
      * call with no library behind it.
      */
-    private suspend fun verifyFactsForTx(txid: String): Pair<ResolvedAssetFacts?, TransferRuleState> {
+    private suspend fun verifyFactsForTx(
+        txid: String,
+        expectedAssetId: String? = null,
+    ): Pair<ResolvedAssetFacts?, TransferRuleState> {
         val facts = try {
-            provenanceWalker.resolve(txid, forceToIssuance = true)
+            if (expectedAssetId != null) {
+                // The row names its asset from its credit; find that asset's issuance from
+                // whichever input leads to it, not only the first.
+                walkFactsFor(txid, expectedAssetId, forceToIssuance = true)
+            } else {
+                provenanceWalker.resolve(txid, forceToIssuance = true)
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -607,7 +640,7 @@ class AssetManager(
     suspend fun verifyTransferRules(assetId: String): TransferRuleState {
         val utxo = utxoDao.getAssetUtxosByIdNow(assetId).firstOrNull()
             ?: return TransferRuleState.UNKNOWN
-        val (facts, state) = verifyFactsForTx(utxo.txid)
+        val (facts, state) = verifyFactsForTx(utxo.txid, expectedAssetId = assetId)
         return if (facts?.assetId == assetId) state else TransferRuleState.UNKNOWN
     }
 
@@ -1091,6 +1124,18 @@ class AssetManager(
                     .onFailure { android.util.Log.d("AssetManager", "receipt check threw for ${txHashHex.take(12)}:${out.vout}", it) }
             }
         }
+        // The per-asset history lists a transfer under the asset its backed rows name — never
+        // the first input's walk. Once per session, as the walk used to.
+        if (!isIssuance && !isOutgoingUnconfirmed && txHashHex !in labelledInSession) {
+            val named = utxoDao.getAssetUtxosForTxNow(txHashHex)
+                .filter { AssetCredit.counts(it.assetCredit) }
+                .sortedByDescending { it.assetQuantity }
+                .firstNotNullOfOrNull { r -> r.assetId?.takeIf { it.isNotEmpty() && !it.startsWith("unresolved:") } }
+            if (named != null) {
+                runCatching { transactionDao.updateAssetId(txHashHex, named) }
+                labelledInSession.add(txHashHex)
+            }
+        }
 
         // Kick off metadata fetch if we have a CID (issuance only).
         // Keyed by the placeholder assetId so the UI can display a name
@@ -1102,12 +1147,21 @@ class AssetManager(
                 }
         }
 
-        // M3 parent-walk: fire if we still have a placeholder OR if we
+        // A transfer is never named by the parent walk: the walk follows the first input, which
+        // need not be where the units came from (the sender chooses the input order). Its rows
+        // are named by their credit above; the walk only fetches on-chain facts for an asset a
+        // backed row of this transaction already names.
+        if (!isIssuance) {
+            runCatching { walkFactsForCreditedAssets(txHashHex) }
+                .onFailure { android.util.Log.d("AssetManager", "M3 facts walk threw for $txHashHex", it) }
+        }
+
+        // M3 parent-walk (issuance only): fire if we still have a placeholder OR if we
         // haven't yet walked this tx in the current session (to backfill
         // chain-facts for rows resolved in a prior session). The session-
         // local cache gates repeat walks to once per process lifetime.
-        val shouldWalk = (anyStillUnresolved && placeholderAssetId.startsWith("unresolved:"))
-            || !walkedInSession.contains(txHashHex)
+        val shouldWalk = isIssuance && ((anyStillUnresolved && placeholderAssetId.startsWith("unresolved:"))
+            || !walkedInSession.contains(txHashHex))
         if (shouldWalk) {
             runCatching {
                 val resolved = resolveTransferAssetId(txHashHex)
@@ -1121,46 +1175,7 @@ class AssetManager(
                         transactionDao.updateAssetId(txHashHex, resolved.assetId)
                     }
 
-                    // Persist on-chain facts from the issuance header. These
-                    // are authoritative — totalSupply and decimals are
-                    // cryptographically tied to the issuance tx, whereas
-                    // name/imageUrl depend on IPFS reachability. Seed an
-                    // empty row if needed, then merge the chain fields so
-                    // we don't clobber any existing IPFS-sourced metadata.
-                    metadataDao.insertChainFacts(
-                        app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity(
-                            assetId = resolved.assetId,
-                            totalSupply = resolved.totalSupply,
-                            decimals = resolved.divisibility,
-                            metadataCid = resolved.metadataCid,
-                            cachedAt = System.currentTimeMillis(),
-                        )
-                    )
-                    metadataDao.updateChainFacts(
-                        assetId = resolved.assetId,
-                        totalSupply = resolved.totalSupply,
-                        decimals = resolved.divisibility,
-                    )
-
-                    // Issuance-side metadata fetch — uses the CID we just
-                    // extracted from the issuance header (authoritative)
-                    // rather than waiting on backend getAssetData.
-                    runCatching {
-                        metadataService.getMetadata(resolved.assetId, resolved.metadataCid)
-                    }
-
-                    // Transfer-rule signal for the asset this walk just named. Without it the
-                    // rules column is only ever written by verifyTransferRulesForTx, so the
-                    // common path — an asset that arrives and is walked in the background —
-                    // reached the send screen with nothing stored and had to walk again.
-                    // Inside the once-per-walk branch, so at most one proxy call per newly
-                    // resolved asset.
-                    runCatching { metadataService.refreshRules(resolved.assetId) }
-                        .onFailure {
-                            android.util.Log.w(
-                                "AssetManager", "refreshRules failed for ${resolved.assetId}", it,
-                            )
-                        }
+                    applyChainFacts(resolved)
                     android.util.Log.i("AssetManager",
                         "M3 resolved $txHashHex → ${resolved.assetId} " +
                         "(supply=${resolved.totalSupply} div=${resolved.divisibility}; placeholder rewritten)")
@@ -1172,6 +1187,110 @@ class AssetManager(
         maybePersistAfterDetect(persistAfterDetect, result)
         return result
     }
+
+    /**
+     * Persist on-chain facts from an issuance header the walk reached, and ask for the asset's
+     * metadata and transfer rules. The facts are authoritative — totalSupply and decimals are
+     * cryptographically tied to the issuance tx, whereas name/imageUrl depend on IPFS
+     * reachability. Seed an empty row if needed, then merge the chain fields so we don't clobber
+     * any existing IPFS-sourced metadata.
+     */
+    private suspend fun applyChainFacts(resolved: ResolvedAsset) {
+        metadataDao.insertChainFacts(
+            app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity(
+                assetId = resolved.assetId,
+                totalSupply = resolved.totalSupply,
+                decimals = resolved.divisibility,
+                metadataCid = resolved.metadataCid,
+                cachedAt = System.currentTimeMillis(),
+            )
+        )
+        metadataDao.updateChainFacts(
+            assetId = resolved.assetId,
+            totalSupply = resolved.totalSupply,
+            decimals = resolved.divisibility,
+        )
+
+        // Issuance-side metadata fetch — uses the CID we just
+        // extracted from the issuance header (authoritative)
+        // rather than waiting on backend getAssetData.
+        runCatching {
+            metadataService.getMetadata(resolved.assetId, resolved.metadataCid)
+        }
+
+        // Transfer-rule signal for the asset this walk just named. Without it the
+        // rules column is only ever written by verifyTransferRulesForTx, so the
+        // common path — an asset that arrives and is walked in the background —
+        // reached the send screen with nothing stored and had to walk again.
+        // Inside the once-per-walk branch, so at most one proxy call per newly
+        // resolved asset.
+        runCatching { metadataService.refreshRules(resolved.assetId) }
+            .onFailure {
+                android.util.Log.w(
+                    "AssetManager", "refreshRules failed for ${resolved.assetId}", it,
+                )
+            }
+    }
+
+    /**
+     * On-chain facts for the assets this transfer's backed rows name ([AssetCredit]).
+     *
+     * The walk resolves an asset by following a transaction's FIRST input back to an issuance.
+     * That is the sender's choice, not where the units came from, so its answer is used only
+     * when it is the asset the row already names: a walk that reaches the issuance of the named
+     * asset yields that asset's own facts whichever input it started from, because the id is
+     * derived from the issuance itself. When the first input's walk reaches another asset, the
+     * walk is tried from each other input's transaction. Nothing here renames a row.
+     *
+     * At most one attempt per transaction per [FACTS_WALK_RETRY_MS] until every named asset has
+     * its facts.
+     */
+    private suspend fun walkFactsForCreditedAssets(txHashHex: String) {
+        if (walkedInSession.contains(txHashHex)) return
+        val named = utxoDao.getAssetUtxosForTxNow(txHashHex)
+            .filter { AssetCredit.counts(it.assetCredit) && it.assetQuantity > 0L }
+            .mapNotNull { it.assetId }
+            .filter { it.isNotEmpty() && !it.startsWith("unresolved:") }
+            .distinct()
+        if (named.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val last = factsWalkAttemptAt[txHashHex]
+        if (last != null && now - last < FACTS_WALK_RETRY_MS) return
+        factsWalkAttemptAt[txHashHex] = now
+
+        var allFound = true
+        for (assetId in named) {
+            val facts = walkFactsFor(txHashHex, assetId, forceToIssuance = false)
+            if (facts == null) {
+                allFound = false
+                continue
+            }
+            applyChainFacts(
+                ResolvedAsset(facts.assetId, facts.totalSupply, facts.divisibility, facts.metadataCid),
+            )
+            android.util.Log.i("AssetManager",
+                "M3 facts for ${facts.assetId} via $txHashHex " +
+                    "(supply=${facts.totalSupply} div=${facts.divisibility}; row named by its credit)")
+        }
+        if (allFound) {
+            walkedInSession.add(txHashHex)
+            factsWalkAttemptAt.remove(txHashHex)
+        }
+    }
+
+    /** [factsForNamedAsset] over the walker, starting from [txid] and then from the
+     *  transactions its other inputs spend. */
+    private suspend fun walkFactsFor(txid: String, assetId: String, forceToIssuance: Boolean): ResolvedAssetFacts? =
+        factsForNamedAsset(
+            assetId = assetId,
+            startTxid = txid,
+            otherParents = {
+                val lines = heldInputLines(txid) ?: return@factsForNamedAsset emptyList()
+                lines.drop(1).mapNotNull { it?.split("|", limit = 2)?.getOrNull(0)?.takeIf { p -> p.length == 64 } }
+            },
+            known = { if (forceToIssuance) null else provenanceStore.issuanceFactsFor(it) },
+            resolve = { provenanceWalker.resolve(it, forceToIssuance) },
+        )
 
     /**
      * Persist-on-detect decision (C6), extracted as its own seam so it's
@@ -2727,6 +2846,13 @@ class AssetManager(
      *  refresh chain facts in case they ever go stale. */
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** Transfers whose history row was labelled this session with the asset their backed rows name. */
+    private val labelledInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** When [walkFactsForCreditedAssets] last tried a transaction whose named assets it has not
+     *  all found facts for. Process lifetime. */
+    private val factsWalkAttemptAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     /** When [settleFromIndexer] last asked about an outpoint the indexer has not yet answered
      *  for. Process lifetime. */
     private val receiptCheckAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -3069,6 +3195,9 @@ class AssetManager(
          *  output is not reported until it confirms, and a behind indexer catches up. */
         const val RECEIPT_RECHECK_MS = 60_000L
 
+        /** How often a transfer whose named assets lack on-chain facts is walked again. A deep
+         *  chain resumes from its frontier on each attempt, so this also paces how fast it resolves. */
+        const val FACTS_WALK_RETRY_MS = 2 * 60_000L
     }
 }
 
