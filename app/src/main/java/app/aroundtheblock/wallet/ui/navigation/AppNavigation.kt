@@ -43,6 +43,7 @@ import app.aroundtheblock.wallet.ui.digiid.DigiIdScreen
 import app.aroundtheblock.wallet.ui.hub.DigiRunnerLeaderboardScreen
 import app.aroundtheblock.wallet.ui.onboarding.*
 import app.aroundtheblock.wallet.ui.settings.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import app.aroundtheblock.wallet.ui.hub.ChatScreen
 import app.aroundtheblock.wallet.ui.hub.CreateThreadScreen
 import app.aroundtheblock.wallet.ui.hub.HubScreen
@@ -143,6 +144,7 @@ fun AppNavigation(
         val hasPin = try { pinManager.hasPin() } catch (e: Exception) { false }
         if (shouldRouteToUnlock(walletState, hasPin, currentRoute)) {
             android.util.Log.i("AppNavigation", "wallet locked on route=$currentRoute — routing to unlock")
+            SeedViewGate.revoke()
             resumeAfterUnlock = routeToResumeAfterUnlock(currentRoute)
             navController.navigate("unlock") {
                 popUpTo(0) { inclusive = true }
@@ -594,11 +596,23 @@ fun AppNavigation(
             }
 
             composable("settings_view_seed") {
-                SeedViewScreen(
-                    navController = navController,
-                    walletManager = walletManager,
-                    keyStoreManager = keyStoreManager
-                )
+                // Spent once per visit; saveable so a rotation does not spend it twice.
+                val passed = rememberSaveable { SeedViewGate.consume() }
+                if (passed) {
+                    SeedViewScreen(
+                        navController = navController,
+                        walletManager = walletManager,
+                        keyStoreManager = keyStoreManager
+                    )
+                } else {
+                    LaunchedEffect(Unit) {
+                        android.util.Log.w("AppNavigation", "recovery phrase opened without the PIN + biometric check — back to Security settings")
+                        navController.navigate("settings_security") {
+                            popUpTo("settings_view_seed") { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
             }
 
             // ── Send flow ─────────────────────────────────────────────────────

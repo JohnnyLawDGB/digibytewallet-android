@@ -118,10 +118,16 @@ class WipeRouteGatePolicyTest {
         // Note 8 2026-09-23: the system credential activity stopped MainActivity, which locked;
         // after the PIN the user landed on wallet home and had to open Recover funds again.
         assertEquals("recover_funds", routeToResumeAfterUnlock("recover_funds"))
-        for (route in listOf("settings_security", "settings_view_seed", "settings_network",
+        for (route in listOf("settings_security", "settings_network",
                 "settings_display", "settings_about")) {
             assertEquals(route, routeToResumeAfterUnlock(route))
         }
+    }
+
+    @Test
+    fun `a lock on the recovery phrase returns to Security settings, never to the phrase`() {
+        // BB-2026-10-08-dino: the unlock takes one factor, the phrase takes two.
+        assertEquals("settings_security", routeToResumeAfterUnlock("settings_view_seed"))
     }
 
     @Test

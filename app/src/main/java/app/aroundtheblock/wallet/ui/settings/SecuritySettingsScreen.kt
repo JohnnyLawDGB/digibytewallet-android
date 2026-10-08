@@ -417,12 +417,14 @@ fun SecuritySettingsScreen(
                                                     subtitle = authViewPhraseMsg
                                                 )
                                                 if (result is BiometricResult.Success) {
+                                                    SeedViewGate.grant()
                                                     navController.navigate("settings_view_seed")
                                                 } else {
                                                     snackMessage = bioRequiredMsg
                                                 }
                                             } else if (!biometricAvailable) {
                                                 // No biometric hardware — PIN alone suffices
+                                                SeedViewGate.grant()
                                                 navController.navigate("settings_view_seed")
                                             }
                                         }

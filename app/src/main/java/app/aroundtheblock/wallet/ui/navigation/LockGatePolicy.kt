@@ -65,10 +65,18 @@ fun shouldRouteToOnboardingAfterWipe(state: WalletState, currentRoute: String?):
  * screen shows nothing the unlock did not already open.
  */
 private val RESUMABLE_AFTER_UNLOCK = setOf(
-    "recover_funds", "settings_security", "settings_view_seed", "settings_network",
+    "recover_funds", "settings_security", "settings_network",
     "settings_display", "settings_about", "settings_reconcile",
 )
 
-/** The route to reopen after the unlock that followed a lock on [interrupted], or null. */
-fun routeToResumeAfterUnlock(interrupted: String?): String? =
-    interrupted?.takeIf { it in RESUMABLE_AFTER_UNLOCK }
+/**
+ * The route to reopen after the unlock that followed a lock on [interrupted], or null.
+ *
+ * The recovery phrase is the exception to "the unlock already opened it": the unlock takes the PIN
+ * OR a biometric, while the phrase takes the PIN AND a biometric. A lock on the phrase therefore
+ * returns to Security settings, where the phrase must be asked for again (BB-2026-10-08-dino).
+ */
+fun routeToResumeAfterUnlock(interrupted: String?): String? = when (interrupted) {
+    "settings_view_seed" -> "settings_security"
+    else -> interrupted?.takeIf { it in RESUMABLE_AFTER_UNLOCK }
+}
