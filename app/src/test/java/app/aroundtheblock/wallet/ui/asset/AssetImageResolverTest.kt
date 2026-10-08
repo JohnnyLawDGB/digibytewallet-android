@@ -116,10 +116,12 @@ class AssetImageResolverTest {
     }
 
     @Test
-    fun `data URI passes through as string`() {
-        // Issuance tools embed tiny thumbnails inline as base64 data URIs so
-        // they don't need to pin separately to IPFS. Coil decodes natively.
-        val inline = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
-        assertEquals(inline, AssetImageResolver.resolve(inline))
+    fun `data URIs are rejected whatever media type they declare`() {
+        // Coil 2.x has no data-URI fetcher, so none of these could ever render; null keeps the
+        // placeholder and keeps the detail screen from offering an empty viewer.
+        assertNull(AssetImageResolver.resolve("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"))
+        assertNull(AssetImageResolver.resolve("data:text/html,<p>x</p>"))
+        assertNull(AssetImageResolver.resolve("data:image/svg+xml;utf8,<svg/>"))
+        assertNull(AssetImageResolver.resolve("  DATA:image/png;base64,AAAA"))
     }
 }
