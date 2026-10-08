@@ -11,9 +11,14 @@
 //       in the loaded wallet.
 //   [4] Stack. An unconfirmed tx with one wallet-owned input (P2PKH, then P2WPKH) and 60,000 other
 //       inputs is checked on a thread with a 1 MiB stack (Android's default) and refused, ASan-clean.
+//   [5] Conflicting spends. A junk-signature spend F of C, registered before C, and the wallet's own
+//       validly signed send S of C: S is the spend of C, F is invalid, in either order.
+//   [6] Validity walk. BRWalletTransactionIsValid on a receive whose unconfirmed ancestry is a
+//       30,000-long relayed chain answers on a 1 MiB stack (bounded walk) instead of recursing through it.
 // Uses only the wallet's public API, so the same main builds against an earlier core:
 //   UNSIGNED_SPEND_CORE_DIR=<core checkout> run.sh  -- recorded red against core ee48b70: [1] and [3]
-//   mark C spent, [2] marks C spent, and [4] overflows the stack in BRTransactionVerifyInput.
+//   mark C spent, [2] marks C spent, and [4] overflows the stack in BRTransactionVerifyInput
+//   (and against 051e504, [6] overflows the stack in BRWalletTransactionIsValid).
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -68,6 +73,12 @@ static void whole(BRWallet *w, BRTransaction *C, BRTransaction *T, const char *l
 
 static BRWallet *g_w; static BRTransaction *g_T; static int g_r = -1;
 static void *regThread(void *a) { (void)a; g_r = BRWalletRegisterTransaction(g_w, g_T); return NULL; }
+static void *validThread(void *a) { (void)a; g_r = BRWalletTransactionIsValid(g_w, g_T); return NULL; }
+static void onSmallStack(void *(*fn)(void *)) {
+    pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 1 << 20);
+    pthread_t th; g_r = -1;
+    pthread_create(&th, &at, fn, NULL); pthread_join(th, NULL);
+}
 
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -136,11 +147,53 @@ int main(void) {
             BRTransactionAddInput(g_T, q, 0, 0, NULL, 0, kSig, sizeof(kSig), kSig, 0, 0xffffffff);
         }
         BRTransactionAddOutput(g_T, 1000, spk, l); fin(g_T); g_T->blockHeight = TX_UNCONFIRMED;
-        pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 1 << 20);
-        pthread_t th; g_r = -1;
-        pthread_create(&th, &at, regThread, NULL); pthread_join(th, NULL);
+        onSmallStack(regThread);
         ck(g_r == 0, type == 0 ? "P2PKH input: refused, the stack intact" : "P2WPKH input: refused, the stack intact");
         if (BRWalletTransactionForHash(g_w, g_T->txHash) != g_T) BRTransactionFree(g_T);
+        BRWalletFree(g_w);
+    }
+
+    printf("[5] a forged and a signed spend of the same coin\n");
+    for (int order = 0; order < 2; order++) {
+        BRWallet *w = BRWalletNew(NULL, 0, g_mpk);
+        size_t l = spkOf(w, 0, 1, spk), l2 = spkOf(w, 1, 1, spk2);
+        BRTransaction *C = coin(spk, l, 0x51), *F = junk(C, spk2, l2);
+        if (order == 0) BRWalletRegisterTransaction(w, F);           // forged first, before C
+        BRWalletRegisterTransaction(w, C);
+        BRAddress d; BRWalletUnusedAddrs(w, &d, 1, 1, 1);
+        BRTransaction *S = BRWalletCreateTransaction(w, 50000000ULL, d.s);
+        int signedOk = S && BRWalletSignTransaction(w, S, 0, seed, sizeof(seed)) == 1;
+        if (signedOk) S->timestamp = 1784990000;
+        int regS = signedOk && BRWalletRegisterTransaction(w, S) == 1;
+        if (order == 1) BRWalletRegisterTransaction(w, F);           // forged after the signed send
+        ck(regS && BRWalletTransactionIsValid(w, S) && ! BRWalletTransactionIsValid(w, F),
+           order == 0 ? "forged first: the signed send is valid, the forged one is not"
+                      : "signed first: the signed send is valid, the forged one is not");
+        ck(BRWalletBalance(w) == 100000000ULL - BRWalletAmountSentByTx(w, S) + BRWalletAmountReceivedFromTx(w, S),
+           "  ... and the balance is C less what the signed send spends");
+        BRWalletFree(w);
+    }
+
+    printf("[6] the validity walk over a long relayed chain\n");
+    {
+        g_w = BRWalletNew(NULL, 0, g_mpk);
+        uint8_t other[22] = {0x00, 0x14}; memset(&other[2], 0x66, 20);
+        UInt256 prev; memset(prev.u8, 0x61, 32);
+        for (int i = 0; i < 30000; i++) {                             // a foreign unconfirmed chain
+            BRTransaction *t = BRTransactionNew();
+            BRTransactionAddInput(t, prev, 0, 0, NULL, 0, kSig, sizeof(kSig), kSig, 0, 0xffffffff);
+            BRTransactionAddOutput(t, 100000000ULL, other, sizeof(other)); fin(t);
+            t->blockHeight = TX_UNCONFIRMED;
+            prev = t->txHash;
+            if (BRWalletRegisterTransaction(g_w, t) == 0 && BRWalletTransactionForHash(g_w, t->txHash) != t) BRTransactionFree(t);
+        }
+        size_t l = spkOf(g_w, 0, 1, spk);
+        g_T = BRTransactionNew();                                     // a receive at its tip
+        BRTransactionAddInput(g_T, prev, 0, 0, NULL, 0, kSig, sizeof(kSig), kSig, 0, 0xffffffff);
+        BRTransactionAddOutput(g_T, 90000000ULL, spk, l); fin(g_T); g_T->blockHeight = TX_UNCONFIRMED;
+        BRWalletRegisterTransaction(g_w, g_T);
+        onSmallStack(validThread);
+        ck(g_r == 0 || g_r == 1, "BRWalletTransactionIsValid answers on a 1 MiB stack");
         BRWalletFree(g_w);
     }
 

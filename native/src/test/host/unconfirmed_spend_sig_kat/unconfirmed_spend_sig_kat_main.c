@@ -17,6 +17,10 @@
 //       as before: confirmed transactions are not second-guessed.
 //   [8] One selection's own-unconfirmed walk is bounded in total, not per coin: 900 coins of a forged
 //       chain (put in through the trusted path) cost at most SELECT_WALK_BUDGET input visits.
+//   [9] A server's height proves nothing: a junk-signature spend registered with a server-reported
+//       height (BRWalletRegisterTransactionUnproven) is refused, as is one that arrived before its coin
+//       and is then promoted by a server (BRWalletUpdateTransactionsUnproven); a validly signed spend
+//       with a server-reported height registers and spends the coin.
 // Recorded red against core 887cc82: [2] registers the junk-signature spend, C is spent and the send
 // fails or spends the forged change; [5] registers the tampered copy; [8] visits ~900x more.
 //
@@ -300,6 +304,35 @@ int main(void) {
         snprintf(m, sizeof(m), "BRWalletMaxOutputAmount visited %lu inputs (bound %d)", _walletKatWalkVisits, SELECT_WALK_BUDGET);
         ck(_walletKatWalkVisits <= SELECT_WALK_BUDGET, m);
         BRWalletFree(wf);
+    }
+
+    printf("[9] server-reported heights\n");
+    {
+        BRWallet *ws = mkWallet();
+        BRTransaction *C3 = receive(ws, 1, 100000000ULL, 0x81, 700000);
+        BRWalletRegisterTransaction(ws, C3);
+        BRTransaction *J = junkSpend(ws, C3->txHash, 0, 99000000ULL, 700005);
+        UInt256 jh = J->txHash;
+        BRWalletRegisterTransactionUnproven(ws, J);
+        int held = BRWalletTransactionForHash(ws, jh) == J;
+        if (! held) BRTransactionFree(J);
+        ck(! held && BRWalletOutpointSpent(ws, C3->txHash, 0) == 0, "a junk spend with a server height is refused");
+        BRTransaction *s = signedSend(ws, 50000000ULL);
+        if (s) { s->blockHeight = 700006; s->timestamp = g_ts++; }
+        ck(s && BRWalletRegisterTransactionUnproven(ws, s) == 1 && BRWalletOutpointSpent(ws, C3->txHash, 0) == 1,
+           "a validly signed spend with a server height registers and spends the coin");
+        BRWalletFree(ws);
+
+        ws = mkWallet();
+        BRTransaction *C4 = receive(ws, 1, 100000000ULL, 0x82, 700000);
+        BRTransaction *J2 = junkSpend(ws, C4->txHash, 0, 99000000ULL, TX_UNCONFIRMED);
+        UInt256 j2 = J2->txHash;
+        BRWalletRegisterTransaction(ws, J2);                     // before its coin: passes the first check
+        BRWalletRegisterTransaction(ws, C4);
+        BRWalletUpdateTransactionsUnproven(ws, &j2, 1, 700007, g_ts++);
+        ck(BRWalletOutpointSpent(ws, C4->txHash, 0) == 0 && BRWalletBalance(ws) == 100000000ULL,
+           "a junk spend promoted by a server does not spend the coin");
+        BRWalletFree(ws);
     }
 
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);

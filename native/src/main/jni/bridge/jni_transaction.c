@@ -574,8 +574,9 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
         if (existing->blockHeight == TX_UNCONFIRMED &&
             (uint32_t)blockHeight != TX_UNCONFIRMED && blockHeight > 0) {
             UInt256 h = existing->txHash;
-            BRWalletUpdateTransactions(g_wallet, &h, 1,
-                                       (uint32_t)blockHeight, (uint32_t)blockTimestamp);
+            /* A server's height, not one this wallet proved: the record stays signature-checked. */
+            BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
+                                               (uint32_t)blockHeight, (uint32_t)blockTimestamp);
             LOGI("registerRawTransaction: promoted stuck-pending tx to height=%ld ts=%ld",
                  (long)blockHeight, (long)blockTimestamp);
             promoted = JNI_TRUE;
@@ -590,7 +591,9 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
     tx->timestamp = (uint32_t)blockTimestamp;
 
     UInt256 txHash = tx->txHash;
-    int ok = BRWalletRegisterTransaction(g_wallet, tx);
+    /* The height is the server's, not proven by this wallet: the tx's signatures on wallet coins are
+     * checked at any height (BRWalletRegisterTransactionUnproven), now and at every balance rebuild. */
+    int ok = BRWalletRegisterTransactionUnproven(g_wallet, tx);
     if (!ok) {
         /* Not taken by the wallet. It keeps an unconfirmed non-wallet tx in its allTx set; anything
          * else it refused -- a confirmed non-wallet tx, an out-of-range tx, an unconfirmed tx that
@@ -633,8 +636,9 @@ NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
         UInt256 h = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
         BRTransaction *existing = BRWalletTransactionForHash(g_wallet, h);
         if (existing && existing->blockHeight == TX_UNCONFIRMED) {
-            BRWalletUpdateTransactions(g_wallet, &h, 1,
-                                       (uint32_t)blockHeight, (uint32_t)blockTimestamp);
+            /* A server's height, not one this wallet proved: the record stays signature-checked. */
+            BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
+                                               (uint32_t)blockHeight, (uint32_t)blockTimestamp);
             LOGI("confirmTransaction: promoted %s to height=%ld ts=%ld",
                  hashStr, (long)blockHeight, (long)blockTimestamp);
             promoted = JNI_TRUE;
