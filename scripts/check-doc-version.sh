@@ -20,7 +20,8 @@ VER=$(grep -oE 'versionName = "[0-9.]+"' "$GRADLE" | grep -oE '[0-9.]+' | head -
 status=0
 check() {
     local file="$1" label="$2" found
-    found=$(grep -oE "$3" "$ROOT/$file" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    # Three or four parts: a patch release of a final version (4.0.87.1) carries a fourth.
+    found=$(grep -oE "$3" "$ROOT/$file" | grep -oE '[0-9]+(\.[0-9]+){2,3}' | head -1)
     if [ -z "$found" ]; then
         echo "FAIL: no $label version line found in $file"; status=1
     elif [ "$found" != "$VER" ]; then

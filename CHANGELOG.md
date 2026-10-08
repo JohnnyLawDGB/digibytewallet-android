@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.0.87.1](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v4.0.87...v4.0.87.1) (2026-10-08)
+
+Security-only update for `io.digibyte`. No features; the move notice to DigiByte Mobile, the
+"DigiByte (old)" launcher name and the grey icon are unchanged.
+
+### Bug Fixes
+
+* stability: data received from the network is handled more strictly, so a peer cannot crash or stall the wallet
+* spending safety: the balance and sends count only coins this wallet can spend; a send uses confirmed coins first, then the wallet's own change (an incoming payment is spendable after its first confirmation)
+* wallet amounts stay within DigiByte's money range
+* a DigiDollar send pays the fee its confirmation shows
+
 ## [3.3.0](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v3.2.0...v3.3.0) (2026-04-08)
 
 
