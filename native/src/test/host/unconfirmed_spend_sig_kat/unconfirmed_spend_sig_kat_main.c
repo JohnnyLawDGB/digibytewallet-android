@@ -21,6 +21,11 @@
 //       height (BRWalletRegisterTransactionUnproven) is refused, as is one that arrived before its coin
 //       and is then promoted by a server (BRWalletUpdateTransactionsUnproven); a validly signed spend
 //       with a server-reported height registers and spends the coin.
+//  [10] Trust does not outlive its reason. A junk-signature spend of C delivered in a block (the trusted
+//       path) spends C while confirmed; once a reorg takes it back to unconfirmed (BRWalletSetTxUnconfirmedAfter
+//       or BRWalletUpdateTransactions to TX_UNCONFIRMED) it no longer spends C. A validly signed one still
+//       does. A trusted junk spend registered before its coin is known does not spend the coin once it arrives.
+// Recorded red against core b2ba065 (trust was a standing exemption): the [10] reorg and late-coin checks fail.
 // Recorded red against core 887cc82: [2] registers the junk-signature spend, C is spent and the send
 // fails or spends the forged change; [5] registers the tampered copy; [8] visits ~900x more.
 //
@@ -333,6 +338,46 @@ int main(void) {
         ck(BRWalletOutpointSpent(ws, C4->txHash, 0) == 0 && BRWalletBalance(ws) == 100000000ULL,
            "a junk spend promoted by a server does not spend the coin");
         BRWalletFree(ws);
+    }
+
+    printf("[10] trust from a block does not outlive the block\n");
+    for (int how = 0; how < 2; how++) {
+        BRWallet *wr = mkWallet();
+        BRTransaction *C5 = receive(wr, 1, 100000000ULL, 0x91, 700000);
+        BRWalletRegisterTransaction(wr, C5);
+        BRTransaction *J = junkSpend(wr, C5->txHash, 0, 99000000ULL, TX_UNCONFIRMED);
+        UInt256 jh = J->txHash;
+        ck(BRWalletRegisterTransactionTrusted(wr, J) == 1, "setup: a junk spend delivered in a block registers");
+        BRWalletUpdateTransactions(wr, &jh, 1, 700010, g_ts++);
+        ck(BRWalletOutpointSpent(wr, C5->txHash, 0) == 1, "  ... and, confirmed, spends the coin");
+        if (how == 0) BRWalletSetTxUnconfirmedAfter(wr, 700005);
+        else BRWalletUpdateTransactions(wr, &jh, 1, TX_UNCONFIRMED, 0);
+        ck(BRWalletOutpointSpent(wr, C5->txHash, 0) == 0 && BRWalletBalance(wr) == 100000000ULL,
+           how == 0 ? "after a reorg (SetTxUnconfirmedAfter) it no longer spends the coin"
+                    : "after a reorg (UpdateTransactions to unconfirmed) it no longer spends the coin");
+        BRWalletFree(wr);
+    }
+    {
+        BRWallet *wr = mkWallet();
+        BRTransaction *C6 = receive(wr, 1, 100000000ULL, 0x92, 700000);
+        BRWalletRegisterTransaction(wr, C6);
+        BRTransaction *s = signedSend(wr, 50000000ULL);
+        UInt256 sh = s ? s->txHash : UINT256_ZERO;
+        ck(s && BRWalletRegisterTransactionTrusted(wr, s) == 1, "setup: a validly signed spend delivered in a block");
+        BRWalletUpdateTransactions(wr, &sh, 1, 700010, g_ts++);
+        BRWalletSetTxUnconfirmedAfter(wr, 700005);
+        ck(BRWalletOutpointSpent(wr, C6->txHash, 0) == 1, "after a reorg a validly signed spend still spends the coin");
+        BRWalletFree(wr);
+    }
+    {
+        BRWallet *wr = mkWallet();
+        BRTransaction *C7 = receive(wr, 1, 100000000ULL, 0x93, 700000);
+        BRTransaction *J = junkSpend(wr, C7->txHash, 0, 99000000ULL, TX_UNCONFIRMED);
+        ck(BRWalletRegisterTransactionTrusted(wr, J) == 1, "setup: a trusted junk spend registered before its coin");
+        BRWalletRegisterTransaction(wr, C7);
+        ck(BRWalletOutpointSpent(wr, C7->txHash, 0) == 0 && BRWalletBalance(wr) == 100000000ULL,
+           "once the coin arrives the trusted junk spend does not spend it");
+        BRWalletFree(wr);
     }
 
     printf(g_fail == 0 ? "\nALL PASS\n" : "\n%d FAIL\n", g_fail);
