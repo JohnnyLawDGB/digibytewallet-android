@@ -74,7 +74,8 @@ object DigiAssetEncoder {
             }
         }
 
-        /** Convenience: output 31 with range=false is a burn per DA spec. */
+        /** Convenience: names output 31 with range=false — the destroy marker in a BURN payload.
+         *  This encoder writes TRANSFER payloads, in which that index is an ordinary output. */
         val isBurn: Boolean get() = !range && outputIndex == 31
     }
 

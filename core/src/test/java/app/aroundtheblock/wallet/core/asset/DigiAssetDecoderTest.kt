@@ -362,6 +362,19 @@ class DigiAssetDecoderTest {
     }
 
     @Test
+    fun `output 31 is a burn only in a burn operation`() {
+        // One instruction, 1 unit to output 31, as a transfer and as a burn.
+        val transfer = decoder.decode(hexToBytes("6a06444102151f01"))!!
+        assertEquals(AssetOperation.TRANSFER, transfer.operation)
+        assertEquals(31, transfer.transferInstructions.single().outputIndex)
+        assertFalse("in a transfer, output 31 is a real output", transfer.transferInstructions.single().isBurn)
+
+        val burn = decoder.decode(hexToBytes("6a06444102251f01"))!!
+        assertEquals(AssetOperation.BURN, burn.operation)
+        assertTrue("in a burn, output 31 is the destroy marker", burn.transferInstructions.single().isBurn)
+    }
+
+    @Test
     fun `decode parses transfer with skip flag`() {
         val result = decoder.decode(hexToBytes(TRANSFER_V3_SKIP))!!
         assertTrue(

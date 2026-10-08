@@ -16,7 +16,7 @@ import app.aroundtheblock.wallet.core.model.AssetOperation
  *       0x04 - Issuance, immutable rules
  *       0x05 - Issuance, no metadata or rules
  *       0x15 - Transfer
- *       0x25 - Burn (output index 31 = burn)
+ *       0x25 - Burn (non-range output index 31 = burn; other instructions transfer)
  *
  * Fields after the header are encoded using BitIO fixed-precision encoding,
  * a bit-level packed format where values occupy variable widths (1-7 bytes).
@@ -282,7 +282,10 @@ class DigiAssetDecoder {
                 }
             }
 
-            val burn = !range && output == 31
+            // Output 31 is the destroy marker only in a BURN (DigiAsset_Core DigiByteTransaction.cpp
+            // decodeAssetTransfer: `type == DIGIASSET_BURN && !range && output == 31`). In a transfer
+            // or an issuance it names a real output, which exists once a transaction has 32 or more.
+            val burn = !range && output == 31 && operation == AssetOperation.BURN
             instructions.add(
                 TransferInstruction(
                     skip = skip,
@@ -460,6 +463,7 @@ data class TransferInstruction(
     val outputIndex: Int,
     /** Amount of tokens (absolute or percentage depending on [percent]). */
     val amount: Long,
-    /** True if this instruction burns tokens (output index 31, non-range). */
+    /** True if this instruction burns tokens: the non-range output index 31 of a BURN operation.
+     *  In any other operation index 31 is an ordinary output and this is false. */
     val isBurn: Boolean
 )

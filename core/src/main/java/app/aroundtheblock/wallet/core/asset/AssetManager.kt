@@ -890,7 +890,8 @@ class AssetManager(
         //    and range instructions are not resolvable without the per-input
         //    asset balances from parent txs (M3), so we skip them here —
         //    an underestimate is better than a fake number.
-        //  - BURN: quantities of outputs don't matter (asset is destroyed).
+        //  - BURN: as TRANSFER, except a non-range instruction to output 31
+        //    destroys its units; the burn's other instructions still deliver.
         val firstNonOpReturn = outputs.firstOrNull {
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout

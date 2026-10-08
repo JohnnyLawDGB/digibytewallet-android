@@ -17,7 +17,10 @@ import app.aroundtheblock.wallet.core.model.AssetOperation
  *    `0..outputIndex` inclusive (confirmed vs RenzoDD/digiasset-core
  *    `DigiByteTransaction.cpp:257-329` — `startI = range ? 0 : output`). Previously
  *    dropped entirely, so range receives under-counted to 0.
- *  - **BURN**: 0 to every output (asset destroyed).
+ *  - **BURN**: like a transfer, except that a non-range instruction to output 31 destroys
+ *    its units and credits nobody. The burn transaction's other instructions still deliver
+ *    (DigiAsset_Core `DigiByteTransaction.cpp` `decodeAssetTransfer` applies the destroy marker
+ *    only when `type == DIGIASSET_BURN`). In a TRANSFER, output 31 is an ordinary output.
  *  - **UNCLASSIFIABLE**: 0 to every output — the carrier could not be read, so nothing is
  *    credited; [targetsOutput] holds every output instead.
  *
@@ -36,14 +39,12 @@ object AssetTxQuantity {
         AssetOperation.ISSUANCE ->
             if (vout == firstNonOpReturnVout) (header.totalQuantity ?: 0L) else 0L
 
-        AssetOperation.TRANSFER ->
+        AssetOperation.TRANSFER, AssetOperation.BURN ->
             header.transferInstructions
                 .asSequence()
-                .filter { !it.percent && !it.isBurn }
+                .filter { !it.percent && !destroys(header, it) }
                 .filter { inst -> if (inst.range) vout <= inst.outputIndex else inst.outputIndex == vout }
                 .sumOf { it.amount }
-
-        AssetOperation.BURN -> 0L
 
         AssetOperation.UNCLASSIFIABLE -> 0L
     }
@@ -148,10 +149,9 @@ object AssetTxQuantity {
         outputCount: Int,
     ): Boolean {
         if (header.operation == AssetOperation.UNCLASSIFIABLE) return true
-        val destroyMarkerApplies = header.operation == AssetOperation.BURN
         val instructionTargets = header.transferInstructions.any { inst ->
             when {
-                inst.isBurn && destroyMarkerApplies -> false
+                destroys(header, inst) -> false
                 inst.range -> vout <= inst.outputIndex
                 else -> inst.outputIndex == vout
             }
@@ -165,4 +165,13 @@ object AssetTxQuantity {
         }
         return false
     }
+
+    /**
+     * Is [inst] the destroy marker — units consumed, credited to nobody? Only the non-range
+     * output 31 of a BURN operation, as [TransferInstruction.isBurn] is set by the decoder. Read
+     * from the instruction and the operation here rather than from the flag, so crediting and
+     * holding agree with the reference however an instruction was built.
+     */
+    private fun destroys(header: DecodedAssetHeader, inst: TransferInstruction): Boolean =
+        header.operation == AssetOperation.BURN && !inst.range && inst.outputIndex == 31
 }

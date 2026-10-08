@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.asset
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -155,7 +156,7 @@ class DigiAssetEncoderTest {
     }
 
     @Test
-    fun `burn instruction encodes output 31 with range=false`() {
+    fun `an output 31 instruction encodes range=false and decodes as a transfer target`() {
         val script = DigiAssetEncoder.encodeTransferScript(
             version = 3,
             instructions = listOf(
@@ -167,7 +168,9 @@ class DigiAssetEncoderTest {
         )
         val decoded = DigiAssetDecoder().decode(script)!!
         val inst = decoded.transferInstructions[0]
-        assertTrue(inst.isBurn)
+        // The encoder writes TRANSFER (0x15); output 31 is the destroy marker only in a BURN.
+        assertFalse(inst.range)
+        assertFalse(inst.isBurn)
         assertEquals(31, inst.outputIndex)
         assertEquals(300L, inst.amount)
     }
