@@ -49,7 +49,9 @@ class HeldAssetBalancesTest {
         blockHeight: Long = 700_000L,
     ) = UtxoEntity(
         txid = txid, vout = 0, scriptPubKey = script, satoshis = 6000, blockHeight = blockHeight,
-        isAsset = true, assetId = assetId, assetQuantity = qty, spent = spent, assetSource = source)
+        isAsset = true, assetId = assetId, assetQuantity = qty, spent = spent, assetSource = source,
+        // A backed holding: these tests are about which held rows count, not whether units are backed.
+        assetCredit = AssetCredit.VERIFIED)
 
     @Before fun setup() {
         mockkStatic(Log::class)

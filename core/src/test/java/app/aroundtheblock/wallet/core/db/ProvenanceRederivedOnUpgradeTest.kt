@@ -61,17 +61,22 @@ class ProvenanceRederivedOnUpgradeTest {
     }
 
     /** Open an install whose database is at [from], the way Room does: every registered step from
-     *  there up to the current version, in order, and none when it is already current. */
-    private fun open(from: Int, db: SupportSQLiteDatabase) {
+     *  there up to [to] (the current version unless given), in order, and none when it is already
+     *  there. The steps this test is about end at [DISCARD_VERSION]; later steps change the schema
+     *  and have their own tests (MIGRATION_11_12: AssetCreditColumnOnUpgradeTest). */
+    private fun open(from: Int, db: SupportSQLiteDatabase, to: Int = WALLET_DB_VERSION) {
         var at = from
-        while (at < WALLET_DB_VERSION) {
+        while (at < to) {
             val step = WALLET_DB_MIGRATIONS.singleOrNull { it.startVersion == at }
                 ?: return fail("no registered step from version $at")
             step.migrate(db)
             at = step.endVersion
         }
-        assertEquals("the steps overshoot the current version", WALLET_DB_VERSION, at)
+        assertEquals("the steps overshoot version $to", to, at)
     }
+
+    /** The version the provenance discard ([MIGRATION_10_11]) brings a database to. */
+    private val DISCARD_VERSION = 11
 
     private val start = "5".repeat(64)
     private val parent = "a".repeat(64)
@@ -111,7 +116,7 @@ class ProvenanceRederivedOnUpgradeTest {
     @Test fun an_identity_resolved_before_the_upgrade_does_not_survive_it() {
         val tables = installAtVersion10()
 
-        open(10, database(tables))
+        open(10, database(tables), to = DISCARD_VERSION)
 
         assertEquals(
             "an identity resolved before the binding was carried across the upgrade",
@@ -122,7 +127,7 @@ class ProvenanceRederivedOnUpgradeTest {
     @Test fun a_walk_frontier_from_before_the_upgrade_does_not_survive_it() {
         val tables = installAtVersion10()
 
-        open(10, database(tables))
+        open(10, database(tables), to = DISCARD_VERSION)
 
         assertEquals(
             "a frontier reached before the binding was carried across the upgrade",
@@ -136,7 +141,7 @@ class ProvenanceRederivedOnUpgradeTest {
         val tables = installAtVersion10()
         val before = tables.rows.filterKeys { it !in provenanceTables }.mapValues { it.value.toList() }
 
-        open(10, database(tables))
+        open(10, database(tables), to = DISCARD_VERSION)
 
         val after = tables.rows.filterKeys { it !in provenanceTables }.mapValues { it.value.toList() }
         assertEquals(before, after)
@@ -151,7 +156,7 @@ class ProvenanceRederivedOnUpgradeTest {
      *  creates at the current version, runs none either. */
     @Test fun the_discard_runs_once_and_a_fresh_install_runs_nothing() {
         val tables = installAtVersion10()
-        open(10, database(tables))
+        open(10, database(tables), to = DISCARD_VERSION)
         tables.put("asset_provenance", mapOf("txid" to parent, "assetId" to "La" + "e".repeat(30)))
         tables.put("asset_walk_frontier", mapOf("startTxid" to parent, "resumeTxid" to start))
         val afterFirstLaunch = tables.rows.mapValues { it.value.toList() }
@@ -168,11 +173,11 @@ class ProvenanceRederivedOnUpgradeTest {
         )
     }
 
-    /** GUARD. The upgrade changes rows, never the schema: the current version's exported schema
-     *  is version 10's, table for table, so Room's post-step validation holds by construction. */
+    /** GUARD. The upgrade changes rows, never the schema: version 11's exported schema is
+     *  version 10's, table for table, so Room's post-step validation holds by construction. */
     @Test fun the_schema_is_unchanged_across_the_upgrade() {
         val v10 = schema(10)
-        val current = schema(WALLET_DB_VERSION)
+        val current = schema(DISCARD_VERSION)
 
         assertEquals(tablesOf(v10), tablesOf(current))
         assertEquals(v10.getString("identityHash"), current.getString("identityHash"))

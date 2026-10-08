@@ -33,6 +33,7 @@ class HeldAssetUtxoCountTest {
     private fun row(txid: String, vout: Int, qty: Long) = UtxoEntity(
         txid = txid, vout = vout, scriptPubKey = ownedScript, satoshis = 6000, blockHeight = 700_000L,
         isAsset = true, assetId = "La1", assetQuantity = qty, spent = false, assetSource = AssetSource.NATIVE,
+        assetCredit = AssetCredit.VERIFIED,   // backed; what is under test is the UTXO count
     )
 
     @Before fun setup() {

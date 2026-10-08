@@ -14,7 +14,10 @@ data class UtxoEntity(
     @ColumnInfo(name = "asset_id") val assetId: String? = null,
     @ColumnInfo(name = "asset_quantity") val assetQuantity: Long = 0,
     val spent: Boolean = false,
-    @ColumnInfo(name = "asset_source") val assetSource: String = "BACKEND"
+    @ColumnInfo(name = "asset_source") val assetSource: String = "BACKEND",
+    /** Whether the row's units are backed; see [app.aroundtheblock.wallet.core.asset.AssetCredit].
+     *  Only a BACKED or VERIFIED row counts, is sendable, or names its asset. */
+    @ColumnInfo(name = "asset_credit") val assetCredit: String = "UNCHECKED",
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

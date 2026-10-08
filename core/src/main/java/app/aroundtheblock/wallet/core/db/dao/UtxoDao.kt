@@ -17,7 +17,8 @@ interface UtxoDao {
     @Query("SELECT * FROM utxos WHERE is_asset = 0 AND spent = 0")
     suspend fun getSpendableDigiByteUtxosNow(): List<UtxoEntity>
 
-    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_id = :assetId")
+    /** The unspent rows of one asset that are backed (see AssetCredit): only those are sendable. */
+    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_id = :assetId AND asset_credit IN ('BACKED', 'VERIFIED')")
     suspend fun getAssetUtxosByIdNow(assetId: String): List<UtxoEntity>
 
     @Query("SELECT COALESCE(SUM(satoshis), 0) FROM utxos WHERE is_asset = 0 AND spent = 0")
@@ -54,10 +55,11 @@ interface UtxoDao {
     @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND vout = :vout LIMIT 1")
     suspend fun getAssetIdAt(txid: String, vout: Int): String?
 
-    /** A RESOLVED asset-id for any asset output of this tx (skips "unresolved:…"
-     *  placeholders), or null if none is resolved yet. Used to label an activity
-     *  row with the asset's real name/symbol instead of a bare "Tokens". */
-    @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND is_asset = 1 AND asset_id NOT LIKE 'unresolved:%' LIMIT 1")
+    /** A RESOLVED asset-id for any backed asset output of this tx (skips "unresolved:…"
+     *  placeholders and rows whose units are not backed), or null if none is resolved yet.
+     *  Used to label an activity row with the asset's real name/symbol instead of a bare
+     *  "Tokens". */
+    @Query("SELECT asset_id FROM utxos WHERE txid = :txid AND is_asset = 1 AND asset_id NOT LIKE 'unresolved:%' AND asset_credit IN ('BACKED', 'VERIFIED') LIMIT 1")
     suspend fun getResolvedAssetIdForTx(txid: String): String?
 
     @Query("DELETE FROM utxos")
@@ -92,7 +94,9 @@ interface UtxoDao {
     // "<name> — 0 held". Also guards against a 0/negative-quantity phantom row.
     // utxoCount counts only rows holding units: a send's plain change is stored as
     // a 0-quantity asset row and holds none of the asset.
-    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, SUM(CASE WHEN asset_quantity > 0 THEN 1 ELSE 0 END) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 GROUP BY asset_id HAVING SUM(asset_quantity) > 0")
+    // Only backed rows (see AssetCredit): a quantity read from a transfer's instructions alone
+    // is a claim, not a holding.
+    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, SUM(CASE WHEN asset_quantity > 0 THEN 1 ELSE 0 END) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_credit IN ('BACKED', 'VERIFIED') GROUP BY asset_id HAVING SUM(asset_quantity) > 0")
     fun getAssetBalances(): Flow<List<AssetBalance>>
 
     /** All asset rows of a given provenance (unspent + spent). Used by the
@@ -105,9 +109,19 @@ interface UtxoDao {
     @Query("SELECT * FROM utxos WHERE is_asset = 1 AND txid = :txid AND vout = :vout LIMIT 1")
     suspend fun getAssetUtxoAt(txid: String, vout: Int): UtxoEntity?
 
+    /** Every asset row of one transaction (spent and unspent). */
+    @Query("SELECT * FROM utxos WHERE is_asset = 1 AND txid = :txid")
+    suspend fun getAssetUtxosForTxNow(txid: String): List<UtxoEntity>
+
     /** Re-tag provenance only — never rewrites quantity/spent/blockHeight. */
     @Query("UPDATE utxos SET asset_source = :source WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
     suspend fun markAssetSource(txid: String, vout: Int, source: String)
+
+    /** Settle what an asset row holds: its asset, its quantity and how that was established
+     *  (AssetCredit). The one write that may lower a quantity, because it replaces a claim
+     *  with a fact. */
+    @Query("UPDATE utxos SET asset_id = :assetId, asset_quantity = :quantity, asset_credit = :credit WHERE is_asset = 1 AND txid = :txid AND vout = :vout")
+    suspend fun settleAssetCredit(txid: String, vout: Int, assetId: String, quantity: Long, credit: String)
 
     /** Raise a resolved quantity without touching other columns. Callers must
      *  only ever pass a value >= the current one (never downgrade). */

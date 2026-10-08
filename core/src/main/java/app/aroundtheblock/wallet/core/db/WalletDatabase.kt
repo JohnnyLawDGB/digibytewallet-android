@@ -11,12 +11,13 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 /** The schema version this build opens the database at. A fresh install is created here and runs
  *  none of [WALLET_DB_MIGRATIONS]; an existing install runs each step from its version up to it. */
-internal const val WALLET_DB_VERSION = 11
+internal const val WALLET_DB_VERSION = 12
 
 /** Every step between schema versions, in order. [WalletDatabase.create] registers exactly these. */
 internal val WALLET_DB_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
     MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+    MIGRATION_11_12,
 )
 
 @Database(
