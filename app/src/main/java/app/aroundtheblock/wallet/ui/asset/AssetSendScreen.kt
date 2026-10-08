@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -583,13 +584,16 @@ private fun AssetSendConfirmDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                // Issuer-written text is bounded so it can only ever fill its own row.
                 AssetConfirmRow(
                     label = stringResource(R.string.as_asset),
-                    value = asset.metadata?.name ?: asset.assetId.take(12) + "…"
+                    value = asset.metadata?.name ?: asset.assetId.take(12) + "…",
+                    maxLines = 2,
                 )
                 AssetConfirmRow(
                     label = stringResource(R.string.as_quantity),
                     value = quantityText + " " + (asset.metadata?.symbol ?: tokensNoun(quantityUnits, quantityDivisibility)),
+                    maxLines = 1,
                 )
                 // Full address — never truncated per security requirement
                 AssetConfirmRow(label = stringResource(R.string.send_to), value = recipientAddress)
@@ -700,7 +704,7 @@ private fun SendResultBanner(
 }
 
 @Composable
-private fun AssetConfirmRow(label: String, value: String) {
+private fun AssetConfirmRow(label: String, value: String, maxLines: Int = Int.MAX_VALUE) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -714,7 +718,9 @@ private fun AssetConfirmRow(label: String, value: String) {
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

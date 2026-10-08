@@ -14,6 +14,7 @@ import app.aroundtheblock.wallet.core.db.dao.UtxoDao
 import app.aroundtheblock.wallet.core.db.entity.TransactionEntity
 import app.aroundtheblock.wallet.core.db.entity.UtxoEntity
 import app.aroundtheblock.wallet.core.ipfs.AssetMetadataService
+import app.aroundtheblock.wallet.core.ipfs.AssetMetadataService.Companion.displaySafe
 import app.aroundtheblock.wallet.core.model.AssetData
 import app.aroundtheblock.wallet.core.model.AssetMetadata
 import app.aroundtheblock.wallet.core.model.OwnedAsset
@@ -567,7 +568,8 @@ class AssetManager(
             // and firing it on every insert adds back-pressure to the sync loop.
             .debounce(250L)
             .map { (naiveBalances, metadata) ->
-            val metadataMap = metadata.associateBy { it.assetId }
+            // displaySafe: rows cached before the category filter still carry what the old filter let through.
+            val metadataMap = metadata.associateBy { it.assetId }.mapValues { (_, row) -> row.displaySafe() }
             // NATIVE-AUTHORITATIVE display balance: the naive DB SUM over spent=0 rows
             // over-counts, because the Room UTXO cache accumulates phantoms (recipient
             // markers from sends, dead-send change, dropped txs). Recompute what the
@@ -2269,7 +2271,7 @@ class AssetManager(
         ownedScriptHexes: Set<String>? = null,
     ): AssetTxAmount? {
         val count = assetTokenCountForTx(txHashHex, isSend, ownedScriptHexes) ?: return null
-        val meta = utxoDao.getResolvedAssetIdForTx(txHashHex)?.let { metadataDao.getMetadata(it) }
+        val meta = utxoDao.getResolvedAssetIdForTx(txHashHex)?.let { metadataDao.getMetadata(it) }?.displaySafe()
         val name = meta?.name?.takeIf { it.isNotBlank() }
         return AssetTxAmount(
             units = count,

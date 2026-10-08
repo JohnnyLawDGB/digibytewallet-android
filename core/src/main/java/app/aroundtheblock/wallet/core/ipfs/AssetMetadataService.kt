@@ -82,40 +82,69 @@ class AssetMetadataService(
         const val MAX_IMAGE_URL_LEN = 2048
 
         /**
-         * Strip control chars + RTL/BiDi overrides + cap length.
+         * Strip everything that is not visible text, then cap the length.
          *
          * Why:
-         *  - U+202E LEFT-TO-RIGHT OVERRIDE (and friends U+202A..U+202E,
-         *    U+2066..U+2069) is the classic homoglyph attack vector — they
-         *    flip text direction so "MyEvil-\u202Egnp.token" renders as
-         *    "MyEvil-token.png" in the UI. Strip them.
-         *  - Control chars (C0 + DEL + C1) have no place in a display
-         *    name and confuse logging / clipboard / TTY logs.
-         *  - Length cap prevents DB bloat from intentional megabyte
-         *    names — issuer-controlled IPFS metadata is fully attacker-
-         *    controlled in the worst case.
+         *  - The BiDi overrides and isolates (U+202A..U+202E, U+2066..U+2069) flip text direction,
+         *    so "MyEvil-\u202Egnp.token" renders as "MyEvil-token.png". The direction MARKS
+         *    (U+200E, U+200F, U+061C) and the zero-width characters reorder or hide text the same
+         *    way. Unicode files all of them under one category, Cf (format), so the filter goes by
+         *    category rather than by a list of ranges: a list only stops the characters someone
+         *    thought of (bounty BB-2026-10-08-ricki).
+         *  - U+2028 / U+2029 are mandatory line breaks in category Zl / Zp, not control characters.
+         *    A name or symbol is one line; [allowNewlines] permits '\n' and nothing else.
+         *  - Control characters (Cc), unpaired surrogates (Cs) and private-use code points (Co)
+         *    have no place in a display name either.
+         *  - The cap counts code points, so it never cuts an emoji or any other astral character in
+         *    half. It stops a megabyte name from bloating the local DB: issuer-controlled IPFS
+         *    metadata is fully attacker-controlled in the worst case.
+         *
+         * Unassigned code points are kept on purpose: which ones are unassigned depends on the
+         * device's Unicode version, and a newer emoji must not vanish from a name on an older phone.
          *
          * Internal so the security test suite can verify the predicate
          * directly without standing up Room + IPFS infrastructure.
          */
         internal fun sanitize(input: String?, maxLen: Int, allowNewlines: Boolean): String? {
             if (input.isNullOrBlank()) return null
-            val cleaned = input.filter { ch -> isDisplaySafe(ch) || (allowNewlines && ch == '\n') }
-            if (cleaned.isBlank()) return null
-            return cleaned.take(maxLen)
+            val out = StringBuilder(minOf(input.length, maxLen * 2))
+            var kept = 0
+            var i = 0
+            while (i < input.length && kept < maxLen) {
+                val cp = input.codePointAt(i)
+                i += Character.charCount(cp)
+                if (isDisplaySafe(cp) || (allowNewlines && cp == '\n'.code)) {
+                    out.appendCodePoint(cp)
+                    kept++
+                }
+            }
+            return out.toString().takeIf { it.isNotBlank() }
         }
 
-        internal fun isDisplaySafe(ch: Char): Boolean {
-            val code = ch.code
-            // C0 control range
-            if (code < 0x20) return false
-            // DEL + C1 control range
-            if (code in 0x7F..0x9F) return false
-            // BiDi overrides + isolates that flip text direction
-            if (code in 0x202A..0x202E) return false  // LRE/RLE/PDF/LRO/RLO
-            if (code in 0x2066..0x2069) return false  // LRI/RLI/FSI/PDI
-            return true
+        internal fun isDisplaySafe(codePoint: Int): Boolean = when (Character.getType(codePoint).toByte()) {
+            Character.CONTROL,              // Cc: C0, DEL, C1
+            Character.FORMAT,               // Cf: BiDi overrides/isolates/marks, zero-width chars, BOM, soft hyphen, tags
+            Character.LINE_SEPARATOR,       // Zl: U+2028
+            Character.PARAGRAPH_SEPARATOR,  // Zp: U+2029
+            Character.SURROGATE,            // Cs: an unpaired half of a surrogate pair
+            Character.PRIVATE_USE,          // Co: renders as whatever the installed fonts decide
+            -> false
+            else -> true
         }
+
+        internal fun isDisplaySafe(ch: Char): Boolean = isDisplaySafe(ch.code)
+
+        /**
+         * Rows cached by 4.0.88 and earlier went through the old range filter, and a cached row is
+         * never fetched again (CIDs are immutable). Every read that puts a cached name, symbol or
+         * description on screen goes through this, so those rows display clean without a
+         * migration. Idempotent and cheap: the fields are already length-capped.
+         */
+        fun AssetMetadataEntity.displaySafe(): AssetMetadataEntity = copy(
+            name = sanitize(name, MAX_SHORT_TEXT_LEN, allowNewlines = false),
+            symbol = sanitize(symbol, MAX_SHORT_TEXT_LEN, allowNewlines = false),
+            description = sanitize(description, MAX_LONG_TEXT_LEN, allowNewlines = true),
+        )
     }
     /**
      * Return metadata for [assetId], fetching from IPFS via [metadataCid] if not cached.
@@ -342,7 +371,7 @@ class AssetMetadataService(
     // Mapping
     // -------------------------------------------------------------------------
 
-    private fun AssetMetadataEntity.toModel() = AssetMetadata(
+    private fun AssetMetadataEntity.toModel() = displaySafe().run { AssetMetadata(
         assetId = assetId,
         name = name,
         symbol = symbol,
@@ -352,5 +381,5 @@ class AssetMetadataService(
         issuerAddress = issuerAddress,
         imageUrl = imageUrl,
         metadataCid = metadataCid,
-    )
+    ) }
 }

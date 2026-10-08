@@ -6,6 +6,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity
+import app.aroundtheblock.wallet.core.ipfs.AssetMetadataService.Companion.displaySafe
 
 /**
  * AssetMetadataService takes IPFS-fetched JSON whose contents are fully
@@ -153,9 +155,8 @@ class AssetMetadataSanitizationTest {
     @Test
     fun `isDisplaySafe accepts ordinary printable chars`() {
         // Note: emoji like 🪙 are surrogate pairs and can't be a single
-        // Char — they go through sanitize() naturally because the high
-        // and low surrogates are both above U+009F. The list below
-        // covers the BMP code points the predicate sees one at a time.
+        // Char. sanitize() walks code points, so a pair reaches the
+        // predicate whole; a lone half is rejected (see below).
         for (ch in listOf('A', 'z', '0', ' ', '!', '日', 'Ä')) {
             assertTrue("$ch (cp=${ch.code}) should be display-safe",
                 AssetMetadataService.isDisplaySafe(ch))
@@ -213,5 +214,78 @@ class AssetMetadataSanitizationTest {
             assertNotEquals("attack must be sanitized: ${a.codePoints().toArray().joinToString()}",
                 a, cleaned)
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Category filter (BB-2026-10-08-ricki): everything that is not visible text
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `line and paragraph separators never reach a one-line field`() {
+        assertEquals("FAKEUSDT", short("FAKE\u2028USDT"))
+        assertEquals("FAKEUSDT", short("FAKE\u2029USDT"))
+        // A description may keep '\n', and only '\n'.
+        assertEquals("line1\nline2", long_("line1\u2028\nline2\u2029"))
+    }
+
+    @Test
+    fun `format characters are stripped`() {
+        val format = listOf(
+            0x200E, 0x200F, 0x061C,          // LRM, RLM, ALM
+            0x200B, 0x200C, 0x200D, 0x2060,  // ZWSP, ZWNJ, ZWJ, WJ
+            0xFEFF, 0x00AD, 0x180E,          // BOM, soft hyphen, Mongolian vowel separator
+            0x2061, 0x2064, 0x206A, 0x206F,  // invisible operators, deprecated format chars
+            0xFFF9, 0xFFFB,                  // interlinear annotation
+        )
+        for (cp in format) {
+            assertFalse("U+%04X should be unsafe".format(cp), AssetMetadataService.isDisplaySafe(cp))
+            assertEquals("U+%04X".format(cp), "AB", short("A" + String(Character.toChars(cp)) + "B"))
+        }
+        // Astral format characters: the Unicode tag block.
+        assertEquals("AB", short("A" + String(Character.toChars(0xE0041)) + "B"))
+    }
+
+    @Test
+    fun `private use and lone surrogates are stripped`() {
+        assertEquals("AB", short("A\uE000B"))
+        assertEquals("AB", short("A" + String(Character.toChars(0xF0000)) + "B"))
+        assertEquals("AB", short("A\uD800B"))
+        assertEquals("AB", short("A\uDC00B"))
+    }
+
+    @Test
+    fun `a name made only of invisible characters is no name`() {
+        assertNull(short("\u200B"))
+        assertNull(short("\u200E\u200F\uFEFF"))
+        assertNull(short("\u2028"))
+    }
+
+    @Test
+    fun `the cap counts code points and never splits a pair`() {
+        val coin = "🪙"  // one code point, two UTF-16 units
+        val out = AssetMetadataService.sanitize("a" + coin.repeat(10), maxLen = 4, allowNewlines = false)!!
+        assertEquals("a" + coin.repeat(3), out)
+        assertEquals(4, out.codePointCount(0, out.length))
+    }
+
+    @Test
+    fun `cached rows from older builds display clean`() {
+        val stale = AssetMetadataEntity(
+            assetId = "La123",
+            name = "USDT\u200B",
+            symbol = "US\u2028DT",
+            description = "first\u2029second\nthird",
+            decimals = 8,
+            totalSupply = 42,
+            rulesJson = "{}",
+        )
+        val shown = stale.displaySafe()
+        assertEquals("USDT", shown.name)
+        assertEquals("USDT", shown.symbol)
+        assertEquals("firstsecond\nthird", shown.description)
+        // Everything that is not display text is untouched.
+        assertEquals(stale.copy(name = shown.name, symbol = shown.symbol, description = shown.description), shown)
+        // Idempotent.
+        assertEquals(shown, shown.displaySafe())
     }
 }

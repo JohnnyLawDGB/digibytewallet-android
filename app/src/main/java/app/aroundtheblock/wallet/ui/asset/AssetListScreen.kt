@@ -247,7 +247,9 @@ private fun AssetCard(
                     color = if (label.kind == app.aroundtheblock.wallet.core.asset.AssetDisplayLabel.Kind.NAMED)
                                 DigiByteAccent
                             else MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
