@@ -1,11 +1,13 @@
-# DigiByte Wallet — Bug Bounty Program
+# DigiByte Mobile — Bug Bounty Program
 
-**Effective:** 2026-05-03
+**Effective:** 2026-05-03 (scope updated 2026-10-08)
 **Maximum reward:** 100,000 DGB
-**Scope version:** v3.5.31 and later
+**Scope version:** DigiByte Mobile 4.0.88 and later
 
 This program rewards security researchers who report verifiable vulnerabilities
-in the DigiByte Android Wallet. The wallet is a non-custodial, sovereignty-first
+in DigiByte Mobile (`app.aroundtheblock.wallet`), the Android wallet published by
+Around The Block LLC. It was previously published as DigiByte Wallet
+(`io.digibyte`); v4.0.87 is that app's final release. The wallet is a non-custodial, sovereignty-first
 SPV wallet that holds user funds — bugs that compromise user funds, secrets,
 or privacy are taken seriously and rewarded accordingly.
 
@@ -17,13 +19,17 @@ or privacy are taken seriously and rewarded accordingly.
 
 | Asset | Where to get it |
 |-------|-----------------|
-| `digibyte-wallet-vX.Y.Z.apk` (release signed) | https://github.com/JohnnyLawDGB/digibytewallet-android/releases |
-| Source code | https://github.com/JohnnyLawDGB/digibytewallet-android (`phase1-modernization` branch) |
+| DigiByte Mobile from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
+| `aroundtheblock-wallet-vX.Y.Z.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases |
+| Source code | https://github.com/JohnnyLawDGB/digibytewallet-android |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
-**Only the latest released tag is in scope.** If a vulnerability exists in
-v3.5.30 but is fixed in v3.5.31, it's eligible only if the bug existed
-*at the time of report submission* against the latest release.
+**Only the latest DigiByte Mobile release is in scope.** Name the exact
+version you tested (Settings → About, or the APK file name). A report is
+eligible only if the bug exists in the latest release at the time you submit
+it. Reports against `io.digibyte` builds, including its final v4.0.87, are
+accepted only if the same bug is also present in the latest DigiByte Mobile
+release.
 
 ### Vulnerability classes we pay for
 
@@ -96,7 +102,7 @@ A theoretical critical-tier finding without a PoC: scored as Medium until a PoC
 lands.
 
 Payment is in DGB to an address you provide. We do not pay in fiat or other
-cryptocurrencies — this is the DigiByte Wallet bounty, paid in DigiByte.
+cryptocurrencies — this is the DigiByte Mobile bounty, paid in DigiByte.
 
 ---
 
@@ -127,9 +133,10 @@ Reports about the following are **closed without payout**:
 - The wallet trusts system CAs for non-pinned endpoints (defense-in-depth
   layer; cert pinning is targeted to specific endpoints)
 - Asset metadata may contain attacker-controlled strings (sanitization
-  layer in `AssetMetadataService` strips control chars + BiDi overrides;
-  finding a bypass IS in scope, but flagging the attack class generically
-  is not)
+  layer in `AssetMetadataService` keeps visible text only: control, format,
+  separator, surrogate and private-use code points are stripped; finding a
+  bypass IS in scope, but flagging the attack class generically, or
+  look-alike letters that are valid text, is not)
 
 ### Generic / requires adversarial conditions outside threat model
 
@@ -160,6 +167,8 @@ Reports about the following are **closed without payout**:
 1. Email `security@aroundtheblock.us` with subject prefix `[BOUNTY]`
 2. Or open a GitHub Security Advisory at
    https://github.com/JohnnyLawDGB/digibytewallet-android/security/advisories/new
+3. One finding per email, please. Name the exact DigiByte Mobile version in the
+   subject line.
 
 **Do not** open public GitHub Issues for security reports. We will close
 them and ask you to resubmit privately, which delays your payout.
@@ -170,7 +179,7 @@ Reports without these elements are returned for missing information:
 
 - **Title** — one-line summary
 - **Severity claim** — your initial Critical/High/Medium/Low assessment
-- **Affected version** — the exact tag (e.g. `v3.5.31`) you tested against
+- **Affected version** — the exact DigiByte Mobile version (e.g. `4.0.89`) you tested against
 - **Affected platform** — Android version, device model, ROM
 - **Repro steps** — numbered, deterministic; copy-pasteable commands where possible
 - **PoC** — minimal artifact that triggers the bug. For network bugs: a `curl` or
@@ -196,7 +205,7 @@ Reports without these elements are returned for missing information:
 
 - Researchers must be **18 or older** (or have parent/guardian consent)
 - Researchers must **not** be a current or former employee or contractor
-  of the DigiByte Wallet team
+  of the DigiByte Mobile team
 - One reward per unique vulnerability (first valid report wins; duplicates
   receive thanks + credit)
 - Researchers must comply with all applicable laws
