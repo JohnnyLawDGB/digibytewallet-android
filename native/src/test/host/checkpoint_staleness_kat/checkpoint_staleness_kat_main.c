@@ -90,6 +90,15 @@
 // Holding the grid at 50k caps that over-scan at ~35 MB.
 #define CKPT_MAX_GAP_BLOCKS   50000
 
+// BRMainNetParams (read below for its checkpoint contexts, V4 parameters and allowed-algorithm heights) points at
+// BRMerkleBlockVerifyDifficulty, which lives in BRMerkleBlock.c with the whole header-validation stack. This suite
+// never calls it; the definition only satisfies the link.
+int BRMerkleBlockVerifyDifficulty(const BRMerkleBlock *block, const BRMerkleBlock *previous, uint32_t transitionTime)
+{
+    (void)block; (void)previous; (void)transitionTime;
+    return 0;
+}
+
 static int g_failures = 0;
 
 static void check(int cond, const char *desc) {
@@ -168,6 +177,49 @@ int main(void)
     }
     check(maxGap <= CKPT_MAX_GAP_BLOCKS,
           "mainnet: no gap between adjacent checkpoints exceeds CKPT_MAX_GAP_BLOCKS");
+
+    // ---- difficulty context (mainnet): the newest checkpoint must carry one that verifies ----
+    // A new wallet's resident chain starts at the newest checkpoint's stub, which has no ancestors. Without the
+    // context (BRCheckPointContext) MultiShield V4 cannot judge the first ~61 headers above it at all, and every later
+    // header on that branch is then judged only against them (V4-R1). gen_block_checkpoints.sh writes the context in
+    // the same run that moves the newest checkpoint, so a table refreshed by hand -- or a context that no longer
+    // links to its checkpoint -- turns this red.
+    {
+        const BRCheckPoint *newestCp = &BRMainNetCheckpoints[nMain - 1];
+        const BRCheckPointContext *ctx = NULL;
+        int allVerify = 1;
+
+        for (size_t i = 0; i < BRMainNetParams.checkpointContextsCount; i++) {
+            const BRCheckPointContext *c = &BRMainNetParams.checkpointContexts[i];
+            int ok = BRCheckPointContextVerify(BRMainNetCheckpoints, nMain, c, NULL);
+
+            printf("difficulty context at %u: %zu headers, %s\n", c->height, c->count, ok ? "verifies" : "DOES NOT VERIFY");
+            if (! ok) allVerify = 0;
+            if (c->height == newestCp->height) ctx = c;
+        }
+        check(ctx != NULL, "mainnet: the newest checkpoint carries a difficulty context (rerun "
+              "scripts/gen_block_checkpoints.sh)");
+        check(ctx != NULL && BRCheckPointContextVerify(BRMainNetCheckpoints, nMain, ctx, NULL),
+              "mainnet: the newest checkpoint's context links header by header to that checkpoint");
+        check(ctx != NULL && ctx->count >= (size_t)(BR_DIFF_V4_NUM_ALGOS*BRMainNetParams.diffV4.averagingInterval +
+                                                     BR_DIFF_V4_MEDIAN_SPAN),
+              "mainnet: the newest checkpoint's context spans the V4 averaging window and both median spans");
+
+        // every algorithm allowed directly above the checkpoint has a block in the run, or V4 could not judge it
+        int allAlgos = (ctx != NULL);
+        static const int algos[] = { BLOCK_VERSION_SHA256D, BLOCK_VERSION_SCRYPT, BLOCK_VERSION_GROESTL,
+                                     BLOCK_VERSION_SKEIN, BLOCK_VERSION_QUBIT, BLOCK_VERSION_ODO };
+        for (size_t a = 0; ctx && a < sizeof(algos)/sizeof(*algos); a++) {
+            if (! BRChainParamsAlgoAllowed(&BRMainNetParams, newestCp->height + 1, algos[a])) continue;
+            int found = 0;
+            uint8_t hdr[80];
+            for (size_t r = 0; r < ctx->count && BRCheckPointContextRow(ctx, r, hdr); r++)
+                if ((int)(UInt32GetLE(hdr) & BLOCK_VERSION_ALGO) == algos[a]) { found = 1; break; }
+            if (! found) allAlgos = 0;
+        }
+        check(allAlgos, "mainnet: the newest checkpoint's context holds a block of every algorithm allowed above it");
+        check(allVerify, "mainnet: every shipped difficulty context verifies");
+    }
 
     // ---- staleness (mainnet): bounds a NEW wallet's over-scan ----
     const BRCheckPoint *newest = &BRMainNetCheckpoints[nMain - 1];

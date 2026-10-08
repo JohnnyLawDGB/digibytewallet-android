@@ -9,9 +9,10 @@
 # Plus the structural invariants the C core relies on (checkpoints[0] == genesis,
 # ascending heights, non-zero targets).
 #
-# BRChainParams.h is self-contained on the host: it needs only -I on the submodule
-# dir and links no submodule .c sources (verified — it pulls BRMerkleBlock.h/BRSet.h
-# for types only). Same header-only shape as status_staleness_kat / cf_peer_status_kat.
+# BRChainParams.h is header-only for the table itself. The difficulty-context check
+# (BRCheckPointContextVerify, a static inline in BRChainParams.h) hashes headers, so
+# this suite also links BRCrypto.c and the vendored hash code it references; nothing
+# else from the submodule.
 #
 # THIS KAT IS INTENTIONALLY TIME-DEPENDENT. It goes red as the checkpoint table ages,
 # with no code change, which is the entire point: a stale constant table is invisible
@@ -28,9 +29,14 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-clang -w \
+shopt -s nullglob
+SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
+shopt -u nullglob
+clang -w -include stdint.h \
     -I "$CORE_DIR" \
     "$SCRIPT_DIR/checkpoint_staleness_kat_main.c" \
+    "$CORE_DIR/BRCrypto.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
+    "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" \
     -o "$BUILD_DIR/checkpoint_staleness_kat"
 
 # Run the C gate WITHOUT `set -e` aborting on a non-zero exit: both this and the
