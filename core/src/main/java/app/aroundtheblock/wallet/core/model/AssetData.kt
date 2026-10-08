@@ -28,7 +28,14 @@ enum class AssetOperation {
     /** Transfer of existing tokens between addresses. */
     TRANSFER,
     /** Permanent destruction of tokens. */
-    BURN
+    BURN,
+    /**
+     * An OP_RETURN tagged as a DigiAsset carrier ("DA") that the wallet cannot classify: a
+     * framing it does not read (OP_PUSHDATA2/4) or a payload that does not decode. Nothing is
+     * credited from it, and every owned output of the transaction is held out of plain-DGB
+     * spends, because which outputs the protocol credits cannot be known.
+     */
+    UNCLASSIFIABLE
 }
 
 /**

@@ -78,6 +78,7 @@ object AssetTransferAllocator {
             AssetOperation.TRANSFER -> false
             AssetOperation.BURN -> true
             AssetOperation.ISSUANCE -> return Result.Indeterminate("issuance")
+            AssetOperation.UNCLASSIFIABLE -> return Result.Indeterminate("unclassifiable carrier")
         }
         if (outputCount < 1) return Result.Indeterminate("no outputs")
         if (inputs.isEmpty()) return Result.Indeterminate("no inputs")

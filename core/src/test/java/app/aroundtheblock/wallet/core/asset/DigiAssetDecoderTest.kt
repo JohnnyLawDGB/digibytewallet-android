@@ -115,7 +115,12 @@ class DigiAssetDecoderTest {
     @Test
     fun `decode returns null for too-short script`() {
         assertNull(decoder.decode(hexToBytes("6a02")))
-        assertNull(decoder.decode(hexToBytes("6a024441"))) // DA magic but no version/opcode
+    }
+
+    @Test
+    fun `a DA tag with no version or opcode is unclassifiable, not plain`() {
+        assertEquals(AssetOperation.UNCLASSIFIABLE, decoder.decode(hexToBytes("6a024441"))?.operation)
+        assertTrue(decoder.containsAsset(hexToBytes("6a024441")))
     }
 
     @Test
@@ -130,6 +135,58 @@ class DigiAssetDecoderTest {
         assertFalse(decoder.containsAsset(hexToBytes(NON_DA_OP_RETURN)))
         assertFalse(decoder.containsAsset(ByteArray(0)))
         assertFalse(decoder.containsAsset(hexToBytes("6a024442"))) // "DB" not "DA"
+    }
+
+    // ================================================================
+    // Fail closed: a "DA" carrier the decoder cannot classify
+    // ================================================================
+
+    /** The same transfer (10 units to output 0) in each framing. Script reads the
+     *  OP_PUSHDATA2/4 length little-endian. */
+    private val transferDirect = "6a0644410215000a"
+    private val transferPushdata2 = "6a4d060044410215000a"
+    private val transferPushdata4 = "6a4e0600000044410215000a"
+
+    @Test
+    fun `PUSHDATA2 and PUSHDATA4 carriers decode as UNCLASSIFIABLE`() {
+        for (hex in listOf(transferPushdata2, transferPushdata4)) {
+            val h = decoder.decode(hexToBytes(hex))
+            assertEquals(hex, AssetOperation.UNCLASSIFIABLE, h?.operation)
+            assertTrue(hex, h!!.transferInstructions.isEmpty())
+            assertTrue(hex, decoder.containsAsset(hexToBytes(hex)))
+        }
+        // GUARD: the same payload behind a direct push is an ordinary transfer.
+        assertEquals(AssetOperation.TRANSFER, decoder.decode(hexToBytes(transferDirect))?.operation)
+    }
+
+    @Test
+    fun `a PUSHDATA2 carrier with equal length bytes is UNCLASSIFIABLE too`() {
+        // Length 257 (0x0101) reads the same either way round; it is still not a DA framing.
+        val payload = "44410215" + "002001" + "0001".repeat(125)
+        assertEquals(257 * 2, payload.length)
+        val h = decoder.decode(hexToBytes("6a4d0101$payload"))
+        assertEquals(AssetOperation.UNCLASSIFIABLE, h?.operation)
+    }
+
+    @Test
+    fun `a plain OP_RETURN framed with PUSHDATA2 is not a carrier`() {
+        val plain = "6a4d0600" + "68656c6c6f21" // "hello!"
+        assertNull(decoder.decode(hexToBytes(plain)))
+        assertFalse(decoder.containsAsset(hexToBytes(plain)))
+    }
+
+    @Test
+    fun `every output of an UNCLASSIFIABLE carrier is targeted, none is credited`() {
+        val h = decoder.decode(hexToBytes(transferPushdata2))!!
+        for (vout in 0..40) {
+            assertTrue("vout $vout held whatever came in",
+                AssetTxQuantity.targetsOutput(h, vout, firstNonOpReturnVout = 0, inputUnits = 0L, outputCount = 41))
+            assertTrue("vout $vout held when the inputs are unknown",
+                AssetTxQuantity.targetsOutput(h, vout, firstNonOpReturnVout = 0, inputUnits = null, outputCount = 41))
+            assertEquals(0L, AssetTxQuantity.forOutputTotal(h, vout, 0, inputUnits = 100L, outputCount = 41))
+        }
+        assertNull("no remainder is known", AssetTxQuantity.implicitChange(h, inputUnits = 100L, outputCount = 41))
+        assertNull("nothing is known to be consumed", AssetTxQuantity.assignedUnits(h))
     }
 
     // ================================================================
@@ -302,6 +359,19 @@ class DigiAssetDecoderTest {
         assertNotNull("Burn opcode should have a burn instruction", burnInstr)
         assertEquals(31, burnInstr!!.outputIndex)
         assertEquals(300L, burnInstr.amount)
+    }
+
+    @Test
+    fun `output 31 is a burn only in a burn operation`() {
+        // One instruction, 1 unit to output 31, as a transfer and as a burn.
+        val transfer = decoder.decode(hexToBytes("6a06444102151f01"))!!
+        assertEquals(AssetOperation.TRANSFER, transfer.operation)
+        assertEquals(31, transfer.transferInstructions.single().outputIndex)
+        assertFalse("in a transfer, output 31 is a real output", transfer.transferInstructions.single().isBurn)
+
+        val burn = decoder.decode(hexToBytes("6a06444102251f01"))!!
+        assertEquals(AssetOperation.BURN, burn.operation)
+        assertTrue("in a burn, output 31 is the destroy marker", burn.transferInstructions.single().isBurn)
     }
 
     @Test

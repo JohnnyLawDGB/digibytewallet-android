@@ -154,6 +154,42 @@ class AssetPreSpendPassTest {
         assertTrue("nothing was registered at all — the test is blind", held.isNotEmpty())
     }
 
+    // ── A carrier the decoder cannot classify ─────────────────────────────
+
+    /** The same ten-units-to-output-0 payload, framed with OP_PUSHDATA2 (length 6, little-endian). */
+    private val transferPushdata2 = "6a4d060044410215000a"
+    /** A plain OP_RETURN ("hello!") framed with OP_PUSHDATA2: not a DigiAsset carrier. */
+    private val notePushdata2 = "6a4d060068656c6c6f21"
+
+    /** Fail closed: which outputs the protocol credits cannot be read from the carrier, so every
+     *  owned output is held — the one the payload seems to name and the one it does not — even
+     *  with the inputs known to carry nothing. */
+    @Test fun `every owned output of an unclassifiable carrier is held out`() = runTest {
+        val carrier = id("c1")
+        wallet[carrier] = arrayOf("0|50000|$ours", "1|0|$transferPushdata2", "2|9000|$theirs", "3|70000|$ours")
+        inputs[carrier] = arrayOf("$funding|2")
+        coEvery { utxoDao.getAssetUtxoAt(funding, 2) } returns UtxoEntity(
+            txid = funding, vout = 2, scriptPubKey = ByteArray(0), satoshis = 700L, blockHeight = 1L,
+            isAsset = true, assetId = "La", assetQuantity = 10L,
+        )
+
+        manager().pass()
+
+        assertEquals(listOf(carrier to 0, carrier to 3), held.filter { it.first == carrier })
+    }
+
+    /** GUARD: an OP_RETURN that is not tagged "DA" is not a carrier, however it is framed. */
+    @Test fun `a plain PUSHDATA2 OP_RETURN holds nothing`() = runTest {
+        wallet.remove(transfer)
+        val note = id("c2")
+        wallet[note] = arrayOf("0|50000|$ours", "1|0|$notePushdata2")
+
+        manager().pass()
+
+        assertEquals(emptyList<Pair<String, Int>>(), held)
+        assertTrue("the note was never looked at — the test is blind", note in reads)
+    }
+
     // ── It cannot report complete without having looked ───────────────────
 
     /** Each way the pass can stop says something different, so each test pins its own branch. */

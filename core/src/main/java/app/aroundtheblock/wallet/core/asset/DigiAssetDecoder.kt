@@ -16,7 +16,7 @@ import app.aroundtheblock.wallet.core.model.AssetOperation
  *       0x04 - Issuance, immutable rules
  *       0x05 - Issuance, no metadata or rules
  *       0x15 - Transfer
- *       0x25 - Burn (output index 31 = burn)
+ *       0x25 - Burn (non-range output index 31 = burn; other instructions transfer)
  *
  * Fields after the header are encoded using BitIO fixed-precision encoding,
  * a bit-level packed format where values occupy variable widths (1-7 bytes).
@@ -36,6 +36,10 @@ class DigiAssetDecoder {
         /** OP_PUSHDATA1 opcode. */
         private const val OP_PUSHDATA1: Int = 0x4c
 
+        /** OP_PUSHDATA2 / OP_PUSHDATA4 opcodes: a 2- or 4-byte little-endian length follows. */
+        private const val OP_PUSHDATA2: Int = 0x4d
+        private const val OP_PUSHDATA4: Int = 0x4e
+
         /** Minimum number of bytes in DA payload (header only: DA + version + opcode). */
         private const val MIN_DA_PAYLOAD = 4
 
@@ -46,63 +50,91 @@ class DigiAssetDecoder {
     /**
      * Attempt to decode a DigiAsset from a raw OP_RETURN script.
      *
+     * FAIL CLOSED. A script whose push begins with the "DA" tag is a DigiAsset carrier whether or
+     * not this reader can make sense of it. When it cannot — the payload is framed with
+     * OP_PUSHDATA2/4, the push is shorter than the header or runs past the script, or the payload
+     * does not decode — the answer is a header with [AssetOperation.UNCLASSIFIABLE], never null.
+     * Null would file the transaction as plain DGB and leave every output it pays us spendable,
+     * although the protocol may have credited units to any of them. The hold rule
+     * ([AssetTxQuantity.targetsOutput]) holds every owned output of such a transaction, and the
+     * native reader (BRDigiAsset.c) makes the same call.
+     *
      * @param script Raw scriptPubKey bytes (starting with OP_RETURN).
-     * @return [DecodedAssetHeader] if the script contains a valid DA payload, null otherwise.
+     * @return [DecodedAssetHeader] if the script is a DigiAsset carrier (see above), null otherwise.
      */
     fun decode(script: ByteArray): DecodedAssetHeader? {
-        if (script.isEmpty()) return null
-
-        val payload = extractPayload(script) ?: return null
-        if (payload.size < MIN_DA_PAYLOAD) return null
-
-        // Check DA magic prefix
-        val magic = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
-        if (magic != DA_MAGIC) return null
+        val carrier = locateCarrier(script) ?: return null
+        val payload = carrier.payload ?: return DecodedAssetHeader.unclassifiable()
 
         return try {
             parseHeader(payload)
         } catch (_: Exception) {
-            // Conservative: return null rather than crash on unexpected data
+            // Never crash on unexpected data; a tagged payload that throws is unclassifiable.
             null
-        }
+        } ?: DecodedAssetHeader.unclassifiable()
     }
 
     /**
-     * Quick check whether a script contains a DigiAsset OP_RETURN.
-     * Cheaper than full decode when you only need presence detection.
+     * Quick check whether a script is a DigiAsset carrier — tagged "DA", including one [decode]
+     * reports as [AssetOperation.UNCLASSIFIABLE]. Cheaper than full decode when you only need
+     * presence detection.
      */
-    fun containsAsset(script: ByteArray): Boolean {
-        if (script.size < 6) return false
-        val payload = extractPayload(script) ?: return false
-        if (payload.size < 2) return false
-        val magic = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
-        return magic == DA_MAGIC
-    }
+    fun containsAsset(script: ByteArray): Boolean = locateCarrier(script) != null
 
     // -- internal --------------------------------------------------------
 
+    /** A "DA"-tagged push. [payload] is the declared payload when this reader can classify it,
+     *  null when the carrier is tagged but framed or sized so that it cannot. */
+    private class Carrier(val payload: ByteArray?)
+
     /**
-     * Extract the data payload from an OP_RETURN script, stripping the
-     * OP_RETURN opcode and push-data length prefix.
+     * Find the DigiAsset carrier in an OP_RETURN script: null when the script is not one (no
+     * push, or a push that does not begin with the "DA" tag), otherwise a [Carrier].
+     *
+     * Direct pushes and OP_PUSHDATA1 are the framings DigiAsset payloads use (76 bytes and above
+     * need OP_PUSHDATA1). OP_PUSHDATA2/4 are read only far enough to see the tag: no DigiAsset
+     * encoder frames a payload that way, and which outputs the protocol would credit for one is
+     * not something this reader can decide, so such a carrier is unclassifiable.
      */
-    private fun extractPayload(script: ByteArray): ByteArray? {
-        if (script.isEmpty() || script[0] != OP_RETURN) return null
-        if (script.size < 2) return null
+    private fun locateCarrier(script: ByteArray): Carrier? {
+        if (script.size < 2 || script[0] != OP_RETURN) return null
 
         val pushByte = script[1].toInt() and 0xFF
-        return when {
-            pushByte <= MAX_SINGLE_PUSH -> {
-                if (script.size < 2 + pushByte) return null
-                script.copyOfRange(2, 2 + pushByte)
-            }
+        val pushLen: Long
+        val dataOff: Int
+        when {
+            pushByte <= MAX_SINGLE_PUSH -> { pushLen = pushByte.toLong(); dataOff = 2 }
             pushByte == OP_PUSHDATA1 -> {
                 if (script.size < 3) return null
-                val len = script[2].toInt() and 0xFF
-                if (script.size < 3 + len) return null
-                script.copyOfRange(3, 3 + len)
+                pushLen = script[2].toLong() and 0xFFL; dataOff = 3
             }
-            else -> null // OP_PUSHDATA2/4 not used in practice for DA
+            pushByte == OP_PUSHDATA2 -> {
+                if (script.size < 4) return null
+                pushLen = littleEndian(script, 2, 2); dataOff = 4
+            }
+            pushByte == OP_PUSHDATA4 -> {
+                if (script.size < 6) return null
+                pushLen = littleEndian(script, 2, 4); dataOff = 6
+            }
+            else -> return null
         }
+
+        // The tag: the first two bytes of the push, where the script has them.
+        if (pushLen < 2 || script.size < dataOff + 2) return null
+        val magic = ((script[dataOff].toInt() and 0xFF) shl 8) or (script[dataOff + 1].toInt() and 0xFF)
+        if (magic != DA_MAGIC) return null
+
+        // Tagged. From here on, anything this reader cannot classify is unclassifiable, never
+        // "not an asset".
+        if (pushByte == OP_PUSHDATA2 || pushByte == OP_PUSHDATA4) return Carrier(null)
+        if (pushLen < MIN_DA_PAYLOAD || dataOff + pushLen > script.size) return Carrier(null)
+        return Carrier(script.copyOfRange(dataOff, dataOff + pushLen.toInt()))
+    }
+
+    private fun littleEndian(bytes: ByteArray, at: Int, width: Int): Long {
+        var v = 0L
+        for (i in width - 1 downTo 0) v = (v shl 8) or (bytes[at + i].toLong() and 0xFFL)
+        return v
     }
 
     /**
@@ -154,12 +186,9 @@ class DigiAssetDecoder {
         var aggregation = Aggregation.AGGREGATABLE
 
         if (operation == AssetOperation.ISSUANCE) {
-            // Amount of assets to create
-            totalQuantity = try {
-                reader.readFixedPrecision()
-            } catch (_: Exception) {
-                null
-            }
+            // Amount of assets to create. A payload that ends inside it does not decode; the
+            // exception reaches decode(), which fails closed.
+            totalQuantity = reader.readFixedPrecision()
 
             // Issuance flags are the LAST 8 bits of the payload.
             // We need to peek at them without consuming the transfer instructions.
@@ -180,11 +209,19 @@ class DigiAssetDecoder {
             }
         }
 
-        // Parse transfer instructions
-        val transferInstructions = try {
+        // Parse transfer instructions. A transfer's or burn's stream is exactly what the protocol
+        // reads, so one that ends inside an instruction is a payload that does not decode: the
+        // exception reaches decode(), which fails closed. An issuance's stream follows a rules
+        // block this reader does not parse (opcodes 3 and 4), so it is read only as far as it
+        // makes sense; the supply is credited without it (AssetTxQuantity.forOutput).
+        val transferInstructions = if (operation == AssetOperation.ISSUANCE) {
+            try {
+                parseTransferInstructions(reader, operation)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else {
             parseTransferInstructions(reader, operation)
-        } catch (_: Exception) {
-            emptyList()
         }
 
         return DecodedAssetHeader(
@@ -212,16 +249,23 @@ class DigiAssetDecoder {
      *   variable: amount (1 byte if percent, else fixed-precision encoded)
      *
      * For issuance, the last 8 bits are issuance flags (not a transfer instruction).
+     *
+     * Only an issuance's stream is read leniently (see [parseHeader]): for any other operation an
+     * instruction the payload ends inside throws.
      */
     private fun parseTransferInstructions(
         reader: BitReader,
         operation: AssetOperation
     ): List<TransferInstruction> {
         val footerBits = if (operation == AssetOperation.ISSUANCE) 8 else 0
+        val lenient = operation == AssetOperation.ISSUANCE
         val instructions = mutableListOf<TransferInstruction>()
 
         while (reader.bitsRemaining() > footerBits) {
-            if (reader.bitsRemaining() < 8 + footerBits) break // not enough bits for even minimal instruction
+            if (reader.bitsRemaining() < 8 + footerBits) { // not enough bits for even minimal instruction
+                if (lenient) break
+                throw IllegalStateException("payload ends inside an instruction")
+            }
 
             val skip = reader.readBits(1) == 1L
             val range = reader.readBits(1) == 1L
@@ -233,12 +277,15 @@ class DigiAssetDecoder {
             } else {
                 try {
                     reader.readFixedPrecision()
-                } catch (_: Exception) {
-                    break
+                } catch (e: Exception) {
+                    if (lenient) break else throw e
                 }
             }
 
-            val burn = !range && output == 31
+            // Output 31 is the destroy marker only in a BURN (DigiAsset_Core DigiByteTransaction.cpp
+            // decodeAssetTransfer: `type == DIGIASSET_BURN && !range && output == 31`). In a transfer
+            // or an issuance it names a real output, which exists once a transaction has 32 or more.
+            val burn = !range && output == 31 && operation == AssetOperation.BURN
             instructions.add(
                 TransferInstruction(
                     skip = skip,
@@ -334,6 +381,23 @@ data class DecodedAssetHeader(
      */
     val hasRules: Boolean get() = opcode == 3 || opcode == 4
 
+    companion object {
+        /** What [DigiAssetDecoder.decode] returns for a "DA"-tagged carrier it cannot classify:
+         *  no fields, no instructions, nothing to credit. */
+        fun unclassifiable(): DecodedAssetHeader = DecodedAssetHeader(
+            version = 0,
+            opcode = 0,
+            operation = AssetOperation.UNCLASSIFIABLE,
+            metadataHash = null,
+            metadataCid = null,
+            totalQuantity = null,
+            divisibility = 0,
+            locked = false,
+            aggregation = Aggregation.AGGREGATABLE,
+            transferInstructions = emptyList(),
+        )
+    }
+
     /**
      * Convert to [AssetData] model for the wallet layer.
      * Uses the first non-burn transfer instruction's amount, or totalQuantity for issuance.
@@ -399,6 +463,7 @@ data class TransferInstruction(
     val outputIndex: Int,
     /** Amount of tokens (absolute or percentage depending on [percent]). */
     val amount: Long,
-    /** True if this instruction burns tokens (output index 31, non-range). */
+    /** True if this instruction burns tokens: the non-range output index 31 of a BURN operation.
+     *  In any other operation index 31 is an ordinary output and this is false. */
     val isBurn: Boolean
 )

@@ -933,7 +933,8 @@ class AssetManager(
      * Returns an [IncomingAssetInfo] carrying the decoded header and the
      * placeholder asset-id we stamped onto the UTXO rows (caller uses it
      * to label the [TransactionEntity] the same way), or null for non-asset
-     * transactions.
+     * transactions — and for an unclassifiable carrier, after its owned
+     * outputs have been held.
      */
     /**
      * The set of hex-encoded scriptPubKeys the wallet owns, derived from the
@@ -1025,7 +1026,8 @@ class AssetManager(
         //    and range instructions are not resolvable without the per-input
         //    asset balances from parent txs (M3), so we skip them here —
         //    an underestimate is better than a fake number.
-        //  - BURN: quantities of outputs don't matter (asset is destroyed).
+        //  - BURN: as TRANSFER, except a non-range instruction to output 31
+        //    destroys its units; the burn's other instructions still deliver.
         val firstNonOpReturn = outputs.firstOrNull {
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout
@@ -1102,6 +1104,11 @@ class AssetManager(
                 logIfHeldForZeroRows(txHashHex, vout, header, firstNonOpReturn, outputCount, zeroRowInputs)
             },
         )
+
+        // A carrier tagged "DA" that cannot be classified: the hold above took every owned output
+        // (AssetTxQuantity.targetsOutput). There is no quantity, asset id or metadata to record,
+        // so no row is written and the transaction is not reported as an asset transaction.
+        if (header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE) return null
 
         // What each owned output HOLDS, as opposed to what the instructions claim for it: DigiAsset
         // Core's distribution, computed on the device. An issuance distributes the units it
@@ -1706,6 +1713,8 @@ class AssetManager(
                 AssetProvenanceWalker.Hop.Transfer(firstInput.prevTxidHex)
             }
             app.aroundtheblock.wallet.core.model.AssetOperation.BURN -> AssetProvenanceWalker.Hop.DeadEnd
+            // A carrier that cannot be read names no parent to walk to.
+            app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE -> AssetProvenanceWalker.Hop.DeadEnd
         }
     }
 

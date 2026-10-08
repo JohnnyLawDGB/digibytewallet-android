@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.asset
 
+import app.aroundtheblock.wallet.core.model.AssetOperation
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -16,7 +18,10 @@ import kotlin.random.Random
  * the spec rejects" is a potential mis-attribution bug.
  *
  * Goals these tests enforce:
- *   1. The decoder never throws on any input — bad input returns null.
+ *   1. The decoder never throws on any input. Input that is not a DigiAsset
+ *      carrier returns null; a carrier tagged "DA" that cannot be read
+ *      returns an UNCLASSIFIABLE header (fail closed: the hold rule then
+ *      keeps every owned output of the transaction out of DGB spends).
  *   2. Buffer over-reads are impossible: claimed lengths > actual buffer
  *      size, truncated headers, oversized varints all decline cleanly.
  *   3. Random fuzz doesn't produce a non-null header that would later
@@ -26,6 +31,13 @@ import kotlin.random.Random
 class DigiAssetDecoderFuzzTest {
 
     private val decoder = DigiAssetDecoder()
+
+    /** A tagged carrier the decoder cannot read: an UNCLASSIFIABLE header with nothing in it. */
+    private fun assertUnclassifiable(header: DecodedAssetHeader?) {
+        assertNotNull("a tagged carrier must not read as 'not an asset'", header)
+        assertEquals(AssetOperation.UNCLASSIFIABLE, header!!.operation)
+        assertTrue("an unclassifiable carrier carries no instructions", header.transferInstructions.isEmpty())
+    }
 
     // -------------------------------------------------------------------------
     // Trivial degenerate cases
@@ -68,21 +80,38 @@ class DigiAssetDecoderFuzzTest {
     }
 
     @Test
-    fun `truncated DA payload after magic returns null`() {
+    fun `truncated DA payload after magic is unclassifiable`() {
         // OP_RETURN, push len = 2, payload = 0x44 0x41 — magic only, no version+opcode.
         val script = byteArrayOf(0x6A, 0x02, 0x44, 0x41)
-        assertNull(decoder.decode(script))
+        assertUnclassifiable(decoder.decode(script))
     }
 
     @Test
-    fun `OP_PUSHDATA2 and OP_PUSHDATA4 are refused`() {
-        // DA spec uses single-byte push or PUSHDATA1 only. Bigger pushdata
-        // codes shouldn't be honored — refuse rather than leaking
-        // exploitable parser surface.
+    fun `a tagged push that runs past the script is unclassifiable`() {
+        // OP_RETURN says push 30 bytes; the "DA" tag and 4 more follow.
+        val script = byteArrayOf(0x6A, 30, 0x44, 0x41, 0x03, 0x15, 0x00, 0x0A)
+        assertUnclassifiable(decoder.decode(script))
+    }
+
+    @Test
+    fun `OP_PUSHDATA2 and OP_PUSHDATA4 carriers are unclassifiable, never plain`() {
+        // DA payloads use a single-byte push or PUSHDATA1. A tagged payload behind a bigger
+        // pushdata code is not parsed — but it is not "no asset" either: which outputs the
+        // protocol credits cannot be known, so the transaction's outputs are held.
         val pd2 = byteArrayOf(0x6A, 0x4D, 0x02, 0x00, 0x44, 0x41, 0x03, 0x15)
         val pd4 = byteArrayOf(0x6A, 0x4E, 0x02, 0x00, 0x00, 0x00, 0x44, 0x41, 0x03, 0x15)
+        assertUnclassifiable(decoder.decode(pd2))
+        assertUnclassifiable(decoder.decode(pd4))
+    }
+
+    @Test
+    fun `OP_PUSHDATA2 or OP_PUSHDATA4 without the DA tag is not a carrier`() {
+        val pd2 = byteArrayOf(0x6A, 0x4D, 0x02, 0x00, 0x44, 0x42, 0x03, 0x15)
+        val pd4 = byteArrayOf(0x6A, 0x4E, 0x02, 0x00, 0x00, 0x00, 0x44, 0x42)
         assertNull(decoder.decode(pd2))
         assertNull(decoder.decode(pd4))
+        assertNull("a declared length too short to hold a tag", decoder.decode(byteArrayOf(0x6A, 0x4D, 0x01, 0x00, 0x44, 0x41)))
+        assertNull("a length field the script ends inside", decoder.decode(byteArrayOf(0x6A, 0x4E, 0x02, 0x00)))
     }
 
     // -------------------------------------------------------------------------
@@ -98,36 +127,53 @@ class DigiAssetDecoderFuzzTest {
     }
 
     @Test
-    fun `version zero is refused`() {
+    fun `version zero is unclassifiable`() {
         val payload = byteArrayOf(0x44, 0x41, 0x00, 0x15) + ByteArray(8) { 0x00 }
         val script = byteArrayOf(0x6A, payload.size.toByte()) + payload
-        assertNull(decoder.decode(script))
+        assertUnclassifiable(decoder.decode(script))
     }
 
     @Test
-    fun `unknown opcode returns null`() {
+    fun `unknown opcode is unclassifiable`() {
         // 0xFF isn't a known DA op (not 0x01-0x05, 0x15, 0x25).
         val payload = byteArrayOf(0x44, 0x41, 0x03, 0xFF.toByte()) + ByteArray(8) { 0x00 }
         val script = byteArrayOf(0x6A, payload.size.toByte()) + payload
-        assertNull(decoder.decode(script))
+        assertUnclassifiable(decoder.decode(script))
     }
 
     @Test
-    fun `issuance opcode missing metadata hash bytes returns null`() {
+    fun `issuance opcode missing metadata hash bytes is unclassifiable`() {
         // Opcode 1 needs a 32-byte metadata hash; we provide 4 bytes.
         // Decoder MUST detect underflow rather than reading past the end.
         val payload = byteArrayOf(0x44, 0x41, 0x03, 0x01) + ByteArray(4) { 0xAA.toByte() }
         val script = byteArrayOf(0x6A, payload.size.toByte()) + payload
-        assertNull(decoder.decode(script))
+        assertUnclassifiable(decoder.decode(script))
     }
 
     @Test
-    fun `v1 v2 issuance with truncated SHA1 padding returns null`() {
+    fun `v1 v2 issuance with truncated SHA1 padding is unclassifiable`() {
         // Old opcodes 1-2 carry a 20-byte SHA1 region that v3 dropped.
         // Truncate it — decoder must refuse, not read uninitialized bytes.
         val payload = byteArrayOf(0x44, 0x41, 0x02, 0x01) + ByteArray(10) { 0xAA.toByte() }
         val script = byteArrayOf(0x6A, payload.size.toByte()) + payload
-        assertNull(decoder.decode(script))
+        assertUnclassifiable(decoder.decode(script))
+    }
+
+    @Test
+    fun `an issuance amount the payload ends inside is unclassifiable`() {
+        // Opcode 5 (no metadata); the amount header selects the 7-byte form, 1 byte follows.
+        val script = byteArrayOf(0x6A, 0x05, 0x44, 0x41, 0x02, 0x05, 0xE0.toByte())
+        assertUnclassifiable(decoder.decode(script))
+    }
+
+    @Test
+    fun `a transfer instruction the payload ends inside is unclassifiable`() {
+        // A flags byte with no amount after it.
+        assertUnclassifiable(decoder.decode(byteArrayOf(0x6A, 0x05, 0x44, 0x41, 0x02, 0x15, 0x03)))
+        // A 2-byte amount with one byte left.
+        assertUnclassifiable(decoder.decode(byteArrayOf(0x6A, 0x06, 0x44, 0x41, 0x02, 0x15, 0x00, 0x20)))
+        // A range instruction with no second index byte.
+        assertUnclassifiable(decoder.decode(byteArrayOf(0x6A, 0x05, 0x44, 0x41, 0x02, 0x15, 0x40)))
     }
 
     // -------------------------------------------------------------------------
@@ -153,7 +199,13 @@ class DigiAssetDecoderFuzzTest {
 
             // If the decoder returned a header, it MUST satisfy basic
             // invariants — these are what downstream code (M3 walk,
-            // UI render) relies on without re-checking.
+            // UI render) relies on without re-checking. An unclassifiable
+            // carrier carries nothing at all.
+            if (header.operation == AssetOperation.UNCLASSIFIABLE) {
+                assertTrue("unclassifiable carries no instructions", header.transferInstructions.isEmpty())
+                assertNull("unclassifiable carries no quantity", header.totalQuantity)
+                return@repeat
+            }
             assertTrue("version in declared range", header.version in 1..255)
             assertTrue("divisibility 0..7", header.divisibility in 0..7)
             // totalQuantity is nullable (null on transfer/burn). When set
