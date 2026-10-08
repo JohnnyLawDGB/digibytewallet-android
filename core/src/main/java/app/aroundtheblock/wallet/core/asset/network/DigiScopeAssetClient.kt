@@ -35,6 +35,18 @@ class DigiScopeAssetClient(
         .build()
 
     /**
+     * [client] for the indexer stack lookup only, with redirects off. Its answer decides whether
+     * an asset send may spend an output and what a received output is credited with, so it must
+     * come from the pinned endpoint that was asked, never from wherever a 3xx points. A redirect
+     * is returned as a non-2xx response, which [readStack] reads as "no answer". The other calls
+     * keep [client]'s behaviour.
+     */
+    private val stackClient: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
+    /**
      * The DigiAsset stack on one unspent output, straight from the indexer
      * (`GET /digiassets/txout/:txid/:vout`). 404 is the indexer saying the output is not unspent;
      * every other failure is "no answer".
@@ -45,7 +57,7 @@ class DigiScopeAssetClient(
     /** Blocking; [stackOf] runs it on the IO dispatcher (its callers include the main thread). */
     private fun readStack(txid: String, vout: Int): app.aroundtheblock.wallet.core.asset.send.StackLookup = try {
         val req = Request.Builder().url("$baseUrl/digiassets/txout/${txid.lowercase()}/$vout").get().build()
-        client.newCall(req).execute().use { resp ->
+        stackClient.newCall(req).execute().use { resp ->
             when {
                 resp.code == 404 -> DigiScopeAssetParsing.notFound(resp.body?.string())
                 !resp.isSuccessful -> app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable

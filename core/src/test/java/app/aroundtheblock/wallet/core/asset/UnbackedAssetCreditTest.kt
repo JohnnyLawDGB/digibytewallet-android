@@ -147,7 +147,10 @@ class UnbackedAssetCreditTest {
                 computedQty = AssetTxQuantity.forOutputTotal(header, vout, 0, null, outputCount),
                 credit = credit,
             )
-            if (credit == OutputCredit.Unknown) mgr.settleFromIndexer(txid, vout, placeholder, nowMs = 0L)
+            if (credit == OutputCredit.Unknown) {
+                mgr.settleFromIndexer(txid, vout, placeholder,
+                    maxUnits = AssetCreditRules.maxDeliverable(header, vout, outputCount), nowMs = 0L)
+            }
         }
         return credits
     }
@@ -158,6 +161,13 @@ class UnbackedAssetCreditTest {
 
     private fun row(vout: Int) = rows.getValue(key(txid, vout))
 
+    /** The honest control transfer: 5 units to output 0, three outputs. */
+    private val CONTROL = "6a06444103150005"
+
+    /** [AssetCreditRules.maxDeliverable] for [script]'s output [vout] of three. */
+    private fun cap(script: String, vout: Int, outputCount: Int = 3) =
+        AssetCreditRules.maxDeliverable(requireNotNull(DigiAssetDecoder().decode(hex(script))), vout, outputCount)
+
     private val forged = listOf(
         // BB-2026-10-08-rico: [noskip→0,1][skip→0,999999] from a 1-unit carrier.
         Triple("6a0b4441031500018060f423f0", listOf(In.Own(AssetUnits(X, 1)), In.Plain), 0),
@@ -167,6 +177,8 @@ class UnbackedAssetCreditTest {
         Triple("6a0744410315002016", listOf(In.Plain, In.Plain), 0),
         // BB-2026-10-08-toshit: 1,000,000 declared from a 1-unit carrier.
         Triple("6a0744410315002016", listOf(In.Own(AssetUnits(X, 1))), 0),
+        // Range instruction crediting every output 0..8191 with 2^54-1, no asset input (dino).
+        Triple("6a0d444103155fffffffffffffffff", listOf(In.Plain), 0),
     )
 
     // ── RC1: forged credit ───────────────────────────────────────────────────────────────────
@@ -190,7 +202,7 @@ class UnbackedAssetCreditTest {
 
             // Confirmed: Core gave the victim's output nothing.
             answers[key(txid, victim)] = StackLookup.Found(emptyList())
-            mgr.settleFromIndexer(txid, victim, placeholder, nowMs = AssetManagerTestClock.later)
+            mgr.settleFromIndexer(txid, victim, placeholder, cap(script, victim), nowMs = AssetManagerTestClock.later)
             assertEquals(script, AssetCredit.VERIFIED, row(victim).assetCredit)
             assertEquals(script, 0L, row(victim).assetQuantity)
             assertEquals(script, placeholder, row(victim).assetId)
@@ -345,7 +357,10 @@ class UnbackedAssetCreditTest {
                 computedQty = AssetTxQuantity.forOutputTotal(header, vout, 0, null, outputCount),
                 credit = credit,
             )
-            if (credit == OutputCredit.Unknown) mgr.settleFromIndexer(txid, vout, Z, nowMs = 0L)
+            if (credit == OutputCredit.Unknown) {
+                mgr.settleFromIndexer(txid, vout, Z,
+                    maxUnits = AssetCreditRules.maxDeliverable(header, vout, outputCount), nowMs = 0L)
+            }
         }
         return credits
     }
@@ -462,12 +477,46 @@ class UnbackedAssetCreditTest {
         val mgr = manager()
         receive(mgr, "6a06444103150005", listOf(In.Foreign), listOf(0))   // Unavailable
         assertEquals(1, lookups)
-        mgr.settleFromIndexer(txid, 0, placeholder, nowMs = 1_000L)
+        mgr.settleFromIndexer(txid, 0, placeholder, cap(CONTROL, 0), nowMs = 1_000L)
         assertEquals("asked again too soon", 1, lookups)
         answers[key(txid, 0)] = StackLookup.Found(listOf(StackEntry(X, 5)))
-        mgr.settleFromIndexer(txid, 0, placeholder, nowMs = AssetManagerTestClock.later)
+        mgr.settleFromIndexer(txid, 0, placeholder, cap(CONTROL, 0), nowMs = AssetManagerTestClock.later)
         assertEquals(2, lookups)
         assertEquals(mapOf(X to 5L), balances(mgr))
+    }
+
+    /** The indexer is believed only up to what the transaction's own instructions can deliver
+     *  to a non-last output; more than that leaves the row UNCHECKED and uncounted. */
+    @Test fun an_indexer_count_above_what_the_instructions_deliver_is_not_believed() = runTest {
+        assertEquals(5L, cap(CONTROL, 0))
+        assertNull("the last output also takes leftovers: no bound", cap(CONTROL, 2))
+
+        val mgr = manager()
+        answers[key(txid, 0)] = StackLookup.Found(listOf(StackEntry(X, 1_000_000)))
+        receive(mgr, CONTROL, listOf(In.Foreign), listOf(0))
+        assertEquals(AssetCredit.UNCHECKED, row(0).assetCredit)
+        assertEquals(emptyMap<String, Long>(), balances(mgr))
+
+        // Exactly the bound is believed; and the last output is not capped.
+        rows.clear(); answers.clear()
+        val mgr2 = manager()
+        answers[key(txid, 0)] = StackLookup.Found(listOf(StackEntry(X, 5)))
+        answers[key(txid, 2)] = StackLookup.Found(listOf(StackEntry(X, 1_000)))
+        receive(mgr2, CONTROL, listOf(In.Foreign), listOf(0, 2))
+        assertEquals(mapOf(X to 1_005L), balances(mgr2))
+    }
+
+    @Test fun the_bound_counts_range_instructions_and_gives_up_on_percent_and_overflow() {
+        // Range to 8191 of 2^54-1 covers output 0.
+        assertEquals(AssetTransferAllocator.MAX_ISSUANCE, cap("6a0d444103155fffffffffffffffff", 0))
+        // Output 1 is named by nothing in the control transfer: nothing can be delivered there.
+        assertEquals(0L, cap(CONTROL, 1, outputCount = 4))
+        fun h(vararg i: TransferInstruction) = DecodedAssetHeader(3, 0x15, app.aroundtheblock.wallet.core.model.AssetOperation.TRANSFER,
+            null, null, null, 0, false, Aggregation.AGGREGATABLE, i.toList())
+        assertNull(AssetCreditRules.maxDeliverable(h(TransferInstruction(false, false, true, 0, 128, false)), 0, 3))
+        assertNull(AssetCreditRules.maxDeliverable(h(
+            TransferInstruction(false, false, false, 0, Long.MAX_VALUE, false),
+            TransferInstruction(false, false, false, 0, 1, false)), 0, 3))
     }
 
     @Test fun a_settled_row_is_final() = runTest {
@@ -477,7 +526,7 @@ class UnbackedAssetCreditTest {
         val asked = lookups
         // Re-detected on the next sweep, with a different claim: nothing changes, nobody is asked.
         mgr.persistDetectedAssetOutput(txid, 0, ownedScript, 600, 0, placeholder, 1_000_000, credit = OutputCredit.Unknown)
-        mgr.settleFromIndexer(txid, 0, placeholder, nowMs = AssetManagerTestClock.later)
+        mgr.settleFromIndexer(txid, 0, placeholder, cap(CONTROL, 0), nowMs = AssetManagerTestClock.later)
         assertEquals(asked, lookups)
         assertEquals(X to 5L, row(0).assetId to row(0).assetQuantity)
     }
