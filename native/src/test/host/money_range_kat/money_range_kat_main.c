@@ -70,7 +70,7 @@ static void refused(BRWallet *w, const uint64_t *amts, size_t n, uint8_t tag, co
     snprintf(m, sizeof(m), "%s: refused (registered=%d, valid=%d), balance %llu unchanged", what, r, valid,
              (unsigned long long)BRWalletBalance(w));
     ck(r == 0 && valid == 0 && !held && BRWalletBalance(w) == before && array_count(w->utxos) == utxos, m);
-    // an unconfirmed non-wallet tx is kept in allTx by the wallet, as before; otherwise it is ours to free
+    ck(BRWalletTransactionForHash(w, h) == NULL, "  ... and is not kept (not even as an unconfirmed non-wallet tx)");
     if (BRWalletTransactionForHash(w, h) != tx) BRTransactionFree(tx);
 }
 

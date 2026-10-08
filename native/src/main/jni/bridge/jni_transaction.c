@@ -158,7 +158,7 @@ static void _registerWalletCopy(BRTransaction *tx)
     if (BRWalletTransactionForHash(g_wallet, tx->txHash)) return;   /* already held: nothing to copy */
     BRTransaction *walletCopy = BRTransactionCopy(tx);
     if (!walletCopy) return;                                        /* the peer relay-back re-registers */
-    BRWalletRegisterTransaction(g_wallet, walletCopy);
+    BRWalletRegisterTransactionTrusted(g_wallet, walletCopy);   /* this wallet signed it: no input check */
     if (BRWalletTransactionForHash(g_wallet, tx->txHash) != walletCopy) BRTransactionFree(walletCopy);
 }
 
@@ -193,18 +193,12 @@ NativeBridge_createTransaction(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    /* Build at the caller's rate, if specified, then put the wallet's rate back -- whether or not
-     * the build succeeds. The rate is wallet-wide state that later builds read (asset sends,
-     * sweeps, a later send at the default rate), so a custom rate is for this one build only. */
-    uint64_t savedFeePerKb = BRWalletFeePerKb(g_wallet);
-    if (feePerKb > 0) {
-        BRWalletSetFeePerKb(g_wallet, (uint64_t)feePerKb);
-    }
-
-    BRTransaction *tx = BRWalletCreateTransaction(g_wallet, (uint64_t)amountSatoshis, addrChars);
-    if (feePerKb > 0) {
-        BRWalletSetFeePerKb(g_wallet, savedFeePerKb);
-    }
+    /* Build at the caller's rate, if specified, for this one build only. The rate is handed to the
+     * builder rather than set on the wallet: the wallet's rate is shared state that later builds
+     * read (asset sends, sweeps, a later send at the default rate) and that peers' feefilter
+     * messages and concurrent builds update, so a custom rate never touches it. */
+    BRTransaction *tx = BRWalletCreateTransactionAtFeePerKb(g_wallet, (uint64_t)amountSatoshis, addrChars,
+                                                            feePerKb > 0 ? (uint64_t)feePerKb : 0);
     (*env)->ReleaseStringUTFChars(env, toAddress, addrChars);
 
     if (!tx) {
@@ -595,13 +589,14 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
     tx->blockHeight = (uint32_t)blockHeight;
     tx->timestamp = (uint32_t)blockTimestamp;
 
+    UInt256 txHash = tx->txHash;
     int ok = BRWalletRegisterTransaction(g_wallet, tx);
     if (!ok) {
-        /* Not owned by any wallet address — free to avoid leak.
-         * BRWalletRegisterTransaction's non-wallet path leaves tx orphaned
-         * unless blockHeight == TX_UNCONFIRMED (in which case the wallet
-         * tracks it). For confirmed txs that don't match, we free. */
-        if (tx->blockHeight != TX_UNCONFIRMED) BRTransactionFree(tx);
+        /* Not taken by the wallet. It keeps an unconfirmed non-wallet tx in its allTx set; anything
+         * else it refused -- a confirmed non-wallet tx, an out-of-range tx, an unconfirmed tx that
+         * does not validly sign a wallet output -- is not kept at any height, so ask the wallet
+         * whether it holds this object rather than infer it from the height, and free it if not. */
+        if (BRWalletTransactionForHash(g_wallet, txHash) != tx) BRTransactionFree(tx);
         LOGW("registerRawTransaction: tx not associated with wallet");
         return JNI_FALSE;
     }

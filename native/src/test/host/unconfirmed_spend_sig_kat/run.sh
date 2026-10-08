@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Host KAT runner: the wallet's amounts stay within DigiByte's money range (see the _main.c header).
-# BRWallet.c is #included by the main, so it is NOT on the clang line. Recorded red against core
-# 91000fd: MAX_MONEY is 21 million DGB, and an out-of-range receive wraps the balance.
+# Host KAT runner: an unconfirmed tx that spends a wallet coin registers only when it validly signs it;
+# the wallet's own sends, the same phrase elsewhere and blocks are unaffected (see the _main.c header).
+# BRWallet.c is #included by the main, so it is NOT on the clang line; -DWALLET_KAT_COUNT_WALK turns on
+# the walk counter [8] reads.
 #
 # Exit code 0 = all checks passed, 1 = check failed / ASan fault / build error.
 set -uo pipefail
@@ -16,10 +17,10 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
-clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
+clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer -DWALLET_KAT_COUNT_WALK \
     -I "$CORE_DIR" \
     -I "$CORE_DIR/secp256k1/include" \
-    "$SCRIPT_DIR/money_range_kat_main.c" \
+    "$SCRIPT_DIR/unconfirmed_spend_sig_kat_main.c" \
     "$CORE_DIR/BRTransaction.c" \
     "$CORE_DIR/BRDigiDollar.c" \
     "$CORE_DIR/BRDigiAsset.c" \
@@ -36,8 +37,7 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
     "$CORE_DIR/crypto/qubit.c" "$CORE_DIR/crypto/odocrypt.c" \
     "${SHA3_SRCS[@]}" \
     -lpthread -lm \
-    -o "$BUILD_DIR/money_range_kat" || { echo "FAIL: build error"; exit 1; }
+    -o "$BUILD_DIR/unconfirmed_spend_sig_kat" || { echo "FAIL: build error"; exit 1; }
 
-# LeakSanitizer OFF: BRWalletFree does not free the non-wallet unconfirmed transactions the wallet
-# keeps in allTx (an out-of-range one is no longer kept: the main frees what was not taken).
-ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" "$BUILD_DIR/money_range_kat"
+# LeakSanitizer OFF: unconfirmed non-wallet txs the wallet keeps in allTx are not freed by BRWalletFree.
+ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" "$BUILD_DIR/unconfirmed_spend_sig_kat"
