@@ -628,6 +628,111 @@ static int case_inv_hash_stack(void)
     return (started && job.r == 1) ? 1 : 0;       // green: handled cleanly on the small stack
 }
 
+// ---- cases: a script length cannot carry the running offset past the message ------
+//
+// Each transaction below declares a per-input or per-output script length near the
+// 64-bit maximum. The parser accumulates that length into the running offset; the
+// comparison arm (-DWIRE_OFF_WRAP_UNFIXED) does so with an "off + sLen <= bufLen"
+// gate that WRAPS, so a wrapped offset slips past the end-of-buffer gate and the
+// parser then reads or writes outside the exact-length message. The bounded parser
+// compares the declared length against the bytes that remain, with no addition on
+// the side that could wrap, and rejects before acting on it.
+//
+// These are the reproductions carried over from the offline parser harness, as
+// exact-length buffers so AddressSanitizer brackets them:
+//
+//   tx_offwrap     -- a segwit signed tx whose input-script length wraps the offset
+//                     so the end-of-buffer gate passes; the sign-tail then sizes a
+//                     tiny allocation from the wrapped witness offset and writes the
+//                     version field past it (a heap WRITE, deterministic).
+//   tx_offwrap_out -- a tx whose output-script length wraps the offset to land back
+//                     inside the buffer, so the script copy reads from one byte past
+//                     the message (a heap READ, deterministic).
+//
+// Exact wire bytes (62 and 64 bytes); the only attacker-chosen field is the
+// 8-byte script-length varint (0xff ...).
+static const uint8_t k_offwrap_write[] = { // 62 bytes
+    0x01,0x00,0x00,0x00,0x00,0x01,0x01,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x00,0x00,0x00,0x00,0xff,0xc7,0xff,0xff,0xff,
+    0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,
+    0x00,0x00
+};
+static const uint8_t k_offwrap_out[] = { // 64 bytes
+    0x01,0x00,0x00,0x00,0x01,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0x01,0x00,
+    0xe1,0xf5,0x05,0x00,0x00,0x00,0x00,0xff,0xc0,0xff,0xff,0xff,
+    0xff,0xff,0xff,0xff
+};
+// An honest signed segwit transaction: empty scriptSig (so isSigned stays set), a
+// p2wpkh output and a one-item witness. It reaches the very sign-tail the write
+// case abuses, and must be ACCEPTED in BOTH arms -- the bound changes behaviour only
+// for a malformed length, never for a well-formed one.
+static const uint8_t k_offwrap_ctl[] = { // 91 bytes
+    0x02,0x00,0x00,0x00,0x00,0x01,0x01,0x22,0x22,0x22,0x22,0x22,
+    0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,
+    0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,
+    0x22,0x22,0x22,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,
+    0x01,0x80,0x4a,0x5d,0x05,0x00,0x00,0x00,0x00,0x16,0x00,0x14,
+    0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,
+    0x0d,0x0e,0x0f,0x10,0x11,0x12,0x13,0x14,0x01,0x05,0xaa,0xbb,
+    0xcc,0xdd,0xee,0x00,0x00,0x00,0x00
+};
+
+static int parse_bytes(const uint8_t *bytes, size_t len)
+{
+    uint8_t *buf = dup_exact(bytes, len);
+    BRTransaction *tx = BRTransactionParse(buf, len);
+    int accepted = (tx != NULL);
+    if (tx) BRTransactionFree(tx);
+    free(buf);
+    return accepted;
+}
+
+static int case_tx_offwrap(void)     { return parse_bytes(k_offwrap_write, sizeof(k_offwrap_write)); }
+static int case_tx_offwrap_out(void) { return parse_bytes(k_offwrap_out,   sizeof(k_offwrap_out));   }
+static int case_tx_offwrap_ctl(void) { return parse_bytes(k_offwrap_ctl,   sizeof(k_offwrap_ctl));   }
+
+// Fuzz-ish arm: every truncation of the two attack messages and the honest control,
+// plus a non-wrapping overlong length (a script that claims one more byte than the
+// message holds) and a maximal varint with no bytes behind it. Each is parsed in an
+// exact-length buffer. The bound must keep every one inside the message: if any
+// prefix drove a read or write past the buffer the sanitizer would abort this
+// process, so simply returning is the clean result. No malformed prefix is accepted,
+// so the oracle is "rejected".
+static int case_tx_offwrap_fuzz(void)
+{
+    const uint8_t *msgs[] = { k_offwrap_write, k_offwrap_out, k_offwrap_ctl };
+    const size_t   lens[] = { sizeof(k_offwrap_write), sizeof(k_offwrap_out), sizeof(k_offwrap_ctl) };
+    for (size_t m = 0; m < 3; m++) {
+        for (size_t n = 0; n <= lens[m]; n++) (void)parse_bytes(msgs[m], n);
+    }
+    // Non-wrapping overlong input-script length: a one-input tx that claims a script
+    // one byte longer than the bytes present. No wrap, but the length still exceeds
+    // the message and must be rejected, not read past.
+    uint8_t over[64];
+    size_t o = 0;
+    put_u32le(&over[o], 1); o += 4;              // version
+    over[o++] = 0x01;                            // input count 1
+    memset(&over[o], 0x33, 32); o += 32;         // outpoint hash
+    put_u32le(&over[o], 0); o += 4;              // outpoint index
+    over[o++] = 0x20;                            // script length 32 (more than remains)
+    over[o++] = 0x00;                            // only one byte of "script" present
+    (void)parse_bytes(over, o);
+    // A maximal 8-byte varint length with nothing behind it.
+    uint8_t vmax[64];
+    size_t v = put_segwit_prefix(vmax);          // a valid one-in one-out prefix
+    (void)parse_bytes(vmax, v);                  // whole, honest (accepted elsewhere)
+    uint8_t trunc[64];
+    memcpy(trunc, vmax, v);
+    trunc[v - 1] = 0xff;                         // turn the trailing empty scriptPubKey len into 0xff
+    (void)parse_bytes(trunc, v);                 // 0xff with no 8 bytes behind it
+    return 0;                                     // nothing malformed was accepted
+}
+
 // ---- cases: a store the parser asked for exists before the object is used --------
 //
 // Honest one-input, one-output transactions. What differs is the allocator: run.sh
@@ -811,6 +916,10 @@ int main(int argc, char **argv)
     else if (strcmp(c, "notfound_wrap") == 0)  accepted = case_notfound_wrap();
     else if (strcmp(c, "tx_count_trunc") == 0) accepted = case_tx_count_trunc();
     else if (strcmp(c, "inv_hash_stack") == 0) accepted = case_inv_hash_stack();
+    else if (strcmp(c, "tx_offwrap") == 0)     accepted = case_tx_offwrap();
+    else if (strcmp(c, "tx_offwrap_out") == 0) accepted = case_tx_offwrap_out();
+    else if (strcmp(c, "tx_offwrap_ctl") == 0) accepted = case_tx_offwrap_ctl();
+    else if (strcmp(c, "tx_offwrap_fuzz") == 0) accepted = case_tx_offwrap_fuzz();
 #ifdef KAT_GROW_HOOK
     else if (strcmp(c, "tx_store_in") == 0)  accepted = case_tx_store_in();
     else if (strcmp(c, "tx_store_out") == 0) accepted = case_tx_store_out();
