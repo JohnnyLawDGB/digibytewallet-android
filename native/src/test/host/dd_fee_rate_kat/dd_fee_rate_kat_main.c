@@ -20,9 +20,9 @@
 //   e.g. a 5 DGB custom total leaves a rate at which a one-input transfer pays 9.54 DGB -- or this
 //   KAT has lost the ability to see the defect and fails.
 //
-// The bridge half (NativeBridge_createTransaction puts the wallet's rate back after each build) is
-// checked against the source by run.sh: jni_transaction.c includes Android headers and cannot be
-// compiled on the host.
+// The DGB build at a custom rate takes the rate as a parameter (BRWalletCreateTransactionAtFeePerKb)
+// and leaves the wallet's rate alone; that the bridge uses it is checked against the source by
+// run.sh: jni_transaction.c includes Android headers and cannot be compiled on the host.
 //
 // BRWallet.c and base_builder.c are #included (the reference builder needs the wallet struct);
 // BRWallet.c is therefore NOT on the compiler line in run.sh. Exit code 0 = all checks passed.
@@ -191,6 +191,21 @@ int main(void) {
         }
         if (t0) BRTransactionFree(t0);
         BRWalletFree(w0);
+    }
+
+    printf("\nA DGB build at a custom rate: the rate is a parameter, not wallet state\n");
+    {
+        uint64_t thirty[1] = { 3000000000ULL };
+        BRWallet *w = mkWallet(thirty, 1);
+        BRWalletSetFeePerKb(w, 250000ULL);                     // e.g. raised by a peer's feefilter
+        BRAddress to = BRWalletReceiveAddress(w, 1);
+        BRTransaction *a = BRWalletCreateTransactionAtFeePerKb(w, 100000000ULL, to.s, 5000000ULL);
+        BRTransaction *b = BRWalletCreateTransactionAtFeePerKb(w, 100000000ULL, to.s, 0);
+        ck(a && b && paid(a) > paid(b), "the custom rate is the one paid; 0 builds at the wallet's rate");
+        ck(BRWalletFeePerKb(w) == 250000ULL, "the wallet's rate is unchanged by either build");
+        if (a) BRTransactionFree(a);
+        if (b) BRTransactionFree(b);
+        BRWalletFree(w);
     }
 
     printf("\nRED (the reference builder, which read the wallet's rate)\n");

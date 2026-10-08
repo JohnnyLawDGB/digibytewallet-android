@@ -12,6 +12,7 @@
 //       first; the selection pass now makes it a rule.)
 //   [4] A relayed unconfirmed tx that spends a foreign unconfirmed receive, or that pays out more
 //       than it spends, is not "own": its outputs are not selected.
+// BRWalletSelectableUTXOs (the DigiAsset send's DGB fee source) follows the same rule and order.
 // Recorded red against core dea3e00 (before this change): [1] funds the 10 DGB send from the
 // unconfirmed receive and counts it in the maximum, and [4] selects the relayed chain's outputs.
 //
@@ -91,6 +92,11 @@ int main(void) {
     if (s) BRTransactionFree(s);
     ck(BRWalletMaxOutputAmount(w) < 100000000ULL, "the spendable maximum leaves the unconfirmed receive out");
     {
+        BRUTXO u[4]; size_t n = BRWalletSelectableUTXOs(w, u, 4);
+        ck(BRWalletSelectableUTXOs(w, NULL, 0) == 1 && n == 1 && UInt256Eq(u[0].hash, real->txHash),
+           "the selectable list (the asset send's DGB fee source) holds only the confirmed coin");
+    }
+    {
         UInt256 h = fake->txHash;
         BRWalletUpdateTransactions(w, &h, 1, 700001, g_ts++);
         s = build(w, 1000000000ULL);
@@ -117,6 +123,13 @@ int main(void) {
     s = build(w, 50000000ULL);
     ck(s && s->inCount == 1 && spentInput(s, later->txHash), "the confirmed coin is taken over the unconfirmed change");
     if (s) BRTransactionFree(s);
+    {
+        // send1 paid one of the wallet's own addresses, so both its outputs are the wallet's
+        BRUTXO u[4]; size_t n = BRWalletSelectableUTXOs(w, u, 4);
+        ck(n == 3 && UInt256Eq(u[0].hash, later->txHash) && UInt256Eq(u[1].hash, send1->txHash) &&
+           UInt256Eq(u[2].hash, send1->txHash),
+           "the selectable list is confirmed first, then the own unconfirmed outputs");
+    }
     BRWalletFree(w);
 
     printf("[4] relayed chains are not own\n");

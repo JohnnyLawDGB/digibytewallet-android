@@ -8,10 +8,11 @@
 #       base_builder.c are #included by the main, so neither is on the compiler line.
 #
 # [2/2] SOURCE GATE. jni_transaction.c includes Android headers and cannot be compiled on the host,
-#       so this scans Java_io_digibyte_core_bridge_NativeBridge_createTransaction and fails unless it reads the wallet's rate
-#       before it sets the caller's, and sets the saved rate back after BRWalletCreateTransaction
-#       with no return in between -- the custom rate is for that one build, success or failure.
-#       DD_FEE_GATE_FILE=<path> points the gate at another copy (used to show it refuses the old shape).
+#       so this scans Java_io_digibyte_core_bridge_NativeBridge_createTransaction and fails unless it builds through
+#       BRWalletCreateTransactionAtFeePerKb and never calls BRWalletSetFeePerKb: the custom rate is
+#       a parameter of that one build, not wallet state that outlives it or that a concurrent build
+#       or feefilter update could change mid-build. DD_FEE_GATE_FILE=<path> points the gate at
+#       another copy (used to show it refuses the older shapes).
 #
 # Exit code 0 = all checks passed, 1 = a check failed / sanitizer fault / build error.
 set -uo pipefail
@@ -51,14 +52,12 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
     -lpthread -lm \
     -o "$BUILD_DIR/dd_fee_rate_kat" || { echo "FAIL: build error"; exit 1; }
 
-# LeakSanitizer OFF: BRWalletCreateTransaction never frees the output script BRTxOutputSetAddress
-# allocates (BRWallet.c, a core leak of its own -- every DGB build leaks one script), and the
-# "prior DGB build" step calls it. AddressSanitizer itself stays on.
-ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" "$BUILD_DIR/dd_fee_rate_kat"
+# LeakSanitizer ON: every wallet and transaction the main makes is released.
+ASAN_OPTIONS="abort_on_error=1 detect_leaks=1" "$BUILD_DIR/dd_fee_rate_kat"
 kat=$?
 
 echo
-echo "[2/2] source gate: createTransaction puts the wallet's rate back ($JNI)"
+echo "[2/2] source gate: createTransaction passes the rate to the builder ($JNI)"
 awk '/^Java_io_digibyte_core_bridge_NativeBridge_createTransaction\(/{p=1} p{print} p&&/^}/{exit}' "$JNI" \
     | sed 's@/\*.*\*/@@g; s@//.*$@@' > "$BUILD_DIR/create.c"
 gate=0
@@ -66,24 +65,17 @@ if [ ! -s "$BUILD_DIR/create.c" ]; then
     echo "  FAIL could not locate NativeBridge_createTransaction"
     gate=1
 else
-    read -r save set build restore early <<<"$(awk '
-        /BRWalletFeePerKb\(g_wallet\)/ && !save                         { save = NR }
-        /BRWalletSetFeePerKb\(g_wallet, *\(uint64_t\) *feePerKb\)/ && !set { set = NR }
-        /BRWalletCreateTransaction\(/ && !build                         { build = NR }
-        build && NR > build && /BRWalletSetFeePerKb\(g_wallet,/ && !restore { restore = NR }
-        set && !restore && /return/                                     { early = NR }
-        END { printf "%d %d %d %d %d\n", save, set, build, restore, early }' "$BUILD_DIR/create.c")"
-    if [ "$save" -gt 0 ] && [ "$save" -lt "$set" ] && [ "$set" -lt "$build" ] && [ "$build" -lt "$restore" ]; then
-        echo "  ok   the rate is read before the caller's is set, and set back after the build"
+    if grep -q 'BRWalletCreateTransactionAtFeePerKb(' "$BUILD_DIR/create.c"; then
+        echo "  ok   the build is made with the rate as a parameter"
     else
-        echo "  FAIL the rate is not saved before and restored after the build (save=$save set=$set build=$build restore=$restore)"
+        echo "  FAIL the build does not go through BRWalletCreateTransactionAtFeePerKb"
         gate=1
     fi
-    if [ "$early" -eq 0 ]; then
-        echo "  ok   no return between setting the caller's rate and restoring the wallet's"
-    else
-        echo "  FAIL a return at line $early of the function leaves the caller's rate on the wallet"
+    if grep -q 'BRWalletSetFeePerKb(' "$BUILD_DIR/create.c"; then
+        echo "  FAIL createTransaction sets the wallet's rate"
         gate=1
+    else
+        echo "  ok   the wallet's rate is never set"
     fi
 fi
 

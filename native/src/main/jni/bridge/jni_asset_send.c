@@ -267,8 +267,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(
 }
 
 /**
- * The wallet's spendable NATIVE DigiByte UTXOs (BRWalletUTXOs = wallet->utxos,
- * which excludes asset/DD dust) as newline-separated
+ * The wallet's spendable NATIVE DigiByte UTXOs (BRWalletSelectableUTXOs: the subset of
+ * wallet->utxos that coin selection spends, in its order) as newline-separated
  * "txidHex|vout|amountSats|scriptPubKeyHex" lines, or "" if none / not loaded.
  *
  * Sovereign source for the DigiAsset-send DGB fee. The Room `is_asset=0`
@@ -285,11 +285,14 @@ Java_io_digibyte_core_bridge_NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env,
     (void)thiz;
     if (!g_wallet) return (*env)->NewStringUTF(env, "");
 
-    size_t n = BRWalletUTXOs(g_wallet, NULL, 0);
+    /* The coins DGB coin selection itself would spend, in its order (BRWalletSelectableUTXOs):
+     * confirmed first, then the wallet's own unconfirmed change; never an unconfirmed coin someone
+     * else sent, an asset-held output or one the wallet cannot sign. */
+    size_t n = BRWalletSelectableUTXOs(g_wallet, NULL, 0);
     if (n == 0) return (*env)->NewStringUTF(env, "");
     BRUTXO *utxos = (BRUTXO *)malloc(n * sizeof(BRUTXO));
     if (!utxos) return (*env)->NewStringUTF(env, "");
-    n = BRWalletUTXOs(g_wallet, utxos, n);
+    n = BRWalletSelectableUTXOs(g_wallet, utxos, n);
 
     size_t cap = n * 640 + 1; /* 64 txid + vout + amount + up to 512 script + seps */
     char *buf = (char *)malloc(cap);

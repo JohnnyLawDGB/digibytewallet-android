@@ -166,6 +166,10 @@ static BRTransaction *makeOwnedSend(BRWallet *w, uint8_t tag)
     return tx;
 }
 
+/* Registration: these fixtures stand in for the wallet's own sends and their funding, with placeholder
+ * signatures, so they register through BRWalletRegisterTransactionTrusted -- the path the bridge's
+ * _registerWalletCopy and the peer manager use for a tx this wallet signed. (The checked path refuses
+ * an unconfirmed spend of a wallet coin without a valid signature; unconfirmed_spend_sig_kat.) */
 /* Mirrors the hand-off of the send functions in jni_transaction.c (_registerWalletCopy): set
  * the timestamp, then decide which object the wallet's registered record is. Returns the
  * ORIGINAL, which the caller hands to the publisher exactly as the JNI function hands its tx
@@ -186,16 +190,16 @@ static BRTransaction *registerAndHandOff(BRWallet *w, BRTransaction *tx)
     if (! tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
     g_lastCopy = NULL;
 #if defined(PUBLISH_OWNERSHIP_UNFIXED)
-    BRWalletRegisterTransaction(w, tx);
+    BRWalletRegisterTransactionTrusted(w, tx);
 #elif defined(PUBLISH_LOOKUP_FIRST_UNFIXED)
     BRTransaction *copy = BRTransactionCopy(tx);
-    if (copy) BRWalletRegisterTransaction(w, copy);
+    if (copy) BRWalletRegisterTransactionTrusted(w, copy);
     g_lastCopy = copy;
 #else
     if (BRWalletTransactionForHash(w, tx->txHash)) return tx;   /* already held: nothing to copy */
     BRTransaction *copy = BRTransactionCopy(tx);
     if (! copy) return tx;
-    BRWalletRegisterTransaction(w, copy);
+    BRWalletRegisterTransactionTrusted(w, copy);
     if (BRWalletTransactionForHash(w, tx->txHash) != copy) BRTransactionFree(copy);
     g_lastCopy = copy;
 #endif
