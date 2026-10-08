@@ -18,6 +18,8 @@ import app.aroundtheblock.wallet.core.model.AssetOperation
  *    `DigiByteTransaction.cpp:257-329` — `startI = range ? 0 : output`). Previously
  *    dropped entirely, so range receives under-counted to 0.
  *  - **BURN**: 0 to every output (asset destroyed).
+ *  - **UNCLASSIFIABLE**: 0 to every output — the carrier could not be read, so nothing is
+ *    credited; [targetsOutput] holds every output instead.
  *
  * SKIPS **percent** instructions: resolving a percentage needs the per-input asset
  * balances (an index / provenance walk we don't have here), and the reference
@@ -42,6 +44,8 @@ object AssetTxQuantity {
                 .sumOf { it.amount }
 
         AssetOperation.BURN -> 0L
+
+        AssetOperation.UNCLASSIFIABLE -> 0L
     }
 
     /**
@@ -85,9 +89,11 @@ object AssetTxQuantity {
      *
      * ISSUANCE returns 0: the issued supply is credited by [forOutput]'s first-non-OP_RETURN
      * convention, so computing a leftover here would double-count the issuer's marker.
+     * UNCLASSIFIABLE returns null: with no instructions read, no remainder is known.
      */
     fun implicitChange(header: DecodedAssetHeader, inputUnits: Long?, outputCount: Int): Long? {
         if (header.operation == AssetOperation.ISSUANCE) return 0L
+        if (header.operation == AssetOperation.UNCLASSIFIABLE) return null
         if (inputUnits == null) return null
         val assigned = assignedUnits(header) ?: return null
         return (inputUnits - assigned).coerceAtLeast(0L)
@@ -96,10 +102,12 @@ object AssetTxQuantity {
     /**
      * Units the instructions CONSUME from the inputs: a fixed instruction its amount, a range
      * instruction `(outputIndex + 1) * amount`, a burn instruction its amount. Null when a
-     * percent instruction makes the total depend on per-input balances. The input total at which
+     * percent instruction makes the total depend on per-input balances, or when the carrier is
+     * UNCLASSIFIABLE (its instructions were never read). The input total at which
      * [implicitChange] is exactly zero.
      */
     fun assignedUnits(header: DecodedAssetHeader): Long? {
+        if (header.operation == AssetOperation.UNCLASSIFIABLE) return null
         var assigned = 0L
         for (inst in header.transferInstructions) {
             if (inst.percent) return null
@@ -128,6 +136,9 @@ object AssetTxQuantity {
      * instructions — so instruction targets count for all three. The non-range index 31 is the
      * destroy marker only in a BURN; in any other operation it names a real output (one that
      * exists once a transaction has 32 or more outputs) and is a target like any other.
+     *
+     * An UNCLASSIFIABLE carrier targets every output: which ones the protocol credits cannot be
+     * read from it, so every owned output of the transaction is held, whatever came in.
      */
     fun targetsOutput(
         header: DecodedAssetHeader,
@@ -136,6 +147,7 @@ object AssetTxQuantity {
         inputUnits: Long?,
         outputCount: Int,
     ): Boolean {
+        if (header.operation == AssetOperation.UNCLASSIFIABLE) return true
         val destroyMarkerApplies = header.operation == AssetOperation.BURN
         val instructionTargets = header.transferInstructions.any { inst ->
             when {

@@ -797,7 +797,8 @@ class AssetManager(
      * Returns an [IncomingAssetInfo] carrying the decoded header and the
      * placeholder asset-id we stamped onto the UTXO rows (caller uses it
      * to label the [TransactionEntity] the same way), or null for non-asset
-     * transactions.
+     * transactions — and for an unclassifiable carrier, after its owned
+     * outputs have been held.
      */
     /**
      * The set of hex-encoded scriptPubKeys the wallet owns, derived from the
@@ -965,6 +966,11 @@ class AssetManager(
                 logIfHeldForZeroRows(txHashHex, vout, header, firstNonOpReturn, outputCount, zeroRowInputs)
             },
         )
+
+        // A carrier tagged "DA" that cannot be classified: the hold above took every owned output
+        // (AssetTxQuantity.targetsOutput). There is no quantity, asset id or metadata to record,
+        // so no row is written and the transaction is not reported as an asset transaction.
+        if (header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE) return null
 
         var anyStillUnresolved = false
         for (out in ownedOutputs) {
@@ -1350,6 +1356,8 @@ class AssetManager(
                 AssetProvenanceWalker.Hop.Transfer(firstInput.prevTxidHex)
             }
             app.aroundtheblock.wallet.core.model.AssetOperation.BURN -> AssetProvenanceWalker.Hop.DeadEnd
+            // A carrier that cannot be read names no parent to walk to.
+            app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE -> AssetProvenanceWalker.Hop.DeadEnd
         }
     }
 

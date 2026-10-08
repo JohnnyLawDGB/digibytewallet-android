@@ -6,7 +6,9 @@
 // its header is two bits wide, and the third bit is the top bit of the 54-bit mantissa -- the
 // reference decoder and the Kotlin BitReader read it the same way. An amount the payload ends
 // in the middle of, a flags byte with no amount after it, and a header that declares metadata
-// the payload is too short to hold each end the read where the payload ends.
+// the payload is too short to hold each end the read where the payload ends. Each is a payload
+// that does not decode, so the reader then fails closed: every output of the transaction is
+// held as an asset output (asset_unclassifiable_carrier_kat pins that rule).
 //
 // Each case runs as its own process (argv[1] selects it), so every read site has its own
 // red-then-green proof. The RED arm (-DASSET_SCRIPT_BOUNDS_UNFIXED) restores the earlier shape
@@ -68,12 +70,12 @@ static int classify(const uint8_t *opReturn, size_t opReturnLen, int normalCount
 }
 
 // Issuance (opcode 0x05, no metadata) whose amount header selects the 7-byte form, on a payload
-// that ends after the first amount byte. The amount is incomplete and no instruction follows,
-// so nothing is marked.
+// that ends after the first amount byte. The amount is incomplete: the payload does not decode,
+// so the output is held (fail closed).
 static void caseAmount7Truncated(void) {
     static const uint8_t s[7] = { 0x6a,0x05,0x44,0x41,0x02,0x05,0xe0 };
-    check(classify(s, sizeof(s), 1, 0) == 0,
-          "an incomplete 7-byte amount marks nothing, and the read ends with the payload");
+    check(classify(s, sizeof(s), 1, 0) == 1,
+          "an incomplete 7-byte amount holds the output, and the read ends with the payload");
 }
 
 // Transfer whose instruction carries a COMPLETE 7-byte amount with all three header bits set
@@ -97,20 +99,24 @@ static void caseAmount7Complete(void) {
           "GUARD: a complete 7-byte amount with header bits 110 marks the output it names");
 }
 
-// Issuance whose opcode declares metadata (opcode 0x01) on a payload far too short to hold the
-// 52 metadata bytes. The skip is bounded by the bytes that remain: not an asset carrier.
+// Issuance whose opcode declares metadata (opcode 0x01, version 2) on a payload far too short to
+// hold the 52 metadata bytes. The skip is bounded by the bytes that remain, and the payload does
+// not decode, so the output is held (fail closed).
 static void caseShortMetadata(void) {
     static const uint8_t s[7] = { 0x6a,0x05,0x44,0x41,0x02,0x01,0x00 };
-    check(classify(s, sizeof(s), 1, 0) == 0,
-          "an issuance that declares metadata the payload cannot hold marks nothing");
+    check(classify(s, sizeof(s), 1, 0) == 1,
+          "an issuance that declares metadata the payload cannot hold holds the output");
 }
 
 // Transfer whose instruction flags byte is the LAST byte of the payload: there is no amount
-// byte to read, so the read ends there and nothing is marked.
+// byte to read, so the read ends there. The transfer does not decode, so every output is held
+// (fail closed) -- the one the flags byte names and the one it does not.
 static void caseFlagsLastByte(void) {
     static const uint8_t s[7] = { 0x6a,0x05,0x44,0x41,0x02,0x15,0x03 };
-    check(classify(s, sizeof(s), 4, 3) == 0,
-          "a flags byte with no amount after it marks nothing, and the read ends with the payload");
+    check(classify(s, sizeof(s), 4, 3) == 1,
+          "a flags byte with no amount after it holds the output, and the read ends with the payload");
+    check(classify(s, sizeof(s), 4, 1) == 1,
+          "a flags byte with no amount after it holds an output it does not name too");
 }
 
 int main(int argc, char **argv) {

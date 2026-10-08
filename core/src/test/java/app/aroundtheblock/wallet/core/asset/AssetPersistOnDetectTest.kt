@@ -166,6 +166,15 @@ class AssetPersistOnDetectTest {
         return seen.sorted()
     }
 
+    @Test fun protects_every_owned_output_of_an_unclassifiable_carrier() {
+        // Fail closed: nothing about the carrier says which outputs the protocol credits, so
+        // detection holds every owned output, whatever the inputs carried.
+        assertEquals(
+            listOf(0, 2, 3),
+            protectedVoutsFor(DecodedAssetHeader.unclassifiable(), owned = listOf(0, 2, 3), inputUnits = 0L, outputCount = 4),
+        )
+    }
+
     @Test fun protects_the_outputs_an_issuance_instruction_targets() {
         // An issuance distributes its units through the same instruction list a transfer uses.
         // Output 0 is the first non-OP_RETURN output; the instruction names output 2.
