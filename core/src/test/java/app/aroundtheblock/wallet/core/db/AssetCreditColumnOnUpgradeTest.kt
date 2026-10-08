@@ -10,9 +10,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The step to version 12 ([MIGRATION_11_12]) adds `utxos.asset_credit` and does nothing else: no
- * row is deleted and no quantity changes, and every existing row starts UNCHECKED, so nothing a
- * pre-4.0.89 build credited counts until it has been decided again
+ * The step to version 12 ([MIGRATION_11_12]) adds `utxos.asset_credit` and drops every asset name
+ * a pre-4.0.89 build took from the first input's history: no row is deleted and no quantity
+ * changes, every existing row starts UNCHECKED, and nothing it credited counts or names an asset
+ * until it has been decided again
  * ([app.aroundtheblock.wallet.core.asset.AssetCredit]). Instrumented coverage against a real
  * SQLite file is in MigrationTest.migrate11To12_everyExistingAssetRowStartsUncheckedAndKeepsItsQuantity.
  */
@@ -28,7 +29,7 @@ class AssetCreditColumnOnUpgradeTest {
         return (0 until arr.length()).map { arr.getJSONObject(it) }.associateBy { it.getString("tableName") }
     }
 
-    @Test fun the_step_adds_the_column_with_unchecked_for_every_existing_row_and_nothing_else() {
+    @Test fun the_step_adds_the_column_and_drops_the_old_names() {
         val issued = mutableListOf<String>()
         val db = mockk<SupportSQLiteDatabase>()
         every { db.execSQL(any<String>()) } answers { issued += firstArg<String>() }
@@ -36,7 +37,13 @@ class AssetCreditColumnOnUpgradeTest {
         MIGRATION_11_12.migrate(db)
 
         assertEquals(
-            listOf("ALTER TABLE utxos ADD COLUMN asset_credit TEXT NOT NULL DEFAULT 'UNCHECKED'"),
+            listOf(
+                "ALTER TABLE utxos ADD COLUMN asset_credit TEXT NOT NULL DEFAULT 'UNCHECKED'",
+                // A label from the first input's walk is not kept: the transactions that made asset
+                // rows lose theirs, and every asset row goes back to its placeholder until decided.
+                "UPDATE transactions SET assetId = NULL WHERE txid IN (SELECT txid FROM utxos WHERE is_asset = 1)",
+                "UPDATE utxos SET asset_id = 'unresolved:' || txid WHERE is_asset = 1",
+            ),
             issued,
         )
         assertEquals(12, WALLET_DB_VERSION)

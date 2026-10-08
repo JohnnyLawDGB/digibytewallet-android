@@ -165,14 +165,73 @@ class AssetTransferAllocatorTest {
         assertTrue(r is Result.Indeterminate)
     }
 
-    @Test fun drawing_across_entries_of_a_hybrid_or_unreadable_asset_is_indeterminate() {
+    @Test fun drawing_across_entries_voids_for_hybrid_and_is_indeterminate_when_unreadable() {
         val hybrid = "Lh" + "h".repeat(36)
+        val dispersed = "Ld" + "d".repeat(36)
         val h = header(AssetOperation.TRANSFER, ti(0, 5))
-        assertTrue(AssetTransferAllocator.allocate(h, listOf(listOf(u(hybrid, 3)), listOf(u(hybrid, 3))), 3) { true } is Result.Indeterminate)
+        // Core: "Hybrid assets can't wrap over inputs" — an invalid instruction.
+        assertEquals(mapOf(2 to listOf(u(hybrid, 6))),
+            allocated(AssetTransferAllocator.allocate(h, listOf(listOf(u(hybrid, 3)), listOf(u(hybrid, 3))), 3) { true }))
+        assertTrue(AssetTransferAllocator.allocate(h, listOf(listOf(u(dispersed, 3)), listOf(u(dispersed, 3))), 3) { true } is Result.Indeterminate)
         assertTrue(AssetTransferAllocator.allocate(h, listOf(listOf(u("unresolved:t", 3)), listOf(u("unresolved:t", 3))), 3) { true } is Result.Indeterminate)
+        // With no entry after it, the inputs simply run out: invalid whatever the asset.
+        assertEquals(mapOf(2 to listOf(u("unresolved:t", 3))),
+            allocated(AssetTransferAllocator.allocate(h, listOf(listOf(u("unresolved:t", 3))), 3) { true }))
         // Within one entry, nothing is wrapped and the answer is exact.
         assertEquals(mapOf(0 to listOf(u(hybrid, 5)), 2 to listOf(u(hybrid, 1))),
             allocated(AssetTransferAllocator.allocate(h, listOf(listOf(u(hybrid, 6))), 3) { true }))
+    }
+
+    // ── Issuance: the new asset is the only input ───────────────────────────────────────────
+
+    private fun issuance(script: String) = decode(script).also { assertEquals(AssetOperation.ISSUANCE, it.operation) }
+
+    @Test fun an_issuance_follows_its_instructions_and_leaves_the_rest_on_the_last_output() {
+        // qty 10, instruction -> output 0 for 4, flags locked/aggregatable.
+        val script = "6a08" + "44410305" + "0a" + "00" + "04" + "10"
+        val h = issuance(script)
+        assertTrue(AssetPayloadCheck.readsExactly(hex(script), h))
+        val r = AssetTransferAllocator.allocateIssuance(h, X, 3, payloadExact = true)
+        assertEquals(mapOf(0 to listOf(u(X, 4)), 2 to listOf(u(X, 6))), allocated(r))
+    }
+
+    @Test fun an_issuance_with_no_instruction_goes_entirely_to_the_last_output() {
+        val script = "6a06" + "44410305" + "0a" + "10"
+        val r = AssetTransferAllocator.allocateIssuance(issuance(script), X, 3, payloadExact = true)
+        assertEquals(mapOf(2 to listOf(u(X, 10))), allocated(r))
+    }
+
+    @Test fun an_issuance_of_a_hybrid_asset_that_over_assigns_is_voided_not_guessed() {
+        // qty 10, -> output 0 for 20; flags 0x14: locked, hybrid. The new asset is the only input.
+        val script = "6a08" + "44410305" + "0a" + "00" + "14" + "14"
+        val h = issuance(script)
+        assertEquals(Aggregation.HYBRID, h.aggregation)
+        val r = AssetTransferAllocator.allocateIssuance(h, "unresolved:t", 3, payloadExact = true)
+        assertEquals(mapOf(2 to listOf(u("unresolved:t", 10))), allocated(r))
+    }
+
+    @Test fun an_issuance_not_read_exactly_is_indeterminate() {
+        val h = issuance("6a06" + "44410305" + "0a" + "10")
+        assertTrue(AssetTransferAllocator.allocateIssuance(h, X, 3, payloadExact = false) is Result.Indeterminate)
+    }
+
+    // ── Reading a payload exactly ────────────────────────────────────────────────────────────
+
+    @Test fun the_reported_transfer_vectors_read_exactly() {
+        for (s in listOf("6a0b4441031500018060f423f0", "6a0744410315012012", "6a0744410315002016",
+                "6a09444103158201002644", "6a0844410315810a000a", "6a06444103150005")) {
+            assertTrue(s, AssetPayloadCheck.readsExactly(hex(s), decode(s)))
+        }
+    }
+
+    @Test fun a_transfer_cut_off_mid_instruction_does_not_read_exactly() {
+        // One instruction byte with its amount missing: the decoder stops, Core reads past the end.
+        val s = "6a05" + "44410315" + "00"
+        val h = DigiAssetDecoder().decode(hex(s))
+        if (h != null) assertEquals(false, AssetPayloadCheck.readsExactly(hex(s), h))
+        // A push that does not match the script length.
+        val t = "6a0644410315000500"
+        DigiAssetDecoder().decode(hex(t))?.let { assertEquals(false, AssetPayloadCheck.readsExactly(hex(t), it)) }
     }
 
     @Test fun issuance_is_not_allocated_here() {

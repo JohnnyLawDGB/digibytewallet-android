@@ -137,7 +137,8 @@ class UnbackedAssetCreditTest {
             parentHasDataOutput = { t -> if (t in plainParents) false else null },
             rowIsTargeted = { _, _ -> null },
             ruleFree = { true },
-        )
+            payloadExact = AssetPayloadCheck.readsExactly(hex(script), header),
+        ).credits
         for (vout in ownedVouts) {
             val credit = credits.getValue(vout)
             mgr.persistDetectedAssetOutput(
@@ -325,6 +326,127 @@ class UnbackedAssetCreditTest {
         assertEquals(Y, found?.assetId)
         val none = factsForNamedAsset(A, "start", { listOf("p1", "p2") }, { null }) { byTx[it] }
         assertNull("another lineage's asset is never returned", none)
+    }
+
+    // ── Issuance: the units are where Core's instructions put them ────────────────────────────
+
+    private val Z = "La" + "z".repeat(36)   // stands in for the derived id of a new asset
+
+    /** Issue [script] in [txid] with [outputCount] outputs, the wallet owning [ownedVouts]. */
+    private suspend fun issue(mgr: AssetManager, script: String, ownedVouts: List<Int>, outputCount: Int): Map<Int, OutputCredit> {
+        val header = requireNotNull(DigiAssetDecoder().decode(hex(script)))
+        val credits = issuanceOutputCredits(header, Z, outputCount, ownedVouts,
+            AssetPayloadCheck.readsExactly(hex(script), header)).credits
+        for (vout in ownedVouts) {
+            val credit = credits.getValue(vout)
+            mgr.persistDetectedAssetOutput(
+                txHashHex = txid, vout = vout, scriptPubKey = ownedScript, sats = 600, blockHeight = 0,
+                placeholderAssetId = Z,
+                computedQty = AssetTxQuantity.forOutputTotal(header, vout, 0, null, outputCount),
+                credit = credit,
+            )
+            if (credit == OutputCredit.Unknown) mgr.settleFromIndexer(txid, vout, Z, nowMs = 0L)
+        }
+        return credits
+    }
+
+    /** Review vector: an issuance of 1,000,000 whose instruction sends everything to output 1,
+     *  received at output 0 (the first non-OP_RETURN output, where the issuer's total used to be
+     *  credited). Core delivers nothing to output 0. */
+    @Test fun an_issuance_credits_only_where_its_instructions_put_the_units() = runTest {
+        // The review's bytes as written (push length one short of the payload) and as intended.
+        for (script in listOf(
+            "6a09" + "44410305" + "2016" + "01" + "2016" + "10",
+            "6a0a" + "44410305" + "2016" + "01" + "2016" + "10",
+        )) {
+            rows.clear()
+            val mgr = manager()
+            val credits = issue(mgr, script, listOf(0, 1), outputCount = 3)
+            assertEquals(script, AssetCredit.BACKED, row(0).assetCredit)
+            assertEquals(script, 0L, row(0).assetQuantity)
+            assertNull(script, mgr.receivedBackedUnits(rows.filterKeys { it.endsWith(":0") }.values.toList()))
+            if (script.startsWith("6a0a")) {
+                // Read exactly: output 1, where the instruction sends the units, holds them.
+                assertEquals(OutputCredit.Holds(AssetUnits(Z, 1_000_000), Z), credits[1])
+                assertEquals(mapOf(Z to 1_000_000L), balances(mgr))
+            } else {
+                // Not read exactly: output 1 waits for the indexer, which has not answered.
+                assertEquals(OutputCredit.Unknown, credits[1])
+                assertEquals(emptyMap<String, Long>(), balances(mgr))
+            }
+        }
+    }
+
+    /** No instruction: the whole issue is the remainder, which goes to the LAST output. When that
+     *  is the OP_RETURN Core burns it; nothing reaches output 0. */
+    @Test fun an_issuance_with_no_instruction_lands_on_the_last_output_or_nowhere() = runTest {
+        val noInstruction = "6a07" + "44410305" + "2016" + "10"
+        issue(manager(), noInstruction, listOf(0), outputCount = 2)          // [victim, OP_RETURN]
+        assertEquals(0L, row(0).assetQuantity)
+        assertEquals(AssetCredit.BACKED, row(0).assetCredit)
+
+        rows.clear()
+        val mgr = manager()
+        issue(mgr, noInstruction, listOf(0, 2), outputCount = 3)            // [a, OP_RETURN, last]
+        assertEquals(0L, row(0).assetQuantity)
+        assertEquals(Z to 1_000_000L, row(2).assetId to row(2).assetQuantity)
+        assertEquals(mapOf(Z to 1_000_000L), balances(mgr))
+    }
+
+    @Test fun an_honest_issuance_to_output_zero_is_credited_in_full() = runTest {
+        val mgr = manager()
+        issue(mgr, "6a0a" + "44410305" + "2016" + "00" + "2016" + "10", listOf(0), outputCount = 2)
+        assertEquals(AssetCredit.BACKED, row(0).assetCredit)
+        assertEquals(mapOf(Z to 1_000_000L), balances(mgr))
+    }
+
+    /** An instruction asking for more than was issued voids them all: everything to the last. */
+    @Test fun an_issuance_instruction_beyond_the_issue_voids_to_the_last_output() = runTest {
+        val mgr = manager()
+        // qty 10 (0x0a), instruction -> 0 for 20 (0x14), flags 0x10.
+        issue(mgr, "6a08" + "44410305" + "0a" + "00" + "14" + "10", listOf(0, 2), outputCount = 3)
+        assertEquals(0L, row(0).assetQuantity)
+        assertEquals(10L, row(2).assetQuantity)
+    }
+
+    /** A payload not read exactly as Core reads it decides nothing on the device: the issuer's
+     *  claim is held out of DGB spends but not counted. Here, an amount cut off mid-field. */
+    @Test fun an_issuance_payload_not_read_exactly_is_left_unchecked() = runTest {
+        val truncated = "6a09" + "44410305" + "2016" + "01" + "20" + "10"
+        val header = requireNotNull(DigiAssetDecoder().decode(hex(truncated)))
+        assertEquals(false, AssetPayloadCheck.readsExactly(hex(truncated), header))
+        val mgr = manager()
+        val credits = issue(mgr, truncated, listOf(0, 1), outputCount = 3)
+        assertEquals(OutputCredit.Unknown, credits[1])          // named by the cut-off instruction
+        assertEquals(AssetCredit.UNCHECKED, row(1).assetCredit)
+        assertEquals(emptyMap<String, Long>(), balances(mgr))
+    }
+
+    /** A rule-bearing issuance (opcode 3/4): its rules block is not parsed, so never BACKED. */
+    @Test fun a_rule_bearing_issuance_is_never_backed_on_the_device() = runTest {
+        val h = DecodedAssetHeader(
+            version = 3, opcode = 3, operation = app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE,
+            metadataHash = null, metadataCid = null, totalQuantity = 5, divisibility = 0, locked = true,
+            aggregation = Aggregation.AGGREGATABLE, transferInstructions = emptyList(),
+        )
+        assertEquals(false, AssetPayloadCheck.readsExactly(hex("6a07" + "44410303" + "05" + "0010"), h))
+        val r = AssetTransferAllocator.allocateIssuance(h, Z, 2, payloadExact = false)
+        assertTrue(r is AssetTransferAllocator.Result.Indeterminate)
+        assertEquals(OutputCredit.Unknown, AssetCreditRules.forOutput(r, h, 1, 2))
+    }
+
+    /** Counts `DigiAsset::processIssuance` rejects issue nothing. */
+    @Test fun an_issuance_core_rejects_issues_nothing() {
+        fun h(q: Long) = DecodedAssetHeader(
+            version = 3, opcode = 5, operation = app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE,
+            metadataHash = null, metadataCid = null, totalQuantity = q, divisibility = 0, locked = true,
+            aggregation = Aggregation.AGGREGATABLE, transferInstructions = emptyList(),
+        )
+        assertEquals(AssetTransferAllocator.Result.NotAnAssetTransfer, AssetTransferAllocator.allocateIssuance(h(0), Z, 2, true))
+        assertEquals(AssetTransferAllocator.Result.NotAnAssetTransfer,
+            AssetTransferAllocator.allocateIssuance(h(AssetTransferAllocator.MAX_ISSUANCE + 1), Z, 2, true))
+        assertTrue(AssetTransferAllocator.allocateIssuance(h(AssetTransferAllocator.MAX_ISSUANCE), Z, 2, true)
+            is AssetTransferAllocator.Result.Allocated)
     }
 
     // ── Offline, retries, finality ───────────────────────────────────────────────────────────

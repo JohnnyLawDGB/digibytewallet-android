@@ -29,8 +29,19 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE isAssetTx = 1 ORDER BY timestamp DESC")
     fun getAllAssetTransactions(): Flow<List<TransactionEntity>>
 
-    /** Returns transactions for a single DigiAsset (by assetId). */
-    @Query("SELECT * FROM transactions WHERE assetId = :assetId ORDER BY timestamp DESC")
+    /** Returns transactions for a single DigiAsset (by assetId). A transaction that left the
+     *  wallet asset rows is listed only when one of them is backed and names this asset
+     *  (AssetCredit): a label is not taken on trust from a row that has not been decided. One
+     *  that left no asset row (a whole holding sent away) is listed by its label alone. */
+    @Query("""
+        SELECT * FROM transactions WHERE assetId = :assetId
+          AND (
+            EXISTS (SELECT 1 FROM utxos u WHERE u.txid = transactions.txid AND u.is_asset = 1
+                    AND u.asset_id = :assetId AND u.asset_credit IN ('BACKED', 'VERIFIED'))
+            OR NOT EXISTS (SELECT 1 FROM utxos u WHERE u.txid = transactions.txid AND u.is_asset = 1)
+          )
+        ORDER BY timestamp DESC
+    """)
     fun getAssetTransactions(assetId: String): Flow<List<TransactionEntity>>
 
     /** Backfill pass 1: use the correlated UTXO row's `asset_id` to populate
@@ -43,6 +54,8 @@ interface TransactionDao {
             SELECT asset_id FROM utxos
             WHERE utxos.txid = transactions.txid
               AND utxos.is_asset = 1
+              AND utxos.asset_credit IN ('BACKED', 'VERIFIED')
+              AND utxos.asset_id NOT LIKE 'unresolved:%'
             LIMIT 1
         )
         WHERE isAssetTx = 1 AND assetId IS NULL
