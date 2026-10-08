@@ -18,24 +18,26 @@ import org.json.JSONObject
 private const val TAG = "DigiIdManager"
 
 class DigiIdManager(
-    private val httpClient: OkHttpClient,
+    baseClient: OkHttpClient,
     private val historyDao: DigiIdHistoryDao,
     private val digiScopeClient: DigiScopeClient
 ) {
+    // Derived from the shared client, so its Tor proxy, pins and timeouts carry over. Redirects
+    // are not followed: the signed login goes to the host the user approved, or nowhere.
+    private val httpClient: OkHttpClient = baseClient.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
     suspend fun authenticate(request: DigiIdRequest): DigiIdResult = withContext(Dispatchers.IO) {
         try {
             // ── Security: validate callback domain matches URI ──
             // CRITICAL-4: The callback URL is derived from the scanned QR.
-            // Verify it actually points to the domain shown to the user.
-            val callbackHost = try {
-                java.net.URL(request.callbackUrl).host
-            } catch (e: Exception) { "" }
-
-            if (callbackHost.isEmpty()) {
-                return@withContext DigiIdResult.Error(1, "Invalid callback URL")
-            }
-            if (callbackHost != request.domain && !callbackHost.endsWith(".${request.domain}")) {
-                Log.e(TAG, "Callback host mismatch: $callbackHost vs ${request.domain}")
+            // Verify it points to exactly the domain shown to the user — the same parsed URL
+            // is what the POST below is built from, so the host checked is the host contacted.
+            val callback = request.callbackHttpUrl
+            if (callback.host != request.domain || callback.username.isNotEmpty() || callback.password.isNotEmpty()) {
+                Log.e(TAG, "Callback host mismatch: ${callback.host} vs ${request.domain}")
                 return@withContext DigiIdResult.Error(1, "Callback domain doesn't match — possible phishing")
             }
 
@@ -82,7 +84,7 @@ class DigiIdManager(
 
             val body = json.toString().toRequestBody("application/json".toMediaType())
             val httpRequest = Request.Builder()
-                .url(request.callbackUrl)
+                .url(callback)
                 .post(body)
                 .build()
 

@@ -14,8 +14,9 @@ interface DigiIdHistoryDao {
 
     /** Grandfather check: has this domain ever completed a login with the legacy identity?
      *  (IdentityKeyPolicy — such a domain must keep the legacy key or the site's account,
-     *  bound to that address, becomes unreachable.) */
-    @Query("SELECT COUNT(*) FROM digiid_history WHERE domain = :domain AND success = 1 AND derivation = 'legacy'")
+     *  bound to that address, becomes unreachable.) Case-insensitive: the domain is now the
+     *  parsed (lowercase) host, while older rows kept the host as the URI spelled it. */
+    @Query("SELECT COUNT(*) FROM digiid_history WHERE domain = :domain COLLATE NOCASE AND success = 1 AND derivation = 'legacy'")
     suspend fun countSuccessfulLegacy(domain: String): Int
 
     @Query("DELETE FROM digiid_history WHERE timestamp < :before")
