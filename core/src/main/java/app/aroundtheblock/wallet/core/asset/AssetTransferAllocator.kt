@@ -6,7 +6,8 @@ import app.aroundtheblock.wallet.core.model.AssetOperation
 data class AssetUnits(val assetId: String, val count: Long)
 
 /**
- * Where DigiAsset Core puts the units of a TRANSFER or BURN, given what every input carried.
+ * Where DigiAsset Core puts the units of a TRANSFER or BURN, given what every input carried, and
+ * the units an ISSUANCE creates ([allocateIssuance]).
  *
  * A port of `DigiByteTransaction::decodeAssetTransfer` (DigiAsset_Core
  * `src/DigiByteTransaction.cpp`, the instruction loop at :298-410 and the leftover at :411-436),
@@ -38,8 +39,9 @@ data class AssetUnits(val assetId: String, val count: Long)
 object AssetTransferAllocator {
 
     sealed interface Result {
-        /** No input carries an asset: DigiAsset Core does not treat the transaction as an asset
-         *  transfer, and no output receives anything. */
+        /** DigiAsset Core does not treat the transaction as an asset transaction, and no output
+         *  receives anything: a transfer none of whose inputs carries an asset, or an issuance
+         *  Core rejects (`DigiAsset::processIssuance`). */
         data object NotAnAssetTransfer : Result
 
         /**
@@ -92,6 +94,57 @@ object AssetTransferAllocator {
         val onInputs = known.flatten().map { it.assetId }.toSet()
         if (!onInputs.all(ruleFree)) return Result.Indeterminate("an input asset may carry transfer rules")
 
+        // Versions before 3 ignore every instruction when the first input carries nothing
+        // (DigiByteTransaction.cpp:316-318: "a 0 amount causes the input to get wasted").
+        val legacyIgnoresInstructions = header.version < 3 && known[0].isEmpty()
+        return distribute(header, known, outputCount, burnType, legacyIgnoresInstructions, ::aggregationOf)
+    }
+
+    /**
+     * Where an ISSUANCE puts the units it creates. Core runs the same transfer code with the new
+     * asset as the only input (`decodeAssetTX`, DigiByteTransaction.cpp:236-243): the instructions
+     * place units, the remainder goes to the LAST output, and an invalid instruction voids them
+     * all, so the remainder is everything. Units the inputs already carried are not moved by an
+     * issuance (Core burns them); they are not part of this answer.
+     *
+     * [payloadExact] is [AssetPayloadCheck.readsExactly] for the transaction's OP_RETURN: without
+     * an exact reading the instructions are not known and the answer is [Result.Indeterminate].
+     * An issuance Core rejects (`DigiAsset::processIssuance`, DigiAsset.cpp:351-362: a count of
+     * zero or above 2^54-1) issues nothing: [Result.NotAnAssetTransfer].
+     *
+     * @param assetId the id the wallet names the new asset by (derived, or its placeholder).
+     */
+    fun allocateIssuance(
+        header: DecodedAssetHeader,
+        assetId: String,
+        outputCount: Int,
+        payloadExact: Boolean,
+    ): Result {
+        if (header.operation != AssetOperation.ISSUANCE) return Result.Indeterminate("not an issuance")
+        if (!payloadExact) return Result.Indeterminate("payload not read exactly")
+        if (outputCount < 1) return Result.Indeterminate("no outputs")
+        val total = header.totalQuantity ?: return Result.Indeterminate("no issued amount")
+        if (total <= 0L || total > MAX_ISSUANCE) return Result.NotAnAssetTransfer
+        if (header.transferInstructions.any { it.percent }) return Result.Indeterminate("percent instruction")
+        return distribute(
+            header, listOf(listOf(AssetUnits(assetId, total))), outputCount,
+            burnType = false, legacyIgnoresInstructions = false,
+            aggregation = { header.aggregation },
+        )
+    }
+
+    /** The largest count an issuance may create (`DigiAsset::processIssuance`). */
+    const val MAX_ISSUANCE = (1L shl 54) - 1
+
+    /** The instruction loop and the remainder, shared by transfers and issuances. */
+    private fun distribute(
+        header: DecodedAssetHeader,
+        known: List<List<AssetUnits>>,
+        outputCount: Int,
+        burnType: Boolean,
+        legacyIgnoresInstructions: Boolean,
+        aggregation: (String) -> Aggregation?,
+    ): Result {
         fun freshStacks(): MutableList<MutableList<AssetUnits>> =
             known.filter { it.isNotEmpty() }.map { it.toMutableList() }.toMutableList()
 
@@ -106,10 +159,6 @@ object AssetTransferAllocator {
                 held.add(units)
             }
         }
-
-        // Versions before 3 ignore every instruction when the first input carries nothing
-        // (DigiByteTransaction.cpp:316-318: "a 0 amount causes the input to get wasted").
-        val legacyIgnoresInstructions = header.version < 3 && known[0].isEmpty()
 
         var voided = false
         var index = 0
@@ -130,10 +179,18 @@ object AssetTransferAllocator {
                         val top = stacks[index][0]
                         if (top.assetId != removed) return@apply false
                         allowSkip = true
-                        if (top.count < left && aggregationOf(top.assetId) != Aggregation.AGGREGATABLE) {
-                            // Drawing past this entry: invalid for a hybrid asset, compared entry by
-                            // entry for a dispersed one, unknowable for an id we cannot read.
-                            return Result.Indeterminate("draw across entries of a non-aggregable asset")
+                        if (top.count < left) {
+                            // Drawing past this entry. With nothing after it the inputs run out:
+                            // invalid whatever the asset. Otherwise it is invalid for a hybrid
+                            // asset, compared entry by entry for a dispersed one, and unknowable
+                            // for an asset whose aggregation we cannot read.
+                            val more = stacks[index].size > 1 || index + 1 < stacks.size
+                            if (!more) return@apply false
+                            when (aggregation(top.assetId)) {
+                                Aggregation.AGGREGATABLE -> Unit
+                                Aggregation.HYBRID -> return@apply false
+                                else -> return Result.Indeterminate("draw across entries of a non-aggregable asset")
+                            }
                         }
                         if (top.count <= left) {
                             left -= top.count

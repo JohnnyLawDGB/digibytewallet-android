@@ -245,14 +245,51 @@ internal suspend fun transferOutputCredits(
     parentHasDataOutput: suspend (String) -> Boolean?,
     rowIsTargeted: suspend (String, Int) -> Boolean?,
     ruleFree: suspend (String) -> Boolean,
-): Map<Int, OutputCredit> {
-    val stacks: List<List<AssetUnits>?> = inputs?.map { (txid, vout) ->
-        backedInputStack(txid, vout, row, parentHasDataOutput, rowIsTargeted)
-    } ?: listOf(null)
-    val free = HashSet<String>()
-    for (id in stacks.filterNotNull().flatten().map { it.assetId }.distinct()) if (ruleFree(id)) free.add(id)
-    val allocation = AssetTransferAllocator.allocate(header, stacks, outputCount) { it in free }
-    return vouts.associateWith { vout -> AssetCreditRules.forOutput(allocation, header, vout, outputCount) }
+    payloadExact: Boolean = true,
+): OutputCredits {
+    val allocation = if (!payloadExact) {
+        AssetTransferAllocator.Result.Indeterminate("payload not read exactly")
+    } else {
+        val stacks: List<List<AssetUnits>?> = inputs?.map { (txid, vout) ->
+            backedInputStack(txid, vout, row, parentHasDataOutput, rowIsTargeted)
+        } ?: listOf(null)
+        val free = HashSet<String>()
+        for (id in stacks.filterNotNull().flatten().map { it.assetId }.distinct()) if (ruleFree(id)) free.add(id)
+        AssetTransferAllocator.allocate(header, stacks, outputCount) { it in free }
+    }
+    return OutputCredits(allocation, header, outputCount, vouts)
+}
+
+/**
+ * What an ISSUANCE's [vouts] hold: DigiAsset Core's distribution of the issued units
+ * ([AssetTransferAllocator.allocateIssuance]) under the id the wallet names the new asset by.
+ * Without an exact reading of the payload, an output an instruction names (or the last one) is
+ * [OutputCredit.Unknown], never the issuer's claimed total.
+ */
+internal fun issuanceOutputCredits(
+    header: DecodedAssetHeader,
+    assetId: String,
+    outputCount: Int,
+    vouts: List<Int>,
+    payloadExact: Boolean,
+): OutputCredits = OutputCredits(
+    AssetTransferAllocator.allocateIssuance(header, assetId, outputCount, payloadExact),
+    header, outputCount, vouts,
+)
+
+/** An allocation and what it means for each of the wallet's outputs. */
+internal class OutputCredits(
+    val allocation: AssetTransferAllocator.Result,
+    header: DecodedAssetHeader,
+    outputCount: Int,
+    vouts: List<Int>,
+) {
+    val credits: Map<Int, OutputCredit> =
+        vouts.associateWith { vout -> AssetCreditRules.forOutput(allocation, header, vout, outputCount) }
+
+    /** The one asset the transaction provably moved, when it moved exactly one; null otherwise. */
+    val movedAsset: String?
+        get() = (allocation as? AssetTransferAllocator.Result.Allocated)?.assetsMoved?.singleOrNull()
 }
 
 /**
@@ -1064,18 +1101,22 @@ class AssetManager(
             },
         )
 
-        // What each owned output HOLDS, as opposed to what the instructions claim for it. An
-        // issuance creates its asset, so its outputs are credited as before. A transfer's units
-        // are credited only by applying DigiAsset Core's rules to inputs the wallet can vouch for
-        // (its own backed rows, coins whose creating transaction has no data output); anything
-        // else is Unknown and waits for the indexer below. See AssetCredit.
+        // What each owned output HOLDS, as opposed to what the instructions claim for it: DigiAsset
+        // Core's distribution, computed on the device. An issuance distributes the units it
+        // creates; a transfer distributes what its inputs carried, which the wallet can vouch for
+        // only for its own backed rows and coins whose creating transaction has no data output.
+        // Either needs the OP_RETURN read exactly as Core reads it. Anything undecided is Unknown
+        // and waits for the indexer below. See AssetCredit.
         val isIssuance = header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE
+        val payloadExact = AssetPayloadCheck.readsExactly(opReturn.script, header)
         // Rows already settled are final (an unspent output's contents do not change), so a
         // transaction whose owned rows are all settled is not allocated again on every sweep.
-        val allSettled = !isIssuance && ownedOutputs.all { out ->
+        val allSettled = ownedOutputs.isNotEmpty() && ownedOutputs.all { out ->
             AssetCredit.isSettled(utxoDao.getAssetUtxoAt(txHashHex, out.vout)?.assetCredit)
         }
-        val credits: Map<Int, OutputCredit> = if (isIssuance || allSettled) emptyMap() else runCatching {
+        val outputCredits: OutputCredits? = if (allSettled) null else if (isIssuance) {
+            issuanceOutputCredits(header, placeholderAssetId, outputCount, ownedOutputs.map { it.vout }, payloadExact)
+        } else runCatching {
             transferOutputCredits(
                 header = header,
                 inputs = if (inputLines == null || parsedInputs.any { it == null }) null else parsedInputs.filterNotNull(),
@@ -1087,22 +1128,17 @@ class AssetManager(
                     inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
                 },
                 ruleFree = { assetId -> transferRuleState(assetId) == TransferRuleState.NONE },
+                payloadExact = payloadExact,
             )
-        }.getOrElse { emptyMap() }
+        }.getOrNull()
+        val credits: Map<Int, OutputCredit> = outputCredits?.credits.orEmpty()
 
         var anyStillUnresolved = false
         for (out in ownedOutputs) {
             val claimed = AssetTxQuantity.forOutputTotal(
                 header, out.vout, firstNonOpReturn, inputUnits, outputCount,
             )
-            val credit = if (isIssuance) {
-                OutputCredit.Holds(
-                    if (claimed > 0L) AssetUnits(placeholderAssetId, claimed) else null,
-                    placeholderAssetId,
-                )
-            } else {
-                credits[out.vout] ?: OutputCredit.Unknown
-            }
+            val credit = credits[out.vout] ?: OutputCredit.Unknown
             val stillUnresolved = persistDetectedAssetOutput(
                 txHashHex = txHashHex,
                 vout = out.vout,
@@ -1124,13 +1160,15 @@ class AssetManager(
                     .onFailure { android.util.Log.d("AssetManager", "receipt check threw for ${txHashHex.take(12)}:${out.vout}", it) }
             }
         }
-        // The per-asset history lists a transfer under the asset its backed rows name — never
-        // the first input's walk. Once per session, as the walk used to.
-        if (!isIssuance && !isOutgoingUnconfirmed && txHashHex !in labelledInSession) {
+        // The per-asset history lists a transaction under the asset its backed rows name, or,
+        // for one that left the wallet no output (a whole holding sent away), the one asset its
+        // inputs provably moved — never the first input's walk. Once per session.
+        if (!isOutgoingUnconfirmed && txHashHex !in labelledInSession) {
             val named = utxoDao.getAssetUtxosForTxNow(txHashHex)
                 .filter { AssetCredit.counts(it.assetCredit) }
                 .sortedByDescending { it.assetQuantity }
                 .firstNotNullOfOrNull { r -> r.assetId?.takeIf { it.isNotEmpty() && !it.startsWith("unresolved:") } }
+                ?: outputCredits?.movedAsset?.takeIf { ownedOutputs.isEmpty() && !it.startsWith("unresolved:") }
             if (named != null) {
                 runCatching { transactionDao.updateAssetId(txHashHex, named) }
                 labelledInSession.add(txHashHex)
