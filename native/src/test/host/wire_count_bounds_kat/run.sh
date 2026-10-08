@@ -132,7 +132,7 @@ if ! grep -q 'WIRE_STORE_CHECK_UNFIXED' "$CORE_DIR/BRTransaction.c"; then
     echo "GATE FAILURE: BRTransaction.c has no WIRE_STORE_CHECK_UNFIXED seam; -D would be inert."
     exit 1
 fi
-for tok in WIRE_WITNESS_COUNT_UNFIXED WIRE_WITNESS_ITEM_UNFIXED TX_SIGN_REPARSE_UNFIXED; do
+for tok in WIRE_WITNESS_COUNT_UNFIXED WIRE_WITNESS_ITEM_UNFIXED TX_SIGN_REPARSE_UNFIXED WIRE_OFF_WRAP_UNFIXED; do
     if ! grep -q "$tok" "$CORE_DIR/BRTransaction.c"; then
         echo "GATE FAILURE: BRTransaction.c has no $tok seam; -D would be inert."
         exit 1
@@ -472,14 +472,65 @@ run_inv_hash() {
     fi
 }
 
+# ---- a script length cannot carry the running offset past the message --------------
+# BRTransactionParse accumulates each per-input and per-output script length into a
+# running offset. The comparison arm -DWIRE_OFF_WRAP_UNFIXED gates that accumulation
+# with "off + sLen <= bufLen", which wraps when the declared length is near the type
+# maximum: a wrapped offset slips past the end-of-buffer gate and the parser then acts
+# outside the exact-length message. tx_offwrap reproduces the sign-tail heap WRITE and
+# tx_offwrap_out the output-script heap READ; both are deterministic, so the red arm
+# must fault on each in both word sizes. The shipped arm compares the length against
+# the bytes that remain with no addition that could wrap and rejects cleanly, while
+# still ACCEPTING the honest signed segwit control (which reaches the same sign-tail).
+# green${bits} was built by run_bits for this word size.
+run_offwrap() {
+    local bits="$1"
+    echo "--- ${bits}-bit: a script length cannot carry the offset past the message ---"
+    if ! build "$BUILD_DIR/owred${bits}" "$bits" -DWIRE_OFF_WRAP_UNFIXED; then
+        echo "GATE FAILURE: ${bits}-bit off-wrap red arm did not compile."; FAIL=1; return
+    fi
+    for c in tx_offwrap tx_offwrap_out; do
+        out="$("$BUILD_DIR/owred${bits}" "$c" 2>&1)"; rc=$?
+        if echo "$out" | grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
+        else
+            echo "  [$bits red $c] GATE FAILURE: no sanitizer report (rc=$rc)"
+            echo "$out" | sed 's/^/      /' | head -6; FAIL=1
+        fi
+    done
+    for c in tx_offwrap tx_offwrap_out tx_offwrap_fuzz; do
+        out="$("$BUILD_DIR/green${bits}" "$c" 2>&1)"; rc=$?
+        if echo "$out" | grep -Eq "$SAN_RE"; then
+            echo "  [$bits green $c] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
+            echo "$out" | sed 's/^/      /' | head -6; FAIL=1
+        elif echo "$out" | grep -q "RESULT $c rejected"; then
+            echo "  [$bits green $c] rejected cleanly, inside the message (rc=$rc)"
+        else
+            echo "  [$bits green $c] GATE FAILURE: not rejected (rc=$rc)"
+            echo "$out" | sed 's/^/      /' | head -6; FAIL=1
+        fi
+    done
+    for arm in owred green; do   # the honest control reaches the sign-tail and must be accepted in both arms
+        out="$("$BUILD_DIR/${arm}${bits}" tx_offwrap_ctl 2>&1)"; rc=$?
+        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT tx_offwrap_ctl accepted"; then
+            echo "  [$bits $arm tx_offwrap_ctl] the honest signed segwit tx is accepted (rc=$rc)"
+        else
+            echo "  [$bits $arm tx_offwrap_ctl] GATE FAILURE: the honest control was not accepted (rc=$rc)"
+            echo "$out" | sed 's/^/      /' | head -6; FAIL=1
+        fi
+    done
+}
+
 run_bits 64
 run_store 64
 run_witness 64
 run_inv_hash 64
+run_offwrap 64
 run_bits 32
 run_store 32
 run_witness 32
 run_inv_hash 32
+run_offwrap 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then

@@ -46,7 +46,14 @@
 #include "BRPeer.c"
 
 #ifndef KAT_HASHES
+#ifdef PEER_KNOWN_TX_HASHES_MAX
+/* knownTxHashes is capped (BRPeer.c, oldest third evicted on overflow). Feed exactly the cap so
+ * no eviction happens and "every distinct hash present exactly once" stays an exact oracle; the
+ * eviction itself is covered by peer_known_tx_cap_kat. */
+#define KAT_HASHES PEER_KNOWN_TX_HASHES_MAX
+#else
 #define KAT_HASHES 20000
+#endif
 #endif
 
 static BRPeerContext *g_ctx;
