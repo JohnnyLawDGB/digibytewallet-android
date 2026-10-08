@@ -91,6 +91,29 @@ object AssetCreditRules {
         }
 
     /**
+     * The most units of any asset the transaction's own instructions can deliver to [vout]: the
+     * sum of the fixed amounts aimed at it, and of every range instruction that covers it. The
+     * indexer's count for a received output is accepted only up to this bound, so a wrong or
+     * substituted answer cannot credit more than the transaction itself could deliver there.
+     *
+     * Null is "no bound": the LAST output, which also receives every leftover (and everything
+     * when the instructions are voided); an output a percent instruction names, whose amount
+     * depends on the inputs; and a sum that overflows.
+     */
+    fun maxDeliverable(header: DecodedAssetHeader, vout: Int, outputCount: Int): Long? {
+        if (vout == outputCount - 1) return null
+        val burnMarker = header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.BURN
+        var max = 0L
+        for (inst in header.transferInstructions) {
+            val named = if (inst.range) vout <= inst.outputIndex else inst.outputIndex == vout
+            if (!named || (burnMarker && !inst.range && inst.outputIndex == AssetTransferAllocator.BURN_OUTPUT)) continue
+            if (inst.percent) return null
+            max = try { Math.addExact(max, inst.amount) } catch (e: ArithmeticException) { return null }
+        }
+        return max
+    }
+
+    /**
      * What the indexer's answer for an unspent output says it holds, or null for no answer yet
      * (the output is not reported unspent — not yet confirmed, or the indexer is behind — or no
      * answer could be had). Several entries of one asset are that asset's total; entries of

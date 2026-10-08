@@ -1156,7 +1156,10 @@ class AssetManager(
             // Only an output known to be ours: with no owned set every output was taken above,
             // and the indexer is not told about outputs that belong to someone else.
             if (credit == OutputCredit.Unknown && !isOutgoingUnconfirmed && owned.isNotEmpty()) {
-                runCatching { settleFromIndexer(txHashHex, out.vout, placeholderAssetId) }
+                runCatching {
+                    settleFromIndexer(txHashHex, out.vout, placeholderAssetId,
+                        maxUnits = AssetCreditRules.maxDeliverable(header, out.vout, outputCount))
+                }
                     .onFailure { android.util.Log.d("AssetManager", "receipt check threw for ${txHashHex.take(12)}:${out.vout}", it) }
             }
         }
@@ -1509,6 +1512,8 @@ class AssetManager(
         txHashHex: String,
         vout: Int,
         placeholderAssetId: String,
+        /** [AssetCreditRules.maxDeliverable] for this output; null for no bound. */
+        maxUnits: Long?,
         nowMs: Long = System.currentTimeMillis(),
     ): OutputCredit? {
         val source = assetStackSource ?: return null
@@ -1527,6 +1532,16 @@ class AssetManager(
             app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
         }
         val credit = AssetCreditRules.fromIndexer(lookup) ?: return null
+        val reported = (credit as? OutputCredit.Holds)?.units?.count ?: 0L
+        if (maxUnits != null && reported > maxUnits) {
+            // More than this transaction's own instructions can deliver to a non-last output:
+            // the answer is not plausible, so it is not believed. The row stays UNCHECKED.
+            runCatching {
+                android.util.Log.w("AssetManager",
+                    "receipt ${txHashHex.take(12)}:$vout: indexer reports $reported, instructions deliver at most $maxUnits; not credited")
+            }
+            return null
+        }
         val settled = settledRow(credit, placeholderAssetId, AssetCredit.VERIFIED) ?: return null
         utxoDao.settleAssetCredit(txHashHex, vout, settled.assetId, settled.quantity, settled.credit)
         receiptCheckAt.remove(key)
