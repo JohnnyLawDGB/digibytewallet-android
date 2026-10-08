@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -22,7 +23,7 @@ data class AppUpdate(
  *   Deliberately not this source repository: io.digibyte installs already in the wild read ITS
  *   releases with no tag filter, so a new-app build published there would be offered to them.
  */
-class UpdateChecker(private val client: OkHttpClient, repo: String) {
+class UpdateChecker(private val client: OkHttpClient, private val repo: String) {
 
     /** Stable channel. GitHub's /releases/latest EXCLUDES prereleases by definition —
      *  which is exactly why tagging `-beta` stops it notifying anyone, and is the
@@ -74,6 +75,9 @@ class UpdateChecker(private val client: OkHttpClient, repo: String) {
                     .render(release.optString("body", ""))
                     .take(500)
                 val htmlUrl = release.getString("html_url")
+                // A release page that is not this repository's means the answer is not one
+                // GitHub gave for our repository. Offer nothing rather than guess.
+                if (!isReleaseUrl(htmlUrl, repo, RELEASE_PAGE)) return@withContext null
                 val isPre = release.optBoolean("prerelease", false)
 
                 var downloadUrl = htmlUrl // fallback: the release page
@@ -81,7 +85,11 @@ class UpdateChecker(private val client: OkHttpClient, repo: String) {
                     for (i in 0 until assets.length()) {
                         val asset = assets.getJSONObject(i)
                         if (asset.getString("name").endsWith(".apk")) {
-                            downloadUrl = asset.getString("browser_download_url")
+                            // The button opens this link directly, so it must be one of this
+                            // repository's release downloads and nothing else (AND-010).
+                            asset.getString("browser_download_url")
+                                .takeIf { isReleaseUrl(it, repo, RELEASE_DOWNLOAD) }
+                                ?.let { downloadUrl = it }
                             break
                         }
                     }
@@ -100,6 +108,24 @@ class UpdateChecker(private val client: OkHttpClient, repo: String) {
         } catch (e: Exception) {
             android.util.Log.w("UpdateChecker", "Update check failed: ${e.message}")
             null
+        }
+    }
+
+    internal companion object {
+        const val RELEASE_PAGE = "releases/"
+        const val RELEASE_DOWNLOAD = "releases/download/"
+
+        /**
+         * True only for `https://github.com/<repo>/<kind>…`: no other scheme, host, port or
+         * user-info. The update dialog launches these links, so this is the whole list of
+         * places an update can send someone.
+         */
+        fun isReleaseUrl(url: String, repo: String, kind: String): Boolean {
+            val u = url.toHttpUrlOrNull() ?: return false
+            if (u.scheme != "https" || u.host != "github.com" || u.port != 443) return false
+            if (u.username.isNotEmpty() || u.password.isNotEmpty()) return false
+            if (repo.isBlank()) return false
+            return u.encodedPath.startsWith("/$repo/$kind", ignoreCase = true)
         }
     }
 

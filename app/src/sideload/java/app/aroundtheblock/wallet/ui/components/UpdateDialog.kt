@@ -87,7 +87,13 @@ fun UpdateDialog(
                 // Download button
                 Button(
                     onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
+                        // UpdateChecker only lets this repository's release links through. A
+                        // device with nothing to open the link must not take the wallet down.
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
+                        }.onFailure {
+                            app.aroundtheblock.wallet.ui.util.openExternalUrl(context, update.htmlUrl)
+                        }
                         onDismiss()
                     },
                     modifier = Modifier.fillMaxWidth(),
