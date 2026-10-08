@@ -18,7 +18,7 @@ or privacy are taken seriously and rewarded accordingly.
 | Asset | Where to get it |
 |-------|-----------------|
 | `digibyte-wallet-vX.Y.Z.apk` (release signed) | https://github.com/JohnnyLawDGB/digibytewallet-android/releases |
-| Source code | https://github.com/JohnnyLawDGB/digibytewallet-android (`phase1-modernization` branch) |
+| Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
 **Only the latest released tag is in scope.** If a vulnerability exists in
