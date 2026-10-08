@@ -94,9 +94,9 @@ class UtxoDaoTest {
     @Test
     fun sovereignPrune_deletesPhantomsAndHealsInflatedBalance() = runTest {
         val assetId = "Ua1inflated"
-        val real = UtxoEntity("real", 0, ownedScript, 6000, 1000, isAsset = true, assetId = assetId, assetQuantity = 10)
-        val phantom1 = UtxoEntity("stuckSend", 0, recipientScript, 6000, 1001, isAsset = true, assetId = assetId, assetQuantity = 10)
-        val phantom2 = UtxoEntity("recoverResend", 0, recipientScript, 6000, 1002, isAsset = true, assetId = assetId, assetQuantity = 10)
+        val real = UtxoEntity("real", 0, ownedScript, 6000, 1000, isAsset = true, assetId = assetId, assetQuantity = 10, assetCredit = "VERIFIED")
+        val phantom1 = UtxoEntity("stuckSend", 0, recipientScript, 6000, 1001, isAsset = true, assetId = assetId, assetQuantity = 10, assetCredit = "VERIFIED")
+        val phantom2 = UtxoEntity("recoverResend", 0, recipientScript, 6000, 1002, isAsset = true, assetId = assetId, assetQuantity = 10, assetCredit = "VERIFIED")
         utxoDao.insertAll(listOf(real, phantom1, phantom2))
 
         // Pre-condition: the bug — balance reads 30 for a true holding of 10.
@@ -122,8 +122,8 @@ class UtxoDaoTest {
     fun getAllAssetUtxosNow_returnsAllAssetRowsExcludingDgb() = runTest {
         utxoDao.insertAll(listOf(
             UtxoEntity("dgb", 0, byteArrayOf(), 500000, 1000, isAsset = false),
-            UtxoEntity("assetUnspent", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Uu", assetQuantity = 3),
-            UtxoEntity("assetSpent", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Us", assetQuantity = 4, spent = true)
+            UtxoEntity("assetUnspent", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Uu", assetQuantity = 3, assetCredit = "VERIFIED"),
+            UtxoEntity("assetSpent", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Us", assetQuantity = 4, spent = true, assetCredit = "VERIFIED")
         ))
         val all = utxoDao.getAllAssetUtxosNow()
         assertEquals(2, all.size)
@@ -135,7 +135,7 @@ class UtxoDaoTest {
     fun deleteAssetUtxo_neverTouchesDgb() = runTest {
         utxoDao.insertAll(listOf(
             UtxoEntity("shared", 0, byteArrayOf(), 500000, 1000, isAsset = false),
-            UtxoEntity("shared", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 9)
+            UtxoEntity("shared", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 9, assetCredit = "VERIFIED")
         ))
         utxoDao.deleteAssetUtxo("shared", 0)   // (shared,0) is DGB — must survive
         assertEquals(500000L, utxoDao.getDigiByteBalance().first())
@@ -148,8 +148,8 @@ class UtxoDaoTest {
      *  dead/failed asset-send that consumed an input on the client side. */
     @Test
     fun markUnspent_restoresAssetUtxoToSpendableAndBalance() = runTest {
-        val assetUtxo = UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 5)
-        val otherAssetUtxo = UtxoEntity("tx1", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 7)
+        val assetUtxo = UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 5, assetCredit = "VERIFIED")
+        val otherAssetUtxo = UtxoEntity("tx1", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 7, assetCredit = "VERIFIED")
         utxoDao.insertAll(listOf(assetUtxo, otherAssetUtxo))
 
         utxoDao.markSpent("tx1", 0)
@@ -171,8 +171,8 @@ class UtxoDaoTest {
     @Test
     fun markUnspent_onlyAffectsExactOutpoint() = runTest {
         utxoDao.insertAll(listOf(
-            UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 5),
-            UtxoEntity("tx1", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 7)
+            UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 5, assetCredit = "VERIFIED"),
+            UtxoEntity("tx1", 1, ownedScript, 6000, 1000, isAsset = true, assetId = "asset123", assetQuantity = 7, assetCredit = "VERIFIED")
         ))
         utxoDao.markSpent("tx1", 0)
         utxoDao.markSpent("tx1", 1)
@@ -190,7 +190,7 @@ class UtxoDaoTest {
     @Test
     fun setSpent_togglesBothDirections() = runTest {
         utxoDao.insertAll(listOf(
-            UtxoEntity("a", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 5)
+            UtxoEntity("a", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "Ua", assetQuantity = 5, assetCredit = "VERIFIED")
         ))
         assertEquals(5L, utxoDao.getAssetBalances().first().first { it.assetId == "Ua" }.totalQuantity)
         utxoDao.setSpent("a", 0, true)   // native says the input was spent

@@ -42,6 +42,7 @@ class AssetHeldMeansNativeHoldsItTest {
         txid = txid, vout = 2, scriptPubKey = ownedScript, satoshis = 6000, blockHeight = 0,
         isAsset = true, assetId = "La3t7Jdv", assetQuantity = qty, spent = false,
         assetSource = source,
+        assetCredit = AssetCredit.VERIFIED,   // backed; what is under test is native holding
     )
 
     @Before fun setup() {

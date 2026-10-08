@@ -241,6 +241,47 @@ class MigrationTest {
         v11Db.close()
     }
 
+    // -------------------------------------------------------------------------
+    // Migration path: v11 → v12 (asset credit: only backed units count)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate11To12_everyExistingAssetRowStartsUncheckedAndKeepsItsQuantity() {
+        val start = "6".repeat(64)
+        val v11Db = helper.createDatabase(TEST_DB_NAME, 11)
+        v11Db.execSQL(
+            """INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id,
+               asset_quantity, spent, asset_source)
+               VALUES ('$start', 0, X'0014', 600, 100, 1, 'LaBefore', 1000000, 0, 'NATIVE')"""
+        )
+        v11Db.close()
+
+        val v12Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 12, true, MIGRATION_11_12)
+        v12Db.query("SELECT asset_id, asset_quantity, asset_credit FROM utxos WHERE txid = '$start' AND vout = 0").use { c ->
+            assertTrue("the row is kept", c.moveToFirst())
+            assertEquals("LaBefore", c.getString(0))
+            assertEquals("the stored quantity is untouched (the hold-out rules read it)", 1_000_000L, c.getLong(1))
+            assertEquals("an existing row counts for nothing until it is decided again", "UNCHECKED", c.getString(2))
+        }
+        v12Db.close()
+    }
+
+    @Test
+    fun utxoDao_getAssetBalances_countsOnlyBackedRows() = runTest {
+        val dao = db.utxoDao()
+        dao.insertAll(listOf(
+            UtxoEntity("backed", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 5L, assetCredit = "BACKED"),
+            UtxoEntity("verified", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 7L, assetCredit = "VERIFIED"),
+            UtxoEntity("claimed", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 1_000_000L),
+            UtxoEntity("mixed", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 3L, assetCredit = "MIXED"),
+        ))
+
+        val balances = dao.getAssetBalances().first()
+        assertEquals(12L, balances.single().totalQuantity)
+        assertEquals(setOf("backed", "verified"), dao.getAssetUtxosByIdNow("assetA").map { it.txid }.toSet())
+    }
+
     @Test
     fun digiIdHistoryDao_countSuccessfulLegacy_ignoresFailuresAndSiteRows() = runTest {
         val dao: DigiIdHistoryDao = db.digiIdHistoryDao()
@@ -303,7 +344,8 @@ class MigrationTest {
             blockHeight = 12345L,
             isAsset = true,
             assetId = "Ua9UVkALVFTHnHFLnqPc1n7xJj7Rrm4kM3",
-            assetQuantity = 500L       // real asset count decoded from OP_RETURN
+            assetQuantity = 500L,      // real asset count decoded from OP_RETURN
+            assetCredit = "VERIFIED",  // and backed: only a backed row is in the balance
         )
         dao.insertAll(listOf(assetUtxo))
 
@@ -318,9 +360,9 @@ class MigrationTest {
     fun utxoDao_getAssetBalances_groupsByAssetId() = runTest {
         val dao = db.utxoDao()
         dao.insertAll(listOf(
-            UtxoEntity("tx1", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 100L),
-            UtxoEntity("tx2", 0, byteArrayOf(), 700L, 1001L, isAsset = true, assetId = "assetA", assetQuantity = 200L),
-            UtxoEntity("tx3", 0, byteArrayOf(), 700L, 1002L, isAsset = true, assetId = "assetB", assetQuantity = 50L)
+            UtxoEntity("tx1", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 100L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx2", 0, byteArrayOf(), 700L, 1001L, isAsset = true, assetId = "assetA", assetQuantity = 200L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx3", 0, byteArrayOf(), 700L, 1002L, isAsset = true, assetId = "assetB", assetQuantity = 50L, assetCredit = "VERIFIED")
         ))
 
         val balances = dao.getAssetBalances().first()
@@ -337,8 +379,8 @@ class MigrationTest {
     fun utxoDao_getAssetBalances_excludesSpentUtxos() = runTest {
         val dao = db.utxoDao()
         dao.insertAll(listOf(
-            UtxoEntity("tx1", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 100L),
-            UtxoEntity("tx2", 0, byteArrayOf(), 700L, 1001L, isAsset = true, assetId = "assetA", assetQuantity = 200L)
+            UtxoEntity("tx1", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 100L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx2", 0, byteArrayOf(), 700L, 1001L, isAsset = true, assetId = "assetA", assetQuantity = 200L, assetCredit = "VERIFIED")
         ))
         dao.markSpent("tx1", 0)
 

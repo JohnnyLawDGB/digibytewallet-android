@@ -76,24 +76,24 @@ class AssetManagerClearDeadSendTest {
         // Owned asset-change row the dead send fabricated at our own address.
         val deadChange = UtxoEntity(
             deadTxid, 2, ownedScript, 700, 1000,
-            isAsset = true, assetId = assetId, assetQuantity = 20
+            isAsset = true, assetId = assetId, assetQuantity = 20, assetCredit = "VERIFIED"
         )
         // NON-owned recipient marker of the same dead tx — must survive.
         val deadRecipientMarker = UtxoEntity(
             deadTxid, 0, recipientScript, 700, 1000,
-            isAsset = true, assetId = assetId, assetQuantity = 20
+            isAsset = true, assetId = assetId, assetQuantity = 20, assetCredit = "VERIFIED"
         )
         // Owned row for a DIFFERENT txid at the SAME vout (2) as the row that
         // gets deleted below — proves the delete is scoped by txid, not just
         // vout: a coincidental vout match on another transaction must survive.
         val otherHolding = UtxoEntity(
             otherTxid, 2, ownedScript, 6000, 1000,
-            isAsset = true, assetId = assetId, assetQuantity = 10
+            isAsset = true, assetId = assetId, assetQuantity = 10, assetCredit = "VERIFIED"
         )
         // A real, unrelated holding of a different asset — must survive.
         val realHolding = UtxoEntity(
             origTxid, 0, ownedScript, 6000, 1000,
-            isAsset = true, assetId = otherAssetId, assetQuantity = 10
+            isAsset = true, assetId = otherAssetId, assetQuantity = 10, assetCredit = "VERIFIED"
         )
         // Owned DGB-change output of the SAME dead tx — is_asset = 0, exactly
         // the shape of a normal asset send's change back to our own wallet.

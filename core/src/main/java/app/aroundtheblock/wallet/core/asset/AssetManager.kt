@@ -196,6 +196,90 @@ internal suspend fun resolveInputAssetUnits(
     return null
 }
 
+/**
+ * What one input of a transfer carried, as far as the wallet can vouch for it, or null when it
+ * cannot ([AssetCredit]):
+ *  - the wallet's own row, BACKED or VERIFIED → that row's asset and quantity (nothing for zero);
+ *  - an UNCHECKED row storing zero on an output its transaction does not target → nothing (plain
+ *    DGB change: Core delivers only to named outputs and the last one);
+ *  - no row, and the transaction that created it has no data output → nothing (such a transaction
+ *    can put no asset on any output);
+ *  - anything else → unknown.
+ */
+internal suspend fun backedInputStack(
+    txid: String,
+    vout: Int,
+    row: suspend (String, Int) -> UtxoEntity?,
+    parentHasDataOutput: suspend (String) -> Boolean?,
+    rowIsTargeted: suspend (String, Int) -> Boolean?,
+): List<AssetUnits>? {
+    val r = row(txid, vout)
+    if (r != null) {
+        if (AssetCredit.counts(r.assetCredit)) {
+            if (r.assetQuantity <= 0L) return emptyList()
+            val id = r.assetId?.takeIf { it.isNotEmpty() } ?: return null
+            return listOf(AssetUnits(id, r.assetQuantity))
+        }
+        if (r.assetCredit == AssetCredit.UNCHECKED && r.assetQuantity == 0L && rowIsTargeted(txid, vout) == false) {
+            return emptyList()
+        }
+        return null
+    }
+    return if (parentHasDataOutput(txid) == false) emptyList() else null
+}
+
+/**
+ * What each of [vouts] holds after a TRANSFER or BURN: DigiAsset Core's allocation
+ * ([AssetTransferAllocator]) over the input stacks [backedInputStack] can vouch for. [inputs] is
+ * every input in order, or null when they could not all be read. An output the allocation cannot
+ * decide is [OutputCredit.Unknown] — never the sum of the instructions that name it.
+ *
+ * Top-level with every probe a lambda, so it runs on the JVM; same constraint as
+ * [resolveInputAssetUnits].
+ */
+internal suspend fun transferOutputCredits(
+    header: DecodedAssetHeader,
+    inputs: List<Pair<String, Int>>?,
+    outputCount: Int,
+    vouts: List<Int>,
+    row: suspend (String, Int) -> UtxoEntity?,
+    parentHasDataOutput: suspend (String) -> Boolean?,
+    rowIsTargeted: suspend (String, Int) -> Boolean?,
+    ruleFree: suspend (String) -> Boolean,
+): Map<Int, OutputCredit> {
+    val stacks: List<List<AssetUnits>?> = inputs?.map { (txid, vout) ->
+        backedInputStack(txid, vout, row, parentHasDataOutput, rowIsTargeted)
+    } ?: listOf(null)
+    val free = HashSet<String>()
+    for (id in stacks.filterNotNull().flatten().map { it.assetId }.distinct()) if (ruleFree(id)) free.add(id)
+    val allocation = AssetTransferAllocator.allocate(header, stacks, outputCount) { it in free }
+    return vouts.associateWith { vout -> AssetCreditRules.forOutput(allocation, header, vout, outputCount) }
+}
+
+/**
+ * On-chain facts for [assetId], found by walking back from [startTxid] and, when that walk names
+ * another asset, from each of [otherParents]. A walk's answer is accepted only when it is
+ * [assetId] itself: the id is derived from its issuance, so reaching that issuance from any
+ * starting point yields the asset's own facts, while the asset some other lineage reaches says
+ * nothing about this one. [known] short-circuits with facts already proven. Null when no walk
+ * reaches [assetId].
+ */
+internal suspend fun factsForNamedAsset(
+    assetId: String,
+    startTxid: String,
+    otherParents: suspend () -> List<String>,
+    known: suspend (String) -> ResolvedAssetFacts?,
+    resolve: suspend (String) -> ResolvedAssetFacts?,
+): ResolvedAssetFacts? {
+    known(assetId)?.let { if (it.assetId == assetId) return it }
+    resolve(startTxid)?.let { if (it.assetId == assetId) return it }
+    for (parent in otherParents().distinct()) {
+        if (parent == startTxid) continue
+        resolve(parent)?.let { if (it.assetId == assetId) return it }
+    }
+    return null
+}
+
 /** Filled by [resolveInputAssetUnits] when stored-zero rows are the whole reason its answer is
  *  "unknown": which rows, and what every other input carried. Left empty otherwise. */
 internal class ZeroRowInputs {
@@ -510,9 +594,18 @@ class AssetManager(
      * the JVM, and this catch IS reached from a JVM test — the walk's first act is a NativeBridge
      * call with no library behind it.
      */
-    private suspend fun verifyFactsForTx(txid: String): Pair<ResolvedAssetFacts?, TransferRuleState> {
+    private suspend fun verifyFactsForTx(
+        txid: String,
+        expectedAssetId: String? = null,
+    ): Pair<ResolvedAssetFacts?, TransferRuleState> {
         val facts = try {
-            provenanceWalker.resolve(txid, forceToIssuance = true)
+            if (expectedAssetId != null) {
+                // The row names its asset from its credit; find that asset's issuance from
+                // whichever input leads to it, not only the first.
+                walkFactsFor(txid, expectedAssetId, forceToIssuance = true)
+            } else {
+                provenanceWalker.resolve(txid, forceToIssuance = true)
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -548,7 +641,7 @@ class AssetManager(
     suspend fun verifyTransferRules(assetId: String): TransferRuleState {
         val utxo = utxoDao.getAssetUtxosByIdNow(assetId).firstOrNull()
             ?: return TransferRuleState.UNKNOWN
-        val (facts, state) = verifyFactsForTx(utxo.txid)
+        val (facts, state) = verifyFactsForTx(utxo.txid, expectedAssetId = assetId)
         return if (facts?.assetId == assetId) state else TransferRuleState.UNKNOWN
     }
 
@@ -682,15 +775,19 @@ class AssetManager(
             val assetId = row.assetId ?: continue   // unattributed row — can't group by asset
             val scriptHex = row.scriptPubKey.toHex().lowercase()
             val state = spentState(row.txid, row.vout)
-            val keep = isHeldForDisplay(scriptHex, owned, row.assetSource, state,
-                                        everConfirmed = row.blockHeight > 0L)
+            // Units count only when they are backed: a transfer's quantity read from its
+            // instructions alone is a claim, and so is the name the first input's history gives
+            // it (see AssetCredit). An unbacked row is held out of DGB spending all the same.
+            val keep = AssetCredit.counts(row.assetCredit) &&
+                isHeldForDisplay(scriptHex, owned, row.assetSource, state,
+                                 everConfirmed = row.blockHeight > 0L)
             // PER-ROW DIAGNOSTIC. Every asset-balance investigation so far has had totals
             // and no rows, which is how two different wrong diagnoses both looked plausible.
             // This is the row-level fact: which outpoint, how many units, what height, whose
             // provenance, what native says, and the resulting decision.
             android.util.Log.i("AssetManager",
                 "row ${row.txid.take(12)}:${row.vout} qty=${row.assetQuantity} " +
-                "h=${row.blockHeight} src=${row.assetSource} state=$state " +
+                "h=${row.blockHeight} src=${row.assetSource} credit=${row.assetCredit} state=$state " +
                 "owned=${scriptHex in owned} -> ${if (keep) "COUNT" else "drop"}")
             if (!keep) continue
             qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
@@ -907,13 +1004,14 @@ class AssetManager(
         // remainder as nothing. The pass in front of a spend and the startup replay, which write
         // no row, each keep one record for the whole run.
         val zeroRowInputs = ZeroRowInputs()
+        val inputLines = NativeBridge.getTransactionInputsForHash(txHashHex)
+        val parsedInputs = (inputLines ?: emptyArray()).map { line ->
+            val p = line.split("|", limit = 2)
+            val prevVout = p.getOrNull(1)?.toIntOrNull()
+            if (prevVout == null || p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
+        }
         val inputUnits = resolveInputAssetUnits(
-            inputs = (NativeBridge.getTransactionInputsForHash(txHashHex) ?: emptyArray())
-                .mapNotNull { line ->
-                    val p = line.split("|", limit = 2)
-                    val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
-                    if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
-                },
+            inputs = parsedInputs.filterNotNull(),
             rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
             isAssetTx = { txid -> txHasAssetPayload(txid) },
             rowIsTargeted = { txid, vout ->
@@ -968,8 +1066,45 @@ class AssetManager(
             },
         )
 
+        // What each owned output HOLDS, as opposed to what the instructions claim for it. An
+        // issuance creates its asset, so its outputs are credited as before. A transfer's units
+        // are credited only by applying DigiAsset Core's rules to inputs the wallet can vouch for
+        // (its own backed rows, coins whose creating transaction has no data output); anything
+        // else is Unknown and waits for the indexer below. See AssetCredit.
+        val isIssuance = header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE
+        // Rows already settled are final (an unspent output's contents do not change), so a
+        // transaction whose owned rows are all settled is not allocated again on every sweep.
+        val allSettled = !isIssuance && ownedOutputs.all { out ->
+            AssetCredit.isSettled(utxoDao.getAssetUtxoAt(txHashHex, out.vout)?.assetCredit)
+        }
+        val credits: Map<Int, OutputCredit> = if (isIssuance || allSettled) emptyMap() else runCatching {
+            transferOutputCredits(
+                header = header,
+                inputs = if (inputLines == null || parsedInputs.any { it == null }) null else parsedInputs.filterNotNull(),
+                outputCount = outputCount,
+                vouts = ownedOutputs.map { it.vout },
+                row = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout) },
+                parentHasDataOutput = { txid -> (parentHasDataOutput ?: ::nativeParentHasDataOutput)(txid) },
+                rowIsTargeted = { txid, vout ->
+                    inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
+                },
+                ruleFree = { assetId -> transferRuleState(assetId) == TransferRuleState.NONE },
+            )
+        }.getOrElse { emptyMap() }
+
         var anyStillUnresolved = false
         for (out in ownedOutputs) {
+            val claimed = AssetTxQuantity.forOutputTotal(
+                header, out.vout, firstNonOpReturn, inputUnits, outputCount,
+            )
+            val credit = if (isIssuance) {
+                OutputCredit.Holds(
+                    if (claimed > 0L) AssetUnits(placeholderAssetId, claimed) else null,
+                    placeholderAssetId,
+                )
+            } else {
+                credits[out.vout] ?: OutputCredit.Unknown
+            }
             val stillUnresolved = persistDetectedAssetOutput(
                 txHashHex = txHashHex,
                 vout = out.vout,
@@ -977,12 +1112,31 @@ class AssetManager(
                 sats = out.sats,
                 blockHeight = blockHeight,
                 placeholderAssetId = placeholderAssetId,
-                computedQty = AssetTxQuantity.forOutputTotal(
-                    header, out.vout, firstNonOpReturn, inputUnits, outputCount,
-                ),
+                computedQty = claimed,
                 isOutgoingUnconfirmed = isOutgoingUnconfirmed,
+                credit = credit,
             )
             if (stillUnresolved) anyStillUnresolved = true
+            // Someone else's inputs: what this output holds is asked of the indexer the send path
+            // already trusts, and the row counts only once it has answered.
+            // Only an output known to be ours: with no owned set every output was taken above,
+            // and the indexer is not told about outputs that belong to someone else.
+            if (credit == OutputCredit.Unknown && !isOutgoingUnconfirmed && owned.isNotEmpty()) {
+                runCatching { settleFromIndexer(txHashHex, out.vout, placeholderAssetId) }
+                    .onFailure { android.util.Log.d("AssetManager", "receipt check threw for ${txHashHex.take(12)}:${out.vout}", it) }
+            }
+        }
+        // The per-asset history lists a transfer under the asset its backed rows name — never
+        // the first input's walk. Once per session, as the walk used to.
+        if (!isIssuance && !isOutgoingUnconfirmed && txHashHex !in labelledInSession) {
+            val named = utxoDao.getAssetUtxosForTxNow(txHashHex)
+                .filter { AssetCredit.counts(it.assetCredit) }
+                .sortedByDescending { it.assetQuantity }
+                .firstNotNullOfOrNull { r -> r.assetId?.takeIf { it.isNotEmpty() && !it.startsWith("unresolved:") } }
+            if (named != null) {
+                runCatching { transactionDao.updateAssetId(txHashHex, named) }
+                labelledInSession.add(txHashHex)
+            }
         }
 
         // Kick off metadata fetch if we have a CID (issuance only).
@@ -995,12 +1149,21 @@ class AssetManager(
                 }
         }
 
-        // M3 parent-walk: fire if we still have a placeholder OR if we
+        // A transfer is never named by the parent walk: the walk follows the first input, which
+        // need not be where the units came from (the sender chooses the input order). Its rows
+        // are named by their credit above; the walk only fetches on-chain facts for an asset a
+        // backed row of this transaction already names.
+        if (!isIssuance) {
+            runCatching { walkFactsForCreditedAssets(txHashHex) }
+                .onFailure { android.util.Log.d("AssetManager", "M3 facts walk threw for $txHashHex", it) }
+        }
+
+        // M3 parent-walk (issuance only): fire if we still have a placeholder OR if we
         // haven't yet walked this tx in the current session (to backfill
         // chain-facts for rows resolved in a prior session). The session-
         // local cache gates repeat walks to once per process lifetime.
-        val shouldWalk = (anyStillUnresolved && placeholderAssetId.startsWith("unresolved:"))
-            || !walkedInSession.contains(txHashHex)
+        val shouldWalk = isIssuance && ((anyStillUnresolved && placeholderAssetId.startsWith("unresolved:"))
+            || !walkedInSession.contains(txHashHex))
         if (shouldWalk) {
             runCatching {
                 val resolved = resolveTransferAssetId(txHashHex)
@@ -1014,46 +1177,7 @@ class AssetManager(
                         transactionDao.updateAssetId(txHashHex, resolved.assetId)
                     }
 
-                    // Persist on-chain facts from the issuance header. These
-                    // are authoritative — totalSupply and decimals are
-                    // cryptographically tied to the issuance tx, whereas
-                    // name/imageUrl depend on IPFS reachability. Seed an
-                    // empty row if needed, then merge the chain fields so
-                    // we don't clobber any existing IPFS-sourced metadata.
-                    metadataDao.insertChainFacts(
-                        app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity(
-                            assetId = resolved.assetId,
-                            totalSupply = resolved.totalSupply,
-                            decimals = resolved.divisibility,
-                            metadataCid = resolved.metadataCid,
-                            cachedAt = System.currentTimeMillis(),
-                        )
-                    )
-                    metadataDao.updateChainFacts(
-                        assetId = resolved.assetId,
-                        totalSupply = resolved.totalSupply,
-                        decimals = resolved.divisibility,
-                    )
-
-                    // Issuance-side metadata fetch — uses the CID we just
-                    // extracted from the issuance header (authoritative)
-                    // rather than waiting on backend getAssetData.
-                    runCatching {
-                        metadataService.getMetadata(resolved.assetId, resolved.metadataCid)
-                    }
-
-                    // Transfer-rule signal for the asset this walk just named. Without it the
-                    // rules column is only ever written by verifyTransferRulesForTx, so the
-                    // common path — an asset that arrives and is walked in the background —
-                    // reached the send screen with nothing stored and had to walk again.
-                    // Inside the once-per-walk branch, so at most one proxy call per newly
-                    // resolved asset.
-                    runCatching { metadataService.refreshRules(resolved.assetId) }
-                        .onFailure {
-                            android.util.Log.w(
-                                "AssetManager", "refreshRules failed for ${resolved.assetId}", it,
-                            )
-                        }
+                    applyChainFacts(resolved)
                     android.util.Log.i("AssetManager",
                         "M3 resolved $txHashHex → ${resolved.assetId} " +
                         "(supply=${resolved.totalSupply} div=${resolved.divisibility}; placeholder rewritten)")
@@ -1065,6 +1189,110 @@ class AssetManager(
         maybePersistAfterDetect(persistAfterDetect, result)
         return result
     }
+
+    /**
+     * Persist on-chain facts from an issuance header the walk reached, and ask for the asset's
+     * metadata and transfer rules. The facts are authoritative — totalSupply and decimals are
+     * cryptographically tied to the issuance tx, whereas name/imageUrl depend on IPFS
+     * reachability. Seed an empty row if needed, then merge the chain fields so we don't clobber
+     * any existing IPFS-sourced metadata.
+     */
+    private suspend fun applyChainFacts(resolved: ResolvedAsset) {
+        metadataDao.insertChainFacts(
+            app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity(
+                assetId = resolved.assetId,
+                totalSupply = resolved.totalSupply,
+                decimals = resolved.divisibility,
+                metadataCid = resolved.metadataCid,
+                cachedAt = System.currentTimeMillis(),
+            )
+        )
+        metadataDao.updateChainFacts(
+            assetId = resolved.assetId,
+            totalSupply = resolved.totalSupply,
+            decimals = resolved.divisibility,
+        )
+
+        // Issuance-side metadata fetch — uses the CID we just
+        // extracted from the issuance header (authoritative)
+        // rather than waiting on backend getAssetData.
+        runCatching {
+            metadataService.getMetadata(resolved.assetId, resolved.metadataCid)
+        }
+
+        // Transfer-rule signal for the asset this walk just named. Without it the
+        // rules column is only ever written by verifyTransferRulesForTx, so the
+        // common path — an asset that arrives and is walked in the background —
+        // reached the send screen with nothing stored and had to walk again.
+        // Inside the once-per-walk branch, so at most one proxy call per newly
+        // resolved asset.
+        runCatching { metadataService.refreshRules(resolved.assetId) }
+            .onFailure {
+                android.util.Log.w(
+                    "AssetManager", "refreshRules failed for ${resolved.assetId}", it,
+                )
+            }
+    }
+
+    /**
+     * On-chain facts for the assets this transfer's backed rows name ([AssetCredit]).
+     *
+     * The walk resolves an asset by following a transaction's FIRST input back to an issuance.
+     * That is the sender's choice, not where the units came from, so its answer is used only
+     * when it is the asset the row already names: a walk that reaches the issuance of the named
+     * asset yields that asset's own facts whichever input it started from, because the id is
+     * derived from the issuance itself. When the first input's walk reaches another asset, the
+     * walk is tried from each other input's transaction. Nothing here renames a row.
+     *
+     * At most one attempt per transaction per [FACTS_WALK_RETRY_MS] until every named asset has
+     * its facts.
+     */
+    private suspend fun walkFactsForCreditedAssets(txHashHex: String) {
+        if (walkedInSession.contains(txHashHex)) return
+        val named = utxoDao.getAssetUtxosForTxNow(txHashHex)
+            .filter { AssetCredit.counts(it.assetCredit) && it.assetQuantity > 0L }
+            .mapNotNull { it.assetId }
+            .filter { it.isNotEmpty() && !it.startsWith("unresolved:") }
+            .distinct()
+        if (named.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val last = factsWalkAttemptAt[txHashHex]
+        if (last != null && now - last < FACTS_WALK_RETRY_MS) return
+        factsWalkAttemptAt[txHashHex] = now
+
+        var allFound = true
+        for (assetId in named) {
+            val facts = walkFactsFor(txHashHex, assetId, forceToIssuance = false)
+            if (facts == null) {
+                allFound = false
+                continue
+            }
+            applyChainFacts(
+                ResolvedAsset(facts.assetId, facts.totalSupply, facts.divisibility, facts.metadataCid),
+            )
+            android.util.Log.i("AssetManager",
+                "M3 facts for ${facts.assetId} via $txHashHex " +
+                    "(supply=${facts.totalSupply} div=${facts.divisibility}; row named by its credit)")
+        }
+        if (allFound) {
+            walkedInSession.add(txHashHex)
+            factsWalkAttemptAt.remove(txHashHex)
+        }
+    }
+
+    /** [factsForNamedAsset] over the walker, starting from [txid] and then from the
+     *  transactions its other inputs spend. */
+    private suspend fun walkFactsFor(txid: String, assetId: String, forceToIssuance: Boolean): ResolvedAssetFacts? =
+        factsForNamedAsset(
+            assetId = assetId,
+            startTxid = txid,
+            otherParents = {
+                val lines = heldInputLines(txid) ?: return@factsForNamedAsset emptyList()
+                lines.drop(1).mapNotNull { it?.split("|", limit = 2)?.getOrNull(0)?.takeIf { p -> p.length == 64 } }
+            },
+            known = { if (forceToIssuance) null else provenanceStore.issuanceFactsFor(it) },
+            resolve = { provenanceWalker.resolve(it, forceToIssuance) },
+        )
 
     /**
      * Persist-on-detect decision (C6), extracted as its own seam so it's
@@ -1168,16 +1396,26 @@ class AssetManager(
         placeholderAssetId: String,
         computedQty: Long,
         isOutgoingUnconfirmed: Boolean = false,
+        credit: OutputCredit = OutputCredit.Unknown,
     ): Boolean {
         if (isOutgoingUnconfirmed) return false
         val existingRow = utxoDao.getAssetUtxoAt(txHashHex, vout)
+        // What the output holds, when the caller knows (see AssetCredit). Unknown keeps the
+        // claimed quantity on an UNCHECKED row: the hold-out rules read it, the balance does not.
+        val settled = settledRow(credit, placeholderAssetId, AssetCredit.BACKED)
         return if (existingRow != null) {
             // Re-detection of a row we already hold: re-tag provenance ONLY.
             utxoDao.markAssetSource(txHashHex, vout, AssetSource.NATIVE)
-            if (computedQty > existingRow.assetQuantity) {
-                utxoDao.updateAssetQuantity(txHashHex, vout, computedQty)
+            var assetId = existingRow.assetId
+            if (!AssetCredit.isSettled(existingRow.assetCredit)) {
+                if (settled != null) {
+                    utxoDao.settleAssetCredit(txHashHex, vout, settled.assetId, settled.quantity, settled.credit)
+                    assetId = settled.assetId
+                } else if (computedQty > existingRow.assetQuantity) {
+                    utxoDao.updateAssetQuantity(txHashHex, vout, computedQty)
+                }
             }
-            existingRow.assetId == null || existingRow.assetId.startsWith("unresolved:")
+            assetId == null || assetId.startsWith("unresolved:")
         } else {
             // Genuinely new outpoint: insert as NATIVE.
             utxoDao.insertAll(
@@ -1189,10 +1427,11 @@ class AssetManager(
                         satoshis = sats,
                         blockHeight = blockHeight,
                         isAsset = true,
-                        assetId = placeholderAssetId,
-                        assetQuantity = computedQty,
+                        assetId = settled?.assetId ?: placeholderAssetId,
+                        assetQuantity = settled?.quantity ?: computedQty,
                         spent = false,
                         assetSource = AssetSource.NATIVE,
+                        assetCredit = settled?.credit ?: AssetCredit.UNCHECKED,
                     )
                 )
             )
@@ -1201,8 +1440,70 @@ class AssetManager(
             // surfaces in the display balance on the next recompute instead of waiting out
             // the TTL (the "my confirmed deposit didn't show up" glitch).
             invalidateOwnedScriptsCache()
-            placeholderAssetId.startsWith("unresolved:")
+            (settled?.assetId ?: placeholderAssetId).startsWith("unresolved:")
         }
+    }
+
+    /** The row values a decided [OutputCredit] settles to; null for [OutputCredit.Unknown]. An
+     *  output holding nothing keeps the transaction's one moved asset as its label (or the
+     *  placeholder), with a zero quantity; a mixed output keeps the placeholder. */
+    private class SettledRow(val assetId: String, val quantity: Long, val credit: String)
+
+    private fun settledRow(credit: OutputCredit, placeholderAssetId: String, source: String): SettledRow? =
+        when (credit) {
+            is OutputCredit.Holds -> credit.units
+                ?.let { SettledRow(it.assetId, it.count, source) }
+                ?: SettledRow(credit.label ?: placeholderAssetId, 0L, source)
+            OutputCredit.Mixed -> SettledRow(placeholderAssetId, 0L, AssetCredit.MIXED)
+            OutputCredit.Unknown -> null
+        }
+
+    /**
+     * Ask the DigiAsset indexer what an owned, unspent output of someone else's transfer holds,
+     * and settle its row from the answer: the asset and the count are the indexer's, never the
+     * transaction's instructions or the first input's history. This is the lookup an asset send
+     * already makes for every input ([app.aroundtheblock.wallet.core.asset.send.AssetInputCheck]),
+     * against the same pinned endpoint.
+     *
+     * No answer (offline, the indexer behind, the output not yet confirmed) leaves the row
+     * UNCHECKED, which does not count; it is asked again at most every [RECEIPT_RECHECK_MS].
+     * Nothing is credited on faith in the meantime. Returns the credit it settled, or null.
+     */
+    internal suspend fun settleFromIndexer(
+        txHashHex: String,
+        vout: Int,
+        placeholderAssetId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): OutputCredit? {
+        val source = assetStackSource ?: return null
+        val row = utxoDao.getAssetUtxoAt(txHashHex, vout) ?: return null
+        if (row.spent || AssetCredit.isSettled(row.assetCredit)) return null
+        val key = "${txHashHex.lowercase()}:$vout"
+        val last = receiptCheckAt[key]
+        if (last != null && nowMs - last < RECEIPT_RECHECK_MS) return null
+        receiptCheckAt[key] = nowMs
+
+        val lookup = try {
+            source.stackOf(txHashHex, vout)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+        }
+        val credit = AssetCreditRules.fromIndexer(lookup) ?: return null
+        val settled = settledRow(credit, placeholderAssetId, AssetCredit.VERIFIED) ?: return null
+        utxoDao.settleAssetCredit(txHashHex, vout, settled.assetId, settled.quantity, settled.credit)
+        receiptCheckAt.remove(key)
+        if (AssetCredit.counts(settled.credit) && settled.quantity > 0L && !settled.assetId.startsWith("unresolved:")) {
+            // The per-asset history lists this transaction under the asset it delivered.
+            runCatching { transactionDao.updateAssetId(txHashHex, settled.assetId) }
+        }
+        runCatching {
+            android.util.Log.i("AssetManager",
+                "receipt ${txHashHex.take(12)}:$vout settled by the indexer: ${settled.credit} " +
+                    "${settled.assetId.take(12)} x${settled.quantity} (claimed ${row.assetQuantity})")
+        }
+        return credit
     }
 
     /**
@@ -1685,6 +1986,7 @@ class AssetManager(
     private suspend fun retryMissingAssetMetadata() {
         val missing = runCatching {
             utxoDao.getAllAssetUtxosNow()
+                .filter { AssetCredit.counts(it.assetCredit) }   // only assets the wallet shows
                 .mapNotNull { it.assetId }
                 .filter { it.isNotEmpty() && !it.startsWith("unresolved:") }
                 .distinct()
@@ -2230,6 +2532,11 @@ class AssetManager(
         isSend: Boolean,
         ownedScriptHexes: Set<String>? = null,
     ): Long? {
+        // A receive shows what the wallet's backed rows hold, never what the instructions claim:
+        // the sender writes the instructions, and DigiAsset Core delivers only units the inputs
+        // carried (see AssetCredit). Until a received output is backed or verified, the row shows
+        // as the plain DGB it also is.
+        if (!isSend) return receivedBackedUnits(utxoDao.getAssetUtxosForTxNow(txHashHex))
         val outputLines = NativeBridge.getTransactionOutputsForHash(txHashHex) ?: return null
         if (outputLines.isEmpty()) return null
 
@@ -2256,6 +2563,12 @@ class AssetManager(
             val wanted = if (isSend) !isOwned else isOwned
             if (wanted) total += AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn)
         }
+        return if (total > 0L) total else null
+    }
+
+    /** The units a receive delivered, as its backed rows record them; null when none are. */
+    internal fun receivedBackedUnits(rows: List<UtxoEntity>): Long? {
+        val total = rows.filter { AssetCredit.counts(it.assetCredit) }.sumOf { it.assetQuantity }
         return if (total > 0L) total else null
     }
 
@@ -2534,6 +2847,17 @@ class AssetManager(
      *  process restart; the walk then runs exactly once per session to
      *  refresh chain facts in case they ever go stale. */
     private val walkedInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Transfers whose history row was labelled this session with the asset their backed rows name. */
+    private val labelledInSession = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** When [walkFactsForCreditedAssets] last tried a transaction whose named assets it has not
+     *  all found facts for. Process lifetime. */
+    private val factsWalkAttemptAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** When [settleFromIndexer] last asked about an outpoint the indexer has not yet answered
+     *  for. Process lifetime. */
+    private val receiptCheckAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** Transactions [holdAssetOutputsBeforeSpend] has shown to carry no asset payload — a fact
      *  about their bytes, so it outlives rows, rescans and a rebuilt native wallet. Touched only
@@ -2868,6 +3192,14 @@ class AssetManager(
          *  settling. Each listing after the first exists only because something arrived during
          *  the round before it, so two or three is the most a real wallet shows. */
         const val MAX_PRE_SPEND_LISTINGS = 8
+
+        /** How often an output still waiting for the indexer is asked about again. An unconfirmed
+         *  output is not reported until it confirms, and a behind indexer catches up. */
+        const val RECEIPT_RECHECK_MS = 60_000L
+
+        /** How often a transfer whose named assets lack on-chain facts is walked again. A deep
+         *  chain resumes from its frontier on each attempt, so this also paces how fast it resolves. */
+        const val FACTS_WALK_RETRY_MS = 2 * 60_000L
     }
 }
 
