@@ -249,22 +249,72 @@ class MigrationTest {
     @Throws(IOException::class)
     fun migrate11To12_everyExistingAssetRowStartsUncheckedAndKeepsItsQuantity() {
         val start = "6".repeat(64)
+        val plain = "7".repeat(64)
         val v11Db = helper.createDatabase(TEST_DB_NAME, 11)
         v11Db.execSQL(
             """INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id,
                asset_quantity, spent, asset_source)
                VALUES ('$start', 0, X'0014', 600, 100, 1, 'LaBefore', 1000000, 0, 'NATIVE')"""
         )
+        for (tx in listOf(start, plain)) v11Db.execSQL(
+            """INSERT INTO transactions (txid, blockHeight, timestamp, amount, fee, toAddress, fromAddress,
+               confirmations, sent, received, isAssetTx, rawBytes, assetId)
+               VALUES ('$tx', 100, 1, 600, 0, '', '', 1, 0, 600, 1, NULL, 'LaBefore')"""
+        )
         v11Db.close()
 
         val v12Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 12, true, MIGRATION_11_12)
         v12Db.query("SELECT asset_id, asset_quantity, asset_credit FROM utxos WHERE txid = '$start' AND vout = 0").use { c ->
             assertTrue("the row is kept", c.moveToFirst())
-            assertEquals("LaBefore", c.getString(0))
+            assertEquals("the first-input name is dropped until the row is decided", "unresolved:$start", c.getString(0))
             assertEquals("the stored quantity is untouched (the hold-out rules read it)", 1_000_000L, c.getLong(1))
             assertEquals("an existing row counts for nothing until it is decided again", "UNCHECKED", c.getString(2))
         }
+        v12Db.query("SELECT assetId FROM transactions WHERE txid = '$start'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertTrue("the history label from the old walk is dropped", c.isNull(0))
+        }
+        v12Db.query("SELECT assetId FROM transactions WHERE txid = '$plain'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("a transaction with no asset row keeps its label", "LaBefore", c.getString(0))
+        }
         v12Db.close()
+    }
+
+    @Test
+    fun history_lists_a_transaction_only_under_an_asset_a_backed_row_names() = runTest {
+        val utxos = db.utxoDao()
+        val txs = db.transactionDao()
+        fun tx(id: String) = app.aroundtheblock.wallet.core.db.entity.TransactionEntity(
+            txid = id, blockHeight = 1, timestamp = 1, amount = 600, fee = 0, toAddress = "", fromAddress = "",
+            confirmations = 1, isAssetTx = true, assetId = "assetX",
+        )
+        txs.insertAll(listOf(tx("verified"), tx("unchecked"), tx("sentAway")))
+        utxos.insertAll(listOf(
+            UtxoEntity("verified", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 5, assetCredit = "VERIFIED"),
+            UtxoEntity("unchecked", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 1_000_000),
+        ))
+
+        val listed = txs.getAssetTransactions("assetX").first().map { it.txid }.toSet()
+        assertEquals(setOf("verified", "sentAway"), listed)
+    }
+
+    @Test
+    fun backfill_labels_from_backed_rows_only() = runTest {
+        val utxos = db.utxoDao()
+        val txs = db.transactionDao()
+        fun tx(id: String) = app.aroundtheblock.wallet.core.db.entity.TransactionEntity(
+            txid = id, blockHeight = 1, timestamp = 1, amount = 600, fee = 0, toAddress = "", fromAddress = "",
+            confirmations = 1, isAssetTx = true, assetId = null,
+        )
+        txs.insertAll(listOf(tx("backed"), tx("unchecked")))
+        utxos.insertAll(listOf(
+            UtxoEntity("backed", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 5, assetCredit = "BACKED"),
+            UtxoEntity("unchecked", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 1_000_000),
+        ))
+        txs.backfillAssetIdFromUtxos()
+        assertEquals("assetX", txs.getTransaction("backed")?.assetId)
+        assertNull(txs.getTransaction("unchecked")?.assetId)
     }
 
     @Test
