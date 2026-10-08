@@ -106,7 +106,7 @@ The suite must pass before any release tag. Sync in scenario F is compact-filter
 
 ## Static Analysis (MobSF)
 
-MobSF report: `security/reports/mobsf-report.json` (versioned snapshots alongside it, e.g. `mobsf-report-v3.6.6.json`, `mobsf-scorecard-v3.6.6.json`).
+MobSF reports are produced by the MobSF CI workflow (not committed). Scorecards: `security/reports/mobsf-scorecard-*.json`.
 
 Baseline expectations (see the MobSF false-positive baseline notes): 0 trackers; secrets flagged are only secp256k1 curve constants / localization strings; the single "exported component" is the Compose `PreviewActivity` (debug build only); backup disabled; cleartext traffic disabled.
 

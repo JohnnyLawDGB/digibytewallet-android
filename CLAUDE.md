@@ -207,7 +207,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 
 ## Security Audit
 - Security tests live in `core/src/test/java/io/digibyte/core/security/` (run `./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"` for the current count)
-- MobSF report at `security/reports/mobsf-report.json`
+- MobSF reports are produced by the MobSF CI workflow (not committed); scorecards at `security/reports/mobsf-scorecard-*.json`
 - Audit summary at `security/AUDIT-SUMMARY.md`
 - CRITICAL-1: Both halves CLOSED. PIN rate-limit: v3.10.35 (`PinManager`; see security/AUDIT-LOG.md). Keystore user-auth binding: v4.0.77 (`SeedKeyBinding`, 300 s window — see Seed Security above). RESIDUAL: a device with no secure lock screen keeps the unbound key (`SeedKeyBinding.NONE`), and inside the auth window a compromised app process can still decrypt the seed. Hardware backing is probed and logged (`KeyInfo.isInsideSecureHardware`) at key creation, not enforced.
 - CRITICAL-2: Resolved (g_seed static, accessor API)

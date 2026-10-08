@@ -428,7 +428,7 @@ CameraX CBC usage — it entered with a dependency, not with our code, which is 
 comparison shows: across 52 releases the score moved two points and neither point came from
 wallet logic. The new SECURE is the `assets.digistamp.co` domain pin added in v4.0.51.
 
-Reports for both are in `security/reports/` (`mobsf-report-v4.0.58.json`, scorecard alongside).
+Reports for both were produced by MobSF (raw dumps not kept in-repo; scorecard: `security/reports/mobsf-scorecard-v4.0.58.json`). MobSF reports are produced by the MobSF CI workflow.
 
 ---
 
@@ -609,8 +609,7 @@ ROADMAP Phase 2); the mnemonic as an immutable String outside the load/restore/s
 
 Scanned the **shipped GitHub release asset** `digibyte-wallet-v4.0.76.apk`
 (SHA256 `457d451bc63e34a2213fee8aee802dab9d91d30991cefd56fa3829f13d349d7d`, 75,002,954 bytes) with
-MobSF v4.5.2 static analyzer. Reports: `reports/mobsf-report-v4.0.76.json`,
-`reports/mobsf-scorecard-v4.0.76.json`.
+MobSF v4.5.2 static analyzer. Scorecard: `reports/mobsf-scorecard-v4.0.76.json` (raw MobSF JSON dumps are produced by the MobSF CI workflow and not kept in-repo).
 
 **Score 66/100 — identical finding set to the v4.0.58 baseline. Zero new signal.**
 Set-diff of scorecard titles v4.0.58 → v4.0.76: nothing added, nothing removed. Against v3.6.6 (68)

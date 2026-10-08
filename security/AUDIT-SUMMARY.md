@@ -74,7 +74,7 @@ v3 lineage), 10 WARNING all known (`android_sql_raw_query` is SQLCipher-internal
 `net/zetetic/*`; `android_hardcoded` = Coil + derivation paths / pref-keys /
 cert-pins, verified no real secret). **Binary analysis: every native lib incl.
 the modified `libcore-lib.so` has NX + PIE + stack canary** — the VLA heap fix did
-not weaken hardening. Report: `reports/mobsf-report-v3.6.6.json`.
+not weaken hardening. Scorecard: `reports/mobsf-scorecard-v3.6.6.json` (raw MobSF JSON dumps are produced by the MobSF CI workflow and not kept in-repo).
 
 ## Findings Summary
 
@@ -237,10 +237,10 @@ because a number baked into this file drifted (it said 42 for months after
 security/
 ├── AUDIT-SUMMARY.md                    ← This file
 ├── reports/
-│   ├── mobsf-report.json               ← MobSF v3.0.1 (initial)
-│   ├── mobsf-report-v3.5.30.json       ← MobSF v3.5.30 (pre-bounty)
-│   ├── mobsf-report-v3.6.6.json        ← MobSF v3.6.6 (changed-surface audit, score 68)
-│   └── mobsf-scorecard-v3.6.6.json     ← MobSF v3.6.6 scorecard
+│   ├── mobsf-scorecard-v3.6.6.json     ← MobSF v3.6.6 scorecard
+│   ├── mobsf-scorecard-v4.0.58.json    ← MobSF v4.0.58 scorecard
+│   └── mobsf-scorecard-v4.0.76.json    ← MobSF v4.0.76 scorecard
+│   (raw mobsf-report*.json dumps are produced by the MobSF CI workflow, not committed)
 └── tests/ (in core/src/test/java/io/digibyte/core/security/)
     ├── SeedIsolationTest.kt
     ├── ManifestSecurityTest.kt
