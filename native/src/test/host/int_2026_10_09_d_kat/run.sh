@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Host KAT runner for INT-2026-10-09-D: a transaction counts as trusted only when the block that delivered it is
-# the manager's own main-chain block it asked for; a full block is asked for only when it is the block the main
-# chain holds at its height. See int_2026_10_09_d_kat_main.c for the cases, the entry layer and the fixture.
+# the manager's own main-chain block it asked for; a filter is evaluated (a match asks for the block, a miss marks the
+# height scanned) only for the block the main chain holds at its height. See int_2026_10_09_d_kat_main.c for the
+# cases, the entry layer and the fixture.
 #
 # Compiles the REAL, live submodule sources out of the tree with AddressSanitizer. The main file #includes BRPeer.c
 # and BRPeerManager.c (for their file-statics), so neither is a separate unit.
@@ -30,11 +31,14 @@ RED_CASES=(
     unknown_block_unsigned_spend
     fork_cfilter_no_request
     fork_buffered_filter_no_request
+    fork_cfilter_miss_leaves_height
+    fork_buffered_filter_miss_leaves_height
 )
 GUARD_CASES=(
     main_block_unsigned_spend_confirms
     main_cfilter_requests
     main_buffered_filter_requests
+    main_cfilter_miss_marks_scanned
     main_chain_index_matches_walk
 )
 
@@ -174,7 +178,7 @@ run_bits() {
     # the log lines a device check greps for
     run_case "$BUILD_DIR/green${bits}" fork_cfilter_no_request
     echo "$OUT" | grep -q "which our main chain does not hold there" \
-        && echo "  [$bits green] log: '$(echo "$OUT" | grep -m1 -o 'cfilter: match on block.*' | cut -c1-140)'" \
+        && echo "  [$bits green] log: '$(echo "$OUT" | grep -m1 -o 'cfilter: filter for block.*' | cut -c1-140)'" \
         || { echo "  [$bits green] GATE FAILURE: the no-request log line is missing"; FAIL=1; }
 }
 

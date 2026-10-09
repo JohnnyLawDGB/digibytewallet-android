@@ -1,6 +1,6 @@
 // Host KAT for INT-2026-10-09-D: a transaction counts as trusted only when the block that delivered it is the
-// manager's own main-chain block it asked for; and the manager asks for a full block only when that block is the
-// one its main chain holds at the height.
+// manager's own main-chain block it asked for; and a filter is evaluated (a match asks for the block, a miss marks the
+// height scanned) only for the block the main chain holds at its height.
 //
 // WHAT IT PROVES.
 //   RED (fail in the -DINT_2026_10_09_D_UNFIXED build, pass in the shipped build):
@@ -15,12 +15,18 @@
 //                                        the wallet, keyed by a resident block NOT on the main chain: no full block
 //                                        is asked for, nothing is recorded, the height stays outstanding.
 //     fork_buffered_filter_no_request    the same through the buffered-filter drain (_cfBufEval).
+//     fork_cfilter_miss_leaves_height    a filter read with the hash of a block beside the main chain MISSES: the
+//                                        height is not marked scanned, the main block's filter is still evaluated,
+//                                        and the payment in the main block is found and confirmed.
+//     fork_buffered_filter_miss_leaves_height  the same through the buffered-filter drain.
 //   GUARD (pass in both builds):
 //     main_block_unsigned_spend_confirms the manager's own main-chain block it asked for: its transactions are
 //                                        the block's and are not second-guessed (registered and confirmed).
 //     main_cfilter_requests              a matching filter for the main-chain block asks for the block and
 //                                        records the solicitation.
 //     main_buffered_filter_requests      the same through the buffered-filter drain.
+//     main_cfilter_miss_marks_scanned    a miss on the main-chain block still marks the height scanned (live and
+//                                        buffered).
 //     main_chain_index_matches_walk      the index the checks read for "the main-chain block at this height" gives
 //                                        exactly the answer of the walk down from lastBlock, across tip
 //                                        extensions, a reorg, a rewind and a prune.
@@ -409,30 +415,50 @@ static void note(Fx *f, const char *what, int r)
            s ? "yes" : "no", s ? s->blockHeight : 0u, coinUnspent(f), BRWalletBalance(f->w));
 }
 
-// the filter header chain over 24278142..24278143, with the cfheader at 24278143 committing to a filter keyed by
-// `keyHash` that holds the wallet's first filter element; the bytes are written to out/outLen
-static void setupFilter(Fx *f, UInt256 keyHash, uint8_t *out, size_t outCap, size_t *outLen)
+// the filter header chain over [height - 1 .. height], with the cfheader at `height` committing to a filter keyed by
+// `keyHash` that holds the element `elem` (the wallet's first filter element when NULL); the bytes are written to
+// out/outLen, and the scan ledger has `height` outstanding
+static void setupFilterAt(Fx *f, uint32_t height, UInt256 keyHash, const uint8_t *elem, size_t elemLen, uint8_t *out,
+                          size_t outCap, size_t *outLen)
 {
     BRWalletFilterElements *fe = BRWalletGetFilterElements(f->w);
     UInt256 dummy, fh;
 
     assert(fe != NULL && fe->count > 0);
-    *outLen = buildSingleElementFilter(keyHash, fe->elements[0], fe->elementLens[0], out, outCap);
+    if (! elem) { elem = fe->elements[0]; elemLen = fe->elementLens[0]; }
+    *outLen = buildSingleElementFilter(keyHash, elem, elemLen, out, outCap);
     BRWalletFilterElementsFree(fe);
     BRSHA256_2(fh.u8, out, *outLen);
     memset(dummy.u8, 0x77, sizeof(dummy.u8));
 
     MGR_LOCK(f->m);
     if (f->m->compactFilterChain) BRCompactFilterChainFree(f->m->compactFilterChain);
-    f->m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, 24278142u, UINT256_ZERO);
+    f->m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, height - 1, UINT256_ZERO);
     assert(BRCompactFilterChainAppend(f->m->compactFilterChain,
                                       BRCompactFilterChainTipHeader(f->m->compactFilterChain), &dummy, 1) == 1);
     assert(BRCompactFilterChainAppend(f->m->compactFilterChain,
                                       BRCompactFilterChainTipHeader(f->m->compactFilterChain), &fh, 1) == 1);
-    assert(BRCompactFilterChainVerifyFilter(f->m->compactFilterChain, 24278143u, out, *outLen) == 1);
-    BRCFScanLedgerInit(&f->m->cfLedger, 24278142u);
-    BRCFScanLedgerRecordRequested(&f->m->cfLedger, 24278143u, 24278143u, UINT128_ZERO, 0, 1);
+    assert(BRCompactFilterChainVerifyFilter(f->m->compactFilterChain, height, out, *outLen) == 1);
+    BRCFScanLedgerInit(&f->m->cfLedger, height - 1);
+    BRCFScanLedgerRecordRequested(&f->m->cfLedger, height, height, UINT128_ZERO, 0, 1);
     MGR_UNLOCK(f->m);
+}
+
+static void setupFilter(Fx *f, UInt256 keyHash, uint8_t *out, size_t outCap, size_t *outLen)
+{
+    setupFilterAt(f, 24278143u, keyHash, NULL, 0, out, outCap, outLen);
+}
+
+// would these filter bytes, read with `keyHash`, match the wallet?
+static int filterMatches(Fx *f, UInt256 keyHash, const uint8_t *bytes, size_t len)
+{
+    BRWalletFilterElements *fe = BRWalletGetFilterElements(f->w);
+    BRGCSFilter *gcs = BRGCSFilterBasicParse(bytes, len, keyHash);
+    int hit = (gcs && fe) ? BRGCSFilterMatchAny(gcs, fe->elements, fe->elementLens, fe->count) : 0;
+
+    if (gcs) BRGCSFilterFree(gcs);
+    if (fe) BRWalletFilterElementsFree(fe);
+    return hit;
 }
 
 static size_t outstanding(Fx *f)
@@ -456,13 +482,26 @@ static BRPeer *fxFilterPeer(Fx *f)
     return peer;
 }
 
-static int drainEval(Fx *f, UInt256 blockHash, const uint8_t *bytes, size_t len)
+static int drainEvalAt(Fx *f, uint32_t height, UInt256 blockHash, const uint8_t *bytes, size_t len)
 {
     MGR_LOCK(f->m);
     struct _cfDrainCtx c = { f->m, _BRPeerManagerFilterElementsLocked(f->m) };
-    int r = _cfBufEval(&c, 24278143u, blockHash, bytes, len);
+    int r = _cfBufEval(&c, height, blockHash, bytes, len);
     MGR_UNLOCK(f->m);
     return r;
+}
+
+static int drainEval(Fx *f, UInt256 blockHash, const uint8_t *bytes, size_t len)
+{
+    return drainEvalAt(f, 24278143u, blockHash, bytes, len);
+}
+
+static uint32_t scannedThrough(Fx *f)
+{
+    MGR_LOCK(f->m);
+    uint32_t h = BRCFScanLedgerScannedThrough(&f->m->cfLedger);
+    MGR_UNLOCK(f->m);
+    return h;
 }
 
 // =============================================================================
@@ -607,6 +646,113 @@ static void case_main_buffered_filter_requests(Fx *f)
     check(outstanding(f) == 1, "the height stays outstanding until the block arrives");
 }
 
+// ---- a filter for a block the main chain does not hold ----------------------
+// Two blocks at 24278145 on top of the tip: M, which the main chain now holds (it is the new lastBlock) and which pays
+// the wallet AMOUNT2, and S beside it. The filter header at 24278145 commits to M's filter, keyed by M, holding the
+// wallet's element; read with S's hash as the key the same bytes miss.
+typedef struct {
+    BRTransaction *recv;
+    uint8_t mainHdr[80], sideHdr[80];
+    UInt256 mainHash, sideHash;
+    uint8_t enc[16];
+    size_t encLen;
+} Pair145;
+
+static void setupPair145(Fx *f, Pair145 *p)
+{
+    BRTransaction *mtx[1], *stx[1];
+
+    p->recv = seededTx(f->spk, f->spkLen, AMOUNT2, 0x62);
+    mtx[0] = p->recv;
+    stx[0] = f->other;
+    MGR_LOCK(f->m);
+    BRMerkleBlock *tip = f->m->lastBlock;
+    buildHeader(p->mainHdr, tip->blockHash, mtx, 1, tip->timestamp + 15, tip->target, 21);
+    buildHeader(p->sideHdr, tip->blockHash, stx, 1, tip->timestamp + 17, tip->target, 22);
+    BRMerkleBlock *mb = BRMerkleBlockParse(p->mainHdr, 80), *sb = BRMerkleBlockParse(p->sideHdr, 80);
+    mb->height = sb->height = 24278145u;
+    p->mainHash = mb->blockHash;
+    p->sideHash = sb->blockHash;
+    BRSetAdd(f->m->blocks, mb);
+    BRSetAdd(f->m->blocks, sb);
+    f->m->lastBlock = mb;
+    MGR_UNLOCK(f->m);
+    setupFilterAt(f, 24278145u, p->mainHash, NULL, 0, p->enc, sizeof(p->enc), &p->encLen);
+    assert(filterMatches(f, p->mainHash, p->enc, p->encLen));
+    assert(! filterMatches(f, p->sideHash, p->enc, p->encLen));
+}
+
+// RED. A filter that verifies at 24278145, read with the hash of the block beside the main chain there, misses. The
+// miss does not mark the height scanned. The main block's filter at that height is then still evaluated, matches, its
+// block is asked for, and the payment in it is found and confirmed.
+static void case_fork_cfilter_miss_leaves_height(Fx *f)
+{
+    BRPeer *peer = fxPeer(f);
+    BRPeerCallbackInfo *info = f->infos[f->infoCount - 1];
+    Pair145 p;
+
+    setupPair145(f, &p);
+    _peerRelayedCFilter(info, FILTER_TYPE_BASIC, p.sideHash, p.enc, p.encLen);
+    size_t out1 = outstanding(f);
+    uint32_t scan1 = scannedThrough(f);
+    printf("NOTE: side-block filter (a miss): outstanding=%zu scannedThrough=%u\n", out1, scan1);
+    check(out1 == 1 && scan1 < 24278145u, "a miss read with another block's hash does not mark the height scanned");
+    check(! peerAsked(peer, p.sideHash), "nothing is asked for");
+
+    _peerRelayedCFilter(info, FILTER_TYPE_BASIC, p.mainHash, p.enc, p.encLen);
+    check(peerAsked(peer, p.mainHash) && solicited(f, p.mainHash, 24278145u),
+          "the main block's filter is evaluated: it matches and the block is asked for");
+
+    BRTransaction *txs[1] = { p.recv };
+    int r = deliverBlock(peer, p.mainHdr, txs, 1);
+    BRTransaction *rec = BRWalletTransactionForHash(f->w, p.recv->txHash);
+    printf("NOTE: main block delivered: r=%d receive=%s height=%u outstanding=%zu scannedThrough=%u\n", r,
+           rec ? "yes" : "no", rec ? rec->blockHeight : 0u, outstanding(f), scannedThrough(f));
+    check(rec != NULL && rec->blockHeight == 24278145u, "the payment is found and confirmed at 24278145");
+    check(outstanding(f) == 0 && scannedThrough(f) == 24278145u, "only then is the height scanned");
+    BRTransactionFree(p.recv);
+}
+
+// RED. The same through the buffered-filter drain: a miss read with the side block's hash leaves the height
+// outstanding; the main block's bytes then match and its block is asked for.
+static void case_fork_buffered_filter_miss_leaves_height(Fx *f)
+{
+    BRPeer *peer = fxFilterPeer(f);
+    Pair145 p;
+
+    setupPair145(f, &p);
+    int r = drainEvalAt(f, 24278145u, p.sideHash, p.enc, p.encLen);
+    printf("NOTE: buffered side-block filter (a miss): r=%d outstanding=%zu scannedThrough=%u\n", r, outstanding(f),
+           scannedThrough(f));
+    check(r == 1, "the bytes leave the buffer");
+    check(outstanding(f) == 1 && scannedThrough(f) < 24278145u,
+          "a miss read with another block's hash does not mark the height scanned");
+    r = drainEvalAt(f, 24278145u, p.mainHash, p.enc, p.encLen);
+    check(r == 1 && peerAsked(peer, p.mainHash) && solicited(f, p.mainHash, 24278145u),
+          "the main block's filter is evaluated: it matches and the block is asked for");
+    BRTransactionFree(p.recv);
+}
+
+// GUARD. A miss on the main block at 24278143 still marks the height scanned, live and buffered.
+static void case_main_cfilter_miss_marks_scanned(Fx *f)
+{
+    BRPeer *peer = fxFilterPeer(f);
+    BRPeerCallbackInfo *info = f->infos[f->infoCount - 1];
+    uint8_t enc[16];
+    size_t len;
+
+    setupFilterAt(f, 24278143u, f->mainHash143, kOtherSpk, sizeof(kOtherSpk), enc, sizeof(enc), &len);
+    check(! filterMatches(f, f->mainHash143, enc, len), "setup: the filter holds no wallet element");
+    _peerRelayedCFilter(info, FILTER_TYPE_BASIC, f->mainHash143, enc, len);
+    printf("NOTE: main-block miss: outstanding=%zu scannedThrough=%u\n", outstanding(f), scannedThrough(f));
+    check(outstanding(f) == 0 && scannedThrough(f) == 24278143u, "live: the height is scanned");
+    check(! peerAsked(peer, f->mainHash143), "live: nothing is asked for");
+
+    setupFilterAt(f, 24278143u, f->mainHash143, kOtherSpk, sizeof(kOtherSpk), enc, sizeof(enc), &len);
+    int r = drainEval(f, f->mainHash143, enc, len);
+    check(r == 1 && outstanding(f) == 0 && scannedThrough(f) == 24278143u, "buffered: the height is scanned");
+}
+
 // ---- the main-chain index ---------------------------------------------------
 static BRMerkleBlock *synthBlock(uint32_t height, uint8_t tag, UInt256 prev)
 {
@@ -734,6 +880,9 @@ static const Case kCases[] = {
     { "unknown_block_unsigned_spend",          case_unknown_block_unsigned_spend },
     { "fork_cfilter_no_request",               case_fork_cfilter_no_request },
     { "fork_buffered_filter_no_request",       case_fork_buffered_filter_no_request },
+    { "fork_cfilter_miss_leaves_height",       case_fork_cfilter_miss_leaves_height },
+    { "fork_buffered_filter_miss_leaves_height", case_fork_buffered_filter_miss_leaves_height },
+    { "main_cfilter_miss_marks_scanned",       case_main_cfilter_miss_marks_scanned },
     { "main_block_unsigned_spend_confirms",    case_main_block_unsigned_spend_confirms },
     { "main_cfilter_requests",                 case_main_cfilter_requests },
     { "main_buffered_filter_requests",         case_main_buffered_filter_requests },
