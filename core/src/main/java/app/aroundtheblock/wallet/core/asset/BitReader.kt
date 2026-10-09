@@ -95,7 +95,11 @@ class BitReader(private val data: ByteArray) {
      *
      *   Result = mantissa * 10^exponent
      *
+     * A value past [Long.MAX_VALUE] is not a count of units: the product is computed exactly and
+     * such a value throws instead of wrapping, so a decoded amount is never negative or wrapped.
+     *
      * @throws IllegalStateException if not enough bits remain.
+     * @throws ArithmeticException if the value does not fit a signed 64-bit count.
      */
     fun readFixedPrecision(): Long {
         check(bitsRemaining() >= 3) { "Not enough bits for fixed precision header" }
@@ -136,7 +140,7 @@ class BitReader(private val data: ByteArray) {
             }
         }
 
-        return mantissa * pow10(exponent)
+        return Math.multiplyExact(mantissa, pow10(exponent))
     }
 
     /** Get current position in bits. */

@@ -82,10 +82,12 @@ class AssetImplicitChangeTest {
         assertNull(AssetTxQuantity.implicitChange(h, inputUnits = null, outputCount = 4))
     }
 
-    /** Instructions that over-assign relative to the inputs we resolved: clamp at 0, never negative. */
-    @Test fun over_assignment_clamps_to_zero() {
+    /** Instructions that consume more than the inputs we resolved are invalid; DigiAsset Core voids
+     *  them and the last output receives everything the inputs carried — never a clamped zero. */
+    @Test fun over_assignment_leaves_everything_to_the_last_output() {
         val h = transfer(listOf(ti(outputIndex = 0, amount = 150)))
-        assertEquals(0L, AssetTxQuantity.implicitChange(h, inputUnits = 100L, outputCount = 4))
+        assertEquals(100L, AssetTxQuantity.implicitChange(h, inputUnits = 100L, outputCount = 4))
+        assertEquals(0L, AssetTxQuantity.implicitChange(h, inputUnits = 0L, outputCount = 4))
     }
 
     /**

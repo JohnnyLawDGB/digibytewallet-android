@@ -35,18 +35,24 @@ object AssetTxQuantity {
         header: DecodedAssetHeader,
         vout: Int,
         firstNonOpReturnVout: Int?,
-    ): Long = when (header.operation) {
-        AssetOperation.ISSUANCE ->
-            if (vout == firstNonOpReturnVout) (header.totalQuantity ?: 0L) else 0L
-
-        AssetOperation.TRANSFER, AssetOperation.BURN ->
-            header.transferInstructions
-                .asSequence()
-                .filter { !it.percent && !destroys(header, it) }
-                .filter { inst -> if (inst.range) vout <= inst.outputIndex else inst.outputIndex == vout }
-                .sumOf { it.amount }
-
-        AssetOperation.UNCLASSIFIABLE -> 0L
+    ): Long {
+        when (header.operation) {
+            AssetOperation.ISSUANCE ->
+                return if (vout == firstNonOpReturnVout) (header.totalQuantity ?: 0L).coerceAtLeast(0L) else 0L
+            AssetOperation.UNCLASSIFIABLE -> return 0L
+            AssetOperation.TRANSFER, AssetOperation.BURN -> Unit
+        }
+        // Checked: an instruction list whose amounts are not counts (a negative one, or a sum past
+        // the signed range) credits nothing rather than a wrapped number.
+        var sum = 0L
+        for (inst in header.transferInstructions) {
+            if (inst.percent || destroys(header, inst)) continue
+            if (inst.amount < 0L || inst.outputIndex < 0) return 0L
+            val named = if (inst.range) vout <= inst.outputIndex else inst.outputIndex == vout
+            if (!named) continue
+            sum = try { Math.addExact(sum, inst.amount) } catch (e: ArithmeticException) { return 0L }
+        }
+        return sum
     }
 
     /**
@@ -67,7 +73,8 @@ object AssetTxQuantity {
     ): Long {
         val explicit = forOutput(header, vout, firstNonOpReturnVout)
         if (vout != implicitChangeVout(outputCount)) return explicit
-        return explicit + (implicitChange(header, inputUnits, outputCount) ?: 0L)
+        val change = implicitChange(header, inputUnits, outputCount) ?: return explicit
+        return try { Math.addExact(explicit, change) } catch (e: ArithmeticException) { 0L }
     }
 
     /**
@@ -88,6 +95,12 @@ object AssetTxQuantity {
      * on null rather than guess a quantity; see the spec's fail-closed rule, which keeps the
      * *spending* decision separate from the *display* decision.
      *
+     * Also null when what the instructions consume is not a count ([assignedUnits] null: a
+     * negative amount, or a product or sum past the signed range). Instructions that consume more
+     * than [inputUnits] are invalid: DigiAsset Core voids every one of them and the last output
+     * receives everything the inputs carried, so the remainder is [inputUnits] itself, never a
+     * clamped zero. **The remainder is never more than the inputs carried, and never wraps.**
+     *
      * ISSUANCE returns 0: the issued supply is credited by [forOutput]'s first-non-OP_RETURN
      * convention, so computing a leftover here would double-count the issuer's marker.
      * UNCLASSIFIABLE returns null: with no instructions read, no remainder is known.
@@ -95,9 +108,10 @@ object AssetTxQuantity {
     fun implicitChange(header: DecodedAssetHeader, inputUnits: Long?, outputCount: Int): Long? {
         if (header.operation == AssetOperation.ISSUANCE) return 0L
         if (header.operation == AssetOperation.UNCLASSIFIABLE) return null
-        if (inputUnits == null) return null
+        if (inputUnits == null || inputUnits < 0L) return null
         val assigned = assignedUnits(header) ?: return null
-        return (inputUnits - assigned).coerceAtLeast(0L)
+        if (assigned > inputUnits) return inputUnits
+        return inputUnits - assigned
     }
 
     /**
@@ -106,15 +120,46 @@ object AssetTxQuantity {
      * percent instruction makes the total depend on per-input balances, or when the carrier is
      * UNCLASSIFIABLE (its instructions were never read). The input total at which
      * [implicitChange] is exactly zero.
+     *
+     * Also null when the consumption is not a count: a negative amount or index, or a product or
+     * sum past the signed 64-bit range. Every step is exact; nothing here wraps.
      */
     fun assignedUnits(header: DecodedAssetHeader): Long? {
         if (header.operation == AssetOperation.UNCLASSIFIABLE) return null
         var assigned = 0L
         for (inst in header.transferInstructions) {
             if (inst.percent) return null
-            assigned += if (inst.range) (inst.outputIndex.toLong() + 1L) * inst.amount else inst.amount
+            if (inst.amount < 0L || inst.outputIndex < 0) return null
+            try {
+                val consumed = if (inst.range) Math.multiplyExact(inst.outputIndex.toLong() + 1L, inst.amount) else inst.amount
+                assigned = Math.addExact(assigned, consumed)
+            } catch (e: ArithmeticException) {
+                return null
+            }
         }
         return assigned
+    }
+
+    /**
+     * Can what the fixed and range instructions consume not be counted — a negative amount or
+     * index, or a total past the signed 64-bit range? Such instructions are never an honest
+     * transfer (no input holds that many units), so nothing about the transaction's outputs is
+     * believed. Percent instructions are left out: what they consume depends on the inputs.
+     */
+    fun consumptionUncountable(header: DecodedAssetHeader): Boolean {
+        if (header.operation == AssetOperation.UNCLASSIFIABLE) return false
+        var assigned = 0L
+        for (inst in header.transferInstructions) {
+            if (inst.percent) continue
+            if (inst.amount < 0L || inst.outputIndex < 0) return true
+            try {
+                val consumed = if (inst.range) Math.multiplyExact(inst.outputIndex.toLong() + 1L, inst.amount) else inst.amount
+                assigned = Math.addExact(assigned, consumed)
+            } catch (e: ArithmeticException) {
+                return true
+            }
+        }
+        return false
     }
 
     /** The output index [implicitChange] lands on: the transaction's last output, verbatim.

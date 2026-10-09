@@ -178,7 +178,8 @@ internal suspend fun resolveInputAssetUnits(
     for ((txid, vout) in inputs) {
         val stored = rowQuantity(txid, vout)
         if (stored != null && stored > 0L) {
-            total += stored
+            // A total that does not fit a count is not a total.
+            total = try { Math.addExact(total, stored) } catch (e: ArithmeticException) { return null }
             continue
         }
         if (stored != null) {

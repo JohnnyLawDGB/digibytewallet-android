@@ -53,7 +53,8 @@ class DigiAssetDecoder {
      * FAIL CLOSED. A script whose push begins with the "DA" tag is a DigiAsset carrier whether or
      * not this reader can make sense of it. When it cannot — the payload is framed with
      * OP_PUSHDATA2/4, the push is shorter than the header or runs past the script, or the payload
-     * does not decode — the answer is a header with [AssetOperation.UNCLASSIFIABLE], never null.
+     * does not decode (an amount that does not fit a signed 64-bit count included) — the answer is
+     * a header with [AssetOperation.UNCLASSIFIABLE], never null.
      * Null would file the transaction as plain DGB and leave every output it pays us spendable,
      * although the protocol may have credited units to any of them. The hold rule
      * ([AssetTxQuantity.targetsOutput]) holds every owned output of such a transaction, and the

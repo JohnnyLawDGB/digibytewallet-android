@@ -506,15 +506,19 @@ class UnbackedAssetCreditTest {
         assertEquals(mapOf(X to 1_005L), balances(mgr2))
     }
 
-    @Test fun the_bound_counts_range_instructions_and_gives_up_on_percent_and_overflow() {
-        // Range to 8191 of 2^54-1 covers output 0.
-        assertEquals(AssetTransferAllocator.MAX_ISSUANCE, cap("6a0d444103155fffffffffffffffff", 0))
-        // Output 1 is named by nothing in the control transfer: nothing can be delivered there.
-        assertEquals(0L, cap(CONTROL, 1, outputCount = 4))
+    @Test fun the_bound_counts_range_instructions_gives_up_on_percent_and_believes_nothing_uncountable() {
         fun h(vararg i: TransferInstruction) = DecodedAssetHeader(3, 0x15, app.aroundtheblock.wallet.core.model.AssetOperation.TRANSFER,
             null, null, null, 0, false, Aggregation.AGGREGATABLE, i.toList())
+        // A range to 3 of 7 covers output 0 once.
+        assertEquals(7L, AssetCreditRules.maxDeliverable(h(TransferInstruction(false, true, false, 3, 7, false)), 0, 5))
+        // Output 1 is named by nothing in the control transfer: nothing can be delivered there.
+        assertEquals(0L, cap(CONTROL, 1, outputCount = 4))
         assertNull(AssetCreditRules.maxDeliverable(h(TransferInstruction(false, false, true, 0, 128, false)), 0, 3))
-        assertNull(AssetCreditRules.maxDeliverable(h(
+        // Instructions whose consumption is not a count (range to 8191 of 2^54-1; a sum past the
+        // signed range): no count is believed on any output, the last one included.
+        assertEquals(0L, cap("6a0d444103155fffffffffffffffff", 0))
+        assertEquals(0L, cap("6a0d444103155fffffffffffffffff", 2))
+        assertEquals(0L, AssetCreditRules.maxDeliverable(h(
             TransferInstruction(false, false, false, 0, Long.MAX_VALUE, false),
             TransferInstruction(false, false, false, 0, 1, false)), 0, 3))
     }

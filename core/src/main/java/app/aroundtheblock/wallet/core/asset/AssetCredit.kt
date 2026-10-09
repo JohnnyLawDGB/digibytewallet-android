@@ -97,10 +97,16 @@ object AssetCreditRules {
      * substituted answer cannot credit more than the transaction itself could deliver there.
      *
      * Null is "no bound": the LAST output, which also receives every leftover (and everything
-     * when the instructions are voided); an output a percent instruction names, whose amount
-     * depends on the inputs; and a sum that overflows.
+     * when the instructions are voided); and an output a percent instruction names, whose amount
+     * depends on the inputs.
+     *
+     * Zero — believe no count, on any output — when what the instructions consume cannot be
+     * counted ([AssetTxQuantity.consumptionUncountable]): no input holds that many units, so no
+     * answer about the transaction's outputs is credited. Likewise for a sum that does not fit a
+     * count.
      */
     fun maxDeliverable(header: DecodedAssetHeader, vout: Int, outputCount: Int): Long? {
+        if (AssetTxQuantity.consumptionUncountable(header)) return 0L
         if (vout == outputCount - 1) return null
         val burnMarker = header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.BURN
         var max = 0L
@@ -108,7 +114,7 @@ object AssetCreditRules {
             val named = if (inst.range) vout <= inst.outputIndex else inst.outputIndex == vout
             if (!named || (burnMarker && !inst.range && inst.outputIndex == AssetTransferAllocator.BURN_OUTPUT)) continue
             if (inst.percent) return null
-            max = try { Math.addExact(max, inst.amount) } catch (e: ArithmeticException) { return null }
+            max = try { Math.addExact(max, inst.amount) } catch (e: ArithmeticException) { return 0L }
         }
         return max
     }
