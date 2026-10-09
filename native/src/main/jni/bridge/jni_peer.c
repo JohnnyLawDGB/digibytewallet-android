@@ -12,6 +12,7 @@
 #include "BRCompactFilterChain.h"
 #include "BRNetwork.h"
 #include "saved_blocks_deserialize.h"
+#include "saved_peers_deserialize.h"
 #include "bridge_status_stale.h"
 #include "BRPeerPenalty.h"
 #include "dandelion_state.h"
@@ -1435,22 +1436,12 @@ NativeBridge_loadSavedPeers(JNIEnv *env, jobject thiz,
     jbyte *buf = (*env)->GetByteArrayElements(env, data, NULL);
     if (!buf) return 0;
 
-    uint8_t *b = (uint8_t *)buf;
-    size_t pos = 0;
-    uint32_t count = UInt32GetLE(&b[pos]); pos += 4;
-
     if (g_savedPeers) free(g_savedPeers);
-    g_savedPeers = calloc(count, sizeof(BRPeer));
-    g_savedPeersCount = 0;
-
-    size_t peerSize = 16 + 2 + 8 + 8; /* addr + port + timestamp + services */
-    for (uint32_t i = 0; i < count && pos + peerSize <= (size_t)len; i++) {
-        memcpy(&g_savedPeers[i].address, &b[pos], 16); pos += 16;
-        g_savedPeers[i].port = UInt16GetLE(&b[pos]); pos += 2;
-        g_savedPeers[i].timestamp = (uint32_t)UInt64GetLE(&b[pos]); pos += 8;
-        g_savedPeers[i].services = UInt64GetLE(&b[pos]); pos += 8;
-        g_savedPeersCount++;
-    }
+    g_savedPeers = NULL;
+    /* Guarded, JNI-free parse (saved_peers_deserialize.h): a corrupt count or a failed
+     * allocation leaves no saved peers instead of writing through NULL. */
+    g_savedPeersCount = deserialize_saved_peers_guarded((const uint8_t *)buf, (size_t)len,
+                                                        &g_savedPeers);
 
     (*env)->ReleaseByteArrayElements(env, data, buf, JNI_ABORT);
     LOGI("loadSavedPeers: loaded %zu peers from persistent storage", g_savedPeersCount);

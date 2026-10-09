@@ -8,6 +8,7 @@
  */
 
 #include "jni_bridge.h"
+#include "saved_transactions_deserialize.h"
 
 /* ---------- getSerializedTransactions ----------
  * Returns all wallet transactions as a single byte array:
@@ -90,38 +91,10 @@ NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
     jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
     if (!bytes) return 0;
 
-    const uint8_t *buf = (const uint8_t *)bytes;
-    size_t pos = 0;
-
-    uint32_t txCount = UInt32GetLE(&buf[pos]); pos += 4;
-    if (txCount == 0 || txCount > 10000) {
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return 0;
-    }
-
-    g_savedTransactions = calloc(txCount, sizeof(BRTransaction *));
-    if (!g_savedTransactions) {
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return 0;
-    }
-
-    size_t loaded = 0;
-    for (uint32_t i = 0; i < txCount && pos + 12 <= (size_t)len; i++) {
-        uint32_t txSize = UInt32GetLE(&buf[pos]); pos += 4;
-        uint32_t height = UInt32GetLE(&buf[pos]); pos += 4;
-        uint32_t timestamp = UInt32GetLE(&buf[pos]); pos += 4;
-
-        if (pos + txSize > (size_t)len) break;
-
-        BRTransaction *tx = BRTransactionParse(&buf[pos], txSize);
-        pos += txSize;
-
-        if (tx) {
-            tx->blockHeight = height;
-            tx->timestamp = timestamp;
-            g_savedTransactions[loaded++] = tx;
-        }
-    }
+    /* Guarded, JNI-free parse (saved_transactions_deserialize.h): a corrupt count, a failed
+     * allocation, or a record length that runs past the blob is never parsed. */
+    size_t loaded = deserialize_saved_transactions_guarded((const uint8_t *)bytes, (size_t)len,
+                                                           &g_savedTransactions);
 
     g_savedTransactionCount = loaded;
     (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
