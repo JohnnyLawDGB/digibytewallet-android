@@ -4096,7 +4096,7 @@ class SyncService : Service() {
          * Sanity floor for "we've reached the chain tip." The highest
          * hardcoded checkpoint in
          * native/src/main/jni/digibytewallet-core/BRChainParams.h is
-         * block 23,660,000. Any real chain tip must be at or past that;
+         * block 24,300,000. Any real chain tip must be at or past that;
          * peers claiming a lower tip are lagging or dishonest and must
          * NOT cause us to declare sync complete (which stops the bloom
          * rescan and strands user transactions in unscanned blocks).
@@ -4104,7 +4104,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 24_250_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 24_300_000L
 
         /** How far the compact-filter SCAN may trail the network tip and still count as
          *  caught up. The scan legitimately lags the header tip by a few blocks while the
