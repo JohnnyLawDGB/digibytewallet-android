@@ -41,10 +41,15 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 
+# Difficulty level 1, named here: the rig's headers are synthetic, with no difficulty history, so at level 2 a
+# header among them that does not extend the tip can never be judged and is refused (INT-2026-10-09-E) before it
+# reaches the parentless-header store this gate drives (the "new block during a rescan" call site among them). This
+# suite is about that store, not the target; the level-2 verdicts are pinned in header_diff_v4_kat and
+# int_2026_10_09_e_kat. Proof of work stays at the shipped level.
 build() {
     local out="$1"; shift
     clang -w -include stdint.h \
-        "$@" \
+        -DDGB_HEADER_DIFF_CHECK=1 "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \

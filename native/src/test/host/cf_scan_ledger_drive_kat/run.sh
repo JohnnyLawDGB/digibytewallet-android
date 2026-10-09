@@ -190,6 +190,13 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
+# Difficulty level 1, named here (both compiles below): the fixture's headers are synthetic, with no difficulty
+# history, so at level 2 a fork header among them can never be judged and is refused (INT-2026-10-09-E); the
+# reorg cases (the REORG_NULLGUARD gate among them) could not adopt a fork at all. This suite is about the scan
+# ledger, not the target; the level-2 verdicts are pinned in header_diff_v4_kat and int_2026_10_09_e_kat. Proof of
+# work stays at the shipped level.
+KAT_DIFF_LEVEL=-DDGB_HEADER_DIFF_CHECK=1
+
 # build <output> <extra -D flags...>
 build() {
     local out="$1"; shift
@@ -201,7 +208,7 @@ build() {
         # keep the real definitions, and `__wrap_<sym>` is a distinct token the
         # macro never rewrites.
         clang -w -include stdint.h \
-        -DCF_LEDGER_DRIVE_REREQUEST=1 \
+        -DCF_LEDGER_DRIVE_REREQUEST=1 "$KAT_DIFF_LEVEL" \
         "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
@@ -216,7 +223,7 @@ build() {
         -c "$SCRIPT_DIR/cf_scan_ledger_drive_kat_main.c" -o "$BUILD_DIR/kat_main.o"
 
         clang -w -include stdint.h \
-        -DCF_LEDGER_DRIVE_REREQUEST=1 \
+        -DCF_LEDGER_DRIVE_REREQUEST=1 "$KAT_DIFF_LEVEL" \
         "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
