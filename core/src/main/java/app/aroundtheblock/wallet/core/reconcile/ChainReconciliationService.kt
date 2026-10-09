@@ -195,7 +195,10 @@ class ChainReconciliationService(
                 // pending to the confirming height the node reports.
                 val heldBefore = runCatching { NativeBridge.getSerializedTransactionForHash(txid) != null }
                     .getOrDefault(false)
+                // Registered only when the bytes ARE the transaction asked for: their id must be
+                // the txid requested (BB-2026-10-09-susanto-f9). Anything else did not land.
                 val rawBytes = runCatching { hexToBytes(rawTx.hex) }.getOrNull()
+                    ?.takeIf { NativeBridge.rawTransactionId(it)?.equals(txid, ignoreCase = true) == true }
                 val ok = rawBytes != null && NativeBridge.registerRawTransaction(
                     rawBytes, rawTx.blockHeight, rawTx.blockTime
                 )
@@ -377,6 +380,9 @@ class ChainReconciliationService(
             fetch = { tx -> nodeClient.fetchRawTx(tx.txid, tx.height) },
             decodeHex = { hex -> runCatching { hexToBytes(hex) }.getOrNull() },
             register = { bytes, h, t -> NativeBridge.registerRawTransaction(bytes, h, t) },
+            isTransaction = { bytes, txid ->
+                NativeBridge.rawTransactionId(bytes)?.equals(txid, ignoreCase = true) == true
+            },
             onProgress = { i, total ->
                 _state.value = State.Scanning(
                     "Recovering tx ${i + 1}/$total…",
@@ -497,6 +503,7 @@ internal suspend fun importPlannedHistory(
     fetch: suspend (AddressTx) -> RawTxEntry?,
     decodeHex: (String) -> ByteArray?,
     register: (ByteArray, Long, Long) -> Boolean,
+    isTransaction: (bytes: ByteArray, txid: String) -> Boolean,
     onProgress: (index: Int, total: Int) -> Unit = { _, _ -> },
     onImported: (AddressTx) -> Unit = { },
 ): HistoryImportOutcome {
@@ -508,6 +515,8 @@ internal suspend fun importPlannedHistory(
         if (raw == null) { unrecovered++; continue }
         val bytes = decodeHex(raw.hex)
         if (bytes == null) { unrecovered++; continue }
+        // Bytes that are not the transaction asked for did not recover it (BB-2026-10-09-susanto-f9).
+        if (!isTransaction(bytes, tx.txid)) { unrecovered++; continue }
         if (register(bytes, raw.blockHeight, raw.blockTime)) {
             imported++
             onImported(tx)

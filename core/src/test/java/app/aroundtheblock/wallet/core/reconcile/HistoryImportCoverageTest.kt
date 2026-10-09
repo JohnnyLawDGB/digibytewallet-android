@@ -38,7 +38,8 @@ class HistoryImportCoverageTest {
         fetch: suspend (AddressTx) -> RawTxEntry? = { raw() },
         decode: (String) -> ByteArray? = { byteArrayOf(1, 2) },
         register: (ByteArray, Long, Long) -> Boolean = { _, _, _ -> true },
-    ) = importPlannedHistory(planned, fetch, decode, register)
+        isTransaction: (ByteArray, String) -> Boolean = { _, _ -> true },
+    ) = importPlannedHistory(planned, fetch, decode, register, isTransaction)
 
     @Test fun everyPlannedTxRegistered_isCovered() = runTest {
         val out = run(listOf(tx("a"), tx("b"), tx("c")))
@@ -110,6 +111,7 @@ class HistoryImportCoverageTest {
             fetch = { t -> if (t.txid == "no-fetch") null else raw(hex = t.txid) },
             decodeHex = { hex -> if (hex == "bad-hex") null else hex.toByteArray() },
             register = { bytes, _, _ -> String(bytes) != "rejected" },
+            isTransaction = { _, _ -> true },
         )
         assertEquals(1, out.imported)
         assertEquals(3, out.unrecovered)
@@ -175,6 +177,7 @@ class HistoryImportCoverageTest {
             // The real jni_transaction.c behaviour: a tx already in the wallet
             // returns JNI_FALSE from the duplicate branch.
             register = { bytes, _, _ -> String(bytes) !in alreadyInWallet },
+            isTransaction = { _, _ -> true },
         )
 
         assertEquals(1, out.imported)
@@ -275,8 +278,37 @@ class HistoryImportCoverageTest {
             fetch = { RawTxEntry("00", 23_900_123L, 1_712_000_000L) },
             decodeHex = { byteArrayOf(0) },
             register = { _, h, t -> seenHeight = h; seenTime = t; true },
+            isTransaction = { _, _ -> true },
         )
         assertEquals(23_900_123L, seenHeight)
         assertEquals(1_712_000_000L, seenTime)
+    }
+
+    /**
+     * BB-2026-10-09-susanto-f9. Bytes that are not the transaction asked for are never
+     * registered: the import counts that txid as not recovered, so the band is not covered.
+     */
+    @Test fun bytesOfAnotherTransaction_areNotRegistered_andNotCovered() = runTest {
+        val registered = mutableListOf<String>()
+        val out = run(
+            listOf(tx("asked"), tx("fine")),
+            fetch = { t -> raw(hex = if (t.txid == "asked") "other" else t.txid) },
+            decode = { hex -> hex.toByteArray() },
+            register = { bytes, _, _ -> registered += String(bytes); true },
+            isTransaction = { bytes, txid -> String(bytes) == txid },
+        )
+        assertEquals(listOf("fine"), registered)
+        assertEquals(1, out.imported)
+        assertEquals(1, out.unrecovered)
+        assertTrue(!out.covered)
+    }
+
+    @Test fun theCheckIsGivenTheRequestedTxid() = runTest {
+        val asked = mutableListOf<String>()
+        run(
+            listOf(tx("a"), tx("b")),
+            isTransaction = { _, txid -> asked += txid; true },
+        )
+        assertEquals(listOf("a", "b"), asked)
     }
 }
