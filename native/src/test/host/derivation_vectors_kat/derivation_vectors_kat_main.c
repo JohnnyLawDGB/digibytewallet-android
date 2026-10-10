@@ -48,13 +48,14 @@ int main(int argc, char *argv[])
 {
     static Vector v[512];
     size_t n = 0, i;
-    char line[512], mnemonic[256] = "", seedHex[160] = "", why[300];
+    char line[512], mnemonic[256] = "", passphrase[256] = "", seedHex[160] = "", why[300];
     FILE *f;
     UInt512 seed;
 
     if (argc < 2 || ! (f = fopen(argv[1], "r"))) { printf("FAIL: cannot open the vector file\n"); return 1; }
     while (fgets(line, sizeof(line), f)) {
         if (sscanf(line, "# mnemonic: %255[^\n]", mnemonic) == 1) continue;
+        if (sscanf(line, "# passphrase: %255[^\n]", passphrase) == 1) continue;
         if (sscanf(line, "# bip39 seed: %159s", seedHex) == 1) continue;
         if (line[0] == '#' || line[0] == '\n') continue;
         if (n < sizeof(v) / sizeof(v[0]) &&
@@ -64,8 +65,8 @@ int main(int argc, char *argv[])
     snprintf(why, sizeof(why), "%zu rows, mnemonic %s", n, mnemonic[0] ? "found" : "MISSING");
     result("vectors_parsed", n == 160 && mnemonic[0], why);
 
-    // BIP39: the seed the whole file hangs from.
-    BRBIP39DeriveKey(seed.u8, mnemonic, NULL);
+    // BIP39: the seed the whole file hangs from ("(empty)" is no passphrase).
+    BRBIP39DeriveKey(seed.u8, mnemonic, strcmp(passphrase, "(empty)") == 0 ? NULL : passphrase);
     {
         char hex[129];
         for (i = 0; i < 64; i++) snprintf(hex + 2 * i, 3, "%02x", seed.u8[i]);

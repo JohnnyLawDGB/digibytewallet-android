@@ -16,7 +16,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="${CORE_DIR:-$REPO_ROOT/native/src/main/jni/digibytewallet-core}"
-VECTORS="$CORE_DIR/vectors/derivation/abandon-about.txt"
+VECTOR_FILES=("$CORE_DIR/vectors/derivation/abandon-about.txt" "$CORE_DIR/vectors/derivation/abandon-about-trezor.txt")
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
@@ -67,15 +67,16 @@ build() {
         -o "$out"
 }
 
-if [ ! -s "$VECTORS" ]; then
-    echo "GATE FAILURE: no vector file at $VECTORS."
-    exit 1
-fi
+for VECTORS in "${VECTOR_FILES[@]}"; do
+    [ -s "$VECTORS" ] || { echo "GATE FAILURE: no vector file at $VECTORS."; exit 1; }
+done
 
 FAIL=0
 build "$BUILD_DIR/red" -DDERIVATION_VECTORS_RED || { echo "GATE FAILURE: comparison arm did not compile."; exit 1; }
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
 
+for VECTORS in "${VECTOR_FILES[@]}"; do
+echo "=== $(basename "$VECTORS")"
 echo "--- COMPARISON ARM (-DDERIVATION_VECTORS_RED): every RED case MUST fail, every GUARD case pass ---"
 out="$("$BUILD_DIR/red" "$VECTORS" 2>&1)"; rc=$?
 echo "$out" | grep -Eq "$SAN_RE" && { echo "  [red] GATE FAILURE: sanitizer report"; FAIL=1; }
@@ -99,5 +100,7 @@ for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
     echo "$out" | grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE: not passed"; FAIL=1; }
 done
 
-[ $FAIL -eq 0 ] && echo "derivation_vectors_kat: GATE HELD (the core derives and watches every independent vector)"
+done
+
+[ $FAIL -eq 0 ] && echo "derivation_vectors_kat: GATE HELD (the core derives and watches every independent vector, with and without a passphrase)"
 exit $FAIL
