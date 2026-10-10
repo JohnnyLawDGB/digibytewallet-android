@@ -41,15 +41,16 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 
-# Difficulty level 1, named here: the rig's headers are synthetic, with no difficulty history, so at level 2 a
-# header among them that does not extend the tip can never be judged and is refused (INT-2026-10-09-E) before it
-# reaches the parentless-header store this gate drives (the "new block during a rescan" call site among them). This
-# suite is about that store, not the target; the level-2 verdicts are pinned in header_diff_v4_kat and
-# int_2026_10_09_e_kat. Proof of work stays at the shipped level.
+# No header-check level is named here: this suite builds at the levels the app ships, like most of them.
+# It carried -DDGB_HEADER_DIFF_CHECK=1 from 2026-10-09, added when cf_reorg_rewind_kat and
+# cf_scan_ledger_drive_kat needed that pin for their synthetic fixtures. This rig does not need it: run at
+# the shipped level 2 it passes, on both release lines, so the pin only built it at a level no app ships.
+# Removed 2026-10-10 after scripts/check-kat-level-pins.sh flagged it. The level-2 verdicts stay pinned in
+# header_diff_v4_kat and int_2026_10_09_e_kat.
 build() {
     local out="$1"; shift
     clang -w -include stdint.h \
-        -DDGB_HEADER_DIFF_CHECK=1 "$@" \
+        "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \

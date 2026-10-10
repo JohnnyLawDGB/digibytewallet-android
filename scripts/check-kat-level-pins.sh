@@ -28,6 +28,7 @@
 #     # KAT-LEVEL-SWEEP: <why this suite owns its levels>
 #
 # Usage: scripts/check-kat-level-pins.sh          (exit 0 = every pin is load-bearing)
+#        scripts/check-kat-level-pins.sh --list   (classify only; runs nothing)
 #
 # Slow by nature -- it runs each pinned suite a second time -- so it belongs on the weekly
 # schedule, not on every push.
@@ -56,9 +57,14 @@ for run in "$HOST_DIR"/*/run.sh; do
     if grep -q 'KAT-LEVEL-SWEEP' "$run"; then
         skipped+="  $suite: declares KAT-LEVEL-SWEEP"$'\n'; continue
     fi
+    grep -qE -- '-D(DGB_HEADER_POW_CHECK|DGB_HEADER_DIFF_CHECK)=' "$run" || continue
     why=""
     for m in DGB_HEADER_POW_CHECK DGB_HEADER_DIFF_CHECK; do
-        mapfile -t lits < <(grep -oE -- "-D$m=[0-9]+" "$run" | grep -oE '[0-9]+$' | sort -u)
+        # Comments are stripped first. These files SHOULD discuss their levels in prose -- the
+        # removal note in orphan_set_limits_kat names the flag it dropped -- and a gate that a
+        # comment can trip is a gate that discourages the documentation.
+        mapfile -t lits < <(sed 's/\(^\|[[:space:]]\)#.*$//' "$run" \
+                            | grep -oE -- "-D$m=[0-9]+" | grep -oE '[0-9]+$' | sort -u)
         [ "${#lits[@]}" -eq 0 ] && continue
         if [ "${#lits[@]}" -gt 1 ]; then
             skipped+="  $suite: drives $m itself (levels ${lits[*]})"$'\n'; continue
@@ -79,6 +85,10 @@ if [ "${#PINNED[@]}" -eq 0 ]; then echo "PASS: no pins to justify"; exit 0; fi
 echo "pins to justify: ${#PINNED[@]}"
 for i in "${!PINNED[@]}"; do echo "  ${PINNED[$i]} (${REASON[$i]})"; done
 echo
+if [ "${1:-}" = "--list" ]; then
+    echo "(--list: classification only, nothing run)"
+    exit 0
+fi
 
 fail=0
 for i in "${!PINNED[@]}"; do
