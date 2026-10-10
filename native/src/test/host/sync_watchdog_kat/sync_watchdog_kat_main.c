@@ -309,6 +309,34 @@ int main(void)
         result("loop_valve_holds_recovery_until_ceiling", at == SUPP);
     }
 
+    // ---- the zero-peer escalation (SyncService's keepalive tick, from its code) ----------------
+    {
+        int streak = 0;
+        BRZeroPeerAction a1 = BRZeroPeerStep(&streak, 0, 0, 1, 1.0), a2 = BRZeroPeerStep(&streak, 0, 0, 1, 1.0),
+                         a3 = BRZeroPeerStep(&streak, 0, 0, 1, 1.0), a4 = BRZeroPeerStep(&streak, 0, 0, 1, 1.0);
+        result("zero_peers_reconnect_then_recreate_every_third",
+               a1 == BRZeroPeerReconnect && a2 == BRZeroPeerReconnect && a3 == BRZeroPeerRecreateThenReconnect &&
+               a4 == BRZeroPeerReconnect && streak == 1);
+    }
+    {
+        int streak = 2;
+        BRZeroPeerAction a = BRZeroPeerStep(&streak, 3, 0, 1, 1.0);
+        BRZeroPeerAction b = BRZeroPeerStep(&streak, 0, 0, 1, 1.0);
+        result("a_peer_resets_the_streak", a == BRZeroPeerNone && b == BRZeroPeerReconnect && streak == 1);
+    }
+    {
+        int streak = 2;
+        BRZeroPeerAction a = BRZeroPeerStep(&streak, 0, 1, 1, 1.0);
+        result("tor_coming_up_defers_and_keeps_the_streak", a == BRZeroPeerDeferForTor && streak == 2);
+    }
+    {
+        int streak = 0;
+        result("never_synced_with_peers_kicks_sync",
+               BRZeroPeerStep(&streak, 4, 0, 0, 0.42) == BRZeroPeerKickSync &&
+               BRZeroPeerStep(&streak, 4, 0, 0, 1.0) == BRZeroPeerNone &&
+               BRZeroPeerStep(&streak, 4, 0, 1, 0.42) == BRZeroPeerNone);
+    }
+
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
 }

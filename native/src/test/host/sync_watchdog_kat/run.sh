@@ -27,7 +27,8 @@ RED_CASES=(loop_valve_holds_recovery_until_ceiling released_past_ceiling c2b_hea
            c2b_post_timeout_rearms c2d_corrupt_chain_heals c2_tier2_live_gate
            c2a_tier2_never_both regression_is_reinit latch_clears_on_reinit
            reinit_no_tier2_harassment)
-GUARD_CASES=(loop_healthy_exits loop_progressing_waits loop_catching_up_waits
+GUARD_CASES=(zero_peers_reconnect_then_recreate_every_third a_peer_resets_the_streak
+             tor_coming_up_defers_and_keeps_the_streak never_synced_with_peers_kicks_sync loop_healthy_exits loop_progressing_waits loop_catching_up_waits
              loop_frozen_cf_recovers_once_at_120s loop_reanchor_then_grace_then_bounded_rotating_heals
              loop_declined_reanchor_asked_again loop_never_synced_never_reanchors window_full_at_window synced_not_reanchored_reanchors never_synced_stays_on_filters
              fresh_reanchor_given_grace reanchor_never_rebuilt_stays
