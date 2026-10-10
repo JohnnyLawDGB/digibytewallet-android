@@ -11,7 +11,8 @@
 #include <stdlib.h>
 
 static int g_failed = 0;
-static BRPaymentUri U;   // ~16 KiB: static, not on the stack
+static BRPaymentUri U;
+static char B[BR_PAYMENT_URI_BUF_SIZE];   // the text fields live here
 
 static void result(const char *name, int pass, const char *detail)
 {
@@ -22,7 +23,7 @@ static void result(const char *name, int pass, const char *detail)
     printf("RESULT %s %s\n", name, pass ? "pass" : "fail");
 }
 
-static int parse(const char *s) { return BRPaymentUriParse(s, strlen(s), &U); }
+static int parse(const char *s) { return BRPaymentUriParse(s, strlen(s), &U, B, sizeof(B)); }
 static int rejected(const char *s) { return parse(s) == 0; }
 static int eqs(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
@@ -132,7 +133,8 @@ int main(void)
         ok = rejected(big);                                   // MAX + 1 bytes
         big[BR_PAYMENT_URI_MAX] = '\0';
         ok = ok && parse(big) && strlen(U.address) == BR_PAYMENT_URI_MAX;
-        ok = ok && BRPaymentUriParse("DRe\0al", 6, &U) == 0;
+        ok = ok && BRPaymentUriParse("DRe\0al", 6, &U, B, sizeof(B)) == 0;
+        ok = ok && BRPaymentUriParse("DReal", 5, &U, B, sizeof(B) - 1) == 0;   // buffer too small
         result("bounded_and_nul_free_input", ok, NULL);
     }
 
