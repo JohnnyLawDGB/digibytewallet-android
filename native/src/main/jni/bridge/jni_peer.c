@@ -14,6 +14,7 @@
 #include "saved_blocks_deserialize.h"
 #include "bridge_status_stale.h"
 #include "BRPeerPenalty.h"
+#include "BRPeerPenaltyRestore.h"
 #include "dandelion_state.h"
 #include "checkpoint_time.h"
 
@@ -370,8 +371,6 @@ static int g_savedBlocksLoadComplete = 0;
 /* Penalty set restored from the previous session (see serializePeerPenalties). Kept at
  * bridge level, like the own-node pin and the BIP158 state, so EVERY (re)created manager
  * inherits it — a forceReconnect builds a fresh manager with an empty table otherwise. */
-/* Mirrors PEER_PENALTY_MAX in BRPeerManager.c — the ring buffer's capacity. */
-#define PEER_PENALTY_RESTORE_MAX 32
 
 static uint8_t *g_savedPenalties = NULL;
 static size_t   g_savedPenaltiesLen = 0;
@@ -486,38 +485,17 @@ static const char *MAINNET_PRIORITY_PEER_IPS[] = {
  * dialled 122x while the wallet held 0 peers" loop. Only their persistence is dropped. */
 static size_t _loadPenaltiesExceptPriority(BRPeerManager *manager, const uint8_t *blob, size_t blobLen)
 {
-    UInt128 addrs[PEER_PENALTY_RESTORE_MAX];
-    uint16_t ports[PEER_PENALTY_RESTORE_MAX];
-    time_t until[PEER_PENALTY_RESTORE_MAX];
-    UInt128 exempt[MAINNET_PRIORITY_PEER_COUNT];
-    size_t exemptCount = 0, count, kept;
-    uint8_t filtered[4 + PEER_PENALTY_RESTORE_MAX * BR_PEER_PENALTY_ENTRY_BYTES];
-    size_t written;
+    /* The rule (live entries only, the canon exempt, at most 32) is the core's, shared
+     * with iOS: BRPeerPenaltyRestore.h. It used to be composed here, where iOS could not
+     * reach it. Note the canon is now that of the network being run (testnet26 exempts
+     * its own canon), where this function always exempted the mainnet one. */
+    size_t dropped = 0;
+    size_t restored = BRPeerManagerRestorePenalties(manager, blob, blobLen, &dropped);
 
-    count = BRPeerPenaltyDeserialize(blob, blobLen, time(NULL), addrs, ports, until,
-                                     PEER_PENALTY_RESTORE_MAX);
-    if (count == 0) return 0;
-
-    for (size_t i = 0; i < MAINNET_PRIORITY_PEER_COUNT; i++) {
-        struct in_addr ip4;
-
-        if (inet_pton(AF_INET, MAINNET_PRIORITY_PEER_IPS[i], &ip4) != 1) continue;
-        exempt[exemptCount] = UINT128_ZERO;
-        exempt[exemptCount].u16[5] = 0xffff;
-        exempt[exemptCount].u32[3] = ip4.s_addr;
-        exemptCount++;
+    if (dropped > 0) {
+        LOGI("peer penalties: dropped %zu against the priority fleet on restore", dropped);
     }
-
-    kept = BRPeerPenaltyDropExempt(addrs, ports, until, count, exempt, exemptCount);
-    if (kept < count) {
-        LOGI("peer penalties: dropped %zu against the priority fleet on restore", count - kept);
-    }
-    if (kept == 0) return 0;
-
-    written = BRPeerPenaltySerialize(addrs, ports, until, kept, time(NULL),
-                                     filtered, sizeof(filtered));
-    if (written == 0) return 0;
-    return BRPeerManagerLoadPenalties(manager, filtered, written);
+    return restored;
 }
 
 /**
