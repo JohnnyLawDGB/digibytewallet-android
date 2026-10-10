@@ -237,6 +237,78 @@ int main(void)
         result("decide_nothing_without_peers", BRTipStallDecide(&z, 0, 0, 0, SUPP, TIP * 3, &t2, &fast) == BRTipStallNone);
     }
 
+    // ---- the BIP158 loop (SyncService.startBip158Watchdog, from its code) ---------------------
+    // Wall-clock base, as Android's System.currentTimeMillis(): the heal cooldown starts from 0, so
+    // with real time the first heal is never held back by it.
+    {
+        const int64_t T0 = 1790000000000LL;
+        int rot = -1;
+        BRBip158WatchdogState s = BRBip158WatchdogInit(24000000, 24000040, 23990000, T0);
+        result("loop_healthy_exits", BRBip158WatchdogStep(&s, 24000000, 24000050, 24000060, 23990000, 5, 0, 1, SUPP, T0 + 15000, &rot) == BRBip158Healthy);
+
+        s = BRBip158WatchdogInit(1000, 1000, 900, T0);
+        result("loop_progressing_waits", BRBip158WatchdogStep(&s, 1100, 5000, 50000, 900, 5, 0, 1, SUPP, T0 + 15000, &rot) == BRBip158Wait);
+
+        s = BRBip158WatchdogInit(1000, 50000, 900, T0);
+        result("loop_catching_up_waits", BRBip158WatchdogStep(&s, 1000, 50000, 90000, 900, 5, 0, 1, SUPP, T0 + 200000, &rot) == BRBip158Wait);
+    }
+    {   // the cf tip froze while headers climb, the scan frozen too: one recovery, at 120 s, once
+        const int64_t T0 = 1790000000000LL;
+        int rot = -1, recoveries = 0; int64_t at = -1;
+        BRBip158WatchdogState s = BRBip158WatchdogInit(1000, 2000, 900, T0);
+        for (int i = 1; i <= 40; i++) {
+            int64_t t = T0 + i * BR_WD_BIP158_POLL_MS;
+            BRBip158Action a = BRBip158WatchdogStep(&s, 1000, 2000 + i * 100, 1000000, 900, 5, 0, 1, SUPP, t, &rot);
+            if (a == BRBip158RecoverFrozenCf) { recoveries++; if (at < 0) at = t - T0; }
+        }
+        result("loop_frozen_cf_recovers_once_at_120s", recoveries == 1 && at == 120000);
+    }
+    {   // synced, headers at the tip, the filter chain stuck: re-anchor at 120 s, grace, then three
+        // heals 240 s apart rotating through the canon pool, and no fourth
+        const int64_t T0 = 1790000000000LL;
+        int rot = -1, reanchors = 0, heals = 0, rots[8] = {0}; int64_t healAt[8] = {0}, reanchorAt = -1, other = 0;
+        BRBip158WatchdogState s = BRBip158WatchdogInit(1000, 50000, 900, T0);
+        for (int i = 1; i <= 100; i++) {
+            int64_t t = T0 + i * BR_WD_BIP158_POLL_MS;
+            BRBip158Action a = BRBip158WatchdogStep(&s, 1000, 50000, 50000, 900, 5, 0, 1, SUPP, t, &rot);
+            if (a == BRBip158Reanchor) { reanchors++; reanchorAt = t - T0; BRBip158WatchdogReanchored(&s, 1, t); }
+            else if (a == BRBip158HealCorruptChain) { if (heals < 8) { healAt[heals] = t - T0; rots[heals] = rot; } heals++; }
+            else if (a != BRBip158Wait) other++;
+        }
+        result("loop_reanchor_then_grace_then_bounded_rotating_heals",
+               reanchors == 1 && reanchorAt == 120000 && heals == 3 && other == 0 &&
+               healAt[0] == 210000 && healAt[1] == 450000 && healAt[2] == 690000 &&
+               rots[0] == 0 && rots[1] == 1 && rots[2] == 2);
+    }
+    {   // a declined re-anchor changes nothing: the next poll asks again
+        const int64_t T0 = 1790000000000LL;
+        int rot = -1;
+        BRBip158WatchdogState s = BRBip158WatchdogInit(1000, 50000, 900, T0);
+        BRBip158Action a = BRBip158Wait;
+        for (int i = 1; i <= 8; i++) a = BRBip158WatchdogStep(&s, 1000, 50000, 50000, 900, 5, 0, 1, SUPP, T0 + i * 15000, &rot);
+        BRBip158WatchdogReanchored(&s, 0, T0 + 120000);
+        BRBip158Action b = BRBip158WatchdogStep(&s, 1000, 50000, 50000, 900, 5, 0, 1, SUPP, T0 + 135000, &rot);
+        result("loop_declined_reanchor_asked_again", a == BRBip158Reanchor && b == BRBip158Reanchor && ! s.reanchoredThisSession);
+    }
+    {   // a wallet that never reached sync never re-anchors and so never heals
+        const int64_t T0 = 1790000000000LL;
+        int rot = -1, acted = 0;
+        BRBip158WatchdogState s = BRBip158WatchdogInit(1000, 50000, 900, T0);
+        for (int i = 1; i <= 100; i++)
+            if (BRBip158WatchdogStep(&s, 1000, 50000, 50000, 900, 5, 0, 0, SUPP, T0 + i * 15000, &rot) != BRBip158Wait) acted++;
+        result("loop_never_synced_never_reanchors", acted == 0);
+    }
+    {   // the valve owns a pinned hole: the frozen-CF recovery waits for the 30-min ceiling, then fires
+        const int64_t T0 = 1790000000000LL;
+        int rot = -1; int64_t at = -1;
+        BRBip158WatchdogState s = BRBip158WatchdogInit(1000, 2000, 900, T0);
+        for (int i = 1; i <= 200 && at < 0; i++) {
+            int64_t t = T0 + i * BR_WD_BIP158_POLL_MS;
+            if (BRBip158WatchdogStep(&s, 1000, 2000 + i * 100, 10000000, 900, 5, 1, 1, SUPP, t, &rot) == BRBip158RecoverFrozenCf) at = t - T0;
+        }
+        result("loop_valve_holds_recovery_until_ceiling", at == SUPP);
+    }
+
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
 }

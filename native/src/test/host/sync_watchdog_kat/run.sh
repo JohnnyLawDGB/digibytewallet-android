@@ -23,11 +23,13 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
-RED_CASES=(released_past_ceiling c2b_heal_rearms c2b_frozen_rearms c2b_tier2_rearms
+RED_CASES=(loop_valve_holds_recovery_until_ceiling released_past_ceiling c2b_heal_rearms c2b_frozen_rearms c2b_tier2_rearms
            c2b_post_timeout_rearms c2d_corrupt_chain_heals c2_tier2_live_gate
            c2a_tier2_never_both regression_is_reinit latch_clears_on_reinit
            reinit_no_tier2_harassment)
-GUARD_CASES=(window_full_at_window synced_not_reanchored_reanchors never_synced_stays_on_filters
+GUARD_CASES=(loop_healthy_exits loop_progressing_waits loop_catching_up_waits
+             loop_frozen_cf_recovers_once_at_120s loop_reanchor_then_grace_then_bounded_rotating_heals
+             loop_declined_reanchor_asked_again loop_never_synced_never_reanchors window_full_at_window synced_not_reanchored_reanchors never_synced_stays_on_filters
              fresh_reanchor_given_grace reanchor_never_rebuilt_stays
              grace_ignored_before_reanchor post_timeout_not_while_scan_advances
              post_timeout_suppressed_by_valve synced_at_tip_is_healthy
