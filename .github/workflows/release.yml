@@ -1,13 +1,27 @@
-name: Release Build & Deploy
+name: Release Build & Deploy (io.digibyte — RETIRED)
+
+# RETIRED 2026-10-10. This builds and publishes the OLD app, io.digibyte, whose final release
+# was v4.0.87.2. It signs with the io.digibyte key (secrets.KEYSTORE_*), names the asset
+# digibyte-wallet-<tag>.apk, and rewrites the public downloads page, latest.json and the
+# digibyte-wallet-latest.apk symlink that the retired app's in-app updater polls.
+#
+# The tag trigger is removed, deliberately. It fired on any 'v*' tag, and a tag event runs the
+# workflows present AT THE TAGGED COMMIT — harmless while the DigiByte Mobile release branch
+# carries no release.yml, but a trap the moment develop and the mobile line are merged: a v*
+# tag cut from develop would then build the retired app with the retired key and repoint the
+# live download channel at it, pushing an APK no current install can accept.
+#
+# The wallet is now DigiByte Mobile (app.aroundtheblock.wallet), whose release is built by
+# scripts/build-release.sh on the owner's machine. Its key is deliberately not in CI
+# (owner decision 2026-10-05): it is also the app-signing key Play holds, so a stolen CI
+# secret would sign a malicious update for every Play and sideload user.
+#
+# Kept rather than deleted, and still dispatchable, for one job: re-publishing or repairing
+# io.digibyte's downloads page. Dispatch is guarded below to v4.0.87.x so it cannot be pointed
+# at a DigiByte Mobile tag by mistake.
 
 on:
-  push:
-    tags: ['v*']
-  # Manual fallback. Without this the release is UNRECOVERABLE if a tag event is
-  # missed: the workflow cannot be dispatched, so the only remedy is deleting and
-  # re-pushing the tag and hoping. That happened on v4.0.33-beta — tag present on
-  # the remote, workflow active, correct trigger at the tagged commit, and no run
-  # was ever created. Pass the tag as `ref` to build it.
+  # No tag trigger. See above.
   workflow_dispatch:
 
 permissions:
@@ -18,6 +32,20 @@ jobs:
   build-sign-deploy:
     runs-on: ubuntu-latest
     steps:
+      # This workflow may only ever publish io.digibyte, and that app ended at v4.0.87.2.
+      # Without this, a dispatch against a DigiByte Mobile tag would build the retired app
+      # under that version and overwrite the live download channel with it.
+      - name: Refuse anything that is not an io.digibyte tag
+        run: |
+          REF="${GITHUB_REF#refs/tags/}"
+          case "$REF" in
+            v4.0.87|v4.0.87.*) echo "ref $REF is an io.digibyte tag, continuing" ;;
+            *) echo "REFUSED: $REF is not an io.digibyte tag (v4.0.87 / v4.0.87.x)."
+               echo "io.digibyte ended at v4.0.87.2. DigiByte Mobile releases are built by"
+               echo "scripts/build-release.sh on the owner's machine, not here."
+               exit 1 ;;
+          esac
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
