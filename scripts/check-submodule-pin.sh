@@ -12,6 +12,19 @@
 #
 # A pin that resolves on your laptop proves nothing — the object is in your local
 # store. This checks the FORK.
+#
+# The rule is CONTAINMENT: the pin must equal, or be an ancestor of, the tip of a
+# durable branch. A pin BEHIND the tip passes (decided 2026-10-10). The core has two
+# consumers, Android and iOS, and requiring EQUALITY forced both pins to move the same
+# day as every core push. Equality was only ever required because CI checks the
+# submodule out at depth 1, where `merge-base --is-ancestor` cannot see the history
+# between pin and tip (it reddened CI on 2026-08-31 and 2026-09-03). This script now
+# fetches that history before asking, so a shallow checkout gets the same answer as a
+# full clone.
+#
+# The same script lives in both consumers (digibytewallet-ios/Scripts/check-core-pin.sh,
+# digibytewallet-android/scripts/check-submodule-pin.sh), differing only in SUB_PATH.
+# Change both together.
 set -euo pipefail
 
 CORE_REMOTE="${CORE_REMOTE:-git@github.com:JohnnyLawDGB/digibytewallet-core.git}"
@@ -26,50 +39,61 @@ if [ -z "$PIN" ]; then
 fi
 echo "pin at $REF: $PIN"
 
-# Ask the REMOTE what each durable branch points at, then check containment there.
-# Deliberately not `git cat-file` against the local store: local reachability is
-# exactly the false positive this script exists to catch.
+# Ask the REMOTE what each durable branch points at, then check containment against
+# history fetched from there. Deliberately not `git cat-file` against the local store:
+# local reachability is exactly the false positive this script exists to catch.
 cd "$SUB_PATH"
-git fetch -q "$CORE_REMOTE" $DURABLE 2>/dev/null || true
+# An uninitialised submodule is an empty directory, and git run there acts on the
+# PARENT repo: it would fetch core history into it and answer about the wrong store.
+if [ "$(git rev-parse --show-toplevel 2>/dev/null)" != "$(pwd -P)" ]; then
+    echo "FAIL: $SUB_PATH is not checked out. Run: git submodule update --init"
+    exit 2
+fi
 
-# EQUALITY, not containment. CI checks out the submodule with actions/checkout
-# (`submodules: recursive`, depth 1), so the only core commit in its store is the
-# pin itself; a fetch of `develop` into that shallow store brings the tip but none
-# of the history behind it, and `merge-base --is-ancestor` can only succeed when
-# pin == tip. A local full clone answers "contained" for a pin one commit behind —
-# exactly the case that reddens CI (bit 2026-08-31 and 2026-09-03). So: pass only
-# on equality; report "behind" separately so the fix is obvious.
-BEHIND=""
+UNVERIFIED=""
 for b in $DURABLE; do
-    tip="$(git ls-remote "$CORE_REMOTE" "refs/heads/$b" 2>/dev/null | awk '{print $1}')"
-    [ -z "$tip" ] && continue
+    # --exit-code: 2 means the branch does not exist (skip it); anything else non-zero
+    # means the remote could not be asked, which must not read as "not contained".
+    rc=0
+    tip="$(git ls-remote --exit-code "$CORE_REMOTE" "refs/heads/$b" 2>/dev/null | awk '{print $1}')" || rc=$?
+    if [ "$rc" -eq 2 ]; then continue; fi
+    if [ "$rc" -ne 0 ] || [ -z "$tip" ]; then
+        UNVERIFIED="$UNVERIFIED $b"
+        continue
+    fi
     if [ "$PIN" = "$tip" ]; then
         echo "OK: pin equals the tip of core '$b' ($tip)"
         exit 0
     fi
-    git fetch -q "$CORE_REMOTE" "$b" 2>/dev/null || true
-    if [ -z "$BEHIND" ] && git merge-base --is-ancestor "$PIN" "$tip" 2>/dev/null; then
-        BEHIND="$b $tip"
+    # A shallow store (CI) holds the pin and nothing behind it, so ancestry would read
+    # as "not contained". Fetch the branch's full history first.
+    if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+        fetched="$(git fetch -q --unshallow "$CORE_REMOTE" "refs/heads/$b" 2>&1 && echo yes || true)"
+    else
+        fetched="$(git fetch -q "$CORE_REMOTE" "refs/heads/$b" 2>&1 && echo yes || true)"
+    fi
+    if [ "${fetched##*$'\n'}" != "yes" ]; then
+        UNVERIFIED="$UNVERIFIED $b"
+        continue
+    fi
+    if git merge-base --is-ancestor "$PIN" "$tip" 2>/dev/null; then
+        behind="$(git rev-list --count "$PIN..$tip")"
+        echo "OK: pin is contained in core '$b' ($behind commit(s) behind its tip $tip)"
+        exit 0
     fi
 done
 
-if [ -n "$BEHIND" ]; then
-    set -- $BEHIND
+if [ -n "$UNVERIFIED" ]; then
     cat <<MSG
-FAIL: the submodule pin is BEHIND the tip of core '$1'.
+FAIL: could not fetch core history to verify the pin (branches:$UNVERIFIED).
 
-  pin: $PIN
-  tip: $2
+  pin:    $PIN
+  remote: $CORE_REMOTE
 
-The pin is reachable from '$1' on a full clone, but CI clones the submodule at
-depth 1 and cannot see the history between pin and tip — it will fail this same
-check. Core's durable tip must EQUAL the android pin.
-
-Fix: bump the pin forward and commit it here, e.g.
-  cd $SUB_PATH && git checkout -q $2 && cd - >/dev/null
-  git add $SUB_PATH && git commit -m "chore(core): bump submodule pin to ${2:0:7}"
+This is a fetch failure, not a verdict on the pin. Check network and credentials,
+or set CORE_REMOTE (e.g. https://github.com/JohnnyLawDGB/digibytewallet-core.git).
 MSG
-    exit 1
+    exit 2
 fi
 
 cat <<MSG
