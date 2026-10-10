@@ -178,6 +178,13 @@ Reports without these elements are returned for missing information:
   the malicious tx hex or metadata JSON.
 - **Impact statement** — what an attacker gains
 - **Suggested fix** (optional but valued — affects payout tier)
+- **DGB payout address** — we pay in DGB to an address you provide, so include one. We
+  checksum-verify it before sending anything, and we will ask you to confirm it in your own words
+  at payment time: a bounty payment is an irreversible on-chain send.
+- **How you want to be credited** — your real name, a handle, or anonymous. We name reporters in
+  the release notes and in the Hall of Fame below, and we only do that with your permission, so if
+  you do not tell us we cannot credit you. Asking to stay anonymous does not affect eligibility,
+  and duplicates and hardening findings are credited too, even where they earn no payment.
 
 ### Disclosure timeline
 
@@ -234,9 +241,10 @@ platform — direct submission is welcomed and treated identically.
 ## Hall of Fame
 
 Researchers who have reported valid vulnerabilities, with their permission,
-will be listed here.
+will be listed here. Tell us in your report how you would like to appear.
 
-*(Empty — we look forward to crediting you.)*
+*(Being populated — reporters from the 2026-09 and 2026-10 waves are being asked for their
+credit preference before they are named here.)*
 
 ---
 
