@@ -26,7 +26,7 @@ SAN_RE='ERROR: AddressSanitizer|runtime error:'
 RED_CASES=(absent_from_full_window_aged_out absent_tried_then_given_up unconfirmed_held_then_retried
            unreadable_height_tried_then_held all_unconfirmed_window_not_full
            one_confirmed_row_anchors_full hold_edges)
-GUARD_CASES=(heights_classify confirmed_listed_settles sentinel_listed_republishes window_bound)
+GUARD_CASES=(conflicted_only_when_held_and_invalid heights_classify confirmed_listed_settles sentinel_listed_republishes window_bound)
 
 build() {
     local out="$1"; shift

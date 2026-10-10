@@ -109,6 +109,12 @@ int main(void)
     snprintf(why, sizeof(why), "1 ms short %s, clock back %s, under cap %s", name(a), name(b), name(c));
     result("hold_edges", a == BRStrandedHold && b == BRStrandedHold && c == BRStrandedRepublish, why);
 
+    // A held send the core marks invalid is conflicted (removed, not re-published); a held valid
+    // one and one the wallet does not hold are not (BRWalletTransactionIsValid reads 1 for those).
+    result("conflicted_only_when_held_and_invalid",
+           BRStrandedSendIsConflicted(1, 0) && ! BRStrandedSendIsConflicted(1, 1) && ! BRStrandedSendIsConflicted(0, 1) &&
+           ! BRStrandedSendIsConflicted(0, 0), NULL);
+
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
 }
