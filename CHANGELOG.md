@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.0.87.2](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v4.0.87.1...v4.0.87.2) (2026-10-10)
+
+Security-only update for `io.digibyte`, on top of 4.0.87.1. No features; the move notice to
+DigiByte Mobile, the "DigiByte (old)" launcher name and the grey icon are unchanged.
+
+### Bug Fixes
+
+* a payment is counted from the block this wallet itself holds at that height, and a peer answering about another block at that height can neither have a payment counted from it nor leave the real block's payment unseen
+* an alternative chain whose difficulty the wallet has no history to check is refused rather than adopted, unless it extends the chain the wallet already has
+* stability: the wallet reads its own saved peers, blocks and transactions strictly within the bytes it saved, on 32-bit devices as on 64-bit ones; damaged or oversized saved data is treated as empty
+* release: the downloads-page rewrite reads a four-part version, so publishing a tag cannot leave the page naming one version beside another version's checksum
+
 ## [4.0.87.1](https://github.com/JohnnyLawDGB/digibytewallet-android/compare/v4.0.87...v4.0.87.1) (2026-10-08)
 
 Security-only update for `io.digibyte`. No features; the move notice to DigiByte Mobile, the
