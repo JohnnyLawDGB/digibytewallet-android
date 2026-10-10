@@ -262,7 +262,16 @@ jobs:
             # The group REPEATS (*, not \?) on purpose: the live page was left reading
             # "v4.0.32-beta-beta", and a single optional suffix matches only
             # "v4.0.32-beta", rewriting it to "v4.0.33-beta" and keeping the 404.
-            VER_RE='v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[A-Za-z0-9.]\+\)*'
+            #
+            # It also reads a FOURTH numeric part, which a patch release of a final version
+            # carries (v4.0.87.1). Three parts only was enough to PUBLISH such a tag -- the page
+            # then read "v4.0.87" and the whole tag replaced it -- but not to publish the NEXT
+            # one: the regex would stop at "v4.0.87" inside the page's "v4.0.87.1", so the
+            # version element would become "v4.0.87.2.1", and the anchored filename pattern
+            # ("digibyte-wallet-v4.0.87\.apk") would not match "digibyte-wallet-v4.0.87.1.apk"
+            # at all -- freezing the download button on the old APK beside the new SHA-256,
+            # which is failure 3 above, the worst of them.
+            VER_RE='v[0-9]\+\.[0-9]\+\.[0-9]\+\(\.[0-9]\+\)*\(-[A-Za-z0-9.]\+\)*'
             sed -i "s|digibyte-wallet-${VER_RE}\.apk|${FILENAME}|g"              index.html
             sed -i "s|<div class=\"ver\">${VER_RE}|<div class=\"ver\">${TAG}|"   index.html
             sed -i "s|Download APK (${VER_RE})|Download APK (${TAG})|"           index.html

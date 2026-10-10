@@ -63,6 +63,13 @@ jobs:
       - name: Docs state the shipped version
         run: ./scripts/check-doc-version.sh
 
+      # The release workflow rewrites the public downloads page with sed, and gets to try that
+      # exactly once per release, at the moment a tag is pushed -- too late to find out that its
+      # version regex does not understand the shape of the version being published. Three parts
+      # could publish v4.0.87.1 but not the release after it. Driven over a fixture here instead.
+      - name: Release page rewrite handles the version shape
+        run: ./scripts/test-helpers/release-page-version-test.sh
+
       # Runs on EVERY build, not in the periodic security cycle: a new CVE appears without
       # anyone touching this repository, so it is the one class of vulnerability whose arrival
       # is unrelated to our commits — and the only one we cannot find by reading our own code.
