@@ -148,6 +148,33 @@ treat them as history plus decisions, not as instructions:
 
 ## Important Patterns
 
+### Re-derive an inherited value before you use it (2026-10-10)
+
+The recurring defect on this project is not a wrong value, it is a **borrowed** one: a number,
+build flag or severity carried over from an adjacent context because it looked consistent there.
+Four instances in one day:
+
+- `$100,000` became `100,000 DGB` in a commit titled "correct rewards to DGB" — the unit changed
+  and the digits did not, cutting the bounty programme 279x by find-and-replace.
+- `orphan_set_limits_kat` carried `-DDGB_HEADER_DIFF_CHECK=1` because its two sibling suites
+  needed it. Measured: it passes at the shipped level on both release lines, so the pin only
+  lowered coverage. `scripts/check-kat-level-pins.sh` now makes every such pin prove itself.
+- "Asset misattribution" was scored **High** straight from the bounty tier table, which lists it
+  beside "funds at rest". DigiAssets carry no market value, so a forged credit costs a user
+  nothing: it is display integrity, Low. Severity follows the value at risk, not the subsystem's
+  name.
+- `release.yml`'s `VER_RE` read three version parts, because every release had three until
+  v4.0.87.1 had four. Tagging the next release would have rewritten the live download page to
+  "v4.0.87.2.1" and frozen the download button beside a new checksum.
+
+Each looked like local consistency. Severity tables, build flags and version regexes all describe
+a context, and the context moves while the value stays.
+
+**So:** when a value comes from a sibling test, an adjacent release line, a tier table or a
+previous version, re-derive it here. Where measuring is cheap, measure — running that KAT at the
+shipped level took 53 seconds and overturned the assumption. Where it is a judgement, state the
+assumption out loud so it can be refuted; that is how the DigiAsset scoring got corrected.
+
 ### Guardrails (run these; they exist because each one already bit us)
 
 ```bash
@@ -166,6 +193,10 @@ ln -sf ../../scripts/check-worktree-target.sh .git/hooks/pre-commit   # once per
   worktree then lands on whatever branch main is on, over an unrelated base, sweeping up
   whatever was already dirty. Override with `ALLOW_MAIN_COMMIT=1` for deliberate
   merge/release work.
+- **`check-kat-level-pins.sh`** — a suite that names its own `DGB_HEADER_*_CHECK` level is built
+  at a level no app ships, so it must prove the pin is load-bearing by failing at the shipped
+  level. Three suites once carried the same pin and only two needed it. Slow (it re-runs each
+  pinned suite), so it rides the weekly schedule, not every push.
 - **Prefer `git add <explicit paths>` over `git add -A`** when a worktree is in play.
 
 ### Submodule (digibytewallet-core)

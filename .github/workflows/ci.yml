@@ -129,3 +129,10 @@ jobs:
 
       - name: Native host KATs (full sweep)
         run: ./scripts/run-host-kats.sh
+
+      # A suite that names its own header-check level is built at a level no app ships, so it
+      # has to prove the pin is load-bearing. Three suites once carried the same level-1 pin and
+      # only two needed it; the third was quietly testing a verdict no user gets. Runs here
+      # rather than per-push because it re-runs each pinned suite a second time.
+      - name: Header-check level pins are load-bearing
+        run: ./scripts/check-kat-level-pins.sh
