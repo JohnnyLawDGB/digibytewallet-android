@@ -76,6 +76,18 @@ class PinRateLimitTest {
         return mgr to store
     }
 
+    /** As [freshManagerWithPin], but the PIN record is made through [StandInArgon2id], which answers at once,
+     *  instead of the 600 000-round PBKDF2. For the cases about the clock: the cooldown does not depend on
+     *  the hash, and a stand-in record counts exactly like a PBKDF2 one (see the stand-in section below). */
+    private fun quickManagerWithPin(store: FakePinStore = FakePinStore(), c: FakePinClock = clock): Pair<PinManager, FakePinStore> {
+        val mgr = PinManager(store, StandInArgon2id(), c)
+        mgr.setPin(correct)
+        return mgr to store
+    }
+
+    /** A new process over [store] (a force-stop or a reboot), built as [quickManagerWithPin] builds its manager. */
+    private fun restartedOver(store: PinStore, c: FakePinClock = clock): PinManager = PinManager(store, StandInArgon2id(), c)
+
     /** The time the running cooldown has left as the screens see it — when it ends, less the wall clock now — or 0. */
     private fun PinManager.timeLeft(c: FakePinClock = clock): Long = currentLockout().let { if (it == 0L) 0L else it - c.wall }
 
@@ -298,7 +310,7 @@ class PinRateLimitTest {
     }
 
     @Test fun `the time left counts down only as time passes, whatever the wall clock does`() {
-        val (mgr, _) = freshManagerWithPin()
+        val (mgr, _) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
         var left = 60_000L
         for (move in listOf(DAY, -2 * DAY, 3_600_000L, -1L, YEAR)) {
@@ -319,13 +331,13 @@ class PinRateLimitTest {
     // left carries over as it was last measured, and runs on from its first reading in the new boot.
 
     @Test fun `a reboot carries the time left over unchanged and it runs on from there`() {
-        val (mgr, store) = freshManagerWithPin()
+        val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
         clock.pass(20_000L)
         assertEquals(40_000L, mgr.timeLeft()) // read, as the unlock screen does on entry
 
         clock.reboot(offMs = 30_000L, upMs = 25_000L)
-        val afterReboot = PinManager(store, clock = clock)
+        val afterReboot = restartedOver(store)
         assertEquals("the time left after the reboot", 40_000L, afterReboot.timeLeft())
         val r = afterReboot.verifyPin(correct)
         assertTrue("expected the cooldown after the reboot, got $r", r is PinVerifyResult.LockedOut)
@@ -345,15 +357,14 @@ class PinRateLimitTest {
         for (upMs in listOf(0L, 1L, 25_000L, measuredAt - 1, measuredAt, measuredAt + 1, 600_000L, 30L * DAY)) {
             for (move in listOf(0L, YEAR, -YEAR)) {
                 val c = FakePinClock(wall = t0, sinceBoot = measuredAt - 20_000L)
-                val store = FakePinStore()
-                val mgr = PinManager(store, clock = c).apply { setPin(correct) }
+                val (mgr, store) = quickManagerWithPin(c = c)
                 repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
                 c.pass(20_000L)
                 assertEquals(40_000L, mgr.timeLeft(c))
 
                 c.reboot(upMs = upMs)
                 c.wall += move
-                val r = PinManager(store, clock = c).verifyPin(correct)
+                val r = restartedOver(store, c).verifyPin(correct)
                 val case = "new boot up $upMs ms, wall clock moved $move ms"
                 assertTrue("$case: expected the cooldown, got $r", r is PinVerifyResult.LockedOut)
                 assertEquals("$case: the time left", 40_000L, (r as PinVerifyResult.LockedOut).until - c.wall)
@@ -369,11 +380,10 @@ class PinRateLimitTest {
         val measuredAt = 120_000L
         for (upMs in listOf(1L, 25_000L, measuredAt - 1, measuredAt, measuredAt + 1, 600_000L, 30L * DAY)) {
             val c = FakePinClock(wall = t0, sinceBoot = measuredAt, boot = PinClock.UNKNOWN_BOOT)
-            val store = FakePinStore()
-            val mgr = PinManager(store, clock = c).apply { setPin(correct) }
+            val (mgr, store) = quickManagerWithPin(c = c)
             repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min, measured at 2 min up
             c.reboot(upMs = upMs)
-            val left = PinManager(store, clock = c).timeLeft(c)
+            val left = restartedOver(store, c).timeLeft(c)
             val counted = (upMs - measuredAt).coerceAtLeast(0L)
             assertEquals("new boot up $upMs ms", (60_000L - counted).coerceAtLeast(0L), left)
             assertTrue("new boot up $upMs ms: more counted than the device ran", 60_000L - left <= upMs)
@@ -381,51 +391,51 @@ class PinRateLimitTest {
     }
 
     @Test fun `repeated reboots never end a cooldown`() {
-        val (mgr, store) = freshManagerWithPin()
+        val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
         repeat(10) { i ->
             clock.reboot(offMs = 3_600_000L, upMs = 10_000L + i)
             clock.wall += if (i % 2 == 0) YEAR else -YEAR
-            val r = PinManager(store, clock = clock).verifyPin(correct)
+            val r = restartedOver(store).verifyPin(correct)
             assertTrue("reboot ${i + 1}: expected the cooldown, got $r", r is PinVerifyResult.LockedOut)
             assertEquals("reboot ${i + 1}: the time left", 60_000L, (r as PinVerifyResult.LockedOut).until - clock.wall)
         }
         clock.pass(60_000L)
-        assertSame(PinVerifyResult.Success, PinManager(store, clock = clock).verifyPin(correct))
+        assertSame(PinVerifyResult.Success, restartedOver(store).verifyPin(correct))
     }
 
     @Test fun `a cooldown read as run out stays ended after a reboot`() {
-        val (mgr, store) = freshManagerWithPin()
+        val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) }
         clock.pass(60_000L)
         assertEquals(0L, mgr.currentLockout())
         clock.reboot()
-        assertEquals(0L, PinManager(store, clock = clock).currentLockout())
-        assertSame(PinVerifyResult.Success, PinManager(store, clock = clock).verifyPin(correct))
+        assertEquals(0L, restartedOver(store).currentLockout())
+        assertSame(PinVerifyResult.Success, restartedOver(store).verifyPin(correct))
     }
 
     // The price of counting nothing across a reboot, stated: a cooldown that ran out while nothing read
     // it is carried over with the time it had when last read (at most the longest cooldown).
     @Test fun `a cooldown not read again before a reboot carries over the time it had when last read`() {
-        val (mgr, store) = freshManagerWithPin()
+        val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // last read as it started
         clock.pass(60_000L) // it runs out, but nothing reads it
         clock.reboot()
-        assertEquals(60_000L, PinManager(store, clock = clock).timeLeft())
+        assertEquals(60_000L, restartedOver(store).timeLeft())
     }
 
     @Test fun `failures count the same across reboots and wall-clock moves and wipe-after-N trips at the threshold`() {
-        val (mgr, store) = freshManagerWithPin()
+        val (mgr, store) = quickManagerWithPin()
         mgr.setWipeAfterN(true)
         var last: PinVerifyResult = PinVerifyResult.Success
         for (n in 1..PinManager.WIPE_THRESHOLD) {
-            last = PinManager(store, clock = clock).verifyPin(wrong)
+            last = restartedOver(store).verifyPin(wrong)
             if (n == PinManager.WIPE_THRESHOLD) break
             assertEquals("failure $n", n, (last as PinVerifyResult.Wrong).failCount)
             clock.reboot()
             clock.wall -= DAY
             // The cooldown runs out on the monotonic clock in the new boot, from its first reading there.
-            assertEquals(PinManager.cooldownMsForFailCount(n), PinManager(store, clock = clock).timeLeft())
+            assertEquals(PinManager.cooldownMsForFailCount(n), restartedOver(store).timeLeft())
             clock.pass(PinManager.cooldownMsForFailCount(n))
         }
         assertSame(PinVerifyResult.ShouldWipe, last)
@@ -455,20 +465,19 @@ class PinRateLimitTest {
             for (stopAt in 0..2) {
                 val case = "reboot first $rebootFirst, stopped at write $stopAt"
                 val c = FakePinClock(wall = t0)
-                val store = FakePinStore()
-                val mgr = PinManager(store, clock = c).apply { setPin(correct) }
+                val (mgr, store) = quickManagerWithPin(c = c)
                 repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
                 c.pass(20_000L)
                 if (rebootFirst) c.reboot()
                 val expected = if (rebootFirst) 60_000L else 40_000L
                 try {
-                    PinManager(StoppingStore(store, stopAt), clock = c).currentLockout()
+                    restartedOver(StoppingStore(store, stopAt), c).currentLockout()
                     throw AssertionError("$case: the read wrote fewer than ${stopAt + 1} values")
                 } catch (e: StoppingStore.Stopped) {
                     // the process is gone; the next one reads what was written
                 }
                 c.pass(5_000L)
-                val left = PinManager(store, clock = c).timeLeft(c)
+                val left = restartedOver(store, c).timeLeft(c)
                 assertTrue("$case: $left ms left, less than the ${expected - 5_000L} ms a complete write leaves", left >= expected - 5_000L)
                 assertTrue("$case: $left ms left, more than the cooldown had", left <= 60_000L)
             }
@@ -478,7 +487,7 @@ class PinRateLimitTest {
     // ── A cooldown kept on the wall clock by 4.0.89 and earlier ──────────────────────────────
 
     @Test fun `a running cooldown kept on the wall clock by an earlier version is carried over once`() {
-        val (mgr, store) = freshManagerWithPin()
+        val (mgr, store) = quickManagerWithPin()
         store.putInt("pin_fail_count", 4)
         store.putLong("pin_lockout_until", clock.wall + 45_000L)
         store.putLong("pin_last_fail_at", clock.wall - 15_000L)
@@ -498,8 +507,7 @@ class PinRateLimitTest {
     @Test fun `a wall-clock cooldown is carried over with at most the longest cooldown and not at all once run out`() {
         for ((endsIn, carried) in listOf(-DAY to 0L, -1L to 0L, 0L to 0L, 1L to 1L, 10L * DAY to PinManager.MAX_COOLDOWN_MS)) {
             val c = FakePinClock(wall = t0)
-            val store = FakePinStore()
-            val mgr = PinManager(store, clock = c).apply { setPin(correct) }
+            val (mgr, store) = quickManagerWithPin(c = c)
             store.putInt("pin_fail_count", 7)
             store.putLong("pin_lockout_until", c.wall + endsIn)
             store.putLong("pin_last_fail_at", c.wall - 1L)
