@@ -27,7 +27,7 @@
  *   session 1  the wallet holds the receive at TX_UNCONFIRMED and is saved by
  *              BRWalletSerializeTransactions -- what getSerializedTransactions persists, height included.
  *   relaunch   the bridge's own JNI-free loader (deserialize_saved_transactions_guarded), then
- *              BRWalletNewDual and BRWalletSetTaprootKey in recoverWalletFromBytes' order.
+ *              BRWalletNewDual and BRWalletSetTaprootKey in restoreWalletFromBytes' order.
  *   the tip    the sync completes in compact-filter mode with the app's synced peer count (three):
  *              _BRPeerManagerLoadMempools pings every peer; each pong runs _postSyncDone, which runs
  *              _BRPeerManagerRequestUnrelayedTx (getdata for every unconfirmed record, then a ping);
@@ -94,7 +94,7 @@ static const uint8_t kEmpty[1] = { 0 };
 #define DGB_TO_US          100000000ULL
 #define SYNCED_PEERS       3       /* SyncService SYNCED_PEER_COUNT: the app's target once synced */
 
-/* The wallet as recoverWalletFromBytes builds it: BRWalletNewDual over the saved records (BIP84 and
+/* The wallet as restoreWalletFromBytes builds it: BRWalletNewDual over the saved records (BIP84 and
  * legacy keys), then the BIP86 taproot key. */
 static BRWallet *openWallet(BRTransaction *saved[], size_t savedCount)
 {
@@ -253,7 +253,7 @@ static void onSyncStopped(void *info, int error)
     ((Fx *)info)->syncStoppedSeen++;
 }
 
-/* The relaunch: the bridge's loader over the saved blob, then the wallet in recoverWalletFromBytes'
+/* The relaunch: the bridge's loader over the saved blob, then the wallet in restoreWalletFromBytes'
  * order. Records the wallet did not take stay the caller's (as in the bridge). */
 static void relaunch(Fx *f, const uint8_t *blob, size_t blobLen, size_t expect)
 {

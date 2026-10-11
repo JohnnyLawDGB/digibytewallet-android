@@ -25,7 +25,7 @@ import android.content.Context
  * The counter above only catches crashes in the PRE-unlock startup window (native
  * lib load, DB open) — [markBootHealthy] fires ~12s after onCreate, well before a
  * user has usually unlocked. A corrupt persisted blob that only crashes the
- * POST-unlock wallet-restore (`recoverWalletFromBytes` / `loadSavedBlocks` fed a
+ * POST-unlock wallet-restore (`restoreWalletFromBytes` / `loadSavedBlocks` fed a
  * corrupt `saved_transactions`/`saved_blocks` blob) would crash AFTER that timer
  * already reset `pending_boots`, so it would never trip the counter above and the
  * device would crash on every launch forever.
@@ -33,10 +33,10 @@ import android.content.Context
  * This is a SEPARATE flag/counter (`restore_pending` / `restore_crash_count`),
  * distinct from `pending_boots`, bracketing specifically the post-unlock restore:
  *   1. [beginRestore] sets `restore_pending = true` (commit) at the START of the
- *      restore, before `recoverWalletFromBytes`/`loadSavedBlocks` run.
+ *      restore, before `restoreWalletFromBytes`/`loadSavedBlocks` run.
  *   2. [markRestoreHealthy] clears it once the restore's risky window has
  *      genuinely completed (after `loadSavedBlocks` returns, not just after
- *      `recoverWalletFromBytes` — the corrupt-blob crash lives in the block
+ *      `restoreWalletFromBytes` — the corrupt-blob crash lives in the block
  *      deserializer).
  *   3. [recoverFromCrashedRestoreIfNeeded], called in `onCreate` right after
  *      [beginBoot] (before any UI/unlock can start a restore), checks whether
@@ -125,7 +125,7 @@ object BootGuard {
 
     /**
      * Call at the START of the post-unlock wallet restore (the entry of
-     * `WalletManager.restoreFromDisk()`), before `recoverWalletFromBytes` or any
+     * `WalletManager.restoreFromDisk()`), before `restoreWalletFromBytes` or any
      * other risky native deserialization runs. Committed synchronously so a
      * crash immediately after this call still leaves `restore_pending = true`
      * on disk for [recoverFromCrashedRestoreIfNeeded] to see on the next launch.
@@ -136,7 +136,7 @@ object BootGuard {
 
     /**
      * Call AFTER the restore's risky window has genuinely completed — i.e. after
-     * `recoverWalletFromBytes` succeeds AND the first `loadSavedBlocks` call in
+     * `restoreWalletFromBytes` succeeds AND the first `loadSavedBlocks` call in
      * `SyncService.startSyncWithTor` returns (that's where a corrupt
      * `saved_blocks` blob actually crashes the native block deserializer).
      * Clears `restore_pending` and resets `restore_crash_count` so a healthy

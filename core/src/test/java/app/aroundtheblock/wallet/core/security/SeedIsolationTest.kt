@@ -109,12 +109,15 @@ class SeedIsolationTest {
             "recoverWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType, ByteArray::class.java
         )
         NativeBridge::class.java.getDeclaredMethod(
+            "restoreWalletFromBytes", ByteArray::class.java, Long::class.javaPrimitiveType, ByteArray::class.java
+        )
+        NativeBridge::class.java.getDeclaredMethod(
             "mnemonicToSeed", ByteArray::class.java, ByteArray::class.java
         )
 
         // And no String-typed passphrase overload may creep back in alongside them.
         val stringy = NativeBridge::class.java.declaredMethods.filter { m ->
-            m.name in setOf("createWalletFromBytes", "recoverWalletFromBytes", "mnemonicToSeed") &&
+            m.name in setOf("createWalletFromBytes", "recoverWalletFromBytes", "restoreWalletFromBytes", "mnemonicToSeed") &&
                 m.parameterTypes.any { it == String::class.java }
         }
         assertTrue("passphrase must not cross JNI as a String: $stringy", stringy.isEmpty())

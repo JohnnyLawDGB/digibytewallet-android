@@ -233,6 +233,13 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
      * create may wait behind a startSync's bounded disconnect wait. */
     PEER_GUARD();
 
+    /* A wallet is never built from records loaded for another one: creating a wallet first drops any
+     * pending load, so no later restore can build from it. (-DSAVED_TX_PENDING_LOAD_UNFIXED, the host
+     * KAT's comparison arm only, keeps it.) */
+#ifndef SAVED_TX_PENDING_LOAD_UNFIXED
+    saved_transactions_discard();
+#endif
+
     if (!phraseBytes) {
         LOGW("createWalletFromBytes: phraseBytes is null");
         return JNI_FALSE;
@@ -326,24 +333,51 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
     return JNI_TRUE;
 }
 
-/* ---------- recoverWalletFromBytes ---------- */
+/* ---------- recoverWalletFromBytes ----------
+ * Recover a wallet from a phrase the user entered (WalletManager.recoverWallet). It is never built from
+ * loaded records: any pending load is dropped first -- it was loaded for a disk restore, possibly of
+ * another wallet -- and the wallet is then built as restoreWalletFromBytes builds it, from no records.
+ */
+jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes,
+                                                     jlong creationTimestamp, jbyteArray passphrase);
 
 jboolean JNICALL
 NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
                                                                    jbyteArray phraseBytes,
                                                                    jlong creationTimestamp,
                                                                    jbyteArray passphrase) {
+    PEER_GUARD();   /* the drop and the swap are one step for every other user of (g_wallet, g_peerManager) */
+
+    /* (-DSAVED_TX_PENDING_LOAD_UNFIXED, the host KAT's comparison arm only, keeps the pending load.) */
+#ifndef SAVED_TX_PENDING_LOAD_UNFIXED
+    saved_transactions_discard();
+#endif
+    jboolean ok = NativeBridge_restoreWalletFromBytes(env, thiz, phraseBytes, creationTimestamp, passphrase);
+    if (ok) LOGI("recoverWalletFromBytes: wallet recovered, creationTime=%u", g_walletCreationTime);
+    return ok;
+}
+
+/* ---------- restoreWalletFromBytes ----------
+ * Restore the wallet from its stored phrase and the records loadSerializedTransactions loaded for it
+ * (WalletManager.restoreFromDisk: the load, then this). The only entry that builds a wallet from loaded
+ * records; after the build the bridge keeps none of them (saved_transactions_release_after_build).
+ */
+jboolean JNICALL
+NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz,
+                                    jbyteArray phraseBytes,
+                                    jlong creationTimestamp,
+                                    jbyteArray passphrase) {
     (void)thiz;
     PEER_GUARD();   /* the swap is serialised with every other user of (g_wallet, g_peerManager) */
 
     if (!phraseBytes) {
-        LOGW("recoverWalletFromBytes: phraseBytes is null");
+        LOGW("restoreWalletFromBytes: phraseBytes is null");
         return JNI_FALSE;
     }
 
     jsize phraseLen = (*env)->GetArrayLength(env, phraseBytes);
     if (phraseLen <= 0 || phraseLen > 1024) {
-        LOGW("recoverWalletFromBytes: invalid length=%d", phraseLen);
+        LOGW("restoreWalletFromBytes: invalid length=%d", phraseLen);
         return JNI_FALSE;
     }
 
@@ -352,7 +386,7 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     phraseChars[phraseLen] = '\0';
 
     if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
-        LOGW("recoverWalletFromBytes: invalid BIP39 phrase");
+        LOGW("restoreWalletFromBytes: invalid BIP39 phrase");
         secure_zero(phraseChars, sizeof(phraseChars));
         return JNI_FALSE;
     }
@@ -396,13 +430,20 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     extern size_t g_savedTransactionCount;
 
     if (g_savedTransactions && g_savedTransactionCount > 0) {
-        LOGI("recoverWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
+        LOGI("restoreWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
         g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
     } else {
         g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
     }
+    /* The wallet owns the records it took, and the bridge keeps none of them (jni_transaction_persist.c).
+     * Nothing else uses the new wallet before this: the swap holds PEER_GUARD, and no peer manager is
+     * built on it until startSync. (-DSAVED_TX_ARRAY_UNFIXED, the host KAT's comparison arm only, leaves
+     * the array naming them.) */
+#ifndef SAVED_TX_ARRAY_UNFIXED
+    saved_transactions_release_after_build(g_wallet);
+#endif
     if (!g_wallet) {
-        LOGE("recoverWalletFromBytes: BRWalletNewDual failed");
+        LOGE("restoreWalletFromBytes: BRWalletNewDual failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
@@ -420,7 +461,7 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
     g_peerManagerNeedsRecreate = 1;
 
-    LOGI("recoverWalletFromBytes: wallet recovered, creationTime=%u", g_walletCreationTime);
+    LOGI("restoreWalletFromBytes: wallet built, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }
 

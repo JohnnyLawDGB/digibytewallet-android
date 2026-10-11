@@ -11,7 +11,7 @@ import org.junit.Assert.*
  * restart in the wallet's balance.
  *
  * The bug: on restart, `WalletManager.restoreFromDisk()` calls
- * `recoverWalletFromBytes()` → `BRWalletNewDual(savedTxs, …)`. Inside
+ * `restoreWalletFromBytes()` → `BRWalletNewDual(savedTxs, …)`. Inside
  * `BRWalletNewDual`, the saved transactions are bulk-loaded and
  * `_BRWalletUpdateBalance` runs while `hasTaprootKey == 0` and the taproot chains
  * are still empty — so a saved P2TR output fails
@@ -29,7 +29,7 @@ import org.junit.Assert.*
  * This test drives the real reload cycle end-to-end:
  *   createWallet → register a confirmed tx paying getReceiveAddress(0,3) →
  *   getSerializedTransactions (the saved-tx blob) →
- *   loadSerializedTransactions + recoverWalletFromBytes (the restart) →
+ *   loadSerializedTransactions + restoreWalletFromBytes (the restart) →
  *   assert the balance still includes the P2TR output.
  *
  * The `getBalance()` assertion after reload is the load-bearing one: RED before
@@ -53,17 +53,12 @@ class TaprootReloadBalanceTest {
     private val confirmedHeight = 20_000_000L
     private val blockTs = 1_700_000_000L
 
-    // NOTE (teardown): we intentionally do NOT free the global saved-transaction set
-    // after this test. recoverWalletFromBytes() → BRWalletNewDual() takes OWNERSHIP of
-    // the g_savedTransactions BRTransaction pointers (it stores them, it does not copy),
-    // so those objects are now co-owned by the recovered g_wallet. Calling
-    // loadSerializedTransactions() again here would BRTransactionFree() them while
-    // g_wallet still references them, and the next test's createWallet() →
-    // BRWalletFree(g_wallet) would double-free → SIGSEGV. The next createWallet()'s
-    // BRWalletFree reclaims the tx objects exactly once, which is the correct teardown.
-    // (No other test in the suite calls loadSerializedTransactions, so the stale global
-    // pointer is never freed a second time.) In production this shared ownership is benign
-    // because each restore runs in a fresh process.
+    // NOTE (teardown): nothing to release here. restoreWalletFromBytes() → BRWalletNewDual()
+    // takes the saved records (it stores the pointers, it does not copy), and from then on the
+    // bridge names none of them: the records it did not take are released and its saved-record
+    // array is cleared (saved_tx_array_kat pins this). So the next test's createWallet() →
+    // BRWalletFree(g_wallet) reclaims them exactly once, and a later loadSerializedTransactions()
+    // or createWallet() frees nothing a wallet owns.
 
     @Test
     fun p2trReceive_survivesReload_inBalance() {
@@ -104,8 +99,8 @@ class TaprootReloadBalanceTest {
 
         val phraseBytes = mnemonic.toByteArray(Charsets.UTF_8)
         assertTrue(
-            "recoverWalletFromBytes (the reload) should succeed",
-            NativeBridge.recoverWalletFromBytes(phraseBytes, blockTs, null),
+            "restoreWalletFromBytes (the reload) should succeed",
+            NativeBridge.restoreWalletFromBytes(phraseBytes, blockTs, null),
         )
 
         // LOAD-BEARING: after reload, the P2TR output must still be in the balance.
