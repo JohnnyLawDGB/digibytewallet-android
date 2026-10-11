@@ -98,8 +98,9 @@ internal object AssetAnswerCaps {
     /** The indexer's sync state. */
     const val SYNC_STATE = 64L * 1024
 
-    /** The assets on one unspent output (or the indexer's not-found answer for it). */
-    const val OUTPUT_STACK = 256L * 1024
+    /** The assets on one unspent output (or the indexer's not-found answer for it): a few entries in
+     *  practice, and 64 KiB is room for hundreds. */
+    const val OUTPUT_STACK = 64L * 1024
 }
 
 /**

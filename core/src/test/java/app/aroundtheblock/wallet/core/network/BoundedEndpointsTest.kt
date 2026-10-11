@@ -70,7 +70,7 @@ class BoundedEndpointsTest {
         const val ASSET_TX = 4 * MiB         // asset indexers: one raw transaction
         const val ASSET_HISTORY = 4 * MiB    // asset indexers: an address's asset history
         const val ASSET_SYNC = 64 * KiB      // asset indexers: sync state
-        const val ASSET_STACK = 256 * KiB    // our indexer: the assets on one output
+        const val ASSET_STACK = 64 * KiB     // our indexer: the assets on one output
         const val DIGISTAMP_AUTH = 64 * KiB  // digistamp: challenge, session
         const val RECONCILE = 32 * MiB       // reconcile backend: a 500-address UTXO batch with parents
         const val HISTORY = 16 * MiB         // reconcile backend: address history
@@ -238,8 +238,10 @@ class BoundedEndpointsTest {
         val json = """{"txid":"$TXID","vout":0,"confirmations":3,"assets":[{"assetId":"$ASSET","count":5}],"note":"PAD"}"""
         val client = { length: Long -> clientServing(Served { textSource(padded(json, length)) }) }
 
-        assertEquals(StackLookup.Found(listOf(StackEntry(ASSET, 5))),
-            runBlocking { DigiScopeAssetClient(baseClient = client(ASSET_STACK)).stackOf(TXID, 0) })
+        // The entries only: the answer may carry more than them (its confirmations, for one).
+        val found = runBlocking { DigiScopeAssetClient(baseClient = client(ASSET_STACK)).stackOf(TXID, 0) }
+        assertTrue("an answer of exactly the cap was not read: $found", found is StackLookup.Found)
+        assertEquals(listOf(StackEntry(ASSET, 5)), (found as StackLookup.Found).entries)
         assertEquals(StackLookup.Unavailable,
             runBlocking { DigiScopeAssetClient(baseClient = client(ASSET_STACK + 1)).stackOf(TXID, 0) })
     }
