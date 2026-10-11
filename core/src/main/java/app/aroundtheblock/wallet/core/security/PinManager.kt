@@ -196,9 +196,10 @@ private class EncryptedPrefsPinStore(context: Context) : PinStore {
  * A cooldown runs on the monotonic clock ([PinClock.sinceBootMs]). The wall clock never decides
  * whether one has ended, so setting the date neither ends, lengthens nor starts one. The time a
  * cooldown still has to run is stored with the monotonic reading, and the boot, it was measured at,
- * and is measured again each time it is read. That clock starts again from zero at every boot, so
- * how much time passed around a reboot cannot be known without the wall clock: a reboot carries the
- * time left over unchanged, and the cooldown runs on from its first reading in the new boot.
+ * and is measured again each time it is read. That clock starts again from zero at every boot: in a
+ * new boot its reading is the time the device has run since it started, and that counts. The time from
+ * the last reading through the shutdown cannot be known without the wall clock and does not count, so
+ * a reboot never takes more off a cooldown than the time since boot.
  */
 class PinManager internal constructor(
     private val store: PinStore,
@@ -360,6 +361,9 @@ class PinManager internal constructor(
      * The time the running cooldown still has to run, or 0 if none is running. It is measured on
      * the monotonic clock and recorded, so the next reading — after a process restart or a reboot —
      * starts from this one; a cooldown found to have run out is cleared, so no reboot brings it back.
+     * Where the boot count cannot be read, a new boot whose clock already reads past the last reading
+     * is taken for the same boot: then only the time past that reading counts, less than the time
+     * since boot.
      */
     private fun cooldownLeftMs(): Long {
         carryOverWallClockCooldown()
@@ -370,10 +374,11 @@ class PinManager internal constructor(
         val measuredAt = store.getLong(KEY_COOLDOWN_MEASURED_AT, 0L)
         val sameBoot = boot == store.getInt(KEY_COOLDOWN_BOOT, PinClock.UNKNOWN_BOOT) && now >= measuredAt
         // In the boot it was measured in, the time that passed is the difference of two readings of
-        // the monotonic clock. Across a reboot that clock started again from zero, and how much time
-        // passed cannot be known without the wall clock: none is counted, so a reboot never shortens a
-        // cooldown — the time left carries over, and counting resumes from this reading.
-        val stillLeft = if (sameBoot) left - (now - measuredAt) else left
+        // the monotonic clock. In a new boot that clock reads the time since the device started: real
+        // time no one can move, so it counts. The time from the last reading through the shutdown cannot
+        // be known without the wall clock and does not count: a reboot never takes more off a cooldown
+        // than the time since boot.
+        val stillLeft = if (sameBoot) left - (now - measuredAt) else left - now
         if (stillLeft <= 0L) {
             clearCooldown()
             return 0L

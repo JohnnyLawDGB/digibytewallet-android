@@ -326,11 +326,13 @@ class PinRateLimitTest {
 
     // ── A reboot: the monotonic clock starts again from zero ─────────────────────────────────
     //
-    // GUARD (no red can exist: the manager before this change read no monotonic clock). How much time
-    // passed around a reboot cannot be known without the wall clock, so none is counted: the time
-    // left carries over as it was last measured, and runs on from its first reading in the new boot.
+    // In a new boot the monotonic clock reads the time the device has run since it started: real time
+    // no one can move, and it counts. The time from the last reading through the shutdown cannot be
+    // known without the wall clock and does not count. So a reboot never takes more off a cooldown than
+    // the time since boot. Each case below was red against the rule that counted nothing across a
+    // reboot, except the one marked GUARD, which holds under both.
 
-    @Test fun `a reboot carries the time left over unchanged and it runs on from there`() {
+    @Test fun `a reboot counts the time the new boot has run and nothing from before it`() {
         val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
         clock.pass(20_000L)
@@ -338,23 +340,23 @@ class PinRateLimitTest {
 
         clock.reboot(offMs = 30_000L, upMs = 25_000L)
         val afterReboot = restartedOver(store)
-        assertEquals("the time left after the reboot", 40_000L, afterReboot.timeLeft())
+        assertEquals("the time left after the reboot: 40 s less the 25 s the new boot has run", 15_000L, afterReboot.timeLeft())
         val r = afterReboot.verifyPin(correct)
         assertTrue("expected the cooldown after the reboot, got $r", r is PinVerifyResult.LockedOut)
         assertEquals(PinManager.FREE_ATTEMPTS + 1, store.getInt("pin_fail_count", -1))
 
-        clock.pass(39_999L)
+        clock.pass(14_999L)
         assertTrue(afterReboot.verifyPin(correct) is PinVerifyResult.LockedOut)
         clock.pass(1L)
         assertSame(PinVerifyResult.Success, afterReboot.verifyPin(correct))
         assertEquals("the right PIN clears the count", 0, store.getInt("pin_fail_count", -1))
     }
 
-    @Test fun `a reboot never shortens a cooldown however the clocks read after it`() {
+    @Test fun `a reboot takes off exactly the time the new boot has run however the clocks read after it`() {
         // The cooldown is measured 2 min into a boot, so the new boot's clock can read less than,
         // the same as, or more than it did then.
         val measuredAt = 120_000L
-        for (upMs in listOf(0L, 1L, 25_000L, measuredAt - 1, measuredAt, measuredAt + 1, 600_000L, 30L * DAY)) {
+        for (upMs in listOf(0L, 1L, 25_000L, 39_999L, 40_000L, measuredAt - 1, measuredAt, measuredAt + 1, 600_000L, 30L * DAY)) {
             for (move in listOf(0L, YEAR, -YEAR)) {
                 val c = FakePinClock(wall = t0, sinceBoot = measuredAt - 20_000L)
                 val (mgr, store) = quickManagerWithPin(c = c)
@@ -366,45 +368,54 @@ class PinRateLimitTest {
                 c.wall += move
                 val r = restartedOver(store, c).verifyPin(correct)
                 val case = "new boot up $upMs ms, wall clock moved $move ms"
-                assertTrue("$case: expected the cooldown, got $r", r is PinVerifyResult.LockedOut)
-                assertEquals("$case: the time left", 40_000L, (r as PinVerifyResult.LockedOut).until - c.wall)
+                val left = (40_000L - upMs).coerceAtLeast(0L)
+                if (left > 0L) {
+                    assertTrue("$case: expected the cooldown, got $r", r is PinVerifyResult.LockedOut)
+                    assertEquals("$case: the time left", left, (r as PinVerifyResult.LockedOut).until - c.wall)
+                } else {
+                    assertSame("$case: the cooldown ran out in the new boot", PinVerifyResult.Success, r)
+                }
             }
         }
     }
 
-    @Test fun `where the boot count cannot be read a reboot still never ends a cooldown early`() {
-        // Without the boot count a reboot is recognised only by the monotonic clock reading less than
-        // it did. While it does, the time left carries over unchanged. A new boot that has already run
-        // longer than the old one had is read as the same boot: then only the time past the old reading
-        // counts, which is less than the time the device has run since the reboot.
+    @Test fun `where the boot count cannot be read a reboot never takes off more than the time since boot`() {
+        // Without the boot count a reboot is recognised only by the monotonic clock reading less than it
+        // did; then the new boot's whole uptime counts. A new boot whose clock already reads past the last
+        // measurement is taken for the same boot, and only the time past that reading counts: less than
+        // the time since boot, never more.
         val measuredAt = 120_000L
-        for (upMs in listOf(1L, 25_000L, measuredAt - 1, measuredAt, measuredAt + 1, 600_000L, 30L * DAY)) {
+        for (upMs in listOf(1L, 25_000L, 59_999L, 60_000L, measuredAt - 1, measuredAt, measuredAt + 1, 600_000L, 30L * DAY)) {
             val c = FakePinClock(wall = t0, sinceBoot = measuredAt, boot = PinClock.UNKNOWN_BOOT)
             val (mgr, store) = quickManagerWithPin(c = c)
             repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min, measured at 2 min up
             c.reboot(upMs = upMs)
             val left = restartedOver(store, c).timeLeft(c)
-            val counted = (upMs - measuredAt).coerceAtLeast(0L)
+            val counted = if (upMs < measuredAt) upMs else upMs - measuredAt
             assertEquals("new boot up $upMs ms", (60_000L - counted).coerceAtLeast(0L), left)
-            assertTrue("new boot up $upMs ms: more counted than the device ran", 60_000L - left <= upMs)
+            assertTrue("new boot up $upMs ms: more taken off than the time since boot", 60_000L - left <= upMs)
         }
     }
 
-    @Test fun `repeated reboots never end a cooldown`() {
+    @Test fun `repeated reboots take off only the time each new boot has run`() {
         val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
+        var left = 60_000L
         repeat(10) { i ->
-            clock.reboot(offMs = 3_600_000L, upMs = 10_000L + i)
+            clock.reboot(offMs = 3_600_000L, upMs = 1_000L + i)
             clock.wall += if (i % 2 == 0) YEAR else -YEAR
+            left -= 1_000L + i
             val r = restartedOver(store).verifyPin(correct)
             assertTrue("reboot ${i + 1}: expected the cooldown, got $r", r is PinVerifyResult.LockedOut)
-            assertEquals("reboot ${i + 1}: the time left", 60_000L, (r as PinVerifyResult.LockedOut).until - clock.wall)
+            assertEquals("reboot ${i + 1}: the time left", left, (r as PinVerifyResult.LockedOut).until - clock.wall)
         }
-        clock.pass(60_000L)
+        clock.pass(left - 1)
+        assertTrue(restartedOver(store).verifyPin(correct) is PinVerifyResult.LockedOut)
+        clock.pass(1L)
         assertSame(PinVerifyResult.Success, restartedOver(store).verifyPin(correct))
     }
 
-    @Test fun `a cooldown read as run out stays ended after a reboot`() {
+    @Test fun `GUARD a cooldown read as run out stays ended after a reboot`() {
         val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) }
         clock.pass(60_000L)
@@ -414,14 +425,15 @@ class PinRateLimitTest {
         assertSame(PinVerifyResult.Success, restartedOver(store).verifyPin(correct))
     }
 
-    // The price of counting nothing across a reboot, stated: a cooldown that ran out while nothing read
-    // it is carried over with the time it had when last read (at most the longest cooldown).
-    @Test fun `a cooldown not read again before a reboot carries over the time it had when last read`() {
+    // What a reboot still costs, stated: time that passed after the last reading and before the reboot is
+    // not known, so a cooldown that ran out while nothing read it comes back with the time it had when last
+    // read, less the time the new boot has run.
+    @Test fun `a cooldown not read again before a reboot carries over its last reading less the new boot's uptime`() {
         val (mgr, store) = quickManagerWithPin()
         repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // last read as it started
         clock.pass(60_000L) // it runs out, but nothing reads it
-        clock.reboot()
-        assertEquals(60_000L, restartedOver(store).timeLeft())
+        clock.reboot(upMs = 25_000L)
+        assertEquals(35_000L, restartedOver(store).timeLeft())
     }
 
     @Test fun `failures count the same across reboots and wall-clock moves and wipe-after-N trips at the threshold`() {
@@ -432,11 +444,12 @@ class PinRateLimitTest {
             last = restartedOver(store).verifyPin(wrong)
             if (n == PinManager.WIPE_THRESHOLD) break
             assertEquals("failure $n", n, (last as PinVerifyResult.Wrong).failCount)
-            clock.reboot()
+            clock.reboot(upMs = 25_000L)
             clock.wall -= DAY
-            // The cooldown runs out on the monotonic clock in the new boot, from its first reading there.
-            assertEquals(PinManager.cooldownMsForFailCount(n), restartedOver(store).timeLeft())
-            clock.pass(PinManager.cooldownMsForFailCount(n))
+            // The new boot's 25 s count; the rest runs out on the monotonic clock in the new boot.
+            val left = (PinManager.cooldownMsForFailCount(n) - 25_000L).coerceAtLeast(0L)
+            assertEquals("failure $n", left, restartedOver(store).timeLeft())
+            clock.pass(left)
         }
         assertSame(PinVerifyResult.ShouldWipe, last)
         assertTrue(mgr.isWipePending())
@@ -469,7 +482,7 @@ class PinRateLimitTest {
                 repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
                 c.pass(20_000L)
                 if (rebootFirst) c.reboot()
-                val expected = if (rebootFirst) 60_000L else 40_000L
+                val expected = if (rebootFirst) 35_000L else 40_000L // read 25 s into the new boot
                 try {
                     restartedOver(StoppingStore(store, stopAt), c).currentLockout()
                     throw AssertionError("$case: the read wrote fewer than ${stopAt + 1} values")
