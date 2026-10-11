@@ -136,8 +136,9 @@ cryptocurrencies — this is the DigiByte Wallet bounty, paid in DigiByte.
 
 One further rule, because most of what we now receive arrives in machine-generated batches: a
 reward is **per unique vulnerability, not per email**. Seven reports of one root cause are one
-reward. Paid findings are capped at **three per reporter per wave**, and a report against any
-version that is not the current release is closed without triage.
+reward. Paid findings are capped at **three per reporter per wave**, and a report against a version
+that is not in scope — see "The bounty target is one named version" above, which is the only
+statement of that rule — is closed without triage.
 
 ---
 
@@ -157,9 +158,9 @@ Reports about the following are **closed without payout**:
 
 ### Already known / accepted
 
-- The Application's signature lineage starts from a debug certificate
-  (Scheme v3 lineage by design — see `release.yml` and
-  `security/AUDIT-SUMMARY.md`)
+- The retired io.digibyte app's signature lineage starts from a debug certificate (Scheme v3
+  rotation by design). io.digibyte is out of scope; DigiByte Mobile is signed by a single release
+  key with no lineage, and its build refuses an artifact with any other signer.
 - AndroidX `WorkManager` / `ProfileInstaller` exported components
   protected by signature-level system permissions (third-party,
   required by the libraries)
@@ -171,6 +172,22 @@ Reports about the following are **closed without payout**:
   layer in `AssetMetadataService` strips control chars + BiDi overrides;
   finding a bypass IS in scope, but flagging the attack class generically
   is not)
+
+### Known to us, but not yet public
+
+The list above is closed: documented, deliberate trade-offs, and reports of them are out of
+scope. This is a different case — a real vulnerability that we had already found ourselves but
+had **not** fixed in a release, published, or described anywhere you could have seen:
+
+- The **first** valid external report of it earns **half** of its tier's reward, and full credit.
+  You had no way of knowing we knew, so it is not treated as worth nothing; the reduction is for
+  the fix already being ours.
+- Later reports of the same root cause are duplicates: credit, no payment.
+- When we apply this we tell you what we already knew — by tracking ID and the invariant the fix
+  establishes — so the reduction can be checked from your side rather than taken on trust.
+
+_This rule was applied from the 2026-10 waves but was not written here until 2026-10-11, after a
+reporter rightly pointed out that the published rules did not cover it._
 
 ### Generic / requires adversarial conditions outside threat model
 
@@ -284,8 +301,17 @@ platform — direct submission is welcomed and treated identically.
 Researchers who have reported valid vulnerabilities, with their permission,
 will be listed here. Tell us in your report how you would like to appear.
 
-*(Being populated — reporters from the 2026-09 and 2026-10 waves are being asked for their
-credit preference before they are named here.)*
+Names only, each with that researcher's permission and in the form they chose. What each one
+found is credited in the notes of the release that fixes it, and not before: several of these
+findings are fixed but not yet released, and naming them here would disclose them.
+
+0xasuma · 0xradu · Advena · Akbarrsw · @Lord99900 (Bima maulana) · Danu Fandiyana · folox ·
+iblitzc0de · Jackai · Jo Arsy · Keyzo · Lou · Luis_MZ · Mr Fz · Muhammad Harley · oncodewa ·
+Redi Sinaga · Rensisme · Ricki Ariadi · rreiissz · Toshit · Tsaqif · Umiroh123 · w4ke · xbyteid ·
+Yudha Eka Saputra
+
+*Reporters from the 2026-09 and 2026-10 waves who have not yet answered the credit question are
+not listed. Anonymity, or no answer, never affects payment.*
 
 ---
 
@@ -293,3 +319,13 @@ credit preference before they are named here.)*
 
 - **2026-05-03 — Program launched.** Initial scope: v3.5.31 and later.
   Maximum reward 100,000 DGB.
+- **2026-10-10 — Scope and scoring.** One named bounty target that holds still, with a 14-day
+  overlap when it moves. DigiByte Mobile (`app.aroundtheblock.wallet`) is in scope; io.digibyte,
+  retired at v4.0.87.2, is not. Severity follows the value actually at risk (DigiAssets carry no
+  market value, so asset findings are display integrity unless they reach DGB, DigiDollar or the
+  seed). One reward per unique vulnerability; three paid findings per reporter per wave. Payout
+  address and credit preference requested with every report.
+- **2026-10-11 — Rules written down that were already applied.** "Known to us, but not yet
+  public" (half the tier for the first external report). The scope rule is stated once instead
+  of twice. The io.digibyte signing-lineage item corrected. Hall of Fame populated with the
+  names of researchers who gave permission.

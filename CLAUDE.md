@@ -5,8 +5,20 @@
 Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C native core via JNI, hardware-backed security, DigiAssets v2 (detection), Digi-ID, Community Hub.
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
-**Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
-**Version:** v4.0.87 (versionCode 40087)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+
+> **Read [`RELEASING.md`](RELEASING.md) §0 before branching, and before releasing anything.**
+> Two products share this repo. **DigiByte Mobile (`app.aroundtheblock.wallet`) ships;**
+> io.digibyte was retired at v4.0.87.2 (2026-10-10) and receives nothing.
+> **`develop` still builds `io.digibyte`.** The shipping product, and everything needed to
+> release it (`scripts/build-release.sh`, `docs/SIGNING.md`, the signing-key scripts), exists
+> only on `release/digibyte-mobile-<version>` branches. So a PR merged to `develop` does not
+> reach the product until `develop` and the mobile line are merged — that merge is step 0 of
+> 4.0.90. Releases are **not** tag-driven: they are built on the owner's machine by
+> `scripts/build-release.sh`, and the release key never goes to CI.
+> `release.yml` and `release-please` on `develop` are retired; do not rely on either.
+
+**Branch:** `develop` is the default branch and builds io.digibyte (see above). `phase1-modernization` is retired.
+**Version:** DigiByte Mobile 4.0.89 (versionCode 40089) on `release/digibyte-mobile-4.0.89`; the next is 4.0.90. io.digibyte ended at 4.0.87.2. _(Source of truth: `versionName`/`versionCode` in `app/build.gradle.kts` on the release branch.)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -148,6 +160,61 @@ treat them as history plus decisions, not as instructions:
 
 ## Important Patterns
 
+### One copy of each thing (2026-10-11)
+
+The package move did not break the code. It broke **where things live**, and every failure
+found on 2026-10-11 was a second copy that drifted from the first, or a thing that existed in
+only one place nobody looked:
+
+- two `CAMPAIGN.md` files, 25 lines apart; two 4.0.90 scope lists, already disagreeing;
+- `check-submodule-pin.sh` fixed on `develop` while twelve open PRs ran their own old copy;
+- the shipping product's release machinery present only on a release branch, while `develop`
+  — the branch every PR, tool and reader defaults to — builds the retired app;
+- a finished gate, its CI hook and the lesson below on a branch that had never been pushed;
+- a private records repo with nothing committed for twenty days, through three releases and
+  every bounty payout;
+- a bounty write-up in this public repo (`security/reports/bounty/`), whose side finding
+  (now INT-2026-10-11-A) then sat for a month with nobody acting on it.
+
+**So:** every concern has one owner. The release procedure is `RELEASING.md`. A release's
+scope is one private file per version. Finding detail lives only in the private repo; here a
+finding is named by ID and described by its invariant. When you change something that exists
+in more than one place, change every copy or delete all but one. When you finish work, push it.
+And before declaring something missing, check **the thing itself, not its container** — a
+`.git` absent from a parent directory does not mean the directory below it is unversioned.
+
+
+### Re-derive an inherited value before you use it (2026-10-10)
+
+_Recovered 2026-10-11: this section was written on an unpushed branch and reached no line._
+
+The recurring defect on this project is not a wrong value, it is a **borrowed** one: a number,
+build flag or severity carried over from an adjacent context because it looked consistent there.
+Four instances in one day:
+
+- `$100,000` became `100,000 DGB` in a commit titled "correct rewards to DGB" — the unit changed
+  and the digits did not, cutting the bounty programme 279x by find-and-replace.
+- `orphan_set_limits_kat` carried `-DDGB_HEADER_DIFF_CHECK=1` because its two sibling suites
+  needed it. Measured: it passes at the shipped level on both release lines, so the pin only
+  lowered coverage. `scripts/check-kat-level-pins.sh` makes every such pin prove itself — written 2026-10-10 on
+  branch `feat/kat-level-pin-gate`, which was never pushed until 2026-10-11 and lands with the
+  develop/mobile merge.
+- "Asset misattribution" was scored **High** straight from the bounty tier table, which lists it
+  beside "funds at rest". DigiAssets carry no market value, so a forged credit costs a user
+  nothing: it is display integrity, Low. Severity follows the value at risk, not the subsystem's
+  name.
+- `release.yml`'s `VER_RE` read three version parts, because every release had three until
+  v4.0.87.1 had four. Tagging the next release would have rewritten the live download page to
+  "v4.0.87.2.1" and frozen the download button beside a new checksum.
+
+Each looked like local consistency. Severity tables, build flags and version regexes all describe
+a context, and the context moves while the value stays.
+
+**So:** when a value comes from a sibling test, an adjacent release line, a tier table or a
+previous version, re-derive it here. Where measuring is cheap, measure — running that KAT at the
+shipped level took 53 seconds and overturned the assumption. Where it is a judgement, state the
+assumption out loud so it can be refuted; that is how the DigiAsset scoring got corrected.
+
 ### Guardrails (run these; they exist because each one already bit us)
 
 ```bash
@@ -212,6 +279,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - Security tests live in `core/src/test/java/io/digibyte/core/security/` (run `./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"` for the current count)
 - MobSF reports are produced by the MobSF CI workflow (not committed); scorecards at `security/reports/mobsf-scorecard-*.json`
 - Audit summary at `security/AUDIT-SUMMARY.md`
+- **Bounty and audit findings: detail lives only in the private repo** (`~/dgb-wallet-private/audit/`). Never write a report, its mechanism or a reporter's details into this repo — `security/reports/bounty/` takes no new files (see the README there). Here, name a finding by ID and state the invariant.
 - CRITICAL-1: Both halves CLOSED. PIN rate-limit: v3.10.35 (`PinManager`; see security/AUDIT-LOG.md). Keystore user-auth binding: v4.0.77 (`SeedKeyBinding`, 300 s window — see Seed Security above). RESIDUAL: a device with no secure lock screen keeps the unbound key (`SeedKeyBinding.NONE`), and inside the auth window a compromised app process can still decrypt the seed. Hardware backing is probed and logged (`KeyInfo.isInsideSecureHardware`) at key creation, not enforced.
 - CRITICAL-2: Resolved (g_seed static, accessor API)
 - CRITICAL-3: Resolved (ByteArray path, zeroed after use)
