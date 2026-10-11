@@ -102,6 +102,7 @@ void JNICALL NativeBridge_markInitialSyncDone(JNIEnv *env, jobject thiz);  /* jn
 void JNICALL NativeBridge_markSavedBlocksLoadComplete(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jbyteArray JNICALL NativeBridge_mnemonicToSeed(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jbyteArray passphrase);  /* jni_derive.c */
 jint JNICALL NativeBridge_outpointSpentState(JNIEnv *env, jobject thiz, jstring txHashHex, jint vout);  /* jni_wallet.c */
+jlong JNICALL NativeBridge_peerManagerGeneration(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jint JNICALL NativeBridge_peerPenaltyDecide(JNIEnv *env, jobject thiz, jbyteArray blob);  /* jni_peer_penalty_persist.c */
 jint JNICALL NativeBridge_peerPenaltyDecideLength(JNIEnv *env, jobject thiz, jint length);  /* jni_peer_penalty_persist.c */
 jint JNICALL NativeBridge_peerPenaltyEntryBytes(JNIEnv *env, jobject thiz);  /* jni_peer_penalty_persist.c */
@@ -241,6 +242,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "markSavedBlocksLoadComplete", "()V", (void *) NativeBridge_markSavedBlocksLoadComplete }, \
     { "mnemonicToSeed", "([B[B)[B", (void *) NativeBridge_mnemonicToSeed }, \
     { "outpointSpentState", "(Ljava/lang/String;I)I", (void *) NativeBridge_outpointSpentState }, \
+    { "peerManagerGeneration", "()J", (void *) NativeBridge_peerManagerGeneration }, \
     { "peerPenaltyDecide", "([B)I", (void *) NativeBridge_peerPenaltyDecide }, \
     { "peerPenaltyDecideLength", "(I)I", (void *) NativeBridge_peerPenaltyDecideLength }, \
     { "peerPenaltyEntryBytes", "()I", (void *) NativeBridge_peerPenaltyEntryBytes }, \
@@ -284,6 +286,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "stopSync", "()V", (void *) NativeBridge_stopSync }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 137
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 138
 
 #endif

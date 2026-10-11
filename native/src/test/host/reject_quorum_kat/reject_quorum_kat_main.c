@@ -5,15 +5,19 @@
  * reject for a valid transaction that honest peers already relayed. BRPeerManagerTxRefusedByNetwork is
  * the core's answer to "has the network refused it": 1 only when peers in at least two network groups
  * (an IPv4 address's /16, any other address's /32) rejected it as invalid, non-standard or dust AND no
- * peer has relayed or announced it. The publish verdict a first rejection gives (EINVAL, answered
- * once) is unchanged: it says the send is not relayed; it does not say the network refused it.
+ * peer has relayed, announced or asked for it in the manager's life. That evidence does not lapse with
+ * the peer: a send a peer had stays not-refused after that peer disconnects, answers notfound or rejects
+ * it, until the send confirms or the wallet removes it. The publish verdict a first rejection gives
+ * (EINVAL, answered once) is unchanged: it says the send is not relayed; it does not say the network
+ * refused it.
  *
  * Drives the real BRPeerManager.c (with BRPeer.c, for BRPeerContext) through its own reject, relay
  * and has-tx handlers, with connected peers whose addresses place them in chosen network groups.
  *
- * Comparison arm (-DREJECT_QUORUM_UNFIXED, by PRESENCE, as BRPeerManager.c's other seams): one
- * peer's terminal rejection is taken as the network's -- the rule the sweep followed. Each RED case
- * must fail there; each GUARD case holds in both arms.
+ * Comparison arms (by PRESENCE, as BRPeerManager.c's other seams), each with its own expectation per
+ * case in run.sh: -DREJECT_QUORUM_UNFIXED takes one peer's terminal rejection as the network's -- the
+ * rule the sweep followed; -DRELAY_EVIDENCE_UNFIXED counts only the peers relaying the send right now,
+ * so the evidence lapses with each peer. A RED case must fail in its arm; a GUARD case holds there.
  *
  * One case per process (argv[1]); "list" names them. Each prints RESULT <case> pass|fail.
  */
@@ -128,6 +132,39 @@ static void relayedBy(BRPeerManager *m, BRPeer *p, BRTransaction *tx)
 {
     BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
     _peerRelayedTx(&info, tx);
+}
+
+/* The peer asks for the transaction (getdata) and is served it from the real request path; the served
+ * copy is the caller's to release, as BRPeer.c's handler does. */
+static void requestedBy(BRPeerManager *m, BRPeer *p, UInt256 h)
+{
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
+    BRTransaction *served = _peerRequestedTx(&info, h);
+    if (served) BRTransactionFree(served);
+}
+
+/* The peer answers notfound for the transaction. */
+static void notfoundFrom(BRPeerManager *m, BRPeer *p, UInt256 h)
+{
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
+    _peerDataNotfound(&info, &h, 1, NULL, 0);
+}
+
+static void drainPongs(BRPeer *p);
+
+/* The peer's connection closes cleanly, as ordinary churn ends one; the manager releases the peer. */
+static void disconnected(BRPeerManager *m, BRPeer *p)
+{
+    drainPongs(p);
+    BRPeerCallbackInfo info; memset(&info, 0, sizeof(info)); info.peer = p; info.manager = m;
+    _peerDisconnected(&info, 0);   /* frees p; does not free info */
+}
+
+/* True while the manager holds a relay record for txHash, with or without peers in it. */
+static int relayRecordHeld(BRPeerManager *m, UInt256 h)
+{
+    for (size_t i = 0; i < array_count(m->txRelays); i++) if (UInt256Eq(m->txRelays[i].txHash, h)) return 1;
+    return 0;
 }
 
 static void drainPongs(BRPeer *p)
@@ -354,6 +391,105 @@ static void removed_forgets(void)
     rigDown(&r);
 }
 
+/* ---- relay evidence: a send any peer ever had is never refused, whatever became of that peer ---- */
+
+static void relayed_then_disconnected(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *a = addPeer4(r.m, 10, 1, 0, 1);
+    BRPeer *c = addPeer4(r.m, 172, 20, 0, 1);
+    BRPeer *d = addPeer4(r.m, 192, 168, 0, 1);
+    relayedBy(r.m, d, wireCopy(&r));
+    check(BRPeerManagerRelayCount(r.m, r.aHash) == 1, "a peer relays the send");
+    disconnected(r.m, d);
+    check(BRPeerManagerRelayCount(r.m, r.aHash) == 0, "that peer leaves: no connected peer relays it now");
+    rejectFrom(r.m, a, r.aHash, REJECT_INVALID);
+    rejectFrom(r.m, c, r.aHash, REJECT_INVALID);
+    check(! refused(&r), "a peer had the send before it left: two groups rejecting it afterwards do not make it refused");
+    rigDown(&r);
+}
+
+static void requested_then_disconnected(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *a = addPeer4(r.m, 10, 1, 0, 1);
+    BRPeer *c = addPeer4(r.m, 172, 20, 0, 1);
+    BRPeer *d = addPeer4(r.m, 192, 168, 0, 1);
+    requestedBy(r.m, d, r.aHash);
+    check(BRPeerManagerRelayCount(r.m, r.aHash) == 1, "a peer asked for the send and was served it");
+    disconnected(r.m, d);
+    rejectFrom(r.m, a, r.aHash, REJECT_INVALID);
+    rejectFrom(r.m, c, r.aHash, REJECT_NONSTANDARD);
+    check(! refused(&r), "a peer took the send before it left: two groups rejecting it afterwards do not make it refused");
+    rigDown(&r);
+}
+
+static void announced_then_notfound(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *a = addPeer4(r.m, 10, 1, 0, 1);
+    BRPeer *c = addPeer4(r.m, 172, 20, 0, 1);
+    BRPeer *d = addPeer4(r.m, 192, 168, 0, 1);
+    announcedBy(r.m, d, r.aHash);
+    notfoundFrom(r.m, d, r.aHash);
+    check(BRPeerManagerRelayCount(r.m, r.aHash) == 0, "the announcing peer later answers notfound: no connected peer relays it now");
+    rejectFrom(r.m, a, r.aHash, REJECT_INVALID);
+    rejectFrom(r.m, c, r.aHash, REJECT_DUST);
+    check(! refused(&r), "a peer announced the send: a later notfound and two groups rejecting it do not make it refused");
+    rigDown(&r);
+}
+
+static void relayer_then_rejects(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *c = addPeer4(r.m, 172, 20, 0, 1);
+    BRPeer *d = addPeer4(r.m, 192, 168, 0, 1);
+    relayedBy(r.m, d, wireCopy(&r));
+    rejectFrom(r.m, d, r.aHash, REJECT_INVALID);
+    rejectFrom(r.m, c, r.aHash, REJECT_INVALID);
+    check(! refused(&r), "a peer that relayed the send and then rejected it had it: not refused");
+    rigDown(&r);
+}
+
+static void rejecter_later_has_it_then_leaves(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *a = addPeer4(r.m, 10, 1, 0, 1);
+    BRPeer *c = addPeer4(r.m, 172, 20, 0, 1);
+    rejectFrom(r.m, a, r.aHash, REJECT_INVALID);
+    rejectFrom(r.m, c, r.aHash, REJECT_INVALID);
+    announcedBy(r.m, a, r.aHash);
+    disconnected(r.m, a);
+    check(! refused(&r), "a rejecting peer that then announced the send had it, and leaving does not undo that: not refused");
+    rigDown(&r);
+}
+
+static void confirmed_drops_relay_record(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *d = addPeer4(r.m, 192, 168, 0, 1);
+    relayedBy(r.m, d, wireCopy(&r));
+    disconnected(r.m, d);
+    uint32_t height = BRMainNetParams.checkpointsCount
+        ? BRMainNetParams.checkpoints[BRMainNetParams.checkpointsCount - 1].height + 1000 : 25000000;
+    _BRPeerManagerUpdateTx(r.m, &r.aHash, 1, height, (uint32_t)time(NULL));
+    _BRPeerManagerFlushAnswers(r.m);
+    check(! relayRecordHeld(r.m, r.aHash), "a confirmed send's relay record is dropped");
+    rigDown(&r);
+}
+
+static void removed_drops_relay_record(void)
+{
+    Rig r; check(rigUp(&r), "rig: send A is published and held");
+    BRPeer *c = addPeer4(r.m, 172, 20, 0, 1);
+    BRPeer *d = addPeer4(r.m, 192, 168, 0, 1);
+    relayedBy(r.m, d, wireCopy(&r));
+    rejectFrom(r.m, c, r.aHash, REJECT_INVALID);
+    BRPeerManagerRemoveTransaction(r.m, r.aHash);
+    check(! relayRecordHeld(r.m, r.aHash), "the wallet removing the send drops its relay record with it");
+    rigDown(&r);
+}
+
 typedef struct { const char *name; void (*run)(void); } Case;
 static const Case kCases[] = {
     { "one_peer_rejects", one_peer_rejects },
@@ -370,6 +506,13 @@ static const Case kCases[] = {
     { "publish_answer_unchanged", publish_answer_unchanged },
     { "confirmed_forgets", confirmed_forgets },
     { "removed_forgets", removed_forgets },
+    { "relayed_then_disconnected", relayed_then_disconnected },
+    { "requested_then_disconnected", requested_then_disconnected },
+    { "announced_then_notfound", announced_then_notfound },
+    { "relayer_then_rejects", relayer_then_rejects },
+    { "rejecter_later_has_it_then_leaves", rejecter_later_has_it_then_leaves },
+    { "confirmed_drops_relay_record", confirmed_drops_relay_record },
+    { "removed_drops_relay_record", removed_drops_relay_record },
 };
 
 int main(int argc, char **argv)
@@ -382,8 +525,10 @@ int main(int argc, char **argv)
     }
     for (size_t i = 0; i < n; i++) {
         if (strcmp(argv[1], kCases[i].name) != 0) continue;
-#ifdef REJECT_QUORUM_UNFIXED
+#if defined(REJECT_QUORUM_UNFIXED)
         printf("ARM: comparison (REJECT_QUORUM_UNFIXED)\n");
+#elif defined(RELAY_EVIDENCE_UNFIXED)
+        printf("ARM: comparison (RELAY_EVIDENCE_UNFIXED)\n");
 #else
         printf("ARM: shipped\n");
 #endif

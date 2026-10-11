@@ -3575,15 +3575,21 @@ class SyncService : Service() {
             // gives its coins back to the wallet, and forget its record. It used to be logged and
             // kept — coins spent, row "pending" — for good. No single peer's message decides that:
             // the terminal verdict can be one peer's rejection, so removal also needs the core's
-            // corroboration (peers in two network groups rejected it, none relayed or announced it);
+            // corroboration (peers in two network groups rejected it, none relayed, announced or asked
+            // for it), and that answer must have held: seen at two sweeps ten minutes apart, on one peer
+            // manager, and at every sweep in between (refusalHold), since one reading can predate the
+            // answers of honest peers and a rebuilt manager starts with no relay evidence;
             // otherwise it is kept and its coins stay locked. An asset or DigiDollar send is left to
             // its own handling: the asset layer's CONFLICTED accounting reads an abandoned attempt
             // from the wallet, so this never removes one, and never calls into the asset layer.
-            val action = outcome?.actionFor(plainDgb = isPlainDgbSend(txid), refusedByPeers = isRefusedByPeers(txid))
-                ?: app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.KEEP
+            val action = outcome?.actionFor(
+                plainDgb = isPlainDgbSend(txid),
+                refusedByPeers = refusalHold.observe(txid) { isRefusedByPeers(txid) },
+            ) ?: app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.KEEP
             if (action == app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.REMOVE_AND_UNLOCK) {
                 if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
                     store.remove(txid)
+                    refusalHold.forget(txid)
                     dropped = true
                     android.util.Log.i("SyncService",
                         "stranded-send sweep: removed refused send ${txid.take(12)}; its coins are spendable again")
@@ -3683,12 +3689,28 @@ class SyncService : Service() {
 
     /**
      * Whether the network has refused [txid] on evidence no single peer can supply — the core's
-     * answer: peers in at least two network groups rejected it and none has relayed or announced it.
-     * Anything that cannot be read is not a refusal.
+     * answer: peers in at least two network groups rejected it and none has relayed, announced or
+     * asked for it while the core has run. Anything that cannot be read is not a refusal. The sweep
+     * reads it only through [refusalHold].
      */
     private fun isRefusedByPeers(txid: String): Boolean {
         return runCatching { NativeBridge.isRefusedByNetwork(txid) }.getOrDefault(false)
     }
+
+    /**
+     * When, and on which peer manager, the core first called each recorded send refused, in this
+     * session. The sweep removes a send only once that answer has held at two observations at least ten
+     * minutes apart, on one peer manager, and at every observation in between
+     * ([app.aroundtheblock.wallet.core.sync.RefusalHold]): one reading can come before every connected
+     * peer has answered, and a manager rebuilt here or anywhere else starts with no relay evidence. The
+     * manager is named by the bridge's generation, which every build bumps; an unreadable one is
+     * unknown and never completes a hold. Awake time, so a change of the device's clock cannot pass the
+     * hold and time asleep does not count; never persisted.
+     */
+    private val refusalHold = app.aroundtheblock.wallet.core.sync.RefusalHold(
+        clock = android.os.SystemClock::uptimeMillis,
+        manager = { runCatching { NativeBridge.peerManagerGeneration() }.getOrNull() },
+    )
 
     /** Most recent serialized block window from [NativeCallback.onSaveBlocks],
      *  paired with the [SavedBlockStore] epoch captured AT RECEIPT — mirrors
