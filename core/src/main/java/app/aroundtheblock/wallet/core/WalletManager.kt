@@ -403,13 +403,14 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 }
             }
 
-            // Use recoverWalletFromBytes with the original creation timestamp so the
-            // peer manager starts syncing from the right checkpoint — not NOW.
+            // restoreWalletFromBytes builds the wallet from the records loaded just above (the only native
+            // call that uses loaded records), with the original creation timestamp so the peer manager
+            // starts syncing from the right checkpoint — not NOW.
             val creationTime = prefs.getLong(KEY_CREATION_TIME, 0L)
             // After a one-time history rebuild the anchor goes no later than the oldest record
             // the discarded cache held (creationTimeForRestore); otherwise unchanged.
             val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))
-            val success = NativeBridge.recoverWalletFromBytes(seedBytes, restoreTime, storedPass)
+            val success = NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)
             if (success) {
                 _walletState.value = WalletState.Unlocked
             }

@@ -125,6 +125,7 @@ jlong JNICALL NativeBridge_requestCompactFilters(JNIEnv *env, jobject thiz, jlon
 jint JNICALL NativeBridge_rerequestHeadersFromTip(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_rescan(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jbyteArray data);  /* jni_peer.c */
+jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jlong creationTimestamp, jbyteArray passphrase);  /* jni_wallet.c */
 jstring JNICALL NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents);  /* jni_transaction.c */
 jbyteArray JNICALL NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz, jobject handler);  /* jni_peer.c */
@@ -264,6 +265,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "rerequestHeadersFromTip", "()I", (void *) NativeBridge_rerequestHeadersFromTip }, \
     { "rescan", "()V", (void *) NativeBridge_rescan }, \
     { "restoreCfScanLedger", "([B)Z", (void *) NativeBridge_restoreCfScanLedger }, \
+    { "restoreWalletFromBytes", "([BJ[B)Z", (void *) NativeBridge_restoreWalletFromBytes }, \
     { "sendDigiDollar", "(Ljava/lang/String;J)Ljava/lang/String;", (void *) NativeBridge_sendDigiDollar }, \
     { "serializePeerPenalties", "()[B", (void *) NativeBridge_serializePeerPenalties }, \
     { "setCallbackHandler", "(" DGB_JNI_NATIVECALLBACK_SIG ")V", (void *) NativeBridge_setCallbackHandler }, \
@@ -284,6 +286,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "stopSync", "()V", (void *) NativeBridge_stopSync }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 137
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 138
 
 #endif

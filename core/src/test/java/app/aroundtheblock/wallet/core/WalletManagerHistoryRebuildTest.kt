@@ -144,7 +144,7 @@ class WalletManagerHistoryRebuildTest {
         val lowered = Regex("""val (\w+) = creationTimeForRestore\(\s*creationTime\s*,\s*HistoryRebuildOnUpgrade\.floorTime\(context\)\s*\)""")
             .find(b) ?: error("the restore time is not creationTimeForRestore(creationTime, floorTime)")
         val name = lowered.groupValues[1]
-        val calls = Regex("""NativeBridge\.recoverWalletFromBytes\(([^)]*)\)""").findAll(b).map { it.groupValues[1] }.toList()
+        val calls = Regex("""NativeBridge\.restoreWalletFromBytes\(([^)]*)\)""").findAll(b).map { it.groupValues[1] }.toList()
         assertTrue("scanner is blind: no native restore call", calls.isNotEmpty())
         for (args in calls) {
             val time = args.split(",").map { it.trim() }.getOrNull(1)

@@ -25,11 +25,24 @@ object NativeBridge {
      *  checksum doesn't match — i.e. a typo'd/invalid seed. Touches no wallet state. */
     external fun isValidMnemonic(phrase: String): Boolean
 
-    /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
+    /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak.
+     *  Drops a pending [loadSerializedTransactions] load first: a wallet is never built from records
+     *  loaded for another one. */
     external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: ByteArray?): Boolean
 
-    /** Recover wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
+    /** Recover wallet from a mnemonic the user entered, as ByteArray (UTF-8). Avoids JVM String heap
+     *  leak. Drops a pending [loadSerializedTransactions] load first and builds from no saved records;
+     *  the restore of the stored wallet is [restoreWalletFromBytes]. */
     external fun recoverWalletFromBytes(
+        phraseBytes: ByteArray,
+        creationTimestamp: Long,
+        passphrase: ByteArray?,
+    ): Boolean
+
+    /** Restore the stored wallet from its mnemonic (UTF-8 ByteArray) and the records
+     *  [loadSerializedTransactions] loaded for it — WalletManager.restoreFromDisk, its only caller. The
+     *  only native call that builds a wallet from loaded records. */
+    external fun restoreWalletFromBytes(
         phraseBytes: ByteArray,
         creationTimestamp: Long,
         passphrase: ByteArray?,
@@ -366,7 +379,8 @@ object NativeBridge {
     /** Serialize all wallet transactions to a byte array for persistence. */
     external fun getSerializedTransactions(): ByteArray?
 
-    /** Load previously saved transactions before recoverWalletFromBytes/createWalletFromBytes. */
+    /** Load previously saved transactions for [restoreWalletFromBytes], which must follow. Creating a
+     *  wallet or recovering one from a phrase drops a pending load. */
     external fun loadSerializedTransactions(data: ByteArray): Int
 
     // === Validation ===

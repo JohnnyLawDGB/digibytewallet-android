@@ -51,15 +51,15 @@ grep -q "TIPSWEEP_TOKEN_STAKE_UNFIXED" "$CORE_DIR/BRPeerManager.c" ||
 flat() { tr -s '[:space:]' ' ' < "$1"; }
 fn_body() { awk -v start="$2" '$0 ~ start {on=1} on {print} on && /^\}/ {exit}' "$1" | tr -s '[:space:]' ' '; }
 
-# 1. The relaunch builds the wallet from the saved records first and installs the taproot key after,
-#    which is the order openWallet() uses.
-RECOVER="$(fn_body "$BRIDGE_DIR/jni_wallet.c" '^NativeBridge_recoverWalletFromBytes')"
-[ -n "$RECOVER" ] || gate_fail "recoverWalletFromBytes was not found in jni_wallet.c. Re-anchor the gate."
-AFTER_NEW="${RECOVER#*BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy)}"
-[ "$AFTER_NEW" != "$RECOVER" ] ||
-    gate_fail "recoverWalletFromBytes no longer builds the wallet with BRWalletNewDual over g_savedTransactions."
+# 1. The relaunch (restoreWalletFromBytes, the restore from disk) builds the wallet from the saved records
+#    first and installs the taproot key after, which is the order openWallet() uses.
+RESTORE="$(fn_body "$BRIDGE_DIR/jni_wallet.c" '^NativeBridge_restoreWalletFromBytes')"
+[ -n "$RESTORE" ] || gate_fail "restoreWalletFromBytes was not found in jni_wallet.c. Re-anchor the gate."
+AFTER_NEW="${RESTORE#*BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy)}"
+[ "$AFTER_NEW" != "$RESTORE" ] ||
+    gate_fail "restoreWalletFromBytes no longer builds the wallet with BRWalletNewDual over g_savedTransactions."
 <<<"$AFTER_NEW" grep -qF "BRWalletSetTaprootKey(g_wallet, mpkBIP86)" ||
-    gate_fail "recoverWalletFromBytes no longer installs the taproot key after the saved records are loaded."
+    gate_fail "restoreWalletFromBytes no longer installs the taproot key after the saved records are loaded."
 
 # 2. The saved records are written by BRWalletSerializeTransactions and read back by the guarded
 #    loader this suite compiles directly.

@@ -198,7 +198,7 @@ fun UnlockScreen(
                     // WalletManager.restoreFromDisk() is core (core cannot depend on
                     // app), so the arming is handed to restoreFromDisk, which runs it at
                     // the start of the post-unlock restore's risky native window —
-                    // recoverWalletFromBytes runs synchronously inside the call below.
+                    // restoreWalletFromBytes runs synchronously inside the call below.
                     // commit()'d before the risky call so a crash mid-restore leaves
                     // restore_pending=true for BootGuard.recoverFromCrashedRestoreIfNeeded
                     // to see next launch.

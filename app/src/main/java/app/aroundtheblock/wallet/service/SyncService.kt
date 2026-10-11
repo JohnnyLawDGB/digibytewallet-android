@@ -2271,7 +2271,7 @@ class SyncService : Service() {
         // now provably clear of the corrupt-blob crash vector — loadSavedBlocks
         // (and loadSavedPeers) just ran without crashing and the C core has
         // consumed them. Clearing here — rather than right after
-        // recoverWalletFromBytes in restoreFromDisk() — is deliberate: that's
+        // restoreWalletFromBytes in restoreFromDisk() — is deliberate: that's
         // still BEFORE the saved_blocks bytes are ever handed to the native
         // block deserializer, so it would miss the actual crash this bracket
         // exists to catch. A no-op if no restore is pending this launch (e.g.

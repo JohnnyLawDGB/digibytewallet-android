@@ -62,28 +62,36 @@ NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz) {
 }
 
 /* ---------- loadSerializedTransactions ----------
- * Parse saved transactions and store them for use by BRWalletNew.
- * Must be called BEFORE recoverWallet/createWallet.
+ * Parse saved transactions and hold them for restoreWalletFromBytes, the disk restore, which must follow:
+ * it is the only entry that builds a wallet from loaded records. createWalletFromBytes and
+ * recoverWalletFromBytes drop a pending load instead (saved_transactions_discard), so a wallet is never
+ * built from records loaded for another one.
  */
 BRTransaction **g_savedTransactions = NULL;
 size_t g_savedTransactionCount = 0;
+
+/* ---------- saved_transactions_discard ----------
+ * Drops a pending load: the records the array holds -- none of them a wallet's, since building a wallet
+ * from the array releases it (saved_transactions_release_after_build) -- then the array, which is cleared.
+ */
+void saved_transactions_discard(void) {
+    if (g_savedTransactions) {
+        for (size_t i = 0; i < g_savedTransactionCount; i++) {
+            if (g_savedTransactions[i]) BRTransactionFree(g_savedTransactions[i]);
+        }
+        free(g_savedTransactions);
+    }
+    g_savedTransactions = NULL;
+    g_savedTransactionCount = 0;
+}
 
 jint JNICALL
 NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
                                                                        jbyteArray data) {
     (void)thiz;
 
-    /* Free any previously loaded transactions. The array only ever names records no wallet took: a
-     * build from it releases it (saved_transactions_release_after_build), so none of these is a
-     * wallet's. */
-    if (g_savedTransactions) {
-        for (size_t i = 0; i < g_savedTransactionCount; i++) {
-            if (g_savedTransactions[i]) BRTransactionFree(g_savedTransactions[i]);
-        }
-        free(g_savedTransactions);
-        g_savedTransactions = NULL;
-        g_savedTransactionCount = 0;
-    }
+    /* A new load replaces a pending one. */
+    saved_transactions_discard();
 
     if (!data) return 0;
 
@@ -106,12 +114,12 @@ NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
 }
 
 /* ---------- saved_transactions_release_after_build ----------
- * Called by recoverWalletFromBytes right after BRWalletNewDual has built `wallet` from the loaded records,
- * before the wallet is published. BRWalletNewDual takes the records it keeps -- the wallet owns them from
- * then on, and BRWalletFree releases them -- and skips the rest (an unsigned record, a repeated hash, one
- * outside the money range). From here the bridge names none of them: a record the wallet did not take is
- * released, then the array, and the array is cleared. So a later loadSerializedTransactions frees nothing
- * the wallet owns, and a later recoverWalletFromBytes never builds from a record a wallet has released.
+ * Called by restoreWalletFromBytes right after BRWalletNewDual has built `wallet` from the loaded records,
+ * before anything else uses the wallet. BRWalletNewDual takes the records it keeps -- the wallet owns them
+ * from then on, and BRWalletFree releases them -- and skips the rest (an unsigned record, a repeated hash,
+ * one outside the money range). From here the bridge names none of them: a record the wallet did not take
+ * is released, then the array, and the array is cleared. So a later load or drop frees nothing the wallet
+ * owns, and a later build never starts from a record a wallet has released.
  */
 void saved_transactions_release_after_build(BRWallet *wallet) {
     if (!wallet) return;   /* nothing was built: the records are still the array's */

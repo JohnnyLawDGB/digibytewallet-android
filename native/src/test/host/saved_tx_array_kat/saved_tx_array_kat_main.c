@@ -1,40 +1,52 @@
-/* saved_tx_array_kat — once a wallet is built from the saved records, the bridge holds no pointer to them.
+/* saved_tx_array_kat -- the saved records reach only the wallet they were loaded for, and the bridge keeps
+ * no pointer to them once that wallet is built.
  *
- * THE INVARIANT THIS PINS
- * -----------------------
- * loadSerializedTransactions parses the saved records into the bridge's array (g_savedTransactions) and
- * recoverWalletFromBytes builds the wallet from them: BRWalletNewDual takes the records it keeps -- the
- * wallet owns them from then on, and BRWalletFree releases them -- and skips the rest (an unsigned record,
- * a repeated hash, one outside the money range). Once the wallet is built, the bridge must name none of
- * them: the records the wallet did not take are released, then the array, and the array is cleared. So a
- * second loadSerializedTransactions in the same process frees nothing the wallet owns, and a
- * recoverWalletFromBytes after a build never hands BRWalletNewDual a record the previous wallet released.
+ * THE INVARIANTS THIS PINS
+ * ------------------------
+ * loadSerializedTransactions parses the saved records into the bridge's array (g_savedTransactions) for the
+ * disk restore, restoreWalletFromBytes, which must follow: WalletManager.restoreFromDisk loads the cache,
+ * then calls it. It is the only entry that builds a wallet from loaded records.
+ *   1. Once the wallet is built, the bridge names none of the records: BRWalletNewDual takes the ones it
+ *      keeps (the wallet owns them from then on, and BRWalletFree releases them) and skips the rest (an
+ *      unsigned record, a repeated hash, one outside the money range); the skipped ones are released, then
+ *      the array, and the array is cleared. So a second load in the same process frees nothing a wallet
+ *      owns, and a later build never starts from a record a wallet released.
+ *   2. A wallet is never built from records loaded for another one: creating a wallet
+ *      (createWalletFromBytes) and recovering one from a phrase (recoverWalletFromBytes) first drop any
+ *      pending load, so neither -- nor any restore after them -- builds from it.
  *
  * THE PATH (the bridge's own code, compiled here)
  * -----------------------------------------------
  * This KAT compiles jni_transaction_persist.c and jni_wallet.c themselves, over the stand-ins in host_jni/
  * for <jni.h> and <android/log.h> (jni_registry.c is not compiled: dgb_register_natives is stubbed below).
  * It boots the bridge through the real JNI_OnLoad with a host VM and env, then calls the real entry points
- * in the order the app does: the first launch's wallet saves its records (getSerializedTransactions, what
- * WalletManager / SyncService persist); a later launch restores from disk (loadSerializedTransactions, then
- * recoverWalletFromBytes -- WalletManager.restoreFromDisk); and then the same process does it again.
+ * the app calls: getSerializedTransactions (what WalletManager / SyncService persist), the restore from
+ * disk (loadSerializedTransactions, then restoreWalletFromBytes -- WalletManager.restoreFromDisk), a
+ * recovery from a phrase (recoverWalletFromBytes -- WalletManager.recoverWallet) and a creation
+ * (createWalletFromBytes -- WalletManager.createWallet). run.sh holds the Kotlin side to the same rule: the
+ * load and restoreWalletFromBytes are called from restoreFromDisk alone.
  *
- * ARMS (presence of the macro selects the comparison arm; the shipped arm is built with no -D):
- *   default                    the bridge releases its hold when the wallet is built.
- *   -DSAVED_TX_ARRAY_UNFIXED   the array keeps naming the records after the build.
+ * ARMS (presence of a macro selects a comparison arm; the shipped arm is built with no -D):
+ *   default                          both rules above.
+ *   -DSAVED_TX_ARRAY_UNFIXED         the array keeps naming the records after the build (rule 1 off).
+ *   -DSAVED_TX_PENDING_LOAD_UNFIXED  creating and recovering keep a pending load (rule 2 off).
  *
  * SCENARIOS (argv[1]; run.sh says what each arm must do):
- *   reload_after_build       RED-THEN-GREEN (AddressSanitizer). Restore from disk twice in one process:
- *                            the second load must not release the live wallet's records, so the second
- *                            recover frees each record once and builds the next wallet from the new load.
- *   recover_after_build      RED-THEN-GREEN (AddressSanitizer). Recover from the phrase after a restore
- *                            from disk, with no new load: the new wallet is built from no saved records,
- *                            never from records the previous wallet released.
- *   unadopted_released       RED-THEN-GREEN (assertion). A cache that repeats a record: the wallet takes
- *                            the first copy and skips the second; once built, the skipped copy is released
- *                            and the array is cleared.
- *   load_twice_before_build  GUARD, both arms. Two loads before any build: the second releases the first
- *                            load's records (no wallet ever took them) and the build takes the second's.
+ *   reload_after_build       RED-THEN-GREEN (AddressSanitizer) against rule 1. Restore from disk twice in
+ *                            one process: the second load must not release the live wallet's records, so
+ *                            the second restore frees each record once and builds from the new load.
+ *   recover_after_build      RED-THEN-GREEN (AddressSanitizer) against rule 1. Recover from the phrase after
+ *                            a restore: the new wallet is built from no saved records, never from records
+ *                            the previous wallet released.
+ *   unadopted_released       RED-THEN-GREEN (assertion) against rule 1. A cache that repeats a record: the
+ *                            wallet takes the first copy and skips the second; once built, the skipped copy
+ *                            is released and the array is cleared.
+ *   foreign_load_recover     RED-THEN-GREEN (assertion) against rule 2. Wallet A's cache is loaded and no
+ *                            wallet is built from it; wallet B, recovered from its phrase, holds none of it.
+ *   foreign_load_create      RED-THEN-GREEN (assertion) against rule 2. Wallet A's cache is loaded; wallet B
+ *                            is created, which drops the load, so B's later restore holds none of it.
+ *   load_twice_before_build  GUARD, every arm. Two loads before any build: the second releases the first
+ *                            load's records (no wallet ever took them) and the restore takes the second's.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +66,10 @@ extern size_t g_savedTransactionCount;
 jint JNICALL NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz, jbyteArray data);
 jbyteArray JNICALL NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz);
 jboolean JNICALL NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes,
+                                                     jlong creationTimestamp, jbyteArray passphrase);
+jboolean JNICALL NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes,
+                                                    jbyteArray passphrase);
+jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes,
                                                      jlong creationTimestamp, jbyteArray passphrase);
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved);
 
@@ -150,13 +166,29 @@ int __android_log_print(int prio, const char *tag, const char *fmt, ...)
 static const char *kMnemonic =
     "abandon abandon abandon abandon abandon abandon abandon abandon "
     "abandon abandon abandon about";
+static const char *kOtherMnemonic =   /* another wallet: a BIP39 reference phrase */
+    "legal winner thank year wave sausage worth useful legal winner thank yellow";
 static const uint8_t kEmpty[1] = { 0 };
 #define CREATION_TIME 1700000000
 
-static jboolean recoverFromPhrase(void)
+static HostArray *phraseArray(const char *phrase) { return hostArray(phrase, strlen(phrase)); }
+
+/* The native call WalletManager.restoreFromDisk makes after it loads the cache. */
+static jboolean restoreEntry(const char *phrase)
 {
-    HostArray *phrase = hostArray(kMnemonic, strlen(kMnemonic));
-    return NativeBridge_recoverWalletFromBytes(env, NULL, phrase, CREATION_TIME, NULL);
+    return NativeBridge_restoreWalletFromBytes(env, NULL, phraseArray(phrase), CREATION_TIME, NULL);
+}
+
+/* The native call WalletManager.recoverWallet makes: a phrase the user entered. */
+static jboolean recoverEntry(const char *phrase)
+{
+    return NativeBridge_recoverWalletFromBytes(env, NULL, phraseArray(phrase), CREATION_TIME, NULL);
+}
+
+/* The native call WalletManager.createWallet makes. */
+static jboolean createEntry(const char *phrase)
+{
+    return NativeBridge_createWalletFromBytes(env, NULL, phraseArray(phrase), NULL);
 }
 
 static jint loadSaved(HostArray *blob) { return NativeBridge_loadSerializedTransactions(env, NULL, blob); }
@@ -195,7 +227,7 @@ static BRTransaction *receive(const uint8_t *spk, size_t spkLen, uint64_t amount
 static HostArray *firstLaunchCache(UInt256 hashes[2])
 {
     check(JNI_OnLoad(&g_vmValue, NULL) == JNI_VERSION_1_6, "the bridge boots (JNI_OnLoad)");
-    check(recoverFromPhrase() == JNI_TRUE && g_wallet != NULL, "first launch: the wallet is recovered from its phrase");
+    check(recoverEntry(kMnemonic) == JNI_TRUE && g_wallet != NULL, "first launch: the wallet is recovered from its phrase");
 
     BRAddress a = BRWalletReceiveAddress(g_wallet, 1);
     uint8_t spk[64];
@@ -215,11 +247,11 @@ static HostArray *firstLaunchCache(UInt256 hashes[2])
     return cache;
 }
 
-/* The restore from disk WalletManager.restoreFromDisk performs: load the cache, then recover. */
+/* The restore from disk WalletManager.restoreFromDisk performs: load the cache, then restore. */
 static void restoreFromDisk(HostArray *cache, jint expectLoaded, const char *what)
 {
     jint loaded = loadSaved(cache);
-    jboolean ok = recoverFromPhrase();
+    jboolean ok = restoreEntry(kMnemonic);
     check(loaded == expectLoaded && ok == JNI_TRUE && g_wallet != NULL, what);
 }
 
@@ -245,7 +277,7 @@ static void scenario_reload_after_build(void)
           "INVARIANT: once the wallet is built, the bridge names none of the records");
 
     /* The same process restores from disk again: the cache is read a second time, then the wallet is
-     * recovered, which releases the first wallet (and with it the records it took). */
+     * restored, which releases the first wallet (and with it the records it took). */
     restoreFromDisk(cache, 2, "restore from disk again: two records loaded, the wallet recovered");
     check(holds(h[0]) && holds(h[1]), "the new wallet holds both saved records");
 
@@ -266,7 +298,7 @@ static void scenario_recover_after_build(void)
     check(holds(h[0]) && holds(h[1]), "the wallet holds both saved records");
 
     /* A recovery from the phrase in the same process: no new load. */
-    check(recoverFromPhrase() == JNI_TRUE && g_wallet != NULL, "recover from the phrase again");
+    check(recoverEntry(kMnemonic) == JNI_TRUE && g_wallet != NULL, "recover from the phrase again");
     check(! holds(h[0]) && ! holds(h[1]), "the new wallet holds no record the previous wallet took");
     check(g_savedTransactions == NULL && g_savedTransactionCount == 0,
           "INVARIANT: the bridge names none of the records");
@@ -294,7 +326,7 @@ static void scenario_unadopted_released(void)
     BRTransaction *p[3] = { g_savedTransactions[0], g_savedTransactions[1], g_savedTransactions[2] };
     check(UInt256Eq(p[0]->txHash, p[2]->txHash) && p[0] != p[2], "the first and third records are two copies of one");
 
-    check(recoverFromPhrase() == JNI_TRUE && g_wallet != NULL, "the wallet is recovered from them");
+    check(restoreEntry(kMnemonic) == JNI_TRUE && g_wallet != NULL, "the wallet is restored from them");
     check(BRWalletTransactionForHash(g_wallet, p[0]->txHash) == p[0] &&
           BRWalletTransactionForHash(g_wallet, p[1]->txHash) == p[1],
           "the wallet took the first copy and the second record");
@@ -316,26 +348,63 @@ static void scenario_load_twice_before_build(void)
 
     check(loadSaved(cache) == 2, "the cache is loaded");
     check(loadSaved(cache) == 2, "the cache is loaded again before any wallet was built from it");
-    check(recoverFromPhrase() == JNI_TRUE && holds(h[0]) && holds(h[1]),
-          "the wallet is recovered from the second load and holds both records");
+    check(restoreEntry(kMnemonic) == JNI_TRUE && holds(h[0]) && holds(h[1]),
+          "the wallet is restored from the second load and holds both records");
     HostArray *again = (HostArray *)NativeBridge_getSerializedTransactions(env, NULL);
     check(again != NULL && again->len == cache->len, "the app's next save writes both records");
+    endScenario();
+}
+
+/* ---- foreign_load_recover ------------------------------------------------------------------------- */
+static void scenario_foreign_load_recover(void)
+{
+    printf("\n-- foreign_load_recover: a wallet recovered from a phrase is never built from records loaded for another --\n");
+    UInt256 h[2];
+    HostArray *cache = firstLaunchCache(h);
+
+    /* A restore from disk read wallet A's cache and stopped before building. */
+    check(loadSaved(cache) == 2, "wallet A's cache is loaded, and no wallet is built from it");
+    check(recoverEntry(kOtherMnemonic) == JNI_TRUE && g_wallet != NULL, "wallet B is recovered from its phrase");
+    check(! holds(h[0]) && ! holds(h[1]), "INVARIANT: wallet B holds none of the records loaded for wallet A");
+    check(g_savedTransactions == NULL && g_savedTransactionCount == 0, "INVARIANT: the bridge names none of them");
+    endScenario();
+}
+
+/* ---- foreign_load_create -------------------------------------------------------------------------- */
+static void scenario_foreign_load_create(void)
+{
+    printf("\n-- foreign_load_create: creating a wallet drops a pending load, so no later restore builds from it --\n");
+    UInt256 h[2];
+    HostArray *cache = firstLaunchCache(h);
+
+    check(loadSaved(cache) == 2, "wallet A's cache is loaded, and no wallet is built from it");
+    check(createEntry(kOtherMnemonic) == JNI_TRUE && g_wallet != NULL, "wallet B is created");
+    check(g_savedTransactions == NULL && g_savedTransactionCount == 0,
+          "INVARIANT: creating a wallet drops the pending load");
+    /* Wallet B is restored from disk later in this process. Its own cache was cleared when it was
+     * created, so this restore loads nothing. */
+    check(restoreEntry(kOtherMnemonic) == JNI_TRUE && g_wallet != NULL, "wallet B is restored, with no new load");
+    check(! holds(h[0]) && ! holds(h[1]), "INVARIANT: wallet B holds none of the records loaded for wallet A");
     endScenario();
 }
 
 int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
-#ifdef SAVED_TX_ARRAY_UNFIXED
+#if defined(SAVED_TX_ARRAY_UNFIXED)
     printf("ARM: comparison (-DSAVED_TX_ARRAY_UNFIXED) -- the array keeps naming the records after the build\n");
+#elif defined(SAVED_TX_PENDING_LOAD_UNFIXED)
+    printf("ARM: comparison (-DSAVED_TX_PENDING_LOAD_UNFIXED) -- creating and recovering keep a pending load\n");
 #else
-    printf("ARM: shipped -- the bridge releases its hold when the wallet is built\n");
+    printf("ARM: shipped -- the records reach only their wallet, and the bridge keeps none once it is built\n");
 #endif
     static const struct { const char *name; void (*fn)(void); } scenarios[] = {
         { "reload_after_build",      scenario_reload_after_build },
         { "recover_after_build",     scenario_recover_after_build },
         { "unadopted_released",      scenario_unadopted_released },
         { "load_twice_before_build", scenario_load_twice_before_build },
+        { "foreign_load_recover",    scenario_foreign_load_recover },
+        { "foreign_load_create",     scenario_foreign_load_create },
     };
     const char *want = (argc > 1) ? argv[1] : NULL;
     int ran = 0;

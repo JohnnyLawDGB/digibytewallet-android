@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
-# Host KAT: once a wallet is built from the saved records, the bridge holds no pointer to them.
+# Host KAT: the saved records reach only the wallet they were loaded for, and the bridge keeps no pointer
+# to them once that wallet is built.
 #
-# loadSerializedTransactions parses the saved records into the bridge's array and recoverWalletFromBytes
-# builds the wallet from them; BRWalletNewDual takes the records it keeps and the wallet releases them in
-# BRWalletFree. The array must not go on naming them: the records the wallet did not take are released when
-# it is built, then the array, and the array is cleared. A second load in the same process then frees
-# nothing a wallet owns, and a recover after a build never builds from a record a wallet released.
+# loadSerializedTransactions parses the saved records for the disk restore, restoreWalletFromBytes, the only
+# entry that builds a wallet from loaded records (WalletManager.restoreFromDisk: the load, then it).
+#   rule 1  once the wallet is built, the bridge names none of the records: the ones the wallet did not take
+#           are released, then the array, and the array is cleared;
+#   rule 2  creating a wallet and recovering one from a phrase first drop any pending load, so a wallet is
+#           never built from records loaded for another one.
 #
 # The _main.c compiles the bridge's OWN jni_transaction_persist.c and jni_wallet.c (with slip13.c), over the
 # stand-ins in host_jni/ for <jni.h> and <android/log.h>, boots the bridge through the real JNI_OnLoad, and
-# calls the real entry points in the order the app does (getSerializedTransactions; then the restore from
-# disk: loadSerializedTransactions, recoverWalletFromBytes).
+# calls the real entry points the app calls. The Kotlin side is held below to the same rule: the load and
+# restoreWalletFromBytes are called from WalletManager.restoreFromDisk alone, the load first.
 #
 # ==== RED-BEFORE-GREEN =======================================================
-# PRESENCE of the macro selects the comparison arm (the shipped arm is built with no -D at all).
-#   RED-THEN-GREEN (AddressSanitizer)  reload_after_build, recover_after_build: the comparison arm must be
-#                                      stopped by an AddressSanitizer use-after-free or double-free report;
-#                                      the shipped arm must pass clean.
-#   RED-THEN-GREEN (assertion)         unadopted_released: the comparison arm must fail the invariant's
-#                                      checks and only those (nothing reaches a sanitizer: the record is
-#                                      merely kept); the shipped arm must pass.
-#   GUARD (both arms)                  load_twice_before_build: two loads before any build are already
-#                                      right; no arm can be red. Both arms must pass.
-# A comparison arm that passes, or stops for any other reason, proves nothing and fails the gate. Every
-# arm runs under a time limit. Both arms are built 64- and 32-bit and must give the same verdicts; then
-# every scenario runs on the 64-bit shipped arm under the leak checker and must be clean.
+# PRESENCE of a macro selects a comparison arm (the shipped arm is built with no -D at all):
+#   -DSAVED_TX_ARRAY_UNFIXED         rule 1 off: the array keeps naming the records after the build.
+#   -DSAVED_TX_PENDING_LOAD_UNFIXED  rule 2 off: creating and recovering keep a pending load.
+# Each red scenario must be red in ITS comparison arm, and pass in the other comparison arm and the shipped
+# one -- so each red is that rule's and the two seams are independent:
+#   RED-THEN-GREEN (AddressSanitizer)  rule 1: reload_after_build, recover_after_build -- stopped by an
+#                                      AddressSanitizer use-after-free or double-free report.
+#   RED-THEN-GREEN (assertion)         rule 1: unadopted_released; rule 2: foreign_load_recover,
+#                                      foreign_load_create -- the arm fails the invariant's checks and only
+#                                      those (nothing reaches a sanitizer).
+#   GUARD (every arm)                  load_twice_before_build: two loads before any build are already
+#                                      right; no arm can be red.
+# A comparison arm that passes, or stops for any other reason, proves nothing and fails the gate. Every arm
+# runs under a time limit. All arms are built 64- and 32-bit and must give the same verdicts; then every
+# scenario runs on the 64-bit shipped arm under the leak checker and must be clean.
 set -uo pipefail   # NOT -e: the comparison arm's non-zero exit must be captured
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,10 +45,37 @@ shopt -u nullglob
 
 gate_fail() { echo "GATE FAILED: $*"; exit 1; }
 
-# Seam self-check: a -D that names nothing builds the shipped path, and the comparison arm would
-# (wrongly) be the shipped code.
-grep -q "SAVED_TX_ARRAY_UNFIXED" "$BRIDGE_DIR/jni_wallet.c" ||
+# Seam self-checks: a -D that names nothing builds the shipped path, and the comparison arm would
+# (wrongly) be the shipped code. Rule 2's seam guards both the create and the recover entry.
+grep -q "#ifndef SAVED_TX_ARRAY_UNFIXED" "$BRIDGE_DIR/jni_wallet.c" ||
     gate_fail "SAVED_TX_ARRAY_UNFIXED is not present in jni_wallet.c -- the -D would select nothing."
+PENDING_SEAMS="$(grep -c "#ifndef SAVED_TX_PENDING_LOAD_UNFIXED" "$BRIDGE_DIR/jni_wallet.c")"
+[ "$PENDING_SEAMS" -eq 2 ] ||
+    gate_fail "SAVED_TX_PENDING_LOAD_UNFIXED guards $PENDING_SEAMS sites in jni_wallet.c; expected 2 (create, recover)."
+
+# Source gates, Kotlin side: the loaded records are WalletManager.restoreFromDisk's alone. In the app's
+# sources, loadSerializedTransactions and restoreWalletFromBytes are each called exactly once, from
+# restoreFromDisk, the load first; restoreFromDisk neither creates nor recovers a wallet. (Comments do not
+# count: they never write the receiver, NativeBridge.)
+WALLET_KT="$REPO_ROOT/core/src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt"
+KT_SITES="$BUILD_DIR/kt_sites.txt"
+grep -rnF --include=*.kt -e "NativeBridge.loadSerializedTransactions(" -e "NativeBridge.restoreWalletFromBytes(" \
+    "$REPO_ROOT/core/src/main" "$REPO_ROOT/app/src/main" > "$KT_SITES"
+for call in loadSerializedTransactions restoreWalletFromBytes; do
+    n="$(grep -cF "NativeBridge.$call(" "$KT_SITES")"
+    [ "$n" -eq 1 ] || { sed 's/^/   | /' "$KT_SITES"; gate_fail "NativeBridge.$call is called from $n places in the app; expected 1 (restoreFromDisk)."; }
+done
+# restoreFromDisk's body, braces matched.
+RESTORE_KT="$(awk '!on && /fun restoreFromDisk\(/ { on = 1 }
+                   on { print; o = gsub(/\{/, "{"); c = gsub(/\}/, "}"); d += o - c; if (o > 0) seen = 1; if (seen && d <= 0) exit }' "$WALLET_KT")"
+[ -n "$RESTORE_KT" ] || gate_fail "restoreFromDisk was not found in WalletManager.kt. Re-anchor the gate."
+LOAD_AT="$(<<<"$RESTORE_KT" grep -nF "NativeBridge.loadSerializedTransactions(" | cut -d: -f1)"
+BUILD_AT="$(<<<"$RESTORE_KT" grep -nF "NativeBridge.restoreWalletFromBytes(" | cut -d: -f1)"
+[ -n "$LOAD_AT" ] && [ -n "$BUILD_AT" ] && [ "$LOAD_AT" -lt "$BUILD_AT" ] ||
+    gate_fail "restoreFromDisk must call loadSerializedTransactions and then restoreWalletFromBytes (load at '${LOAD_AT}', build at '${BUILD_AT}')."
+if <<<"$RESTORE_KT" grep -qE "NativeBridge\.(recoverWalletFromBytes|createWalletFromBytes)\("; then
+    gate_fail "restoreFromDisk calls recoverWalletFromBytes or createWalletFromBytes, which drop its own load."
+fi
 
 # $1 out, rest: extra flags. KAT_BITS=32 builds -m32 (needs gcc-multilib).
 build() {
@@ -84,12 +116,15 @@ build() {
         -o "$out"
 }
 
-echo "=== building arms (the bridge and the wallet under ASan: comparison + shipped, 64- and 32-bit) ==="
-build "$BUILD_DIR/comparison" -DSAVED_TX_ARRAY_UNFIXED || gate_fail "the comparison arm did not build"
-build "$BUILD_DIR/shipped"                             || gate_fail "the shipped arm did not build"
-KAT_BITS=32 build "$BUILD_DIR/comparison32" -DSAVED_TX_ARRAY_UNFIXED ||
-    gate_fail "the 32-bit comparison arm did not build (gcc-multilib?)"
-KAT_BITS=32 build "$BUILD_DIR/shipped32" || gate_fail "the 32-bit shipped arm did not build (gcc-multilib?)"
+echo "=== building arms (the bridge and the wallet under ASan: two comparison arms + shipped, 64- and 32-bit) ==="
+for bits in 64 32; do
+    sfx=""; [ "$bits" = "32" ] && sfx="32"
+    KAT_BITS=$bits build "$BUILD_DIR/array$sfx" -DSAVED_TX_ARRAY_UNFIXED ||
+        gate_fail "the ${bits}-bit array arm did not build (gcc-multilib for 32-bit?)"
+    KAT_BITS=$bits build "$BUILD_DIR/pending$sfx" -DSAVED_TX_PENDING_LOAD_UNFIXED ||
+        gate_fail "the ${bits}-bit pending arm did not build"
+    KAT_BITS=$bits build "$BUILD_DIR/shipped$sfx" || gate_fail "the ${bits}-bit shipped arm did not build"
+done
 
 # symbolize=0: a report is printed and the arm aborts at once. Symbolizing a report can stall for minutes
 # (measured on the 32-bit arm under load), and the gate reads the report's first line, not its frames.
@@ -165,29 +200,38 @@ must_fail_checks() {
     grep "^   FAIL:" "$log" | sed "s/^   /   $arm: /"
 }
 
-RED_ASAN="reload_after_build recover_after_build"
-RED_ASSERT="unadopted_released"
+RED_ASAN_ARRAY="reload_after_build recover_after_build"
+RED_ASSERT_ARRAY="unadopted_released"
+RED_ASSERT_PENDING="foreign_load_recover foreign_load_create"
 GUARD="load_twice_before_build"
 
 for bits in 64 32; do
     sfx=""; [ "$bits" = "32" ] && sfx="32"
-    for scenario in $RED_ASAN; do
-        echo; echo "---- [RED-THEN-GREEN, AddressSanitizer, ${bits}-bit] scenario=$scenario : comparison must be reported, shipped must be clean ----"
-        must_report "$BUILD_DIR/comparison$sfx" "comparison$sfx" "$scenario"
+    for scenario in $RED_ASAN_ARRAY; do
+        echo; echo "---- [RED-THEN-GREEN, AddressSanitizer, rule 1, ${bits}-bit] scenario=$scenario : array arm must be reported; pending and shipped must pass ----"
+        must_report "$BUILD_DIR/array$sfx" "array$sfx" "$scenario"
+        must_pass "$BUILD_DIR/pending$sfx" "pending$sfx" "$scenario" "$ASAN_OFF"
         must_pass "$BUILD_DIR/shipped$sfx" "shipped$sfx" "$scenario" "$ASAN_OFF"
-        echo "   shipped$sfx: ALL PASS"
+        echo "   pending$sfx and shipped$sfx: ALL PASS"
     done
-    for scenario in $RED_ASSERT; do
-        echo; echo "---- [RED-THEN-GREEN, assertion, ${bits}-bit] scenario=$scenario : comparison must fail the invariant's checks, shipped must pass ----"
-        must_fail_checks "$BUILD_DIR/comparison$sfx" "comparison$sfx" "$scenario"
+    for scenario in $RED_ASSERT_ARRAY; do
+        echo; echo "---- [RED-THEN-GREEN, assertion, rule 1, ${bits}-bit] scenario=$scenario : array arm must fail the invariant's checks; pending and shipped must pass ----"
+        must_fail_checks "$BUILD_DIR/array$sfx" "array$sfx" "$scenario"
+        must_pass "$BUILD_DIR/pending$sfx" "pending$sfx" "$scenario" "$ASAN_OFF"
         must_pass "$BUILD_DIR/shipped$sfx" "shipped$sfx" "$scenario" "$ASAN_OFF"
-        echo "   shipped$sfx: ALL PASS"
+        echo "   pending$sfx and shipped$sfx: ALL PASS"
+    done
+    for scenario in $RED_ASSERT_PENDING; do
+        echo; echo "---- [RED-THEN-GREEN, assertion, rule 2, ${bits}-bit] scenario=$scenario : pending arm must fail the invariant's checks; array and shipped must pass ----"
+        must_fail_checks "$BUILD_DIR/pending$sfx" "pending$sfx" "$scenario"
+        must_pass "$BUILD_DIR/array$sfx" "array$sfx" "$scenario" "$ASAN_OFF"
+        must_pass "$BUILD_DIR/shipped$sfx" "shipped$sfx" "$scenario" "$ASAN_OFF"
+        echo "   array$sfx and shipped$sfx: ALL PASS"
     done
     for scenario in $GUARD; do
-        echo; echo "---- [GUARD, both arms, ${bits}-bit] scenario=$scenario : both arms must pass ----"
-        must_pass "$BUILD_DIR/comparison$sfx" "comparison$sfx" "$scenario" "$ASAN_OFF"
-        must_pass "$BUILD_DIR/shipped$sfx" "shipped$sfx" "$scenario" "$ASAN_OFF"
-        echo "   comparison$sfx and shipped$sfx: ALL PASS"
+        echo; echo "---- [GUARD, every arm, ${bits}-bit] scenario=$scenario : every arm must pass ----"
+        for arm in array pending shipped; do must_pass "$BUILD_DIR/$arm$sfx" "$arm$sfx" "$scenario" "$ASAN_OFF"; done
+        echo "   array$sfx, pending$sfx and shipped$sfx: ALL PASS"
     done
 done
 
@@ -195,11 +239,11 @@ done
 # ends up owned by a wallet or released, and nothing is left behind when the wallet is released.
 echo
 echo "---- [LEAK CHECK] every scenario on the shipped arm under detect_leaks=1 must be clean ----"
-for scenario in $RED_ASAN $RED_ASSERT $GUARD; do
+for scenario in $RED_ASAN_ARRAY $RED_ASSERT_ARRAY $RED_ASSERT_PENDING $GUARD; do
     must_pass "$BUILD_DIR/shipped" "shipped" "$scenario" "$ASAN_LEAK"
     echo "   leak-clean: $scenario"
 done
 
 echo
-echo "saved_tx_array_kat: RED-BEFORE-GREEN OK (2 AddressSanitizer + 1 assertion comparison-arm scenarios, 1 guard in both arms, 64- and 32-bit), leak check OK (4 scenarios)"
+echo "saved_tx_array_kat: RED-BEFORE-GREEN OK (rule 1: 2 AddressSanitizer + 1 assertion scenarios; rule 2: 2 assertion scenarios; each red only in its own arm; 1 guard in every arm; 64- and 32-bit), leak check OK (6 scenarios), source gates OK"
 exit 0
