@@ -67,8 +67,12 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     # -DDEBUG: peer_log is compiled out on the host without it (BRPeer.h); the log lines are evidence.
+    # -DDGB_HEADER_DIFF_CHECK=1, named here: the fixture's headers are synthetic, with no difficulty history, so at
+    # level 2 a fork header among them can never be judged and is refused (INT-2026-10-09-E), and no reorg could be
+    # built. This suite is about the filter chain and the scan ledger, not the target; the level-2 verdicts are
+    # pinned in header_diff_v4_kat and int_2026_10_09_e_kat. Proof of work stays at the shipped level.
     "${CC:-clang}" -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        -DDGB_HEADER_DIFF_CHECK=1 "${m[@]}" "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/cf_reorg_rewind_kat_main.c" "${UNITS[@]}" \
         -lm -lpthread -o "$out"

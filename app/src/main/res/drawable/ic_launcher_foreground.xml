@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher art for app.aroundtheblock.wallet ("green rim", chosen 2026-10-03).
+     The DigiByte mark is the official logo from DigiByte Core (src/qt/res/src/digibyte.svg,
+     viewBox 1024), scaled into the 66dp safe zone of the 108dp adaptive canvas (logo r=31dp); the
+     decorative green rim sits at the edge of the visible 72dp circle, r=33..36dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,19.5a34.5,34.5 0,1 1,0 69a34.5,34.5 0,1 1,0 -69"
+        android:strokeColor="#19B38B"
+        android:strokeWidth="3" />
+    <group
+        android:scaleX="0.0605469"
+        android:scaleY="0.0605469"
+        android:translateX="23"
+        android:translateY="23">
+        <path
+            android:fillColor="#0066CC"
+            android:pathData="M512,0C229.2,0,0,229.3,0,512s229.3,512,512,512s512-229.3,512-512S794.8,0,512,0z" />
+        <path
+            android:fillColor="#002352"
+            android:pathData="M512,96a416,416 0,1 1,0 832a416,416 0,1 1,0 -832z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M639.9,303.2l14.8-38.5c1.5-3.9-1.4-8.1-5.5-8.1h-54.9L577,301.7h-24.3l14.2-37c1.5-3.9-1.4-8.1-5.5-8.1h-54.9 l-17.3,45.1H317.6c-7.8,0-15.1,4.2-18.9,11L256,388.2h59.8h260.8c10.6,0,21.2,2,31,6c18.9,7.8,41.3,25.4,35.6,65.1 c-9.4,66.5-77.1,184.3-224.1,186.1l76-197.9c3.2-8.2-2.9-16.8-11.6-16.8h-102L258.4,733.2c0,0,24.8,3.1,63.7,3.1L309.9,768h56 c4.4,0,8.5-2.8,10.1-6.9l10.5-27.4c8.3-0.7,16.6-1.6,25.3-2.6l-14,36.9h56c4.4,0,8.5-2.8,10.1-6.9l16-41.7 c92.1-21,191.1-66.7,249.8-163.1C848.4,362,725.1,311.8,639.9,303.2z" />
+    </group>
+</vector>

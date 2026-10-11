@@ -1,0 +1,559 @@
+package app.aroundtheblock.wallet.ui.settings
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import androidx.compose.ui.res.stringResource
+import app.aroundtheblock.wallet.R
+import app.aroundtheblock.wallet.core.asset.AssetManager
+import app.aroundtheblock.wallet.core.reconcile.ChainReconciliationService
+import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
+import app.aroundtheblock.wallet.core.reconcile.ClassTotal
+import app.aroundtheblock.wallet.core.reconcile.ScanClass
+import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
+import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.NumberFormat
+import java.util.Locale
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ReconcileScreenEntryPoint {
+    fun assetManager(): AssetManager
+    fun walletManager(): app.aroundtheblock.wallet.core.WalletManager
+    /** The reconcile client Hilt builds on the shared client (Tor routing and DigiScope pins). */
+    fun dgbNodeClient(): DgbNodeClient
+}
+
+/**
+ * "Scan for missing funds" screen — Path B reconciliation.
+ *
+ * Flow:
+ *  - Explain what we're about to do + trust model (node-trusted vs. SPV)
+ *  - Let the user edit the RPC endpoint if they run their own node
+ *  - Button kicks off ChainReconciliationService.reconcile()
+ *  - Progress shown live; final result shows addresses/UTXOs/imported counts
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Pull the app-scoped AssetManager via a Hilt entry point so reconcile
+    // can refresh asset UTXOs after tx import. Without this the Assets tab
+    // stayed empty even after a successful scan.
+    val entryPoint = remember {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            ReconcileScreenEntryPoint::class.java,
+        )
+    }
+    // The injected client: it carries the Tor routing and the DigiScope pins.
+    val client = remember { entryPoint.dgbNodeClient() }
+    val assetManager = remember { entryPoint.assetManager() }
+    val walletManager = remember { entryPoint.walletManager() }
+    val service = remember {
+        ChainReconciliationService(client, assetManager, appContext = context.applicationContext)
+    }
+    val scope = rememberCoroutineScope()
+    var stuckResult by remember { mutableStateOf<String?>(null) }
+
+    val state by service.state.collectAsStateWithLifecycle()
+    var endpoint by remember { mutableStateOf(client.endpoint()) }
+    var editingEndpoint by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Scan for missing funds", color = Color.White) },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0A1628)
+                )
+            )
+        },
+        containerColor = Color(0xFF0A1628),
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Intro card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742))
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.CloudSync,
+                            contentDescription = null,
+                            tint = DigiByteAccent,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "What this does",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "The wallet normally finds your transactions via SPV (bloom " +
+                        "filters + peer merkleblocks). If a sync was interrupted or " +
+                        "peers dropped blocks, some of your transactions may be " +
+                        "missing from the local state even though they're on-chain.\n\n" +
+                        "This tool asks a DigiByte full node to list the unspent " +
+                        "outputs on every address your wallet derives, then imports " +
+                        "any missing transactions into the local wallet.",
+                        color = Color(0xFFB0BEC5),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+
+            // Trust warning
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0x33FFAA00)
+                )
+            ) {
+                Row(
+                    Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFFAA00),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "This queries an external node. The default endpoint is " +
+                        "api.digiscope.me (cert-pinned). For full sovereignty, " +
+                        "point it at your own node below — no tx credentials ever " +
+                        "leave your device, we only send public addresses.",
+                        color = Color(0xFFFFCC66),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+
+            // Endpoint picker
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742))
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "Node endpoint",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (editingEndpoint) {
+                        OutlinedTextField(
+                            value = endpoint,
+                            onValueChange = { endpoint = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = DigiByteAccent,
+                                unfocusedBorderColor = Color(0xFF546E7A),
+                            )
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = {
+                                client.setCustomEndpoint(endpoint)
+                                editingEndpoint = false
+                            }) { Text("Save") }
+                            TextButton(onClick = {
+                                client.setCustomEndpoint(null)
+                                endpoint = DgbNodeClient.DEFAULT_BASE_URL
+                                editingEndpoint = false
+                            }) { Text("Reset to default") }
+                        }
+                    } else {
+                        Text(
+                            endpoint,
+                            color = Color(0xFFB0BEC5),
+                            fontSize = 13.sp,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        TextButton(onClick = { editingEndpoint = true }) {
+                            Text("Use my own node")
+                        }
+                    }
+                }
+            }
+
+            // Action + state
+            val busy = state is ChainReconciliationService.State.Scanning
+
+            // ONE definition of "run the scan", shared by the button and by the
+            // auto-start below, so the two can never drift apart.
+            val runScan: () -> Unit = {
+                scope.launch {
+                    val result = service.reconcile()
+                    // Clear the post-upgrade banner flag if this manual
+                    // run got us a successful reconcile — same pref the
+                    // auto-trigger writes to, so a Done here also
+                    // dismisses the WalletScreen banner.
+                    if (result is ChainReconciliationService.State.Done) {
+                        app.aroundtheblock.wallet.core.reconcile.PostUpgradeReconciler
+                            .clearFailedFlag(context)
+                    }
+                }
+                Unit
+            }
+
+            // Arrived from the history-gap banner, whose button reads "Scan for missing
+            // transactions". That button used to only NAVIGATE here, so a user who tapped it
+            // landed on this screen believing a scan had started — nothing had, and nothing
+            // said so. Observed 2026-08-07: a first tap produced no network call at all (the
+            // DgbNodeClient logs every failure and was silent because it was never reached),
+            // and the wallet sat at 0.00 DGB with its history written off until the button on
+            // THIS screen was pressed. A control must do what its label says.
+            //
+            // Guarded by a remember so it fires once per arrival, not on every recomposition.
+            var autoStarted by remember { mutableStateOf(false) }
+            LaunchedEffect(autoStart, state) {
+                if (shouldAutoStartReconcile(
+                        requested = autoStart,
+                        alreadyStarted = autoStarted,
+                        scanInProgress = state is ChainReconciliationService.State.Scanning,
+                    )
+                ) {
+                    autoStarted = true
+                    runScan()
+                }
+            }
+
+            Button(
+                onClick = runScan,
+                enabled = !busy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
+            ) {
+                Text(
+                    if (busy) "Scanning…" else "Scan for missing funds",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
+            }
+
+            // --- Stuck / phantom-chain send recovery ---
+            HorizontalDivider(color = Color(0xFF243352))
+            Text(
+                "Stuck unconfirmed sends",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            )
+            Text(
+                "If sends never confirm, they may be spending change from an earlier send " +
+                    "that never landed on-chain — so they can never be mined. This drops those " +
+                    "un-mineable transactions and restores the coins they tied up. Confirmed " +
+                    "sends are never touched.",
+                color = Color(0xFFB0BEC5),
+                fontSize = 13.sp,
+            )
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            walletManager.clearStuckSends()
+                        }
+                        stuckResult = if (result.dropped == 0)
+                            "No stuck sends to clear."
+                        else buildString {
+                            append("Cleared ${result.dropped} stuck send(s)")
+                            // Name orphans explicitly: they are the ones that could never
+                            // confirm no matter how long you waited, and until now the only
+                            // cure was a full rebuild-from-chain re-sync.
+                            if (result.orphansCleared > 0) {
+                                append(", ${result.orphansCleared} of them orphaned " +
+                                    "(spending a parent this wallet no longer has)")
+                            }
+                            append("; corrected ${result.assetRowsCleared} asset row(s). ")
+                            append("Balance updates shortly.")
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Clear stuck sends")
+            }
+            stuckResult?.let {
+                Text(it, color = Color(0xFF6BE8A3), fontSize = 13.sp)
+            }
+
+            // --- Full rebuild from chain (rescan every tx, re-stamp block heights) ---
+            HorizontalDivider(color = Color(0xFF243352))
+            Text(
+                "Full rebuild from chain",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            )
+            Text(
+                "If confirmations, ordering, or balance still look wrong, this clears the local " +
+                    "transaction cache and re-scans the whole chain with compact filters — re-detecting " +
+                    "and block-stamping every transaction from on-chain data. Your seed and coins are " +
+                    "untouched; everything is rebuilt from the chain. The app restarts and the rescan " +
+                    "runs from your wallet's birth, so it takes a while to finish.",
+                color = Color(0xFFB0BEC5),
+                fontSize = 13.sp,
+            )
+            var armRebuild by remember { mutableStateOf(false) }
+            var rebuilding by remember { mutableStateOf(false) }
+            OutlinedButton(
+                enabled = !rebuilding,
+                onClick = {
+                    if (!armRebuild) {
+                        armRebuild = true
+                    } else {
+                        // Run the native teardown OFF the main thread. rebuildFromChainRescan()
+                        // calls NativeBridge.stopSync(), which blocks on the peer lock; on a
+                        // wallet jammed on an orphaned tip (peers hammering getheaders) that
+                        // lock is contended, and running it on the UI thread ANRs the app
+                        // (reported: "clicked rescan and it locked up"). Restart on the main
+                        // thread once the clear completes.
+                        rebuilding = true
+                        scope.launch {
+                            withContext(Dispatchers.IO) { walletManager.rebuildFromChainRescan() }
+                            val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                            li?.addFlags(
+                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            )
+                            context.startActivity(li)
+                            Runtime.getRuntime().exit(0)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (armRebuild) Color(0xFFFF6B6B) else Color(0xFFB0BEC5)
+                ),
+            ) {
+                Text(
+                    when {
+                        rebuilding -> "Rebuilding — clearing cache, restarting…"
+                        armRebuild -> "Tap again to confirm — clears cache & restarts"
+                        else       -> "Full rebuild from chain (rescan)"
+                    }
+                )
+            }
+
+            when (val s = state) {
+                is ChainReconciliationService.State.Idle -> Unit
+
+                is ChainReconciliationService.State.Scanning -> {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Color(0xFF1A2742),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            when (s.stage) {
+                                ChainReconciliationService.STAGE_COMPARING -> stringResource(R.string.reconcile_stage_comparing)
+                                else -> s.stage
+                            },
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = s.progress.coerceIn(0f, 1f),
+                            modifier = Modifier.fillMaxWidth(),
+                            color = DigiByteAccent,
+                            trackColor = Color(0xFF243352)
+                        )
+                    }
+                }
+
+                is ChainReconciliationService.State.Done -> {
+                    val fmt = NumberFormat.getNumberInstance(Locale.US).apply {
+                        minimumFractionDigits = 2
+                        maximumFractionDigits = 8
+                    }
+                    fun dgb(sat: Long) = "${fmt.format(sat / 100_000_000.0)} DGB"
+                    fun line(t: ClassTotal) = "${t.count} · ${dgb(t.sat)}"
+                    val p = s.partition
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Color(0x3348B76D),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            "Scan complete",
+                            color = Color(0xFF6BE8A3),
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        ResultRow("Addresses scanned", "${s.scannedAddresses}")
+                        ResultRow(stringResource(R.string.reconcile_outputs_found), "${s.utxosSeenOnChain}")
+                        if (p == null) {
+                            // No wallet to compare with: say so rather than show a raw sum as a balance.
+                            ResultRow(stringResource(R.string.reconcile_found_not_compared), dgb(s.totalChainBalanceSat))
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            ResultRow(stringResource(R.string.reconcile_spendable), dgb(p.spendableSat), emphasize = true)
+                            ResultRow(stringResource(R.string.reconcile_wallet_spendable), dgb(p.walletSpendableSat))
+                            Text(
+                                if (p.matchesWallet) stringResource(R.string.reconcile_matches_wallet)
+                                else stringResource(R.string.reconcile_does_not_match_wallet),
+                                color = if (p.matchesWallet) Color(0xFF6BE8A3) else Color(0xFFFFB74D),
+                                fontSize = 12.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            val held = p.total(ScanClass.HELD_ASSET)
+                            if (held.count > 0) ResultRow(stringResource(R.string.reconcile_held_asset), line(held))
+                            val unknown = p.total(ScanClass.HELD_UNKNOWN)
+                            if (unknown.count > 0) ResultRow(stringResource(R.string.reconcile_held_unknown), line(unknown))
+                            val proven = p.total(ScanClass.PROVEN_PLAIN)
+                            if (proven.count > 0) ResultRow(stringResource(R.string.reconcile_proven_plain), line(proven))
+                            val dd = p.total(ScanClass.DIGIDOLLAR)
+                            if (dd.count > 0) ResultRow(stringResource(R.string.reconcile_digidollar_outputs), "${dd.count}")
+                            val immature = p.total(ScanClass.IMMATURE)
+                            if (immature.count > 0) ResultRow(stringResource(R.string.reconcile_immature), line(immature))
+                            val pending = p.total(ScanClass.PENDING)
+                            if (pending.count > 0) ResultRow(stringResource(R.string.reconcile_pending), line(pending))
+                            val missing = p.total(ScanClass.NOT_IN_WALLET)
+                            ResultRow(stringResource(R.string.reconcile_not_in_wallet), line(missing), emphasize = missing.count > 0)
+                            if (p.walletOnly.count > 0) {
+                                ResultRow(stringResource(R.string.reconcile_wallet_only), line(p.walletOnly))
+                            }
+                            if (missing.count == 0) {
+                                Text(
+                                    stringResource(R.string.reconcile_no_missing_funds),
+                                    color = Color(0xFFB0BEC5),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        ResultRow(
+                            "Transactions imported",
+                            "${s.txsImported}",
+                            emphasize = s.txsImported > 0
+                        )
+                        ResultRow(stringResource(R.string.reconcile_txs_already_in_wallet), "${s.alreadyKnown}")
+                        if (s.txsNotAdded > 0) {
+                            ResultRow(stringResource(R.string.reconcile_txs_not_added), "${s.txsNotAdded}")
+                        }
+                        if (s.historyTxsImported > 0) {
+                            ResultRow(
+                                "Recovered from history",
+                                "${s.historyTxsImported}",
+                                emphasize = true
+                            )
+                        }
+                        if (s.txsImported > 0 || s.historyTxsImported > 0) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Your balance should update shortly.",
+                                color = Color(0xFFB0BEC5),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                is ChainReconciliationService.State.Failed -> {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Color(0x33FF5252),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            "Scan failed",
+                            color = Color(0xFFFF8A80),
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(s.reason, color = Color(0xFFB0BEC5), fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultRow(label: String, value: String, emphasize: Boolean = false) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = Color(0xFFB0BEC5), fontSize = 13.sp)
+        Text(
+            value,
+            color = if (emphasize) DigiByteAccent else Color.White,
+            fontWeight = if (emphasize) FontWeight.SemiBold else FontWeight.Normal,
+            fontSize = 13.sp
+        )
+    }
+}

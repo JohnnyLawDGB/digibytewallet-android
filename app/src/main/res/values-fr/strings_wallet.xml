@@ -22,7 +22,7 @@
     <string name="onb_create">Créer un nouveau portefeuille</string>
     <string name="onb_recover">Récupérer un portefeuille existant</string>
     <string name="onb_footer">DigiByte — Sécurisé, rapide, décentralisé</string>
-    <string name="app_name_display">DigiByte Wallet</string>
+    <string name="app_name_display">DigiByte Mobile</string>
     <string name="seed_screenshot_blocked">Les captures d\'écran sont bloquées. Notez ces mots — ils ne pourront pas être récupérés.</string>
     <string name="seed_title">Votre phrase de récupération</string>
     <string name="seed_word_count">Phrase de récupération de %1$d mots</string>
@@ -45,6 +45,9 @@
     <string name="unlock_locked">Verrouillé — réessayez dans %1$s</string>
     <string name="unlock_unlocking">Déverrouillage…</string>
     <string name="unlock_biometrics_cd">Déverrouiller par biométrie</string>
+    <string name="recover_title">Récupérer le portefeuille</string>
+    <string name="recover_body">Saisissez votre phrase de récupération pour restaurer votre portefeuille.</string>
+    <string name="recover_continue">Continuer</string>
     <string name="seed_retry">Réessayer</string>
     <string name="verify_next">Suivant</string>
     <string name="verify_finish">Terminer</string>
@@ -67,7 +70,7 @@
     <string name="unlock_attempts_left">Code PIN incorrect. Tentatives restantes : %1$d</string>
     <string name="battery_title">Maintenir la synchronisation en arrière-plan</string>
     <string name="battery_body">Android peut mettre ce portefeuille en veille lorsque l\'écran est éteint, ce qui coupe sa connexion au réseau DigiByte et peut le bloquer à 0 pair jusqu\'à ce que vous le rouvriez.\n\nAutorisez-le à fonctionner sans restriction pour que la synchronisation continue.</string>
-    <string name="battery_body_samsung">\n\nSur Samsung, ouvrez également Entretien de l\'appareil → Batterie → « Applis jamais en veille » et ajoutez DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nSur Samsung, ouvrez également Entretien de l\'appareil → Batterie → « Applis jamais en veille » et ajoutez DigiByte Mobile.</string>
     <string name="battery_open_settings">Ouvrir les paramètres</string>
     <string name="tor_title">Nouvelle fonctionnalité de confidentialité</string>
     <string name="tor_body">Le routage Tor est désormais disponible. Une fois activé, votre portefeuille se connecte au réseau DigiByte via Tor, ce qui masque votre adresse IP aux pairs.\n\nActiver le routage Tor ?</string>
@@ -609,7 +612,52 @@
     <string name="market_tor_notice_title">Le Marché ne passe pas par Tor</string>
     <string name="market_tor_notice_body">Le Marché ne passe pas par Tor ; le site verra votre adresse IP.</string>
     <string name="market_tor_notice_continue">Continuer</string>
-    <string name="move_title">DigiByte Wallet devient DigiByte Mobile</string>
-    <string name="move_body">Cette appli ne recevra plus de mises à jour. Installez DigiByte Mobile depuis Google Play, choisissez Récupérer un portefeuille existant et saisissez la phrase de récupération de ce portefeuille — rien ne bouge sur la chaîne. Gardez cette appli jusqu’à ce que votre solde apparaisse dans la nouvelle.</string>
-    <string name="move_how">Comment migrer</string>
+    <string name="restore_pass_toggle">J’ai utilisé une phrase secrète</string>
+    <string name="restore_pass_body">Uniquement si vous en avez ajouté une en créant ce portefeuille. Une phrase secrète erronée ouvre un autre portefeuille, vide — sans aucun message d’erreur.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Veuillez saisir les %1$d mots.</string>
+    <string name="restore_err_invalid_words">Mot(s) invalide(s) : %1$s</string>
+    <string name="restore_err_checksum">Cette phrase de récupération n’est pas valide. Vérifiez chaque mot et leur ordre.</string>
+    <string name="restore_scan_title">Restaurer en toute confidentialité</string>
+    <string name="restore_scan_body">Une fois que vous continuez, ce téléphone retrouve lui-même les transactions de votre portefeuille — adresses natives (dgb1q…), legacy (D…), Taproot et DigiDollar — sans envoyer vos adresses à qui que ce soit.</string>
+    <string name="restore_other_title">Phrase issue d’une autre application de portefeuille ?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor et certains anciens portefeuilles conservent les pièces sur des formats d’adresse que ce portefeuille n’utilise pas, la synchronisation ne peut donc pas les voir. Une vérification peut les trouver, mais elle envoie les adresses dérivées de votre phrase à DigiScope (api.digiscope.me), qui signale les fonds qu’elles détiennent. Inutile pour une phrase issue de DigiByte Mobile ou de l’ancienne appli DigiByte Wallet. Vous pouvez aussi la lancer plus tard depuis Paramètres → Récupérer les fonds d’un autre portefeuille.</string>
+    <string name="restore_other_check">Vérifier d’autres formats</string>
+    <string name="restore_scan_deriving">Dérivation des adresses…</string>
+    <string name="restore_scan_duration">Cela peut prendre 30 à 90 secondes selon le nœud.</string>
+    <string name="restore_scan_failed">Échec de l’analyse</string>
+    <string name="restore_scan_retry">Relancer la vérification</string>
+    <string name="restore_found_title">Fonds trouvés</string>
+    <string name="restore_unreachable_title">Impossible de joindre DigiScope</string>
+    <string name="restore_none_title">Aucun fonds détecté pour l’instant</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB sur %2$d chemin</item>
+        <item quantity="many">%1$s DGB sur %2$d chemins</item>
+        <item quantity="other">%1$s DGB sur %2$d chemins</item>
+    </plurals>
+    <string name="restore_unreachable_body">La vérification n’a pas pu s’exécuter. La synchronisation trouvera tout de même les formats propres à ce portefeuille une fois que vous continuez ; réessayez, ou utilisez plus tard Paramètres → Récupérer les fonds d’un autre portefeuille pour les formats d’autres applications.</string>
+    <string name="restore_none_body">Rien de non dépensé sur les formats vérifiés. La synchronisation trouvera tout de même les transactions propres à ce portefeuille une fois que vous continuez.</string>
+    <string name="restore_nonnative_note">%1$s DGB se trouvent sur le format d’adresse d’une autre application. Après la restauration, vous serez dirigé vers Récupérer les fonds d’un autre portefeuille pour les transférer dans ce portefeuille — rien n’est déplacé tant que vous n’avez pas confirmé là-bas.</string>
+    <string name="restore_pass_nothing_found">Rien n’a été trouvé avec la phrase secrète saisie. Une phrase secrète n’a pas de somme de contrôle : une phrase erronée ouvre un autre portefeuille, vide, sans aucune erreur. Vérifiez qu’elle ne contient pas de faute de frappe — ou, si vous n’en avez pas défini à la création du portefeuille, revenez en arrière et fermez le champ de la phrase secrète.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d adresse analysée</item>
+        <item quantity="many">%1$s · %2$d adresses analysées</item>
+        <item quantity="other">%1$s · %2$d adresses analysées</item>
+    </plurals>
+    <string name="restore_date_title">Quand avez-vous créé ce portefeuille ?</string>
+    <string name="restore_date_body">Cela nous permet d’éviter une analyse inutile de la blockchain et de synchroniser plus vite.</string>
+    <string name="restore_date_unsure">Je ne m’en souviens pas</string>
+    <string name="restore_date_unsure_sub">Analyse complète de la blockchain (la plus lente — à choisir en cas de doute)</string>
+    <string name="restore_date_warning">Les transactions antérieures à l’année sélectionnée ne seront pas détectées. Si votre portefeuille peut avoir un historique plus ancien, choisissez une année antérieure — ou « Je ne m’en souviens pas » pour une couverture complète (plus lent).</string>
+    <string name="restore_date_start">Lancer la récupération</string>
+    <string name="restore_date_restoring">Restauration du portefeuille…</string>
+    <string name="restore_date_onwards">À partir de janv. %1$d</string>
+    <string name="restore_date_range">janv. %1$d – déc. %1$d</string>
+    <string name="restore_date_genesis">Lancement de DigiByte en janvier 2014</string>
 </resources>

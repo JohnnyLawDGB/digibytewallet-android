@@ -148,6 +148,10 @@ static BRTransaction *makeChildOf(const uint8_t *spk, size_t spkLen, UInt256 par
 }
 
 /* A plain send spending `prev`:0 and paying `amt` to `spk`. */
+/* Registration: these fixtures stand in for the wallet's own sends and their funding, with placeholder
+ * signatures, so they register through BRWalletRegisterTransactionTrusted -- the path the bridge's
+ * _registerWalletCopy and the peer manager use for a tx this wallet signed. (The checked path refuses
+ * an unconfirmed spend of a wallet coin without a valid signature; unconfirmed_spend_sig_kat.) */
 static BRTransaction *mkTx(const uint8_t *spk, size_t spkLen, UInt256 prev, uint64_t amt)
 {
     BRTransaction *tx = BRTransactionNew();
@@ -164,7 +168,7 @@ static BRTransaction *registerCopyHandOff(BRWallet *w, BRTransaction *tx)
 {
     if (! tx->timestamp) tx->timestamp = (uint32_t)time(NULL);
     BRTransaction *copy = BRTransactionCopy(tx);
-    if (copy) BRWalletRegisterTransaction(w, copy);
+    if (copy) BRWalletRegisterTransactionTrusted(w, copy);
     return tx;
 }
 
@@ -449,10 +453,10 @@ static void scenario_invalid_released(void)
     UInt256 prev; memset(prev.u8, 0x31, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *WB = mkTx(spk, spkLen, F->txHash, 40000);
     WB->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, WB);
+    BRWalletRegisterTransactionTrusted(w, WB);
 
     /* A spends the same F:0 but is NOT a wallet record — so it is invalid, and the list owns it */
     BRTransaction *A = mkTx(spk, spkLen, F->txHash, 30000);
@@ -489,13 +493,13 @@ static void scenario_invalid_survives(void)
     UInt256 prev; memset(prev.u8, 0x41, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *WB = mkTx(spk, spkLen, F->txHash, 40000);
     WB->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, WB);
+    BRWalletRegisterTransactionTrusted(w, WB);
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 30000);
     WA->timestamp = (uint32_t)time(NULL) + 1;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
     UInt256 aHash = WA->txHash;
     check(BRWalletTransactionForHash(w, aHash) == WA, "WA is the wallet's own record");
     check(! BRWalletTransactionIsValid(w, WA), "WA is an invalid double-spend");
@@ -623,11 +627,11 @@ static void scenario_relay(void)
     UInt256 prev; memset(prev.u8, 0x21, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);                       /* funding, wallet-owned */
+    BRWalletRegisterTransactionTrusted(w, F);                       /* funding, wallet-owned */
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 40000); /* the wallet's record of send A */
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
 
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
     BRPeer *p = addPeer(m, 0x06, 1);
@@ -671,11 +675,11 @@ static void scenario_remove_relay(void)
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->blockHeight = 1000;                                   /* confirmed funding, so the parent walk skips it */
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);                       /* funding, wallet-owned */
+    BRWalletRegisterTransactionTrusted(w, F);                       /* funding, wallet-owned */
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 40000); /* the wallet's record of send A */
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
 
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
     BRPeer *p = addPeer(m, 0x06, 1);
@@ -723,15 +727,15 @@ static void scenario_remove_parent(void)
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->blockHeight = 1000;                                    /* confirmed funding, so the parent walk skips it */
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *P = mkTx(spk, spkLen, F->txHash, 40000);   /* wallet's parent send */
     P->timestamp = (uint32_t)time(NULL);
     UInt256 pHash = P->txHash;
-    BRWalletRegisterTransaction(w, P);
+    BRWalletRegisterTransactionTrusted(w, P);
     BRTransaction *C = mkTx(spk, spkLen, pHash, 30000);       /* wallet's child, spends P:0 */
     C->timestamp = (uint32_t)time(NULL);
     UInt256 cHash = C->txHash;
-    BRWalletRegisterTransaction(w, C);
+    BRWalletRegisterTransactionTrusted(w, C);
 
     /* the relay path lists the wallet's child record (owned = 0), and its parent walk lists the
      * wallet's parent record (owned = 0). The confirmed funding F is skipped by the parent walk. */
@@ -859,7 +863,7 @@ static void *rgr_mutator(void *arg)
         BRPeerManagerRemoveTransaction(g_rgrMgr, g_rgrHash[slot]);  /* frees the send, purges the list */
         BRTransaction *fresh = rgrMakeSend(slot, (uint32_t)i + 1);
         fresh->timestamp = (uint32_t)time(NULL);
-        BRWalletRegisterTransaction(g_rgrWallet, fresh);
+        BRWalletRegisterTransactionTrusted(g_rgrWallet, fresh);
         MGR_LOCK(g_rgrMgr);
         _BRPeerManagerAddTxToPublishListOwned(g_rgrMgr, fresh, NULL, NULL, 0);
         MGR_UNLOCK(g_rgrMgr);
@@ -884,11 +888,11 @@ static void scenario_remove_getdata_race(void)
         BRTransaction *F = mkTx(g_rgrSpk, g_rgrSpkLen, prev, 5000000);
         F->blockHeight = 1000;                 /* confirmed funding, so the parent walk skips it */
         F->timestamp = (uint32_t)time(NULL);
-        BRWalletRegisterTransaction(g_rgrWallet, F);
+        BRWalletRegisterTransactionTrusted(g_rgrWallet, F);
         g_rgrFund[s] = F->txHash;
         BRTransaction *WA = rgrMakeSend(s, 0);
         WA->timestamp = (uint32_t)time(NULL);
-        BRWalletRegisterTransaction(g_rgrWallet, WA);
+        BRWalletRegisterTransactionTrusted(g_rgrWallet, WA);
         _BRPeerManagerAddTxToPublishListOwned(g_rgrMgr, WA, NULL, NULL, 0);
         g_rgrHash[s] = WA->txHash;
     }
@@ -1025,7 +1029,7 @@ static void scenario_answered_duplicate_legacy(void)
     BRTransaction *t = makeOwnedSend(spk, spkLen, 0x11);
     UInt256 h = t->txHash;
     t->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, t);                          /* the wallet's own record ... */
+    BRWalletRegisterTransactionTrusted(w, t);                          /* the wallet's own record ... */
     BRPeerManagerPublishTx(m, t, newCtx(), countingResult);    /* ... handed to the publisher as-is */
     check(BRWalletTransactionForHash(w, h) == t, "the wallet holds the very object that was published");
     check(listedCount(m, h) == 1 && m->publishedTx[0].owned == 0,
@@ -1069,11 +1073,11 @@ static void scenario_answered_removed(void)
     UInt256 prev; memset(prev.u8, 0x21, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->blockHeight = 1000; F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 40000);   /* the wallet's record of send A */
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
 
     /* the relay path lists the wallet's record (owned = 0, no callback) ... */
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
@@ -1158,13 +1162,13 @@ static BRTransaction *makeInvalidWalletSend(BRWallet *w, const uint8_t *spk, siz
     UInt256 prev; memset(prev.u8, tag, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *WB = mkTx(spk, spkLen, F->txHash, 40000);
     WB->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, WB);
+    BRWalletRegisterTransactionTrusted(w, WB);
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 30000);
     WA->timestamp = (uint32_t)time(NULL) + 1;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
     *fHash = F->txHash;
     return WA;
 }
@@ -1261,7 +1265,7 @@ static void scenario_confirm_legacy(void)
     BRTransaction *t = makeOwnedSend(spk, spkLen, 0x11);
     UInt256 h = t->txHash;
     t->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, t);
+    BRWalletRegisterTransactionTrusted(w, t);
     BRPeerManagerPublishTx(m, t, newCtx(), countingResult);
     check(listedCount(m, h) == 1 && entryPending(m, h), "the same-object publish is pending");
 
@@ -1292,7 +1296,7 @@ static void scenario_cancel_legacy(void)
     BRTransaction *t = makeOwnedSend(spk, spkLen, 0x11);
     UInt256 h = t->txHash;
     t->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, t);
+    BRWalletRegisterTransactionTrusted(w, t);
     BRPeerManagerPublishTx(m, t, newCtx(), countingResult);
 
     killPeer(m, p, ETIMEDOUT);
@@ -1322,11 +1326,11 @@ static void scenario_relay_known(void)
     UInt256 prev; memset(prev.u8, 0x21, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 40000);
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
 
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
     BRPeer *p = addPeer(m, 0x06, 1);
@@ -1361,11 +1365,11 @@ static void scenario_relay_block_known(void)
     UInt256 prev; memset(prev.u8, 0x21, 32);
     BRTransaction *F = mkTx(spk, spkLen, prev, 50000);
     F->blockHeight = 1000; F->timestamp = (uint32_t)time(NULL);
-    BRWalletRegisterTransaction(w, F);
+    BRWalletRegisterTransactionTrusted(w, F);
     BRTransaction *WA = mkTx(spk, spkLen, F->txHash, 40000);
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
 
     /* the send is pending in the list as the list's own distinct object */
     m->isConnected = 1; m->connectFailureCount = MAX_CONNECT_FAILURES; m->downloadPeer = NULL;
@@ -1471,7 +1475,7 @@ static void scenario_remove_unrelayed_sweep(void)
     BRTransaction *WA = makeOwnedSend(spk, spkLen, 0x11);
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
-    BRWalletRegisterTransaction(w, WA);
+    BRWalletRegisterTransactionTrusted(w, WA);
     check(BRWalletTransactionForHash(w, aHash) == WA, "the wallet holds the record");
     check(BRWalletAmountSentByTx(w, WA) == 0 && BRWalletAmountReceivedFromTx(w, WA) == 0, "the wallet has no stake in it");
 
@@ -1518,7 +1522,7 @@ static void scenario_sweep_dependant(void)
     BRTransaction *A = makeOwnedSend(spk, spkLen, 0x11);
     A->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = A->txHash;
-    BRWalletRegisterTransaction(w, A);
+    BRWalletRegisterTransactionTrusted(w, A);
     BRTransaction *B = makeChildOf(spk, spkLen, aHash);
     B->timestamp = (uint32_t)time(NULL) + 1;
     UInt256 bHash = B->txHash;

@@ -76,6 +76,10 @@ for a in "\$@"; do
     case "\$a" in *DGB_HEADER_POW_CHECK*) pow=0 ;; esac
     case "\$a" in *DGB_HEADER_DIFF_CHECK*) diff=0 ;; esac
 done
+# KAT_FORCE_SHIPPED_LEVELS overrides a suite's own pin: the shipped level is appended anyway, and
+# a later -D wins, so the suite builds at what users run. scripts/check-kat-level-pins.sh uses this
+# to prove each pin is load-bearing. Never set it for an ordinary sweep.
+if [ "\${KAT_FORCE_SHIPPED_LEVELS:-0}" = "1" ]; then pow=1; diff=1; fi
 extra=()
 [ \$pow -eq 1 ] && extra+=(-DDGB_HEADER_POW_CHECK=$SHIPPED_POW_LEVEL)
 [ \$diff -eq 1 ] && extra+=(-DDGB_HEADER_DIFF_CHECK=$SHIPPED_DIFF_LEVEL)

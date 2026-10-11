@@ -35,9 +35,27 @@
 # a different chain, a pruned node, or a node mid-reindex therefore cannot poison
 # the table.
 #
-# Usage: scripts/gen_block_checkpoints.sh [ssh_target] [ssh_key] [spacing]
-#   defaults: root@digiscope.me  ~/.ssh/DigitalOcean  50000
-# Requires: ssh access to the node, python3 locally.
+# DIFFICULTY CONTEXT
+# ------------------
+# For the newest CTX_COUNT checkpoints (default 2) the script also writes
+# BRMainNetCheckpointContexts[]: the real headers that END AT each of them (the
+# checkpoint's own header last). A wallet's resident chain starts at a checkpoint
+# STUB, which has no ancestors, so without this run MultiShield V4 cannot judge the
+# first headers above the checkpoint a new wallet starts at (V4-R1). Each run holds
+# at least the averaging window plus both median-time-past spans (61 rows) and is
+# extended down until it contains a block of every algorithm allowed above the
+# checkpoint. The script refuses to write a run whose rows do not link by
+# double-SHA256 or whose last row is not the checkpoint; the C core verifies the
+# same at start-up (BRCheckPointContextVerify) and checkpoint_staleness_kat
+# requires a verifying run at the newest checkpoint. A table refresh that moves the
+# newest checkpoint therefore always refreshes its context in the same run.
+#
+# Usage: scripts/gen_block_checkpoints.sh [ssh_target] [ssh_key] [spacing] [min_depth]
+#   defaults: root@digiscope.me  ~/.ssh/DigitalOcean  50000  50000
+#   ssh_target "local" runs the node commands on this machine instead of over ssh
+#   (DGB_CLI, default /usr/local/bin/digibyte-cli; ssh_key is then ignored).
+#   CTX_COUNT (env, default 2): how many of the newest checkpoints get a context.
+# Requires: ssh access to the node (or a local synced node), python3 locally.
 set -euo pipefail
 
 SSH_TARGET="${1:-root@digiscope.me}"
@@ -61,6 +79,13 @@ SPACING="${3:-50000}"
 # so an entry fresher than ~7 days can never be chosen as a birth anchor — it is
 # pure reorg risk for zero scan-span benefit.
 MIN_DEPTH="${4:-50000}"
+CTX_COUNT="${CTX_COUNT:-2}"
+# rows fetched ending at each context checkpoint; the run written is trimmed from these. 1085 is
+# the farthest the wallet's V4 walk reads below a header (averaging window 50 + median span 11 +
+# DIFF_V4_ALGO_WALK_MAX 1024, BRPeerManager.c): an algorithm absent from all of them could not be
+# judged above the checkpoint, so the script refuses to write rather than ship such a run.
+CTX_FETCH=1085
+DGB_CLI="${DGB_CLI:-/usr/local/bin/digibyte-cli}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HDR="$ROOT/native/src/main/jni/digibytewallet-core/BRChainParams.h"
 
@@ -82,8 +107,13 @@ echo "shipped table: $(echo "$OLD" | wc -l) checkpoints" >&2
 
 # ---- 2. pull genesis + every shipped height + the uniform grid ---------------
 echo "pulling from $SSH_TARGET (spacing $SPACING)..." >&2
-RAW="$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_TARGET" bash -s <<EOF
-CLI=/usr/local/bin/digibyte-cli
+if [ "$SSH_TARGET" = "local" ]; then
+  NODE_SH=(bash -s)
+else
+  NODE_SH=(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_TARGET" bash -s)
+fi
+RAW="$("${NODE_SH[@]}" <<EOF
+CLI=$DGB_CLI
 TIP=\$(\$CLI getblockcount)
 # Stop the grid MIN_DEPTH below the tip, then round down to the grid. Never pin a
 # height that could still reorg out — see the MIN_DEPTH rationale above.
@@ -102,6 +132,16 @@ print(d['height'], d['hash'], d['time'], d['bits'])
 emit 0
 for h in $OLD_HEIGHTS; do [ "\$h" = "0" ] || emit \$h; done
 for (( h=$SPACING; h<=LAST; h+=$SPACING )); do emit \$h; done
+# difficulty context: the CTX_FETCH raw headers ending at each of the newest CTX_COUNT
+# checkpoints this run can write (shipped or grid, at least MIN_DEPTH below the tip)
+CTXH=\$( { for h in $OLD_HEIGHTS; do echo \$h; done; for (( h=$SPACING; h<=LAST; h+=$SPACING )); do echo \$h; done; } \\
+        | sort -un | awk -v s=\$SAFE '\$1 <= s' | tail -n $CTX_COUNT )
+for c in \$CTXH; do
+  for (( h=c-$CTX_FETCH+1; h<=c; h++ )); do
+    hash=\$(\$CLI getblockhash \$h) || continue
+    echo "#CTX \$c \$h \$(\$CLI getblockheader "\$hash" false)"
+  done
+done
 EOF
 )"
 
@@ -116,11 +156,12 @@ trap 'rm -rf "$TMPDIR_GEN"' EXIT
 printf '%s\n' "$RAW" > "$TMPDIR_GEN/node.txt"
 printf '%s\n' "$OLD" > "$TMPDIR_GEN/old.txt"
 
-python3 - "$HDR" "$SPACING" "$TMPDIR_GEN/node.txt" "$TMPDIR_GEN/old.txt" "$MIN_DEPTH" <<'PY'
-import re, sys, datetime
+python3 - "$HDR" "$SPACING" "$TMPDIR_GEN/node.txt" "$TMPDIR_GEN/old.txt" "$MIN_DEPTH" "$CTX_COUNT" <<'PY'
+import re, sys, datetime, hashlib
 
 hdr_path, spacing, node_path, old_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 min_depth = int(sys.argv[5])
+ctx_count = int(sys.argv[6])
 
 old = {}
 for line in open(old_path):
@@ -130,9 +171,14 @@ for line in open(old_path):
 
 tip = None
 node = {}
+ctx_raw = {}   # checkpoint height -> {height: raw header hex}
 for line in open(node_path):
     if line.startswith('#TIP'):
         tip = int(line.split()[1]); continue
+    if line.startswith('#CTX'):
+        p = line.split()
+        if len(p) == 4: ctx_raw.setdefault(int(p[1]), {})[int(p[2])] = p[3].lower()
+        continue
     p = line.split()
     if len(p) != 4: continue
     node[int(p[0])] = (p[1].lower(), int(p[2]), '0x' + p[3].lower())
@@ -190,6 +236,73 @@ if depth < min_depth:
 lines = ['        { %8d, uint256("%s"), %d, %s }' % (h, v[0], v[1], v[2]) for h, v in rows]
 body = ",\n".join(lines) + "\n"
 
+# --- difficulty context at the newest checkpoints (BRCheckPointContext) ---
+# What the wallet's V4 walk reads above a checkpoint: the averaging window (5 algos x
+# averagingInterval 10) and both median-time-past spans (11) ending at the checkpoint, and the
+# last block of each algorithm allowed above it. Mainnet since nGroestlDeactivationHeight
+# 23,808,000 (BRChainParams.h algoLockHeight): sha256d, scrypt, skein, qubit, odo.
+CTX_MIN_ROWS = 5 * 10 + 11
+ALGO_MASK = 0xF00
+ALGOS_AFTER_LOCK = {0x200: "sha256d", 0x000: "scrypt", 0x600: "skein", 0x800: "qubit", 0xE00: "odo"}
+ALGO_LOCK_HEIGHT = 23808000
+
+def dsha(b):
+    return hashlib.sha256(hashlib.sha256(b).digest()).digest()
+
+ctx_heights = [h for h, _ in rows][-ctx_count:] if ctx_count > 0 else []
+contexts = []
+for c in ctx_heights:
+    if c < ALGO_LOCK_HEIGHT:
+        sys.exit("REFUSING TO WRITE: context checkpoint %d is below the algorithm lock height %d; "
+                 "the algorithm set this script checks does not apply there" % (c, ALGO_LOCK_HEIGHT))
+    got = ctx_raw.get(c, {})
+    run = []
+    for h in range(c, c - len(got), -1):        # newest first, stop at the first gap
+        if h not in got: break
+        raw = bytes.fromhex(got[h])
+        if len(raw) != 80: sys.exit("REFUSING TO WRITE: context row %d is not an 80-byte header" % h)
+        run.append((h, raw))
+    if not run or run[0][0] != c:
+        sys.exit("REFUSING TO WRITE: the node returned no context rows for checkpoint %d" % c)
+    # the last row IS the checkpoint the table pins (hash, time, bits) ...
+    hsh, t, bits = node[c]
+    top = run[0][1]
+    if dsha(top)[::-1].hex() != hsh or int.from_bytes(top[68:72], 'little') != t or \
+            '0x%08x' % int.from_bytes(top[72:76], 'little') != bits:
+        sys.exit("REFUSING TO WRITE: context top row is not checkpoint %d" % c)
+    # ... and every row is the parent of the row above it
+    for (h, raw), (_, below) in zip(run, run[1:]):
+        if raw[4:36] != dsha(below):
+            sys.exit("REFUSING TO WRITE: context rows %d and %d do not link" % (h - 1, h))
+    # shortest run: the window and spans, then down to the deepest first block of any algorithm
+    need = CTX_MIN_ROWS
+    for a, name in ALGOS_AFTER_LOCK.items():
+        first = next((i for i, (_, raw) in enumerate(run)
+                      if int.from_bytes(raw[0:4], 'little') & ALGO_MASK == a), None)
+        if first is None:
+            sys.exit("REFUSING TO WRITE: no %s block in the %d headers ending at checkpoint %d; "
+                     "the wallet could not judge that algorithm above it" % (name, len(run), c))
+        need = max(need, first + 1)
+    if len(run) < need:
+        sys.exit("REFUSING TO WRITE: only %d context rows for checkpoint %d, need %d" % (len(run), c, need))
+    run = run[:need][::-1]                       # oldest first, as the C table holds it
+    contexts.append((c, run))
+    print("context: checkpoint %d, %d headers %d..%d" % (c, len(run), run[0][0], run[-1][0]), file=sys.stderr)
+
+ctx_src = ("// BEGIN checkpoint difficulty context -- AUTO-GENERATED by scripts/gen_block_checkpoints.sh, DO NOT HAND-EDIT.\n"
+           "// Real headers ending AT each of the newest %d checkpoints (BRCheckPointContext), oldest first; the last\n"
+           "// row is the checkpoint's own header. Verified at generation and again by the core at start-up\n"
+           "// (BRCheckPointContextVerify).\n" % len(contexts))
+for c, run in contexts:
+    ctx_src += "static const char *const BRMainNetCheckpointContext%d[] = {\n" % c
+    ctx_src += ",\n".join('    "%s"   /* %d */' % (raw.hex(), h) for h, raw in run) + "\n};\n"
+ctx_src += "static const BRCheckPointContext BRMainNetCheckpointContexts[] = {\n"
+ctx_src += ",\n".join("    { %d, sizeof(BRMainNetCheckpointContext%d)/sizeof(*BRMainNetCheckpointContext%d), "
+                       "BRMainNetCheckpointContext%d }" % (c, c, c, c) for c, _ in contexts) + "\n};\n"
+ctx_src += "// END checkpoint difficulty context\n"
+if not contexts:
+    sys.exit("REFUSING TO WRITE: CTX_COUNT is 0; the newest checkpoint must carry a difficulty context (V4-R1)")
+
 banner = (
     "// AUTO-GENERATED by scripts/gen_block_checkpoints.sh — DO NOT HAND-EDIT.\n"
     "// %d checkpoints: genesis + every previously-shipped height + a uniform\n"
@@ -212,6 +325,16 @@ if not pat.search(src):
 src = re.sub(r'(?m)^// AUTO-GENERATED by scripts/gen_block_checkpoints\.sh.*?(?=^static const BRCheckPoint BRMainNetCheckpoints)',
              '', src, flags=re.S)
 src = pat.sub(lambda m: banner + m.group(1) + body + m.group(2), src, count=1)
+
+# The context block sits right after the checkpoint table; replace the previous one if present.
+ctx_pat = re.compile(r'// BEGIN checkpoint difficulty context.*?// END checkpoint difficulty context\n', re.S)
+if ctx_pat.search(src):
+    src = ctx_pat.sub(lambda m: ctx_src, src, count=1)
+else:
+    tbl = re.compile(r'(static const BRCheckPoint BRMainNetCheckpoints\[\]\s*=\s*\{\n.*?\n\};\n)', re.S)
+    if not tbl.search(src):
+        sys.exit("FATAL: could not locate the end of BRMainNetCheckpoints[] to place the context after it")
+    src = tbl.sub(lambda m: m.group(1) + "\n" + ctx_src, src, count=1)
 open(hdr_path, 'w').write(src)
 
 print("wrote %d checkpoints (newest %d, %d blocks behind tip %d)"

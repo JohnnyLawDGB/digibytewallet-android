@@ -18,7 +18,7 @@
     <string name="onb_create">Crear billetera nueva</string>
     <string name="onb_recover">Recuperar billetera existente</string>
     <string name="onb_footer">DigiByte — Segura, rápida, descentralizada</string>
-    <string name="app_name_display">Billetera DigiByte</string>
+    <string name="app_name_display">DigiByte Mobile</string>
 
     <!-- WARNING: "no se pueden recuperar" must stay as absolute as the English. -->
     <string name="seed_screenshot_blocked">Las capturas de pantalla están bloqueadas. Anota estas palabras: no se pueden recuperar.</string>
@@ -48,6 +48,9 @@
     <string name="unlock_unlocking">Desbloqueando…</string>
     <string name="unlock_biometrics_cd">Desbloquear con biometría</string>
 
+    <string name="recover_title">Recuperar billetera</string>
+    <string name="recover_body">Introduce tu frase de recuperación para restaurar tu billetera.</string>
+    <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Reintentar</string>
     <string name="verify_next">Siguiente</string>
@@ -71,7 +74,7 @@
     <string name="unlock_attempts_left">PIN incorrecto. Intentos restantes: %1$d</string>
     <string name="battery_title">Mantener la sincronización en segundo plano</string>
     <string name="battery_body">Android puede suspender esta billetera cuando la pantalla está apagada, lo que corta su conexión con la red DigiByte y puede dejarla en 0 pares hasta que la vuelvas a abrir.\n\nPermite que se ejecute sin restricciones para que siga sincronizando.</string>
-    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade DigiByte Mobile.</string>
     <string name="battery_open_settings">Abrir ajustes</string>
     <string name="tor_title">Nueva función de privacidad</string>
     <string name="tor_body">El enrutamiento Tor ya está disponible. Cuando se activa, tu billetera se conecta a la red DigiByte a través de Tor, ocultando tu dirección IP a los pares.\n\n¿Activar el enrutamiento Tor?</string>
@@ -631,7 +634,52 @@
     <string name="market_tor_notice_title">El Mercado no pasa por Tor</string>
     <string name="market_tor_notice_body">El Mercado no pasa por Tor; el sitio verá tu dirección IP.</string>
     <string name="market_tor_notice_continue">Continuar</string>
-    <string name="move_title">DigiByte Wallet ahora es DigiByte Mobile</string>
-    <string name="move_body">Esta app ya no recibirá actualizaciones. Instala DigiByte Mobile desde Google Play, elige Recuperar billetera existente e introduce la frase de recuperación de esta billetera: nada se mueve en la cadena. Conserva esta app hasta que tu saldo aparezca en la nueva.</string>
-    <string name="move_how">Cómo cambiar</string>
+    <string name="restore_pass_toggle">Usé una frase de contraseña</string>
+    <string name="restore_pass_body">Solo si añadiste una al crear esta billetera. Una frase de contraseña incorrecta abre otra billetera, vacía, sin ningún aviso de error.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Introduce las %1$d palabras.</string>
+    <string name="restore_err_invalid_words">Palabra(s) no válida(s): %1$s</string>
+    <string name="restore_err_checksum">Esta frase de recuperación no es válida. Revisa cada palabra y su orden.</string>
+    <string name="restore_scan_title">Restaurar de forma privada</string>
+    <string name="restore_scan_body">Cuando continúes, este teléfono encontrará por sí mismo las transacciones de tu billetera — direcciones nativas (dgb1q…), legacy (D…), Taproot y DigiDollar — sin enviar tus direcciones a nadie.</string>
+    <string name="restore_other_title">¿Frase de otra app de billetera?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor y algunas billeteras antiguas guardan monedas en formatos de dirección que esta billetera no usa, así que la sincronización no puede verlas. Una comprobación puede encontrarlas, pero envía las direcciones que derivan de tu frase a DigiScope (api.digiscope.me), que informa de los fondos que tengan. No es necesaria para una frase de DigiByte Mobile o de la antigua app DigiByte Wallet. También puedes ejecutarla más tarde desde Ajustes → Recuperar fondos de otra billetera.</string>
+    <string name="restore_other_check">Comprobar otros formatos</string>
+    <string name="restore_scan_deriving">Derivando direcciones…</string>
+    <string name="restore_scan_duration">Esto puede tardar entre 30 y 90 segundos según el nodo.</string>
+    <string name="restore_scan_failed">Falló el escaneo</string>
+    <string name="restore_scan_retry">Reintentar la comprobación</string>
+    <string name="restore_found_title">Fondos encontrados</string>
+    <string name="restore_unreachable_title">No se pudo conectar con DigiScope</string>
+    <string name="restore_none_title">Aún no se detectaron fondos</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB en %2$d ruta</item>
+        <item quantity="many">%1$s DGB en %2$d rutas</item>
+        <item quantity="other">%1$s DGB en %2$d rutas</item>
+    </plurals>
+    <string name="restore_unreachable_body">No se pudo realizar la comprobación. La sincronización seguirá encontrando los formatos propios de esta billetera cuando continúes; reinténtalo, o usa más tarde Ajustes → Recuperar fondos de otra billetera para los formatos de otras apps.</string>
+    <string name="restore_none_body">No hay nada sin gastar en los formatos comprobados. La sincronización seguirá encontrando las transacciones propias de esta billetera cuando continúes.</string>
+    <string name="restore_nonnative_note">%1$s DGB están en el formato de dirección de otra app. Tras la restauración irás a Recuperar fondos de otra billetera para moverlos a esta billetera — no se mueve nada hasta que lo confirmes allí.</string>
+    <string name="restore_pass_nothing_found">No se encontró nada con la frase de contraseña que introdujiste. Una frase de contraseña no tiene suma de verificación: una incorrecta abre otra billetera, vacía, sin ningún error. Revisa si tiene un error de escritura o, si no la configuraste al crear la billetera, vuelve atrás y cierra el campo de la frase de contraseña.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d dirección comprobada</item>
+        <item quantity="many">%1$s · %2$d direcciones comprobadas</item>
+        <item quantity="other">%1$s · %2$d direcciones comprobadas</item>
+    </plurals>
+    <string name="restore_date_title">¿Cuándo creaste esta billetera?</string>
+    <string name="restore_date_body">Así podemos omitir el escaneo innecesario de la blockchain y sincronizar más rápido.</string>
+    <string name="restore_date_unsure">No lo recuerdo</string>
+    <string name="restore_date_unsure_sub">Escaneo completo de la blockchain (el más lento — úsalo si no estás seguro)</string>
+    <string name="restore_date_warning">No se detectarán las transacciones anteriores al año seleccionado. Si tu billetera puede tener un historial más antiguo, elige un año anterior — o «No lo recuerdo» para una cobertura completa (más lento).</string>
+    <string name="restore_date_start">Iniciar recuperación</string>
+    <string name="restore_date_restoring">Restaurando billetera…</string>
+    <string name="restore_date_onwards">Desde ene. %1$d</string>
+    <string name="restore_date_range">ene. %1$d – dic. %1$d</string>
+    <string name="restore_date_genesis">DigiByte se lanzó en enero de 2014</string>
 </resources>

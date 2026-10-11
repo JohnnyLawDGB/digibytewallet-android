@@ -139,8 +139,8 @@ static int pubkey_to_address(BRKey *key, int addressFormat, char *out, size_t ou
  *
  * Caller should zero the returned ByteArray via fill(0) once done scanning.
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
+jbyteArray JNICALL
+NativeBridge_mnemonicToSeed(
     JNIEnv *env, jobject thiz,
     jbyteArray phraseBytes,
     jbyteArray passphrase)
@@ -210,8 +210,8 @@ Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
  * Empty strings mark positions where derivation failed (should be rare —
  * the pubkey curve can reject an index, advance and skip in that case).
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
+jobjectArray JNICALL
+NativeBridge_deriveAddresses(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -315,8 +315,8 @@ Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
  *       fullPath: IntArray           // e.g. [44|HARD, 20|HARD, 0|HARD, 0, 5]
  *   ): String?
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_derivePrivateKeyWIF(
+jstring JNICALL
+NativeBridge_derivePrivateKeyWIF(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -415,8 +415,8 @@ Java_io_digibyte_core_bridge_NativeBridge_derivePrivateKeyWIF(
  *       feePerKb: Long
  *   ): String?
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
+jstring JNICALL
+NativeBridge_buildAndSignLegacySweep(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -664,8 +664,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
  * Kotlin signature:
  *   external fun isRawTransactionSigned(rawTxHex: String): Boolean
  */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
+jboolean JNICALL
+NativeBridge_isRawTransactionSigned(
     JNIEnv *env, jobject thiz, jstring rawTxHex)
 {
     (void)thiz;
@@ -731,8 +731,8 @@ Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
  *
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignAssetTransfer(
+jstring JNICALL
+NativeBridge_buildAndSignForeignAssetTransfer(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -1013,8 +1013,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignAssetTransfer(
  *
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
+jstring JNICALL
+NativeBridge_buildAndSignForeignDigiDollarTransfer(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jobjectArray ddTxidsHex, jintArray ddVouts, jobjectArray ddScriptsHex,
@@ -1226,8 +1226,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
  *
  * External chain first (chain 0), then internal (chain 1), matching deriveAddresses.
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_deriveDigiDollarAddresses(
+jobjectArray JNICALL
+NativeBridge_deriveDigiDollarAddresses(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jint gapExternal,

@@ -134,8 +134,8 @@ static jstring sign_with_key(JNIEnv *env, BRKey *key, const char *msgChars,
 
 /* ---- signMessage JNI (legacy shared identity, m/0'/0/0) ---- */
 
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_signMessage(JNIEnv *env, jobject thiz,
                                                        jstring message, jint addressFormat) {
     (void)thiz;
 
@@ -177,8 +177,8 @@ Java_io_digibyte_core_bridge_NativeBridge_signMessage(JNIEnv *env, jobject thiz,
  * query) so the per-login nonce never perturbs the identity. Address format is
  * fixed to legacy P2PKH — the format the Digi-ID ecosystem verifies against.
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
                                                               jstring message, jstring siteUri,
                                                               jint index) {
     (void)thiz;

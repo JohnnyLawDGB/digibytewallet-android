@@ -3,7 +3,7 @@
  *
  * JNI bridge for transaction operations: create, sign, publish, fee estimation.
  *
- * All JNI function names match io.digibyte.core.bridge.NativeBridge.
+ * All JNI function names match app.aroundtheblock.wallet.core.bridge.NativeBridge.
  *
  * Note: The C core uses RFC 6979 deterministic nonces for ECDSA signing
  * (via secp256k1_nonce_function_rfc6979 in BRKey.c / BRKeySign).
@@ -116,8 +116,8 @@ static void _publishResult(void *info, int error)
 /* Returns the recorded publish result for a txid, or PUBLISH_RESULT_PENDING (-1) when no
  * verdict has arrived (or the entry aged out of the ring). Kotlin maps this through
  * core/sync/PublishOutcome. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getPublishResult(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_getPublishResult(JNIEnv *env, jobject thiz,
                                                             jstring txidHex)
 {
     (void)thiz;
@@ -158,14 +158,14 @@ static void _registerWalletCopy(BRTransaction *tx)
     if (BRWalletTransactionForHash(g_wallet, tx->txHash)) return;   /* already held: nothing to copy */
     BRTransaction *walletCopy = BRTransactionCopy(tx);
     if (!walletCopy) return;                                        /* the peer relay-back re-registers */
-    BRWalletRegisterTransaction(g_wallet, walletCopy);
+    BRWalletRegisterTransactionTrusted(g_wallet, walletCopy);   /* this wallet signed it: no input check */
     if (BRWalletTransactionForHash(g_wallet, tx->txHash) != walletCopy) BRTransactionFree(walletCopy);
 }
 
 /* ---------- createTransaction ---------- */
 
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_createTransaction(JNIEnv *env, jobject thiz,
+jbyteArray JNICALL
+NativeBridge_createTransaction(JNIEnv *env, jobject thiz,
                                                              jstring toAddress,
                                                              jlong amountSatoshis,
                                                              jlong feePerKb) {
@@ -193,12 +193,12 @@ Java_io_digibyte_core_bridge_NativeBridge_createTransaction(JNIEnv *env, jobject
         return NULL;
     }
 
-    /* Set fee rate if specified */
-    if (feePerKb > 0) {
-        BRWalletSetFeePerKb(g_wallet, (uint64_t)feePerKb);
-    }
-
-    BRTransaction *tx = BRWalletCreateTransaction(g_wallet, (uint64_t)amountSatoshis, addrChars);
+    /* Build at the caller's rate, if specified, for this one build only. The rate is handed to the
+     * builder rather than set on the wallet: the wallet's rate is shared state that later builds
+     * read (asset sends, sweeps, a later send at the default rate) and that peers' feefilter
+     * messages and concurrent builds update, so a custom rate never touches it. */
+    BRTransaction *tx = BRWalletCreateTransactionAtFeePerKb(g_wallet, (uint64_t)amountSatoshis, addrChars,
+                                                            feePerKb > 0 ? (uint64_t)feePerKb : 0);
     (*env)->ReleaseStringUTFChars(env, toAddress, addrChars);
 
     if (!tx) {
@@ -229,8 +229,8 @@ Java_io_digibyte_core_bridge_NativeBridge_createTransaction(JNIEnv *env, jobject
 
 /* ---------- signTransaction ---------- */
 
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
+jbyteArray JNICALL
+NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
                                                            jbyteArray unsignedTx) {
     (void)thiz;
 
@@ -303,8 +303,8 @@ Java_io_digibyte_core_bridge_NativeBridge_signTransaction(JNIEnv *env, jobject t
 
 /* ---------- publishTransaction ---------- */
 
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
                                                               jbyteArray signedTx) {
     (void)thiz;
     PEER_GUARD();
@@ -373,8 +373,8 @@ static UInt256 _u256FromTxidHex(const char *hex) {
     return h;
 }
 
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
                                                                  jbyteArray signedTx) {
     (void)thiz;
     PEER_GUARD();
@@ -422,8 +422,8 @@ Java_io_digibyte_core_bridge_NativeBridge_publishTransactionStem(JNIEnv *env, jo
     return (*env)->NewStringUTF(env, txidHex);
 }
 
-JNIEXPORT void JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_fluffTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
+void JNICALL
+NativeBridge_fluffTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
     PEER_GUARD();
     if (!g_peerManager || !jtxid) return;
@@ -433,8 +433,8 @@ Java_io_digibyte_core_bridge_NativeBridge_fluffTransaction(JNIEnv *env, jobject 
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
 }
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thiz, jstring jtxid) {
+jint JNICALL
+NativeBridge_getRelayCount(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
     PEER_GUARD();
     if (!g_peerManager || !jtxid) return 0;
@@ -471,8 +471,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getRelayCount(JNIEnv *env, jobject thi
  * The return value says whether g_wallet has really let go of the record: the
  * caller deletes its own rows for this hash on a true return, and a row deleted
  * while the wallet still holds the record could never be cleared again. */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
+jboolean JNICALL
+NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
     PEER_GUARD();
     if (!g_wallet || !jtxid) return JNI_FALSE;
@@ -501,8 +501,8 @@ Java_io_digibyte_core_bridge_NativeBridge_removeTransaction(JNIEnv *env, jobject
  * Returns false when the tx's inputs are already spent by another (confirmed)
  * tx — i.e. a double-spend that can never confirm. Returns true for unknown
  * hashes (don't act on a tx the wallet doesn't hold). */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
+jboolean JNICALL
+NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
     (void)thiz;
     if (!g_wallet || !jtxid) return JNI_TRUE;
     const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
@@ -531,8 +531,8 @@ Java_io_digibyte_core_bridge_NativeBridge_isTransactionValid(JNIEnv *env, jobjec
  * Returns JNI_TRUE if the tx was added, JNI_FALSE otherwise (duplicate,
  * unsigned, parse failure, or tx not associated with any wallet key). */
 
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
+jboolean JNICALL
+NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
                                                                   jbyteArray rawTx,
                                                                   jlong blockHeight,
                                                                   jlong blockTimestamp) {
@@ -574,8 +574,9 @@ Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jo
         if (existing->blockHeight == TX_UNCONFIRMED &&
             (uint32_t)blockHeight != TX_UNCONFIRMED && blockHeight > 0) {
             UInt256 h = existing->txHash;
-            BRWalletUpdateTransactions(g_wallet, &h, 1,
-                                       (uint32_t)blockHeight, (uint32_t)blockTimestamp);
+            /* A server's height, not one this wallet proved: the record stays signature-checked. */
+            BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
+                                               (uint32_t)blockHeight, (uint32_t)blockTimestamp);
             LOGI("registerRawTransaction: promoted stuck-pending tx to height=%ld ts=%ld",
                  (long)blockHeight, (long)blockTimestamp);
             promoted = JNI_TRUE;
@@ -589,13 +590,16 @@ Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jo
     tx->blockHeight = (uint32_t)blockHeight;
     tx->timestamp = (uint32_t)blockTimestamp;
 
-    int ok = BRWalletRegisterTransaction(g_wallet, tx);
+    UInt256 txHash = tx->txHash;
+    /* The height is the server's, not proven by this wallet: the tx's signatures on wallet coins are
+     * checked at any height (BRWalletRegisterTransactionUnproven), now and at every balance rebuild. */
+    int ok = BRWalletRegisterTransactionUnproven(g_wallet, tx);
     if (!ok) {
-        /* Not owned by any wallet address — free to avoid leak.
-         * BRWalletRegisterTransaction's non-wallet path leaves tx orphaned
-         * unless blockHeight == TX_UNCONFIRMED (in which case the wallet
-         * tracks it). For confirmed txs that don't match, we free. */
-        if (tx->blockHeight != TX_UNCONFIRMED) BRTransactionFree(tx);
+        /* Not taken by the wallet. It keeps an unconfirmed non-wallet tx in its allTx set; anything
+         * else it refused -- a confirmed non-wallet tx, an out-of-range tx, an unconfirmed tx that
+         * does not validly sign a wallet output -- is not kept at any height, so ask the wallet
+         * whether it holds this object rather than infer it from the height, and free it if not. */
+        if (BRWalletTransactionForHash(g_wallet, txHash) != tx) BRTransactionFree(tx);
         LOGW("registerRawTransaction: tx not associated with wallet");
         return JNI_FALSE;
     }
@@ -615,8 +619,8 @@ Java_io_digibyte_core_bridge_NativeBridge_registerRawTransaction(JNIEnv *env, jo
  * BRWalletUpdateTransactions sets the height and re-runs _BRWalletUpdateBalance,
  * which releases the withheld DigiDollar/asset credit. Returns true only if a
  * known, still-unconfirmed tx was promoted with a confirmed height. */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
+jboolean JNICALL
+NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
                                                              jstring txHashHex,
                                                              jlong blockHeight,
                                                              jlong blockTimestamp) {
@@ -632,8 +636,9 @@ Java_io_digibyte_core_bridge_NativeBridge_confirmTransaction(JNIEnv *env, jobjec
         UInt256 h = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
         BRTransaction *existing = BRWalletTransactionForHash(g_wallet, h);
         if (existing && existing->blockHeight == TX_UNCONFIRMED) {
-            BRWalletUpdateTransactions(g_wallet, &h, 1,
-                                       (uint32_t)blockHeight, (uint32_t)blockTimestamp);
+            /* A server's height, not one this wallet proved: the record stays signature-checked. */
+            BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
+                                               (uint32_t)blockHeight, (uint32_t)blockTimestamp);
             LOGI("confirmTransaction: promoted %s to height=%ld ts=%ld",
                  hashStr, (long)blockHeight, (long)blockTimestamp);
             promoted = JNI_TRUE;
@@ -645,8 +650,8 @@ Java_io_digibyte_core_bridge_NativeBridge_confirmTransaction(JNIEnv *env, jobjec
 
 /* ---------- getEstimatedFee ---------- */
 
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getEstimatedFee(JNIEnv *env, jobject thiz,
+jlong JNICALL
+NativeBridge_getEstimatedFee(JNIEnv *env, jobject thiz,
                                                            jint priority) {
     (void)env;
     (void)thiz;
@@ -659,8 +664,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getEstimatedFee(JNIEnv *env, jobject t
 }
 
 /* ---------- isValidDigiDollarAddress ---------- */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_isValidDigiDollarAddress(JNIEnv *env, jobject thiz, jstring addr) {
+jboolean JNICALL
+NativeBridge_isValidDigiDollarAddress(JNIEnv *env, jobject thiz, jstring addr) {
     (void)thiz;
     if (! addr) return JNI_FALSE;
     const char *s = (*env)->GetStringUTFChars(env, addr, NULL);
@@ -683,8 +688,8 @@ Java_io_digibyte_core_bridge_NativeBridge_isValidDigiDollarAddress(JNIEnv *env, 
  * DigiDollar vs DGB. Uses the same BE->LE reversal + BRWalletTransactionForHash
  * lookup as outpointSpentState; BRDigiDollarTxType is the sovereign native
  * classifier (DD version-marker + OP_RETURN type push). */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex) {
+jint JNICALL
+NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex) {
     (void)thiz;
     if (! g_wallet || ! txHashHex) return 0;
     const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
@@ -710,8 +715,8 @@ Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxType(JNIEnv *env, jobject 
  * owned outputs on a send would report the DD CHANGE, not the amount sent.
  * Returns an unsigned magnitude; the UI applies +/- from the DGB direction.
  * Same BE->LE reversal + BRWalletTransactionForHash lookup as digiDollarTxType. */
-JNIEXPORT jlong JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxAmount(JNIEnv *env, jobject thiz, jstring txHashHex, jboolean isSend) {
+jlong JNICALL
+NativeBridge_digiDollarTxAmount(JNIEnv *env, jobject thiz, jstring txHashHex, jboolean isSend) {
     (void)thiz;
     if (! g_wallet || ! txHashHex) return 0;
     const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
@@ -737,8 +742,8 @@ Java_io_digibyte_core_bridge_NativeBridge_digiDollarTxAmount(JNIEnv *env, jobjec
 }
 
 /* ---------- sendDigiDollar: decode TD -> build -> sign -> publish (in-memory) ---------- */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents) {
+jstring JNICALL
+NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents) {
     (void)thiz;
     PEER_GUARD(); /* serialize g_peerManager access (v3.7.1 UAF fix); auto-releases on any return */
     if (! g_wallet || ! g_peerManager) { LOGW("sendDigiDollar: wallet/peerManager not ready"); return NULL; }

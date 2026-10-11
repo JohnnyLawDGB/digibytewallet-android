@@ -45,4 +45,6 @@
     //Keyboard
     <color name="keyboard_text_color">#9c9eb9</color>
 
+    <!-- Adaptive launcher icon background: the navy of the DigiByte mark's disc. -->
+    <color name="ic_launcher_background">#002352</color>
 </resources>

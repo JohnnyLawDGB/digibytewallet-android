@@ -261,7 +261,7 @@ check_copy_register() {
 
     # (b) every registration registers COPY. Every mention of the registering function counts as
     # a registration, whatever follows it, so nothing is registered by a spelling this misses.
-    local reg_copy="\\<BRWalletRegisterTransaction$SP\\([^,()]*,$SP$copy$SP\\)"
+    local reg_copy="\\<BRWalletRegisterTransaction(Trusted)?$SP\\([^,()]*,$SP$copy$SP\\)"
     local n_reg n_reg_copy
     n_reg="$(count "BRWalletRegisterTransaction" "$code")"
     n_reg_copy="$(count "$reg_copy" "$code")"
