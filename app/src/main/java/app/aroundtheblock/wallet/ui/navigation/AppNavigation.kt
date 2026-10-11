@@ -356,13 +356,12 @@ fun AppNavigation(
                 if (restoring) {
                     LaunchedEffect(Unit) {
                         // Restore-crash bracket (see UnlockScreen's unlock path for the
-                        // same pattern + rationale): armed at this call site rather than
-                        // inside WalletManager.restoreFromDisk() itself, since BootGuard
-                        // (app module) isn't importable from core. This IS the start of
-                        // the post-unlock (lost-PIN) restore.
-                        BootGuard.beginRestore(context)
+                        // same pattern + rationale): BootGuard (app module) isn't importable
+                        // from core, so the arming is handed to restoreFromDisk, which runs it
+                        // at the start of the post-unlock (lost-PIN) restore's native window.
+                        val armBracket = { BootGuard.beginRestore(context) }
                         try {
-                            withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
+                            withContext(Dispatchers.IO) { walletManager.restoreFromDisk(beforeNative = armBracket) }
                         } catch (e: app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException) {
                             // Auth-bound seed key outside its window (docs/specs/
                             // keystore-auth-binding.md): device-credential prompt, one retry.
@@ -372,7 +371,7 @@ fun AppNavigation(
                                     is app.aroundtheblock.wallet.core.security.BiometricResult.Success
                             ) {
                                 try {
-                                    withContext(Dispatchers.IO) { walletManager.restoreFromDisk() }
+                                    withContext(Dispatchers.IO) { walletManager.restoreFromDisk(beforeNative = armBracket) }
                                 } catch (e2: Exception) {
                                     android.util.Log.e("AppNavigation", "lost-PIN restore retry failed", e2)
                                 }

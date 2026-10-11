@@ -276,8 +276,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * Restore wallet from persisted encrypted seed on app restart.
      * Stops any running sync first to avoid use-after-free crashes.
      * Returns true if the wallet was successfully restored.
+     *
+     * @param beforeNative run at the start of the restore's risky native window. The app arms its
+     *   restore-crash bracket here (BootGuard.beginRestore), so the bracket covers exactly the work
+     *   it is there to watch.
      */
-    fun restoreFromDisk(): Boolean {
+    fun restoreFromDisk(beforeNative: () -> Unit = {}): Boolean {
+        beforeNative() // STUB (seam step): today the bracket is armed before anything else
         val seedBytes = loadSeed() ?: return false
         // The stored passphrase MUST come along. This is the unlock path — it runs on every
         // restart, on resume, and from BootGuard. Rebuilding a passphrase wallet without it

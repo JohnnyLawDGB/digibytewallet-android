@@ -80,6 +80,12 @@ interface DatabaseFileSet {
 
     /** Moves the file and its companions to a name of their own. True when nothing is left at the live name. */
     fun setAside(reason: AsideReason): Boolean
+
+    /**
+     * Finishes a set-aside that a crash interrupted, before anything opens the database. True when no
+     * set-aside is left half done.
+     */
+    fun finishInterrupted(): Boolean
 }
 
 /** Opening and re-keying one database file outside Room. */
@@ -95,6 +101,8 @@ class DatabaseFiles(
     private val dir: File,
     private val name: String,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Renames one file; a seam so a test can end the process between two moves. */
+    private val move: (from: File, to: File) -> Boolean = { from, to -> from.renameTo(to) },
 ) : DatabaseFileSet {
 
     override fun exists(): Boolean = File(dir, name).exists()
@@ -119,8 +127,8 @@ class DatabaseFiles(
         val moved = mutableListOf<Pair<File, File>>()
         for (from in present) {
             val to = File(dir, stem + from.name.removePrefix(name))
-            if (!from.renameTo(to)) {
-                moved.asReversed().forEach { (back, aside) -> aside.renameTo(back) }
+            if (!move(from, to)) {
+                moved.asReversed().forEach { (back, aside) -> move(aside, back) }
                 Log.w(TAG, "$name: could not be set aside (${from.name})")
                 return false
             }
@@ -129,6 +137,9 @@ class DatabaseFiles(
         Log.w(TAG, "$name set aside as $stem (${reason.tag})")
         return (COMPANIONS + "").none { File(dir, name + it).exists() }
     }
+
+    /** STUB (seam step): today nothing records a set-aside in progress, so there is nothing to finish. */
+    override fun finishInterrupted(): Boolean = true
 
     /** The database files set aside so far (not their companions). */
     fun asides(): List<File> =

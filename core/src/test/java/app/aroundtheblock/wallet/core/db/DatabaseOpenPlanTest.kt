@@ -324,6 +324,7 @@ class DatabaseOpenPlanTest {
         val refusing = object : DatabaseFileSet {
             override fun exists() = f.files.exists()
             override fun setAside(reason: AsideReason) = false
+            override fun finishInterrupted() = true
         }
 
         val plan = WalletDatabaseOpener(f.keys, refusing, f.cipher, pause = { }).plan()
