@@ -390,15 +390,29 @@ class DatabaseOpenPlanTest {
         assertTrue("the seed's legacy key was deleted by opening the database", LEGACY_ALIAS in f.vault.keys)
     }
 
-    /** No code path that decides about the database deletes a database file or a key. */
-    @Test fun `the database key code deletes no database and no key`() {
-        val src = listOf("core/src/main/java/app/aroundtheblock/wallet/core/db/DatabaseKeyProvisioner.kt", "../core/src/main/java/app/aroundtheblock/wallet/core/db/DatabaseKeyProvisioner.kt")
-            .map(::File).firstOrNull { it.exists() } ?: error("DatabaseKeyProvisioner.kt not found")
-        val code = src.readLines().filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }.joinToString("\n")
-        assertTrue("scanner is blind: no setAside in the provisioner", code.contains("fun setAside("))
-        assertFalse("the database key code deletes a file", Regex("""\.delete\(\)""").containsMatchIn(code))
-        assertFalse("the database key code deletes a key", Regex("""vault\.delete\(""").containsMatchIn(code))
-        assertFalse("the database key code deletes a file", Regex("""deleteRecursively|Files\.delete""").containsMatchIn(code))
-        assertNotNull(code)
+    /**
+     * No code path that decides about the database, opens it, or recovers it deletes a database file or
+     * a key: the provisioner and opener, the database's own helpers, and the crash-loop breaker's
+     * recovery. (A full wallet wipe is the one place that deletes them.)
+     */
+    @Test fun `the database code deletes no database and no key`() {
+        val sources = listOf(
+            "core/src/main/java/app/aroundtheblock/wallet/core/db/DatabaseKeyProvisioner.kt",
+            "core/src/main/java/app/aroundtheblock/wallet/core/db/WalletDatabase.kt",
+            "app/src/main/java/app/aroundtheblock/wallet/StaleDataWiper.kt",
+        )
+        for (path in sources) {
+            val src = listOf(path, "../$path").map(::File).firstOrNull { it.exists() } ?: error("$path not found")
+            val code = src.readLines().filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }.joinToString("\n")
+            assertTrue("scanner is blind: $path is empty", code.contains("fun "))
+            for ((what, pattern) in listOf(
+                "deletes a file" to Regex("""\.delete\(\)"""),
+                "deletes a database" to Regex("""deleteDatabase\("""),
+                "deletes a tree" to Regex("""deleteRecursively|Files\.delete"""),
+                "deletes a key" to Regex("""vault\.delete\(|deleteEntry"""),
+            )) {
+                assertFalse("$path $what", pattern.containsMatchIn(code))
+            }
+        }
     }
 }

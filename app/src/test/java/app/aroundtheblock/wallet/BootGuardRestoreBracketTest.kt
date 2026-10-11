@@ -97,6 +97,8 @@ class BootGuardRestoreBracketTest {
     @Test
     fun `begin-crash twice escalates to syncAndDb`() {
         val harness = Harness()
+        val record = "c1c2:a1a2"
+        harness.factory.prefsFor("dgb_db_key").edit().putString("encrypted_key", record).commit()
 
         BootGuard.beginRestore(harness.context)
         val first = BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context)
@@ -112,7 +114,41 @@ class BootGuardRestoreBracketTest {
         assertFalse("the escalated recovery left the database at its live name", harness.database.exists())
         val aside = harness.asides()
         assertEquals("the escalated recovery deleted the database instead of setting it aside", listOf("rows"), aside.map { it.readText() })
-        assertFalse("the escalated recovery discarded the database's key record", harness.factory.requestedNames.contains("dgb_db_key"))
+        assertEquals("the escalated recovery discarded the database's key record",
+            record, harness.factory.prefsFor("dgb_db_key").getString("encrypted_key", null))
+    }
+
+    // ---------- (c2) a re-key in progress is left to finish ----------
+
+    /**
+     * While a database's re-key is pending (its new password kept, `pending_key`, before the file is
+     * re-keyed), the next start resumes the re-key on its own. The crash-loop breaker must not set that
+     * database aside — a start killed while re-keying is exactly what it would otherwise count.
+     */
+    @Test
+    fun `the crash-loop breaker leaves a database alone while a re-key is pending`() {
+        val harness = Harness()
+        harness.factory.prefsFor("dgb_db_key").edit().putString("pending_key", "c1c2:a1a2").commit()
+
+        BootGuard.beginRestore(harness.context)
+        BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context)
+        BootGuard.beginRestore(harness.context)
+        assertEquals(BootGuard.RestoreRecovery.SyncAndDb, BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context))
+
+        assertEquals("the crash-loop breaker set aside a database whose re-key is pending", "rows", harness.database.readText())
+        assertTrue("a database whose re-key is pending was set aside", harness.asides().isEmpty())
+    }
+
+    @Test
+    fun `the boot counter's recovery leaves a database alone while a re-key is pending`() {
+        val harness = Harness()
+        harness.factory.prefsFor("dgb_db_key").edit().putString("pending_key", "c1c2:a1a2").commit()
+        harness.factory.prefsFor("dgb_boot_guard").edit().putInt("pending_boots", BootGuard.THRESHOLD_DB).commit()
+
+        BootGuard.beginBoot(harness.context)
+
+        assertEquals("the boot counter's recovery set aside a database whose re-key is pending", "rows", harness.database.readText())
+        assertTrue(harness.asides().isEmpty())
     }
 
     // ---------- (d) NEVER-begin (idle user, never unlocked) -> none. THE CRITICAL CASE ----------

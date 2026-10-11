@@ -203,6 +203,58 @@ class SeedRecordWriteTest {
         assertEquals("a seed was derived from a record missing its passphrase", created, h.derivedWith.size)
     }
 
+    /** A record written by this release, then changed: [edit] applied to what is on disk. */
+    private fun Harness.versionedRecord(withPassphrase: Boolean, edit: (InMemoryPrefs) -> Unit): WalletManager {
+        assertTrue(walletManager().createWallet(phrase, if (withPassphrase) passphrase else null))
+        val onDisk = reopened(seedStore.inner)
+        edit(onDisk)
+        return walletManager(onDisk)
+    }
+
+    private fun assertRecordError(wm: WalletManager, case: String) {
+        assertNull("$case: the wallet's recovery key was derived from a record that contradicts itself", wm.loadBip39Seed())
+        try {
+            wm.decryptStoredPassphrase()
+            fail("$case: the phrase screen was given an answer")
+        } catch (e: IllegalStateException) {
+            // an error, never "none" and never a guess
+        }
+    }
+
+    // GUARD (test gap): each way a versioned record can contradict itself reads as an error.
+    @Test fun `a versioned record that says it has a passphrase and holds none is an error`() {
+        val h = Harness()
+        val wm = h.versionedRecord(withPassphrase = true) { it.edit().remove("encrypted_pass_v2").remove("encrypted_pass_iv_v2").commit() }
+        assertRecordError(wm, "says one, holds none")
+    }
+
+    // GUARD (test gap).
+    @Test fun `a versioned record that says it has no passphrase and holds one is an error`() {
+        val h = Harness()
+        val enc = h.vault.encrypt(BOUND_ALIAS, passphrase)
+        val wm = h.versionedRecord(withPassphrase = false) {
+            it.edit().putString("encrypted_pass_v2", hex(enc.ciphertext)).putString("encrypted_pass_iv_v2", hex(enc.iv)).commit()
+        }
+        assertRecordError(wm, "says none, holds one")
+    }
+
+    // GUARD (test gap).
+    @Test fun `a versioned record without its passphrase flag is an error`() {
+        val h = Harness()
+        val wm = h.versionedRecord(withPassphrase = false) { it.edit().remove("seed_has_passphrase").commit() }
+        assertRecordError(wm, "no flag")
+    }
+
+    // GUARD (test gap).
+    @Test fun `a versioned record that says it has a passphrase and holds an empty one is an error`() {
+        val h = Harness()
+        val empty = h.vault.encrypt(BOUND_ALIAS, ByteArray(0))
+        val wm = h.versionedRecord(withPassphrase = true) {
+            it.edit().putString("encrypted_pass_v2", hex(empty.ciphertext)).putString("encrypted_pass_iv_v2", hex(empty.iv)).commit()
+        }
+        assertRecordError(wm, "says one, holds an empty one")
+    }
+
     @Test fun `the passphrase a wallet was created with is the one its record reads back`() {
         val h = Harness()
         assertTrue(h.walletManager().createWallet(phrase, passphrase))

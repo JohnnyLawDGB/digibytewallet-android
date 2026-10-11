@@ -131,6 +131,46 @@ class WipeRemovesSetAsideDatabasesTest {
         assertFalse("the wipe reported the database gone while one of its files remains", erased)
     }
 
+    /** Positive control: the wipe removes the wallet database's files and nothing else in the directory. */
+    @Test fun `a wipe removes only the wallet database's files`() {
+        val d = Device()
+        d.plantEverything()
+        val others = listOf("other.db", "other.db-wal", "wallet.dbx", "notes.txt")
+        others.forEach { File(d.dbDir, it).writeText("not the wallet's") }
+
+        assertTrue(d.eraser.eraseDatabase())
+
+        assertEquals("the wipe removed files that are not the wallet database's", others.sorted(), d.dbDir.list()!!.sorted())
+    }
+
+    @Test fun `the eraser cannot claim the database gone when it cannot list the databases' directory`() {
+        val d = Device()
+        // The databases' "directory" is there but cannot be listed: listing it answers nothing.
+        val unlistable = File(tmp.newFolder(), "databases").apply { writeText("not a directory") }
+        every { d.ctx.getDatabasePath(any()) } answers { File(unlistable, firstArg<String>()) }
+
+        assertFalse("the wipe reported the database gone without being able to look", d.eraser.eraseDatabase())
+    }
+
+    @Test fun `a wipe leaves no database file even where emptying the utxo cache writes one`() = kotlinx.coroutines.test.runTest {
+        val d = Device()
+        d.live("wallet.db", "live")
+        // In rollback-journal mode a write through the still-open handle creates the journal by name.
+        val utxos = io.mockk.mockk<UtxoManager>(relaxed = true)
+        io.mockk.coEvery { utxos.clearAll() } answers { File(d.dbDir, "wallet.db-journal").writeText("") }
+        val wm = WalletManager(
+            context = d.ctx,
+            keyStoreManager = io.mockk.mockk(relaxed = true),
+            utxoManager = utxos,
+            dataEraser = d.eraser,
+            quiesceNative = { },
+        )
+
+        wm.wipeWallet()
+
+        assertEquals("database files left after the wipe returned", emptyList<String>(), d.databaseFiles())
+    }
+
     @Test fun `a wallet wipe is not verified while a set-aside database remains`() = kotlinx.coroutines.test.runTest {
         val d = Device()
         d.plantEverything()
