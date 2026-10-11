@@ -141,6 +141,51 @@ class DatabaseKeyDeviceTest {
         aside.close()
     }
 
+    /**
+     * A damaged file under the right password: SQLCipher answers "malformed" (code 11) at the first
+     * open — told apart from a wrong password, set aside as corrupt, never deleted. (Damage to page 1
+     * reads as "not a database" and is set aside the same way, under the wrong-password tag.)
+     */
+    @Test fun damagedDatabase_isSetAsideAsCorrupt_neverDeleted_andANewOneOpens() {
+        val password = random32()
+        store(TEST_DB_ALIAS, password, named = true)
+        val db = WalletDatabase.create(context, password, TEST_DB)
+        runBlocking {
+            repeat(200) { i ->
+                db.digiIdHistoryDao().insert(
+                    DigiIdHistoryEntity(domain = "d$i.example".padEnd(120, 'x'), callbackUrl = "https://d$i/cb".padEnd(200, 'y'),
+                        address = "D$i", timestamp = i.toLong(), success = true)
+                )
+            }
+        }
+        db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        db.close()
+        val original = dbFile.readBytes()
+        java.io.RandomAccessFile(dbFile, "rw").use { f ->
+            var page = 1L
+            while (page * 4096 + 164 <= f.length()) { f.seek(page * 4096 + 100); f.write(ByteArray(64) { 0x5A }); page++ }
+        }
+        val damaged = dbFile.readBytes()
+        assertFalse("precondition: the file was damaged", damaged.contentEquals(original))
+        assertEquals("precondition: the damage reads as corrupt", OpenAnswer.CORRUPT, WalletDatabase.cipherFiles(context, dbFile).probe(password))
+
+        val opened = DatabaseKeyProvisioner.openWalletDatabase(context, TEST_DB, keys())
+        val now = try {
+            history(opened)
+        } catch (e: Exception) {
+            opened.close()
+            fail("the first query failed on a damaged database: ${e.javaClass.simpleName}: ${e.message}")
+            return
+        }
+        assertTrue("the new database is not empty", now.isEmpty())
+        opened.close()
+
+        val asides = scratch().filter { it.name.contains(".aside-") && !it.name.endsWith("-wal") && !it.name.endsWith("-shm") && !it.name.endsWith("-journal") }
+        assertEquals("a damaged database was not set aside", 1, asides.size)
+        assertTrue("a damaged database was not told apart as corrupt: ${asides.single().name}", asides.single().name.contains(AsideReason.CORRUPT.tag))
+        assertTrue("the set-aside copy is not the damaged file as it was", asides.single().readBytes().contentEquals(damaged))
+    }
+
     @Test fun missingKey_setsTheDatabaseAsideNeverDeletes() {
         val password = random32()
         store(TEST_DB_ALIAS, password, named = true)
