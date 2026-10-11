@@ -456,9 +456,10 @@ class PinRateLimitTest {
         assertEquals(PinManager.WIPE_THRESHOLD, store.getInt("pin_fail_count", -1))
     }
 
-    // ── A process stopped between the writes of a measurement ────────────────────────────────
+    // ── A process stopped part-way through a write ───────────────────────────────────────────
 
-    /** A [PinStore] over [inner] that stops, as a killed process does, at write number [stopAt] (from 0). */
+    /** A [PinStore] over [inner] that stops, as a killed process does, at write number [stopAt] (from 0):
+     *  that write and every later one do not land. */
     private class StoppingStore(val inner: FakePinStore, val stopAt: Int) : PinStore by inner {
         class Stopped : RuntimeException("stand-in: the process stopped here")
         private var writes = 0
@@ -469,30 +470,70 @@ class PinRateLimitTest {
         override fun putBoolean(key: String, value: Boolean) { write(); inner.putBoolean(key, value) }
         override fun remove(key: String) { write(); inner.remove(key) }
         override fun clear() { write(); inner.clear() }
+        override fun commit(edit: PinStoreEdit) { write(); inner.commit(edit) } // one write: all of it lands, or none
     }
 
-    // A stop part-way leaves at least the time a complete write would have left, and never more than
-    // the time left when it was measured before.
-    @Test fun `a process stopped while recording a measurement leaves no less time left`() {
+    /** Runs [entry] over a store that stops at write [stopAt]; true if it stopped there. */
+    private fun stoppedAt(stopAt: Int, store: FakePinStore, entry: (PinStore) -> Unit): Boolean = try {
+        entry(StoppingStore(store, stopAt))
+        false
+    } catch (e: StoppingStore.Stopped) {
+        true // the process is gone; the next one reads what was written
+    }
+
+    @Test fun `a failure that is counted always has its cooldown`() {
+        // The 4th wrong PIN counts a failure and starts the 1-minute cooldown. Wherever the process stops
+        // while that is stored, the failure is either not counted at all, or counted with its cooldown.
+        for (stopAt in 0..3) {
+            val c = FakePinClock(wall = t0)
+            val (mgr, store) = quickManagerWithPin(c = c)
+            repeat(PinManager.FREE_ATTEMPTS) { mgr.verifyPin(wrong) }
+            stoppedAt(stopAt, store) { restartedOver(it, c).verifyPin(wrong) }
+            val count = store.getInt("pin_fail_count", -1)
+            val left = restartedOver(store, c).timeLeft(c)
+            assertTrue(
+                "stopped at write $stopAt: $count failures counted with $left ms of cooldown",
+                (count == PinManager.FREE_ATTEMPTS && left == 0L) || (count == PinManager.FREE_ATTEMPTS + 1 && left == 60_000L),
+            )
+        }
+    }
+
+    @Test fun `a failure that reaches wipe-after-N is counted with the wipe it owes`() {
+        for (stopAt in 0..3) {
+            val c = FakePinClock(wall = t0)
+            val (mgr, store) = quickManagerWithPin(c = c)
+            mgr.setWipeAfterN(true)
+            repeat(PinManager.WIPE_THRESHOLD - 1) {
+                mgr.verifyPin(wrong)
+                c.pass(PinManager.MAX_COOLDOWN_MS)
+                assertEquals(0L, mgr.currentLockout()) // read as run out, so the next entry starts from nothing
+            }
+            stoppedAt(stopAt, store) { restartedOver(it, c).verifyPin(wrong) }
+            val count = store.getInt("pin_fail_count", -1)
+            val owed = restartedOver(store, c).isWipePending()
+            assertTrue(
+                "stopped at write $stopAt: $count failures counted, wipe owed $owed",
+                (count == PinManager.WIPE_THRESHOLD - 1 && !owed) || (count == PinManager.WIPE_THRESHOLD && owed),
+            )
+        }
+    }
+
+    // A reading records its measurement in one write: a process stopped there leaves the measurement
+    // before it, and the next reading loses nothing either way.
+    @Test fun `a process stopped while recording a measurement loses nothing`() {
         for (rebootFirst in listOf(false, true)) {
-            for (stopAt in 0..2) {
+            for (stopAt in 0..1) {
                 val case = "reboot first $rebootFirst, stopped at write $stopAt"
                 val c = FakePinClock(wall = t0)
                 val (mgr, store) = quickManagerWithPin(c = c)
                 repeat(PinManager.FREE_ATTEMPTS + 1) { mgr.verifyPin(wrong) } // 1 min
                 c.pass(20_000L)
-                if (rebootFirst) c.reboot()
+                if (rebootFirst) c.reboot(upMs = 25_000L)
                 val expected = if (rebootFirst) 35_000L else 40_000L // read 25 s into the new boot
-                try {
-                    restartedOver(StoppingStore(store, stopAt), c).currentLockout()
-                    throw AssertionError("$case: the read wrote fewer than ${stopAt + 1} values")
-                } catch (e: StoppingStore.Stopped) {
-                    // the process is gone; the next one reads what was written
-                }
+                val stopped = stoppedAt(stopAt, store) { restartedOver(it, c).currentLockout() }
+                assertEquals("$case: a reading is one write", stopAt == 0, stopped)
                 c.pass(5_000L)
-                val left = restartedOver(store, c).timeLeft(c)
-                assertTrue("$case: $left ms left, less than the ${expected - 5_000L} ms a complete write leaves", left >= expected - 5_000L)
-                assertTrue("$case: $left ms left, more than the cooldown had", left <= 60_000L)
+                assertEquals(case, expected - 5_000L, restartedOver(store, c).timeLeft(c))
             }
         }
     }

@@ -73,6 +73,29 @@ interface PinStore {
     fun putBoolean(key: String, value: Boolean)
     fun remove(key: String)
     fun clear()
+
+    /** Stores every change in [edit] together: a process stopped there leaves all of them stored or none.
+     *  A store that persists overrides this with one commit. This default applies them one at a time,
+     *  which is only right for a store that keeps nothing across a process stop. */
+    fun commit(edit: PinStoreEdit) {
+        edit.removals.forEach { remove(it) }
+        edit.ints.forEach { (key, value) -> putInt(key, value) }
+        edit.longs.forEach { (key, value) -> putLong(key, value) }
+        edit.booleans.forEach { (key, value) -> putBoolean(key, value) }
+    }
+}
+
+/** Changes to the PIN store that [PinStore.commit] stores together, or not at all. */
+class PinStoreEdit {
+    internal val ints = LinkedHashMap<String, Int>()
+    internal val longs = LinkedHashMap<String, Long>()
+    internal val booleans = LinkedHashMap<String, Boolean>()
+    internal val removals = LinkedHashSet<String>()
+
+    fun putInt(key: String, value: Int): PinStoreEdit = apply { ints[key] = value }
+    fun putLong(key: String, value: Long): PinStoreEdit = apply { longs[key] = value }
+    fun putBoolean(key: String, value: Boolean): PinStoreEdit = apply { booleans[key] = value }
+    fun remove(key: String): PinStoreEdit = apply { removals += key }
 }
 
 /**
@@ -178,6 +201,15 @@ private class EncryptedPrefsPinStore(context: Context) : PinStore {
     override fun putBoolean(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).commit() }
     override fun remove(key: String) { prefs.edit().remove(key).commit() }
     override fun clear() { prefs.edit().clear().commit() }
+
+    override fun commit(edit: PinStoreEdit) {
+        val editor = prefs.edit()
+        edit.removals.forEach { editor.remove(it) }
+        edit.ints.forEach { (key, value) -> editor.putInt(key, value) }
+        edit.longs.forEach { (key, value) -> editor.putLong(key, value) }
+        edit.booleans.forEach { (key, value) -> editor.putBoolean(key, value) }
+        editor.commit()
+    }
 }
 
 /**
@@ -291,7 +323,7 @@ class PinManager internal constructor(
      *  3. Success ⇒ reset counters ⇒ [PinVerifyResult.Success].
      *  4. Fail ⇒ increment; if wipe-after-N && count ≥ threshold ⇒
      *     [PinVerifyResult.ShouldWipe] (+ set wipe-pending); else start the cooldown
-     *     ⇒ [PinVerifyResult.Wrong].
+     *     ⇒ [PinVerifyResult.Wrong]. The count and what it starts are one write.
      *
      * The wall clock decides nothing here: setting it neither ends, lengthens nor starts a cooldown.
      */
@@ -314,22 +346,24 @@ class PinManager internal constructor(
             PinCheck.MISMATCH -> Unit
         }
 
-        // 4. Failure — increment persisted counter.
+        // 4. Failure — the count and what it starts are stored in one write, so a process stopped
+        //    there leaves the failure counted with its cooldown (or owed wipe), or not counted at all.
         val count = store.getInt(KEY_FAIL_COUNT, 0) + 1
-        store.putInt(KEY_FAIL_COUNT, count)
+        val failure = PinStoreEdit().putInt(KEY_FAIL_COUNT, count)
 
         if (isWipeAfterNEnabled() && count >= WIPE_THRESHOLD) {
             // Persist a backstop so a kill between here and the caller's wipe still
             // completes the wipe on next launch.
-            store.putBoolean(KEY_WIPE_PENDING, true)
+            store.commit(failure.putBoolean(KEY_WIPE_PENDING, true))
             return PinVerifyResult.ShouldWipe
         }
 
         val cooldown = cooldownMsForFailCount(count)
         return if (cooldown > 0L) {
-            recordCooldown(cooldown, clock.sinceBootMs(), clock.bootCount())
+            store.commit(failure.withCooldown(cooldown, clock.sinceBootMs(), clock.bootCount()))
             PinVerifyResult.Wrong(count, clock.wallMs() + cooldown)
         } else {
+            store.commit(failure)
             PinVerifyResult.Wrong(count, null)
         }
     }
@@ -350,9 +384,10 @@ class PinManager internal constructor(
     }
 
     private fun resetRateLimit() {
-        store.putInt(KEY_FAIL_COUNT, 0)
-        clearCooldown()
-        forgetWallClockCooldown()
+        store.commit(
+            PinStoreEdit().putInt(KEY_FAIL_COUNT, 0)
+                .remove(KEY_COOLDOWN_LEFT_MS).remove(KEY_WALL_LOCKOUT_UNTIL).remove(KEY_WALL_LAST_FAIL_AT)
+        )
     }
 
     // ── The cooldown on the monotonic clock ───────────────────────────────────
@@ -388,14 +423,13 @@ class PinManager internal constructor(
     }
 
     /** Records [leftMs] as the time the cooldown still has to run, measured at [sinceBootMs] in boot
-     *  [boot]. The measurement is written before the time it belongs to, so a process stopped between
-     *  the writes leaves a record that reads as no less time left (or, when a cooldown was being
-     *  started, as none yet — as it was when the failure count was written and the cooldown not). */
+     *  [boot], in one write: a process stopped there leaves this measurement or the one before it. */
     private fun recordCooldown(leftMs: Long, sinceBootMs: Long, boot: Int) {
-        store.putLong(KEY_COOLDOWN_MEASURED_AT, sinceBootMs)
-        store.putInt(KEY_COOLDOWN_BOOT, boot)
-        store.putLong(KEY_COOLDOWN_LEFT_MS, leftMs)
+        store.commit(PinStoreEdit().withCooldown(leftMs, sinceBootMs, boot))
     }
+
+    private fun PinStoreEdit.withCooldown(leftMs: Long, sinceBootMs: Long, boot: Int): PinStoreEdit =
+        putLong(KEY_COOLDOWN_LEFT_MS, leftMs).putLong(KEY_COOLDOWN_MEASURED_AT, sinceBootMs).putInt(KEY_COOLDOWN_BOOT, boot)
 
     private fun clearCooldown() {
         if (store.contains(KEY_COOLDOWN_LEFT_MS)) store.remove(KEY_COOLDOWN_LEFT_MS)
@@ -404,21 +438,17 @@ class PinManager internal constructor(
     /**
      * 4.0.89 and earlier kept a cooldown as a wall-clock deadline. One still running is carried over
      * once, with the time the wall clock now says it has left (at most [MAX_COOLDOWN_MS]); from then
-     * on it runs on the monotonic clock like any other. The wall-clock keys are then removed.
+     * on it runs on the monotonic clock like any other. The wall-clock keys are removed in the same write.
      */
     private fun carryOverWallClockCooldown() {
         val until = store.getLong(KEY_WALL_LOCKOUT_UNTIL, 0L)
         if (until <= 0L) return
         val left = (until - clock.wallMs()).coerceIn(0L, MAX_COOLDOWN_MS)
+        val edit = PinStoreEdit().remove(KEY_WALL_LOCKOUT_UNTIL).remove(KEY_WALL_LAST_FAIL_AT)
         if (left > 0L && store.getLong(KEY_COOLDOWN_LEFT_MS, 0L) <= 0L) {
-            recordCooldown(left, clock.sinceBootMs(), clock.bootCount())
+            edit.withCooldown(left, clock.sinceBootMs(), clock.bootCount())
         }
-        forgetWallClockCooldown()
-    }
-
-    private fun forgetWallClockCooldown() {
-        if (store.contains(KEY_WALL_LOCKOUT_UNTIL)) store.remove(KEY_WALL_LOCKOUT_UNTIL)
-        if (store.contains(KEY_WALL_LAST_FAIL_AT)) store.remove(KEY_WALL_LAST_FAIL_AT)
+        store.commit(edit)
     }
 
     // ── Wipe-after-N toggle + backstop ────────────────────────────────────────
