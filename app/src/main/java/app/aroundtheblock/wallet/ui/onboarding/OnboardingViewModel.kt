@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.security.PinManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -169,20 +170,30 @@ class OnboardingViewModel @Inject constructor(
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
+        // This create's own copy: clearing the screen's copy (onCleared) never changes the bytes a
+        // create in progress is using, and this one is zeroed however the create ends.
+        val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
-            val success = withContext(Dispatchers.Default) {
-                // Do NOT clearPin here — PinSetupScreen calls setPin() right
-                // before this, and clearing afterward wipes the freshly-set
-                // PIN. (recoverWallet keeps its clearPin because it runs
-                // before pin_setup, replacing any stale-from-prior-install PIN.)
-                walletManager.createWallet(phrase, _passphrase)
+            val success = try {
+                withContext(Dispatchers.Default) {
+                    // Do NOT clearPin here — PinSetupScreen calls setPin() right
+                    // before this, and clearing afterward wipes the freshly-set
+                    // PIN. (recoverWallet keeps its clearPin because it runs
+                    // before pin_setup, replacing any stale-from-prior-install PIN.)
+                    walletManager.createWallet(phrase, pass)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A create that throws has failed: reported as such, not let out of the scope.
+                false
+            } finally {
+                // Created or not, the passphrase has no further use here — and now it can be wiped.
+                pass?.fill(0)
+                clearPassphrase()
             }
             wipeMnemonicFromMemory()
-            // The passphrase is now in the Keystore envelope; there is no reason for the
-            // ViewModel to keep holding it — and now it can actually be wiped.
-            _passphrase?.fill(0)
-            _passphrase = null
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet creation failed")
             onResult(success)
         }
@@ -192,6 +203,8 @@ class OnboardingViewModel @Inject constructor(
     fun recoverWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
         val ts = _recoveryTimestamp
+        // This restore's own copy, as in createWallet.
+        val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
 
@@ -199,19 +212,25 @@ class OnboardingViewModel @Inject constructor(
             // paced convoy bounds the memory of an arbitrarily deep CF scan, so
             // there is nothing to refuse. (A backup you can't restore from isn't a
             // backup.)
-            val success = withContext(Dispatchers.Default) {
-                // Clear any stale PIN from a previous install so the user
-                // is routed to PIN setup, not the unlock screen. Done inside
-                // the worker dispatcher so the Keystore-backed prefs write
-                // never lands on the main thread.
-                pinManager.clearPin()
-                walletManager.recoverWallet(phrase, ts, _passphrase)
+            val success = try {
+                withContext(Dispatchers.Default) {
+                    // Clear any stale PIN from a previous install so the user
+                    // is routed to PIN setup, not the unlock screen. Done inside
+                    // the worker dispatcher so the Keystore-backed prefs write
+                    // never lands on the main thread.
+                    pinManager.clearPin()
+                    walletManager.recoverWallet(phrase, ts, pass)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A restore that throws has failed: reported as such, not let out of the scope.
+                false
+            } finally {
+                // As in createWallet: restored or not, the passphrase has no further use here.
+                pass?.fill(0)
+                clearPassphrase()
             }
-
-            // As in createWallet: once restored, the passphrase is in the Keystore envelope and
-            // this copy has no further use.
-            _passphrase?.fill(0)
-            _passphrase = null
 
             // If the pre-recovery scan found funds on non-native paths, signal
             // the UI to navigate to RecoverFundsScreen after the wallet lands.
@@ -250,9 +269,17 @@ class OnboardingViewModel @Inject constructor(
         _mnemonic = emptyList()
     }
 
+    /** Every byte of the held passphrase zeroed, then let go (AND-006). */
+    private fun clearPassphrase() {
+        _passphrase?.fill(0)
+        _passphrase = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         wipeMnemonicFromMemory()
+        // Setup abandoned or finished: the passphrase is zeroed here too, not only after a create.
+        clearPassphrase()
     }
 }
 

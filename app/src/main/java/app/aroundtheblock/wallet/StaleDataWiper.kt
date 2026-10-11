@@ -7,19 +7,19 @@ import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 
 /**
- * Wipes regenerable app data to recover from corruption — WITHOUT ever touching
- * the wallet seed (`dgb_wallet_seed`) or the PIN store. Split into two tiers so
- * the startup crash-loop breaker ([BootGuard]) can escalate gradually: try the
- * cheap fix (sync blobs — only costs a header re-sync) before the expensive one
- * (the encrypted DB — Room re-creates it via fallbackToDestructiveMigration).
+ * Recovers from corruption — WITHOUT ever touching the wallet seed (`dgb_wallet_seed`)
+ * or the PIN store. Split into two tiers so the startup crash-loop breaker ([BootGuard])
+ * can escalate gradually: try the cheap fix (sync blobs — only costs a header re-sync)
+ * before the expensive one (the encrypted DB, set aside so Room creates a new one).
  *
- * Everything wiped here is either re-downloaded from the network (sync state) or
- * rebuilt locally (the DB is a cache of on-chain data). User funds live only in
- * the seed, which is never in scope.
+ * The sync state is re-downloaded from the network. The encrypted DB is NOT only a cache
+ * of on-chain data — it holds Digi-ID login history that cannot be rebuilt — so it is
+ * never deleted here: it is set aside with its key kept. User funds live only in the
+ * seed, which is never in scope.
  *
- * All prefs/DB files are network-suffixed ([networkSuffix]) so wiping the
+ * All prefs/DB files are network-suffixed ([networkSuffix]) so a recovery of the
  * mainnet session never touches a testnet DB/prefs on disk, and vice versa.
- * `dgb_db_key` stays unsuffixed/shared (same passphrase encrypts either DB).
+ * `dgb_db_key` stays unsuffixed/shared (same password encrypts either DB), and is kept.
  */
 object StaleDataWiper {
 
@@ -48,42 +48,26 @@ object StaleDataWiper {
         ChainTipStore.invalidateCache()
     }
 
-    /** Heavier recovery: delete the encrypted Room DB and its key material so a
-     *  clean DB is created on next open. The DB is a local cache (txs/utxos/headers/
-     *  asset metadata), all rebuildable from chain + network. Seed/PIN untouched. */
+    /** Heavier recovery: set the encrypted Room DB aside so a clean DB is created on next
+     *  open (Room creates it under the same key). Never deleted: the DB holds what the chain
+     *  cannot give back — Digi-ID login history, labels, asset metadata — so it is moved to a
+     *  name of its own with its companions (`DatabaseFiles.setAside`), and its key record and
+     *  Keystore key are KEPT, so the set-aside copy stays readable. Seed/PIN untouched.
+     *
+     *  The crash-loop breaker calls this on every start while starts keep dying; those asides
+     *  are bounded (`DatabaseFiles.MAX_RECOVERY_ASIDES`), and past the bound the database is
+     *  left where it is — the crash is then not the database's. Nothing aside is removed here:
+     *  a full wallet wipe (WalletDataEraser.eraseDatabase) is the one place that removes asides. */
     fun wipeDatabase(context: Context) {
-        android.util.Log.w("StaleDataWiper", "Wiping encrypted DB + key (seed preserved)")
         val dbFileName = "wallet${networkSuffix(context)}.db"
-        context.getDatabasePath(dbFileName).delete()
-        context.getDatabasePath("$dbFileName-journal").delete()
-        context.getDatabasePath("$dbFileName-shm").delete()
-        context.getDatabasePath("$dbFileName-wal").delete()
-        context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE).edit().clear().apply()
-        // Delete ONLY the DB-dedicated Keystore key.
-        //
-        // CRITICAL: never delete "dgb_wallet_master" — KeyStoreManager.KEY_ALIAS
-        // is that alias, and WalletManager.persistSeed/loadSeed use it to
-        // encrypt/decrypt the wallet SEED. Deleting it would leave the preserved
-        // seed blob permanently UNDECRYPTABLE — bricking the wallet even though
-        // the blob survives (funds lost unless the user has the recovery phrase).
-        // The regenerated DB passphrase re-encrypts under the still-present
-        // dgb_wallet_master (provideDatabaseInner's new-install path), so the DB
-        // recovers without ever touching the seed's key. (The original
-        // wipeStaleData deleted dgb_wallet_master — a latent seed-loss bug.)
-        try {
-            val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
-            ks.load(null)
-            if (ks.containsAlias("dgb_db_passphrase")) {
-                ks.deleteEntry("dgb_db_passphrase")
-                android.util.Log.w("StaleDataWiper", "Deleted stale DB Keystore key: dgb_db_passphrase")
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("StaleDataWiper", "Could not clean Keystore: ${e.message}")
-        }
+        val path = context.getDatabasePath(dbFileName)
+        val dir = path.parentFile ?: return
+        val setAside = app.aroundtheblock.wallet.core.db.DatabaseFiles(dir, dbFileName)
+            .setAside(app.aroundtheblock.wallet.core.db.AsideReason.RECOVERY)
+        android.util.Log.w("StaleDataWiper", "Encrypted DB set aside=$setAside (key kept; seed preserved)")
     }
 
-    /** Full wipe of regenerable data (DB + sync blobs). Used by the DB-init
-     *  exception path in AppModule — a DB failure warrants clearing both.
+    /** Both tiers at once: the DB set aside, the sync blobs cleared.
      *  NEVER clears the PIN store or the wallet seed. */
     fun wipeAll(context: Context) {
         wipeDatabase(context)
