@@ -31,6 +31,8 @@ set -euo pipefail
 
 SSH_TARGET="${1:-root@digiscope.me}"
 SSH_KEY="${2:-$HOME/.ssh/DigitalOcean}"
+# The checkpoint source is pinned: a host with any other key is refused (scripts/known_hosts.digiscope).
+KNOWN_HOSTS="${KNOWN_HOSTS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/known_hosts.digiscope}"
 SPACING="${3:-50000}"
 CF_TIP_MARGIN="${CF_TIP_MARGIN:-10000}"
 OUT="$(cd "$(dirname "$0")/.." && pwd)/native/src/main/jni/digibytewallet-core/BRCompactFilterCheckpoints.h"
@@ -44,7 +46,7 @@ BLOCK_HDR="$(cd "$(dirname "$0")/.." && pwd)/native/src/main/jni/digibytewallet-
 # whenever it has more than a handful of elements — so the header can only be
 # identified by name, never by position or by shape.
 echo "Pulling filter-headers from $SSH_TARGET (spacing $SPACING)..." >&2
-RAW="$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_TARGET" bash -s <<EOF
+RAW="$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null "$SSH_TARGET" bash -s <<EOF
 CLI=/usr/local/bin/digibyte-cli
 TIP=\$(\$CLI getblockcount)
 LAST=\$(( TIP - TIP % $SPACING ))
