@@ -80,10 +80,10 @@ fun interface HttpFetcher {
 private const val MAX_PRICE_BODY_BYTES = 64L * 1024
 
 /**
- * Production [HttpFetcher] backed by OkHttp. An answer over [MAX_PRICE_BODY_BYTES] is refused
- * unread.
+ * Production [HttpFetcher] backed by OkHttp, on the client it is given — in the app the shared one,
+ * which carries the Tor routing. An answer over [MAX_PRICE_BODY_BYTES] is refused unread.
  */
-fun okHttpFetcher(client: OkHttpClient = OkHttpClient()): HttpFetcher = HttpFetcher { url ->
+fun okHttpFetcher(client: OkHttpClient): HttpFetcher = HttpFetcher { url ->
     val request = Request.Builder().url(url).build()
     client.newCall(request).execute().use { response ->
         if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
@@ -104,7 +104,7 @@ fun okHttpFetcher(client: OkHttpClient = OkHttpClient()): HttpFetcher = HttpFetc
  */
 class PriceProvider(
     private val priceCacheDao: PriceCacheDao,
-    private val fetcher: HttpFetcher = okHttpFetcher(),
+    private val fetcher: HttpFetcher,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val oracleProvider: OraclePriceProvider? = null
 ) {

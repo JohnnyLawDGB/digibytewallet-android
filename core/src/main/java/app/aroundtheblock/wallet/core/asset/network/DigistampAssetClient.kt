@@ -24,7 +24,9 @@ import java.util.concurrent.TimeUnit
  * arrive without warning; the rotation degrades to the next provider rather than failing hard.
  */
 class DigistampAssetClient(
-    baseClient: OkHttpClient = OkHttpClient(),
+    /** The client every request is derived from: in the app the shared one (Tor routing). No default —
+     *  a client made here would carry no Tor routing. */
+    baseClient: OkHttpClient,
     private val baseUrl: String = DEFAULT_BASE_URL,
 ) : AssetNetworkClient {
 

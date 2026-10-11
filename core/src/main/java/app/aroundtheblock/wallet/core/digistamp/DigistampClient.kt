@@ -18,7 +18,9 @@ import java.util.concurrent.TimeUnit
  * key is about to sign.
  */
 class DigistampClient(
-    baseClient: OkHttpClient = OkHttpClient(),
+    /** The client every request is derived from: in the app the shared one (Tor routing). No default —
+     *  a client made here would carry no Tor routing. */
+    baseClient: OkHttpClient,
 ) {
     private val client: OkHttpClient = baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
