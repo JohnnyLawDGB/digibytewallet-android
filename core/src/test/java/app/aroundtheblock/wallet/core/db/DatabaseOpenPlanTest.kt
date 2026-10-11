@@ -204,6 +204,7 @@ class DatabaseOpenPlanTest {
         assertTrue("the wrapped password was stored before the verified reopen: $log", liveAt > reopenedAt)
     }
 
+    // GUARD (nothing re-keyed before this change, so nothing was stored either).
     @Test fun `a re-key that did not take stores no wrapped password`() {
         val f = Fixture()
         f.database(legacy)
@@ -250,8 +251,11 @@ class DatabaseOpenPlanTest {
             RekeyAnswer.REKEYED
         }
         val first = f.opener().plan()
+        assertFalse("the legacy-password database was not re-keyed", f.cipher.keyedWith.contentEquals(legacy))
         assertTrue("the re-keyed file is not opened with its new password this run ($first)",
             first is DatabaseOpenPlan.Open && first.password.contentEquals(f.cipher.keyedWith))
+        assertFalse("a wrapped password reached the disk although its write was refused",
+            f.records.inner.durable.containsKey(DatabaseKeyProvisioner.WRAPPED))
 
         val next = Fixture(reopened(f.records.inner), f.vault)
         File(f.dir, f.name).copyTo(next.live())

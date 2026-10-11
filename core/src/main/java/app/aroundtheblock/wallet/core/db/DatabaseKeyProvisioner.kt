@@ -190,7 +190,7 @@ class WalletDatabaseOpener(
             if (!files.exists()) DatabaseOpenPlan.Open(keys.provisionNew()!!, recoverOnFirstOpen = false) else legacyToday()
         else -> {
             // StaleDataWiper.wipeAll, then a new database
-            (files as DatabaseFiles).deleteToday()
+            (files as? DatabaseFiles)?.deleteToday()
             keys.clearRecordToday()
             DatabaseOpenPlan.Open(keys.provisionNew()!!, recoverOnFirstOpen = false)
         }
@@ -205,7 +205,7 @@ class WalletDatabaseOpener(
                 DatabaseOpenPlan.Open(legacy, recoverOnFirstOpen = false)
             }
             OpenAnswer.NOT_A_DATABASE -> {
-                (files as DatabaseFiles).deleteToday()
+                (files as? DatabaseFiles)?.deleteToday()
                 DatabaseOpenPlan.Open(keys.provisionNew()!!, recoverOnFirstOpen = false)
             }
             OpenAnswer.CORRUPT, OpenAnswer.UNDECIDED -> DatabaseOpenPlan.Open(legacy, recoverOnFirstOpen = false)
