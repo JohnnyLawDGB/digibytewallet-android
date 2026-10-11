@@ -28,7 +28,7 @@ GUARD_CASES=(androids_table_value_for_value january_first_utc_by_timegm outside_
 
 build() {
     local out="$1"; shift
-    "$CC" -w -std=c99 -include stdint.h -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer "$@" \
+    "$CC" -w -std=c99 -D_DEFAULT_SOURCE -include stdint.h -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/recovery_date_kat_main.c" -o "$out"
 }
