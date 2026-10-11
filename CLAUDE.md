@@ -18,7 +18,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > `release.yml` and `release-please` on `develop` are retired; do not rely on either.
 
 **Branch:** `develop` is the default branch and builds io.digibyte (see above). `phase1-modernization` is retired.
-**Version:** DigiByte Mobile 4.0.89 (versionCode 40089) on `release/digibyte-mobile-4.0.89`; the next is 4.0.90. io.digibyte ended at 4.0.87.2. _(Source of truth: `versionName`/`versionCode` in `app/build.gradle.kts` on the release branch.)_
+**Version:** v4.0.87 on `develop` (io.digibyte — retired; it ended at 4.0.87.2 on its own branch). **DigiByte Mobile ships 4.0.89** (versionCode 40089) from `release/digibyte-mobile-4.0.89`; the next is 4.0.90. _(This line must name the version `develop` builds — `scripts/check-doc-version.sh` enforces it; it moves to the DigiByte Mobile version when the two lines merge.)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
