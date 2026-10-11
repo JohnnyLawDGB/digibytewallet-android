@@ -173,6 +173,10 @@ object AppModule {
      *
      * digiscope stays as fallback rather than being replaced. Depending on one host is the
      * state that produced the outage; two providers speaking the same shapes is the point.
+     *
+     * Only providers that we, or a known operator, run belong here: the chain takes the first
+     * answer any endpoint gives, so every endpoint is trusted for asset names, metadata and images
+     * whenever the ones before it cannot be reached (AssetEndpointChainTest).
      */
     @Provides @Singleton
     fun provideAssetNetworkClient(
@@ -182,7 +186,6 @@ object AppModule {
             endpoints = listOf(
                 app.aroundtheblock.wallet.core.asset.network.DigistampAssetClient(baseClient = okHttpClient),
                 app.aroundtheblock.wallet.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
-                app.aroundtheblock.wallet.core.asset.network.DigiAssetsNetClient(baseClient = okHttpClient),
             )
         )
 

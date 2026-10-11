@@ -2,9 +2,8 @@ package app.aroundtheblock.wallet.core.asset.network
 
 /**
  * Small slice of the DigiAsset RPC surface that the wallet actually needs —
- * each concrete [AssetNetworkClient] (digiscope proxy, api.digiassets.net,
- * user-configured node) implements this shape on top of whatever REST/RPC
- * dialect its upstream speaks.
+ * each concrete [AssetNetworkClient] (the digiscope proxy, digistamp's indexer)
+ * implements this shape on top of whatever REST/RPC dialect its upstream speaks.
  *
  * Methods return null on failure so [MultiEndpointAssetClient] can cleanly
  * fall through to the next endpoint in its rotation without exceptions

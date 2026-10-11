@@ -36,7 +36,7 @@ class AssetMetadataService(
     private val ipfsClient: IpfsClient,
     private val assetMetadataDao: AssetMetadataDao,
     /** Optional fallback network client that queries digiasset_core instances
-     *  (digiscope.me proxy, api.digiassets.net) when the IPFS fetch fails or
+     *  (digistamp's indexer, the digiscope.me proxy) when the IPFS fetch fails or
      *  no CID is available. Nullable so tests can construct without one. */
     private val assetNetworkClient: app.aroundtheblock.wallet.core.asset.network.AssetNetworkClient? = null,
 ) {
