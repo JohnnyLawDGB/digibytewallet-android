@@ -12,6 +12,7 @@
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
 #include "BRWalletFilterElements.h"
+#include "tx_details_format.h"
 
 /* ---------- Global state definitions ---------- */
 
@@ -697,7 +698,30 @@ NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
  * "txHash|amount|fee|blockHeight|timestamp|sent|received\n..."
  * Amount is signed: positive = received, negative = sent.
  * sent/received are unsigned raw values for self-send detection.
+ * The list is built by tx_details_format.h; this file reads each row from the wallet.
  */
+
+/* TxDetailsRowFn over the array BRWalletTransactions filled (ctx). */
+static int tx_details_row_from_wallet(void *ctx, size_t i, TxDetailsRow *row) {
+    BRTransaction *tx = ((BRTransaction **)ctx)[i];
+    if (!tx) return 0;
+
+    /* Calculate amount: received - sent */
+    uint64_t received = BRWalletAmountReceivedFromTx(g_wallet, tx);
+    uint64_t sent = BRWalletAmountSentByTx(g_wallet, tx);
+    memcpy(row->txHash, tx->txHash.u8, sizeof(row->txHash));
+    row->amount = (int64_t)received - (int64_t)sent;
+    row->fee = BRWalletFeeForTx(g_wallet, tx);
+    row->blockHeight = tx->blockHeight;
+
+    /* Use tx timestamp if available, otherwise fall back to current time.
+     * tx->timestamp is 0 until the block header is processed by the peer manager. */
+    row->timestamp = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
+    row->sent = sent;
+    row->received = received;
+    return 1;
+}
+
 jstring JNICALL
 NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
     (void)thiz;
@@ -710,53 +734,9 @@ NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
     if (!txs) return (*env)->NewStringUTF(env, "");
     txCount = BRWalletTransactions(g_wallet, txs, txCount);
 
-    /* Build result string — estimate 160 chars per tx (added sent|received fields) */
-    size_t bufSize = txCount * 160 + 1;
-    char *buf = malloc(bufSize);
-    if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
-    buf[0] = '\0';
-    size_t pos = 0;
-
-    /* BRWalletTransactions returns txs sorted by date OLDEST-FIRST (BRWallet.c).
-     * To cap at the 100 MOST RECENT we must start near the end of the array, not
-     * at index 0 — otherwise a wallet with >100 txs keeps its oldest 100 and drops
-     * every new send past the cap (balance still updates because it sums all txs,
-     * but the new tx never appears in the list). Start offset = txCount-100. */
-    size_t startIdx = (txCount > 100) ? (txCount - 100) : 0;
-    for (size_t i = startIdx; i < txCount; i++) { /* the 100 most recent */
-        BRTransaction *tx = txs[i];
-        if (!tx) continue;
-
-        /* Calculate amount: received - sent */
-        uint64_t received = BRWalletAmountReceivedFromTx(g_wallet, tx);
-        uint64_t sent = BRWalletAmountSentByTx(g_wallet, tx);
-        int64_t amount = (int64_t)received - (int64_t)sent;
-        uint64_t fee = BRWalletFeeForTx(g_wallet, tx);
-
-        /* txHash as hex string */
-        char hashHex[65];
-        for (int j = 0; j < 32; j++) {
-            sprintf(&hashHex[j*2], "%02x", tx->txHash.u8[31 - j]);
-        }
-        hashHex[64] = '\0';
-
-        /* Use tx timestamp if available, otherwise fall back to current time.
-         * tx->timestamp is 0 until the block header is processed by the peer manager. */
-        uint32_t ts = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
-
-        int written = snprintf(buf + pos, bufSize - pos,
-            "%s|%lld|%llu|%u|%u|%llu|%llu\n",
-            hashHex,
-            (long long)amount,
-            (unsigned long long)fee,
-            tx->blockHeight,
-            ts,
-            (unsigned long long)sent,
-            (unsigned long long)received);
-        if (written > 0) pos += written;
-    }
-
+    char *buf = tx_details_format(txCount, tx_details_row_from_wallet, txs);
     free(txs);
+    if (!buf) return (*env)->NewStringUTF(env, "");
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
     return result;
