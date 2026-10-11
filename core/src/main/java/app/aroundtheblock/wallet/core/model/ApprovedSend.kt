@@ -105,7 +105,9 @@ sealed class ApprovedSend {
 
         /**
          * An approval for [typedQuantity] of the asset [assetId], which has [divisibility]
-         * decimals, or null when the text is not a positive quantity of such an asset.
+         * decimals, or null when the text is not a positive quantity of such an asset. The asset
+         * form passes its recipient text on as typed or pasted; the approval holds the address
+         * without the whitespace around it, so the address confirmed is exactly the one paid.
          */
         fun asset(
             address: String,
@@ -116,7 +118,7 @@ sealed class ApprovedSend {
             feeEstimateSats: Long,
         ): Asset? {
             val units = AssetQuantity.parse(typedQuantity, divisibility) ?: return null
-            return Asset(address, assetId, units, divisibility, feePerKb, feeEstimateSats)
+            return Asset(address.trim(), assetId, units, divisibility, feePerKb, feeEstimateSats)
         }
     }
 }
