@@ -691,4 +691,9 @@
     <string name="send_not_relayed_title">Gesendet, noch nicht weitergeleitet</string>
     <string name="send_not_relayed_body">Ihre Wallet hat diese Transaktion übertragen, aber noch kein Peer hat sie angenommen, daher ist noch nicht bekannt, ob sie das Netzwerk erreicht hat. Sie wird in Ihren Aktivitäten als ausstehend angezeigt. Prüfen Sie Ihre Aktivitäten, bevor Sie sie erneut senden.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Passphrase konnte nicht gelesen werden</string>
+    <string name="seedview_pass_unreadable_body">Die Passphrase dieser Wallet konnte gerade nicht gelesen werden. Ihre Wiederherstellungswörter allein stellen diese Wallet möglicherweise nicht wieder her. Deshalb werden sie erst angezeigt, wenn die Passphrase zusammen mit ihnen angezeigt werden kann. Versuchen Sie es erneut.</string>
+    <string name="seedview_pass_retry">Erneut versuchen</string>
+    <!-- /pkg E2-keys -->
 </resources>

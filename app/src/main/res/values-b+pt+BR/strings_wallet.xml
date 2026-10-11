@@ -688,4 +688,9 @@
     <string name="send_not_relayed_title">Enviada, ainda não retransmitida</string>
     <string name="send_not_relayed_body">Sua carteira transmitiu esta transação, mas nenhum nó a recebeu ainda, então ainda não se sabe se ela chegou à rede. Ela aparece como pendente na sua atividade. Verifique sua atividade antes de enviá-la novamente.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Não foi possível ler a frase-senha</string>
+    <string name="seedview_pass_unreadable_body">A frase-senha desta carteira não pôde ser lida agora. Suas palavras de recuperação sozinhas podem não restaurar esta carteira, por isso elas só aparecem quando a frase-senha puder aparecer junto. Tente novamente.</string>
+    <string name="seedview_pass_retry">Tentar novamente</string>
+    <!-- /pkg E2-keys -->
 </resources>

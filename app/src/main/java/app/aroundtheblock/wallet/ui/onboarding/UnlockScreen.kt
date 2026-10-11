@@ -196,14 +196,13 @@ fun UnlockScreen(
                 } else {
                     // Restore-crash bracket: BootGuard lives in the app module and
                     // WalletManager.restoreFromDisk() is core (core cannot depend on
-                    // app), so beginRestore is armed here, at the call site, rather
-                    // than inside restoreFromDisk() itself. This IS the start of the
-                    // post-unlock restore — recoverWalletFromBytes runs synchronously
-                    // inside the call below. commit()'d before the risky call so a
-                    // crash mid-restore leaves restore_pending=true for BootGuard
-                    // .recoverFromCrashedRestoreIfNeeded to see next launch.
-                    BootGuard.beginRestore(context)
-                    walletManager.restoreFromDisk()
+                    // app), so the arming is handed to restoreFromDisk, which runs it at
+                    // the start of the post-unlock restore's risky native window —
+                    // recoverWalletFromBytes runs synchronously inside the call below.
+                    // commit()'d before the risky call so a crash mid-restore leaves
+                    // restore_pending=true for BootGuard.recoverFromCrashedRestoreIfNeeded
+                    // to see next launch.
+                    walletManager.restoreFromDisk(beforeNative = { BootGuard.beginRestore(context) })
                 }
             }
             if (!opened) {

@@ -683,4 +683,9 @@
     <string name="send_not_relayed_title">भेजा गया, अभी रिले नहीं हुआ</string>
     <string name="send_not_relayed_body">आपके वॉलेट ने यह लेनदेन प्रसारित किया, लेकिन अभी तक किसी पीयर ने इसे नहीं लिया है, इसलिए अभी पता नहीं है कि यह नेटवर्क तक पहुँचा या नहीं। यह आपकी गतिविधि में लंबित दिखता है। दोबारा भेजने से पहले अपनी गतिविधि जाँच लें।</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">पासफ़्रेज़ पढ़ा नहीं जा सका</string>
+    <string name="seedview_pass_unreadable_body">इस वॉलेट का पासफ़्रेज़ अभी पढ़ा नहीं जा सका। केवल आपके रिकवरी शब्द इस वॉलेट को बहाल नहीं कर सकते, इसलिए वे तब तक नहीं दिखाए जाते जब तक पासफ़्रेज़ उनके साथ नहीं दिखाया जा सकता। फिर से कोशिश करें।</string>
+    <string name="seedview_pass_retry">फिर से कोशिश करें</string>
+    <!-- /pkg E2-keys -->
 </resources>

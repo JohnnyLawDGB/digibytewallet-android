@@ -276,8 +276,12 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * Restore wallet from persisted encrypted seed on app restart.
      * Stops any running sync first to avoid use-after-free crashes.
      * Returns true if the wallet was successfully restored.
+     *
+     * @param beforeNative run at the start of the restore's risky native window. The app arms its
+     *   restore-crash bracket here (BootGuard.beginRestore), so the bracket covers exactly the work
+     *   it is there to watch.
      */
-    fun restoreFromDisk(): Boolean {
+    fun restoreFromDisk(beforeNative: () -> Unit = {}): Boolean {
         val seedBytes = loadSeed() ?: return false
         // The stored passphrase MUST come along. This is the unlock path — it runs on every
         // restart, on resume, and from BootGuard. Rebuilding a passphrase wallet without it
@@ -292,7 +296,22 @@ class WalletManager @Suppress("LongParameterList") constructor(
             return false
         }
         val storedPass = (stored as? StoredPassphrase.Present)?.bytes
+        // Identity is the DERIVED seed, so a passphrase distinguishes wallets that share a
+        // mnemonic. Derived here, before any native work that touches the wallet (the derivation is
+        // a pure function): a record read as "no passphrase" whose own identity is a different
+        // wallet's — an envelope an earlier release's key migration dropped — is not opened, and
+        // nothing of it is overwritten (AND-005).
+        val identitySeed = deriveSeedForIdentity(seedBytes, storedPass)
+        if (storedPass == null && identitySeed != null && identityContradicts(identitySeed)) {
+            android.util.Log.w("WalletManager", "wallet record contradicts its own identity; not opened")
+            identitySeed.fill(0)
+            seedBytes.fill(0)
+            return false
+        }
         try {
+            // The restore's risky native window starts here, so the app's restore-crash bracket is
+            // armed here — never for a restore that refused above: a refusal is not a crash.
+            beforeNative()
             // CRITICAL: stop sync before replacing the wallet — the peer manager's
             // background threads are using the old wallet pointer. Freeing it
             // while they're running causes SIGSEGV.
@@ -312,10 +331,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // Only clear saved blocks/peers if the seed has changed (e.g. after
             // uninstall/reinstall with a different mnemonic). On normal app restarts
             // the seed is the same, so we KEEP the saved blocks to resume sync.
-            // Identity is the DERIVED seed, so a passphrase distinguishes wallets that share a
-            // mnemonic. v1 (mnemonic-based) is still honoured for installs that predate this, so
-            // upgrading does not clear sync data and re-sync everyone from the floor.
-            val identitySeed = deriveSeedForIdentity(seedBytes, storedPass)
+            // v1 (mnemonic-based) is still honoured for installs that predate the derived
+            // identity, so upgrading does not clear sync data and re-sync everyone from the floor.
             if (identitySeed == null) {
                 // Derivation failed — do NOT guess. Clearing on a failed derivation would throw
                 // away good sync data over a transient native error.
@@ -324,14 +341,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 // from interpolating it — so it is respected rather than narrowed.
                 android.util.Log.w("WalletManager", "wallet identity unavailable; leaving sync data intact")
             } else {
-                try {
-                    val verdict = SeedFingerprint.evaluate(storedFingerprints(), seedBytes, identitySeed)
-                    if (verdict.seedChanged) clearSyncData()
-                    if (verdict.writeV2) {
-                        prefs.edit().putString("seed_fingerprint_v2", verdict.v2ToWrite).apply()
-                    }
-                } finally {
-                    identitySeed.fill(0)
+                val verdict = SeedFingerprint.evaluate(storedFingerprints(), seedBytes, identitySeed)
+                if (verdict.seedChanged) clearSyncData()
+                if (verdict.writeV2) {
+                    prefs.edit().putString("seed_fingerprint_v2", verdict.v2ToWrite).apply()
                 }
             }
 
@@ -402,6 +415,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             }
             return success
         } finally {
+            identitySeed?.fill(0)
             storedPass?.fill(0)
             seedBytes.fill(0)
         }
@@ -767,6 +781,16 @@ class WalletManager @Suppress("LongParameterList") constructor(
         if (recordGone) {
             attempt("wallet key") { keyStoreManager.deleteKey(); true } // judged by the read-back below
         }
+        // Empty the UTXO table through the still-open handle BEFORE the database files are erased:
+        // a write after the erase can create a file by name (a rollback journal) that the eraser's
+        // read-back has already passed. Tidiness for this process only, not part of the report.
+        try {
+            utxoManager.clearAll()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletManager", "wipe: utxo cache not emptied (${t.javaClass.simpleName})")
+        }
         // Regenerable + privacy-sensitive persisted data, both networks.
         val storesCleared = listOf(
             attempt("sync data") { dataEraser.eraseSyncData() },
@@ -791,17 +815,6 @@ class WalletManager @Suppress("LongParameterList") constructor(
             seedGone = seedGone,
             everythingCleared = sessionsStopped && quiesced && storesCleared,
         )
-
-        // Last, and not part of the report: the database FILES are already gone (read back by
-        // the eraser); emptying the table through the still-open handle is tidiness for this
-        // process only.
-        try {
-            utxoManager.clearAll()
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            android.util.Log.w("WalletManager", "wipe: utxo cache not emptied (${t.javaClass.simpleName})")
-        }
         return report
     }
 
@@ -1054,7 +1067,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 .remove("encrypted_pass").remove("encrypted_pass_iv")
                 .commit()
             // The database password's record, re-wrapped under its own key and verified, BEFORE the key
-            // that wrapped it is deleted. Until then the key stays; a later unlock or start asks again.
+            // that wrapped it is deleted. If that has not happened the key stays, and it is not asked
+            // for again: the seed has moved, so this migration does not run again. The record still
+            // moves at the next start (WalletDatabaseOpener); the legacy key then wraps nothing and
+            // stays until a wipe.
             if (!releaseDatabaseKey()) {
                 android.util.Log.w("WalletManager", "legacy key kept: the database key record still depends on it")
                 return
@@ -1196,8 +1212,29 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     fun decryptStoredPassphrase(): ByteArray? = when (val stored = storedPassphrase()) {
         is StoredPassphrase.Present -> stored.bytes
-        StoredPassphrase.None -> null
+        StoredPassphrase.None -> if (noPassphraseContradicted()) error("wallet record incomplete: its identity is another wallet's") else null
         is StoredPassphrase.Unknown -> error("wallet record incomplete: ${stored.why}")
+    }
+
+    /** The record's own identity (fingerprint v2) is not the wallet [identitySeed] opens. */
+    private fun identityContradicts(identitySeed: ByteArray): Boolean =
+        prefs.getString(KEY_FINGERPRINT_V2, null)?.let { it != SeedFingerprint.v2(identitySeed) } ?: false
+
+    /** The record reads "no passphrase", and its own identity is not the wallet that opens with none. */
+    private fun noPassphraseContradicted(): Boolean {
+        if (!prefs.contains(KEY_FINGERPRINT_V2)) return false
+        val mnemonicBytes = loadSeed() ?: return false
+        return try {
+            deriveSeedForIdentity(mnemonicBytes, null)?.let { derived ->
+                try {
+                    identityContradicts(derived)
+                } finally {
+                    derived.fill(0)
+                }
+            } ?: false
+        } finally {
+            mnemonicBytes.fill(0)
+        }
     }
 
     /**
@@ -1219,7 +1256,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         return try {
             // Carries the wallet's stored passphrase, if it has one — a passphrase wallet's
             // recovery/sweep seed must match the seed it actually derives from.
-            val pass = when (val stored = storedPassphrase()) {
+            val stored = storedPassphrase()
+            val pass = when (stored) {
                 is StoredPassphrase.Unknown -> {
                     android.util.Log.w("WalletManager", "wallet record incomplete (${stored.why}); recovery key not derived")
                     return null
@@ -1232,7 +1270,16 @@ class WalletManager @Suppress("LongParameterList") constructor(
             } finally {
                 pass?.fill(0)
             }
-            if (seed == null || seed.isEmpty()) null else seed
+            when {
+                seed == null || seed.isEmpty() -> null
+                // The record reads "no passphrase" but its own identity is another wallet's.
+                stored === StoredPassphrase.None && identityContradicts(seed) -> {
+                    seed.fill(0)
+                    android.util.Log.w("WalletManager", "wallet record contradicts its own identity; recovery key not derived")
+                    null
+                }
+                else -> seed
+            }
         } catch (e: Exception) {
             null
         } finally {

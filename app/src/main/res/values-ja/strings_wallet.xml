@@ -678,4 +678,9 @@
     <string name="send_not_relayed_title">送信済み（まだ中継されていません）</string>
     <string name="send_not_relayed_body">ウォレットはこの取引をブロードキャストしましたが、まだどのピアにも受け取られていないため、ネットワークに届いたかどうかはまだわかりません。アクティビティには保留中として表示されます。もう一度送信する前に、アクティビティを確認してください。</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">パスフレーズを読み取れませんでした</string>
+    <string name="seedview_pass_unreadable_body">このウォレットのパスフレーズを今は読み取れませんでした。リカバリーワードだけではこのウォレットを復元できない可能性があるため、パスフレーズを一緒に表示できるまで表示されません。もう一度お試しください。</string>
+    <string name="seedview_pass_retry">再試行</string>
+    <!-- /pkg E2-keys -->
 </resources>

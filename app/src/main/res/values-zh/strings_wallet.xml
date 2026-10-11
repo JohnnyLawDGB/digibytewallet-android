@@ -678,4 +678,9 @@
     <string name="send_not_relayed_title">已发送，尚未中继</string>
     <string name="send_not_relayed_body">您的钱包已广播这笔交易，但尚无节点接收，因此还不能确定它已到达网络。它在您的活动记录中显示为待处理。再次发送前，请先查看您的活动记录。</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">无法读取密码短语</string>
+    <string name="seedview_pass_unreadable_body">暂时无法读取此钱包的密码短语。仅凭您的助记词可能无法恢复此钱包，因此在密码短语能够与它们一起显示之前，不会显示这些助记词。请重试。</string>
+    <string name="seedview_pass_retry">重试</string>
+    <!-- /pkg E2-keys -->
 </resources>

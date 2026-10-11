@@ -668,4 +668,9 @@
     <string name="send_not_relayed_title">Envoyée, pas encore relayée</string>
     <string name="send_not_relayed_body">Votre portefeuille a diffusé cette transaction, mais aucun nœud ne l\'a encore prise en charge : on ne sait donc pas encore si elle a atteint le réseau. Elle apparaît comme en attente dans votre activité. Vérifiez votre activité avant de l\'envoyer à nouveau.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Impossible de lire la phrase secrète</string>
+    <string name="seedview_pass_unreadable_body">La phrase secrète de ce portefeuille n\'a pas pu être lue pour le moment. Vos mots de récupération seuls risquent de ne pas restaurer ce portefeuille : ils ne s\'affichent donc que lorsque la phrase secrète peut s\'afficher avec eux. Réessayez.</string>
+    <string name="seedview_pass_retry">Réessayer</string>
+    <!-- /pkg E2-keys -->
 </resources>

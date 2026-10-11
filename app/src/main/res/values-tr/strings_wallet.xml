@@ -683,4 +683,9 @@
     <string name="send_not_relayed_title">Gönderildi, henüz aktarılmadı</string>
     <string name="send_not_relayed_body">Cüzdanınız bu işlemi yayınladı, ancak henüz hiçbir eş onu almadı; bu yüzden ağa ulaşıp ulaşmadığı henüz bilinmiyor. Etkinliğinizde beklemede olarak görünür. Tekrar göndermeden önce etkinliğinizi kontrol edin.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Parola okunamadı</string>
+    <string name="seedview_pass_unreadable_body">Bu cüzdanın parolası şu anda okunamadı. Kurtarma kelimeleriniz tek başına bu cüzdanı geri yüklemeyebilir; bu nedenle parola onlarla birlikte gösterilebilene kadar gösterilmezler. Tekrar deneyin.</string>
+    <string name="seedview_pass_retry">Yeniden dene</string>
+    <!-- /pkg E2-keys -->
 </resources>

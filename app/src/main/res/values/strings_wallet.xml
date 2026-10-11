@@ -820,4 +820,9 @@
     <string name="send_not_relayed_title">Sent, not yet relayed</string>
     <string name="send_not_relayed_body">Your wallet broadcast this transaction, but no peer has taken it yet, so it is not yet known to have reached the network. It shows as pending in your activity. Check your activity before you send it again.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Passphrase could not be read</string>
+    <string name="seedview_pass_unreadable_body">The passphrase of this wallet could not be read just now. Your recovery words alone may not restore this wallet, so they are not shown until the passphrase can be shown with them. Try again.</string>
+    <string name="seedview_pass_retry">Try again</string>
+    <!-- /pkg E2-keys -->
 </resources>

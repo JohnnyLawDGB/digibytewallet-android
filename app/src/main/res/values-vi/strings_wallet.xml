@@ -678,4 +678,9 @@
     <string name="send_not_relayed_title">Đã gửi, chưa được chuyển tiếp</string>
     <string name="send_not_relayed_body">Ví của bạn đã phát giao dịch này, nhưng chưa có nút nào nhận nó, nên chưa biết nó đã đến được mạng hay chưa. Giao dịch hiển thị là đang chờ trong hoạt động của bạn. Hãy kiểm tra hoạt động trước khi gửi lại.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Không thể đọc cụm mật khẩu</string>
+    <string name="seedview_pass_unreadable_body">Hiện không thể đọc cụm mật khẩu của ví này. Chỉ riêng các từ khôi phục có thể không khôi phục được ví này, vì vậy chúng sẽ không được hiển thị cho đến khi cụm mật khẩu có thể được hiển thị cùng với chúng. Hãy thử lại.</string>
+    <string name="seedview_pass_retry">Thử lại</string>
+    <!-- /pkg E2-keys -->
 </resources>

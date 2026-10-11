@@ -683,4 +683,9 @@
     <string name="send_not_relayed_title">Naipadala, hindi pa naipapasa</string>
     <string name="send_not_relayed_body">Na-broadcast ng iyong wallet ang transaksyong ito, pero wala pang peer na tumanggap nito, kaya hindi pa alam kung nakarating na ito sa network. Lumalabas itong pending sa iyong activity. Tingnan ang iyong activity bago mo ito ipadala ulit.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Hindi mabasa ang passphrase</string>
+    <string name="seedview_pass_unreadable_body">Hindi mabasa ngayon ang passphrase ng wallet na ito. Maaaring hindi maibalik ng iyong mga recovery word lamang ang wallet na ito, kaya hindi ipapakita ang mga ito hangga\'t hindi maipapakita ang passphrase kasama nila. Subukan ulit.</string>
+    <string name="seedview_pass_retry">Subukan ulit</string>
+    <!-- /pkg E2-keys -->
 </resources>

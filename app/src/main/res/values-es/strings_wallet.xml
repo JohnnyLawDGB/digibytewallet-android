@@ -690,4 +690,9 @@
     <string name="send_not_relayed_title">Enviada, aún sin retransmitir</string>
     <string name="send_not_relayed_body">Tu billetera difundió esta transacción, pero ningún nodo la ha recibido todavía, así que aún no se sabe si llegó a la red. Aparece como pendiente en tu actividad. Revisa tu actividad antes de volver a enviarla.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">No se pudo leer la frase de contraseña</string>
+    <string name="seedview_pass_unreadable_body">La frase de contraseña de esta billetera no se pudo leer en este momento. Es posible que tus palabras de recuperación por sí solas no restauren esta billetera, así que no se muestran hasta que la frase de contraseña pueda mostrarse con ellas. Inténtalo de nuevo.</string>
+    <string name="seedview_pass_retry">Reintentar</string>
+    <!-- /pkg E2-keys -->
 </resources>

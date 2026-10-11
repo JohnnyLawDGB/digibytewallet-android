@@ -678,4 +678,9 @@
     <string name="send_not_relayed_title">Terkirim, belum diteruskan</string>
     <string name="send_not_relayed_body">Dompet Anda telah menyiarkan transaksi ini, tetapi belum ada peer yang menerimanya, jadi belum diketahui apakah transaksi ini sudah sampai ke jaringan. Transaksi ini tampil sebagai tertunda di aktivitas Anda. Periksa aktivitas Anda sebelum mengirimnya lagi.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Frasa sandi tidak dapat dibaca</string>
+    <string name="seedview_pass_unreadable_body">Frasa sandi dompet ini tidak dapat dibaca saat ini. Kata-kata pemulihan Anda saja mungkin tidak dapat memulihkan dompet ini, jadi kata-kata itu tidak ditampilkan sampai frasa sandi dapat ditampilkan bersamanya. Coba lagi.</string>
+    <string name="seedview_pass_retry">Coba lagi</string>
+    <!-- /pkg E2-keys -->
 </resources>

@@ -693,4 +693,9 @@
     <string name="send_not_relayed_title">Отправлено, ещё не ретранслировано</string>
     <string name="send_not_relayed_body">Ваш кошелёк разослал эту транзакцию, но ни один узел её ещё не принял, поэтому пока неизвестно, дошла ли она до сети. В вашей активности она отображается как ожидающая. Проверьте активность, прежде чем отправлять её снова.</string>
     <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Не удалось прочитать парольную фразу</string>
+    <string name="seedview_pass_unreadable_body">Парольную фразу этого кошелька сейчас не удалось прочитать. Одних слов восстановления может быть недостаточно, чтобы восстановить этот кошелёк, поэтому они не показываются, пока парольную фразу нельзя показать вместе с ними. Попробуйте ещё раз.</string>
+    <string name="seedview_pass_retry">Повторить</string>
+    <!-- /pkg E2-keys -->
 </resources>
