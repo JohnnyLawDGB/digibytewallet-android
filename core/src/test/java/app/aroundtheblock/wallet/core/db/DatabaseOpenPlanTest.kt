@@ -337,9 +337,10 @@ class DatabaseOpenPlanTest {
     /**
      * The crash-loop breaker sets the database aside on every start while starts keep dying; those
      * asides are bounded. An unopenable database is set aside once and replaced by one that opens,
-     * so it cannot recur and is not bounded. Nothing already aside is ever touched.
+     * so it cannot recur and is not bounded. Recovery never touches an aside (only a full wallet
+     * wipe removes them: WipeRemovesSetAsideDatabasesTest).
      */
-    @Test fun `recovery asides are bounded, and no aside is ever deleted`() {
+    @Test fun `recovery asides are bounded, and recovery never removes an aside`() {
         val f = Fixture()
         f.database(ByteArray(32) { 6 })
         repeat(DatabaseFiles.MAX_RECOVERY_ASIDES) { i -> File(f.dir, "${f.name}.aside-recovery-$i").writeText("old-$i") }

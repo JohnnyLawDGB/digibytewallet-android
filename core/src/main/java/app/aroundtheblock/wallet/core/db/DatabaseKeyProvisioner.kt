@@ -103,8 +103,9 @@ class DatabaseFiles(
      * Moves the database to `<name>.aside-<reason>-<time>`, its companions alongside under the same
      * stem — companions first, so a new database is never opened beside an earlier one's
      * write-ahead log. A move that fails puts back what it had moved. Nothing already aside is
-     * touched, and a set aside is never removed: the crash-loop breaker's asides are bounded
-     * ([MAX_RECOVERY_ASIDES]) instead, because only those recur.
+     * touched, and recovery never removes an aside: the crash-loop breaker's asides are bounded
+     * ([MAX_RECOVERY_ASIDES]) instead, because only those recur. A full wallet wipe is the one
+     * place that removes asides ([everyFileOf]).
      */
     @Synchronized
     override fun setAside(reason: AsideReason): Boolean {
@@ -144,6 +145,16 @@ class DatabaseFiles(
     companion object {
         /** The crash-loop breaker's asides kept at most; beyond that it leaves the database where it is. */
         const val MAX_RECOVERY_ASIDES = 3
+
+        /**
+         * Every file of database [name] in [dir] on disk now: the live file, its companions, and every
+         * copy set aside with theirs. What a full wallet wipe removes, and reads back as gone.
+         */
+        fun everyFileOf(dir: File, name: String): List<File> =
+            dir.listFiles()?.filter { f ->
+                f.name == name || COMPANIONS.any { f.name == name + it } || f.name.startsWith("$name$ASIDE")
+            }.orEmpty()
+
         internal const val ASIDE = ".aside-"
         internal val COMPANIONS = listOf("-wal", "-shm", "-journal")
         private const val TAG = "DatabaseFiles"

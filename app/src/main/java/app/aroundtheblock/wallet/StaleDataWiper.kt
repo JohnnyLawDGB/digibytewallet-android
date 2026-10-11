@@ -56,7 +56,8 @@ object StaleDataWiper {
      *
      *  The crash-loop breaker calls this on every start while starts keep dying; those asides
      *  are bounded (`DatabaseFiles.MAX_RECOVERY_ASIDES`), and past the bound the database is
-     *  left where it is — the crash is then not the database's. Nothing aside is ever removed. */
+     *  left where it is — the crash is then not the database's. Nothing aside is removed here:
+     *  a full wallet wipe (WalletDataEraser.eraseDatabase) is the one place that removes asides. */
     fun wipeDatabase(context: Context) {
         val dbFileName = "wallet${networkSuffix(context)}.db"
         val path = context.getDatabasePath(dbFileName)
