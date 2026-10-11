@@ -81,6 +81,28 @@ data class SyncStateResponse(
 )
 
 /**
+ * The most an asset indexer's answer may be, per route. The same for every indexer, since they
+ * answer the same shapes. An answer over its cap is no answer, as from an indexer that cannot be
+ * reached, and is never held whole.
+ */
+internal object AssetAnswerCaps {
+    /** One asset's data, with any metadata the indexer inlines. */
+    const val ASSET_DATA = 1L * 1024 * 1024
+
+    /** One raw transaction, as hex. */
+    const val RAW_TRANSACTION = 4L * 1024 * 1024
+
+    /** An address's asset history: a list of txids. */
+    const val ADDRESS_HISTORY = 4L * 1024 * 1024
+
+    /** The indexer's sync state. */
+    const val SYNC_STATE = 64L * 1024
+
+    /** The assets on one unspent output (or the indexer's not-found answer for it). */
+    const val OUTPUT_STACK = 256L * 1024
+}
+
+/**
  * The URL to name in a failure log. The address-history route embeds the wallet's own address
  * in the path, and every non-2xx / thrown request used to log the raw URL — so a flaky endpoint
  * wrote the user's address to logcat on each retry. Only the route survives.

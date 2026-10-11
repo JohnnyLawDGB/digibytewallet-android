@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.ipfs
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import app.aroundtheblock.wallet.core.tor.TorNotReadyException
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -14,7 +15,7 @@ import okhttp3.Request
  *    with one exception: a dag-pb CID answered by the DigiScope gateway, which is
  *    accepted on that server's pinned identity instead (see [TRUSTED_GATEWAY_PREFIXES]).
  *    Any other gateway cannot substitute content.
- *  - Responses larger than [MAX_RESPONSE_SIZE] are rejected to prevent OOM.
+ *  - A response larger than [MAX_RESPONSE_SIZE] is refused while it streams; it is never held whole.
  *  - Gateways are tried in order; failures (network or hash mismatch) cause a
  *    transparent fall-through to the next gateway.
  *
@@ -139,16 +140,12 @@ class IpfsClient(
                     return null
                 }
 
-                val body = response.body ?: return null
-
-                val contentLength = body.contentLength()
-                if (contentLength > MAX_RESPONSE_SIZE) {
-                    android.util.Log.w(TAG, "tryGateway: $gateway → oversized ($contentLength b) for $cid")
+                // Checked while the answer streams, not after it is held: a declared length over the
+                // limit is refused unread, and an answer with none stops one byte past the limit.
+                val bytes = BoundedBody.bytes(response.body, MAX_RESPONSE_SIZE) ?: run {
+                    android.util.Log.w(TAG, "tryGateway: $gateway → no body, or over $MAX_RESPONSE_SIZE bytes, for $cid")
                     return null
                 }
-
-                val bytes = body.bytes()
-                if (bytes.size.toLong() > MAX_RESPONSE_SIZE) return null
 
                 // CIDv0 (Qm…) carries the dag-pb / UnixFS wrapper hash,
                 // not the raw content hash. Our gateway serves the unwrapped

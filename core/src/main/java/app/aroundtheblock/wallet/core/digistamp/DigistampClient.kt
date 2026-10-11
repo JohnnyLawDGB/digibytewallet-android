@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.digistamp
 
 import app.aroundtheblock.wallet.core.asset.network.endpointOf
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -45,12 +46,19 @@ class DigistampClient(
                 android.util.Log.w("DigistampClient", "GET ${endpointOf(url)} → HTTP ${resp.code}")
                 null
             } else {
-                resp.body?.string()
+                BoundedBody.text(resp.body, MAX_BODY_BYTES).also {
+                    if (it == null) android.util.Log.w("DigistampClient", "GET ${endpointOf(url)}: no body, or over $MAX_BODY_BYTES bytes")
+                }
             }
         }
     } catch (e: Exception) {
         // Never swallow silently — a blank digistamp screen with no log line is undebuggable.
         android.util.Log.w("DigistampClient", "GET ${endpointOf(url)} failed", e)
         null
+    }
+
+    private companion object {
+        /** The most a challenge or session answer may be: 64 KiB. Each is a few hundred bytes of JSON. */
+        const val MAX_BODY_BYTES = 64L * 1024
     }
 }

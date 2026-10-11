@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.reconcile
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import app.aroundtheblock.wallet.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,6 +45,18 @@ class DgbNodeClient(
         private const val KEY_CUSTOM_ENDPOINT = "custom_rpc_endpoint"
         private const val MAX_ADDRS_PER_REQUEST = 500 // server-side cap
         private const val JSON = "application/json; charset=utf-8"
+
+        // The most each answer may be. One over is "could not read", the same as an unreachable
+        // backend, and is never held whole. The same caps apply to a user's own endpoint.
+
+        /** A reconcile batch: 500 addresses' unspent outputs, each with its parent transaction's hex. */
+        internal const val RECONCILE_BODY_BYTES = 32L * 1024 * 1024
+
+        /** Address history, of one address or of a batch of 500: (txid, height) pairs. */
+        internal const val HISTORY_BODY_BYTES = 16L * 1024 * 1024
+
+        /** One explorer answer (a transaction, a block, a DigiDollar address) or one raw transaction. */
+        internal const val EXPLORER_BODY_BYTES = 8L * 1024 * 1024
 
         /** Path segments at or above this length are treated as an identifier and dropped.
          *  DGB legacy addresses are 34 chars, bech32 ~42, txids 64; the fixed route words
@@ -154,12 +167,12 @@ class DgbNodeClient(
      * own pending txids, not the node's UTXO set, so it never misses such a tx.
      */
     suspend fun txConfirmation(txid: String): TxConfirmation? = withContext(Dispatchers.IO) {
-        val tx = httpGetJson("${endpoint()}/explorer/tx/$txid") ?: return@withContext null
+        val tx = httpGetJson("${endpoint()}/explorer/tx/$txid", EXPLORER_BODY_BYTES) ?: return@withContext null
         val blockhash = tx.optString("blockhash", "")
         val confirmations = tx.optLong("confirmations", 0L)
         if (blockhash.isEmpty() || confirmations <= 0L) return@withContext null // still unconfirmed
         val blocktime = tx.optLong("blocktime", tx.optLong("time", 0L))
-        val block = httpGetJson("${endpoint()}/explorer/block/$blockhash") ?: return@withContext null
+        val block = httpGetJson("${endpoint()}/explorer/block/$blockhash", EXPLORER_BODY_BYTES) ?: return@withContext null
         val height = block.optLong("height", 0L)
         if (height <= 0L) return@withContext null
         TxConfirmation(height, blocktime)
@@ -173,7 +186,7 @@ class DgbNodeClient(
      * Returns null on network/parse failure.
      */
     suspend fun addressHistory(address: String): List<AddressTx>? = withContext(Dispatchers.IO) {
-        val root = httpGetJson("${endpoint()}/rpc/address-history/$address") ?: return@withContext null
+        val root = httpGetJson("${endpoint()}/rpc/address-history/$address", HISTORY_BODY_BYTES) ?: return@withContext null
         parseAddressHistory(root)
     }
 
@@ -190,7 +203,7 @@ class DgbNodeClient(
             val out = ArrayList<AddressTx>()
             for (chunk in addresses.chunked(MAX_ADDRS_PER_REQUEST)) {
                 val payload = JSONObject().apply { put("addresses", JSONArray(chunk)) }
-                val root = httpPostJson("${endpoint()}/rpc/address-history", payload)
+                val root = httpPostJson("${endpoint()}/rpc/address-history", payload, HISTORY_BODY_BYTES)
                     ?: return@withContext null
                 out += parseAddressHistory(root)
             }
@@ -205,7 +218,7 @@ class DgbNodeClient(
      * Returns null on network/parse failure.
      */
     suspend fun fetchRawTx(txid: String, height: Long): RawTxEntry? = withContext(Dispatchers.IO) {
-        val root = httpGetJson("${endpoint()}/explorer/tx/$txid") ?: return@withContext null
+        val root = httpGetJson("${endpoint()}/explorer/tx/$txid", EXPLORER_BODY_BYTES) ?: return@withContext null
         parseRawTxResponse(root, height)
     }
 
@@ -219,7 +232,7 @@ class DgbNodeClient(
      * output" — a transaction we cannot fetch may well hold the dollars we are looking for.
      */
     suspend fun fetchRawTransaction(txid: String): ByteArray? = withContext(Dispatchers.IO) {
-        val root = httpGetJson("${endpoint()}/tx/raw/$txid") ?: return@withContext null
+        val root = httpGetJson("${endpoint()}/tx/raw/$txid", EXPLORER_BODY_BYTES) ?: return@withContext null
         val hex = root.optString("hex").takeIf { it.isNotEmpty() }
             ?: root.optString("rawtx").takeIf { it.isNotEmpty() }
             ?: return@withContext null
@@ -249,7 +262,7 @@ class DgbNodeClient(
      */
     suspend fun digiDollarHolding(ddAddress: String): DigiDollarHoldingResult? =
         withContext(Dispatchers.IO) {
-            val root = httpGetJson("${endpoint()}/explorer/address/$ddAddress")
+            val root = httpGetJson("${endpoint()}/explorer/address/$ddAddress", EXPLORER_BODY_BYTES)
                 ?: return@withContext null
             if (root.optString("type") != "dd_address") return@withContext null
             val r = root.optJSONObject("result") ?: return@withContext null
@@ -268,10 +281,10 @@ class DgbNodeClient(
             )
         }
 
-    /** GET a URL and parse the body as a JSON object. Null on non-2xx, empty
-     *  body, parse error, or network failure (logged). Uses the same cert-pinned
-     *  client selection as the reconcile POST. */
-    private fun httpGetJson(url: String): JSONObject? {
+    /** GET a URL and parse the body as a JSON object. Null on non-2xx, no body or
+     *  one over [cap] bytes, parse error, or network failure (logged). Uses the same
+     *  cert-pinned client selection as the reconcile POST. */
+    private fun httpGetJson(url: String, cap: Long): JSONObject? {
         val req = Request.Builder().url(url).get().build()
         return try {
             client(url).newCall(req).execute().use { resp ->
@@ -279,7 +292,10 @@ class DgbNodeClient(
                     android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} returned HTTP ${resp.code}")
                     return null
                 }
-                val body = resp.body?.string() ?: return null
+                val body = BoundedBody.text(resp.body, cap) ?: run {
+                    android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)}: no body, or over $cap bytes")
+                    return null
+                }
                 JSONObject(body)
             }
         } catch (t: Throwable) {
@@ -289,9 +305,9 @@ class DgbNodeClient(
     }
 
     /** POST a JSON body and parse the response as a JSON object. Null on non-2xx,
-     *  empty body, parse error, or network failure (logged). Same cert-pinned
-     *  client selection as the GET/reconcile paths. */
-    private fun httpPostJson(url: String, payload: JSONObject): JSONObject? {
+     *  no body or one over [cap] bytes, parse error, or network failure (logged). Same
+     *  cert-pinned client selection as the GET/reconcile paths. */
+    private fun httpPostJson(url: String, payload: JSONObject, cap: Long): JSONObject? {
         val req = Request.Builder()
             .url(url)
             .post(payload.toString().toRequestBody(JSON.toMediaType()))
@@ -302,7 +318,10 @@ class DgbNodeClient(
                     android.util.Log.w("DgbNodeClient", "POST ${redactUrl(url)} returned HTTP ${resp.code}")
                     return null
                 }
-                val body = resp.body?.string() ?: return null
+                val body = BoundedBody.text(resp.body, cap) ?: run {
+                    android.util.Log.w("DgbNodeClient", "POST ${redactUrl(url)}: no body, or over $cap bytes")
+                    return null
+                }
                 JSONObject(body)
             }
         } catch (t: Throwable) {
@@ -330,9 +349,9 @@ class DgbNodeClient(
                     )
                     return null
                 }
-                val body = resp.body?.string()
+                val body = BoundedBody.text(resp.body, RECONCILE_BODY_BYTES)
                 if (body == null) {
-                    android.util.Log.w("DgbNodeClient", "reconcile ${redactUrl(url)} empty body")
+                    android.util.Log.w("DgbNodeClient", "reconcile ${redactUrl(url)}: no body, or over $RECONCILE_BODY_BYTES bytes")
                     return null
                 }
                 parseReconcileResponse(body)

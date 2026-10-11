@@ -1,9 +1,8 @@
 package app.aroundtheblock.wallet.core.asset.network
 
-import okhttp3.MediaType.Companion.toMediaType
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -59,10 +58,10 @@ class DigiScopeAssetClient(
         val req = Request.Builder().url("$baseUrl/digiassets/txout/${txid.lowercase()}/$vout").get().build()
         stackClient.newCall(req).execute().use { resp ->
             when {
-                resp.code == 404 -> DigiScopeAssetParsing.notFound(resp.body?.string())
+                resp.code == 404 -> DigiScopeAssetParsing.notFound(BoundedBody.text(resp.body, AssetAnswerCaps.OUTPUT_STACK))
                 !resp.isSuccessful -> app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
                 else -> {
-                    val body = resp.body?.string()
+                    val body = BoundedBody.text(resp.body, AssetAnswerCaps.OUTPUT_STACK)
                     if (body.isNullOrEmpty()) app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
                     else DigiScopeAssetParsing.txOutStack(JSONObject(body), txid, vout)
                 }
@@ -74,7 +73,7 @@ class DigiScopeAssetClient(
     }
 
     override suspend fun getAssetData(assetId: String): AssetDataResponse? {
-        val json = getJson("$baseUrl/digiassets/asset/$assetId") as? JSONObject ?: return null
+        val json = getJson("$baseUrl/digiassets/asset/$assetId", AssetAnswerCaps.ASSET_DATA) as? JSONObject ?: return null
         val parsed = DigiScopeAssetParsing.assetData(json, fallbackAssetId = assetId)
             ?: return null
         // The ipfs blob, when the backend inlines one, is richer than the parser's remit.
@@ -92,7 +91,7 @@ class DigiScopeAssetClient(
             append("$baseUrl/digiassets/history/$address")
             if (limit != null) append("?limit=$limit")
         }
-        val json = getJson(url) ?: return null
+        val json = getJson(url, AssetAnswerCaps.ADDRESS_HISTORY) ?: return null
         val arr = json as? JSONArray ?: return null
         return List(arr.length()) { arr.optString(it) }.filter { it.isNotEmpty() }
     }
@@ -103,7 +102,7 @@ class DigiScopeAssetClient(
      * a null here as "the node is behind" — it means the route is absent.
      */
     override suspend fun getSyncState(): SyncStateResponse? {
-        val json = getJson("$baseUrl/syncstate") as? JSONObject ?: return null
+        val json = getJson("$baseUrl/syncstate", AssetAnswerCaps.SYNC_STATE) as? JSONObject ?: return null
         if (json.has("error")) return null
         return SyncStateResponse(
             count = json.optLong("count", 0L),
@@ -116,7 +115,7 @@ class DigiScopeAssetClient(
         // on the underlying digibyted RPC. Returns either hex in a JSON field
         // or a 404 if the txid isn't known. We accept both wrappers defensively
         // because the server's been reshuffled a couple of times.
-        val json = getJson("$baseUrl/tx/raw/$txHashHex") as? JSONObject ?: return null
+        val json = getJson("$baseUrl/tx/raw/$txHashHex", AssetAnswerCaps.RAW_TRANSACTION) as? JSONObject ?: return null
         if (json.has("error")) return null
         val hex = json.optString("hex").takeIf { it.isNotEmpty() }
             ?: json.optString("rawtx").takeIf { it.isNotEmpty() }
@@ -129,37 +128,8 @@ class DigiScopeAssetClient(
         return ByteArray(length / 2) { substring(it * 2, it * 2 + 2).toInt(16).toByte() }
     }
 
-    private fun postJson(url: String, bodyJson: String): Any? = try {
-        val req = Request.Builder()
-            .url(url)
-            .post(bodyJson.toRequestBody(JSON_MT))
-            .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                android.util.Log.w(
-                    "DigiScopeAssetClient",
-                    "POST ${endpointOf(url)} returned HTTP ${resp.code} ${resp.message}"
-                )
-                return null
-            }
-            val body = resp.body?.string()
-            if (body == null) {
-                android.util.Log.w("DigiScopeAssetClient", "POST ${endpointOf(url)} empty body")
-                return null
-            }
-            if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
-        }
-    } catch (t: Throwable) {
-        android.util.Log.w(
-            "DigiScopeAssetClient",
-            "POST ${endpointOf(url)} threw ${t::class.java.simpleName}: ${t.message}",
-            t
-        )
-        null
-    }
-
-
-    private fun getJson(url: String): Any? = try {
+    /** GET [url] as JSON (an object, or an array), reading at most [cap] bytes of the answer. */
+    private fun getJson(url: String, cap: Long): Any? = try {
         val req = Request.Builder().url(url).get().build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
@@ -169,9 +139,9 @@ class DigiScopeAssetClient(
                 )
                 return null
             }
-            val body = resp.body?.string()
+            val body = BoundedBody.text(resp.body, cap)
             if (body == null) {
-                android.util.Log.w("DigiScopeAssetClient", "GET ${endpointOf(url)} empty body")
+                android.util.Log.w("DigiScopeAssetClient", "GET ${endpointOf(url)}: no body, or over $cap bytes")
                 return null
             }
             if (body.trimStart().startsWith("[")) JSONArray(body) else JSONObject(body)
@@ -197,6 +167,5 @@ class DigiScopeAssetClient(
 
     companion object {
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
-        private val JSON_MT = "application/json; charset=utf-8".toMediaType()
     }
 }
