@@ -37,7 +37,7 @@ class StrandedSweepRemovesRejectedGateTest {
         assertEquals("the sweep must ask the outcome what to do, exactly once", 1, asks.size)
         assertEquals(
             "the sweep removes on the publish verdict alone: one peer's rejection can unlock the coins",
-            listOf("plainDgb = isPlainDgbSend(txid)", "refusedByPeers = refusalHold.observe(txid, isRefusedByPeers(txid))"),
+            listOf("plainDgb = isPlainDgbSend(txid)", "refusedByPeers = refusalHold.observe(txid) { isRefusedByPeers(txid) }"),
             asks.single().arguments,
         )
     }

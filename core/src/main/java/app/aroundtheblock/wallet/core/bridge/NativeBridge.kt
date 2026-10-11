@@ -101,6 +101,14 @@ object NativeBridge {
      *  least two network groups rejected it as invalid, non-standard or dust, and no peer has relayed
      *  or announced it. One peer's rejection is never enough. */
     external fun isRefusedByNetwork(txid: String): Boolean
+
+    /**
+     * The current peer manager's generation: how many the bridge has built in this process, as of this
+     * one (every build bumps it), or 0 while none exists. A rebuilt manager starts with no relay
+     * evidence, so the stranded-send sweep's refusal hold ties each sighting to a generation and never
+     * completes a hold on one that it started on another (core/sync/RefusalHold).
+     */
+    external fun peerManagerGeneration(): Long
     // --- /pkg 2.1 ---
 
     /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.
