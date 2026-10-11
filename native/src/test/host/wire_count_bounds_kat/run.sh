@@ -452,23 +452,45 @@ run_inv_hash() {
     if ! build "$BUILD_DIR/ihred${bits}" "$bits" -DWIRE_INV_HASH_STACK_UNFIXED; then
         echo "GATE FAILURE: ${bits}-bit inv-hash red arm did not compile."; FAIL=1; return
     fi
-    out="$("$BUILD_DIR/ihred${bits}" inv_hash_stack 2>&1)"; rc=$?
-    if echo "$out" | grep -Eq "$SAN_RE"; then
-        echo "  [$bits red inv_hash_stack] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
+    # Both arms run under bounded(), because a stack overflow on a worker thread with a
+    # 256 KB stack intermittently wedges the sanitizer's own report path: the report is
+    # printed and the process then deadlocks instead of aborting (both threads in
+    # futex_wait, no CPU burned). Seen in the 64-bit arm on one sweep and the 32-bit arm
+    # on the next from identical sources, while three fresh runs of the very same wedged
+    # binary each faulted within 120s -- so it is the report path, not the code under
+    # test, and an unbounded wait here stalls the whole aggregate sweep on a flake.
+    # The REPORT is the evidence this arm exists to produce; whether the process then
+    # managed to exit is not. A wedge with NO report is still a gate failure, and says so.
+    local LIMIT_S=300   # overrides the witness arm's 10s; bounded() reads it dynamically
+    local of="$BUILD_DIR/ihred${bits}.inv_hash_stack.out"
+    bounded "$of" "$BUILD_DIR/ihred${bits}" inv_hash_stack; rc=$?
+    if grep -Eq "$SAN_RE" "$of"; then
+        if [ $rc -eq 124 ]; then
+            echo "  [$bits red inv_hash_stack] tripped, then wedged in the sanitizer's exit path (killed at ${LIMIT_S}s): $(grep -Eom1 "$SAN_RE" "$of")"
+        else
+            echo "  [$bits red inv_hash_stack] tripped (rc=$rc): $(grep -Eom1 "$SAN_RE" "$of")"
+        fi
+    elif [ $rc -eq 124 ]; then
+        echo "  [$bits red inv_hash_stack] GATE FAILURE: no sanitizer report and did not return within ${LIMIT_S}s"
+        head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
     else
         echo "  [$bits red inv_hash_stack] GATE FAILURE: no sanitizer report (rc=$rc)"
-        echo "$out" | sed 's/^/      /' | head -6; FAIL=1
+        head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
     fi
     # green arm ($BUILD_DIR/green${bits}) was built by run_bits for this word size.
-    out="$("$BUILD_DIR/green${bits}" inv_hash_stack 2>&1)"; rc=$?
-    if echo "$out" | grep -Eq "$SAN_RE"; then
+    of="$BUILD_DIR/green${bits}.inv_hash_stack.out"
+    bounded "$of" "$BUILD_DIR/green${bits}" inv_hash_stack; rc=$?
+    if grep -Eq "$SAN_RE" "$of"; then
         echo "  [$bits green inv_hash_stack] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
-        echo "$out" | sed 's/^/      /' | head -6; FAIL=1
-    elif echo "$out" | grep -q "RESULT inv_hash_stack accepted"; then
+        head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
+    elif grep -q "RESULT inv_hash_stack accepted" "$of"; then
         echo "  [$bits green inv_hash_stack] handled on the small stack (rc=$rc)"
+    elif [ $rc -eq 124 ]; then
+        echo "  [$bits green inv_hash_stack] GATE FAILURE: did not return within ${LIMIT_S}s"
+        head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
     else
         echo "  [$bits green inv_hash_stack] GATE FAILURE: not handled cleanly (rc=$rc)"
-        echo "$out" | sed 's/^/      /' | head -6; FAIL=1
+        head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
     fi
 }
 
