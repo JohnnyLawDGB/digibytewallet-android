@@ -321,6 +321,15 @@ class RecoverFundsViewModel @Inject constructor(
         )
     }
 
+    /**
+     * The two native calls an entered phrase goes through: whether it is a valid phrase, and the
+     * seed it gives with its passphrase. Held here for the reason [destinationResolver] is: unit
+     * tests run without the native library and stand in for them.
+     */
+    internal var phraseIsValid: (String) -> Boolean = { NativeBridge.isValidMnemonic(it) }
+    internal var seedFromPhrase: (ByteArray, ByteArray?) -> ByteArray? =
+        { phrase, passphrase -> NativeBridge.mnemonicToSeed(phrase, passphrase) }
+
     fun sweep(destination: SweepDestination) = sweepOwn(destination, afterCredential = false)
 
     private fun sweepOwn(destination: SweepDestination, afterCredential: Boolean) {
@@ -581,7 +590,7 @@ class RecoverFundsViewModel @Inject constructor(
     /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
     fun classifyForeign(mnemonic: String, passphrase: String? = null) {
         val phrase = mnemonic.trim().split(Regex("\\s+")).joinToString(" ") { it.lowercase() }
-        if (!NativeBridge.isValidMnemonic(phrase)) {
+        if (!phraseIsValid(phrase)) {
             _state.value = UiState.Error("That doesn't look like a valid recovery phrase.")
             return
         }
@@ -590,7 +599,7 @@ class RecoverFundsViewModel @Inject constructor(
         pendingForeignPassphrase = app.aroundtheblock.wallet.core.Bip39Passphrase.prepare(passphrase)
         _state.value = UiState.Classifying
         activeJob = viewModelScope.launch {
-            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
+            val seed = seedFromPhrase(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
             }
             try {
@@ -649,16 +658,13 @@ class RecoverFundsViewModel @Inject constructor(
         if (!app.aroundtheblock.wallet.core.recovery.RecoverableValue.exists(findings.size, shown?.digiDollar)) {
             _state.value = UiState.Error("Nothing to recover"); return
         }
-        val dest = SweepDestination.Native.resolve(
-            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
-            validator = { NativeBridge.isValidAddress(it) },
-        )
+        val dest = destinationResolver(SweepDestination.Native)
         if (dest !is DestResolution.Ok) {
             _state.value = UiState.Error("Could not get a destination address"); return
         }
         _state.value = UiState.Sweeping
         activeJob = viewModelScope.launch {
-            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
+            val seed = seedFromPhrase(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
                 _state.value = UiState.Error("Could not derive keys from that phrase.")
                 pendingForeignMnemonic = null
         pendingForeignPassphrase?.fill(0)
