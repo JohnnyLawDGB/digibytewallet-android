@@ -161,6 +161,9 @@ ln -sf ../../scripts/check-worktree-target.sh .git/hooks/pre-commit   # once per
   (surviving only in two local worktrees — a `git worktree prune` would have destroyed it),
   and four shipped releases whose pins existed only on deletable feature branches. **Push
   core to `develop`, not just a feature branch.** Wired into CI.
+  A pin *behind* `develop`'s tip passes (containment, 2026-10-10): the script fetches history
+  first, so a shallow CI checkout agrees with a full clone. iOS runs the same script
+  (`digibytewallet-ios/Scripts/check-core-pin.sh`); change both together.
 - **`check-worktree-target.sh`** — refuses a commit in the MAIN checkout while worktrees
   exist. The shell's cwd can reset between commands, and a `git add -A` intended for a
   worktree then lands on whatever branch main is on, over an unrelated base, sweeping up
