@@ -58,7 +58,7 @@ RECOVER="$(fn_body "$BRIDGE_DIR/jni_wallet.c" '^NativeBridge_recoverWalletFromBy
 AFTER_NEW="${RECOVER#*BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy)}"
 [ "$AFTER_NEW" != "$RECOVER" ] ||
     gate_fail "recoverWalletFromBytes no longer builds the wallet with BRWalletNewDual over g_savedTransactions."
-printf '%s' "$AFTER_NEW" | grep -qF "BRWalletSetTaprootKey(g_wallet, mpkBIP86)" ||
+<<<"$AFTER_NEW" grep -qF "BRWalletSetTaprootKey(g_wallet, mpkBIP86)" ||
     gate_fail "recoverWalletFromBytes no longer installs the taproot key after the saved records are loaded."
 
 # 2. The saved records are written by BRWalletSerializeTransactions and read back by the guarded
@@ -66,7 +66,7 @@ printf '%s' "$AFTER_NEW" | grep -qF "BRWalletSetTaprootKey(g_wallet, mpkBIP86)" 
 PERSIST="$(flat "$BRIDGE_DIR/jni_transaction_persist.c")"
 for needle in "BRWalletSerializeTransactions(g_wallet, buf, need)" \
               "deserialize_saved_transactions_guarded((const uint8_t *)bytes, (size_t)len, &g_savedTransactions)"; do
-    printf '%s' "$PERSIST" | grep -qF "$needle" ||
+    <<<"$PERSIST" grep -qF "$needle" ||
         gate_fail "jni_transaction_persist.c no longer contains: $needle"
 done
 
@@ -77,7 +77,7 @@ CONFIRM="$(fn_body "$BRIDGE_DIR/jni_transaction.c" '^NativeBridge_confirmTransac
 for needle in "BRTransaction *existing = BRWalletTransactionForHash(g_wallet, h);" \
               "if (existing && existing->blockHeight == TX_UNCONFIRMED) {" \
               "BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1, (uint32_t)blockHeight, (uint32_t)blockTimestamp);"; do
-    printf '%s' "$CONFIRM" | grep -qF "$needle" ||
+    <<<"$CONFIRM" grep -qF "$needle" ||
         gate_fail "confirmTransaction no longer contains: $needle"
 done
 
