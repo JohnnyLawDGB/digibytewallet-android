@@ -97,6 +97,23 @@ class WalletManager(
     // cannot see those, so the app module supplies it (AppModule). Defaulted so pure-JVM
     // constructions keep compiling; the default has nothing to end and says so truthfully.
     private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
+    // Native wallet creation and the native calls around storing a wallet's record, injectable so
+    // a pure-JVM test can drive createWallet/recoverWallet and the seed record they write
+    // (NativeBridge's init loads the native library, which a JVM cannot). Each default touches
+    // NativeBridge only when invoked.
+    private val createNative: (mnemonic: ByteArray, passphrase: ByteArray?) -> Boolean =
+        { m, p -> NativeBridge.createWalletFromBytes(m, p) },
+    private val recoverNative: (mnemonic: ByteArray, creationTime: Long, passphrase: ByteArray?) -> Boolean =
+        { m, t, p -> NativeBridge.recoverWalletFromBytes(m, t, p) },
+    private val seedNative: (mnemonic: ByteArray, passphrase: ByteArray?) -> ByteArray? =
+        { m, p -> NativeBridge.mnemonicToSeed(m, p) },
+    private val rescanNative: () -> Unit = { NativeBridge.rescan() },
+    private val birthHeightNative: () -> Long = { NativeBridge.getWalletBirthCheckpointHeight() },
+    // The database password's record must not depend on the seed's legacy key when that key is
+    // deleted. Injectable for the same reason as the above; the default reaches the Keystore only
+    // when invoked.
+    private val releaseDatabaseKey: () -> Boolean =
+        { app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.forContext(context).releaseLegacyWrap() },
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -168,7 +185,7 @@ class WalletManager(
         val prepared = passphrase
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            val success = NativeBridge.createWalletFromBytes(mnemonicBytes, prepared)
+            val success = createNative(mnemonicBytes, prepared)
             if (success) {
                 persistSeed(mnemonicBytes)
                 persistPassphrase(prepared)
@@ -179,7 +196,7 @@ class WalletManager(
                 deriveSeedForIdentity(mnemonicBytes)?.let { s2 ->
                     try { saveSeedFingerprintV2(s2) } finally { s2.fill(0) }
                 }
-                NativeBridge.rescan()
+                rescanNative()
             }
             return success
         } finally {
@@ -201,7 +218,7 @@ class WalletManager(
         val prepared = passphrase
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            val success = NativeBridge.recoverWalletFromBytes(mnemonicBytes, creationTimestamp, prepared)
+            val success = recoverNative(mnemonicBytes, creationTimestamp, prepared)
             if (success) {
                 persistSeed(mnemonicBytes)
                 persistPassphrase(prepared)
@@ -232,13 +249,13 @@ class WalletManager(
                 // across restarts (proven on-device: genesis→21.5M cut a 19h scan to ~12m).
                 // Mirrors rebuildFromChainRescan(). commit() (sync) so it lands before the
                 // rescan()/first sync reads it.
-                val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
+                val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
                 val toPersist = cfBirthHeightToPersist(birth)
                 context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
                     if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
                 }.commit()
                 android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
-                NativeBridge.rescan()
+                rescanNative()
             }
             return success
         } finally {
@@ -1084,7 +1101,7 @@ class WalletManager(
             // recovery/sweep seed must match the seed it actually derives from.
             val pass = loadPassphrase()
             val seed = try {
-                NativeBridge.mnemonicToSeed(mnemonicBytes, pass)
+                seedNative(mnemonicBytes, pass)
             } finally {
                 pass?.fill(0)
             }
@@ -1151,7 +1168,7 @@ class WalletManager(
     private fun deriveSeedForIdentity(mnemonicBytes: ByteArray): ByteArray? {
         val pass = loadPassphrase()
         return try {
-            NativeBridge.mnemonicToSeed(mnemonicBytes, pass)?.takeIf { it.isNotEmpty() }
+            seedNative(mnemonicBytes, pass)?.takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
             null
         } finally {

@@ -58,9 +58,14 @@ abstract class WalletDatabase : RoomDatabase() {
          *   `_testnet`-suffixed name when the testnet network is selected,
          *   so a testnet session never opens the mainnet DB file.
          */
-        fun create(context: Context, passphrase: ByteArray, dbFileName: String = "wallet.db"): WalletDatabase {
+        fun create(
+            context: Context,
+            passphrase: ByteArray,
+            dbFileName: String = "wallet.db",
+            onFirstOpenFailure: ((android.database.sqlite.SQLiteException) -> Boolean)? = null,
+        ): WalletDatabase {
             System.loadLibrary("sqlcipher")
-            val factory = SupportOpenHelperFactory(passphrase)
+            val factory = SupportOpenHelperFactory(passphrase) // STUB: onFirstOpenFailure not wired yet (today)
             return Room.databaseBuilder(
                 context.applicationContext,
                 WalletDatabase::class.java,
@@ -70,6 +75,44 @@ abstract class WalletDatabase : RoomDatabase() {
                 .addMigrations(*WALLET_DB_MIGRATIONS)
                 .fallbackToDestructiveMigration()
                 .build()
+        }
+
+        /** A database for this run only, in memory: nothing on disk is opened, changed or created. */
+        fun createTemporary(context: Context): WalletDatabase =
+            Room.inMemoryDatabaseBuilder(context.applicationContext, WalletDatabase::class.java).build()
+
+        /** Opening and re-keying [file] directly with SQLCipher, outside Room. */
+        fun cipherFiles(context: Context, file: java.io.File): CipherFiles = SqlCipherFiles(file)
+    }
+}
+
+/**
+ * [CipherFiles] over SQLCipher. A probe opens the file with one password and reads its schema, then
+ * closes it; nothing is written. Room is not involved, so no migration runs under a probe.
+ */
+internal class SqlCipherFiles(private val file: java.io.File) : CipherFiles {
+
+    override fun probe(password: ByteArray): OpenAnswer = openFailureAnswer(useOpen(password) { db ->
+        db.rawQuery("SELECT count(*) FROM sqlite_master", null).use { it.moveToFirst() }
+    })
+
+    /** STUB: no re-key exists today. */
+    override fun rekey(from: ByteArray, to: ByteArray): RekeyAnswer = RekeyAnswer.UNCHANGED
+
+    /** Opens the file with [password], runs [use], closes it. Null when all of it succeeded, else the database's failure. */
+    private fun useOpen(password: ByteArray, use: (net.zetetic.database.sqlcipher.SQLiteDatabase) -> Unit): android.database.sqlite.SQLiteException? {
+        System.loadLibrary("sqlcipher")
+        var db: net.zetetic.database.sqlcipher.SQLiteDatabase? = null
+        return try {
+            db = net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(
+                file.path, password, null, net.zetetic.database.sqlcipher.SQLiteDatabase.OPEN_READWRITE, null, null,
+            )
+            use(db)
+            null
+        } catch (e: android.database.sqlite.SQLiteException) {
+            e
+        } finally {
+            runCatching { db?.close() }
         }
     }
 }

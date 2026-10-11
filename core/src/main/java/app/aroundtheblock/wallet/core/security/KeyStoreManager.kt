@@ -228,3 +228,78 @@ class KeyStoreManager(
         }
     }
 }
+
+/**
+ * The Keystore operations a wrapped secret needs, by alias. A seam: the database password's
+ * record ([app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner]) is moved between keys, read
+ * back and verified through this interface, so the order of those steps — and what a failure at
+ * each one leaves behind — can be shown on a plain JVM against a fake. [AndroidKeyVault] in
+ * production.
+ *
+ * Every method throws when the Keystore cannot be asked. [contains] answering false is a positive
+ * statement that no key has that alias; [encrypt] and [decrypt] throw [KeyVaultKeyAbsentException]
+ * when they find no key under the alias.
+ */
+interface KeyVault {
+    fun contains(alias: String): Boolean
+
+    /** Makes an AES-256-GCM key under [alias] that needs no user authentication; nothing if one exists. */
+    fun createUnboundKey(alias: String)
+
+    fun encrypt(alias: String, data: ByteArray): EncryptedData
+
+    fun decrypt(alias: String, data: EncryptedData): ByteArray
+
+    /** Removes the key under [alias], if there is one. */
+    fun delete(alias: String)
+}
+
+/** No key is stored under [alias]. Names the alias only; an alias is not a secret. */
+class KeyVaultKeyAbsentException(alias: String) : java.security.GeneralSecurityException("no key under $alias")
+
+/** [KeyVault] over the Android Keystore. Each call asks the Keystore afresh. */
+object AndroidKeyVault : KeyVault {
+    private const val PROVIDER = "AndroidKeyStore"
+    private const val TRANSFORMATION = "AES/GCM/NoPadding"
+    private const val GCM_TAG_BITS = 128
+
+    private fun keyStore(): KeyStore = KeyStore.getInstance(PROVIDER).apply { load(null) }
+
+    private fun key(alias: String): SecretKey =
+        keyStore().getKey(alias, null) as? SecretKey ?: throw KeyVaultKeyAbsentException(alias)
+
+    override fun contains(alias: String): Boolean = keyStore().containsAlias(alias)
+
+    override fun createUnboundKey(alias: String) {
+        if (contains(alias)) return
+        // No setUserAuthenticationRequired: the database opens in the background, before any unlock.
+        val spec = KeyGenParameterSpec.Builder(
+            alias,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256)
+            .build()
+        KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, PROVIDER)
+            .apply { init(spec) }
+            .generateKey()
+    }
+
+    override fun encrypt(alias: String, data: ByteArray): EncryptedData {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, key(alias))
+        return EncryptedData(cipher.doFinal(data), cipher.iv)
+    }
+
+    override fun decrypt(alias: String, data: EncryptedData): ByteArray {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, key(alias), GCMParameterSpec(GCM_TAG_BITS, data.iv))
+        return cipher.doFinal(data.ciphertext)
+    }
+
+    override fun delete(alias: String) {
+        val store = keyStore()
+        if (store.containsAlias(alias)) store.deleteEntry(alias)
+    }
+}
