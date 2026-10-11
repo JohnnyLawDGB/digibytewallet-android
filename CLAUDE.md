@@ -5,7 +5,12 @@
 Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C native core via JNI, hardware-backed security, DigiAssets v2 (detection), Digi-ID, Community Hub.
 
 **Repo:** `JohnnyLawDGB/digibytewallet-android`
-**Branch:** `develop`  _(canonical/default integration branch; releases are tag-driven off `develop`. The old `phase1-modernization` branch is retired/stale — do not work from it.)_
+**Branch:** `develop` — the default branch, and since 2026-10-11 it builds **DigiByte Mobile (`app.aroundtheblock.wallet`)**, the product that ships. io.digibyte was retired at v4.0.87.2 and receives nothing. `phase1-modernization` is frozen at v3.9.2 — do not work from it.
+
+> **Releasing: read [`RELEASING.md`](RELEASING.md).** Releases are **not** tag-driven and never
+> built in CI: `scripts/build-release.sh` builds and signs them on the owner's machine, because the
+> release key is also Play's app-signing key. Until 2026-10-11 `develop` still built io.digibyte
+> while the shipping app lived only on release branches; `RELEASING.md` §0 says how not to repeat it.
 **Version:** v4.0.89 (versionCode 40089)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
@@ -148,6 +153,31 @@ treat them as history plus decisions, not as instructions:
 
 ## Important Patterns
 
+### One copy of each thing (2026-10-11)
+
+The package move did not break the code. It broke **where things live**, and every failure
+found on 2026-10-11 was a second copy that drifted from the first, or a thing that existed in
+only one place nobody looked:
+
+- `develop` — the branch every PR, tool and reader defaults to — still built the retired app,
+  while the shipping product and its release machinery lived only on a release branch;
+- two `CAMPAIGN.md` files, 25 lines apart; two 4.0.90 scope lists, already disagreeing;
+- `check-submodule-pin.sh` fixed on `develop` while twelve open PRs ran their own old copy;
+- a finished gate, its CI hook and the lesson below on a branch that had never been pushed;
+- one of two official report channels — GitHub Security Advisories — that nobody watched:
+  sixteen reports sat untriaged for up to nine days;
+- a private records repo with nothing committed for twenty days, through three releases and
+  every bounty payout;
+- a bounty write-up in this public repo (`security/reports/bounty/`), whose side finding
+  (now INT-2026-10-11-A) then sat for a month with nobody acting on it.
+
+**So:** every concern has one owner. The release procedure is `RELEASING.md`. A release's
+scope is one private file per version. Finding detail lives only in the private repo; here a
+finding is named by ID and described by its invariant. Every intake channel `SECURITY.md` names
+is read at every triage. When you change something that exists in more than one place, change
+every copy or delete all but one. When you finish work, push it. And before declaring something
+missing, check **the thing itself, not its container**.
+
 ### Re-derive an inherited value before you use it (2026-10-10)
 
 The recurring defect on this project is not a wrong value, it is a **borrowed** one: a number,
@@ -240,6 +270,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - Security tests live in `core/src/test/java/io/digibyte/core/security/` (run `./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"` for the current count)
 - MobSF report at `security/reports/mobsf-report.json`
 - Audit summary at `security/AUDIT-SUMMARY.md`
+- **Bounty and audit findings: detail lives only in the private repo** (`~/dgb-wallet-private/audit/`). Never write a report, its mechanism or a reporter's details into this repo — `security/reports/bounty/` takes no new files (see the README there). Here, name a finding by ID and state the invariant.
 - CRITICAL-1: Both halves CLOSED. PIN rate-limit: v3.10.35 (`PinManager`; see security/AUDIT-LOG.md). Keystore user-auth binding: v4.0.77 (`SeedKeyBinding`, 300 s window — see Seed Security above). RESIDUAL: a device with no secure lock screen keeps the unbound key (`SeedKeyBinding.NONE`), and inside the auth window a compromised app process can still decrypt the seed. Hardware backing is probed and logged (`KeyInfo.isInsideSecureHardware`) at key creation, not enforced.
 - CRITICAL-2: Resolved (g_seed static, accessor API)
 - CRITICAL-3: Resolved (ByteArray path, zeroed after use)

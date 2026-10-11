@@ -41,7 +41,7 @@ See [BUG-BOUNTY.md](./BUG-BOUNTY.md) for:
 | any earlier tag | ❌ not supported, please upgrade and re-test |
 
 The latest tag is always linked at
-<https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest>.
+<https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/latest> (DigiByte Mobile; the `digibytewallet-android` releases page is the retired io.digibyte app's).
 
 ## Scope Quick Reference
 
