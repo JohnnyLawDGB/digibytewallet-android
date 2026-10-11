@@ -58,8 +58,11 @@ add_library(
         src/main/jni/digibytewallet-core/BRKey.h
         src/main/jni/digibytewallet-core/BRMerkleBlock.c
         src/main/jni/digibytewallet-core/BRMerkleBlock.h
-        src/main/jni/digibytewallet-core/BRPaymentProtocol.c
-        src/main/jni/digibytewallet-core/BRPaymentProtocol.h
+        # BRPaymentProtocol.c/.h (BIP70/BIP75 messages) are deliberately NOT built: nothing in the app calls
+        # them -- no core or bridge source, no JNI function, no Kotlin declaration. Code with no caller is kept
+        # out of the library rather than maintained in it. The file stays in the core tree (upstream test.c and
+        # the iOS module map name it). native/src/test/host/payment_protocol_unbuilt_kat fails the sweep if it
+        # is listed here again, or if a compiled source starts calling it.
         src/main/jni/digibytewallet-core/BRPeer.c
         src/main/jni/digibytewallet-core/BRPeer.h
         src/main/jni/digibytewallet-core/BRPeerManager.c
