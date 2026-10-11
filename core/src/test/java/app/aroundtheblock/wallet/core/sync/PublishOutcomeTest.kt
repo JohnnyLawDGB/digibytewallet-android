@@ -88,28 +88,46 @@ class PublishOutcomeTest {
     /**
      * A plain DGB send the network refused can never be accepted. The sweep used to log the
      * verdict and carry on: the send stayed in the wallet with its coins spent, and stayed
-     * "pending" in the activity list, for good. It is removed, which unlocks its coins, and its
-     * record goes with it.
+     * "pending" in the activity list, for good. Refused on evidence no single peer can supply
+     * (peers in two network groups rejected it, and none has it), it is removed, which unlocks its
+     * coins, and its record goes with it.
      */
-    @Test fun a_terminal_rejection_of_a_plain_DGB_send_removes_it_and_unlocks_its_coins() {
+    @Test fun a_refusal_peers_corroborate_removes_a_plain_DGB_send_and_unlocks_its_coins() {
         assertEquals(
             "a send the network refused for good is only logged; its coins stay locked",
             PublishOutcome.Action.REMOVE_AND_UNLOCK,
-            PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = true),
+            PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = true, refusedByPeers = true),
         )
     }
 
-    /** An asset or DigiDollar send keeps its own handling: removing it would unseat the asset
-     *  layer's CONFLICTED accounting, which reads the abandoned attempt from the wallet. */
-    @Test fun a_terminal_rejection_of_an_asset_or_DigiDollar_send_is_left_to_its_own_handling() {
-        assertEquals(PublishOutcome.Action.KEEP, PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = false))
+    /**
+     * One peer's rejection is one peer's word. A peer can reject a valid transaction that honest
+     * peers already relayed; removing it would give its coins back, the user would pay again with
+     * other coins, and both payments could confirm. The terminal verdict the first rejection gives
+     * says the send is not relayed. It does not unlock anything.
+     */
+    @Test fun a_single_peers_terminal_rejection_removes_nothing() {
+        assertEquals(
+            "one peer's rejection removed the send and unlocked its coins",
+            PublishOutcome.Action.KEEP,
+            PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = true, refusedByPeers = false),
+        )
+    }
+
+    /** An asset or DigiDollar send keeps its own handling, however refused: removing it would unseat
+     *  the asset layer's CONFLICTED accounting, which reads the abandoned attempt from the wallet. */
+    @Test fun a_refused_asset_or_DigiDollar_send_is_left_to_its_own_handling() {
+        for (corroborated in listOf(true, false)) {
+            assertEquals(PublishOutcome.Action.KEEP, PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = false, refusedByPeers = corroborated))
+        }
     }
 
     /** Nothing short of a terminal verdict removes a send: a slow relay must never lose one. */
     @Test fun nothing_but_a_terminal_rejection_removes_a_send() {
         for (e in listOf(0, PublishOutcome.ENOTCONN, PublishOutcome.ETIMEDOUT, PublishOutcome.ECANCELED, 9999)) {
             for (plain in listOf(true, false)) {
-                assertEquals("errno $e (plain DGB: $plain) must not remove a send", PublishOutcome.Action.KEEP, PublishOutcome.of(e).actionFor(plain))
+                assertEquals("errno $e (plain DGB: $plain) must not remove a send", PublishOutcome.Action.KEEP,
+                    PublishOutcome.of(e).actionFor(plain, refusedByPeers = true))
             }
         }
     }

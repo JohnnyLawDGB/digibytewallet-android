@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include "BRWallet.h"
 #include "BRTransaction.h"
 
@@ -22,11 +23,14 @@
  *                         amounts), and the virtual size it was built at. None when an input is not
  *                         a transaction the wallet holds: the fee is then unknown.
  *
- *   prepared_send_check   before signing: the bytes pay exactly the approved fee, and every coin
- *                         they spend is still one of the wallet's spendable plain coins. After
- *                         signing: the signed transaction still pays exactly the approved fee.
- *                         Signing changes no amount, so that holds unless something else is wrong
- *                         -- and then the signed bytes are not handed back to be broadcast.
+ *   prepared_send_check   only what was approved is signed: before signing, the bytes' outputs are
+ *                         exactly the approved payment (that amount to that script) plus at most
+ *                         one change output to an address of this wallet, they pay exactly the
+ *                         approved fee, and every coin they spend is still one of the wallet's
+ *                         spendable plain coins. After signing: the same check on the signed
+ *                         transaction. Signing changes no output or amount, so that holds unless
+ *                         something else is wrong -- and then the signed bytes are not handed back
+ *                         to be broadcast.
  *
  * MACRO CONVENTION: PREPARED_SEND_UNFIXED is tested by VALUE (#if). =1 is fee_quote_kat's comparison
  * arm, the behaviour before this header existed: the typical 141-vbyte figure every confirmation
@@ -45,6 +49,8 @@ typedef enum {
     PREPARED_SEND_FEE_CHANGED = 2,
     /** A coin it spends is no longer one of the wallet's spendable plain coins. */
     PREPARED_SEND_COIN_UNAVAILABLE = 3,
+    /** Its outputs are not the approved payment plus change to a wallet address. */
+    PREPARED_SEND_NOT_APPROVED = 4,
 } PreparedSendVerdict;
 
 /* The quote for a transaction the wallet built: 1 with *feeOut and *vsizeOut set, or 0 when there is
@@ -72,6 +78,27 @@ static inline int prepared_send_quote(BRWallet *wallet, const BRTransaction *tx,
 }
 
 #if ! PREPARED_SEND_UNFIXED
+/* 1 when tx's outputs are exactly the approved payment -- payAmount to payScript -- plus at most one
+ * change output paying an address of this wallet; 0 for anything else: another recipient, another
+ * amount, an output nobody approved, change to an address that is not the wallet's. */
+static inline int prepared_send_pays_as_approved(BRWallet *wallet, const BRTransaction *tx,
+                                                 const uint8_t *payScript, size_t payScriptLen,
+                                                 uint64_t payAmount)
+{
+    size_t payments = 0, change = 0;
+
+    if (! payScript || payScriptLen == 0 || payAmount == 0 || tx->outCount == 0 || tx->outCount > 2) return 0;
+    for (size_t i = 0; i < tx->outCount; i++) {
+        const BRTxOutput *o = &tx->outputs[i];
+
+        if (payments == 0 && o->amount == payAmount && o->script && o->scriptLen == payScriptLen &&
+            memcmp(o->script, payScript, payScriptLen) == 0) payments++;
+        else if (o->amount > 0 && o->address[0] != '\0' && BRWalletContainsAddress(wallet, o->address)) change++;
+        else return 0;
+    }
+    return payments == 1 && change <= 1;
+}
+
 /* 1 when the outpoint (hash, n) is among utxos[0..count). */
 static inline int prepared_send_has_coin(const BRUTXO *utxos, size_t count, UInt256 hash, uint32_t n)
 {
@@ -82,12 +109,14 @@ static inline int prepared_send_has_coin(const BRUTXO *utxos, size_t count, UInt
 }
 #endif
 
-/* Whether tx may be signed -- or, once signed, handed back to be broadcast -- under approvedFee. */
+/* Whether tx may be signed -- or, once signed, handed back to be broadcast -- as the approved send:
+ * payAmount to payScript (plus change to the wallet), at approvedFee, from coins still the wallet's. */
 static inline PreparedSendVerdict prepared_send_check(BRWallet *wallet, const BRTransaction *tx,
-                                                      uint64_t approvedFee)
+                                                      const uint8_t *payScript, size_t payScriptLen,
+                                                      uint64_t payAmount, uint64_t approvedFee)
 {
 #if PREPARED_SEND_UNFIXED
-    (void)wallet; (void)tx; (void)approvedFee;
+    (void)wallet; (void)tx; (void)payScript; (void)payScriptLen; (void)payAmount; (void)approvedFee;
     return PREPARED_SEND_OK;
 #else
     uint64_t fee;
@@ -99,6 +128,7 @@ static inline PreparedSendVerdict prepared_send_check(BRWallet *wallet, const BR
     fee = BRWalletFeeForTx(wallet, tx);
     if (fee == UINT64_MAX) return PREPARED_SEND_FEE_UNKNOWN;
     if (fee != approvedFee) return PREPARED_SEND_FEE_CHANGED;
+    if (! prepared_send_pays_as_approved(wallet, tx, payScript, payScriptLen, payAmount)) return PREPARED_SEND_NOT_APPROVED;
     if (tx->inCount == 0) return PREPARED_SEND_COIN_UNAVAILABLE;
 
     /* The wallet's spendable plain coins now: spent coins, asset carriers and DigiDollar outputs are

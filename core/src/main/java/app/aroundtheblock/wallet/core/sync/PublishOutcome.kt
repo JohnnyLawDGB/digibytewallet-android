@@ -70,15 +70,18 @@ data class PublishOutcome(
     /**
      * What the stranded-send sweep does with a recorded send whose last publish ended this way.
      *
-     * A terminal rejection of a plain DGB send can never be accepted: the send is removed, which
-     * gives its coins back to the wallet, and its record goes with it — it used to be logged and
-     * kept, its coins spent and its row "pending" for good. An asset or DigiDollar send ([plainDgb]
-     * false) keeps its own handling: the asset layer's CONFLICTED accounting reads an abandoned
-     * attempt from the wallet, so removing one here would unseat it. Anything short of a terminal
-     * verdict removes nothing.
+     * No single peer's message removes a transaction or unlocks its coins. A terminal verdict can
+     * be one peer's rejection — and a peer can reject a valid transaction honest peers already
+     * relayed; removing it would give its coins back, the user would pay again with other coins,
+     * and both payments could confirm. So a plain DGB send is removed, giving its coins back, and
+     * its record forgotten only when the verdict is terminal AND [refusedByPeers]: the core saw
+     * peers in at least two network groups reject it and no peer relay or announce it. Otherwise
+     * it is kept, its coins stay locked, and the sweep carries on as before. An asset or
+     * DigiDollar send ([plainDgb] false) keeps its own handling either way: the asset layer's
+     * CONFLICTED accounting reads an abandoned attempt from the wallet.
      */
-    fun actionFor(plainDgb: Boolean): Action =
-        if (isTerminal && plainDgb) Action.REMOVE_AND_UNLOCK else Action.KEEP
+    fun actionFor(plainDgb: Boolean, refusedByPeers: Boolean): Action =
+        if (isTerminal && plainDgb && refusedByPeers) Action.REMOVE_AND_UNLOCK else Action.KEEP
 
     companion object {
         // errno values as reported by the C core; named here so the policy reads without

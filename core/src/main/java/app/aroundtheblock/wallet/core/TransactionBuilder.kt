@@ -112,12 +112,13 @@ interface SpendNative {
     /** The outputs of raw transaction bytes, one `"vout|satoshis|scriptHex"` each. */
     fun transactionOutputs(tx: ByteArray): Array<String>?
     /**
-     * Signs prepared bytes, or null. Native code refuses, before signing, bytes that do not pay exactly
-     * [approvedFeeSats] or that spend a coin which is no longer one of the wallet's spendable plain
-     * coins, and refuses to return a signed transaction that does not pay exactly [approvedFeeSats].
+     * Signs prepared bytes, or null: only the approved send. Native code refuses, before signing, bytes
+     * whose outputs are not [amountSats] to [toAddress] plus change to a wallet address, that do not
+     * pay exactly [approvedFeeSats], or that spend a coin which is no longer one of the wallet's
+     * spendable plain coins; and refuses to return a signed transaction that fails the same check.
      * The only signer a DGB send has.
      */
-    fun signPrepared(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray?
+    fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray?
     fun broadcast(signedTx: ByteArray): String?
     /** The publish result ring's answer for [txid]: 0 a peer took it, an errno, or -1 while pending. */
     fun publishResult(txid: String): Int
@@ -131,8 +132,8 @@ interface SpendNative {
             NativeBridge.createTransaction(toAddress, amountSatoshis, feePerKb)
         override fun quoteTransaction(unsignedTx: ByteArray): LongArray? = NativeBridge.quoteTransaction(unsignedTx)
         override fun transactionOutputs(tx: ByteArray): Array<String>? = NativeBridge.getRawTransactionOutputs(tx)
-        override fun signPrepared(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray? =
-            NativeBridge.signPreparedTransaction(unsignedTx, approvedFeeSats)
+        override fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray? =
+            NativeBridge.signPreparedTransaction(unsignedTx, toAddress, amountSats, approvedFeeSats)
         override fun broadcast(signedTx: ByteArray): String? = Broadcaster.broadcast(signedTx)
         override fun publishResult(txid: String): Int = NativeBridge.getPublishResult(txid)
         override fun sendDigiDollar(tdAddress: String, cents: Long): String? =
@@ -234,10 +235,11 @@ class TransactionBuilder(
     /**
      * After the credential prompt: sign the prepared bytes, broadcast them, and say whether a peer took them.
      *
-     * Nothing is built here. The bytes go to the checked signer with the approved fee; native code
-     * refuses bytes that no longer pay exactly that fee, or that spend a coin which is no longer one of
+     * Nothing is built here. The bytes go to the checked signer with the approved payment and fee;
+     * native code signs only that send — refusing bytes whose outputs are not that payment plus change
+     * to the wallet, that do not pay exactly that fee, or that spend a coin which is no longer one of
      * the wallet's spendable plain coins (another send spent it, or detection now holds it as an asset
-     * carrier, while the prompt was up), and nothing is broadcast. The record keeps the fee signed.
+     * carrier, while the prompt was up) — and nothing is broadcast. The record keeps the fee signed.
      *
      * The send is [Delivery.RELAYED] only when a peer has taken it; otherwise [Delivery.NOT_YET_RELAYED]
      * — the wallet holds it and keeps publishing it, and it is never reported as sent.
@@ -250,10 +252,12 @@ class TransactionBuilder(
                 return@withContext TxResult.Error(SpendPreflight.NOT_SENT)
             }
 
-            val signedTx = native.signPrepared(prepared.unsignedTx(), prepared.quote.feeSats)
+            val signedTx = native.signPrepared(
+                prepared.unsignedTx(), prepared.toAddress, prepared.amountSats, prepared.quote.feeSats,
+            )
             if (signedTx == null) {
-                // The fee, the coins or the session changed since review: nothing is signed or sent,
-                // and reviewing again builds afresh.
+                // Not the approved send any more (its payment, fee or coins), or the session is
+                // locked: nothing is signed or sent, and reviewing again builds afresh.
                 android.util.Log.w(TAG, "the prepared send no longer matches its approval; nothing was signed")
                 return@withContext TxResult.Error(SpendPreflight.NOT_SENT)
             }

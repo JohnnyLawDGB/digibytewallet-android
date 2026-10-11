@@ -347,13 +347,16 @@ NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx)
     return result;
 }
 
-/* Sign prepared unsigned bytes, or NULL. Before signing they must pay exactly approvedFeeSats and
- * spend only coins that are still the wallet's spendable plain coins; after signing the signed
- * transaction must still pay exactly approvedFeeSats, or nothing is handed back to be broadcast.
- * It signs those bytes and nothing else: no build, no publish (the publish entry points stay
- * publishTransaction / publishTransactionStem, which tx_publish_ownership_kat watches). */
+/* Sign prepared unsigned bytes, or NULL: only the send that was approved -- amountSats to toAddress
+ * at approvedFeeSats. Before signing, the bytes' outputs must be exactly that payment plus at most one
+ * change output to an address of this wallet, they must pay exactly approvedFeeSats, and they must
+ * spend only coins that are still the wallet's spendable plain coins; after signing, the signed
+ * transaction must pass the same check, or nothing is handed back to be broadcast. It signs those
+ * bytes and nothing else: no build, no publish (the publish entry points stay publishTransaction /
+ * publishTransactionStem, which tx_publish_ownership_kat watches). */
 jbyteArray JNICALL
-NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx, jlong approvedFeeSats)
+NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx, jstring toAddress,
+                                     jlong amountSats, jlong approvedFeeSats)
 {
     (void)thiz;
     if (!g_wallet) {
@@ -364,8 +367,23 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
         LOGW("signPreparedTransaction: session not unlocked (no seed)");
         return NULL;
     }
-    if (!unsignedTx || approvedFeeSats <= 0) {
-        LOGW("signPreparedTransaction: no prepared bytes, or no approved fee");
+    if (!unsignedTx || !toAddress || amountSats <= 0 || approvedFeeSats <= 0) {
+        LOGW("signPreparedTransaction: no prepared bytes, or no approved payment or fee");
+        return NULL;
+    }
+
+    /* The approved payment's script, from the approved destination. */
+    uint8_t payScript[128];
+    size_t payScriptLen = 0;
+    const char *addr = (*env)->GetStringUTFChars(env, toAddress, NULL);
+    if (!addr) return NULL;
+    if (BRAddressIsValid(addr)) {
+        size_t need = BRAddressScriptPubKey(NULL, 0, addr);
+        if (need > 0 && need <= sizeof(payScript)) payScriptLen = BRAddressScriptPubKey(payScript, sizeof(payScript), addr);
+    }
+    (*env)->ReleaseStringUTFChars(env, toAddress, addr);
+    if (payScriptLen == 0) {
+        LOGW("signPreparedTransaction: the approved destination is not an address");
         return NULL;
     }
 
@@ -380,9 +398,10 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
         return NULL;
     }
 
-    /* Before signing: exactly the approved fee, and only coins still the wallet's plain ones. */
+    /* Before signing: exactly the approved payment and fee, and only coins still the wallet's plain ones. */
     PreparedSendVerdict verdict;
-    if ((verdict = prepared_send_check(g_wallet, tx, (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
+    if ((verdict = prepared_send_check(g_wallet, tx, payScript, payScriptLen, (uint64_t)amountSats,
+                                       (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
         LOGW("signPreparedTransaction: not signed -- the prepared send no longer matches its approval (verdict %d)",
              (int)verdict);
         BRTransactionFree(tx);
@@ -396,9 +415,10 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
         return NULL;
     }
 
-    /* After signing: the transaction that would be broadcast pays exactly the approved fee. */
-    if ((verdict = prepared_send_check(g_wallet, tx, (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
-        LOGE("signPreparedTransaction: the signed transaction does not pay the approved fee (verdict %d); not returned",
+    /* After signing: the transaction that would be broadcast is still exactly the approved send. */
+    if ((verdict = prepared_send_check(g_wallet, tx, payScript, payScriptLen, (uint64_t)amountSats,
+                                       (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
+        LOGE("signPreparedTransaction: the signed transaction is not the approved send (verdict %d); not returned",
              (int)verdict);
         BRTransactionFree(tx);
         return NULL;
@@ -564,6 +584,24 @@ NativeBridge_getRelayCount(JNIEnv *env, jobject thiz, jstring jtxid) {
         ? (jint)BRPeerManagerRelayCount(g_peerManager, _u256FromTxidHex(txid)) : 0;
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
     return count;
+}
+
+/* ---------- isRefusedByNetwork ----------
+ * True when the network has refused the transaction on evidence no single peer can supply: peers in
+ * at least two network groups rejected it as invalid, non-standard or dust, and no peer has relayed or
+ * announced it (BRPeerManagerTxRefusedByNetwork). One peer's rejection is never enough: the
+ * stranded-send sweep removes a send, and so gives its coins back, only on this answer. */
+jboolean JNICALL
+NativeBridge_isRefusedByNetwork(JNIEnv *env, jobject thiz, jstring jtxid) {
+    (void)thiz;
+    PEER_GUARD();
+    if (!g_peerManager || !jtxid) return JNI_FALSE;
+    const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
+    if (!txid) return JNI_FALSE;
+    jboolean refused = (strlen(txid) == 64 &&
+                        BRPeerManagerTxRefusedByNetwork(g_peerManager, _u256FromTxidHex(txid))) ? JNI_TRUE : JNI_FALSE;
+    (*env)->ReleaseStringUTFChars(env, jtxid, txid);
+    return refused;
 }
 
 /* ---------- removeTransaction ----------

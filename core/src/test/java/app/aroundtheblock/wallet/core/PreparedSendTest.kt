@@ -61,8 +61,8 @@ class PreparedSendTest {
             native.events.any { it.startsWith("create@") },
         )
         assertTrue(
-            "the prepared bytes did not reach the checked signer with the approved fee 23,200: ${native.events}",
-            native.events.contains("sign tx@100000 fee=23200"),
+            "the prepared bytes did not reach the checked signer with the approved payment and fee: ${native.events}",
+            native.events.contains("sign tx@100000 to=$ADDR amount=150000000 fee=23200"),
         )
         assertFalse("a signer that does not check the fee was used: ${native.events}", native.events.any { it.startsWith("sign-unchecked") })
         assertTrue("not sent: $result", result is TxResult.Success)

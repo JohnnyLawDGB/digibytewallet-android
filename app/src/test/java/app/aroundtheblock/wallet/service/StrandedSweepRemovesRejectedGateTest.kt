@@ -35,7 +35,20 @@ class StrandedSweepRemovesRejectedGateTest {
     @Test fun `the sweep asks what a terminal rejection means for the send`() {
         val asks = sync.calls("outcome.actionFor", sweep)
         assertEquals("the sweep must ask the outcome what to do, exactly once", 1, asks.size)
-        assertEquals(listOf("plainDgb = isPlainDgbSend(txid)"), asks.single().arguments)
+        assertEquals(
+            "the sweep removes on the publish verdict alone: one peer's rejection can unlock the coins",
+            listOf("plainDgb = isPlainDgbSend(txid)", "refusedByPeers = isRefusedByPeers(txid)"),
+            asks.single().arguments,
+        )
+    }
+
+    /** No single peer's message removes a transaction: the corroboration is the core's, which
+     *  counts the rejecting peers' network groups and every peer that relayed or announced it. */
+    @Test fun `the corroboration comes from the core's count of rejecting peers`() {
+        val helper = sync.range("private fun isRefusedByPeers(", "\n    }\n")
+            ?: throw AssertionError("isRefusedByPeers not found: nothing asks the core whether peers corroborate the refusal")
+        assertEquals(1, sync.calls("NativeBridge.isRefusedByNetwork", helper).size)
+        assertTrue("the helper reads the publish ring instead of the core's peer evidence", sync.calls("NativeBridge.getPublishResult", helper).isEmpty())
     }
 
     @Test fun `a refused plain DGB send is removed with its record, and is not republished`() {

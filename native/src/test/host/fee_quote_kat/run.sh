@@ -15,8 +15,8 @@
 # Gates first: the header must carry the seam and test its VALUE (#if, never #ifdef: the =0 build
 # would otherwise run the comparison arm). Last, a SOURCE GATE over the real jni_transaction.c
 # (Android headers keep it off the host): quoteTransaction and signPreparedTransaction must go
-# through this header -- the check before the signature and again after it, the signed bytes
-# serialized only after the second check -- and publish nothing themselves.
+# through this header -- the check before the signature and again after it, each handed the approved
+# payment and fee, the signed bytes serialized only after the second check -- and publish nothing.
 # FEE_QUOTE_GATE_FILE=<path> points the source gate at another copy (used to show it refuses one).
 #
 # MACRO CONVENTION: VALUE of -DPREPARED_SEND_UNFIXED (=1 comparison, =0 shipped).
@@ -51,6 +51,11 @@ CASES=(
     check_coin_spent:fail
     check_coin_held:fail
     check_parent_gone:fail
+    check_recipient_changed:fail
+    check_amount_changed:fail
+    check_extra_output:fail
+    check_change_foreign:fail
+    check_self_send_signs:pass
     dd_transfer_builds:pass
 )
 
@@ -230,12 +235,17 @@ else
     n_refuse="$(grep -oE -- "$REFUSE" <<<"$SIGN" | wc -l | tr -d ' ')"
     [ "$n_refuse" -eq 2 ] || say "each check must refuse on a verdict other than PREPARED_SEND_OK (found $n_refuse such tests)"
     grep -Eq 'return[[:space:]]+NULL' <<<"$SIGN" || say "signPreparedTransaction never refuses (no return NULL)"
+    # Sign only what was approved: the destination and amount are handed in, and both checks get them.
+    { grep -Eq 'jstring[[:space:]]+toAddress' <<<"$SIGN" && grep -Eq 'jlong[[:space:]]+amountSats' <<<"$SIGN"; } ||
+        say "signPreparedTransaction is not handed the approved destination and amount"
+    n_bound="$(grep -oE 'prepared_send_check[[:space:]]*\([^;]*payScript[^;]*amountSats[^;]*approvedFeeSats[^;]*\)' <<<"$SIGN" | wc -l | tr -d ' ')"
+    [ "$n_bound" -eq 2 ] || say "each check must be handed the approved payment (payScript, amountSats) and fee (found $n_bound)"
     grep -Eq 'approvedFeeSats[[:space:]]*<=[[:space:]]*0' <<<"$SIGN" || say "signPreparedTransaction does not refuse an approval of no fee"
     grep -Eq 'seed_is_valid[[:space:]]*\(' <<<"$SIGN" || say "signPreparedTransaction does not refuse a locked session"
     for never in 'BRPeerManager(Publish|StemPublish)Tx' '_registerWalletCopy' 'BRWalletSetFeePerKb' 'BRWalletCreateTransaction'; do
         grep -Eq -- "$never" <<<"$SIGN" && say "signPreparedTransaction calls ${never} -- it signs the prepared bytes and nothing else"
     done
-    [ "$gate_fail" -eq 0 ] && echo "  gate: signPreparedTransaction checks before signing, signs once, checks again, then serializes; it builds and publishes nothing"
+    [ "$gate_fail" -eq 0 ] && echo "  gate: signPreparedTransaction checks the approved payment and fee before signing, signs once, checks again, then serializes; it builds and publishes nothing"
     gate_fail=$(( before || gate_fail ))
 fi
 

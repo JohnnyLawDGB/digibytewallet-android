@@ -50,7 +50,7 @@ class SpendPreflightOrderTest {
         override fun scriptPubKey(address: String): ByteArray? = RecordingSpendNative.P2WPKH
         override fun quoteTransaction(unsignedTx: ByteArray): LongArray? = longArrayOf(23_200, 208)
         override fun transactionOutputs(tx: ByteArray): Array<String>? = arrayOf("0|150000000|${RecordingSpendNative.P2WPKH_HEX}")
-        override fun signPrepared(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray? { events += "sign"; return byteArrayOf(2) }
+        override fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray? { events += "sign"; return byteArrayOf(2) }
         override fun publishResult(txid: String): Int = 0
     }
 

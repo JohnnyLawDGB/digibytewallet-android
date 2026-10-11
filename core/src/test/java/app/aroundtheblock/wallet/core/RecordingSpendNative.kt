@@ -52,8 +52,8 @@ open class RecordingSpendNative : SpendNative {
         return outputsOf(String(tx))
     }
 
-    override fun signPrepared(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray? {
-        events += "sign ${String(unsignedTx)} fee=$approvedFeeSats"
+    override fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray? {
+        events += "sign ${String(unsignedTx)} to=$toAddress amount=$amountSats fee=$approvedFeeSats"
         return if (signerSigns) "signed:${String(unsignedTx)}".toByteArray() else null
     }
 

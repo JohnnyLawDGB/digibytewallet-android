@@ -90,10 +90,17 @@ object NativeBridge {
      *  parse or an input is not a transaction the wallet holds (the fee is then unknown). */
     external fun quoteTransaction(unsignedTx: ByteArray): LongArray?
 
-    /** Sign prepared unsigned bytes, or null. Refuses, before signing, bytes that do not pay exactly
-     *  [approvedFeeSats] or that spend a coin which is no longer one of the wallet's spendable plain
-     *  coins; and refuses to hand back a signed transaction whose fee is not [approvedFeeSats]. */
-    external fun signPreparedTransaction(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray?
+    /** Sign prepared unsigned bytes, or null: only the send that was approved. Refuses, before
+     *  signing, bytes whose outputs are not [amountSats] to [toAddress] plus change to a wallet
+     *  address, that do not pay exactly [approvedFeeSats], or that spend a coin which is no longer
+     *  one of the wallet's spendable plain coins; and refuses to hand back a signed transaction that
+     *  fails the same check. */
+    external fun signPreparedTransaction(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray?
+
+    /** True when the network has refused [txid] on evidence no single peer can supply: peers in at
+     *  least two network groups rejected it as invalid, non-standard or dust, and no peer has relayed
+     *  or announced it. One peer's rejection is never enough. */
+    external fun isRefusedByNetwork(txid: String): Boolean
     // --- /pkg 2.1 ---
 
     /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.

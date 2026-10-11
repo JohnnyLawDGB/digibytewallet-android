@@ -3573,10 +3573,13 @@ class SyncService : Service() {
             }
             // A plain DGB send the network refused for good can never be accepted: remove it, which
             // gives its coins back to the wallet, and forget its record. It used to be logged and
-            // kept — coins spent, row "pending" — for good. An asset or DigiDollar send is left to
+            // kept — coins spent, row "pending" — for good. No single peer's message decides that:
+            // the terminal verdict can be one peer's rejection, so removal also needs the core's
+            // corroboration (peers in two network groups rejected it, none relayed or announced it);
+            // otherwise it is kept and its coins stay locked. An asset or DigiDollar send is left to
             // its own handling: the asset layer's CONFLICTED accounting reads an abandoned attempt
             // from the wallet, so this never removes one, and never calls into the asset layer.
-            val action = outcome?.actionFor(plainDgb = isPlainDgbSend(txid))
+            val action = outcome?.actionFor(plainDgb = isPlainDgbSend(txid), refusedByPeers = isRefusedByPeers(txid))
                 ?: app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.KEEP
             if (action == app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.REMOVE_AND_UNLOCK) {
                 if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
@@ -3676,6 +3679,15 @@ class SyncService : Service() {
         val asset = runCatching { NativeBridge.isAssetTransaction(raw) }.getOrDefault(true)
         val digiDollar = runCatching { NativeBridge.digiDollarTxType(txid) }.getOrDefault(-1)
         return !asset && digiDollar == 0
+    }
+
+    /**
+     * Whether the network has refused [txid] on evidence no single peer can supply — the core's
+     * answer: peers in at least two network groups rejected it and none has relayed or announced it.
+     * Anything that cannot be read is not a refusal.
+     */
+    private fun isRefusedByPeers(txid: String): Boolean {
+        return runCatching { NativeBridge.isRefusedByNetwork(txid) }.getOrDefault(false)
     }
 
     /** Most recent serialized block window from [NativeCallback.onSaveBlocks],
