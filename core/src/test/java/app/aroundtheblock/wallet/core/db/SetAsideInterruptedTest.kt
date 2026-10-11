@@ -95,6 +95,16 @@ class SetAsideInterruptedTest {
         }
     }
 
+    // GUARD (written with the fix): the last step — the database taking its final aside name — too.
+    @Test fun `a process that ended at the last step of a set-aside is finished on the next start`() {
+        val dir = tmp.newFolder()
+        database(dir)
+        interrupt(dir, "$name.aside-corrupt-5000.moving")
+
+        assertTrue(DatabaseFiles(dir, name).finishInterrupted())
+        assertTrue("the set-aside was undone instead of finished", assertTogether(dir, "ended at the last step"))
+    }
+
     @Test fun `the opener finishes a half-done set-aside before it decides anything`() {
         val dir = tmp.newFolder()
         database(dir)

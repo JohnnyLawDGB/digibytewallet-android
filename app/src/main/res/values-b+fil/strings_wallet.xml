@@ -675,4 +675,9 @@
     <string name="restore_date_onwards">Mula Ene %1$d</string>
     <string name="restore_date_range">Ene %1$d – Dis %1$d</string>
     <string name="restore_date_genesis">Inilunsad ang DigiByte noong Enero 2014</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Hindi mabasa ang passphrase</string>
+    <string name="seedview_pass_unreadable_body">Hindi mabasa ngayon ang passphrase ng wallet na ito. Maaaring hindi maibalik ng iyong mga recovery word lamang ang wallet na ito, kaya hindi ipapakita ang mga ito hangga\'t hindi maipapakita ang passphrase kasama nila. Subukan ulit.</string>
+    <string name="seedview_pass_retry">Subukan ulit</string>
+    <!-- /pkg E2-keys -->
 </resources>

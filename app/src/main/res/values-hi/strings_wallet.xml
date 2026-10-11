@@ -675,4 +675,9 @@
     <string name="restore_date_onwards">जनवरी %1$d से आगे</string>
     <string name="restore_date_range">जनवरी %1$d – दिसंबर %1$d</string>
     <string name="restore_date_genesis">DigiByte जनवरी 2014 में लॉन्च हुआ</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">पासफ़्रेज़ पढ़ा नहीं जा सका</string>
+    <string name="seedview_pass_unreadable_body">इस वॉलेट का पासफ़्रेज़ अभी पढ़ा नहीं जा सका। केवल आपके रिकवरी शब्द इस वॉलेट को बहाल नहीं कर सकते, इसलिए वे तब तक नहीं दिखाए जाते जब तक पासफ़्रेज़ उनके साथ नहीं दिखाया जा सकता। फिर से कोशिश करें।</string>
+    <string name="seedview_pass_retry">फिर से कोशिश करें</string>
+    <!-- /pkg E2-keys -->
 </resources>

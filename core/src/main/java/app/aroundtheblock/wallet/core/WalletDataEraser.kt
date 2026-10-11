@@ -245,7 +245,8 @@ class AndroidWalletDataEraser internal constructor(
         // (DatabaseFiles.setAside — recovery never removes those; this wipe is the one place that
         // does). Most asides could not be opened once the password below is gone, but one set
         // aside under the published legacy password could be read by anyone with the file.
-        val files = databaseFiles().map(::deleteFile).all { it }
+        // A directory that cannot be listed is not one with nothing left in it: both steps fail.
+        val files = databaseFiles()?.map(::deleteFile)?.all { it } ?: false
         val passphrase = clearPrefs("dgb_db_key")
         val passphraseKey = step("database key alias") {
             if (keystore.contains(DB_KEY_ALIAS)) keystore.delete(DB_KEY_ALIAS)
@@ -253,15 +254,19 @@ class AndroidWalletDataEraser internal constructor(
         }
         // READ-BACK: the database is gone only when no file of it is left on any network — not the
         // live one, not an aside, not a companion.
-        val noneLeft = step("database files read-back") { databaseFiles().isEmpty() }
+        val noneLeft = step("database files read-back") { databaseFiles()?.isEmpty() ?: false }
         return files && noneLeft && passphrase && passphraseKey
     }
 
-    /** Every file of the wallet database on every network that is on disk now (see DatabaseFiles.everyFileOf). */
-    private fun databaseFiles(): List<java.io.File> = WALLET_NETWORK_SUFFIXES.flatMap { net ->
+    /**
+     * Every file of the wallet database on every network that is on disk now (see
+     * DatabaseFiles.everyFileOf); null when a directory that should hold them cannot be listed.
+     */
+    private fun databaseFiles(): List<java.io.File>? = WALLET_NETWORK_SUFFIXES.map { net ->
         val live = context.getDatabasePath("wallet$net.db")
-        live.parentFile?.let { dir -> app.aroundtheblock.wallet.core.db.DatabaseFiles.everyFileOf(dir, live.name) }.orEmpty()
-    }
+        val dir = live.parentFile ?: return null
+        app.aroundtheblock.wallet.core.db.DatabaseFiles.everyFileOf(dir, live.name) ?: return null
+    }.flatten()
 
     override fun eraseLeftoverState(): Boolean {
         val filterPeers = clearPrefsOnEveryNetwork("dgb_filter_peers")

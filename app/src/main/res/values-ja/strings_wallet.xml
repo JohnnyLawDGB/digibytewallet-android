@@ -670,4 +670,9 @@
     <string name="restore_date_onwards">%1$d年1月以降</string>
     <string name="restore_date_range">%1$d年1月～12月</string>
     <string name="restore_date_genesis">DigiByte は 2014 年 1 月にローンチ</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">パスフレーズを読み取れませんでした</string>
+    <string name="seedview_pass_unreadable_body">このウォレットのパスフレーズを今は読み取れませんでした。リカバリーワードだけではこのウォレットを復元できない可能性があるため、パスフレーズを一緒に表示できるまで表示されません。もう一度お試しください。</string>
+    <string name="seedview_pass_retry">再試行</string>
+    <!-- /pkg E2-keys -->
 </resources>

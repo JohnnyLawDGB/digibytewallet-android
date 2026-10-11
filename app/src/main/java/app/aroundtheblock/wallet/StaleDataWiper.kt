@@ -56,9 +56,16 @@ object StaleDataWiper {
      *
      *  The crash-loop breaker calls this on every start while starts keep dying; those asides
      *  are bounded (`DatabaseFiles.MAX_RECOVERY_ASIDES`), and past the bound the database is
-     *  left where it is — the crash is then not the database's. Nothing aside is removed here:
-     *  a full wallet wipe (WalletDataEraser.eraseDatabase) is the one place that removes asides. */
+     *  left where it is — the crash is then not the database's. A database whose re-key is pending
+     *  is left where it is too: the re-key resumes on its own. Nothing aside is removed here: a full
+     *  wallet wipe (WalletDataEraser.eraseDatabase) is the one place that removes asides. */
     fun wipeDatabase(context: Context) {
+        // A re-key in progress resumes on its own at the next open (WalletDatabaseOpener). A start
+        // killed while re-keying is exactly what this breaker counts, so it must not move that file.
+        if (app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.rekeyPending(context)) {
+            android.util.Log.w("StaleDataWiper", "Encrypted DB left in place: its re-key is pending and resumes on the next open")
+            return
+        }
         val dbFileName = "wallet${networkSuffix(context)}.db"
         val path = context.getDatabasePath(dbFileName)
         val dir = path.parentFile ?: return

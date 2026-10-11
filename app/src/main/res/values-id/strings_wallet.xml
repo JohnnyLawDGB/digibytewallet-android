@@ -670,4 +670,9 @@
     <string name="restore_date_onwards">Sejak Jan %1$d</string>
     <string name="restore_date_range">Jan %1$d – Des %1$d</string>
     <string name="restore_date_genesis">DigiByte diluncurkan Januari 2014</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Frasa sandi tidak dapat dibaca</string>
+    <string name="seedview_pass_unreadable_body">Frasa sandi dompet ini tidak dapat dibaca saat ini. Kata-kata pemulihan Anda saja mungkin tidak dapat memulihkan dompet ini, jadi kata-kata itu tidak ditampilkan sampai frasa sandi dapat ditampilkan bersamanya. Coba lagi.</string>
+    <string name="seedview_pass_retry">Coba lagi</string>
+    <!-- /pkg E2-keys -->
 </resources>

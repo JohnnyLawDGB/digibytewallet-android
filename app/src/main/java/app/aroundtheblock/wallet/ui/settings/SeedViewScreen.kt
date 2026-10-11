@@ -52,42 +52,24 @@ fun SeedViewScreen(
     }
 
     /**
-     * The stored BIP39 passphrase, if this wallet has one.
+     * What this screen shows: the words with the stored BIP39 passphrase when this wallet has one —
+     * the whole backup — or, when the passphrase cannot be read, why it cannot (SeedBackupView).
      *
      * Shown WITH the phrase, deliberately. The app holds the passphrase so the wallet can rebuild
      * itself on every restart — which means a user who writes down only the twelve words is
      * holding half a backup while believing it is whole. Revealing the phrase without it would
      * make this screen actively misleading: it is titled "Recovery Phrase" and would be showing
-     * something that no longer recovers anything on its own.
+     * something that no longer recovers anything on its own. For the same reason, a passphrase that
+     * cannot be read is never shown as "none": the words are not shown either, and the screen asks to
+     * try again.
      *
      * Behind the same PIN + biometric gate as the phrase, because it is the same secret material.
+     * v2-aware decrypts live in WalletManager (docs/specs/keystore-auth-binding.md) — no raw prefs
+     * reads here. Read again on "Try again".
      */
-    val storedPassphrase: String? = remember {
-        // v2-aware decrypt lives in WalletManager (auth-bound key migration,
-        // docs/specs/keystore-auth-binding.md) — no more raw prefs reads here.
-        try {
-            walletManager.decryptStoredPassphrase()
-                ?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // Decrypt the seed from SharedPreferences via KeyStoreManager
-    val words: List<String> = remember {
-        try {
-            val decrypted = walletManager.decryptStoredMnemonic()
-            if (decrypted != null) {
-                val phrase = String(decrypted, Charsets.UTF_8)
-                decrypted.fill(0) // zero the ByteArray after use
-                phrase.trim().split(" ")
-            } else {
-                List(12) { "••••••" }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("SeedViewScreen", "Failed to decrypt seed: ${e.message}")
-            List(12) { "error" }
-        }
+    var attempt by remember { mutableIntStateOf(0) }
+    val backup = remember(attempt) {
+        SeedBackupView.read(walletManager::decryptStoredPassphrase, walletManager::decryptStoredMnemonic)
     }
 
     Column(
@@ -139,87 +121,126 @@ fun SeedViewScreen(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
-
-            Text(
-                text = "Your ${words.size}-word Recovery Phrase",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(Modifier.height(4.dp))
-
-            Text(
-                text = "Write these words down in order and store them safely.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF8899AA)
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                itemsIndexed(words) { idx, word ->
+            when (backup) {
+                is SeedBackupView.PassphraseUnreadable -> {
+                    // The passphrase could not be read: the words alone may not restore this wallet,
+                    // so they are not shown as the backup. Say so, and offer to read again.
+                    Spacer(Modifier.height(20.dp))
                     Card(
                         shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742))
+                        colors = CardDefaults.cardColors(containerColor = DigiByteRed.copy(alpha = 0.15f)),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Column(Modifier.padding(14.dp)) {
                             Text(
-                                text = "${idx + 1}.",
-                                color = Color(0xFF546E7A),
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.width(24.dp)
+                                text = stringResource(R.string.seedview_pass_unreadable_title),
+                                color = DigiByteRed,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
                             )
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                text = word,
+                                text = stringResource(R.string.seedview_pass_unreadable_body),
+                                color = Color(0xFFB0BEC5),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = { attempt++ },
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DigiByteRed),
+                    ) {
+                        Text(stringResource(R.string.seedview_pass_retry), color = Color.White)
+                    }
+                }
+                is SeedBackupView.Shown -> {
+                Spacer(Modifier.height(20.dp))
+
+                Text(
+                    text = "Your ${backup.words.size}-word Recovery Phrase",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    text = "Write these words down in order and store them safely.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF8899AA)
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    itemsIndexed(backup.words) { idx, word ->
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "${idx + 1}.",
+                                    color = Color(0xFF546E7A),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(24.dp)
+                                )
+                                Text(
+                                    text = word,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // The passphrase, if there is one. Silent when there is not — the overwhelming
+                // majority of wallets — so this screen is unchanged for them.
+                val storedPassphrase = backup.passphrase
+                if (storedPassphrase != null) {
+                    Spacer(Modifier.height(20.dp))
+                    Card(
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(
+                                text = stringResource(R.string.pass_enter),
+                                color = Color(0xFF8FA1B8),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = storedPassphrase,
                                 color = Color.White,
                                 fontWeight = FontWeight.Medium,
-                                fontSize = 15.sp
+                                fontSize = 15.sp,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.pass_warn),
+                                color = Color(0xFFFFCC66),
+                                style = MaterialTheme.typography.bodySmall,
                             )
                         }
                     }
                 }
-            }
-
-            // The passphrase, if there is one. Silent when there is not — the overwhelming
-            // majority of wallets — so this screen is unchanged for them.
-            if (storedPassphrase != null) {
-                Spacer(Modifier.height(20.dp))
-                Card(
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742)),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(
-                            text = stringResource(R.string.pass_enter),
-                            color = Color(0xFF8FA1B8),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = storedPassphrase,
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 15.sp,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = stringResource(R.string.pass_warn),
-                            color = Color(0xFFFFCC66),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
                 }
             }
 

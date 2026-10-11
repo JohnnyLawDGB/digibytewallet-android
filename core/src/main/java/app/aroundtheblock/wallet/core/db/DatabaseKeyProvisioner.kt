@@ -109,24 +109,33 @@ class DatabaseFiles(
 
     /**
      * Moves the database to `<name>.aside-<reason>-<time>`, its companions alongside under the same
-     * stem — companions first, so a new database is never opened beside an earlier one's
-     * write-ahead log. A move that fails puts back what it had moved. Nothing already aside is
-     * touched, and recovery never removes an aside: the crash-loop breaker's asides are bounded
-     * ([MAX_RECOVERY_ASIDES]) instead, because only those recur. A full wallet wipe is the one
-     * place that removes asides ([everyFileOf]).
+     * stem, one rename at a time and never leaving it apart from them. The database moves first, under
+     * the in-progress name `<stem>.moving`; then each companion; then the database takes its final
+     * name. A process that ends in between leaves a `.moving` file, and [finishInterrupted] — run
+     * before anything opens the database — completes the move from it, so the database and its
+     * write-ahead log always end up together. A move that fails while the process lives puts back what
+     * it had moved. Nothing already aside is touched, and recovery never removes an aside: the
+     * crash-loop breaker's asides are bounded ([MAX_RECOVERY_ASIDES]) instead, because only those
+     * recur. A full wallet wipe is the one place that removes asides ([everyFileOf]).
      */
     @Synchronized
     override fun setAside(reason: AsideReason): Boolean {
-        val present = (COMPANIONS + "").map { File(dir, name + it) }.filter { it.exists() }
-        if (present.isEmpty()) return true
-        if (reason == AsideReason.RECOVERY && asides().count { it.name.startsWith(stemOf(AsideReason.RECOVERY)) } >= MAX_RECOVERY_ASIDES) {
+        if (!finishInterrupted()) return false
+        val live = File(dir, name)
+        val companions = liveCompanions()
+        if (!live.exists() && companions.isEmpty()) return true
+        val recoveryAsides = asides() ?: return false.also { Log.w(TAG, "$name: the directory cannot be listed; left where it is") }
+        if (reason == AsideReason.RECOVERY && recoveryAsides.count { it.name.startsWith(stemOf(AsideReason.RECOVERY)) } >= MAX_RECOVERY_ASIDES) {
             Log.w(TAG, "$name: ${MAX_RECOVERY_ASIDES} recovery asides kept already; left where it is")
             return false
         }
         val stem = freeStem(reason)
+        val half = File(dir, stem + MOVING)
         val moved = mutableListOf<Pair<File, File>>()
-        for (from in present) {
-            val to = File(dir, stem + from.name.removePrefix(name))
+        val steps = (if (live.exists()) listOf(live to half) else emptyList()) +
+            companions.map { it to File(dir, stem + it.name.removePrefix(name)) } +
+            (if (live.exists()) listOf(half to File(dir, stem)) else emptyList())
+        for ((from, to) in steps) {
             if (!move(from, to)) {
                 moved.asReversed().forEach { (back, aside) -> move(aside, back) }
                 Log.w(TAG, "$name: could not be set aside (${from.name})")
@@ -135,21 +144,49 @@ class DatabaseFiles(
             moved += from to to
         }
         Log.w(TAG, "$name set aside as $stem (${reason.tag})")
-        return (COMPANIONS + "").none { File(dir, name + it).exists() }
+        return !live.exists() && liveCompanions().isEmpty()
     }
 
-    /** STUB (seam step): today nothing records a set-aside in progress, so there is nothing to finish. */
-    override fun finishInterrupted(): Boolean = true
+    /**
+     * Completes every set-aside a process ended in the middle of (a `<stem>.moving` file): the
+     * companions still at the live name join it, then it takes its final name. True when nothing is
+     * left half done. False — and nothing moved — when the directory cannot be listed, or when
+     * finishing would put a file over another (the caller then opens nothing).
+     */
+    @Synchronized
+    override fun finishInterrupted(): Boolean {
+        val listed = dir.listFiles() ?: return !dir.exists()
+        for (half in listed.filter { it.name.startsWith("$name$ASIDE") && it.name.endsWith(MOVING) }) {
+            val stem = half.name.removeSuffix(MOVING)
+            if (File(dir, name).exists() || File(dir, stem).exists()) {
+                Log.w(TAG, "$name: a half-done set-aside ($stem) cannot be finished beside the files now there")
+                return false
+            }
+            for (from in liveCompanions()) {
+                val to = File(dir, stem + from.name.removePrefix(name))
+                if (to.exists() || !move(from, to)) {
+                    Log.w(TAG, "$name: a half-done set-aside ($stem) could not be finished (${from.name})")
+                    return false
+                }
+            }
+            if (!move(half, File(dir, stem))) return false
+            Log.w(TAG, "$name: finished the set-aside a process ended in the middle of ($stem)")
+        }
+        return true
+    }
 
-    /** The database files set aside so far (not their companions). */
-    fun asides(): List<File> =
-        dir.listFiles()?.filter { f -> f.name.startsWith("$name$ASIDE") && COMPANIONS.none { f.name.endsWith(it) } }.orEmpty()
+    private fun liveCompanions(): List<File> = COMPANIONS.map { File(dir, name + it) }.filter { it.exists() }
+
+    /** The database files set aside so far (not their companions); null when the directory cannot be listed. */
+    fun asides(): List<File>? =
+        dir.listFiles()?.filter { f -> f.name.startsWith("$name$ASIDE") && (COMPANIONS + MOVING).none { f.name.endsWith(it) } }
+            ?: if (dir.exists()) null else emptyList()
 
     private fun stemOf(reason: AsideReason) = "$name$ASIDE${reason.tag}-"
 
     private fun freeStem(reason: AsideReason): String {
         var time = clock()
-        while ((COMPANIONS + "").any { File(dir, "${stemOf(reason)}$time$it").exists() }) time++
+        while ((COMPANIONS + "" + MOVING).any { File(dir, "${stemOf(reason)}$time$it").exists() }) time++
         return "${stemOf(reason)}$time"
     }
 
@@ -161,12 +198,15 @@ class DatabaseFiles(
          * Every file of database [name] in [dir] on disk now: the live file, its companions, and every
          * copy set aside with theirs. What a full wallet wipe removes, and reads back as gone.
          */
-        fun everyFileOf(dir: File, name: String): List<File> =
+        fun everyFileOf(dir: File, name: String): List<File>? =
             dir.listFiles()?.filter { f ->
                 f.name == name || COMPANIONS.any { f.name == name + it } || f.name.startsWith("$name$ASIDE")
-            }.orEmpty()
+            } ?: if (dir.exists()) null else emptyList() // a directory that is not there holds nothing; one that cannot be listed: cannot tell
 
         internal const val ASIDE = ".aside-"
+
+        /** The in-progress name of a database being set aside; see [setAside]. */
+        internal const val MOVING = ".moving"
         internal val COMPANIONS = listOf("-wal", "-shm", "-journal")
         private const val TAG = "DatabaseFiles"
     }
@@ -412,6 +452,13 @@ class DatabaseKeyProvisioner(
         private const val TAG = "DatabaseKey"
         private val LOCK = Any()
 
+        /**
+         * A re-key is in progress (its new password kept as pending, the file not yet confirmed under
+         * it). The next start resumes it; nothing else may set that database aside meanwhile.
+         */
+        fun rekeyPending(context: Context): Boolean =
+            context.getSharedPreferences(RECORDS, Context.MODE_PRIVATE).contains(PENDING)
+
         fun forContext(context: Context): DatabaseKeyProvisioner =
             DatabaseKeyProvisioner(context.getSharedPreferences(RECORDS, Context.MODE_PRIVATE), AndroidKeyVault)
 
@@ -478,7 +525,13 @@ class WalletDatabaseOpener(
     private val pause: (Long) -> Unit = Thread::sleep,
 ) {
 
-    fun plan(): DatabaseOpenPlan = when (val state = resolveSteadily()) {
+    fun plan(): DatabaseOpenPlan {
+        // A set-aside a process ended in the middle of is finished before anything else looks at the files.
+        if (!files.finishInterrupted()) return temporary("a half-done set-aside could not be finished")
+        return planFor(resolveSteadily())
+    }
+
+    private fun planFor(state: DatabaseKeyState): DatabaseOpenPlan = when (state) {
         is DatabaseKeyState.KeystoreUnavailable ->
             temporary("the Keystore could not be asked (${state.cause.javaClass.simpleName})")
         is DatabaseKeyState.Stored -> {

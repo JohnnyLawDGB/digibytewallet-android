@@ -683,4 +683,9 @@
     <string name="restore_date_onwards">ab Jan. %1$d</string>
     <string name="restore_date_range">Jan. %1$d – Dez. %1$d</string>
     <string name="restore_date_genesis">DigiByte startete im Januar 2014</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Passphrase konnte nicht gelesen werden</string>
+    <string name="seedview_pass_unreadable_body">Die Passphrase dieser Wallet konnte gerade nicht gelesen werden. Ihre Wiederherstellungswörter allein stellen diese Wallet möglicherweise nicht wieder her. Deshalb werden sie erst angezeigt, wenn die Passphrase zusammen mit ihnen angezeigt werden kann. Versuchen Sie es erneut.</string>
+    <string name="seedview_pass_retry">Erneut versuchen</string>
+    <!-- /pkg E2-keys -->
 </resources>

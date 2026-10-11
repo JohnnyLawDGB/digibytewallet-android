@@ -660,4 +660,9 @@
     <string name="restore_date_onwards">À partir de janv. %1$d</string>
     <string name="restore_date_range">janv. %1$d – déc. %1$d</string>
     <string name="restore_date_genesis">Lancement de DigiByte en janvier 2014</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Impossible de lire la phrase secrète</string>
+    <string name="seedview_pass_unreadable_body">La phrase secrète de ce portefeuille n\'a pas pu être lue pour le moment. Vos mots de récupération seuls risquent de ne pas restaurer ce portefeuille : ils ne s\'affichent donc que lorsque la phrase secrète peut s\'afficher avec eux. Réessayez.</string>
+    <string name="seedview_pass_retry">Réessayer</string>
+    <!-- /pkg E2-keys -->
 </resources>

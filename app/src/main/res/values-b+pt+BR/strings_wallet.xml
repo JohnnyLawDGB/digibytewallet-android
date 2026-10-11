@@ -680,4 +680,9 @@
     <string name="restore_date_onwards">A partir de jan. %1$d</string>
     <string name="restore_date_range">jan. %1$d – dez. %1$d</string>
     <string name="restore_date_genesis">O DigiByte foi lançado em janeiro de 2014</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Não foi possível ler a frase-senha</string>
+    <string name="seedview_pass_unreadable_body">A frase-senha desta carteira não pôde ser lida agora. Suas palavras de recuperação sozinhas podem não restaurar esta carteira, por isso elas só aparecem quando a frase-senha puder aparecer junto. Tente novamente.</string>
+    <string name="seedview_pass_retry">Tentar novamente</string>
+    <!-- /pkg E2-keys -->
 </resources>

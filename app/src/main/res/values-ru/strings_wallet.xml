@@ -685,4 +685,9 @@
     <string name="restore_date_onwards">С января %1$d</string>
     <string name="restore_date_range">янв. %1$d – дек. %1$d</string>
     <string name="restore_date_genesis">DigiByte запущен в январе 2014 г.</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Не удалось прочитать парольную фразу</string>
+    <string name="seedview_pass_unreadable_body">Парольную фразу этого кошелька сейчас не удалось прочитать. Одних слов восстановления может быть недостаточно, чтобы восстановить этот кошелёк, поэтому они не показываются, пока парольную фразу нельзя показать вместе с ними. Попробуйте ещё раз.</string>
+    <string name="seedview_pass_retry">Повторить</string>
+    <!-- /pkg E2-keys -->
 </resources>

@@ -675,4 +675,9 @@
     <string name="restore_date_onwards">Oca %1$d ve sonrası</string>
     <string name="restore_date_range">Oca %1$d – Ara %1$d</string>
     <string name="restore_date_genesis">DigiByte Ocak 2014\'te başladı</string>
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Parola okunamadı</string>
+    <string name="seedview_pass_unreadable_body">Bu cüzdanın parolası şu anda okunamadı. Kurtarma kelimeleriniz tek başına bu cüzdanı geri yüklemeyebilir; bu nedenle parola onlarla birlikte gösterilebilene kadar gösterilmezler. Tekrar deneyin.</string>
+    <string name="seedview_pass_retry">Yeniden dene</string>
+    <!-- /pkg E2-keys -->
 </resources>
