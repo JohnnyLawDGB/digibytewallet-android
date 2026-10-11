@@ -21,10 +21,11 @@ If this file and anything else disagree, this file wins — then fix the other o
 > branch building a different `applicationId` from the one that ships, stop: that is the
 > failure this section exists to prevent.
 
-`release-please` is still present and still inert — it triggers only on the retired
-`phase1-modernization` branch, which is why `CHANGELOG.md` stops at 3.3.0. Release notes are
-written by hand (§7). The io.digibyte `release.yml` was deleted on this line; io.digibyte
-releases, if one were ever needed, come from its own `release/io-digibyte-*` branches.
+`release-please` is gone: its workflow and its two configuration files were deleted on this line
+(4.0.90). It only ever ran on the retired `phase1-modernization` branch, which is why
+`CHANGELOG.md` stops at 3.3.0. Release notes are written by hand (§7). The io.digibyte
+`release.yml` was deleted on this line too; io.digibyte releases, if one were ever needed, come
+from its own `release/io-digibyte-*` branches.
 
 **Four repositories, four jobs.** Keep them straight:
 
