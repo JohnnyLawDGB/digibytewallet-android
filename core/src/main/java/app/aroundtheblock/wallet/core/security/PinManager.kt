@@ -82,6 +82,7 @@ interface PinStore {
         edit.ints.forEach { (key, value) -> putInt(key, value) }
         edit.longs.forEach { (key, value) -> putLong(key, value) }
         edit.booleans.forEach { (key, value) -> putBoolean(key, value) }
+        edit.strings.forEach { (key, value) -> putString(key, value) }
     }
 }
 
@@ -90,11 +91,13 @@ class PinStoreEdit {
     internal val ints = LinkedHashMap<String, Int>()
     internal val longs = LinkedHashMap<String, Long>()
     internal val booleans = LinkedHashMap<String, Boolean>()
+    internal val strings = LinkedHashMap<String, String>()
     internal val removals = LinkedHashSet<String>()
 
     fun putInt(key: String, value: Int): PinStoreEdit = apply { ints[key] = value }
     fun putLong(key: String, value: Long): PinStoreEdit = apply { longs[key] = value }
     fun putBoolean(key: String, value: Boolean): PinStoreEdit = apply { booleans[key] = value }
+    fun putString(key: String, value: String): PinStoreEdit = apply { strings[key] = value }
     fun remove(key: String): PinStoreEdit = apply { removals += key }
 }
 
@@ -208,6 +211,7 @@ private class EncryptedPrefsPinStore(context: Context) : PinStore {
         edit.ints.forEach { (key, value) -> editor.putInt(key, value) }
         edit.longs.forEach { (key, value) -> editor.putLong(key, value) }
         edit.booleans.forEach { (key, value) -> editor.putBoolean(key, value) }
+        edit.strings.forEach { (key, value) -> editor.putString(key, value) }
         editor.commit()
     }
 }
@@ -294,11 +298,11 @@ class PinManager internal constructor(
         val (hashHex, method) = tryArgon2Hash(pin, salt) ?: run {
             Pair(hashWithPbkdf2(pin, salt).toHex(), "pbkdf2")
         }
-        store.putString(KEY_HASH, hashHex)
-        store.putString(KEY_SALT, salt.toHex())
-        store.putString(KEY_METHOD, method)
-        // A freshly (re)set PIN starts from a clean rate-limit slate.
-        resetRateLimit()
+        // The record and a clean rate-limit slate are one write: a process stopped there leaves the old PIN
+        // working with its counters, or the new one with none -- never a record that neither PIN opens.
+        store.commit(
+            rateLimitReset().putString(KEY_HASH, hashHex).putString(KEY_SALT, salt.toHex()).putString(KEY_METHOD, method)
+        )
     }
 
     fun hasPin(): Boolean = store.contains(KEY_HASH)
@@ -384,11 +388,13 @@ class PinManager internal constructor(
     }
 
     private fun resetRateLimit() {
-        store.commit(
-            PinStoreEdit().putInt(KEY_FAIL_COUNT, 0)
-                .remove(KEY_COOLDOWN_LEFT_MS).remove(KEY_WALL_LOCKOUT_UNTIL).remove(KEY_WALL_LAST_FAIL_AT)
-        )
+        store.commit(rateLimitReset())
     }
+
+    /** Clears the failure count, the running cooldown, and a wall-clock cooldown 4.0.89 left behind. */
+    private fun rateLimitReset(): PinStoreEdit =
+        PinStoreEdit().putInt(KEY_FAIL_COUNT, 0)
+            .remove(KEY_COOLDOWN_LEFT_MS).remove(KEY_WALL_LOCKOUT_UNTIL).remove(KEY_WALL_LAST_FAIL_AT)
 
     // ── The cooldown on the monotonic clock ───────────────────────────────────
 

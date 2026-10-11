@@ -538,6 +538,41 @@ class PinRateLimitTest {
         }
     }
 
+    // ── Changing the PIN ─────────────────────────────────────────────────────────────────────
+
+    @Test fun `a PIN change stopped part-way leaves the old PIN or the new one working, never neither`() {
+        // The old PIN is set (through a hash that runs, or one that cannot, which leaves a PBKDF2 record) and two
+        // failures are counted against it. Then the PIN is changed through a store that stops at each write in
+        // turn. Afterwards everything is as it was -- the old PIN opens, the two failures still counted -- or
+        // everything is new: the new PIN opens and nothing is counted.
+        val newPin = "654321"
+        val neitherOldNorNew = mutableListOf<String>()
+        for (oldHashRuns in listOf(true, false)) {
+            for (stopAt in 0..4) {
+                val case = "old record ${if (oldHashRuns) "argon2id" else "pbkdf2"}, stopped at write $stopAt"
+                val c = FakePinClock(wall = t0)
+                val hash = StandInArgon2id().apply { runs = oldHashRuns }
+                val store = FakePinStore()
+                PinManager(store, hash, c).apply {
+                    setPin(correct)
+                    repeat(2) { verifyPin(wrong) }
+                }
+                hash.runs = true
+                stoppedAt(stopAt, store) { PinManager(it, hash, c).setPin(newPin) }
+
+                fun opens(pin: String): Boolean =
+                    PinManager(FakePinStore().also { it.map.putAll(store.map) }, hash, c).verifyPin(pin) == PinVerifyResult.Success
+                val oldOpens = opens(correct)
+                val newOpens = opens(newPin)
+                val count = store.getInt("pin_fail_count", -1)
+                if (!((oldOpens && !newOpens && count == 2) || (newOpens && !oldOpens && count == 0))) {
+                    neitherOldNorNew += "$case: the old PIN opens $oldOpens, the new PIN opens $newOpens, $count failures counted"
+                }
+            }
+        }
+        assertTrue(neitherOldNorNew.joinToString("; "), neitherOldNorNew.isEmpty())
+    }
+
     // ── A cooldown kept on the wall clock by 4.0.89 and earlier ──────────────────────────────
 
     @Test fun `a running cooldown kept on the wall clock by an earlier version is carried over once`() {
