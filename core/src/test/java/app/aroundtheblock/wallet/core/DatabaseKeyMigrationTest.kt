@@ -120,7 +120,8 @@ class DatabaseKeyMigrationTest {
         val deletedAt = events.indexOf("delete:$LEGACY_ALIAS")
         assertTrue("precondition: the seed migration completed and deleted the legacy key", deletedAt >= 0)
         val rewrappedAt = events.indexOf("encrypt:$DB_ALIAS")
-        val verifiedAt = events.lastIndexOf("decrypt:$DB_ALIAS")
+        // The last read of the record under its own key before the delete (the test's own reads come later).
+        val verifiedAt = events.subList(0, deletedAt).lastIndexOf("decrypt:$DB_ALIAS")
         assertTrue("the database password was not re-wrapped under its own key before the legacy key was deleted",
             rewrappedAt in 0 until deletedAt)
         assertTrue("the re-wrapped record was not read back and verified before the legacy key was deleted",

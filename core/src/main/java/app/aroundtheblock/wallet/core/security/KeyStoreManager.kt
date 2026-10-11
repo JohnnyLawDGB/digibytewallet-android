@@ -121,8 +121,11 @@ class KeyStoreManager(
     //
     // A SECOND alias, bound to a recent device unlock, that the seed blob migrates
     // onto (WalletManager.migrateSeedKeyIfNeeded). The legacy unbound key above
-    // remains only until migration completes; the DB key (dgb_db_passphrase) is a
-    // different alias and is deliberately never bound — Room opens in background.
+    // remains only until migration completes. The database password has a key of
+    // its own (dgb_db_passphrase, DatabaseKeyProvisioner), never bound — the
+    // database opens in the background. Records written before that key existed
+    // were wrapped under the legacy key above; each is moved onto its own key, read
+    // back and verified, before the migration may delete the legacy key.
 
     private val authAlias: String get() = alias + AUTH_ALIAS_SUFFIX
 

@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
 import app.aroundtheblock.wallet.core.db.dao.*
 import app.aroundtheblock.wallet.core.db.entity.*
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -65,7 +67,8 @@ abstract class WalletDatabase : RoomDatabase() {
             onFirstOpenFailure: ((android.database.sqlite.SQLiteException) -> Boolean)? = null,
         ): WalletDatabase {
             System.loadLibrary("sqlcipher")
-            val factory = SupportOpenHelperFactory(passphrase) // STUB: onFirstOpenFailure not wired yet (today)
+            val cipher = SupportOpenHelperFactory(passphrase)
+            val factory = if (onFirstOpenFailure == null) cipher else FirstOpenRecovery(cipher, onFirstOpenFailure)
             return Room.databaseBuilder(
                 context.applicationContext,
                 WalletDatabase::class.java,
@@ -87,8 +90,40 @@ abstract class WalletDatabase : RoomDatabase() {
 }
 
 /**
+ * The first open of the database through [delegate], given one chance to set right a file that does
+ * not open: [recover] answers true when it changed something (re-keyed or set the file aside) and the
+ * open is tried once more. Only the first open — later failures reach their caller as they always have.
+ */
+internal class FirstOpenRecovery(
+    private val delegate: SupportSQLiteOpenHelper.Factory,
+    private val recover: (android.database.sqlite.SQLiteException) -> Boolean,
+) : SupportSQLiteOpenHelper.Factory {
+    override fun create(configuration: SupportSQLiteOpenHelper.Configuration): SupportSQLiteOpenHelper {
+        val helper = delegate.create(configuration)
+        return object : SupportSQLiteOpenHelper by helper {
+            private var settled = false
+
+            override val writableDatabase: SupportSQLiteDatabase get() = open { helper.writableDatabase }
+
+            override val readableDatabase: SupportSQLiteDatabase get() = open { helper.readableDatabase }
+
+            private fun open(get: () -> SupportSQLiteDatabase): SupportSQLiteDatabase = synchronized(this) {
+                if (settled) return get()
+                try {
+                    get().also { settled = true }
+                } catch (e: android.database.sqlite.SQLiteException) {
+                    settled = true
+                    if (!recover(e)) throw e
+                    get()
+                }
+            }
+        }
+    }
+}
+
+/**
  * [CipherFiles] over SQLCipher. A probe opens the file with one password and reads its schema, then
- * closes it; nothing is written. Room is not involved, so no migration runs under a probe.
+ * closes it; nothing is written. Room is not involved, so no migration runs under a probe or a re-key.
  */
 internal class SqlCipherFiles(private val file: java.io.File) : CipherFiles {
 
@@ -96,11 +131,41 @@ internal class SqlCipherFiles(private val file: java.io.File) : CipherFiles {
         db.rawQuery("SELECT count(*) FROM sqlite_master", null).use { it.moveToFirst() }
     })
 
-    /** STUB: no re-key exists today. */
-    override fun rekey(from: ByteArray, to: ByteArray): RekeyAnswer = RekeyAnswer.UNCHANGED
+    /**
+     * SQLCipher's password change, then a reopen: [RekeyAnswer.REKEYED] only when every page reads
+     * back under [to] (SQLite's integrity check, which decrypts and authenticates each page) and
+     * [from] no longer opens the file; [RekeyAnswer.UNCHANGED] when it is still under [from].
+     */
+    override fun rekey(from: ByteArray, to: ByteArray): RekeyAnswer {
+        val failure = useOpen(from) { db ->
+            // Room keeps the database in write-ahead-log mode. Fold the log into the file and leave
+            // that mode first, so the change rewrites every page of the one file; Room's next open
+            // sets the mode again.
+            db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+            db.rawQuery("PRAGMA journal_mode=DELETE", null).use { it.moveToFirst() }
+            db.changePassword(to)
+        }
+        if (failure != null) android.util.Log.w(TAG, "password change did not complete (${failure.javaClass.simpleName})")
+        val underNew = checksUnder(to)
+        val underOld = probe(from) == OpenAnswer.OPENS
+        return when {
+            underNew && !underOld -> RekeyAnswer.REKEYED
+            underOld && !underNew -> RekeyAnswer.UNCHANGED
+            else -> RekeyAnswer.UNKNOWN
+        }
+    }
 
-    /** Opens the file with [password], runs [use], closes it. Null when all of it succeeded, else the database's failure. */
-    private fun useOpen(password: ByteArray, use: (net.zetetic.database.sqlcipher.SQLiteDatabase) -> Unit): android.database.sqlite.SQLiteException? {
+    /** Opens with [password] and checks every page: true only when the integrity check answers "ok". */
+    private fun checksUnder(password: ByteArray): Boolean {
+        var ok = false
+        val failure = useOpen(password) { db ->
+            db.rawQuery("PRAGMA quick_check", null).use { c -> ok = c.moveToFirst() && c.getString(0) == "ok" && !c.moveToNext() }
+        }
+        return failure == null && ok
+    }
+
+    /** Opens the file with [password], runs [use], closes it. Null when all of it succeeded, else the failure. */
+    private fun useOpen(password: ByteArray, use: (net.zetetic.database.sqlcipher.SQLiteDatabase) -> Unit): Exception? {
         System.loadLibrary("sqlcipher")
         var db: net.zetetic.database.sqlcipher.SQLiteDatabase? = null
         return try {
@@ -109,10 +174,15 @@ internal class SqlCipherFiles(private val file: java.io.File) : CipherFiles {
             )
             use(db)
             null
-        } catch (e: android.database.sqlite.SQLiteException) {
+        } catch (e: Exception) {
+            // What the database said is read by openFailureAnswer; anything else says nothing about the file.
             e
         } finally {
             runCatching { db?.close() }
         }
+    }
+
+    private companion object {
+        const val TAG = "WalletDatabase"
     }
 }

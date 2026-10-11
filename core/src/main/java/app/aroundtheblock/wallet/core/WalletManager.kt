@@ -61,6 +61,24 @@ internal fun cfBirthHeightToPersist(rawBirth: Long): Long? = rawBirth.takeIf { i
  *  wallet_creation_time existed. */
 internal const val DEFAULT_RESTORE_CREATION_TIME = 1774252800L
 
+// The seed record in `dgb_wallet_seed` (AND-005): written whole by WalletManager.writeSeedRecord.
+private const val KEY_CREATION_TIME = "wallet_creation_time"
+private const val KEY_RECORD_VERSION = "seed_record_version"
+private const val KEY_HAS_PASSPHRASE = "seed_has_passphrase"
+private const val KEY_FINGERPRINT_V1 = "seed_fingerprint"
+private const val KEY_FINGERPRINT_V2 = "seed_fingerprint_v2"
+
+/** The version this release writes the seed record at: written whole, in one commit, saying whether it has a passphrase. */
+private const val SEED_RECORD_VERSION = 1
+
+/** Ciphertext and IV keys of the seed and passphrase envelopes, under the auth-bound key and under the legacy one. */
+private val V2_ENVELOPE_FIELDS = listOf("encrypted_seed_v2", "encrypted_seed_iv_v2", "encrypted_pass_v2", "encrypted_pass_iv_v2")
+private val LEGACY_ENVELOPE_FIELDS = listOf("encrypted_seed", "encrypted_seed_iv", "encrypted_pass", "encrypted_pass_iv")
+
+/** Every field of the seed record. */
+private val SEED_RECORD_FIELDS = V2_ENVELOPE_FIELDS + LEGACY_ENVELOPE_FIELDS +
+    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2)
+
 /**
  * The creation time handed to native on a restore. Native picks the header anchor (and
  * `getWalletBirthCheckpointHeight`) from it: the latest checkpoint at least a week older. After a
@@ -171,10 +189,12 @@ class WalletManager(
     }
 
     /**
-     * Create a new wallet from a mnemonic phrase.
-     * Encrypts and persists the phrase to disk.
-     */
-    /**
+     * Create a new wallet from a mnemonic phrase, and store its record.
+     *
+     * The wallet exists once its record has landed, and not before: the record — seed, whether there
+     * is a passphrase and its envelope, creation time, identity, version — is ONE checked write
+     * ([writeSeedRecord]). A write that did not land answers false and leaves "wallet exists" false.
+     *
      * @param passphrase NFKD UTF-8 bytes, or null. **The CALLER owns these and must zero them** —
      *   this does not, because wiping a buffer it was merely handed is the mistake jni_derive.c
      *   already had to be corrected for once.
@@ -182,31 +202,24 @@ class WalletManager(
     fun createWallet(mnemonic: String, passphrase: ByteArray? = null): Boolean {
         // Default null keeps every existing caller — and every existing wallet — unchanged.
         if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
-        val prepared = passphrase
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            val success = createNative(mnemonicBytes, prepared)
-            if (success) {
-                persistSeed(mnemonicBytes)
-                persistPassphrase(prepared)
-                // Persist creation time so restoreFromDisk uses the right sync checkpoint
-                prefs.edit().putLong("wallet_creation_time", System.currentTimeMillis() / 1000).apply()
-                _walletState.value = WalletState.Unlocked
-                clearSyncData()
-                deriveSeedForIdentity(mnemonicBytes)?.let { s2 ->
-                    try { saveSeedFingerprintV2(s2) } finally { s2.fill(0) }
-                }
-                rescanNative()
-            }
-            return success
+            if (!createNative(mnemonicBytes, passphrase)) return false
+            // Persist creation time so restoreFromDisk uses the right sync checkpoint — in the record.
+            val stored = writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000)
+            if (!stored) return false
+            _walletState.value = WalletState.Unlocked
+            clearSyncData()
+            rescanNative()
+            return true
         } finally {
             mnemonicBytes.fill(0)
         }
     }
 
     /**
-     * Recover wallet from mnemonic and creation timestamp.
-     * Encrypts and persists the phrase to disk.
+     * Recover wallet from mnemonic and creation timestamp, and store its record — one checked write,
+     * as [createWallet]; a write that did not land answers false and leaves "wallet exists" false.
      */
     fun recoverWallet(
         mnemonic: String,
@@ -215,49 +228,40 @@ class WalletManager(
         passphrase: ByteArray? = null,
     ): Boolean {
         if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
-        val prepared = passphrase
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            val success = recoverNative(mnemonicBytes, creationTimestamp, prepared)
-            if (success) {
-                persistSeed(mnemonicBytes)
-                persistPassphrase(prepared)
-                _walletState.value = WalletState.Unlocked
-                clearSyncData()
-                deriveSeedForIdentity(mnemonicBytes)?.let { s2 ->
-                    try { saveSeedFingerprintV2(s2) } finally { s2.fill(0) }
-                }
-                // PERSIST the creation time (mirror createWallet, line 97). Without this,
-                // restoreFromDisk finds no wallet_creation_time on the next launch and feeds
-                // native the HARDCODED 2026 fallback (line 229) → getWalletBirthCheckpointHeight
-                // returns the ~2026 checkpoint (~block 21.5M) for EVERY recovered wallet →
-                // an older wallet's scan floors ~20M blocks ABOVE its funds and shows empty.
-                // Use the user's chosen recovery timestamp; if unknown (0), match native's own
-                // time(NULL) default so a restart stays consistent with the first sync.
-                val creationTimeSecs =
-                    if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
-                prefs.edit().putLong("wallet_creation_time", creationTimeSecs).apply()
-                // PERSIST the compact-filter scan floor NOW, while native
-                // g_walletCreationTime still reflects the user's chosen recovery date
-                // (jni_wallet.c sets it from creationTimestamp). Without this the birth
-                // height lives ONLY in volatile native state: the next app launch rebuilds
-                // the wallet from the seed alone (restoreFromDisk passes no timestamp →
-                // g_walletCreationTime resets to 0 → getWalletBirthCheckpointHeight returns
-                // the GENESIS checkpoint), so the scan silently re-floors at genesis and
-                // grinds the full ~23M-block chain (~11-19h) that never finishes on an
-                // interruption. Writing cf_birth_height makes the chosen floor DURABLE
-                // across restarts (proven on-device: genesis→21.5M cut a 19h scan to ~12m).
-                // Mirrors rebuildFromChainRescan(). commit() (sync) so it lands before the
-                // rescan()/first sync reads it.
-                val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
-                val toPersist = cfBirthHeightToPersist(birth)
-                context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-                    if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
-                }.commit()
-                android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
-                rescanNative()
-            }
-            return success
+            if (!recoverNative(mnemonicBytes, creationTimestamp, passphrase)) return false
+            // The creation time is part of the record. Without it restoreFromDisk feeds native the
+            // hardcoded 2026 fallback (DEFAULT_RESTORE_CREATION_TIME) → getWalletBirthCheckpointHeight
+            // returns the ~2026 checkpoint (~block 21.5M) for EVERY recovered wallet → an older
+            // wallet's scan floors ~20M blocks ABOVE its funds and shows empty. Use the user's chosen
+            // recovery timestamp; if unknown (0), match native's own time(NULL) default so a restart
+            // stays consistent with the first sync.
+            val creationTimeSecs =
+                if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
+            if (!writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs)) return false
+            _walletState.value = WalletState.Unlocked
+            clearSyncData()
+            // PERSIST the compact-filter scan floor NOW, while native
+            // g_walletCreationTime still reflects the user's chosen recovery date
+            // (jni_wallet.c sets it from creationTimestamp). Without this the birth
+            // height lives ONLY in volatile native state: the next app launch rebuilds
+            // the wallet from the seed alone (restoreFromDisk passes no timestamp →
+            // g_walletCreationTime resets to 0 → getWalletBirthCheckpointHeight returns
+            // the GENESIS checkpoint), so the scan silently re-floors at genesis and
+            // grinds the full ~23M-block chain (~11-19h) that never finishes on an
+            // interruption. Writing cf_birth_height makes the chosen floor DURABLE
+            // across restarts (proven on-device: genesis→21.5M cut a 19h scan to ~12m).
+            // Mirrors rebuildFromChainRescan(). commit() (sync) so it lands before the
+            // rescan()/first sync reads it.
+            val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
+            val toPersist = cfBirthHeightToPersist(birth)
+            context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
+                if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+            }.commit()
+            android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
+            rescanNative()
+            return true
         } finally {
             mnemonicBytes.fill(0)
         }
@@ -270,6 +274,26 @@ class WalletManager(
      */
     fun restoreFromDisk(): Boolean {
         val seedBytes = loadSeed() ?: return false
+        // The stored passphrase MUST come along. This is the unlock path — it runs on every
+        // restart, on resume, and from BootGuard. Rebuilding a passphrase wallet without it
+        // derives a different seed, so the wallet would open with different addresses and
+        // report a zero balance, on a wallet whose coins are perfectly safe. Null for the
+        // overwhelming majority of wallets, which have no passphrase. Read before anything native:
+        // a record that cannot say whether it has one is not opened at all (AND-005).
+        val storedPass = try {
+            when (val stored = storedPassphrase()) {
+                is StoredPassphrase.Unknown -> {
+                    android.util.Log.w("WalletManager", "wallet record incomplete (${stored.why}); not opened")
+                    seedBytes.fill(0)
+                    return false
+                }
+                is StoredPassphrase.Present -> stored.bytes
+                StoredPassphrase.None -> null
+            }
+        } catch (t: Throwable) {
+            seedBytes.fill(0)
+            throw t
+        }
         try {
             // CRITICAL: stop sync before replacing the wallet — the peer manager's
             // background threads are using the old wallet pointer. Freeing it
@@ -293,7 +317,7 @@ class WalletManager(
             // Identity is the DERIVED seed, so a passphrase distinguishes wallets that share a
             // mnemonic. v1 (mnemonic-based) is still honoured for installs that predate this, so
             // upgrading does not clear sync data and re-sync everyone from the floor.
-            val identitySeed = deriveSeedForIdentity(seedBytes)
+            val identitySeed = deriveSeedForIdentity(seedBytes, storedPass)
             if (identitySeed == null) {
                 // Derivation failed — do NOT guess. Clearing on a failed derivation would throw
                 // away good sync data over a transient native error.
@@ -370,26 +394,17 @@ class WalletManager(
 
             // Use recoverWalletFromBytes with the original creation timestamp so the
             // peer manager starts syncing from the right checkpoint — not NOW.
-            val creationTime = prefs.getLong("wallet_creation_time", 0L)
-            // The stored passphrase MUST come along. This is the unlock path — it runs on every
-            // restart, on resume, and from BootGuard. Rebuilding a passphrase wallet without it
-            // derives a different seed, so the wallet would open with different addresses and
-            // report a zero balance, on a wallet whose coins are perfectly safe. Null for the
-            // overwhelming majority of wallets, which have no passphrase.
-            val storedPass = loadPassphrase()
+            val creationTime = prefs.getLong(KEY_CREATION_TIME, 0L)
             // After a one-time history rebuild the anchor goes no later than the oldest record
             // the discarded cache held (creationTimeForRestore); otherwise unchanged.
             val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))
-            val success = try {
-                NativeBridge.recoverWalletFromBytes(seedBytes, restoreTime, storedPass)
-            } finally {
-                storedPass?.fill(0)
-            }
+            val success = NativeBridge.recoverWalletFromBytes(seedBytes, restoreTime, storedPass)
             if (success) {
                 _walletState.value = WalletState.Unlocked
             }
             return success
         } finally {
+            storedPass?.fill(0)
             seedBytes.fill(0)
         }
     }
@@ -883,31 +898,98 @@ class WalletManager(
 
     // ── Seed persistence ────────────────────────────────────────
 
-    private fun persistSeed(mnemonicBytes: ByteArray) {
-        // Auth-bound key first (docs/specs/keystore-auth-binding.md). ANY failure —
-        // keygen refused (no lock screen), lapsed auth window at onboarding, vendor
-        // quirk — falls back to the legacy unbound key: wallet creation never blocks
-        // on binding (the API 28 lesson from 256522c2).
+    /**
+     * A wallet record's secrets, sealed before anything is written, under one door: the auth-bound key
+     * where the device allows it (docs/specs/keystore-auth-binding.md), else the legacy unbound key.
+     * Wallet creation never blocks on binding (the API 28 lesson from 256522c2): ANY failure on the
+     * bound door — keygen refused, a lapsed auth window, a vendor quirk — falls back to the legacy one.
+     */
+    private class SealedRecord(val authBound: Boolean, val seed: EncryptedData, val passphrase: EncryptedData?)
+
+    private fun sealRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?): SealedRecord {
         if (keyStoreManager.createAuthBoundKey()) {
             try {
-                val enc = keyStoreManager.encryptAuthBound(mnemonicBytes)
-                prefs.edit()
-                    .putString("encrypted_seed_v2", bytesToHex(enc.ciphertext))
-                    .putString("encrypted_seed_iv_v2", bytesToHex(enc.iv))
-                    .remove("encrypted_seed")
-                    .remove("encrypted_seed_iv")
-                    .apply()
-                return
+                return SealedRecord(
+                    authBound = true,
+                    seed = keyStoreManager.encryptAuthBound(mnemonicBytes),
+                    passphrase = passphrase?.let { keyStoreManager.encryptAuthBound(it) },
+                )
             } catch (e: Exception) {
                 android.util.Log.w("WalletManager", "auth-bound blob write failed (${e::class.java.simpleName}) — using legacy key")
             }
         }
         keyStoreManager.createKey()
-        val encrypted = keyStoreManager.encrypt(mnemonicBytes)
-        prefs.edit()
-            .putString("encrypted_seed", bytesToHex(encrypted.ciphertext))
-            .putString("encrypted_seed_iv", bytesToHex(encrypted.iv))
-            .apply()
+        return SealedRecord(
+            authBound = false,
+            seed = keyStoreManager.encrypt(mnemonicBytes),
+            passphrase = passphrase?.let { keyStoreManager.encrypt(it) },
+        )
+    }
+
+    /**
+     * Writes a wallet's record — the seed, whether there is a passphrase and its envelope, the creation
+     * time, the wallet's identity and the record's version — with ONE checked commit, every field
+     * prepared first (AND-005). True only when the write landed and reads back as written. Otherwise
+     * this process is put back to what the store held before, so "wallet exists" stays false for a
+     * record that never reached the disk, in this process and the next.
+     *
+     * The passphrase is stored rather than prompted because [restoreFromDisk] runs from resume and
+     * BootGuard paths with no UI attached; the cost is stated in the spec: a stored passphrase protects
+     * the written BACKUP, not the device, because it sits behind the same door as the mnemonic. A null
+     * or empty passphrase is "no passphrase" — BIP39 treats absent and empty identically (salt =
+     * "mnemonic"), so the two must remain the same wallet.
+     */
+    private fun writeSeedRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?, creationTimeSecs: Long): Boolean {
+        val pass = passphrase?.takeIf { it.isNotEmpty() }
+        val sealed = try {
+            sealRecord(mnemonicBytes, pass)
+        } catch (e: Exception) {
+            android.util.Log.e("WalletManager", "wallet record not sealed (${e::class.java.simpleName}); no wallet was made")
+            return false
+        }
+        val identity = identityOf(mnemonicBytes, pass)
+        val (seedCt, seedIv, passCt, passIv) = if (sealed.authBound) V2_ENVELOPE_FIELDS else LEGACY_ENVELOPE_FIELDS
+        val seedHex = bytesToHex(sealed.seed.ciphertext)
+        val held = prefs.all
+        val edit = prefs.edit()
+        // A record is written whole: nothing of an earlier one survives it.
+        SEED_RECORD_FIELDS.forEach { edit.remove(it) }
+        edit.putString(seedCt, seedHex).putString(seedIv, bytesToHex(sealed.seed.iv))
+        sealed.passphrase?.let { edit.putString(passCt, bytesToHex(it.ciphertext)).putString(passIv, bytesToHex(it.iv)) }
+        identity?.let { edit.putString(KEY_FINGERPRINT_V2, it) }
+        edit.putLong(KEY_CREATION_TIME, creationTimeSecs)
+            .putBoolean(KEY_HAS_PASSPHRASE, sealed.passphrase != null)
+            .putInt(KEY_RECORD_VERSION, SEED_RECORD_VERSION)
+        val landed = edit.commit()
+        val readsBack = landed &&
+            prefs.getInt(KEY_RECORD_VERSION, 0) == SEED_RECORD_VERSION &&
+            prefs.getString(seedCt, null) == seedHex &&
+            prefs.contains(KEY_HAS_PASSPHRASE) && prefs.getBoolean(KEY_HAS_PASSPHRASE, false) == (sealed.passphrase != null) &&
+            prefs.getLong(KEY_CREATION_TIME, -1L) == creationTimeSecs
+        if (readsBack) return true
+        android.util.Log.e("WalletManager", "wallet record not stored (landed=$landed); no wallet was made")
+        putBack(held)
+        return false
+    }
+
+    /**
+     * After a write to the record store that did not land or did not read back: put [held] — what the
+     * store showed before — back into this process's view, and onto disk if that write lands. The file
+     * never took the refused write, so this process then reads what the file holds.
+     */
+    private fun putBack(held: Map<String, *>) {
+        val editor = prefs.edit().clear()
+        for ((key, value) in held) {
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Long -> editor.putLong(key, value)
+                is Int -> editor.putInt(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        if (!editor.commit()) android.util.Log.w("WalletManager", "wallet store: a refused write was put back in this process only")
     }
 
     /** True when the seed blob lives under the auth-bound key. */
@@ -919,6 +1001,12 @@ class WalletManager(
      * anyway. Verified before destructive: the v2 blob must round-trip decrypt
      * equal BEFORE the legacy blob and key are removed. Every failure aborts
      * quietly and is retried on a later unlock.
+     *
+     * The legacy key also wrapped the database password's record on installs from before that record
+     * had a key of its own (PER-001): the record is moved onto its own key, read back and verified
+     * ([releaseDatabaseKey]) before the legacy key is deleted, and while that has not happened the key
+     * stays. A passphrase envelope that is there but cannot be read stops the migration, keeping the
+     * envelope and the key: dropping it would turn the wallet into a different one.
      */
     private fun migrateSeedKeyIfNeeded(mnemonicBytes: ByteArray) {
         if (seedIsAuthBound()) return
@@ -934,15 +1022,23 @@ class WalletManager(
             }
             // Passphrase blob moves through the same door as the mnemonic.
             var passCt: String? = null; var passIv: String? = null
-            val pass = loadLegacyPassphrase()
-            if (pass != null) {
+            val legacyEnvelope = envelopeAt("encrypted_pass", "encrypted_pass_iv", authBound = false)
+            if (legacyEnvelope != null) {
+                val pass = try {
+                    keyStoreManager.decrypt(legacyEnvelope.data)
+                } catch (e: Exception) {
+                    android.util.Log.w("WalletManager", "key-wrap migration deferred: an envelope did not read (${e::class.java.simpleName})")
+                    return
+                }
                 try {
-                    val pEnc = keyStoreManager.encryptAuthBound(pass)
-                    val pCheck = keyStoreManager.decryptAuthBound(pEnc)
-                    val pOk = pCheck.contentEquals(pass)
-                    pCheck.fill(0)
-                    if (!pOk) return
-                    passCt = bytesToHex(pEnc.ciphertext); passIv = bytesToHex(pEnc.iv)
+                    if (pass.isNotEmpty()) {
+                        val pEnc = keyStoreManager.encryptAuthBound(pass)
+                        val pCheck = keyStoreManager.decryptAuthBound(pEnc)
+                        val pOk = pCheck.contentEquals(pass)
+                        pCheck.fill(0)
+                        if (!pOk) return
+                        passCt = bytesToHex(pEnc.ciphertext); passIv = bytesToHex(pEnc.iv)
+                    }
                 } finally {
                     pass.fill(0)
                 }
@@ -956,7 +1052,13 @@ class WalletManager(
             prefs.edit()
                 .remove("encrypted_seed").remove("encrypted_seed_iv")
                 .remove("encrypted_pass").remove("encrypted_pass_iv")
-                .apply()
+                .commit()
+            // The database password's record, re-wrapped under its own key and verified, BEFORE the key
+            // that wrapped it is deleted. Until then the key stays; a later unlock or start asks again.
+            if (!releaseDatabaseKey()) {
+                android.util.Log.w("WalletManager", "legacy key kept: the database key record still depends on it")
+                return
+            }
             keyStoreManager.deleteLegacyKey()
             android.util.Log.i("WalletManager", "wallet blob re-wrapped onto auth-bound key")
         } catch (e: Exception) {
@@ -966,78 +1068,79 @@ class WalletManager(
         }
     }
 
-    /**
-     * Persist the OPTIONAL BIP39 passphrase, under the same Keystore key as the mnemonic.
-     *
-     * Stored rather than prompted because [restoreFromDisk] runs from resume and BootGuard paths
-     * with no UI attached — a passphrase that had to be typed on every unlock would leave those
-     * unable to rebuild the wallet, and background sync would stop until the user next opened the
-     * app. The cost is stated in the spec: a stored passphrase protects the written BACKUP, not
-     * the device, because it sits behind the same door as the mnemonic.
-     *
-     * A null or blank passphrase writes nothing — BIP39 treats absent and empty identically
-     * (salt = "mnemonic"), so an absent entry and an empty one must remain the same wallet.
-     */
-    /** @param passphrase NFKD UTF-8 bytes, or null. The caller still owns and must zero them. */
-    private fun persistPassphrase(passphrase: ByteArray?) {
-        if (passphrase == null || passphrase.isEmpty()) {
-            prefs.edit().remove("encrypted_pass").remove("encrypted_pass_iv").remove("encrypted_pass_v2").remove("encrypted_pass_iv_v2").apply()
-            return
-        }
-        if (seedIsAuthBound()) {
-            try {
-                val enc = keyStoreManager.encryptAuthBound(passphrase)
-                prefs.edit()
-                    .putString("encrypted_pass_v2", bytesToHex(enc.ciphertext))
-                    .putString("encrypted_pass_iv_v2", bytesToHex(enc.iv))
-                    .remove("encrypted_pass").remove("encrypted_pass_iv")
-                    .apply()
-                return
-            } catch (e: Exception) {
-                android.util.Log.w("WalletManager", "auth-bound pass-blob write failed (${e::class.java.simpleName}) — using legacy key")
-            }
-        }
-        keyStoreManager.createKey()
-        val encrypted = keyStoreManager.encrypt(passphrase)
-        prefs.edit()
-            .putString("encrypted_pass", bytesToHex(encrypted.ciphertext))
-            .putString("encrypted_pass_iv", bytesToHex(encrypted.iv))
-            .apply()
+    /** What the stored record says about the wallet's optional BIP39 passphrase. */
+    private sealed class StoredPassphrase {
+        data object None : StoredPassphrase()
+
+        /** NFKD UTF-8 bytes. **The caller owns them and must `fill(0)` them.** */
+        class Present(val bytes: ByteArray) : StoredPassphrase()
+
+        /** The record cannot say: an error, never "no passphrase" — that would be a different wallet. */
+        class Unknown(val why: String) : StoredPassphrase()
+    }
+
+    /** A passphrase envelope as stored, under the auth-bound key ([authBound]) or the legacy one. */
+    private class Envelope(val data: EncryptedData, val authBound: Boolean)
+
+    /** The envelope stored under [ctKey]/[ivKey], or null when there is none. Throws when it is malformed. */
+    private fun envelopeAt(ctKey: String, ivKey: String, authBound: Boolean): Envelope? {
+        val ct = prefs.getString(ctKey, null)
+        val iv = prefs.getString(ivKey, null)
+        if (ct == null && iv == null) return null
+        require(ct != null && iv != null) { "half an envelope" }
+        return Envelope(EncryptedData(hexToBytes(ct), hexToBytes(iv)), authBound)
     }
 
     /**
-     * The stored passphrase as NFKD UTF-8 bytes, or null when this wallet has none.
+     * What the record says about the passphrase (AND-005).
      *
-     * Bytes rather than a String so the caller can wipe it — the version this replaces built a
-     * String from the decrypted bytes, which then could not be zeroed and outlived every use.
-     * **The caller owns the result and must `fill(0)` it.**
+     * A record written by this release carries a version marker and says whether the wallet has a
+     * passphrase; its envelope must then be there and read, and none must be there when it says none.
+     * A record with no version marker comes from an earlier release. Its envelope is read if it holds
+     * one. Without one it is "no passphrase" only where the record itself shows its passphrase write
+     * landed: every earlier release wrote the seed, then the passphrase (or its removal), then the
+     * creation time, each write a full snapshot of the store — so a creation time on disk means the
+     * passphrase write before it landed too; and a mnemonic-based fingerprint (v1) was only ever written
+     * by releases that had no passphrases. Anything else is [StoredPassphrase.Unknown].
+     *
+     * @throws KeystoreUserAuthRequiredException / KeystoreKeyInvalidatedException as [loadSeed].
      */
-    private fun loadPassphrase(): ByteArray? {
-        val ctV2 = prefs.getString("encrypted_pass_v2", null)
-        val ivV2 = prefs.getString("encrypted_pass_iv_v2", null)
-        if (ctV2 != null && ivV2 != null) {
-            return try {
-                keyStoreManager.decryptAuthBound(EncryptedData(hexToBytes(ctV2), hexToBytes(ivV2)))
-                    ?.takeIf { it.isNotEmpty() }
-            } catch (e: KeystoreUserAuthRequiredException) {
-                throw e
-            } catch (e: KeystoreKeyInvalidatedException) {
-                throw e
-            } catch (e: Exception) {
-                null
+    private fun storedPassphrase(): StoredPassphrase {
+        val envelope = try {
+            envelopeAt("encrypted_pass_v2", "encrypted_pass_iv_v2", authBound = true)
+                ?: envelopeAt("encrypted_pass", "encrypted_pass_iv", authBound = false)
+        } catch (e: Exception) {
+            return StoredPassphrase.Unknown("envelope malformed")
+        }
+        if (prefs.getInt(KEY_RECORD_VERSION, 0) >= 1) {
+            if (!prefs.contains(KEY_HAS_PASSPHRASE)) return StoredPassphrase.Unknown("versioned record without its flag")
+            val says = prefs.getBoolean(KEY_HAS_PASSPHRASE, false)
+            return when {
+                says && envelope == null -> StoredPassphrase.Unknown("record says it has one and holds none")
+                !says && envelope != null -> StoredPassphrase.Unknown("record says it has none and holds one")
+                envelope == null -> StoredPassphrase.None
+                else -> openEnvelope(envelope).let {
+                    if (it === StoredPassphrase.None) StoredPassphrase.Unknown("record says it has one and holds an empty one") else it
+                }
             }
         }
-        return loadLegacyPassphrase()
+        if (envelope != null) return openEnvelope(envelope)
+        if (prefs.contains(KEY_CREATION_TIME) || prefs.contains(KEY_FINGERPRINT_V1)) return StoredPassphrase.None
+        return StoredPassphrase.Unknown("record from an earlier release does not show its write completed")
     }
 
-    private fun loadLegacyPassphrase(): ByteArray? = try {
-        val ct = prefs.getString("encrypted_pass", null)
-        val iv = prefs.getString("encrypted_pass_iv", null)
-        if (ct == null || iv == null) null
-        else keyStoreManager.decrypt(EncryptedData(hexToBytes(ct), hexToBytes(iv)))
-            ?.takeIf { it.isNotEmpty() }
-    } catch (e: Exception) {
-        null
+    private fun openEnvelope(envelope: Envelope): StoredPassphrase {
+        val bytes = try {
+            if (envelope.authBound) keyStoreManager.decryptAuthBound(envelope.data) else keyStoreManager.decrypt(envelope.data)
+        } catch (e: KeystoreUserAuthRequiredException) {
+            throw e
+        } catch (e: KeystoreKeyInvalidatedException) {
+            throw e
+        } catch (e: Exception) {
+            return StoredPassphrase.Unknown("envelope did not read (${e::class.java.simpleName})")
+        }
+        if (bytes.isEmpty()) return StoredPassphrase.None
+        return StoredPassphrase.Present(bytes)
     }
 
     /**
@@ -1078,13 +1181,21 @@ class WalletManager(
      *  Caller owns the bytes and must fill(0). Throws like [loadSeed]. */
     fun decryptStoredMnemonic(): ByteArray? = loadSeed()
 
-    /** See [decryptStoredMnemonic]. */
-    fun decryptStoredPassphrase(): ByteArray? = loadPassphrase()
+    /**
+     * The stored passphrase as NFKD UTF-8 bytes, or null when this wallet has none. **The caller owns
+     * the result and must `fill(0)` it.** Throws like [loadSeed], and [IllegalStateException] when the
+     * record cannot say whether the wallet has one — that is an error, never "none".
+     */
+    fun decryptStoredPassphrase(): ByteArray? = when (val stored = storedPassphrase()) {
+        is StoredPassphrase.Present -> stored.bytes
+        StoredPassphrase.None -> null
+        is StoredPassphrase.Unknown -> throw IllegalStateException("wallet record incomplete: ${stored.why}")
+    }
 
     /**
      * Load the wallet's **64-byte BIP39 seed** for re-runnable recovery flows
      * (classify / sweep). The on-disk secret is the BIP39 *mnemonic* (see
-     * [persistSeed]); this decrypts it via the existing [loadSeed] path and
+     * [writeSeedRecord]); this decrypts it via the existing [loadSeed] path and
      * converts it once via [NativeBridge.mnemonicToSeed], zeroing the decrypted
      * mnemonic bytes before returning.
      *
@@ -1092,14 +1203,22 @@ class WalletManager(
      * `fill(0)` when done.
      *
      * @return the 64-byte BIP39 seed, or null if no wallet exists, decrypt
-     *   failed, or seed derivation failed.
+     *   failed, the record cannot say whether it has a passphrase, or seed
+     *   derivation failed.
      */
     fun loadBip39Seed(): ByteArray? {
         val mnemonicBytes = loadSeed() ?: return null
         return try {
             // Carries the wallet's stored passphrase, if it has one — a passphrase wallet's
             // recovery/sweep seed must match the seed it actually derives from.
-            val pass = loadPassphrase()
+            val pass = when (val stored = storedPassphrase()) {
+                is StoredPassphrase.Unknown -> {
+                    android.util.Log.w("WalletManager", "wallet record incomplete (${stored.why}); recovery key not derived")
+                    return null
+                }
+                is StoredPassphrase.Present -> stored.bytes
+                StoredPassphrase.None -> null
+            }
             val seed = try {
                 seedNative(mnemonicBytes, pass)
             } finally {
@@ -1145,35 +1264,33 @@ class WalletManager(
     }
 
     /**
-     * Store the wallet's identity so restarts can tell whether the seed changed.
-     *
-     * Now over the DERIVED seed rather than the mnemonic: a BIP39 passphrase lets one mnemonic
-     * open many wallets, which would all share a mnemonic-based fingerprint and silently inherit
-     * each other's sync data. See [SeedFingerprint] for why it is versioned rather than replaced
-     * — recomputing in place would clear sync data for every existing install on first launch.
+     * The wallet's identity, so restarts can tell whether the seed changed: [SeedFingerprint.v2] of the
+     * DERIVED seed, not the mnemonic — a BIP39 passphrase lets one mnemonic open many wallets, which
+     * would all share a mnemonic-based fingerprint and silently inherit each other's sync data. See
+     * [SeedFingerprint] for why it is versioned rather than replaced. Part of the record
+     * ([writeSeedRecord]); null when the seed cannot be derived.
      */
-    private fun saveSeedFingerprintV2(seedBytes: ByteArray) {
-        prefs.edit().putString("seed_fingerprint_v2", SeedFingerprint.v2(seedBytes)).apply()
+    private fun identityOf(mnemonicBytes: ByteArray, passphrase: ByteArray?): String? {
+        val derived = deriveSeedForIdentity(mnemonicBytes, passphrase) ?: return null
+        return try {
+            SeedFingerprint.v2(derived)
+        } finally {
+            derived.fill(0)
+        }
     }
 
     private fun storedFingerprints() = SeedFingerprint.Stored(
-        v1 = prefs.getString("seed_fingerprint", null),
-        v2 = prefs.getString("seed_fingerprint_v2", null),
+        v1 = prefs.getString(KEY_FINGERPRINT_V1, null),
+        v2 = prefs.getString(KEY_FINGERPRINT_V2, null),
     )
 
     /**
-     * The 64-byte seed for a mnemonic under this wallet's stored passphrase (usually none).
-     * Caller must zero the result.
+     * The 64-byte seed for a mnemonic under [passphrase] (usually none). Caller must zero the result.
      */
-    private fun deriveSeedForIdentity(mnemonicBytes: ByteArray): ByteArray? {
-        val pass = loadPassphrase()
-        return try {
-            seedNative(mnemonicBytes, pass)?.takeIf { it.isNotEmpty() }
-        } catch (e: Exception) {
-            null
-        } finally {
-            pass?.fill(0)
-        }
+    private fun deriveSeedForIdentity(mnemonicBytes: ByteArray, passphrase: ByteArray?): ByteArray? = try {
+        seedNative(mnemonicBytes, passphrase)?.takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+        null
     }
 
     // ── Hex utilities ────────────────────────────────────────────
