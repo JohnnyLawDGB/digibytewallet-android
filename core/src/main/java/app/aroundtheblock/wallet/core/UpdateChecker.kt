@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core
 
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -51,7 +52,7 @@ class UpdateChecker(private val client: OkHttpClient, private val repo: String) 
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
-                val body = response.body?.string() ?: return@withContext null
+                val body = BoundedBody.text(response.body, MAX_RELEASES_BODY_BYTES) ?: return@withContext null
 
                 // /releases returns an ARRAY (newest first); /releases/latest one object.
                 val release: JSONObject = if (includePrereleases) {
@@ -112,6 +113,12 @@ class UpdateChecker(private val client: OkHttpClient, private val repo: String) 
     }
 
     internal companion object {
+        /**
+         * The most the releases answer may be: 4 MiB. Ten releases with notes at GitHub's own
+         * limit (125,000 characters each) come to about that; this repository's are a few KB.
+         */
+        const val MAX_RELEASES_BODY_BYTES = 4L * 1024 * 1024
+
         const val RELEASE_PAGE = "releases/"
         const val RELEASE_DOWNLOAD = "releases/download/"
 

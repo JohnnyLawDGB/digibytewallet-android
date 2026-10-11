@@ -2,6 +2,9 @@ package app.aroundtheblock.wallet.di
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.aroundtheblock.wallet.core.UpdateChecker
+import app.aroundtheblock.wallet.core.asset.network.MultiEndpointAssetClient
+import app.aroundtheblock.wallet.core.digistamp.DigistampClient
 import app.aroundtheblock.wallet.core.network.DigiScopePins
 import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
 import app.aroundtheblock.wallet.core.tor.TorManager
@@ -83,6 +86,35 @@ class SharedClientPinsTest {
         val node = AppModule.provideDgbNodeClient(context(), shared)
         assertPinsDigiScope("the reconcile client (default endpoint)", clientOf(node, "pinnedClient"))
         assertPinsDigiScope("the reconcile client (own endpoint)", clientOf(node, "unpinnedClient"))
+    }
+
+    /**
+     * Every endpoint of the asset metadata chain, as AppModule builds it, reaches the DigiScope host
+     * only through its pins. A client that sets a pinner of its own replaces the shared one, so a
+     * pinner holding another host's pins alone would leave the DigiScope host unpinned on that client
+     * (reachable by a redirect).
+     */
+    @Test fun `every asset chain endpoint reaches the DigiScope host only through its pins`() {
+        val chain = AppModule.provideAssetNetworkClient(shared) as MultiEndpointAssetClient
+        val endpoints = chain.javaClass.getDeclaredField("endpoints").apply { isAccessible = true }.get(chain) as List<*>
+        assertTrue("the asset chain has no endpoints", endpoints.isNotEmpty())
+        for (endpoint in endpoints) {
+            assertPinsDigiScope("the asset endpoint ${endpoint!!.javaClass.simpleName}", clientOf(endpoint, "client"))
+        }
+    }
+
+    @Test fun `the asset stack lookup reaches the DigiScope host only through its pins`() {
+        val source = app.aroundtheblock.wallet.core.asset.network.DigiScopeAssetClient(baseClient = shared)
+        assertPinsDigiScope("the asset stack lookup", clientOf(source, "stackClient"))
+    }
+
+    @Test fun `digistamp's sign-in client reaches the DigiScope host only through its pins`() {
+        assertPinsDigiScope("digistamp's sign-in client", clientOf(DigistampClient(shared), "client"))
+    }
+
+    /** GUARD: the update check is made on the shared client itself. */
+    @Test fun `the update check is made on a pinned client`() {
+        assertPinsDigiScope("the update checker", clientOf(UpdateChecker(shared, "owner/releases"), "client"))
     }
 
     /** GUARD: a client that sets its own pinner sets the same pins, so nothing conflicts. */

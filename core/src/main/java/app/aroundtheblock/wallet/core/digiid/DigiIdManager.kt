@@ -89,7 +89,8 @@ class DigiIdManager(
                 .build()
 
             val response = httpClient.newCall(httpRequest).execute()
-            val responseBody = response.body?.string()
+            // Only the status decides the result: the answer's body is closed unread.
+            response.close()
             val success = response.isSuccessful
 
             // MEDIUM-2: Don't log response body — could contain tokens or attacker content
