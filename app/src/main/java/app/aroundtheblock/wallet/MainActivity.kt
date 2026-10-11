@@ -475,8 +475,9 @@ class MainActivity : FragmentActivity() {
             pendingDigiIdUri = uri
             // Host only, never the URI. The URI carries the challenge nonce, and a logged
             // nonce is a replayable authentication for anything able to read logcat.
-            // DigiIdManager already logs only request.domain; this is the same rule.
-            android.util.Log.i("MainActivity", "Captured Digi-ID deep link for ${intent.data?.host}")
+            // DigiIdManager already logs only request.domain; this is the same rule. The host
+            // comes from whoever sent the link, so it is logged as printable ASCII only.
+            android.util.Log.i("MainActivity", "Captured Digi-ID deep link for ${DigiIdDeepLinkLog.host(intent.data?.host)}")
         }
     }
 }

@@ -199,6 +199,27 @@ class IpfsClientTest {
     }
 
     // -------------------------------------------------------------------------
+    // A CID the verifier cannot verify
+    // -------------------------------------------------------------------------
+
+    /**
+     * A CID naming SHA-1 (0x11), or naming sha3-512 (0x14) over a SHA-512 digest, is unverifiable:
+     * nothing any gateway serves is returned, even bytes that match -- the same answer as for a
+     * code the verifier does not compute at all (0x16, sha3-256).
+     */
+    @Test
+    fun `fetchVerified returns nothing for a CID it cannot verify, whatever the gateways serve`() = runTest {
+        for ((code, algorithm) in listOf(0x11 to "SHA-1", 0x14 to "SHA-512", 0x16 to "SHA3-256")) {
+            every { mockCall.execute() } answers { buildResponse(200, content) } // a fresh body per gateway
+            every { mockHttpClient.newCall(any()) } returns mockCall
+
+            val client = IpfsClient(mockHttpClient, cidVerifier, gateways)
+            assertNull("code 0x${code.toString(16)} over a $algorithm digest",
+                client.fetchVerified(buildCidV1(content, code, algorithm)))
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // All gateways fail
     // -------------------------------------------------------------------------
 
@@ -244,6 +265,12 @@ class IpfsClientTest {
 
     companion object {
         private const val B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+        // A CIDv1 (base58btc, raw codec) whose multihash names [code] over [algorithm]'s digest
+        fun buildCidV1(content: ByteArray, code: Int, algorithm: String): String {
+            val digest = MessageDigest.getInstance(algorithm).digest(content)
+            return "z" + encodeBase58(byteArrayOf(0x01, 0x55, code.toByte(), digest.size.toByte()) + digest)
+        }
 
         // Build a real CIDv0 for deterministic offline tests
         fun buildCidV0(content: ByteArray): String {

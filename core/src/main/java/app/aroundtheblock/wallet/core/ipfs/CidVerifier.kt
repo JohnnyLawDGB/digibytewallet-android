@@ -11,10 +11,13 @@ import java.security.MessageDigest
  *  - CIDv1  — multibase prefix + version(1) + codec varint + multihash
  *              Currently handles base32 ('b') and base58btc ('z') multibase prefixes.
  *
- * Multihash function codes recognised (others return null → verify returns false):
+ * Multihash function codes verified:
  *  - 0x12  sha2-256
- *  - 0x14  sha2-512 (rare, included for completeness)
- *  - 0x11  sha1     (legacy, included for completeness)
+ *  - 0x13  sha2-512
+ *
+ * Every other code is unverifiable: [extractHashAlgorithm] returns null and [verify] returns
+ * false, the same answer as for a mismatch. That includes 0x11 (sha1), whose matches prove
+ * nothing about which content was addressed, and 0x14, which is sha3-512 — not SHA-512.
  */
 class CidVerifier {
 
@@ -107,11 +110,9 @@ class CidVerifier {
     }
 
     private fun multihashCodeToAlgorithm(code: Long): String? = when (code) {
-        0x11L -> "SHA-1"
-        0x12L -> "SHA-256"
-        0x13L -> "SHA-512"   // sha2-512 in some old specs
-        0x14L -> "SHA-512"
-        else  -> null
+        0x12L -> "SHA-256"   // sha2-256
+        0x13L -> "SHA-512"   // sha2-512
+        else  -> null        // unverifiable, 0x11 (sha1) and 0x14 (sha3-512) included
     }
 
     // -------------------------------------------------------------------------

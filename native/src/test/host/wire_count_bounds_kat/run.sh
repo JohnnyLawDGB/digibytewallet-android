@@ -35,6 +35,17 @@
 # present) is accepted by a 32-bit parser that narrows before comparing; at 64 bits
 # the count fails the bound in either arm, so that word size is a GUARD.
 #
+# MERKLE FLAGS. A merkle block's flags length is bounded by the bytes that remain, as its
+# hash count is (BRMerkleBlockParse, which reads the wallet's saved blocks). The comparison
+# arm keeps the addition-first guard: merkle_flags_wrap (a length that wraps that sum) and
+# merkle_flags_over (a length one byte longer than the bytes present) each leave the length non-zero
+# with no flag bytes behind it -- the case's STATE line shows it -- and the walk over the
+# partial tree then reads a flag byte that is not there (a sanitizer report). The wrapped
+# length asks malloc for nearly the whole address space; a real allocator answers NULL, so
+# these cases run with allocator_may_return_null=1 to have ASan's allocator answer the same
+# way rather than stop at the request. The shipped arm bounds both lengths to 0 and walks
+# cleanly; the honest control is accepted in both arms.
+#
 # MACRO CONVENTION. Presence: red is -DWIRE_COUNT_BOUNDS_UNFIXED, green is no -D
 # at all, so a shipped build (which never defines the flag) always gets the
 # bounded code. Detecting a sanitizer report matches the string
@@ -543,20 +554,68 @@ run_offwrap() {
     done
 }
 
+# ---- a merkle block's flags length is bounded by the bytes that remain --------------
+# merkle_flags_wrap and merkle_flags_over: the comparison arm (red${bits}) must keep a
+# non-zero length with no flag bytes (STATE ... flags=absent flagsLen=N, N > 0) and its walk
+# must then fault; the shipped arm must bound the length to 0, walk without a report and
+# answer "rejected". merkle_flags_ctl must be accepted in both arms. The red and green
+# binaries were built by run_bits for this word size.
+run_merkle_flags() {
+    local bits="$1" c arm of rc
+    local asan_saved="$ASAN_OPTIONS"
+    export ASAN_OPTIONS="$asan_saved allocator_may_return_null=1"
+    echo "--- ${bits}-bit: a merkle block's flags length is bounded by the bytes that remain ---"
+    # Every run is time-limited: the comparison arm is expected to fault.
+    for c in merkle_flags_wrap merkle_flags_over; do
+        of="$BUILD_DIR/red${bits}.$c.out"
+        bounded "$of" "$BUILD_DIR/red${bits}" "$c"; rc=$?
+        if grep -Eq "^STATE $c flags=absent flagsLen=[1-9][0-9]*$" "$of" && grep -Eq "$SAN_RE" "$of"; then
+            echo "  [$bits red $c] kept a length with no bytes behind it ($(grep -Eo "flagsLen=[0-9]+" "$of")), and the walk read past it (rc=$rc): $(grep -Eom1 "$SAN_RE" "$of")"
+        else
+            echo "  [$bits red $c] GATE FAILURE: the comparison arm did not keep the length, or its walk did not fault (rc=$rc)"
+            head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
+        fi
+        of="$BUILD_DIR/green${bits}.$c.out"
+        bounded "$of" "$BUILD_DIR/green${bits}" "$c"; rc=$?
+        if grep -Eq "$SAN_RE" "$of"; then
+            echo "  [$bits green $c] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
+            head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
+        elif grep -Eq "^STATE $c flags=(present|absent) flagsLen=0$" "$of" && grep -q "RESULT $c rejected" "$of"; then
+            echo "  [$bits green $c] the length is bounded to 0; the walk read nothing (rc=$rc)"
+        else
+            echo "  [$bits green $c] GATE FAILURE: the length was not bounded (rc=$rc)"
+            head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
+        fi
+    done
+    for arm in red green; do
+        of="$BUILD_DIR/${arm}${bits}.merkle_flags_ctl.out"
+        bounded "$of" "$BUILD_DIR/${arm}${bits}" merkle_flags_ctl; rc=$?
+        if ! grep -Eq "$SAN_RE" "$of" && grep -q "RESULT merkle_flags_ctl accepted" "$of"; then
+            echo "  [$bits $arm merkle_flags_ctl] the honest block keeps its flag byte, walks to its hash and round-trips (rc=$rc)"
+        else
+            echo "  [$bits $arm merkle_flags_ctl] GATE FAILURE: the honest control was not accepted (rc=$rc)"
+            head -6 "$of" 2>/dev/null | sed 's/^/      /'; FAIL=1
+        fi
+    done
+    export ASAN_OPTIONS="$asan_saved"
+}
+
 run_bits 64
 run_store 64
 run_witness 64
 run_inv_hash 64
 run_offwrap 64
+run_merkle_flags 64
 run_bits 32
 run_store 32
 run_witness 32
 run_inv_hash 32
 run_offwrap 32
+run_merkle_flags 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: wire_count_bounds_kat (red tripped or passed on, green clean, store and sign checks held; 64-bit and 32-bit)"
+    echo "PASS: wire_count_bounds_kat (red tripped or passed on, green clean, store and sign checks held, merkle flags bounded; 64-bit and 32-bit)"
     exit 0
 else
     echo "FAIL: wire_count_bounds_kat"
