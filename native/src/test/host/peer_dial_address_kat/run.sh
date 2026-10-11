@@ -31,7 +31,7 @@ GUARD_CASES=(ipv4_network_dials_the_same_address resolver_failure_dials_ipv4
 
 build() {
     local out="$1"; shift
-    "$CC" -w -std=c99 -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "$@" \
+    "$CC" -w -std=c99 -D_DEFAULT_SOURCE -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/peer_dial_address_kat_main.c" -o "$out"
 }
