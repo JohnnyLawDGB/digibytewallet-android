@@ -147,6 +147,21 @@ static BRTransaction *makeChildOf(const uint8_t *spk, size_t spkLen, UInt256 par
     return tx;
 }
 
+/* A record the wallet holds with no stake in it and no token output: a zero-value output to us, a foreign
+ * input, no DigiDollar marker and no OP_RETURN. This is the shape the unrelayed-tx cleanup removes at the
+ * tip. (makeOwnedSend is a DigiDollar transfer paying us: its token output is a stake, so the cleanup keeps
+ * it -- tipsweep_token_stake_kat.) */
+static BRTransaction *makeStakelessRecord(const uint8_t *spk, size_t spkLen, uint8_t tag)
+{
+    BRTransaction *tx = BRTransactionNew();
+    tx->version = 2;
+    UInt256 prev; memset(prev.u8, tag, 32);
+    BRTransactionAddInput(tx, prev, 0, 0, spk, spkLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
+    BRTransactionAddOutput(tx, 0, spk, spkLen);
+    finalizeTxHash(tx);
+    return tx;
+}
+
 /* A plain send spending `prev`:0 and paying `amt` to `spk`. */
 /* Registration: these fixtures stand in for the wallet's own sends and their funding, with placeholder
  * signatures, so they register through BRWalletRegisterTransactionTrusted -- the path the bridge's
@@ -1471,8 +1486,8 @@ static void scenario_remove_unrelayed_sweep(void)
     uint8_t spk[64];
     size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), ta.s);
 
-    /* a wallet record with no stake (zero-value output to us, foreign input): the sweep's target */
-    BRTransaction *WA = makeOwnedSend(spk, spkLen, 0x11);
+    /* a wallet record with no stake and no token (zero-value output to us, foreign input): the sweep's target */
+    BRTransaction *WA = makeStakelessRecord(spk, spkLen, 0x11);
     WA->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = WA->txHash;
     BRWalletRegisterTransactionTrusted(w, WA);
@@ -1517,9 +1532,9 @@ static void scenario_sweep_dependant(void)
     uint8_t spk[64];
     size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), ta.s);
 
-    /* A: a zero-value output to our address, foreign input — a record the wallet has no stake in;
+    /* A: a zero-value output to our address, foreign input, no token — a record the wallet has no stake in;
      * B: spends A:0, zero-value output to us — the same, and a dependant of A. Both unverified. */
-    BRTransaction *A = makeOwnedSend(spk, spkLen, 0x11);
+    BRTransaction *A = makeStakelessRecord(spk, spkLen, 0x11);
     A->timestamp = (uint32_t)time(NULL);
     UInt256 aHash = A->txHash;
     BRWalletRegisterTransactionTrusted(w, A);
