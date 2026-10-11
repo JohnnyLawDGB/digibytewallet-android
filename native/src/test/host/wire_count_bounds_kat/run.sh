@@ -163,8 +163,8 @@ run_bits() {
     echo "--- RED ARM (-DWIRE_COUNT_BOUNDS_UNFIXED): each case MUST fault ---"
     for c in "${red_cases[@]}"; do
         out="$("$BUILD_DIR/red${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
+        if <<<"$out" grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$rc): $(<<<"$out" grep -Eom1 "$SAN_RE")"
         else
             echo "  [$bits red $c] GATE FAILURE: no sanitizer report (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6
@@ -175,7 +175,7 @@ run_bits() {
         # cf's size computation only wraps at 32 bits; at 64 bits the red arm
         # must return cleanly (no fault) -- exercised for completeness.
         out="$("$BUILD_DIR/red${bits}" cf 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
+        if <<<"$out" grep -Eq "$SAN_RE"; then
             echo "  [$bits red cf] unexpected sanitizer report (rc=$rc)"; FAIL=1
         else
             echo "  [$bits red cf] no fault at 64 bits, as expected (rc=$rc)"
@@ -189,7 +189,7 @@ run_bits() {
     echo "--- RED ARM (-DWIRE_COUNT_BOUNDS_UNFIXED): each count MUST be passed on (RESULT accepted) ---"
     for c in "${pass_cases[@]}"; do
         out="$("$BUILD_DIR/red${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -q "RESULT $c accepted"; then
+        if <<<"$out" grep -q "RESULT $c accepted"; then
             echo "  [$bits red $c] passed on -- dropped, peer kept (rc=$rc): the arm sees what the bound governs"
         else
             echo "  [$bits red $c] GATE FAILURE: not passed on (rc=$rc)"
@@ -202,21 +202,21 @@ run_bits() {
         # comparison arm has no bound and acts on the count; whatever it does, it is
         # not the acceptance the 32-bit narrowing produces). Reported, not required.
         out="$("$BUILD_DIR/red${bits}" tx_count_trunc 2>&1)"; rc=$?
-        if echo "$out" | grep -q "RESULT tx_count_trunc accepted"; then
+        if <<<"$out" grep -q "RESULT tx_count_trunc accepted"; then
             echo "  [$bits red tx_count_trunc] GATE FAILURE: accepted at 64 bits (rc=$rc)"; FAIL=1
         else
-            echo "  [$bits red tx_count_trunc] not accepted at 64 bits, as expected (guard; rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE|RESULT.*" | head -1)"
+            echo "  [$bits red tx_count_trunc] not accepted at 64 bits, as expected (guard; rc=$rc): $(<<<"$out" grep -Eom1 "$SAN_RE|RESULT.*" | head -1)"
         fi
     fi
 
     echo "--- GREEN ARM (bounded): each case MUST be rejected, no sanitizer report ---"
     for c in tx headers version reject cf addr_wrap inv_wrap getdata_wrap notfound_wrap tx_count_trunc; do
         out="$("$BUILD_DIR/green${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
+        if <<<"$out" grep -Eq "$SAN_RE"; then
             echo "  [$bits green $c] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6
             FAIL=1
-        elif echo "$out" | grep -q "RESULT $c rejected"; then
+        elif <<<"$out" grep -q "RESULT $c rejected"; then
             echo "  [$bits green $c] rejected cleanly (rc=$rc)"
         else
             echo "  [$bits green $c] GATE FAILURE: not rejected (rc=$rc)"
@@ -243,17 +243,17 @@ run_store() {
     fi
     for c in tx_store_in tx_store_out; do
         out="$("$BUILD_DIR/sred${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
+        if <<<"$out" grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$rc): $(<<<"$out" grep -Eom1 "$SAN_RE")"
         else
             echo "  [$bits red $c] GATE FAILURE: no sanitizer report (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
         fi
         out="$("$BUILD_DIR/sgreen${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
+        if <<<"$out" grep -Eq "$SAN_RE"; then
             echo "  [$bits green $c] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
-        elif echo "$out" | grep -q "RESULT $c rejected"; then
+        elif <<<"$out" grep -q "RESULT $c rejected"; then
             echo "  [$bits green $c] rejected cleanly (rc=$rc)"
         else
             echo "  [$bits green $c] GATE FAILURE: not rejected (rc=$rc)"
@@ -261,7 +261,7 @@ run_store() {
         fi
     done
     out="$("$BUILD_DIR/sgreen${bits}" tx_store_ctl 2>&1)"; rc=$?
-    if echo "$out" | grep -q "RESULT tx_store_ctl accepted" && ! echo "$out" | grep -Eq "$SAN_RE"; then
+    if <<<"$out" grep -q "RESULT tx_store_ctl accepted" && ! <<<"$out" grep -Eq "$SAN_RE"; then
         echo "  [$bits green tx_store_ctl] accepted with the hook idle, as it must be (rc=$rc)"
     else
         echo "  [$bits green tx_store_ctl] GATE FAILURE: the control message was not accepted (rc=$rc)"
@@ -276,22 +276,22 @@ run_store() {
     echo "--- ${bits}-bit: a store the parser asked for exists (grow hook) ---"
     for c in tx_store_script tx_store_sig tx_store_outscript tx_store_witness; do
         out="$("$BUILD_DIR/sred${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -q "RESULT $c ambiguous"; then
+        if <<<"$out" grep -q "RESULT $c ambiguous"; then
             echo "  [$bits red $c] GATE FAILURE: the case did not starve exactly one store (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
-        elif echo "$out" | grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
-        elif echo "$out" | grep -q "RESULT $c accepted"; then
+        elif <<<"$out" grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$rc): $(<<<"$out" grep -Eom1 "$SAN_RE")"
+        elif <<<"$out" grep -q "RESULT $c accepted"; then
             echo "  [$bits red $c] accepted as a half-filled object (rc=$rc): the arm sees what the check governs"
         else
             echo "  [$bits red $c] GATE FAILURE: rejected in the comparison arm (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
         fi
         out="$("$BUILD_DIR/sgreen${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
+        if <<<"$out" grep -Eq "$SAN_RE"; then
             echo "  [$bits green $c] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
-        elif echo "$out" | grep -q "RESULT $c rejected"; then
+        elif <<<"$out" grep -q "RESULT $c rejected"; then
             echo "  [$bits green $c] rejected cleanly (rc=$rc)"
         else
             echo "  [$bits green $c] GATE FAILURE: not rejected (rc=$rc)"
@@ -308,20 +308,20 @@ run_store() {
         echo "GATE FAILURE: ${bits}-bit sign-tail red arm did not compile."; FAIL=1; return
     fi
     out="$("$BUILD_DIR/rred${bits}" sign_reparse_null 2>&1)"; rc=$?
-    if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT sign_reparse_null accepted"; then
+    if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT sign_reparse_null accepted"; then
         echo "  [$bits red sign_reparse_null] answered 1 with the hash as it was (rc=$rc): the arm sees what the check governs"
     else
         echo "  [$bits red sign_reparse_null] GATE FAILURE (rc=$rc)"; echo "$out" | sed 's/^/      /' | head -6; FAIL=1
     fi
     out="$("$BUILD_DIR/sgreen${bits}" sign_reparse_null 2>&1)"; rc=$?
-    if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT sign_reparse_null rejected"; then
+    if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT sign_reparse_null rejected"; then
         echo "  [$bits green sign_reparse_null] answered 0: not signed (rc=$rc)"
     else
         echo "  [$bits green sign_reparse_null] GATE FAILURE: not answered 0 (rc=$rc)"; echo "$out" | sed 's/^/      /' | head -6; FAIL=1
     fi
     for arm in rred sgreen; do
         out="$("$BUILD_DIR/${arm}${bits}" sign_reparse_ctl 2>&1)"; rc=$?
-        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT sign_reparse_ctl accepted"; then
+        if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT sign_reparse_ctl accepted"; then
             echo "  [$bits $arm sign_reparse_ctl] signed with the hook idle; the hash is set (rc=$rc)"
         else
             echo "  [$bits $arm sign_reparse_ctl] GATE FAILURE: the control did not sign (rc=$rc)"; echo "$out" | sed 's/^/      /' | head -6; FAIL=1
@@ -336,14 +336,14 @@ run_store() {
     fi
     for c in array_insert_full array_insert_array_full; do
         out="$("$BUILD_DIR/ired${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
+        if <<<"$out" grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$rc): $(<<<"$out" grep -Eom1 "$SAN_RE")"
         else
             echo "  [$bits red $c] GATE FAILURE: no sanitizer report (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
         fi
         out="$("$BUILD_DIR/sgreen${bits}" "$c" 2>&1)"; rc=$?
-        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT $c rejected"; then
+        if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT $c rejected"; then
             echo "  [$bits green $c] store and count left exactly as they were (rc=$rc)"
         else
             echo "  [$bits green $c] GATE FAILURE (rc=$rc)"; echo "$out" | sed 's/^/      /' | head -6; FAIL=1
@@ -351,7 +351,7 @@ run_store() {
     done
     for arm in ired sgreen; do   # GUARD: the known answers hold in both forms
         out="$("$BUILD_DIR/${arm}${bits}" array_insert_known 2>&1)"; rc=$?
-        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT array_insert_known accepted"; then
+        if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT array_insert_known accepted"; then
             echo "  [$bits $arm array_insert_known] every known answer held (guard)"
         else
             echo "  [$bits $arm array_insert_known] GATE FAILURE (rc=$rc)"; echo "$out" | sed 's/^/      /' | head -6; FAIL=1
@@ -406,7 +406,7 @@ run_witness() {
     # GUARD: tx_witness_item is rejected with the per-item arm absent (witem) and present (green).
     for arm in witem green; do
         out="$("$BUILD_DIR/${arm}${bits}" tx_witness_item 2>&1)"; rc=$?
-        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT tx_witness_item rejected"; then
+        if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT tx_witness_item rejected"; then
             echo "  [$bits $arm tx_witness_item] rejected cleanly (guard; rc=$rc)"
         else
             echo "  [$bits $arm tx_witness_item] GATE FAILURE: not rejected cleanly (rc=$rc)"
@@ -418,7 +418,7 @@ run_witness() {
     # terminates with or without the bound), confirming no arm is simply broken.
     for arm in wred wcount witem green; do
         out="$("$BUILD_DIR/${arm}${bits}" tx_witness_ctl 2>&1)"; rc=$?
-        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT tx_witness_ctl accepted"; then
+        if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT tx_witness_ctl accepted"; then
             echo "  [$bits $arm tx_witness_ctl] the honest witness is accepted; its bytes round-trip (rc=$rc)"
         else
             echo "  [$bits $arm tx_witness_ctl] GATE FAILURE: the honest control was not accepted or did not round-trip (rc=$rc)"
@@ -428,10 +428,10 @@ run_witness() {
 
     # SHIPPED ARM: reject the over-count cleanly.
     out="$("$BUILD_DIR/green${bits}" tx_witness 2>&1)"; rc=$?
-    if echo "$out" | grep -Eq "$SAN_RE"; then
+    if <<<"$out" grep -Eq "$SAN_RE"; then
         echo "  [$bits green tx_witness] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
         echo "$out" | sed 's/^/      /' | head -6; FAIL=1
-    elif echo "$out" | grep -q "RESULT tx_witness rejected"; then
+    elif <<<"$out" grep -q "RESULT tx_witness rejected"; then
         echo "  [$bits green tx_witness] rejected cleanly (rc=$rc)"
     else
         echo "  [$bits green tx_witness] GATE FAILURE: not rejected (rc=$rc)"
@@ -513,8 +513,8 @@ run_offwrap() {
     fi
     for c in tx_offwrap tx_offwrap_out; do
         out="$("$BUILD_DIR/owred${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] tripped (rc=$rc): $(echo "$out" | grep -Eom1 "$SAN_RE")"
+        if <<<"$out" grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$rc): $(<<<"$out" grep -Eom1 "$SAN_RE")"
         else
             echo "  [$bits red $c] GATE FAILURE: no sanitizer report (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
@@ -522,10 +522,10 @@ run_offwrap() {
     done
     for c in tx_offwrap tx_offwrap_out tx_offwrap_fuzz; do
         out="$("$BUILD_DIR/green${bits}" "$c" 2>&1)"; rc=$?
-        if echo "$out" | grep -Eq "$SAN_RE"; then
+        if <<<"$out" grep -Eq "$SAN_RE"; then
             echo "  [$bits green $c] GATE FAILURE: sanitizer report in the fixed arm (rc=$rc)"
             echo "$out" | sed 's/^/      /' | head -6; FAIL=1
-        elif echo "$out" | grep -q "RESULT $c rejected"; then
+        elif <<<"$out" grep -q "RESULT $c rejected"; then
             echo "  [$bits green $c] rejected cleanly, inside the message (rc=$rc)"
         else
             echo "  [$bits green $c] GATE FAILURE: not rejected (rc=$rc)"
@@ -534,7 +534,7 @@ run_offwrap() {
     done
     for arm in owred green; do   # the honest control reaches the sign-tail and must be accepted in both arms
         out="$("$BUILD_DIR/${arm}${bits}" tx_offwrap_ctl 2>&1)"; rc=$?
-        if ! echo "$out" | grep -Eq "$SAN_RE" && echo "$out" | grep -q "RESULT tx_offwrap_ctl accepted"; then
+        if ! <<<"$out" grep -Eq "$SAN_RE" && <<<"$out" grep -q "RESULT tx_offwrap_ctl accepted"; then
             echo "  [$bits $arm tx_offwrap_ctl] the honest signed segwit tx is accepted (rc=$rc)"
         else
             echo "  [$bits $arm tx_offwrap_ctl] GATE FAILURE: the honest control was not accepted (rc=$rc)"

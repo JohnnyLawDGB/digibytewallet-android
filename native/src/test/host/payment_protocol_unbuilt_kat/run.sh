@@ -37,10 +37,10 @@ gate() {
     if [ ! -f "$cm" ]; then echo "    cannot read $cm"; return 1; fi
     code="$(sed 's/#.*$//' "$cm")"   # CMake comments run from # to the end of the line
 
-    if printf '%s\n' "$code" | grep -nE 'BRPaymentProtocol\.(c|h)' >"$WORK_DIR/named"; then
+    if <<<"$code" grep -nE 'BRPaymentProtocol\.(c|h)' >"$WORK_DIR/named"; then
         sed 's/^/    names the file: line /' "$WORK_DIR/named"; bad=1
     fi
-    if printf '%s\n' "$code" | grep -niE 'file[[:space:]]*\([[:space:]]*GLOB|aux_source_directory' >"$WORK_DIR/glob"; then
+    if <<<"$code" grep -niE 'file[[:space:]]*\([[:space:]]*GLOB|aux_source_directory' >"$WORK_DIR/glob"; then
         sed 's/^/    gathers sources by glob: line /' "$WORK_DIR/glob"; bad=1
     fi
 

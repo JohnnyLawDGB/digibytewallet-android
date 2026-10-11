@@ -159,58 +159,58 @@ run_bits() {
     echo "--- RED ARM (-DBLOCK_DELIVERY_GATE_UNFIXED): each RED case MUST fail ---"
     for c in "${RED_CASES[@]}"; do
         run_case "$BUILD_DIR/red${bits}" "$c" 0
-        if echo "$OUT" | grep -Eq "$SAN_RE"; then
+        if <<<"$OUT" grep -Eq "$SAN_RE"; then
             echo "  [$bits red $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
-            echo "$OUT" | grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
-        elif echo "$OUT" | grep -q "RESULT $c fail"; then
-            echo "  [$bits red $c] failed, as required: $(echo "$OUT" | grep -m1 '^FAIL:' )"
+            <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
+        elif <<<"$OUT" grep -q "RESULT $c fail"; then
+            echo "  [$bits red $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:' )"
         else
             echo "  [$bits red $c] GATE FAILURE: did not fail (rc=$RC); this case cannot see what the gate governs"
-            echo "$OUT" | grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
+            <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
         fi
     done
 
     echo "--- RED ARM: each GUARD case MUST pass ---"
     for c in "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/red${bits}" "$c" 0
-        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass"; then
+        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits red $c] passed (guard)"
         else
             echo "  [$bits red $c] GATE FAILURE: guard did not pass in the comparison arm (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
         fi
     done
 
     echo "--- GREEN ARM: every case MUST pass, no sanitizer report ---"
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c" 0
-        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass"; then
+        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits green $c] passed"
         else
             echo "  [$bits green $c] GATE FAILURE (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
         fi
     done
 
     echo "--- GREEN ARM, leak-checked: what is ignored is released ---"
     for c in "${LEAK_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c" 1
-        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass"; then
+        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits green+lsan $c] passed, no leak"
         else
             echo "  [$bits green+lsan $c] GATE FAILURE (rc=$RC)"
-            echo "$OUT" | grep -E "^(FAIL|RESULT)|$SAN_RE|Direct leak|#[0-9]" | sed 's/^/      /' | head -14; FAIL=1
+            <<<"$OUT" grep -E "^(FAIL|RESULT)|$SAN_RE|Direct leak|#[0-9]" | sed 's/^/      /' | head -14; FAIL=1
         fi
     done
 
     # The log lines the device check greps for (neutral text; see the triage exit criteria).
     run_case "$BUILD_DIR/green${bits}" unsolicited_block_resident_header 0
-    echo "$OUT" | grep -q "was not requested from this peer, ignoring" \
-        && echo "  [$bits green] log: '$(echo "$OUT" | grep -m1 'was not requested')'" \
+    <<<"$OUT" grep -q "was not requested from this peer, ignoring" \
+        && echo "  [$bits green] log: '$(<<<"$OUT" grep -m1 'was not requested')'" \
         || { echo "  [$bits green] GATE FAILURE: the ignore log line is missing"; FAIL=1; }
     run_case "$BUILD_DIR/green${bits}" solicited_block_root_mismatch 0
-    echo "$OUT" | grep -q "tx list does not hash to its header's merkle root, ignoring" \
-        && echo "  [$bits green] log: '$(echo "$OUT" | grep -m1 'does not hash')'" \
+    <<<"$OUT" grep -q "tx list does not hash to its header's merkle root, ignoring" \
+        && echo "  [$bits green] log: '$(<<<"$OUT" grep -m1 'does not hash')'" \
         || { echo "  [$bits green] GATE FAILURE: the root-mismatch log line is missing"; FAIL=1; }
 }
 
@@ -227,12 +227,12 @@ run_tag_level2() {
     fi
     for c in "${TAG_CASES[@]}"; do
         run_case "$BUILD_DIR/tag2_${bits}" "$c" 0
-        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass" \
-           && echo "$OUT" | grep -q "^NOTE: level 2:"; then
-            echo "  [$bits level2 $c] passed: $(echo "$OUT" | grep -m1 '^NOTE:')"
+        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass" \
+           && <<<"$OUT" grep -q "^NOTE: level 2:"; then
+            echo "  [$bits level2 $c] passed: $(<<<"$OUT" grep -m1 '^NOTE:')"
         else
             echo "  [$bits level2 $c] GATE FAILURE (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
         fi
     done
 }

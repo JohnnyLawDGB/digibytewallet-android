@@ -41,7 +41,7 @@ GRADLE="$ROOT/native/build.gradle.kts"
 shipped() {   # $1 = macro name
     local found
     found="$(grep -o "D$1=[0-9][0-9]*" "$GRADLE" 2>/dev/null | sort -u)"
-    [ "$(printf '%s' "$found" | grep -c .)" -eq 1 ] || return 1
+    [ "$(<<<"$found" grep -c .)" -eq 1 ] || return 1
     printf '%s' "${found#D$1=}"
 }
 POW="$(shipped DGB_HEADER_POW_CHECK)"  || { echo "GATE FAILURE: no single shipped POW level";  exit 1; }
@@ -95,9 +95,9 @@ for i in "${!PINNED[@]}"; do
     suite="${PINNED[$i]}"
     echo "--- $suite must FAIL at the shipped levels"
     out="$(KAT_FORCE_SHIPPED_LEVELS=1 "$ROOT/scripts/run-host-kats.sh" "$suite" 2>&1)"
-    if printf '%s\n' "$out" | grep -qE '^host KATs: 0 passed, 1 failed'; then
+    if <<<"$out" grep -qE '^host KATs: 0 passed, 1 failed'; then
         echo "    load-bearing: fails at the shipped level, so the pin is required."
-    elif printf '%s\n' "$out" | grep -qE '^host KATs: 1 passed, 0 failed'; then
+    elif <<<"$out" grep -qE '^host KATs: 1 passed, 0 failed'; then
         echo "    GATE FAILURE: it PASSES at the shipped levels, so the pin buys nothing."
         echo "    Drop the flag from native/src/test/host/$suite/run.sh and let the runner"
         echo "    supply the shipped level, or add a KAT-LEVEL-SWEEP line saying why not."
