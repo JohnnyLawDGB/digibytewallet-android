@@ -1,13 +1,18 @@
 # DigiByte Mobile — Bug Bounty Program
 
-**Effective:** 2026-05-03 (scope updated 2026-10-08)
+**Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Scope version:** DigiByte Mobile 4.0.88 and later
+**Bounty target:** **DigiByte Mobile 4.0.89** (`app.aroundtheblock.wallet`), from 2026-10-11.
+4.0.88 stays in scope until **2026-10-25** under the overlap rule below.
+
+This is a small, self-funded, open-source project. Rewards are the ceilings below and most
+reports earn named credit rather than payment; please read the tiers before spending time on a
+report.
 
 This program rewards security researchers who report verifiable vulnerabilities
 in DigiByte Mobile (`app.aroundtheblock.wallet`), the Android wallet published by
-Around The Block LLC. It was previously published as DigiByte Wallet
-(`io.digibyte`); v4.0.87 is that app's final release. The wallet is a non-custodial, sovereignty-first
+Around The Block LLC. It was previously published as DigiByte Wallet (`io.digibyte`), whose
+final release was v4.0.87.2. The wallet is a non-custodial, sovereignty-first
 SPV wallet that holds user funds — bugs that compromise user funds, secrets,
 or privacy are taken seriously and rewarded accordingly.
 
@@ -17,19 +22,42 @@ or privacy are taken seriously and rewarded accordingly.
 
 ### Application
 
+**The wallet is now DigiByte Mobile, `app.aroundtheblock.wallet`.** The old app,
+`io.digibyte`, reached its final release at **v4.0.87.2 on 2026-10-10** and is **out of
+scope**: it receives no further fixes, so a report against it cannot be acted on. Several
+reports have already been closed for testing a retired or frozen version. Test the current
+DigiByte Mobile release and name its exact version.
+
 | Asset | Where to get it |
 |-------|-----------------|
 | DigiByte Mobile from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-vX.Y.Z.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases |
-| Source code | https://github.com/JohnnyLawDGB/digibytewallet-android |
+| `aroundtheblock-wallet-v4.0.89.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.0.89 |
+| Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
-**Only the latest DigiByte Mobile release is in scope.** Name the exact
-version you tested (Settings → About, or the APK file name). A report is
-eligible only if the bug exists in the latest release at the time you submit
-it. Reports against `io.digibyte` builds, including its final v4.0.87, are
-accepted only if the same bug is also present in the latest DigiByte Mobile
-release.
+### The bounty target is one named version, and it holds still
+
+**Test the bounty target named at the top of this file.** It is a single published version, not
+"whatever is newest", and it does not move while you are working. When a new target is adopted,
+the previous one stays in scope for **14 days** afterwards, so a report begun under the old
+target is never wasted.
+
+We ship quickly, and the old wording — "only the latest released tag is in scope" — made that
+our contributors' problem rather than ours: a release landing mid-investigation could turn good
+work into an out-of-scope report on a technicality, and several reports were closed exactly that
+way. So:
+
+- A finding that **reproduces on the bounty target is in scope**, even if a newer release exists
+  by the time you send it. If it is already fixed on the line we develop we will tell you, and it
+  still gets the first-or-duplicate decision on its merits.
+- A finding that **never existed on the target** is out of scope, however real it looks against
+  an older build. Reports against `v3.9.2`, the frozen `phase1-modernization` branch and the
+  retired `io.digibyte` app have all been closed for this.
+- The target is published here and a change is announced here. Watch this file, not the releases
+  page.
+
+Fixes for accepted findings land on our development line and ship in a later release, which may
+be several versions ahead of the target. That is expected and does not affect eligibility.
 
 ### Vulnerability classes we pay for
 
@@ -49,7 +77,7 @@ issues that have qualified, ranked by severity:
 - Memory disclosure of `g_seed` or any derived signing key from a
   non-rooted device
 
-#### High — funds at rest, asset misattribution — up to 50,000 DGB
+#### High — funds at rest — up to 50,000 DGB
 
 - Coin-selector or signing-path bug that lets a network adversary cause a
   user's send to go to an attacker-controlled address
@@ -71,7 +99,7 @@ issues that have qualified, ranked by severity:
 - Persistent denial of sync (peer-driven SPV crash that requires app
   reinstall to recover)
 
-#### Low — DoS, info disclosure — up to 3,000 DGB
+#### Low — DoS, info disclosure, DigiAsset display integrity — up to 3,000 DGB
 
 - App crashes triggerable by a malicious peer or asset issuer that don't
   require user interaction beyond normal use
@@ -93,6 +121,11 @@ determined by:
 - **User interaction required** — none < tap a URL < send a tx < install side-loaded malware
 - **Mitigations defeated** — bypassing cert pinning + Keystore is more valuable than bypassing one
 - **Mainnet impact** — a bug that triggers on real DigiByte mainnet is worth more than one that requires testnet-specific setup
+- **Value actually at risk** — severity follows what a user can lose, not the name of the
+  subsystem. DigiAssets carry no market value today, so a forged credit, a wrong asset ID or a
+  misattributed transfer is a **display-integrity** bug and scores Low, however alarming the
+  mechanism reads. It rises only when it reaches spendable value: DGB, DigiDollar, or the seed.
+  Earlier asset findings have been re-scored on this basis.
 - **Quality of report** — clear PoC + exact reproduction steps + suggested fix is worth more than a vague write-up
 
 A novel critical-tier finding with a working PoC against the latest release on
@@ -103,6 +136,12 @@ lands.
 
 Payment is in DGB to an address you provide. We do not pay in fiat or other
 cryptocurrencies — this is the DigiByte Mobile bounty, paid in DigiByte.
+
+One further rule, because most of what we now receive arrives in machine-generated batches: a
+reward is **per unique vulnerability, not per email**. Seven reports of one root cause are one
+reward. Paid findings are capped at **three per reporter per wave**, and a report against a version
+that is not in scope — see "The bounty target is one named version" above, which is the only
+statement of that rule — is closed without triage.
 
 ---
 
@@ -122,9 +161,9 @@ Reports about the following are **closed without payout**:
 
 ### Already known / accepted
 
-- The Application's signature lineage starts from a debug certificate
-  (Scheme v3 lineage by design — see `release.yml` and
-  `security/AUDIT-SUMMARY.md`)
+- The retired io.digibyte app's signature lineage starts from a debug certificate (Scheme v3
+  rotation by design). io.digibyte is out of scope; DigiByte Mobile is signed by a single release
+  key with no lineage, and its build refuses an artifact with any other signer.
 - AndroidX `WorkManager` / `ProfileInstaller` exported components
   protected by signature-level system permissions (third-party,
   required by the libraries)
@@ -137,6 +176,22 @@ Reports about the following are **closed without payout**:
   separator, surrogate and private-use code points are stripped; finding a
   bypass IS in scope, but flagging the attack class generically, or
   look-alike letters that are valid text, is not)
+
+### Known to us, but not yet public
+
+The list above is closed: documented, deliberate trade-offs, and reports of them are out of
+scope. This is a different case — a real vulnerability that we had already found ourselves but
+had **not** fixed in a release, published, or described anywhere you could have seen:
+
+- The **first** valid external report of it earns **half** of its tier's reward, and full credit.
+  You had no way of knowing we knew, so it is not treated as worth nothing; the reduction is for
+  the fix already being ours.
+- Later reports of the same root cause are duplicates: credit, no payment.
+- When we apply this we tell you what we already knew — by tracking ID and the invariant the fix
+  establishes — so the reduction can be checked from your side rather than taken on trust.
+
+_This rule was applied from the 2026-10 waves but was not written here until 2026-10-11, after a
+reporter rightly pointed out that the published rules did not cover it._
 
 ### Generic / requires adversarial conditions outside threat model
 
@@ -167,8 +222,6 @@ Reports about the following are **closed without payout**:
 1. Email `security@aroundtheblock.us` with subject prefix `[BOUNTY]`
 2. Or open a GitHub Security Advisory at
    https://github.com/JohnnyLawDGB/digibytewallet-android/security/advisories/new
-3. One finding per email, please. Name the exact DigiByte Mobile version in the
-   subject line.
 
 **Do not** open public GitHub Issues for security reports. We will close
 them and ask you to resubmit privately, which delays your payout.
@@ -179,7 +232,7 @@ Reports without these elements are returned for missing information:
 
 - **Title** — one-line summary
 - **Severity claim** — your initial Critical/High/Medium/Low assessment
-- **Affected version** — the exact DigiByte Mobile version (e.g. `4.0.89`) you tested against
+- **Affected version** — the exact tag (e.g. `v3.5.31`) you tested against
 - **Affected platform** — Android version, device model, ROM
 - **Repro steps** — numbered, deterministic; copy-pasteable commands where possible
 - **PoC** — minimal artifact that triggers the bug. For network bugs: a `curl` or
@@ -187,6 +240,13 @@ Reports without these elements are returned for missing information:
   the malicious tx hex or metadata JSON.
 - **Impact statement** — what an attacker gains
 - **Suggested fix** (optional but valued — affects payout tier)
+- **DGB payout address** — we pay in DGB to an address you provide, so include one. We
+  checksum-verify it before sending anything, and we will ask you to confirm it in your own words
+  at payment time: a bounty payment is an irreversible on-chain send.
+- **How you want to be credited** — your real name, a handle, or anonymous. We name reporters in
+  the release notes and in the Hall of Fame below, and we only do that with your permission, so if
+  you do not tell us we cannot credit you. Asking to stay anonymous does not affect eligibility,
+  and duplicates and hardening findings are credited too, even where they earn no payment.
 
 ### Disclosure timeline
 
@@ -205,7 +265,7 @@ Reports without these elements are returned for missing information:
 
 - Researchers must be **18 or older** (or have parent/guardian consent)
 - Researchers must **not** be a current or former employee or contractor
-  of the DigiByte Mobile team
+  of the DigiByte Wallet team
 - One reward per unique vulnerability (first valid report wins; duplicates
   receive thanks + credit)
 - Researchers must comply with all applicable laws
@@ -243,9 +303,19 @@ platform — direct submission is welcomed and treated identically.
 ## Hall of Fame
 
 Researchers who have reported valid vulnerabilities, with their permission,
-will be listed here.
+will be listed here. Tell us in your report how you would like to appear.
 
-*(Empty — we look forward to crediting you.)*
+Names only, each with that researcher's permission and in the form they chose. What each one
+found is credited in the notes of the release that fixes it, and not before: several of these
+findings are fixed but not yet released, and naming them here would disclose them.
+
+0xasuma · 0xradu · Advena · Akbarrsw · @Lord99900 (Bima maulana) · Danu Fandiyana · folox ·
+iblitzc0de · Jackai · Jo Arsy · Keyzo · Lou · Luis_MZ · Mr Fz · Muhammad Harley · oncodewa ·
+Redi Sinaga · Rensisme · Ricki Ariadi · rreiissz · Toshit · Tsaqif · Umiroh123 · w4ke · xbyteid ·
+Yudha Eka Saputra
+
+*Reporters from the 2026-09 and 2026-10 waves who have not yet answered the credit question are
+not listed. Anonymity, or no answer, never affects payment.*
 
 ---
 
@@ -253,3 +323,13 @@ will be listed here.
 
 - **2026-05-03 — Program launched.** Initial scope: v3.5.31 and later.
   Maximum reward 100,000 DGB.
+- **2026-10-10 — Scope and scoring.** One named bounty target that holds still, with a 14-day
+  overlap when it moves. DigiByte Mobile (`app.aroundtheblock.wallet`) is in scope; io.digibyte,
+  retired at v4.0.87.2, is not. Severity follows the value actually at risk (DigiAssets carry no
+  market value, so asset findings are display integrity unless they reach DGB, DigiDollar or the
+  seed). One reward per unique vulnerability; three paid findings per reporter per wave. Payout
+  address and credit preference requested with every report.
+- **2026-10-11 — Rules written down that were already applied.** "Known to us, but not yet
+  public" (half the tier for the first external report). The scope rule is stated once instead
+  of twice. The io.digibyte signing-lineage item corrected. Hall of Fame populated with the
+  names of researchers who gave permission.
