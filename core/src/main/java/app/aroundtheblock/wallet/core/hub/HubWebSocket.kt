@@ -12,6 +12,8 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.utf8Size
 import org.json.JSONObject
 
 class HubWebSocket(
@@ -20,6 +22,15 @@ class HubWebSocket(
 ) {
     companion object {
         const val WS_URL = "wss://api.digiscope.me/api/hub/ws"
+
+        /**
+         * The largest frame the Hub socket accepts, in bytes of payload: 64 KiB. A chat message is
+         * at most 2,000 characters (ChatView), far below this as JSON.
+         */
+        const val MAX_FRAME_BYTES = 64L * 1024
+
+        /** The close code sent for a frame over [MAX_FRAME_BYTES]: 1009, message too big (RFC 6455). */
+        const val CLOSE_MESSAGE_TOO_BIG = 1009
     }
 
     private val _messages = MutableSharedFlow<WebSocketEvent>(replay = 0, extraBufferCapacity = 100)
@@ -45,32 +56,62 @@ class HubWebSocket(
 
         _connectionState.value = ConnectionState.RECONNECTING
 
-        webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                android.util.Log.i("HubWS", "connected!")
-                _connectionState.value = ConnectionState.CONNECTED
-                reconnectAttempts = 0
-            }
+        webSocket = httpClient.newWebSocket(request, Listener())
+    }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val json = JSONObject(text)
-                    val event = parseEvent(json)
-                    if (event != null) _messages.tryEmit(event)
-                } catch (e: Exception) { /* ignore malformed */ }
-            }
+    /**
+     * One connection's events. A frame over [MAX_FRAME_BYTES] is not parsed or passed on: the
+     * connection is closed as message-too-big and torn down at once, and nothing more from it is
+     * passed on. OkHttp hands a frame over only once it is wholly in memory, so what this protects
+     * is that an oversized frame is never trusted and the connection that sent it ends.
+     */
+    private inner class Listener : WebSocketListener() {
+        @Volatile private var refused = false
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                android.util.Log.w("HubWS", "closed: $code $reason")
-                _connectionState.value = ConnectionState.DISCONNECTED
-            }
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            android.util.Log.i("HubWS", "connected!")
+            _connectionState.value = ConnectionState.CONNECTED
+            reconnectAttempts = 0
+        }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                android.util.Log.e("HubWS", "failure: ${t.message}, response=${response?.code}")
-                _connectionState.value = ConnectionState.DISCONNECTED
-                // Auto-reconnect with exponential backoff would go here
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            if (refused) return
+            val size = text.utf8Size()
+            if (size > MAX_FRAME_BYTES) {
+                refuse(webSocket, size)
+                return
             }
-        })
+            try {
+                val json = JSONObject(text)
+                val event = parseEvent(json)
+                if (event != null) _messages.tryEmit(event)
+            } catch (e: Exception) { /* ignore malformed */ }
+        }
+
+        /** The Hub speaks text: a binary frame is ignored, as it always was, unless it is over the cap. */
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            if (!refused && bytes.size > MAX_FRAME_BYTES) refuse(webSocket, bytes.size.toLong())
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            android.util.Log.w("HubWS", "closed: $code $reason")
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            android.util.Log.e("HubWS", "failure: ${t.message}, response=${response?.code}")
+            _connectionState.value = ConnectionState.DISCONNECTED
+            // Auto-reconnect with exponential backoff would go here
+        }
+
+        private fun refuse(webSocket: WebSocket, size: Long) {
+            refused = true
+            android.util.Log.w("HubWS", "a frame of $size bytes is over the $MAX_FRAME_BYTES-byte limit; closing")
+            webSocket.close(CLOSE_MESSAGE_TOO_BIG, "frame over the size limit")
+            webSocket.cancel()
+            if (this@HubWebSocket.webSocket === webSocket) this@HubWebSocket.webSocket = null
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
     }
 
     fun disconnect() {
