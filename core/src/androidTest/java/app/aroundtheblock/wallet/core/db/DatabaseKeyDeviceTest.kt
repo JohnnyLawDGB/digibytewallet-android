@@ -167,7 +167,7 @@ class DatabaseKeyDeviceTest {
         }
         val damaged = dbFile.readBytes()
         assertFalse("precondition: the file was damaged", damaged.contentEquals(original))
-        assertEquals("precondition: the damage reads as corrupt", OpenAnswer.CORRUPT, WalletDatabase.cipherFiles(context, dbFile).probe(password))
+        val answer = WalletDatabase.cipherFiles(context, dbFile).probe(password)
 
         val opened = DatabaseKeyProvisioner.openWalletDatabase(context, TEST_DB, keys())
         val now = try {
@@ -184,6 +184,7 @@ class DatabaseKeyDeviceTest {
         assertEquals("a damaged database was not set aside", 1, asides.size)
         assertTrue("a damaged database was not told apart as corrupt: ${asides.single().name}", asides.single().name.contains(AsideReason.CORRUPT.tag))
         assertTrue("the set-aside copy is not the damaged file as it was", asides.single().readBytes().contentEquals(damaged))
+        assertEquals("a damaged file is not told apart from a wrong password", OpenAnswer.CORRUPT, answer)
     }
 
     @Test fun missingKey_setsTheDatabaseAsideNeverDeletes() {
