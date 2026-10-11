@@ -15,6 +15,11 @@ jobs:
     # The scheduled run is the native sweep below and nothing else.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    # Least privilege: the token only reads -- the checkout, its submodule and the pin check's fetch of
+    # the public core. No step writes through it; the cache and the artifact upload use the runner's own
+    # token, which this block does not govern.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,6 +128,9 @@ jobs:
   native-kats-weekly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    # Least privilege: the checkout and its submodule only.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
