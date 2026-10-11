@@ -81,6 +81,19 @@ After that merge `develop` builds DigiByte Mobile and this section reduces to th
   base into every open PR before deciding the fix worked. (On 2026-10-11, twelve PRs kept
   failing a check that had been fixed on `develop` the day before, for exactly this reason.)
 
+### Landing a fix for a finding that is not yet public
+
+Such a fix is built in the private clone, never pushed to a public branch first, and its tests
+travel with it — a KAT's red arm reproduces the bug (see the private `CAMPAIGN.md` §1). It
+reaches `develop` through **"Merge pull requests" on its draft security advisory**, from the
+advisory's temporary private fork.
+
+- The app repo's **"Base" ruleset blocks that merge.** For the 4.0.86 landing it had to be
+  disabled, the advisory PR merged, and the ruleset re-enabled at once. That is an owner action;
+  re-enable it in the same sitting.
+- **Do not publish an umbrella advisory to "finish" a landing** — publishing deletes its temp
+  fork. Publish the per-finding advisories (§8) once the fix has shipped.
+
 ## 4. Gates — all of them, at the release commit
 
 Run every gate against the exact commit you will build. A gate run on a neighbouring commit
@@ -131,8 +144,10 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
 ## 7. Publish
 
 1. **Sideload:** a release on `JohnnyLawDGB/aroundtheblock-wallet-releases`, tag `vX.Y.Z`,
-   with the APK and `SHA256SUMS`. Release notes written by hand, **with reporter credits as
-   they are written** (§8), not added afterwards.
+   with the APK, and the APK's SHA-256 and the signing certificate's SHA-256 **in the release
+   notes** (attaching `SHA256SUMS` as well is fine). Then download the published APK and hash
+   it — the number on the page must be the number of the file people actually get. Release
+   notes written by hand, **with reporter credits as they are written** (§8).
 2. **Play:** the AAB to open testing, with that release's "what's new" text.
 3. **digiscope.me downloads page:** link the new release.
    **Never repoint `digibyte-wallet-latest.apk` or `latest.json`.** The retired io.digibyte
@@ -175,7 +190,7 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
 [ ] 4  KATs all green · unit tests ×3 · JNI registry · upgrade test PASS — at the release commit
 [ ] 5  build-release.sh in the owner's terminal
 [ ] 6  signer = release cert on both artifacts · SHA256SUMS from disk
-[ ] 7  releases repo · Play · digiscope.me link (latest.json untouched)
+[ ] 7  releases repo (hashes in notes, re-hash the live APK) · Play · digiscope.me link (latest.json untouched)
 [ ] 8  credits · bounty target moved · advisories published or justified · reporters told
 [ ] 9  scope closed, next opened · private repo committed + bundled · release merged back · branches pushed
 ```
