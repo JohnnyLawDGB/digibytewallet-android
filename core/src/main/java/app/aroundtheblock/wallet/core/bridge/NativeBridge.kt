@@ -80,6 +80,22 @@ object NativeBridge {
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
     external fun publishTransaction(signedTx: ByteArray): String?
 
+    // --- pkg 2.1 ---
+    // The fee shown is the fee signed. A DGB send is built and quoted before the credential prompt
+    // ([createTransaction] + [quoteTransaction]) and the prepared bytes are signed after it
+    // ([signPreparedTransaction]), which checks them against the approved fee first.
+
+    /** `[fee, vsize]` of unsigned bytes the wallet built: the fee is the transaction's inputs minus its
+     *  outputs, the vsize the size it was priced at, signatures estimated. Null when the bytes do not
+     *  parse or an input is not a transaction the wallet holds (the fee is then unknown). */
+    external fun quoteTransaction(unsignedTx: ByteArray): LongArray?
+
+    /** Sign prepared unsigned bytes, or null. Refuses, before signing, bytes that do not pay exactly
+     *  [approvedFeeSats] or that spend a coin which is no longer one of the wallet's spendable plain
+     *  coins; and refuses to hand back a signed transaction whose fee is not [approvedFeeSats]. */
+    external fun signPreparedTransaction(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray?
+    // --- /pkg 2.1 ---
+
     /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.
      *  Returns the txid on success, or null on any failure (bad address, insufficient DD/DGB, sign/broadcast). */
     external fun sendDigiDollar(tdAddress: String, cents: Long): String?

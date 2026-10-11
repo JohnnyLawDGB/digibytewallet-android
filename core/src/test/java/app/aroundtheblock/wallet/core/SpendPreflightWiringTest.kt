@@ -15,10 +15,11 @@ import org.junit.Test
  * to the native bridge, which has no library on the JVM, so no behaviour test can see which bridge
  * call a default makes, or that a new caller has appeared somewhere else.
  *
- * Three bridge calls read the plain-coin set for a spend: `createTransaction` (the DGB send),
- * `sendDigiDollar` (its network fee) and `getSpendableDigiByteUtxos` (the network fee of an asset
- * send). The recovery services build from outpoints of another seed that they list and classify
- * themselves, and a re-publish builds nothing; neither reads the set.
+ * Four bridge calls read the plain-coin set for a spend: `createTransaction` (the DGB send's build at
+ * review), `signPreparedTransaction` (its signature after the prompt, which checks the prepared coins
+ * against the set), `sendDigiDollar` (its network fee) and `getSpendableDigiByteUtxos` (the network
+ * fee of an asset send). The recovery services build from outpoints of another seed that they list
+ * and classify themselves, and a re-publish builds nothing; neither reads the set.
  */
 class SpendPreflightWiringTest {
 
@@ -54,6 +55,7 @@ class SpendPreflightWiringTest {
 
     private val readsThePlainCoinSet = listOf(
         "NativeBridge.createTransaction(",
+        "NativeBridge.signPreparedTransaction(",
         "NativeBridge.sendDigiDollar(",
         "NativeBridge.getSpendableDigiByteUtxos(",
     )
@@ -71,6 +73,7 @@ class SpendPreflightWiringTest {
         assertEquals(
             setOf(
                 "TransactionBuilder.kt: NativeBridge.createTransaction(",
+                "TransactionBuilder.kt: NativeBridge.signPreparedTransaction(",
                 "TransactionBuilder.kt: NativeBridge.sendDigiDollar(",
                 "AssetManager.kt: NativeBridge.getSpendableDigiByteUtxos(",
             ),
@@ -80,7 +83,7 @@ class SpendPreflightWiringTest {
 
     @Test fun `the builder reaches the bridge only through its seam`() {
         val file = source("TransactionBuilder.kt")
-        val builder = file.section("class TransactionBuilder(", "private fun estimateFee(")
+        val builder = file.section("class TransactionBuilder(", "private companion object")
 
         assertFalse("TransactionBuilder calls the bridge directly, past its seam", builder.contains("NativeBridge."))
         assertFalse("TransactionBuilder broadcasts directly, past its seam", builder.contains("Broadcaster."))
@@ -96,12 +99,26 @@ class SpendPreflightWiringTest {
 
     @Test fun `both sends run the pass before the first native build step`() {
         val file = source("TransactionBuilder.kt")
+        // The DGB send's review: the pass, then the one helper that builds.
         assertBefore(
-            file.section("suspend fun sendTransaction(", "suspend fun sendDigiDollar("),
-            "SpendPreflight.completed(beforeSpend)", "native.createTransaction(",
+            file.section("suspend fun prepareTransaction(", "suspend fun sendPrepared("),
+            "SpendPreflight.completed(beforeSpend)", "buildAndQuote(",
+        )
+        val helper = file.section("private fun buildAndQuote(", "private fun belowDustLine(")
+        assertTrue("the review's build is not in buildAndQuote", helper.contains("native.createTransaction("))
+        assertEquals("the DGB build is made somewhere other than buildAndQuote", 1, Regex(Regex.escape("native.createTransaction(")).findAll(file).count())
+        assertEquals(
+            "buildAndQuote is called from somewhere other than review",
+            Regex(Regex.escape("buildAndQuote(")).findAll(file.section("suspend fun prepareTransaction(", "suspend fun sendPrepared(")).count(),
+            Regex(Regex.escape("buildAndQuote(")).findAll(file).count() - 1,   // less its declaration
+        )
+        // The DGB send after the prompt: the pass again, then the checked signer.
+        assertBefore(
+            file.section("suspend fun sendPrepared(", "suspend fun sendDigiDollar("),
+            "SpendPreflight.completed(beforeSpend)", "native.signPrepared(",
         )
         assertBefore(
-            file.section("suspend fun sendDigiDollar(", "private fun estimateFee("),
+            file.section("suspend fun sendDigiDollar(", "suspend fun awaitDelivery("),
             "SpendPreflight.completed(beforeSpend)", "native.sendDigiDollar(",
         )
     }

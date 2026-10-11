@@ -675,4 +675,12 @@
     <string name="restore_date_onwards">Mula Ene %1$d</string>
     <string name="restore_date_range">Ene %1$d – Dis %1$d</string>
     <string name="restore_date_genesis">Inilunsad ang DigiByte noong Enero 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, ang minimum ng network. Ipinapakita ang eksaktong bayad para sa transaksyong ito bago ka magkumpirma.</string>
+    <string name="send_preparing">Inihahanda…</string>
+    <string name="send_fee_raised">Itinaas mula sa %1$s DGB na inilagay mo: ito ang bayad na binabayaran ng transaksyong ito.</string>
+    <string name="send_err_below_dust">Mas mababa ang halagang ito sa pinakamaliit na bayad na ipinapasa ng network sa address na ito (%1$s DGB). Magpadala ng kahit ganoon kalaki.</string>
+    <string name="send_not_relayed_title">Naipadala, hindi pa naipapasa</string>
+    <string name="send_not_relayed_body">Na-broadcast ng iyong wallet ang transaksyong ito, pero wala pang peer na tumanggap nito, kaya hindi pa alam kung nakarating na ito sa network. Lumalabas itong pending sa iyong activity. Tingnan ang iyong activity bago mo ito ipadala ulit.</string>
+    <!-- /pkg 2.1 -->
 </resources>

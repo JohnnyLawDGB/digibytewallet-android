@@ -116,6 +116,7 @@ fun AssetSendScreen(
             quantityDivisibility = approved.divisibility,
             feeSats = approved.feeEstimateSats,
             plannedCost = planned?.takeIf { it.approval === approved }?.cost,
+            raisedFromSats = planned?.takeIf { it.approval === approved }?.raisedFromSats,
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
                 coroutineScope.launch {
@@ -451,9 +452,9 @@ fun AssetSendScreen(
                     isError = feeWarning is AssetFeeWarning.ZeroFee
                 )
             } else {
-                val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
+                // No figure here: the fee is the planned transfer's, which the confirmation shows.
                 Text(
-                    text = String.format("%.8f DGB", defaultFeeDgb),
+                    text = stringResource(R.string.send_fee_exact_at_review),
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -462,11 +463,6 @@ fun AssetSendScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             when (feeWarning) {
-                is AssetFeeWarning.BelowRelay -> Text(
-                    text = stringResource(R.string.send_fee_below_min),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFFFA000)
-                )
                 is AssetFeeWarning.ZeroFee -> Text(
                     text = stringResource(R.string.send_fee_required),
                     style = MaterialTheme.typography.labelSmall,
@@ -555,6 +551,8 @@ private fun AssetSendConfirmDialog(
     feeSats: Long,
     /** The markers and fee of the transfer as planned for this approval. */
     plannedCost: AssetSendCost?,
+    /** The custom total typed, when the planned transfer pays more than it; null otherwise. */
+    raisedFromSats: Long?,
     sending: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
@@ -601,6 +599,15 @@ private fun AssetSendConfirmDialog(
                     label = stringResource(R.string.send_network_fee_row),
                     value = String.format("%.8f DGB", feeSats / 100_000_000.0)
                 )
+                // A custom fee the transfer pays more than: said beside the fee, never shown as the lower figure.
+                raisedFromSats?.let { typed ->
+                    Text(
+                        text = stringResource(R.string.send_fee_raised, app.aroundtheblock.wallet.core.model.DgbAmount.format(typed)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFFA000),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
                 CostPreviewCard(

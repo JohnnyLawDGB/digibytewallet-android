@@ -3571,6 +3571,25 @@ class SyncService : Service() {
                         "(retry=${outcome.shouldRetry}, terminal=${outcome.isTerminal})"
                 )
             }
+            // A plain DGB send the network refused for good can never be accepted: remove it, which
+            // gives its coins back to the wallet, and forget its record. It used to be logged and
+            // kept — coins spent, row "pending" — for good. An asset or DigiDollar send is left to
+            // its own handling: the asset layer's CONFLICTED accounting reads an abandoned attempt
+            // from the wallet, so this never removes one, and never calls into the asset layer.
+            val action = outcome?.actionFor(plainDgb = isPlainDgbSend(txid))
+                ?: app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.KEEP
+            if (action == app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.REMOVE_AND_UNLOCK) {
+                if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
+                    store.remove(txid)
+                    dropped = true
+                    android.util.Log.i("SyncService",
+                        "stranded-send sweep: removed refused send ${txid.take(12)}; its coins are spendable again")
+                } else {
+                    android.util.Log.w("SyncService",
+                        "stranded-send sweep: refused send ${txid.take(12)} is still held by the wallet; kept")
+                }
+                continue
+            }
             // Definitive double-spend: the C core marks a tx invalid when its
             // inputs were already spent by another (confirmed) tx. Such a tx can
             // never confirm — drop the phantom and forget the record rather than
@@ -3645,6 +3664,18 @@ class SyncService : Service() {
                 }
             }
         }
+    }
+
+    /**
+     * A recorded send that moves only DGB: the wallet holds it, it carries no DigiAsset transfer
+     * instructions, and it is no DigiDollar transaction. Anything else, or anything that cannot be
+     * read, is not one — and so is never removed by the stranded-send sweep.
+     */
+    private fun isPlainDgbSend(txid: String): Boolean {
+        val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull() ?: return false
+        val asset = runCatching { NativeBridge.isAssetTransaction(raw) }.getOrDefault(true)
+        val digiDollar = runCatching { NativeBridge.digiDollarTxType(txid) }.getOrDefault(-1)
+        return !asset && digiDollar == 0
     }
 
     /** Most recent serialized block window from [NativeCallback.onSaveBlocks],

@@ -13,6 +13,7 @@
 #include "jni_bridge.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
+#include "prepared_send.h"   /* the quote and the checks of a prepared DGB send (fee_quote_kat) */
 
 /* ---------- publish result callback ----------
  *
@@ -298,6 +299,125 @@ NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
 
     BRTransactionFree(tx);
     LOGD("signTransaction: signed tx, %zu bytes", signedLen);
+    return result;
+}
+
+/* ---------- a prepared DGB send: quoteTransaction, signPreparedTransaction ----------
+ *
+ * The fee a DGB send's confirmation shows is the fee of the transaction that is signed. Review builds
+ * the send (createTransaction) and quotes the bytes here; after the credential prompt the SAME bytes
+ * come back to be signed. Kotlin holds them as bytes plus the quote, never a native object, so
+ * nothing native outlives the prompt -- and the wallet may have changed while it was up, which is
+ * why signing checks them first. Both decisions live in prepared_send.h, which fee_quote_kat runs
+ * against the live core on the host; this file only parses, calls and serializes. */
+
+/* [fee, vsize] of unsigned bytes the wallet built: the fee is the transaction's inputs minus its
+ * outputs, the vsize the size it was built at. NULL when the bytes do not parse or the fee is
+ * unknown (an input is not a transaction the wallet holds). Reads the wallet; changes nothing. */
+jlongArray JNICALL
+NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx)
+{
+    (void)thiz;
+    if (!g_wallet || !unsignedTx) return NULL;
+
+    jsize txLen = (*env)->GetArrayLength(env, unsignedTx);
+    if (txLen <= 0) return NULL;
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, unsignedTx, NULL);
+    if (!txBytes) return NULL;
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, unsignedTx, txBytes, JNI_ABORT);
+    if (!tx) {
+        LOGE("quoteTransaction: failed to parse transaction");
+        return NULL;
+    }
+
+    uint64_t fee = 0, vsize = 0;
+    int quoted = prepared_send_quote(g_wallet, tx, &fee, &vsize);
+    BRTransactionFree(tx);
+    if (!quoted) {
+        LOGW("quoteTransaction: the fee is unknown -- an input is not a transaction the wallet holds");
+        return NULL;
+    }
+
+    jlongArray result = (*env)->NewLongArray(env, 2);
+    if (result) {
+        jlong quote[2] = { (jlong)fee, (jlong)vsize };
+        (*env)->SetLongArrayRegion(env, result, 0, 2, quote);
+    }
+    return result;
+}
+
+/* Sign prepared unsigned bytes, or NULL. Before signing they must pay exactly approvedFeeSats and
+ * spend only coins that are still the wallet's spendable plain coins; after signing the signed
+ * transaction must still pay exactly approvedFeeSats, or nothing is handed back to be broadcast.
+ * It signs those bytes and nothing else: no build, no publish (the publish entry points stay
+ * publishTransaction / publishTransactionStem, which tx_publish_ownership_kat watches). */
+jbyteArray JNICALL
+NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx, jlong approvedFeeSats)
+{
+    (void)thiz;
+    if (!g_wallet) {
+        LOGW("signPreparedTransaction: wallet not initialized");
+        return NULL;
+    }
+    if (!seed_is_valid()) {
+        LOGW("signPreparedTransaction: session not unlocked (no seed)");
+        return NULL;
+    }
+    if (!unsignedTx || approvedFeeSats <= 0) {
+        LOGW("signPreparedTransaction: no prepared bytes, or no approved fee");
+        return NULL;
+    }
+
+    jsize txLen = (*env)->GetArrayLength(env, unsignedTx);
+    if (txLen <= 0) return NULL;
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, unsignedTx, NULL);
+    if (!txBytes) return NULL;
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, unsignedTx, txBytes, JNI_ABORT);
+    if (!tx) {
+        LOGE("signPreparedTransaction: failed to parse the prepared transaction");
+        return NULL;
+    }
+
+    /* Before signing: exactly the approved fee, and only coins still the wallet's plain ones. */
+    PreparedSendVerdict verdict;
+    if ((verdict = prepared_send_check(g_wallet, tx, (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
+        LOGW("signPreparedTransaction: not signed -- the prepared send no longer matches its approval (verdict %d)",
+             (int)verdict);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* Sign with wallet (RFC 6979 deterministic nonces); forkId=0 for DigiByte. */
+    if (!seed_sign_transaction(g_wallet, tx, 0) || !BRTransactionIsSigned(tx)) {
+        LOGW("signPreparedTransaction: signing failed");
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* After signing: the transaction that would be broadcast pays exactly the approved fee. */
+    if ((verdict = prepared_send_check(g_wallet, tx, (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
+        LOGE("signPreparedTransaction: the signed transaction does not pay the approved fee (verdict %d); not returned",
+             (int)verdict);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    size_t signedLen = BRTransactionSerialize(tx, NULL, 0);
+    uint8_t *signedBuf = signedLen ? malloc(signedLen) : NULL;
+    if (!signedBuf) {
+        LOGE("signPreparedTransaction: could not serialize the signed transaction");
+        BRTransactionFree(tx);
+        return NULL;
+    }
+    signedLen = BRTransactionSerialize(tx, signedBuf, signedLen);
+    BRTransactionFree(tx);
+
+    jbyteArray result = signedLen ? (*env)->NewByteArray(env, (jsize)signedLen) : NULL;
+    if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)signedLen, (jbyte *)signedBuf);
+    free(signedBuf);
+    LOGD("signPreparedTransaction: signed tx, %zu bytes, fee %lld", signedLen, (long long)approvedFeeSats);
     return result;
 }
 

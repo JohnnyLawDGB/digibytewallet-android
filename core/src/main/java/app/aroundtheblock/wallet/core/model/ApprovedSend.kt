@@ -32,7 +32,11 @@ sealed class ApprovedSend {
         val sats: Long,
         /** Fee rate handed to the transaction builder, in satoshis per kilobyte. */
         val feePerKb: Long,
-        /** The fee estimate the confirmation shows, in satoshis. */
+        /**
+         * The fee the confirmation shows, in satoshis. Once review has quoted the send ([withQuote])
+         * it is the fee of the transaction built for it — its inputs minus its outputs — which is the
+         * fee signed: native code refuses to sign those bytes at any other fee.
+         */
         val feeEstimateSats: Long,
         /**
          * Whole cents for the confirmation's approximate-dollars row, or null when there is no
@@ -45,6 +49,10 @@ sealed class ApprovedSend {
 
         /** The approximate-dollars row, written from whole cents as [amountText] is; "" for no row. */
         val approxUsdText: String get() = approxUsdCents?.let { UsdCents.format(it) }.orEmpty()
+
+        /** This approval, carrying the quote review made: the rate the send was built at and the fee
+         *  of the transaction built. The address, the amount and the dollars row are unchanged. */
+        fun withQuote(feePerKb: Long, feeSats: Long): Dgb = Dgb(address, sats, feePerKb, feeSats, approxUsdCents)
     }
 
     class DigiDollar internal constructor(
@@ -77,6 +85,11 @@ sealed class ApprovedSend {
          *  Everything else, and so what is sent, is unchanged. */
         fun withPlannedFee(feeSats: Long): Asset =
             Asset(address, assetId, units, divisibility, feePerKb, feeSats)
+
+        /** This approval, planned at [feePerKb]: the rate a custom total comes to over the planned
+         *  transfer's own size. The asset, the units and the recipient — what is sent — are unchanged. */
+        fun atRate(feePerKb: Long): Asset =
+            Asset(address, assetId, units, divisibility, feePerKb, feeEstimateSats)
     }
 
     companion object {

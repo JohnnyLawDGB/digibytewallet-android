@@ -675,4 +675,12 @@
     <string name="restore_date_onwards">जनवरी %1$d से आगे</string>
     <string name="restore_date_range">जनवरी %1$d – दिसंबर %1$d</string>
     <string name="restore_date_genesis">DigiByte जनवरी 2014 में लॉन्च हुआ</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, नेटवर्क न्यूनतम। इस लेनदेन का सटीक शुल्क पुष्टि करने से पहले दिखाया जाता है।</string>
+    <string name="send_preparing">तैयार हो रहा है…</string>
+    <string name="send_fee_raised">आपके दर्ज किए गए %1$s DGB से बढ़ाया गया: यह लेनदेन यही शुल्क चुकाता है।</string>
+    <string name="send_err_below_dust">यह राशि उस सबसे छोटे भुगतान से कम है जिसे नेटवर्क इस पते पर रिले करता है (%1$s DGB)। कम से कम इतनी राशि भेजें।</string>
+    <string name="send_not_relayed_title">भेजा गया, अभी रिले नहीं हुआ</string>
+    <string name="send_not_relayed_body">आपके वॉलेट ने यह लेनदेन प्रसारित किया, लेकिन अभी तक किसी पीयर ने इसे नहीं लिया है, इसलिए अभी पता नहीं है कि यह नेटवर्क तक पहुँचा या नहीं। यह आपकी गतिविधि में लंबित दिखता है। दोबारा भेजने से पहले अपनी गतिविधि जाँच लें।</string>
+    <!-- /pkg 2.1 -->
 </resources>

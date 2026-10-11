@@ -812,4 +812,12 @@
     <string name="restore_date_onwards">Jan %1$d onwards</string>
     <string name="restore_date_range">Jan %1$d – Dec %1$d</string>
     <string name="restore_date_genesis">DigiByte launched January 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, the network minimum. The exact fee for this transaction is shown before you confirm.</string>
+    <string name="send_preparing">Preparing…</string>
+    <string name="send_fee_raised">Raised from the %1$s DGB you entered: this is the fee this transaction pays.</string>
+    <string name="send_err_below_dust">This amount is below the smallest payment the network relays to this address (%1$s DGB). Send at least that much.</string>
+    <string name="send_not_relayed_title">Sent, not yet relayed</string>
+    <string name="send_not_relayed_body">Your wallet broadcast this transaction, but no peer has taken it yet, so it is not yet known to have reached the network. It shows as pending in your activity. Check your activity before you send it again.</string>
+    <!-- /pkg 2.1 -->
 </resources>

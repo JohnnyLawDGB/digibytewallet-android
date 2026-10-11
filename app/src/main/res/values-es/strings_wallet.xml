@@ -682,4 +682,12 @@
     <string name="restore_date_onwards">Desde ene. %1$d</string>
     <string name="restore_date_range">ene. %1$d – dic. %1$d</string>
     <string name="restore_date_genesis">DigiByte se lanzó en enero de 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, el mínimo de la red. La comisión exacta de esta transacción se muestra antes de que confirmes.</string>
+    <string name="send_preparing">Preparando…</string>
+    <string name="send_fee_raised">Aumentada desde los %1$s DGB que introdujiste: esta es la comisión que paga esta transacción.</string>
+    <string name="send_err_below_dust">Este importe está por debajo del pago más pequeño que la red retransmite a esta dirección (%1$s DGB). Envía al menos esa cantidad.</string>
+    <string name="send_not_relayed_title">Enviada, aún sin retransmitir</string>
+    <string name="send_not_relayed_body">Tu billetera difundió esta transacción, pero ningún nodo la ha recibido todavía, así que aún no se sabe si llegó a la red. Aparece como pendiente en tu actividad. Revisa tu actividad antes de volver a enviarla.</string>
+    <!-- /pkg 2.1 -->
 </resources>

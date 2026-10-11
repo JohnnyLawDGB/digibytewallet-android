@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core
 
 import android.util.Log
+import app.aroundtheblock.wallet.core.send.FeeRequest
 import app.aroundtheblock.wallet.core.send.SendFailure
 import io.mockk.every
 import io.mockk.mockk
@@ -29,6 +30,10 @@ import org.junit.Test
  *
  * The order is asserted positively — the recorded sequence is compared as a whole — because "the
  * builder was reached" is true of a send that never ran detection at all.
+ *
+ * A DGB send is two steps: review builds and quotes it before the credential prompt, and the send
+ * signs those bytes after it. Detection runs to completion before each: before the build, and again
+ * before the signature (the signer checks the coins against the plain-coin set detection keeps).
  */
 class SpendPreflightOrderTest {
 
@@ -40,9 +45,13 @@ class SpendPreflightOrderTest {
         override fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray? {
             events += "create"; return byteArrayOf(1)
         }
-        override fun signTransaction(unsignedTx: ByteArray): ByteArray? { events += "sign"; return byteArrayOf(2) }
         override fun broadcast(signedTx: ByteArray): String? { events += "broadcast"; return "txid" }
         override fun sendDigiDollar(tdAddress: String, cents: Long): String? { events += "sendDigiDollar"; return "ddtxid" }
+        override fun scriptPubKey(address: String): ByteArray? = RecordingSpendNative.P2WPKH
+        override fun quoteTransaction(unsignedTx: ByteArray): LongArray? = longArrayOf(23_200, 208)
+        override fun transactionOutputs(tx: ByteArray): Array<String>? = arrayOf("0|150000000|${RecordingSpendNative.P2WPKH_HEX}")
+        override fun signPrepared(unsignedTx: ByteArray, approvedFeeSats: Long): ByteArray? { events += "sign"; return byteArrayOf(2) }
+        override fun publishResult(txid: String): Int = 0
     }
 
     private fun builder(beforeSpend: (suspend () -> Unit)? = null): TransactionBuilder {
@@ -56,8 +65,13 @@ class SpendPreflightOrderTest {
         }
     }
 
+    /** Review, then the send of what review prepared — the two steps a DGB send is made of. */
     private suspend fun TransactionBuilder.sendDgb(): TxResult =
-        sendTransaction("dgb1qrecipient", 150_000_000L, 100_000L, emptyList())
+        when (val r = prepareTransaction("dgb1qrecipient", 150_000_000L, FeeRequest.Default)) {
+            is PrepareResult.Ready -> sendPrepared(r.send)
+            is PrepareResult.Error -> TxResult.Error(r.message)
+            is PrepareResult.BelowDust -> TxResult.Error("below the dust line: ${r.thresholdSats}")
+        }
 
     @Before fun setup() {
         mockkStatic(Log::class)
@@ -83,10 +97,10 @@ class SpendPreflightOrderTest {
         val result = b.sendDgb()
 
         assertEquals(
-            listOf("address", "detect:start", "detect:end", "create", "sign", "broadcast"),
+            listOf("address", "detect:start", "detect:end", "create", "detect:start", "detect:end", "sign", "broadcast"),
             events.toList(),
         )
-        assertEquals(TxResult.Success("txid"), result)
+        assertEquals(TxResult.Success("txid", Delivery.RELAYED), result)
     }
 
     @Test fun `a DGB send builds nothing when detection could not finish`() = runTest {
@@ -187,8 +201,8 @@ class SpendPreflightOrderTest {
 
         val result = builder().sendDgb()
 
-        assertEquals(listOf("address", "installed-pass", "create", "sign", "broadcast"), events.toList())
-        assertEquals(TxResult.Success("txid"), result)
+        assertEquals(listOf("address", "installed-pass", "create", "installed-pass", "sign", "broadcast"), events.toList())
+        assertEquals(TxResult.Success("txid", Delivery.RELAYED), result)
     }
 
     @Test fun `with no pass installed no spend is built`() = runTest {

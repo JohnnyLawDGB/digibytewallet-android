@@ -670,4 +670,12 @@
     <string name="restore_date_onwards">Từ tháng 1/%1$d trở đi</string>
     <string name="restore_date_range">Tháng 1/%1$d – Tháng 12/%1$d</string>
     <string name="restore_date_genesis">DigiByte ra mắt tháng 1/2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, mức tối thiểu của mạng. Phí chính xác của giao dịch này được hiển thị trước khi bạn xác nhận.</string>
+    <string name="send_preparing">Đang chuẩn bị…</string>
+    <string name="send_fee_raised">Đã tăng từ %1$s DGB bạn nhập: đây là phí mà giao dịch này phải trả.</string>
+    <string name="send_err_below_dust">Số tiền này thấp hơn khoản thanh toán nhỏ nhất mà mạng chuyển tiếp đến địa chỉ này (%1$s DGB). Hãy gửi ít nhất số đó.</string>
+    <string name="send_not_relayed_title">Đã gửi, chưa được chuyển tiếp</string>
+    <string name="send_not_relayed_body">Ví của bạn đã phát giao dịch này, nhưng chưa có nút nào nhận nó, nên chưa biết nó đã đến được mạng hay chưa. Giao dịch hiển thị là đang chờ trong hoạt động của bạn. Hãy kiểm tra hoạt động trước khi gửi lại.</string>
+    <!-- /pkg 2.1 -->
 </resources>

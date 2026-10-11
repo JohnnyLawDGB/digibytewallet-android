@@ -683,4 +683,12 @@
     <string name="restore_date_onwards">ab Jan. %1$d</string>
     <string name="restore_date_range">Jan. %1$d – Dez. %1$d</string>
     <string name="restore_date_genesis">DigiByte startete im Januar 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, das Netzwerkminimum. Die genaue Gebühr dieser Transaktion wird angezeigt, bevor Sie bestätigen.</string>
+    <string name="send_preparing">Wird vorbereitet…</string>
+    <string name="send_fee_raised">Erhöht von den eingegebenen %1$s DGB: Dies ist die Gebühr, die diese Transaktion zahlt.</string>
+    <string name="send_err_below_dust">Dieser Betrag liegt unter der kleinsten Zahlung, die das Netzwerk an diese Adresse weiterleitet (%1$s DGB). Senden Sie mindestens so viel.</string>
+    <string name="send_not_relayed_title">Gesendet, noch nicht weitergeleitet</string>
+    <string name="send_not_relayed_body">Ihre Wallet hat diese Transaktion übertragen, aber noch kein Peer hat sie angenommen, daher ist noch nicht bekannt, ob sie das Netzwerk erreicht hat. Sie wird in Ihren Aktivitäten als ausstehend angezeigt. Prüfen Sie Ihre Aktivitäten, bevor Sie sie erneut senden.</string>
+    <!-- /pkg 2.1 -->
 </resources>
