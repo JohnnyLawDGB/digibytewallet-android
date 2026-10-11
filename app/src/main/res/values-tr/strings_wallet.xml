@@ -675,4 +675,12 @@
     <string name="restore_date_onwards">Oca %1$d ve sonrası</string>
     <string name="restore_date_range">Oca %1$d – Ara %1$d</string>
     <string name="restore_date_genesis">DigiByte Ocak 2014\'te başladı</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, ağın asgari ücreti. Bu işlemin tam ücreti onaylamadan önce gösterilir.</string>
+    <string name="send_preparing">Hazırlanıyor…</string>
+    <string name="send_fee_raised">Girdiğiniz %1$s DGB tutarından yükseltildi: bu işlemin ödediği ücret budur.</string>
+    <string name="send_err_below_dust">Bu tutar, ağın bu adrese aktardığı en küçük ödemenin (%1$s DGB) altında. En az o kadar gönderin.</string>
+    <string name="send_not_relayed_title">Gönderildi, henüz aktarılmadı</string>
+    <string name="send_not_relayed_body">Cüzdanınız bu işlemi yayınladı, ancak henüz hiçbir eş onu almadı; bu yüzden ağa ulaşıp ulaşmadığı henüz bilinmiyor. Etkinliğinizde beklemede olarak görünür. Tekrar göndermeden önce etkinliğinizi kontrol edin.</string>
+    <!-- /pkg 2.1 -->
 </resources>

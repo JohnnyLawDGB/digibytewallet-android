@@ -3,16 +3,23 @@ package app.aroundtheblock.wallet.ui.wallet
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import app.aroundtheblock.wallet.core.Delivery
+import app.aroundtheblock.wallet.core.PrepareResult
+import app.aroundtheblock.wallet.core.PreparedSend
 import app.aroundtheblock.wallet.core.PriceProvider
+import app.aroundtheblock.wallet.core.SpendPreflight
 import app.aroundtheblock.wallet.core.TransactionBuilder
 import app.aroundtheblock.wallet.core.TxResult
-import app.aroundtheblock.wallet.core.UtxoManager
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.model.ApprovedSend
 import app.aroundtheblock.wallet.core.model.DigiByteUri
 import app.aroundtheblock.wallet.core.model.DgbAmount
+import app.aroundtheblock.wallet.core.model.SendConfirmation
 import app.aroundtheblock.wallet.core.model.UsdCents
+import app.aroundtheblock.wallet.core.send.FeeQuote
+import app.aroundtheblock.wallet.core.send.FeeRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -23,29 +30,32 @@ import javax.inject.Inject
 
 sealed class SendState {
     data object Idle : SendState()
-    /** The confirmation is on screen, showing [approved] — the only thing [SendViewModel.send] accepts. */
-    data class Confirming(val approved: ApprovedSend.Dgb) : SendState()
+    /**
+     * The confirmation is on screen, showing [approved] — the only thing [SendViewModel.send] accepts.
+     * [approved] was made from [prepared], the send review built and quoted, and its bytes are what
+     * the send signs: the fee shown is the fee signed.
+     */
+    data class Confirming(val approved: ApprovedSend.Dgb, val prepared: PreparedSend) : SendState()
+    /** Signing and broadcasting, then waiting for a peer to take it: "Broadcasting…". */
     data object Sending : SendState()
+    /** A peer has taken the transaction: "Sent". */
     data class Success(val txid: String) : SendState()
+    /** Broadcast, and no peer has taken it yet: the wallet holds it as pending. It is not "Sent". */
+    data class NotYetRelayed(val txid: String) : SendState()
     data class Error(val message: String) : SendState()
 }
 
-/** Estimated vsize for a typical 1-input P2WPKH → 2-output transaction. */
-private const val TYPICAL_TX_VSIZE = 141L
-
-/** Default fee rate: 100,000 sat/KB (100 sat/byte) — DigiByte min relay fee. */
-private const val DEFAULT_FEE_PER_KB = 100_000L
-
+/** What the custom-fee field says of itself. There is no "below the relay minimum" state: the builder
+ *  raises a low custom fee to the floor, and the confirmation shows the fee raised. */
 sealed class FeeWarning {
     data object None : FeeWarning()
-    data object BelowRelay : FeeWarning()
+    /** A custom fee that is not a positive amount: review quotes nothing until it is one. */
     data object ZeroFee : FeeWarning()
 }
 
 @HiltViewModel
 class SendViewModel @Inject constructor(
     private val transactionBuilder: TransactionBuilder,
-    private val utxoManager: UtxoManager,
     private val priceProvider: PriceProvider
 ) : ViewModel() {
 
@@ -71,40 +81,31 @@ class SendViewModel @Inject constructor(
     /** Whether user has toggled custom fee mode. */
     val isCustomFee = MutableStateFlow(false)
 
-    /** Custom fee input in DGB (text field value). */
+    /** Custom fee input: a TOTAL fee in DGB (text field value). */
     val customFeeInput = MutableStateFlow("")
 
-    /** Default fee estimate in satoshis for a typical transaction. */
-    val defaultFeeSat: Long = TYPICAL_TX_VSIZE * DEFAULT_FEE_PER_KB / 1000
-
-    /** Fee rate in sat/KB to pass to the C core. */
-    val feeRatePerKb: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
-        if (!custom) {
-            DEFAULT_FEE_PER_KB
-        } else {
-            val feeSat = DgbAmount.toSats(input) ?: 0L
-            if (feeSat <= 0 || TYPICAL_TX_VSIZE <= 0) return@combine DEFAULT_FEE_PER_KB
-            (feeSat * 1000) / TYPICAL_TX_VSIZE
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_FEE_PER_KB)
-
-    /** Estimated total fee in satoshis (for display). */
-    val estimatedFeeSat: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
-        if (!custom) {
-            defaultFeeSat
-        } else {
-            DgbAmount.toSats(input) ?: 0L
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, defaultFeeSat)
-
-    /** Warning state for the custom fee. */
+    /**
+     * The custom-fee field's own state. No fee figure is worked out here: the fee of a send is the
+     * fee of the transaction review builds for it, which the confirmation shows and the send signs.
+     */
     val feeWarning: StateFlow<FeeWarning> = combine(isCustomFee, customFeeInput) { custom, input ->
-        if (!custom) return@combine FeeWarning.None
-        val feeSat = DgbAmount.toSats(input) ?: 0L
-        if (feeSat <= 0) return@combine FeeWarning.ZeroFee
-        // Whole satoshis on both sides: under 100 sat/vB across the typical size.
-        if (feeSat < 100L * TYPICAL_TX_VSIZE) FeeWarning.BelowRelay else FeeWarning.None
+        if (FeeRequest.of(custom, input) == null) FeeWarning.ZeroFee else FeeWarning.None
     }.stateIn(viewModelScope, SharingStarted.Eagerly, FeeWarning.None)
+
+    /** Review is building and quoting the send. One review at a time. */
+    private val _quoting = MutableStateFlow(false)
+    val quoting: StateFlow<Boolean> = _quoting.asStateFlow()
+    private var quoteJob: Job? = null
+
+    /**
+     * The dust line, in satoshis, the amount fell below at the last review — or null. A payment below
+     * the smallest output the network relays to its address type is refused before anything is built.
+     */
+    private val _belowDustSats = MutableStateFlow<Long?>(null)
+    val belowDustSats: StateFlow<Long?> = _belowDustSats.asStateFlow()
+
+    /** The fee of the last send review quoted on this screen: where a custom fee starts from. */
+    private var lastQuotedFeeSats: Long? = null
 
     /** Current send flow state. */
     private val _sendState = MutableStateFlow<SendState>(SendState.Idle)
@@ -123,6 +124,7 @@ class SendViewModel @Inject constructor(
         _ddAddressValid.value = if (value.isBlank()) null
                               else runCatching { NativeBridge.isValidDigiDollarAddress(value.trim()) }.getOrDefault(false)
         _validationError.value = null
+        _belowDustSats.value = null
     }
 
     // ── Amount input ──────────────────────────────────────────────────────
@@ -142,6 +144,7 @@ class SendViewModel @Inject constructor(
         // neither the form nor a confirmation can set this amount beside an earlier one's dollars.
         amountFiat.value = ""
         _validationError.value = null
+        _belowDustSats.value = null
         // Read by the parser the send uses. Text that is not an amount gets no line at all.
         if (DgbAmount.toSats(value) == null) return
         viewModelScope.launch {
@@ -162,6 +165,7 @@ class SendViewModel @Inject constructor(
         // Review answers "enter a valid amount" instead of approving an amount for other text.
         amountDgb.value = ""
         _validationError.value = null
+        _belowDustSats.value = null
         if (UsdCents.parse(value) == null) return
         viewModelScope.launch {
             val dgbText = runCatching {
@@ -196,11 +200,15 @@ class SendViewModel @Inject constructor(
     // ── Send flow ─────────────────────────────────────────────────────────
 
     /**
-     * Move to the Confirming state (shows confirmation dialog).
+     * Review. This is the one place the amount text is read. It becomes an [ApprovedSend] here, and
+     * review builds and quotes the send for it before anything is shown: the confirmation is drawn
+     * from the approval, which carries the fee of the transaction built ([ApprovedSend.Dgb.withQuote]),
+     * and [send] receives that approval and signs those bytes. Nothing that changes a field afterwards
+     * can change what is signed, and the fee shown is the fee signed.
      *
-     * This is the one place the amount text is read. It becomes an [ApprovedSend] here; the
-     * confirmation is drawn from that object and [send] receives it, so nothing that changes a
-     * field afterwards can change what is signed.
+     * A custom fee that is not a positive amount quotes nothing (the field already says "Fee
+     * required"). A payment below the dust line of its address type is refused here
+     * ([belowDustSats]), and a send the balance cannot cover fails here, before any prompt.
      */
     fun requestConfirm() {
         val addr = address.value
@@ -209,40 +217,76 @@ class SendViewModel @Inject constructor(
             _validationError.value = "Enter a valid DigiByte address"
             return
         }
-        val approved = ApprovedSend.dgb(
-            addr, amountDgb.value, feeRatePerKb.value, estimatedFeeSat.value,
+        val fee = FeeRequest.of(isCustomFee.value, customFeeInput.value) ?: return
+        val typed = ApprovedSend.dgb(
+            addr, amountDgb.value, FeeQuote.DEFAULT_FEE_PER_KB, 0L,
             dollarsShown = amountFiat.value,
         )
-        if (approved == null) {
+        if (typed == null) {
             _validationError.value = "Enter a valid amount"
             return
         }
 
-        _sendState.value = SendState.Confirming(approved)
+        _belowDustSats.value = null
+        quoteJob?.cancel()
+        _quoting.value = true
+        quoteJob = viewModelScope.launch {
+            val result = try {
+                transactionBuilder.prepareTransaction(typed.address, typed.sats, fee)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.e(TAG, "review threw", t)
+                PrepareResult.Error(t.message ?: SpendPreflight.NOT_SENT)
+            } finally {
+                _quoting.value = false
+            }
+            when (result) {
+                is PrepareResult.Ready -> {
+                    val prepared = result.send
+                    lastQuotedFeeSats = prepared.quote.feeSats
+                    android.util.Log.i(TAG, "review: ${prepared.amountSats} sats, fee ${prepared.quote.feeSats} sats " +
+                        "over ${prepared.quote.vsize} vB at ${prepared.feePerKb}/kB" + if (prepared.quote.raised) " (raised)" else "")
+                    _sendState.value = SendState.Confirming(typed.withQuote(prepared.feePerKb, prepared.quote.feeSats), prepared)
+                }
+                is PrepareResult.BelowDust -> _belowDustSats.value = result.thresholdSats
+                is PrepareResult.Error -> _sendState.value = SendState.Error(result.message)
+            }
+        }
     }
 
+    /** The confirmation was dismissed, or the credential prompt was: the prepared send goes with it,
+     *  and the next review builds afresh. Nothing native outlived the prompt. */
     fun cancelConfirm() {
+        quoteJob?.cancel()
         if (_sendState.value is SendState.Confirming) {
             _sendState.value = SendState.Idle
         }
     }
 
     /**
-     * Execute the send after biometric/pin auth succeeds.
-     * Collects spendable UTXOs then calls TransactionBuilder.
+     * Execute the send after biometric/pin auth succeeds: sign the prepared bytes and broadcast them.
      */
     private val TAG = "DGB-Send"
 
     fun send(approved: ApprovedSend.Dgb) {
         // Only the approval that is on screen may be sent, and only once: a second tap, or an
         // approval cancelled while the credential prompt was up, finds nothing to send.
-        if ((_sendState.value as? SendState.Confirming)?.approved !== approved) {
+        val confirming = _sendState.value as? SendState.Confirming
+        if (confirming?.approved !== approved) {
             android.util.Log.w(TAG, "send ignored: not the approval being confirmed")
             return
         }
-        val addr = approved.address
-        val sats = approved.sats
-        val feePerKb = approved.feePerKb
+        // The approval was made from this prepared send. Were they ever to differ, the confirmation
+        // would show one send while another is signed: nothing is sent.
+        val prepared = confirming.prepared
+        if (prepared.toAddress != approved.address || prepared.amountSats != approved.sats ||
+            prepared.feePerKb != approved.feePerKb || prepared.quote.feeSats != approved.feeEstimateSats
+        ) {
+            android.util.Log.e(TAG, "send refused: the prepared send is not the approval on screen")
+            _sendState.value = SendState.Error(SpendPreflight.NOT_SENT)
+            return
+        }
 
         _sendState.value = SendState.Sending
 
@@ -251,15 +295,18 @@ class SendViewModel @Inject constructor(
             // nothing behind otherwise — no transaction, no store entry, nothing in the activity
             // list — so when someone reports "it just didn't register anywhere" there is nothing
             // to look at. This is the only durable trace a failed attempt produces.
-            android.util.Log.i(TAG, "send attempt: $sats sats to ${addr.take(12)}… at $feePerKb/kB")
+            android.util.Log.i(TAG, "send attempt: ${approved.sats} sats to ${approved.address.take(12)}… " +
+                "at ${approved.feePerKb}/kB, fee ${approved.feeEstimateSats} sats")
             try {
-                // Collect spendable UTXOs once
-                val utxos = utxoManager.getSpendableUtxos().first()
-                val result = transactionBuilder.sendTransaction(addr, sats, feePerKb, utxos)
+                val result = transactionBuilder.sendPrepared(prepared)
                 _sendState.value = when (result) {
-                    is TxResult.Success -> {
-                        android.util.Log.i(TAG, "send accepted: ${result.txid}")
+                    is TxResult.Success -> if (result.delivery == Delivery.RELAYED) {
+                        android.util.Log.i(TAG, "send relayed: ${result.txid}")
                         SendState.Success(result.txid)
+                    } else {
+                        // Not "Sent": no peer has taken it yet. The wallet holds it and keeps publishing it.
+                        android.util.Log.w(TAG, "send broadcast, no peer has taken it yet: ${result.txid}")
+                        SendState.NotYetRelayed(result.txid)
                     }
                     is TxResult.Error -> {
                         android.util.Log.w(TAG, "send refused: ${result.message}")
@@ -289,15 +336,17 @@ class SendViewModel @Inject constructor(
     fun resetState() {
         _sendState.value = SendState.Idle
         _validationError.value = null
+        _belowDustSats.value = null
     }
 
-    /** Toggle between default and custom fee mode. */
+    /** Toggle between default and custom fee mode. A custom fee starts from the fee of the last send
+     *  review quoted here, when there is one. */
     fun toggleCustomFee() {
         val wasCustom = isCustomFee.value
         isCustomFee.value = !wasCustom
         if (!wasCustom) {
-            // Locale-free: String.format under a decimal-comma locale wrote "0,00014100".
-            customFeeInput.value = DgbAmount.format(defaultFeeSat)
+            // Locale-free (DgbAmount, not String.format, which writes a comma under some locales).
+            lastQuotedFeeSats?.let { customFeeInput.value = DgbAmount.format(it) }
         }
     }
 
@@ -330,34 +379,67 @@ class SendViewModel @Inject constructor(
         }
     }
 
+    /** The DigiDollar confirmation on screen: the one approval [sendDigiDollar] accepts, and only once. */
+    private val ddConfirmation = SendConfirmation<ApprovedSend.DigiDollar>()
+
+    /** A DigiDollar send is out: from its claim until it ends, whatever its outcome. */
+    private val _ddSending = MutableStateFlow(false)
+    val ddSending: StateFlow<Boolean> = _ddSending.asStateFlow()
+
     /**
-     * The DigiDollar send as it will be confirmed and sent, or null when the form is not sendable.
-     * Read once, when the user asks to send; the confirmation and [sendDigiDollar] use only this.
+     * The DigiDollar send as it will be confirmed and sent, or null when the form is not sendable —
+     * or while another DigiDollar send is out. Read once, when the user asks to send; it is put on
+     * the confirmation, and the confirmation and [sendDigiDollar] use only this.
      */
     fun approveDigiDollar(): ApprovedSend.DigiDollar? {
         if (_ddAddressValid.value != true) return null
-        return ApprovedSend.digiDollar(address.value, amountFiat.value)
+        val approved = ApprovedSend.digiDollar(address.value, amountFiat.value)
             ?.takeIf { ddAmountValid(it.cents, _ddBalance.value) }
+            ?: return null
+        return approved.takeIf { ddConfirmation.open(it) }
+    }
+
+    /** The DigiDollar confirmation was dismissed, or its credential prompt refused: nothing is on screen to send. */
+    fun cancelDigiDollar() {
+        ddConfirmation.close()
     }
 
     /**
-     * Execute the DigiDollar send the user approved. Mirrors [send]'s dispatcher pattern.
+     * Execute the DigiDollar send the user approved — with the guard [send] has: only the approval
+     * on screen, and only once. A second submit while this one is out, or one whose confirmation was
+     * closed, finds nothing to send; each send would otherwise be a transfer and a fee of its own.
+     *
+     * "Sent" only when a peer has taken it, as for a DGB send; [onNotSent] when nothing went out.
      */
-    fun sendDigiDollar(approved: ApprovedSend.DigiDollar, onResult: (txid: String?) -> Unit) {
-        if (!NativeBridge.isValidDigiDollarAddress(approved.address)) { onResult(null); return }
-        viewModelScope.launch(Dispatchers.IO) {
-            // Through the builder, never the bridge: it runs asset detection to completion before
-            // the native transfer takes its network fee from the plain-coin set.
-            val txid = try {
-                transactionBuilder.sendDigiDollar(approved.address, approved.cents)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                android.util.Log.w("SendViewModel", "sendDigiDollar failed", t)
-                null
+    fun sendDigiDollar(approved: ApprovedSend.DigiDollar, onNotSent: () -> Unit) {
+        if (ddConfirmation.claim(approved)) {
+            _ddSending.value = true
+            viewModelScope.launch(Dispatchers.IO) {
+                val outcome = try {
+                    // Through the builder, never the bridge: it runs asset detection to completion before
+                    // the native transfer takes its network fee from the plain-coin set.
+                    val txid = if (NativeBridge.isValidDigiDollarAddress(approved.address)) {
+                        transactionBuilder.sendDigiDollar(approved.address, approved.cents)
+                    } else null
+                    txid?.let { it to transactionBuilder.awaitDelivery(it) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    android.util.Log.w("SendViewModel", "sendDigiDollar failed", t)
+                    null
+                } finally {
+                    ddConfirmation.close()
+                    _ddSending.value = false
+                }
+                when {
+                    outcome == null -> onNotSent()
+                    outcome.second == Delivery.RELAYED -> _sendState.value = SendState.Success(outcome.first)
+                    else -> _sendState.value = SendState.NotYetRelayed(outcome.first)
+                }
             }
-            onResult(txid)
+            return
         }
+        android.util.Log.w("SendViewModel", "DigiDollar send ignored: not the approval on screen, or already sent")
     }
 
     companion object {

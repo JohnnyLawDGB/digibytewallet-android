@@ -80,6 +80,29 @@ object NativeBridge {
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
     external fun publishTransaction(signedTx: ByteArray): String?
 
+    // --- pkg 2.1 ---
+    // The fee shown is the fee signed. A DGB send is built and quoted before the credential prompt
+    // ([createTransaction] + [quoteTransaction]) and the prepared bytes are signed after it
+    // ([signPreparedTransaction]), which checks them against the approved fee first.
+
+    /** `[fee, vsize]` of unsigned bytes the wallet built: the fee is the transaction's inputs minus its
+     *  outputs, the vsize the size it was priced at, signatures estimated. Null when the bytes do not
+     *  parse or an input is not a transaction the wallet holds (the fee is then unknown). */
+    external fun quoteTransaction(unsignedTx: ByteArray): LongArray?
+
+    /** Sign prepared unsigned bytes, or null: only the send that was approved. Refuses, before
+     *  signing, bytes whose outputs are not [amountSats] to [toAddress] plus change to a wallet
+     *  address, that do not pay exactly [approvedFeeSats], or that spend a coin which is no longer
+     *  one of the wallet's spendable plain coins; and refuses to hand back a signed transaction that
+     *  fails the same check. */
+    external fun signPreparedTransaction(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray?
+
+    /** True when the network has refused [txid] on evidence no single peer can supply: peers in at
+     *  least two network groups rejected it as invalid, non-standard or dust, and no peer has relayed
+     *  or announced it. One peer's rejection is never enough. */
+    external fun isRefusedByNetwork(txid: String): Boolean
+    // --- /pkg 2.1 ---
+
     /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.
      *  Returns the txid on success, or null on any failure (bad address, insufficient DD/DGB, sign/broadcast). */
     external fun sendDigiDollar(tdAddress: String, cents: Long): String?

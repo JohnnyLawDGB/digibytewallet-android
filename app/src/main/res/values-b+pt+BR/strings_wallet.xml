@@ -680,4 +680,12 @@
     <string name="restore_date_onwards">A partir de jan. %1$d</string>
     <string name="restore_date_range">jan. %1$d – dez. %1$d</string>
     <string name="restore_date_genesis">O DigiByte foi lançado em janeiro de 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, o mínimo da rede. A taxa exata desta transação é mostrada antes de você confirmar.</string>
+    <string name="send_preparing">Preparando…</string>
+    <string name="send_fee_raised">Aumentada dos %1$s DGB que você informou: esta é a taxa que esta transação paga.</string>
+    <string name="send_err_below_dust">Este valor está abaixo do menor pagamento que a rede retransmite para este endereço (%1$s DGB). Envie pelo menos esse valor.</string>
+    <string name="send_not_relayed_title">Enviada, ainda não retransmitida</string>
+    <string name="send_not_relayed_body">Sua carteira transmitiu esta transação, mas nenhum nó a recebeu ainda, então ainda não se sabe se ela chegou à rede. Ela aparece como pendente na sua atividade. Verifique sua atividade antes de enviá-la novamente.</string>
+    <!-- /pkg 2.1 -->
 </resources>

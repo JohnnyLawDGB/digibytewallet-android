@@ -670,4 +670,12 @@
     <string name="restore_date_onwards">%1$d年1月以降</string>
     <string name="restore_date_range">%1$d年1月～12月</string>
     <string name="restore_date_genesis">DigiByte は 2014 年 1 月にローンチ</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB（ネットワークの最低額）。この取引の正確な手数料は、確認の前に表示されます。</string>
+    <string name="send_preparing">準備中…</string>
+    <string name="send_fee_raised">入力された %1$s DGB から引き上げられました。これがこの取引で支払う手数料です。</string>
+    <string name="send_err_below_dust">この金額は、ネットワークがこのアドレスに中継する最小の支払い額（%1$s DGB）を下回っています。少なくともその金額を送金してください。</string>
+    <string name="send_not_relayed_title">送信済み（まだ中継されていません）</string>
+    <string name="send_not_relayed_body">ウォレットはこの取引をブロードキャストしましたが、まだどのピアにも受け取られていないため、ネットワークに届いたかどうかはまだわかりません。アクティビティには保留中として表示されます。もう一度送信する前に、アクティビティを確認してください。</string>
+    <!-- /pkg 2.1 -->
 </resources>

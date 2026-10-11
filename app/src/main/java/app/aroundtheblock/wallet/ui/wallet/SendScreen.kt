@@ -77,6 +77,10 @@ fun SendScreen(
     val feeWarning by viewModel.feeWarning.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val validationError by viewModel.validationError.collectAsStateWithLifecycle()
+    // Review builds and quotes the send before the confirmation: one review at a time.
+    val quoting by viewModel.quoting.collectAsStateWithLifecycle()
+    // The dust line the amount fell below at the last review, if it did.
+    val belowDustSats by viewModel.belowDustSats.collectAsStateWithLifecycle()
     val peerCount by walletViewModel.peerCount.collectAsStateWithLifecycle()
     val syncProgressInfo by walletViewModel.syncProgressInfo.collectAsStateWithLifecycle()
     // Hoisted: used inside coroutine/callback lambdas, which are not composable.
@@ -98,8 +102,8 @@ fun SendScreen(
     // instead of the address reading as an invalid DigiByte address.
     val effectiveDdMode = ddAddressValid == true
     val effectiveAddressValid = if (effectiveDdMode) ddAddressValid else addressValid
-    var ddSentTxid by remember { mutableStateOf<String?>(null) }
-    var ddSending by remember { mutableStateOf(false) }
+    // A DigiDollar send is out: the view model's claim on the approval, held until the send ends.
+    val ddSending by viewModel.ddSending.collectAsStateWithLifecycle()
     // Non-null while the DigiDollar confirmation is up: the approval it shows, and the only
     // thing the send is then given.
     var ddApproved by remember { mutableStateOf<app.aroundtheblock.wallet.core.model.ApprovedSend.DigiDollar?>(null) }
@@ -122,12 +126,29 @@ fun SendScreen(
     }
 
     // ── Success overlay ───────────────────────────────────────────────────
-    if (sendState is SendState.Success || ddSentTxid != null) {
+    // "Sent" means a peer has taken the transaction (DGB and DigiDollar alike).
+    if (sendState is SendState.Success) {
         SendSuccessScreen(
-            txid = (sendState as? SendState.Success)?.txid ?: ddSentTxid!!,
+            txid = (sendState as SendState.Success).txid,
+            relayed = true,
             onDone = {
                 viewModel.resetState()
-                ddSentTxid = null
+                onNavigateBack()
+            }
+        )
+        return
+    }
+
+    // ── Sent, not yet relayed ─────────────────────────────────────────────
+    // Broadcast, and no peer has taken it yet. Never shown as "Sent", and as hard to miss as either
+    // outcome. The wallet holds it as pending; a recorded DGB send is republished by the stranded-send
+    // sweep, which removes it if the network refuses it for good.
+    if (sendState is SendState.NotYetRelayed) {
+        SendSuccessScreen(
+            txid = (sendState as SendState.NotYetRelayed).txid,
+            relayed = false,
+            onDone = {
+                viewModel.resetState()
                 onNavigateBack()
             }
         )
@@ -137,13 +158,15 @@ fun SendScreen(
     // ── Confirmation dialog ───────────────────────────────────────────────
     // Address, amount, the dollars beside it and the fee all come from the approval made at
     // Review, and that same object is what the send receives: the fields are not read again once
-    // the dialog is up.
-    (sendState as? SendState.Confirming)?.approved?.let { approved ->
+    // the dialog is up. The fee is the fee of the transaction review built, which is the one signed.
+    (sendState as? SendState.Confirming)?.let { confirming ->
+        val approved = confirming.approved
         SendConfirmationDialog(
             address = approved.address,
             amountDgb = approved.amountText,
             amountFiat = approved.approxUsdText,
             feeEstimate = approved.feeEstimateSats,
+            raisedFromSats = confirming.prepared.quote.requestedSats?.takeIf { confirming.prepared.quote.raised },
             onConfirm = {
                 coroutineScope.launch {
                     val activity = context as? androidx.fragment.app.FragmentActivity
@@ -175,28 +198,30 @@ fun SendScreen(
                     coroutineScope.launch {
                         val activity = context as? androidx.fragment.app.FragmentActivity
                         val authed = spendAuth.authorize(activity, bioConfirmDdTitle, bioAuthSubtitle)
-                        if (!authed) return@launch   // dialog already dismissed; back to the form
-                        ddSending = true
-                        viewModel.sendDigiDollar(approvedDd) { txid ->
-                            // sendDigiDollar's callback fires on a background dispatcher —
-                            // hop back to Main before touching Compose state or Toast.
+                        if (!authed) {
+                            // Dialog already dismissed; back to the form, and the approval with it.
+                            viewModel.cancelDigiDollar()
+                            return@launch
+                        }
+                        // The view model claims the approval once; its outcome is the send state's
+                        // (Sent, or sent and not yet relayed), and only a failure comes back here.
+                        viewModel.sendDigiDollar(approvedDd) {
+                            // The callback fires on a background dispatcher — hop back to Main for the Toast.
                             coroutineScope.launch {
-                                ddSending = false
-                                if (txid != null) {
-                                    ddSentTxid = txid
-                                } else {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        ddFailedMsg,
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
+                                android.widget.Toast.makeText(
+                                    context,
+                                    ddFailedMsg,
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                     }
                 }
             },
-            onCancel = { ddApproved = null }
+            onCancel = {
+                ddApproved = null
+                viewModel.cancelDigiDollar()
+            }
         )
     }
 
@@ -439,7 +464,7 @@ fun SendScreen(
                     value = customFeeInput,
                     onValueChange = { viewModel.customFeeInput.value = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("0.00014100") },
+                    placeholder = { Text("0.00000000") },
                     suffix = { Text("DGB", color = DigiByteAccent, fontWeight = FontWeight.Bold) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -447,11 +472,10 @@ fun SendScreen(
                     isError = feeWarning is FeeWarning.ZeroFee
                 )
             } else {
-                // Whole satoshis to text, with a dot in every language: the spelling the
-                // confirmation's fee row uses for the same number.
-                val defaultFeeDgb = java.math.BigDecimal.valueOf(viewModel.defaultFeeSat, 8)
+                // No figure here: the fee is the fee of the transaction review builds for this
+                // send, which depends on the coins it gathers. The confirmation shows it.
                 Text(
-                    text = String.format(java.util.Locale.US, "%.8f DGB", defaultFeeDgb),
+                    text = stringResource(R.string.send_fee_exact_at_review),
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -460,13 +484,6 @@ fun SendScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             when (feeWarning) {
-                is FeeWarning.BelowRelay -> {
-                    Text(
-                        text = stringResource(R.string.send_fee_below_min),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFFFA000)
-                    )
-                }
                 is FeeWarning.ZeroFee -> {
                     Text(
                         text = stringResource(R.string.send_fee_required),
@@ -488,6 +505,16 @@ fun SendScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = validationError!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DigiByteRed
+                )
+            }
+            // Below the smallest payment the network relays to this address: refused at review,
+            // before anything is built or signed.
+            belowDustSats?.let { line ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.send_err_below_dust, app.aroundtheblock.wallet.core.model.DgbAmount.format(line)),
                     style = MaterialTheme.typography.bodySmall,
                     color = DigiByteRed
                 )
@@ -590,20 +617,20 @@ fun SendScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                enabled = !isSending && canSend,
+                enabled = !isSending && !quoting && canSend,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                if (isSending) {
+                if (isSending || quoting) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.send_broadcasting))
+                    Text(stringResource(if (isSending) R.string.send_broadcasting else R.string.send_preparing))
                 } else {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
                          modifier = Modifier.size(18.dp))
@@ -625,7 +652,10 @@ private fun SendConfirmationDialog(
     address: String,
     amountDgb: String,
     amountFiat: String,
+    /** The fee of the transaction review built: the fee signed. */
     feeEstimate: Long,
+    /** The custom total typed, when the transaction pays more than it; null otherwise. */
+    raisedFromSats: Long?,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -666,6 +696,15 @@ private fun SendConfirmationDialog(
                     label = stringResource(R.string.send_network_fee_row),
                     value = String.format(java.util.Locale.US, "%.8f DGB", feeDgb)
                 )
+                // A custom fee the transaction pays more than: said beside the fee, never shown as the lower figure.
+                raisedFromSats?.let { typed ->
+                    Text(
+                        text = stringResource(R.string.send_fee_raised, app.aroundtheblock.wallet.core.model.DgbAmount.format(typed)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFFA000),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -909,8 +948,12 @@ private fun SendFailureScreen(
     }
 }
 
+/**
+ * A send that went out: "Sent" when a peer has taken it ([relayed]), otherwise "sent, not yet
+ * relayed" — broadcast, with no peer's word yet, and never presented as sent.
+ */
 @Composable
-private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
+private fun SendSuccessScreen(txid: String, relayed: Boolean, onDone: () -> Unit) {
     val context = LocalContext.current
 
     Column(
@@ -922,19 +965,30 @@ private fun SendSuccessScreen(txid: String, onDone: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = stringResource(R.string.send_success),
-            tint = DigiByteGreen,
+            imageVector = if (relayed) Icons.Default.CheckCircle else Icons.Default.HourglassEmpty,
+            contentDescription = stringResource(if (relayed) R.string.send_success else R.string.send_not_relayed_title),
+            tint = if (relayed) DigiByteGreen else Color(0xFFFFA000),
             modifier = Modifier.size(72.dp)
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = stringResource(R.string.send_sent_title),
+            text = stringResource(if (relayed) R.string.send_sent_title else R.string.send_not_relayed_title),
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
         )
+
+        if (!relayed) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.send_not_relayed_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+            )
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 

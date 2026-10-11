@@ -78,8 +78,12 @@ class SpendPreflightAppWiringTest {
     }
 
     @Test fun `the DGB send goes through the builder`() {
-        val send = source("ui/wallet/SendViewModel.kt").section("fun send(", "fun resetState(")
-        assertTrue("send() does not go through the builder", send.contains("transactionBuilder.sendTransaction("))
+        // Two steps, both the builder's: review builds and quotes the send, and the send signs it.
+        val vm = source("ui/wallet/SendViewModel.kt")
+        val review = vm.section("fun requestConfirm(", "fun cancelConfirm(")
+        assertTrue("review does not go through the builder", review.contains("transactionBuilder.prepareTransaction("))
+        val send = vm.section("fun send(", "fun resetState(")
+        assertTrue("send() does not go through the builder", send.contains("transactionBuilder.sendPrepared("))
     }
 
     @Test fun `the asset send goes through the asset layer`() {

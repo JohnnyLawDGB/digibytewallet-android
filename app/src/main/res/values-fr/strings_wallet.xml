@@ -660,4 +660,12 @@
     <string name="restore_date_onwards">À partir de janv. %1$d</string>
     <string name="restore_date_range">janv. %1$d – déc. %1$d</string>
     <string name="restore_date_genesis">Lancement de DigiByte en janvier 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, le minimum du réseau. Les frais exacts de cette transaction sont affichés avant que vous confirmiez.</string>
+    <string name="send_preparing">Préparation…</string>
+    <string name="send_fee_raised">Augmentés depuis les %1$s DGB saisis : ce sont les frais que paie cette transaction.</string>
+    <string name="send_err_below_dust">Ce montant est inférieur au plus petit paiement que le réseau relaie vers cette adresse (%1$s DGB). Envoyez au moins ce montant.</string>
+    <string name="send_not_relayed_title">Envoyée, pas encore relayée</string>
+    <string name="send_not_relayed_body">Votre portefeuille a diffusé cette transaction, mais aucun nœud ne l\'a encore prise en charge : on ne sait donc pas encore si elle a atteint le réseau. Elle apparaît comme en attente dans votre activité. Vérifiez votre activité avant de l\'envoyer à nouveau.</string>
+    <!-- /pkg 2.1 -->
 </resources>

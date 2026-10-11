@@ -206,7 +206,6 @@ class SendAmountBindingWiringTest {
 
     private val knownDisplayOnly = mapOf(
         "asset/AssetSendScreen.kt" to setOf(
-            "val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0",
             "value = String.format(\"%.8f DGB\", feeSats / 100_000_000.0)",
             "java.text.DecimalFormat(\"0.########\").format(sats / 100_000_000.0)",
         ),

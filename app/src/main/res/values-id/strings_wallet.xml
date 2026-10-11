@@ -670,4 +670,12 @@
     <string name="restore_date_onwards">Sejak Jan %1$d</string>
     <string name="restore_date_range">Jan %1$d – Des %1$d</string>
     <string name="restore_date_genesis">DigiByte diluncurkan Januari 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, batas minimum jaringan. Biaya pasti untuk transaksi ini ditampilkan sebelum Anda mengonfirmasi.</string>
+    <string name="send_preparing">Menyiapkan…</string>
+    <string name="send_fee_raised">Dinaikkan dari %1$s DGB yang Anda masukkan: inilah biaya yang dibayar transaksi ini.</string>
+    <string name="send_err_below_dust">Jumlah ini di bawah pembayaran terkecil yang diteruskan jaringan ke alamat ini (%1$s DGB). Kirim setidaknya sebesar itu.</string>
+    <string name="send_not_relayed_title">Terkirim, belum diteruskan</string>
+    <string name="send_not_relayed_body">Dompet Anda telah menyiarkan transaksi ini, tetapi belum ada peer yang menerimanya, jadi belum diketahui apakah transaksi ini sudah sampai ke jaringan. Transaksi ini tampil sebagai tertunda di aktivitas Anda. Periksa aktivitas Anda sebelum mengirimnya lagi.</string>
+    <!-- /pkg 2.1 -->
 </resources>

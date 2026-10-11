@@ -18,6 +18,8 @@ import app.aroundtheblock.wallet.core.model.AssetQuantity
 import app.aroundtheblock.wallet.core.model.OwnedAsset
 import app.aroundtheblock.wallet.core.model.DgbAmount
 import app.aroundtheblock.wallet.core.model.SendConfirmation
+import app.aroundtheblock.wallet.core.send.FeeQuote
+import app.aroundtheblock.wallet.core.send.FeeRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -32,11 +34,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** Fee warning surfaced under the custom-fee field — mirrors the regular
- *  send's [app.aroundtheblock.wallet.ui.wallet.FeeWarning] semantics. */
+/** What the custom-fee field says of itself — the regular send's
+ *  [app.aroundtheblock.wallet.ui.wallet.FeeWarning]. No "below the relay minimum" state: the planner
+ *  raises a low custom fee to the floor, and the confirmation shows the fee raised. */
 sealed class AssetFeeWarning {
     data object None : AssetFeeWarning()
-    data object BelowRelay : AssetFeeWarning()
+    /** A custom fee that is not a positive amount: Review plans nothing until it is one. */
     data object ZeroFee : AssetFeeWarning()
 }
 
@@ -121,8 +124,11 @@ data class AssetSendCost(
     }
 }
 
-/** The planned cost of one approval: shown only while that approval is the one on screen. */
-class PlannedAssetCost(val approval: ApprovedSend.Asset, val cost: AssetSendCost)
+/**
+ * The planned cost of one approval: shown only while that approval is the one on screen.
+ * [raisedFromSats] is the custom total typed when the planned transfer pays more than it, else null.
+ */
+class PlannedAssetCost(val approval: ApprovedSend.Asset, val cost: AssetSendCost, val raisedFromSats: Long? = null)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -210,12 +216,12 @@ class AssetViewModel @Inject constructor(
         _selectedAssetId.value?.let { checkRules(it) }
     }
 
-    // ── Fee state (mirrors SendViewModel) ──────────────────────────────
+    // ── Fee state ──────────────────────────────────────────────────────
     //
-    // An asset send is a regular DGB tx carrying an OP_RETURN + a pinned
-    // asset UTXO, so the fee is a regular DGB fee: a sat/kB rate (default
-    // 100 sat/byte = min relay) with a custom TOTAL-DGB override. The old
-    // 1/5/20 sat/byte tier chips were all BELOW min relay and got stuck.
+    // An asset send is a regular DGB tx carrying an OP_RETURN + a pinned asset UTXO, so the fee is a
+    // regular DGB fee: 100 sat/vB by default (DigiByte's relay floor), or a custom TOTAL in DGB. The
+    // fee the confirmation shows is the fee of the transfer as planned at Review (B231), which the
+    // send signs no more than; a custom total becomes a rate over THAT transfer's own size.
 
     /** Whether the user has toggled the custom (total-DGB) fee override. */
     val isCustomFee = MutableStateFlow(false)
@@ -223,49 +229,31 @@ class AssetViewModel @Inject constructor(
     /** Custom fee input — a TOTAL fee in DGB (same UX as the regular send). */
     val customFeeInput = MutableStateFlow("")
 
-    /** Default estimated total fee in sats for a typical asset transfer. */
-    val defaultFeeSat: Long = ASSET_TYPICAL_VSIZE * DEFAULT_FEE_PER_KB / 1000
-
-    /** Fee rate in sat/kB handed to [AssetManager.sendAsset]. When custom,
-     *  the user's total-DGB fee is converted to a rate over an asset-typical
-     *  vsize; the size-aware estimator + min-relay floor in sendAsset then
-     *  applies it to the concrete tx shape. */
-    val feeRatePerKb: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
-        if (!custom) {
-            DEFAULT_FEE_PER_KB
-        } else {
-            val feeSat = DgbAmount.toSats(input) ?: 0L
-            if (feeSat <= 0 || ASSET_TYPICAL_VSIZE <= 0) return@combine DEFAULT_FEE_PER_KB
-            (feeSat * 1000) / ASSET_TYPICAL_VSIZE
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_FEE_PER_KB)
-
-    /** Estimated total fee in sats (for the fee-row display). */
+    /**
+     * The fee for the form's cost preview, which labels it an estimate: the custom total typed, or
+     * the planner's own size-aware estimate for the smallest transfer (one asset coin and one fee
+     * coin) at the default rate. Never the confirmation's fee: that is the planned transfer's.
+     */
     val estimatedFeeSat: StateFlow<Long> = combine(isCustomFee, customFeeInput) { custom, input ->
-        if (!custom) {
-            defaultFeeSat
-        } else {
-            DgbAmount.toSats(input) ?: 0L
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, defaultFeeSat)
+        if (custom) DgbAmount.toSats(input) ?: 0L else smallestTransferFeeSats()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, smallestTransferFeeSats())
 
-    /** Warning state for the custom fee (amber below relay, red on zero). */
+    /** The custom-fee field's own state: no figure is worked out here. */
     val feeWarning: StateFlow<AssetFeeWarning> = combine(isCustomFee, customFeeInput) { custom, input ->
-        if (!custom) return@combine AssetFeeWarning.None
-        val feeSat = DgbAmount.toSats(input) ?: 0L
-        if (feeSat <= 0) return@combine AssetFeeWarning.ZeroFee
-        // Whole satoshis on both sides: under 100 sat/vB across the asset-typical size.
-        if (feeSat < 100L * ASSET_TYPICAL_VSIZE) AssetFeeWarning.BelowRelay else AssetFeeWarning.None
+        if (FeeRequest.of(custom, input) == null) AssetFeeWarning.ZeroFee else AssetFeeWarning.None
     }.stateIn(viewModelScope, SharingStarted.Eagerly, AssetFeeWarning.None)
 
-    /** Toggle between default and custom fee mode. Seeds the custom field
-     *  with the current default so the user edits from a sane baseline. */
+    /** The fee of the last transfer planned on this screen: where a custom fee starts from. */
+    private var lastPlannedFeeSats: Long? = null
+
+    /** Toggle between default and custom fee mode. A custom fee starts from the fee of the last
+     *  transfer planned here, when there is one. */
     fun toggleCustomFee() {
         val wasCustom = isCustomFee.value
         isCustomFee.value = !wasCustom
         if (!wasCustom) {
-            // Locale-free: String.format under a decimal-comma locale wrote "0,00014100".
-            customFeeInput.value = DgbAmount.format(defaultFeeSat)
+            // Locale-free (DgbAmount, not String.format, which writes a comma under some locales).
+            lastPlannedFeeSats?.let { customFeeInput.value = DgbAmount.format(it) }
         }
     }
 
@@ -300,30 +288,30 @@ class AssetViewModel @Inject constructor(
      * those units even if the asset's divisibility became known after the field was filled.
      *
      * Returns false when the text is not a positive quantity of the selected asset. A quantity
-     * with no recipient is accepted and opens nothing: a confirmation names where it goes.
+     * with no recipient is accepted and opens nothing: a confirmation names where it goes; nor does
+     * a custom fee that is not a positive amount (the field says "Fee required").
      */
     fun requestConfirm(toAddress: String, quantityInput: String): Boolean {
         val asset = selectedAsset.value ?: return false
         val divisibility = divisibilityOf(asset)
-        val approved = ApprovedSend.asset(
+        val typed = ApprovedSend.asset(
             address = toAddress,
             assetId = asset.assetId,
             typedQuantity = requestedQuantity.textToApprove(quantityInput, divisibility),
             divisibility = divisibility,
-            feePerKb = feeRatePerKb.value,
-            feeEstimateSats = estimatedFeeSat.value,
+            feePerKb = DEFAULT_FEE_PER_KB,
+            feeEstimateSats = 0L,
         ) ?: return false
         if (toAddress.isBlank()) return true
+        val fee = FeeRequest.of(isCustomFee.value, customFeeInput.value) ?: return true
         // The confirmation shows the fee of the transfer as it would be built now (B231), not a
         // typical-size guess: a send that consolidates many coins pays for every input, and the
         // user approves that. sendAssetTransfer then refuses to sign anything costing more.
         planJob?.cancel()
         _planning.value = true
         planJob = viewModelScope.launch {
-            val planned = try {
-                assetManager.previewAssetTransferFee(
-                    approved.assetId, approved.units, approved.address, approved.feePerKb,
-                )
+            val (approved, planned) = try {
+                planFor(typed, fee)
             } finally {
                 _planning.value = false
             }
@@ -333,14 +321,33 @@ class AssetViewModel @Inject constructor(
                 is AssetManager.AssetTransferPlanning.Planned -> {
                     // Fee, markers and total from one plan: the one the send then signs.
                     val cost = AssetSendCost.of(planned.plan)
+                    lastPlannedFeeSats = planned.plan.paidFeeSats
+                    val raisedFrom = (fee as? FeeRequest.CustomTotal)?.totalSats?.takeIf { planned.plan.paidFeeSats > it }
                     if (confirmation.open(approved.withPlannedFee(planned.plan.paidFeeSats))) {
-                        _plannedCost.value = confirmation.approval.value?.let { PlannedAssetCost(it, cost) }
+                        _plannedCost.value = confirmation.approval.value?.let { PlannedAssetCost(it, cost, raisedFrom) }
                     }
                 }
                 is AssetManager.AssetTransferPlanning.NotPlanned -> finish(planned.result.toSendState())
             }
         }
         return true
+    }
+
+    /**
+     * The transfer as planned for [fee], and the approval it is planned under. At the default rate;
+     * or, for a custom total, at the rate that total is over this transfer's own size — measured by
+     * planning it at the default rate first, where the planner's fee is its size at 100 sat/vB. The
+     * planner raises a total below the floor; the confirmation then says so.
+     */
+    private suspend fun planFor(
+        typed: ApprovedSend.Asset,
+        fee: FeeRequest,
+    ): Pair<ApprovedSend.Asset, AssetManager.AssetTransferPlanning> {
+        val atDefault = assetManager.previewAssetTransferFee(typed.assetId, typed.units, typed.address, typed.feePerKb)
+        if (fee !is FeeRequest.CustomTotal || atDefault !is AssetManager.AssetTransferPlanning.Planned) return typed to atDefault
+        val vsize = atDefault.plan.estimatedFeeSats * 1000 / DEFAULT_FEE_PER_KB
+        val approved = typed.atRate(FeeQuote.rateForTotal(fee.totalSats, vsize).coerceAtLeast(1L))
+        return approved to assetManager.previewAssetTransferFee(approved.assetId, approved.units, approved.address, approved.feePerKb)
     }
 
     /** Planning the transfer for the confirmation (see [requestConfirm]) is under way. */
@@ -441,18 +448,11 @@ class AssetViewModel @Inject constructor(
          *  constant (100,000 sat/kB = 100 sat/byte). */
         private const val DEFAULT_FEE_PER_KB = AssetFeeEstimator.MIN_RELAY_FEE_PER_KB
 
-        /** Asset-typical vsize used ONLY for the custom total-DGB ⇄ rate
-         *  conversion and the default-fee display. The regular send uses
-         *  ~141 (close to its real 1-in/2-out size, so its estimate is
-         *  accurate); an asset transfer (mixed inputs + OP_RETURN + markers)
-         *  runs much larger. This MUST match the vsize the estimator actually
-         *  charges over — AssetFeeEstimator's typical shape (1 asset + 1 DGB
-         *  input incl. its +1 margin, 3 outputs, ~40-byte OP_RETURN) is
-         *  12 + 3·150 + 3·34 + 9 + 40 = 613 vB. Using the old 400 biased the
-         *  displayed/confirm-dialog fee ~45% LOW and made a custom TOTAL-DGB
-         *  entry T get charged as ~1.47·T (T over 400 vB re-applied to ~590 vB).
-         *  613 keeps the on-screen estimate at/above what AssetManager.sendAsset
-         *  actually deducts and round-trips the custom total. */
-        private const val ASSET_TYPICAL_VSIZE = 613L
+        /** The planner's size-aware estimate for the smallest transfer — one asset coin, one fee coin,
+         *  the recipient's and the change markers and DGB change, a short instruction — at the default
+         *  rate. Only the form's cost preview, labelled an estimate, shows it. */
+        private fun smallestTransferFeeSats(): Long = AssetFeeEstimator.estimateAssetTxFeeSats(
+            assetInputCount = 1, dgbInputCount = 1, outputCount = 3, opReturnBytes = 40, feePerKb = DEFAULT_FEE_PER_KB,
+        )
     }
 }

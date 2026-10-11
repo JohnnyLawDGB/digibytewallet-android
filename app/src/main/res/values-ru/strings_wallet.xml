@@ -685,4 +685,12 @@
     <string name="restore_date_onwards">С января %1$d</string>
     <string name="restore_date_range">янв. %1$d – дек. %1$d</string>
     <string name="restore_date_genesis">DigiByte запущен в январе 2014 г.</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB — минимум сети. Точная комиссия этой транзакции показывается перед подтверждением.</string>
+    <string name="send_preparing">Подготовка…</string>
+    <string name="send_fee_raised">Повышена с введённых вами %1$s DGB: это комиссия, которую платит эта транзакция.</string>
+    <string name="send_err_below_dust">Эта сумма меньше минимального платежа, который сеть ретранслирует на этот адрес (%1$s DGB). Отправьте не меньше этой суммы.</string>
+    <string name="send_not_relayed_title">Отправлено, ещё не ретранслировано</string>
+    <string name="send_not_relayed_body">Ваш кошелёк разослал эту транзакцию, но ни один узел её ещё не принял, поэтому пока неизвестно, дошла ли она до сети. В вашей активности она отображается как ожидающая. Проверьте активность, прежде чем отправлять её снова.</string>
+    <!-- /pkg 2.1 -->
 </resources>
