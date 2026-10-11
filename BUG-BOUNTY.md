@@ -2,7 +2,8 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **DigiByte Mobile 4.0.88** (`app.aroundtheblock.wallet`)
+**Bounty target:** **DigiByte Mobile 4.0.89** (`app.aroundtheblock.wallet`), from 2026-10-11.
+4.0.88 stays in scope until **2026-10-25** under the overlap rule below.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
 reports earn named credit rather than payment; please read the tiers before spending time on a
@@ -27,7 +28,7 @@ DigiByte Mobile release and name its exact version.
 
 | Asset | Where to get it |
 |-------|-----------------|
-| `aroundtheblock-wallet-vX.Y.Z.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases |
+| `aroundtheblock-wallet-v4.0.89.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.0.89 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
