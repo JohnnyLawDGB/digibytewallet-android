@@ -1,7 +1,10 @@
 package app.aroundtheblock.wallet.core.security
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import org.signal.argon2.Argon2
@@ -26,12 +29,14 @@ sealed interface PinVerifyResult {
     data object Success : PinVerifyResult
 
     /** Wrong PIN. [failCount] is the new consecutive-failure count; [lockedUntil]
-     *  is the wall-clock epoch-ms a cooldown expires, or null if this failure did
-     *  not start a cooldown (still within the free attempts). */
+     *  is when the cooldown this failure started ends, as a wall-clock epoch-ms for the
+     *  screens to count down to (the cooldown itself runs on [PinClock.sinceBootMs]), or
+     *  null if this failure did not start a cooldown (still within the free attempts). */
     data class Wrong(val failCount: Int, val lockedUntil: Long?) : PinVerifyResult
 
     /** Already locked out — the PIN was NOT checked (compare never ran). [until]
-     *  is the wall-clock epoch-ms the lock expires. */
+     *  is when the cooldown ends, as a wall-clock epoch-ms for the screens to count down
+     *  to: the wall clock now plus the time left on [PinClock.sinceBootMs]. */
     data class LockedOut(val until: Long) : PinVerifyResult
 
     /** Wipe-after-N is enabled AND the failure count reached the wipe threshold.
@@ -101,6 +106,47 @@ internal object SignalArgon2id : Argon2idHash {
             .hash
 }
 
+/**
+ * The clocks the PIN cooldown reads. A cooldown RUNS on [sinceBootMs] alone, a clock nothing in
+ * Settings can move. [wallMs] is read only to say when a cooldown ends as the wall-clock time the
+ * screens count down to — never to decide whether it has ended.
+ */
+internal interface PinClock {
+    /** Milliseconds since this boot, deep sleep included (`SystemClock.elapsedRealtime()`). The
+     *  owner cannot set it, and it starts again from zero at every boot. */
+    fun sinceBootMs(): Long
+
+    /** Which boot this is (`Settings.Global.BOOT_COUNT`), or [UNKNOWN_BOOT] where it cannot be read. */
+    fun bootCount(): Int
+
+    /** The wall clock (`System.currentTimeMillis()`), which the owner can set to anything. */
+    fun wallMs(): Long
+
+    companion object {
+        const val UNKNOWN_BOOT = -1
+    }
+}
+
+/**
+ * The device's clocks. [resolver] reads the boot count. Without one, or where the setting cannot be
+ * read, the boot count is [PinClock.UNKNOWN_BOOT], and a reboot is then recognised only by
+ * [sinceBootMs] reading less than it did when the cooldown was last measured.
+ */
+internal class DeviceClock(private val resolver: ContentResolver?) : PinClock {
+    override fun sinceBootMs(): Long = SystemClock.elapsedRealtime()
+
+    override fun bootCount(): Int {
+        val resolver = resolver ?: return PinClock.UNKNOWN_BOOT
+        return try {
+            Settings.Global.getInt(resolver, Settings.Global.BOOT_COUNT, PinClock.UNKNOWN_BOOT)
+        } catch (e: Exception) {
+            PinClock.UNKNOWN_BOOT
+        }
+    }
+
+    override fun wallMs(): Long = System.currentTimeMillis()
+}
+
 /** Production [PinStore] backed by the hardware-keyed `dgb_pin_store`
  *  EncryptedSharedPreferences. Writes use `commit()` (synchronous) so the
  *  rate-limit counters are durable against a force-stop between attempts —
@@ -146,15 +192,24 @@ private class EncryptedPrefsPinStore(context: Context) : PinStore {
  * cooldowns; optional wipe-after-N (default OFF) once the failure count reaches
  * [WIPE_THRESHOLD]. See the design spec at
  * `docs/superpowers/specs/2026-07-16-pin-rate-limit-design.md`.
+ *
+ * A cooldown runs on the monotonic clock ([PinClock.sinceBootMs]). The wall clock never decides
+ * whether one has ended, so setting the date neither ends, lengthens nor starts one. The time a
+ * cooldown still has to run is stored with the monotonic reading, and the boot, it was measured at,
+ * and is measured again each time it is read. That clock starts again from zero at every boot, so
+ * how much time passed around a reboot cannot be known without the wall clock: a reboot carries the
+ * time left over unchanged, and the cooldown runs on from its first reading in the new boot.
  */
 class PinManager internal constructor(
     private val store: PinStore,
     /** The one Argon2id call. Production always uses [SignalArgon2id]; tests put a stand-in here. */
     private val argon2id: Argon2idHash = SignalArgon2id,
+    /** The clocks the cooldown reads. Production passes [DeviceClock] with the content resolver; tests put a fake here. */
+    private val clock: PinClock = DeviceClock(resolver = null),
 ) {
 
     /** Production constructor used by Hilt — backs the store with EncryptedSharedPreferences. */
-    constructor(context: Context) : this(EncryptedPrefsPinStore(context))
+    constructor(context: Context) : this(EncryptedPrefsPinStore(context), clock = DeviceClock(context.contentResolver))
 
     companion object {
         // Persisted state keys (all in dgb_pin_store).
@@ -162,8 +217,15 @@ class PinManager internal constructor(
         private const val KEY_SALT = "pin_salt"
         private const val KEY_METHOD = "pin_method"
         private const val KEY_FAIL_COUNT = "pin_fail_count"
-        private const val KEY_LOCKOUT_UNTIL = "pin_lockout_until"
-        private const val KEY_LAST_FAIL_AT = "pin_last_fail_at"
+        // The running cooldown: the time it still had to run when last measured, and the monotonic
+        // reading and the boot it was measured at. No time left (absent or 0) = no cooldown.
+        private const val KEY_COOLDOWN_LEFT_MS = "pin_cooldown_left_ms"
+        private const val KEY_COOLDOWN_MEASURED_AT = "pin_cooldown_measured_at"
+        private const val KEY_COOLDOWN_BOOT = "pin_cooldown_boot"
+        // Written by 4.0.89 and earlier, which kept the cooldown on the wall clock: read once, to
+        // carry a cooldown still running over (see carryOverWallClockCooldown), then removed.
+        private const val KEY_WALL_LOCKOUT_UNTIL = "pin_lockout_until"
+        private const val KEY_WALL_LAST_FAIL_AT = "pin_last_fail_at"
         private const val KEY_WIPE_AFTER_N = "pin_wipe_after_n"
         private const val KEY_WIPE_PENDING = "pin_wipe_pending"
 
@@ -174,7 +236,7 @@ class PinManager internal constructor(
         /** Total consecutive failures that trigger a wipe when wipe-after-N is on. */
         const val WIPE_THRESHOLD = 10
 
-        /** Longest cooldown — also the forced lockout on a backward-clock jump. */
+        /** Longest cooldown — also the most a cooldown carried over from the wall clock keeps. */
         const val MAX_COOLDOWN_MS = 3_600_000L // 60 min
 
         /**
@@ -219,43 +281,31 @@ class PinManager internal constructor(
     /**
      * Verify [pin] against the stored hash, enforcing the persisted rate-limit.
      *
-     * [nowMs] is injectable so tests can advance/rewind the clock — it is NEVER
-     * passed in production (callers use the [System.currentTimeMillis] default).
-     *
-     * Algorithm (spec §3):
-     *  1. Backward-clock guard: `now < last_fail` ⇒ force a max-cooldown lockout.
-     *  2. Lockout check: `now < lockout_until` ⇒ [PinVerifyResult.LockedOut]
+     * Algorithm (spec §3, with the cooldown on the monotonic clock):
+     *  1. Cooldown check: time left on the running cooldown ⇒ [PinVerifyResult.LockedOut]
      *     WITHOUT running the (expensive, constant-time) compare — the check
      *     precedes the compare and never branches on PIN correctness.
-     *  3. Compare (constant-time Argon2id/PBKDF2). A hasher that could not run has
+     *  2. Compare (constant-time Argon2id/PBKDF2). A hasher that could not run has
      *     checked nothing ⇒ [PinVerifyResult.Unavailable], with every counter untouched.
-     *  4. Success ⇒ reset counters ⇒ [PinVerifyResult.Success].
-     *  5. Fail ⇒ increment; if wipe-after-N && count ≥ threshold ⇒
-     *     [PinVerifyResult.ShouldWipe] (+ set wipe-pending); else set the cooldown
+     *  3. Success ⇒ reset counters ⇒ [PinVerifyResult.Success].
+     *  4. Fail ⇒ increment; if wipe-after-N && count ≥ threshold ⇒
+     *     [PinVerifyResult.ShouldWipe] (+ set wipe-pending); else start the cooldown
      *     ⇒ [PinVerifyResult.Wrong].
+     *
+     * The wall clock decides nothing here: setting it neither ends, lengthens nor starts a cooldown.
      */
-    fun verifyPin(pin: String, nowMs: Long = System.currentTimeMillis()): PinVerifyResult {
-        // 1. Backward-clock-jump guard — treat a clock that moved before the last
-        //    failure as tampering and force the maximum cooldown.
-        val lastFail = store.getLong(KEY_LAST_FAIL_AT, 0L)
-        if (lastFail > 0L && nowMs < lastFail) {
-            val until = nowMs + MAX_COOLDOWN_MS
-            store.putLong(KEY_LOCKOUT_UNTIL, until)
-            store.putLong(KEY_LAST_FAIL_AT, nowMs)
-            return PinVerifyResult.LockedOut(until)
+    fun verifyPin(pin: String): PinVerifyResult {
+        // 1. Cooldown check — runs BEFORE the compare; leaks nothing about the PIN.
+        val left = cooldownLeftMs()
+        if (left > 0L) {
+            return PinVerifyResult.LockedOut(clock.wallMs() + left)
         }
 
-        // 2. Lockout check — runs BEFORE the compare; leaks nothing about the PIN.
-        val lockoutUntil = store.getLong(KEY_LOCKOUT_UNTIL, 0L)
-        if (nowMs < lockoutUntil) {
-            return PinVerifyResult.LockedOut(lockoutUntil)
-        }
-
-        // 3. Constant-time compare. A PIN the hasher could not check is not a wrong PIN: it
+        // 2. Constant-time compare. A PIN the hasher could not check is not a wrong PIN: it
         //    returns before the failure branch, so it counts toward no cooldown and no wipe.
         when (checkPin(pin)) {
             PinCheck.MATCH -> {
-                // 4. Any valid PIN resets the limiter.
+                // 3. Any valid PIN resets the limiter.
                 resetRateLimit()
                 return PinVerifyResult.Success
             }
@@ -263,10 +313,9 @@ class PinManager internal constructor(
             PinCheck.MISMATCH -> Unit
         }
 
-        // 5. Failure — increment persisted counter.
+        // 4. Failure — increment persisted counter.
         val count = store.getInt(KEY_FAIL_COUNT, 0) + 1
         store.putInt(KEY_FAIL_COUNT, count)
-        store.putLong(KEY_LAST_FAIL_AT, nowMs)
 
         if (isWipeAfterNEnabled() && count >= WIPE_THRESHOLD) {
             // Persist a backstop so a kill between here and the caller's wipe still
@@ -277,11 +326,9 @@ class PinManager internal constructor(
 
         val cooldown = cooldownMsForFailCount(count)
         return if (cooldown > 0L) {
-            val until = nowMs + cooldown
-            store.putLong(KEY_LOCKOUT_UNTIL, until)
-            PinVerifyResult.Wrong(count, until)
+            recordCooldown(cooldown, clock.sinceBootMs(), clock.bootCount())
+            PinVerifyResult.Wrong(count, clock.wallMs() + cooldown)
         } else {
-            store.putLong(KEY_LOCKOUT_UNTIL, 0L)
             PinVerifyResult.Wrong(count, null)
         }
     }
@@ -293,14 +340,80 @@ class PinManager internal constructor(
         resetRateLimit()
     }
 
-    /** The stored lockout deadline (wall-clock epoch-ms), or 0 if none. Lets the
-     *  UnlockScreen resume a countdown that spans a process restart. */
-    fun currentLockout(): Long = store.getLong(KEY_LOCKOUT_UNTIL, 0L)
+    /** When the running cooldown ends, as a wall-clock epoch-ms for the screens to count down
+     *  to — the wall clock now plus the time left on the monotonic clock — or 0 if none is
+     *  running. Lets the UnlockScreen resume a countdown that spans a process restart or a reboot. */
+    fun currentLockout(): Long {
+        val left = cooldownLeftMs()
+        return if (left > 0L) clock.wallMs() + left else 0L
+    }
 
     private fun resetRateLimit() {
         store.putInt(KEY_FAIL_COUNT, 0)
-        store.putLong(KEY_LOCKOUT_UNTIL, 0L)
-        store.putLong(KEY_LAST_FAIL_AT, 0L)
+        clearCooldown()
+        forgetWallClockCooldown()
+    }
+
+    // ── The cooldown on the monotonic clock ───────────────────────────────────
+
+    /**
+     * The time the running cooldown still has to run, or 0 if none is running. It is measured on
+     * the monotonic clock and recorded, so the next reading — after a process restart or a reboot —
+     * starts from this one; a cooldown found to have run out is cleared, so no reboot brings it back.
+     */
+    private fun cooldownLeftMs(): Long {
+        carryOverWallClockCooldown()
+        val left = store.getLong(KEY_COOLDOWN_LEFT_MS, 0L)
+        if (left <= 0L) return 0L
+        val now = clock.sinceBootMs()
+        val boot = clock.bootCount()
+        val measuredAt = store.getLong(KEY_COOLDOWN_MEASURED_AT, 0L)
+        val sameBoot = boot == store.getInt(KEY_COOLDOWN_BOOT, PinClock.UNKNOWN_BOOT) && now >= measuredAt
+        // In the boot it was measured in, the time that passed is the difference of two readings of
+        // the monotonic clock. Across a reboot that clock started again from zero, and how much time
+        // passed cannot be known without the wall clock: none is counted, so a reboot never shortens a
+        // cooldown — the time left carries over, and counting resumes from this reading.
+        val stillLeft = if (sameBoot) left - (now - measuredAt) else left
+        if (stillLeft <= 0L) {
+            clearCooldown()
+            return 0L
+        }
+        recordCooldown(stillLeft, now, boot)
+        return stillLeft
+    }
+
+    /** Records [leftMs] as the time the cooldown still has to run, measured at [sinceBootMs] in boot
+     *  [boot]. The measurement is written before the time it belongs to, so a process stopped between
+     *  the writes leaves a record that reads as no less time left (or, when a cooldown was being
+     *  started, as none yet — as it was when the failure count was written and the cooldown not). */
+    private fun recordCooldown(leftMs: Long, sinceBootMs: Long, boot: Int) {
+        store.putLong(KEY_COOLDOWN_MEASURED_AT, sinceBootMs)
+        store.putInt(KEY_COOLDOWN_BOOT, boot)
+        store.putLong(KEY_COOLDOWN_LEFT_MS, leftMs)
+    }
+
+    private fun clearCooldown() {
+        if (store.contains(KEY_COOLDOWN_LEFT_MS)) store.remove(KEY_COOLDOWN_LEFT_MS)
+    }
+
+    /**
+     * 4.0.89 and earlier kept a cooldown as a wall-clock deadline. One still running is carried over
+     * once, with the time the wall clock now says it has left (at most [MAX_COOLDOWN_MS]); from then
+     * on it runs on the monotonic clock like any other. The wall-clock keys are then removed.
+     */
+    private fun carryOverWallClockCooldown() {
+        val until = store.getLong(KEY_WALL_LOCKOUT_UNTIL, 0L)
+        if (until <= 0L) return
+        val left = (until - clock.wallMs()).coerceIn(0L, MAX_COOLDOWN_MS)
+        if (left > 0L && store.getLong(KEY_COOLDOWN_LEFT_MS, 0L) <= 0L) {
+            recordCooldown(left, clock.sinceBootMs(), clock.bootCount())
+        }
+        forgetWallClockCooldown()
+    }
+
+    private fun forgetWallClockCooldown() {
+        if (store.contains(KEY_WALL_LOCKOUT_UNTIL)) store.remove(KEY_WALL_LOCKOUT_UNTIL)
+        if (store.contains(KEY_WALL_LAST_FAIL_AT)) store.remove(KEY_WALL_LAST_FAIL_AT)
     }
 
     // ── Wipe-after-N toggle + backstop ────────────────────────────────────────
