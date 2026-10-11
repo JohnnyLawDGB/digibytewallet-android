@@ -72,8 +72,8 @@ class SetAsideInterruptedTest {
                 dir.list()!!.none { it.startsWith("$name.aside-") })
             return false
         }
-        assertEquals("$case: the database is apart from its companions — at the live name: $atLive; all: ${dir.list()!!.sorted()}",
-            emptyList<String>(), atLive)
+        assertEquals("$case: the database is apart from its companions — all: ${dir.list()!!.sorted()}",
+            emptyList<String>(), atLive.map { name + it })
         val mains = dir.listFiles()!!.filter { it.name.startsWith("$name.aside-") && it.readText() == "rows" }
         assertEquals("$case: the database is not under exactly one aside name: ${dir.list()!!.sorted()}", 1, mains.size)
         val stem = mains.single().name
