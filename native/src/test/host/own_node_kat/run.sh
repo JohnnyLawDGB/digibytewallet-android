@@ -30,7 +30,8 @@ GUARD_CASES=(bare_host_gets_default_port host_with_port_parses blank_is_null emp
              ipv4_used_as_given_tor_on_or_off tor_off_host_name_is_looked_up only_a_dotted_quad_is_an_address
              kotlin_trim_unicode_spaces port_as_kotlin_to_int_or_null typed_host_accepts_any_other_bytes
              host_longer_than_the_buffer_refused link_host_ascii_only url_decoder_quirks net_last_valid_wins
-             label_last_wins_and_absence onion_case_insensitive_before_the_port health_mapping)
+             label_last_wins_and_absence onion_case_insensitive_before_the_port health_mapping
+             watchdog_pin_yields_to_own_node)
 
 build() {
     local out="$1"; shift
