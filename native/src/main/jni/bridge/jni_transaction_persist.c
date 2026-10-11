@@ -73,7 +73,9 @@ NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
                                                                        jbyteArray data) {
     (void)thiz;
 
-    /* Free any previously loaded transactions */
+    /* Free any previously loaded transactions. The array only ever names records no wallet took: a
+     * build from it releases it (saved_transactions_release_after_build), so none of these is a
+     * wallet's. */
     if (g_savedTransactions) {
         for (size_t i = 0; i < g_savedTransactionCount; i++) {
             if (g_savedTransactions[i]) BRTransactionFree(g_savedTransactions[i]);
@@ -101,4 +103,26 @@ NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
 
     LOGI("loadSerializedTransactions: loaded %zu transactions from persistent storage", loaded);
     return (jint)loaded;
+}
+
+/* ---------- saved_transactions_release_after_build ----------
+ * Called by recoverWalletFromBytes right after BRWalletNewDual has built `wallet` from the loaded records,
+ * before the wallet is published. BRWalletNewDual takes the records it keeps -- the wallet owns them from
+ * then on, and BRWalletFree releases them -- and skips the rest (an unsigned record, a repeated hash, one
+ * outside the money range). From here the bridge names none of them: a record the wallet did not take is
+ * released, then the array, and the array is cleared. So a later loadSerializedTransactions frees nothing
+ * the wallet owns, and a later recoverWalletFromBytes never builds from a record a wallet has released.
+ */
+void saved_transactions_release_after_build(BRWallet *wallet) {
+    if (!wallet) return;   /* nothing was built: the records are still the array's */
+
+    if (g_savedTransactions) {
+        for (size_t i = 0; i < g_savedTransactionCount; i++) {
+            BRTransaction *tx = g_savedTransactions[i];
+            if (tx && BRWalletTransactionForHash(wallet, tx->txHash) != tx) BRTransactionFree(tx);
+        }
+        free(g_savedTransactions);
+    }
+    g_savedTransactions = NULL;
+    g_savedTransactionCount = 0;
 }

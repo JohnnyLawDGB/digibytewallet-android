@@ -395,12 +395,20 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     extern BRTransaction **g_savedTransactions;
     extern size_t g_savedTransactionCount;
 
+    BRWallet *built;
     if (g_savedTransactions && g_savedTransactionCount > 0) {
         LOGI("recoverWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
-        g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
+        built = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
     } else {
-        g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
+        built = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
     }
+    /* The wallet owns the records it took, and the bridge keeps none of them (jni_transaction_persist.c).
+     * Done before the wallet is published, so nothing else can change what it holds in between.
+     * (-DSAVED_TX_ARRAY_UNFIXED, the host KAT's comparison arm only, leaves the array naming them.) */
+#ifndef SAVED_TX_ARRAY_UNFIXED
+    saved_transactions_release_after_build(built);
+#endif
+    g_wallet = built;
     if (!g_wallet) {
         LOGE("recoverWalletFromBytes: BRWalletNewDual failed");
         secure_zero(seed, sizeof(seed));
