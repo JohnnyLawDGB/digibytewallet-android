@@ -135,7 +135,8 @@ class BootGuardRestoreBracketTest {
         BootGuard.beginRestore(harness.context)
         assertEquals(BootGuard.RestoreRecovery.SyncAndDb, BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context))
 
-        assertEquals("the crash-loop breaker set aside a database whose re-key is pending", "rows", harness.database.readText())
+        assertTrue("the crash-loop breaker set aside a database whose re-key is pending", harness.database.exists())
+        assertEquals("rows", harness.database.readText())
         assertTrue("a database whose re-key is pending was set aside", harness.asides().isEmpty())
     }
 
@@ -147,7 +148,8 @@ class BootGuardRestoreBracketTest {
 
         BootGuard.beginBoot(harness.context)
 
-        assertEquals("the boot counter's recovery set aside a database whose re-key is pending", "rows", harness.database.readText())
+        assertTrue("the boot counter's recovery set aside a database whose re-key is pending", harness.database.exists())
+        assertEquals("rows", harness.database.readText())
         assertTrue(harness.asides().isEmpty())
     }
 

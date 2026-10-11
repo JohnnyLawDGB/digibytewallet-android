@@ -231,8 +231,8 @@ class SeedRecordWriteTest {
     // GUARD (test gap).
     @Test fun `a versioned record that says it has no passphrase and holds one is an error`() {
         val h = Harness()
-        val enc = h.vault.encrypt(BOUND_ALIAS, passphrase)
         val wm = h.versionedRecord(withPassphrase = false) {
+            val enc = h.vault.encrypt(BOUND_ALIAS, passphrase)
             it.edit().putString("encrypted_pass_v2", hex(enc.ciphertext)).putString("encrypted_pass_iv_v2", hex(enc.iv)).commit()
         }
         assertRecordError(wm, "says none, holds one")
@@ -248,8 +248,8 @@ class SeedRecordWriteTest {
     // GUARD (test gap).
     @Test fun `a versioned record that says it has a passphrase and holds an empty one is an error`() {
         val h = Harness()
-        val empty = h.vault.encrypt(BOUND_ALIAS, ByteArray(0))
         val wm = h.versionedRecord(withPassphrase = true) {
+            val empty = h.vault.encrypt(BOUND_ALIAS, ByteArray(0))
             it.edit().putString("encrypted_pass_v2", hex(empty.ciphertext)).putString("encrypted_pass_iv_v2", hex(empty.iv)).commit()
         }
         assertRecordError(wm, "says one, holds an empty one")
