@@ -80,14 +80,17 @@ in §1 of the triage has no such constraint and moves outright.
 - **Never hardcode platform constants; include the platform header.**
 - **Do not run git inside a Claude-bridged folder.** Even read-only `git status` leaves an
   `index.lock` it cannot unlink, blocking native git.
-- **Core `develop`'s tip must EQUAL the android pin.** CI's "Submodule pin is durable" step
-  clones the submodule `--depth=1`, so a pin that is merely an *ancestor* of the tip fails the
-  check even though it is durable. Pushing a core commit to core `develop` without bumping
-  android's pin in the same push turns every android branch red (bit twice: 2026-08-31 and
-  2026-09-03, the `__OBJC__` guard). Push core, then immediately commit the pin bump on
-  android; never push core ahead and leave it. `./scripts/check-submodule-pin.sh` now
-  requires equality too (it used to pass on a full clone in exactly this case), so run it
-  locally before pushing — a "BEHIND" failure means bump the pin, not fix core.
+- **The pin must be reachable from core `develop` or `master`; it may be behind the tip**
+  (containment; decided 2026-10-10). It used to have to EQUAL the tip, because CI's
+  "Submodule pin is durable" step clones the submodule `--depth=1`, where an ancestor pin
+  could not be verified. That turned every android branch red whenever core moved ahead
+  (2026-08-31 and 2026-09-03, the `__OBJC__` guard), and with iOS as a second consumer it
+  would have forced both pins to move on every core push. `./scripts/check-submodule-pin.sh`
+  now fetches the history first, so a shallow checkout gets the same answer as a full
+  clone. The script is shared with iOS (`Scripts/check-core-pin.sh`), differing only in its
+  submodule path. Exit 1 means the pin is not durable; exit 2 means the remote could not be
+  asked. **Exception:** a core change that alters wallet state must reach both consumers'
+  pins before either ships it.
 
 ## The four pilots
 
