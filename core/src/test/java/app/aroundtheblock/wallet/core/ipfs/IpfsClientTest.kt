@@ -285,7 +285,7 @@ class IpfsClientTest {
             return n
         }
         override fun timeout(): Timeout = Timeout.NONE
-        override fun close() {}
+        override fun close() = Unit
     }
 
     companion object {

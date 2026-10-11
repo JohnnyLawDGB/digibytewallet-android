@@ -355,6 +355,6 @@ class BoundedEndpointsTest {
             return n
         }
         override fun timeout(): Timeout = Timeout.NONE
-        override fun close() {}
+        override fun close() = Unit
     }
 }

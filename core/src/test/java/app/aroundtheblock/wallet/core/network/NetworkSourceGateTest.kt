@@ -136,7 +136,10 @@ class NetworkSourceGateTest {
 
     // ── 4. nothing outside OkHttp ──────────────────────────────────────────────
 
-    private val rawConnection = Regex("""\bopenConnection\s*\(|\bHttpsURLConnection\b|\bHttpURLConnection\b|\bURLConnection\b|\bopenStream\s*\(|\bjava\.net\.URL\b|(?<![\w.])URL\s*\(""")
+    private val rawConnection = Regex(
+        """\bopenConnection\s*\(|\bHttpsURLConnection\b|\bHttpURLConnection\b|\bURLConnection\b|""" +
+            """\bopenStream\s*\(|\bjava\.net\.URL\b|(?<![\w.])URL\s*\(""",
+    )
 
     @Test fun `nothing connects outside OkHttp`() {
         val found = offenders(rawConnection, ::codeOnly)
@@ -259,7 +262,7 @@ internal object KotlinText {
         }
 
         private fun charLiteral() {
-            // '\'' and 'A': the closing quote comes after the escaped character.
+            // '\'' and '\u0041': the closing quote comes after the escaped character.
             val end = if (s.startsWith("'\\", i)) s.indexOf('\'', i + 3) else s.indexOf('\'', i + 1)
             val stop = if (end < 0) s.length else end + 1
             if (keepStrings) out.append(s, i, stop) else out.append("''")

@@ -124,7 +124,8 @@ class BoundedBodyTest {
         assertEquals(utf8, BoundedBody.text(bodyOf(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + utf8.encodeToByteArray(), null), cap))
         assertEquals(utf8, BoundedBody.text(bodyOf("FEFF".decodeHex().toByteArray() + utf8.toByteArray(Charsets.UTF_16BE), null), cap))
         assertEquals(utf8, BoundedBody.text(bodyOf("FFFE".decodeHex().toByteArray() + utf8.toByteArray(Charsets.UTF_16LE), null), cap))
-        assertEquals("café", BoundedBody.text(bodyOf(byteArrayOf(0x63, 0x61, 0x66, 0xE9.toByte()), "text/plain; charset=ISO-8859-1".toMediaType()), cap))
+        val latin1 = "text/plain; charset=ISO-8859-1".toMediaType()
+        assertEquals("caf\u00e9", BoundedBody.text(bodyOf(byteArrayOf(0x63, 0x61, 0x66, 0xE9.toByte()), latin1), cap))
     }
 
     // ── fixtures ───────────────────────────────────────────────────────────────
