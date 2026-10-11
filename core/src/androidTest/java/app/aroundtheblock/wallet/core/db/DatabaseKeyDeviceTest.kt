@@ -88,7 +88,7 @@ class DatabaseKeyDeviceTest {
         assertEquals("rows were lost opening a legacy-password database", rows, history(opened))
         opened.close()
 
-        val cipher = WalletDatabase.cipherFiles(context, dbFile)
+        val cipher = WalletDatabase.cipherFiles(dbFile)
         assertEquals("the published legacy password still opens the database", OpenAnswer.NOT_A_DATABASE, cipher.probe(legacy))
         val state = keys().resolve()
         assertTrue("no wrapped password under its own key was stored after the re-key ($state)",
@@ -167,7 +167,7 @@ class DatabaseKeyDeviceTest {
         }
         val damaged = dbFile.readBytes()
         assertFalse("precondition: the file was damaged", damaged.contentEquals(original))
-        val answer = WalletDatabase.cipherFiles(context, dbFile).probe(password)
+        val answer = WalletDatabase.cipherFiles(dbFile).probe(password)
 
         val opened = DatabaseKeyProvisioner.openWalletDatabase(context, TEST_DB, keys())
         val now = try {

@@ -85,7 +85,7 @@ abstract class WalletDatabase : RoomDatabase() {
             Room.inMemoryDatabaseBuilder(context.applicationContext, WalletDatabase::class.java).build()
 
         /** Opening and re-keying [file] directly with SQLCipher, outside Room. */
-        fun cipherFiles(context: Context, file: java.io.File): CipherFiles = SqlCipherFiles(file)
+        fun cipherFiles(file: java.io.File): CipherFiles = SqlCipherFiles(file)
     }
 }
 

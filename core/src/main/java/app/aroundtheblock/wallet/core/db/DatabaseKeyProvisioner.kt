@@ -414,9 +414,9 @@ class DatabaseKeyProvisioner(
             keys: DatabaseKeyProvisioner = forContext(context),
         ): WalletDatabase {
             val path = context.getDatabasePath(dbFileName)
-            val dir = path.parentFile ?: throw IllegalStateException("database path has no directory")
+            val dir = path.parentFile ?: error("database path has no directory")
             dir.mkdirs()
-            val opener = WalletDatabaseOpener(keys, DatabaseFiles(dir, dbFileName), WalletDatabase.cipherFiles(context, path))
+            val opener = WalletDatabaseOpener(keys, DatabaseFiles(dir, dbFileName), WalletDatabase.cipherFiles(path))
             return when (val plan = opener.plan()) {
                 is DatabaseOpenPlan.Open -> WalletDatabase.create(
                     context, plan.password, dbFileName,
@@ -432,12 +432,10 @@ class DatabaseKeyProvisioner(
 
         /** A record field as written by [format]; null when it is not one. */
         internal fun parse(wrapped: String): EncryptedData? {
-            val parts = wrapped.split(":")
-            if (parts.size != 2) return null
-            val ciphertext = hexToBytesOrNull(parts[0]) ?: return null
-            val iv = hexToBytesOrNull(parts[1]) ?: return null
-            if (ciphertext.isEmpty() || iv.isEmpty()) return null
-            return EncryptedData(ciphertext, iv)
+            val parts = wrapped.split(":").takeIf { it.size == 2 } ?: return null
+            val ciphertext = hexToBytesOrNull(parts[0])?.takeIf { it.isNotEmpty() }
+            val iv = hexToBytesOrNull(parts[1])?.takeIf { it.isNotEmpty() }
+            return if (ciphertext != null && iv != null) EncryptedData(ciphertext, iv) else null
         }
 
         private fun bytesToHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }

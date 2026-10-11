@@ -92,7 +92,9 @@ internal fun creationTimeForRestore(stored: Long, floorTime: Long): Long {
     return if (floorTime > 0L) minOf(base, floorTime) else base
 }
 
-class WalletManager(
+// The seams below (each defaulting to the production call) are what let the wipe, the record write
+// and the key migration run on a plain JVM; grouping them would hide which call each test replaces.
+class WalletManager @Suppress("LongParameterList") constructor(
     private val context: Context,
     private val keyStoreManager: KeyStoreManager,
     private val utxoManager: UtxoManager,
@@ -204,14 +206,15 @@ class WalletManager(
         if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            if (!createNative(mnemonicBytes, passphrase)) return false
             // Persist creation time so restoreFromDisk uses the right sync checkpoint — in the record.
-            val stored = writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000)
-            if (!stored) return false
-            _walletState.value = WalletState.Unlocked
-            clearSyncData()
-            rescanNative()
-            return true
+            val created = createNative(mnemonicBytes, passphrase) &&
+                writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000)
+            if (created) {
+                _walletState.value = WalletState.Unlocked
+                clearSyncData()
+                rescanNative()
+            }
+            return created
         } finally {
             mnemonicBytes.fill(0)
         }
@@ -230,7 +233,6 @@ class WalletManager(
         if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
-            if (!recoverNative(mnemonicBytes, creationTimestamp, passphrase)) return false
             // The creation time is part of the record. Without it restoreFromDisk feeds native the
             // hardcoded 2026 fallback (DEFAULT_RESTORE_CREATION_TIME) → getWalletBirthCheckpointHeight
             // returns the ~2026 checkpoint (~block 21.5M) for EVERY recovered wallet → an older
@@ -239,29 +241,32 @@ class WalletManager(
             // stays consistent with the first sync.
             val creationTimeSecs =
                 if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
-            if (!writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs)) return false
-            _walletState.value = WalletState.Unlocked
-            clearSyncData()
-            // PERSIST the compact-filter scan floor NOW, while native
-            // g_walletCreationTime still reflects the user's chosen recovery date
-            // (jni_wallet.c sets it from creationTimestamp). Without this the birth
-            // height lives ONLY in volatile native state: the next app launch rebuilds
-            // the wallet from the seed alone (restoreFromDisk passes no timestamp →
-            // g_walletCreationTime resets to 0 → getWalletBirthCheckpointHeight returns
-            // the GENESIS checkpoint), so the scan silently re-floors at genesis and
-            // grinds the full ~23M-block chain (~11-19h) that never finishes on an
-            // interruption. Writing cf_birth_height makes the chosen floor DURABLE
-            // across restarts (proven on-device: genesis→21.5M cut a 19h scan to ~12m).
-            // Mirrors rebuildFromChainRescan(). commit() (sync) so it lands before the
-            // rescan()/first sync reads it.
-            val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
-            val toPersist = cfBirthHeightToPersist(birth)
-            context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-                if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
-            }.commit()
-            android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
-            rescanNative()
-            return true
+            val recovered = recoverNative(mnemonicBytes, creationTimestamp, passphrase) &&
+                writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs)
+            if (recovered) {
+                _walletState.value = WalletState.Unlocked
+                clearSyncData()
+                // PERSIST the compact-filter scan floor NOW, while native
+                // g_walletCreationTime still reflects the user's chosen recovery date
+                // (jni_wallet.c sets it from creationTimestamp). Without this the birth
+                // height lives ONLY in volatile native state: the next app launch rebuilds
+                // the wallet from the seed alone (restoreFromDisk passes no timestamp →
+                // g_walletCreationTime resets to 0 → getWalletBirthCheckpointHeight returns
+                // the GENESIS checkpoint), so the scan silently re-floors at genesis and
+                // grinds the full ~23M-block chain (~11-19h) that never finishes on an
+                // interruption. Writing cf_birth_height makes the chosen floor DURABLE
+                // across restarts (proven on-device: genesis→21.5M cut a 19h scan to ~12m).
+                // Mirrors rebuildFromChainRescan(). commit() (sync) so it lands before the
+                // rescan()/first sync reads it.
+                val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
+                val toPersist = cfBirthHeightToPersist(birth)
+                context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
+                    if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+                }.commit()
+                android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
+                rescanNative()
+            }
+            return recovered
         } finally {
             mnemonicBytes.fill(0)
         }
@@ -280,20 +285,13 @@ class WalletManager(
         // report a zero balance, on a wallet whose coins are perfectly safe. Null for the
         // overwhelming majority of wallets, which have no passphrase. Read before anything native:
         // a record that cannot say whether it has one is not opened at all (AND-005).
-        val storedPass = try {
-            when (val stored = storedPassphrase()) {
-                is StoredPassphrase.Unknown -> {
-                    android.util.Log.w("WalletManager", "wallet record incomplete (${stored.why}); not opened")
-                    seedBytes.fill(0)
-                    return false
-                }
-                is StoredPassphrase.Present -> stored.bytes
-                StoredPassphrase.None -> null
-            }
-        } catch (t: Throwable) {
+        val stored = storedPassphraseZeroingOnThrow(seedBytes)
+        if (stored is StoredPassphrase.Unknown) {
+            android.util.Log.w("WalletManager", "wallet record incomplete (${stored.why}); not opened")
             seedBytes.fill(0)
-            throw t
+            return false
         }
+        val storedPass = (stored as? StoredPassphrase.Present)?.bytes
         try {
             // CRITICAL: stop sync before replacing the wallet — the peer manager's
             // background threads are using the old wallet pointer. Freeing it
@@ -948,7 +946,9 @@ class WalletManager(
             return false
         }
         val identity = identityOf(mnemonicBytes, pass)
-        val (seedCt, seedIv, passCt, passIv) = if (sealed.authBound) V2_ENVELOPE_FIELDS else LEGACY_ENVELOPE_FIELDS
+        val fields = if (sealed.authBound) V2_ENVELOPE_FIELDS else LEGACY_ENVELOPE_FIELDS
+        val (seedCt, seedIv) = fields
+        val (passCt, passIv) = fields.drop(2)
         val seedHex = bytesToHex(sealed.seed.ciphertext)
         val held = prefs.all
         val edit = prefs.edit()
@@ -1129,6 +1129,14 @@ class WalletManager(
         return StoredPassphrase.Unknown("record from an earlier release does not show its write completed")
     }
 
+    /** [storedPassphrase] for [restoreFromDisk], which holds [seedBytes]: zeroed when the read throws. */
+    private fun storedPassphraseZeroingOnThrow(seedBytes: ByteArray): StoredPassphrase = try {
+        storedPassphrase()
+    } catch (t: Throwable) {
+        seedBytes.fill(0)
+        throw t
+    }
+
     private fun openEnvelope(envelope: Envelope): StoredPassphrase {
         val bytes = try {
             if (envelope.authBound) keyStoreManager.decryptAuthBound(envelope.data) else keyStoreManager.decrypt(envelope.data)
@@ -1189,7 +1197,7 @@ class WalletManager(
     fun decryptStoredPassphrase(): ByteArray? = when (val stored = storedPassphrase()) {
         is StoredPassphrase.Present -> stored.bytes
         StoredPassphrase.None -> null
-        is StoredPassphrase.Unknown -> throw IllegalStateException("wallet record incomplete: ${stored.why}")
+        is StoredPassphrase.Unknown -> error("wallet record incomplete: ${stored.why}")
     }
 
     /**
