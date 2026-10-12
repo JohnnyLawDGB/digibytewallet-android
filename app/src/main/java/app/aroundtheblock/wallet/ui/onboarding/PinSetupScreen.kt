@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.BiometricResult
+import app.aroundtheblock.wallet.ui.components.SecureWindow
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteRed
@@ -61,6 +62,8 @@ fun PinSetupScreen(
     biometricAuth: BiometricAuth,
     viewModel: OnboardingViewModel = hiltViewModel()
 ) {
+    // The PIN keypad stays out of screenshots and the task-switcher snapshot (counted holder).
+    SecureWindow()
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()

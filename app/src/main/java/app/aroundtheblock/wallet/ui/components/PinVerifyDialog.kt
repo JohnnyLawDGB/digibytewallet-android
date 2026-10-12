@@ -10,13 +10,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backspace
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,100 +67,111 @@ fun PinVerifyDialog(
     onBackspace: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A2742),
-        title = {
-            Text(title, color = Color.White, fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+    // Its own window: obscured touches refused, no screenshots or task-switcher snapshot of the
+    // keypad, overlays hidden. Laid out like the AlertDialog it replaces (which opens a plain window).
+    SensitiveDialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = AlertDialogDefaults.shape,
+            color = Color(0xFF1A2742),
+            tonalElevation = AlertDialogDefaults.TonalElevation,
+            modifier = Modifier.widthIn(min = 280.dp, max = 560.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
                 Text(
-                    subtitle,
-                    color = Color(0xFF8899AA),
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center
+                    title,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.headlineSmall
                 )
-
-                Spacer(Modifier.height(20.dp))
-
-                // PIN dot indicators
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(Modifier.height(16.dp))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(PIN_VERIFY_LENGTH) { idx ->
-                        val filled = idx < pinInput.length
-                        Box(
-                            modifier = Modifier
-                                .size(16.dp)
-                                .clip(CircleShape)
-                                .background(if (filled) DigiByteAccent else Color.Transparent)
-                                .border(2.dp, if (filled) DigiByteAccent else Color(0xFF243352), CircleShape)
-                        )
+                    Text(
+                        subtitle,
+                        color = Color(0xFF8899AA),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+
+                    // PIN dot indicators
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(PIN_VERIFY_LENGTH) { idx ->
+                            val filled = idx < pinInput.length
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(if (filled) DigiByteAccent else Color.Transparent)
+                                    .border(2.dp, if (filled) DigiByteAccent else Color(0xFF243352), CircleShape)
+                            )
+                        }
                     }
-                }
 
-                pinError?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text(it, color = DigiByteRed, style = MaterialTheme.typography.bodySmall)
-                }
+                    pinError?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text(it, color = DigiByteRed, style = MaterialTheme.typography.bodySmall)
+                    }
 
-                Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(20.dp))
 
-                // Compact keypad
-                val rows = listOf(
-                    listOf("1", "2", "3"),
-                    listOf("4", "5", "6"),
-                    listOf("7", "8", "9"),
-                    listOf("", "0", "⌫")
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    rows.forEach { row ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            row.forEach { key ->
-                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                    when (key) {
-                                        "" -> Spacer(Modifier.size(52.dp))
-                                        "⌫" -> {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(52.dp)
-                                                    .clip(CircleShape)
-                                                    .clickable { onBackspace() },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Backspace,
-                                                    contentDescription = stringResource(R.string.pin_backspace),
-                                                    tint = Color(0xFF8899AA),
-                                                    modifier = Modifier.size(22.dp)
-                                                )
+                    // Compact keypad
+                    val rows = listOf(
+                        listOf("1", "2", "3"),
+                        listOf("4", "5", "6"),
+                        listOf("7", "8", "9"),
+                        listOf("", "0", "⌫")
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rows.forEach { row ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                row.forEach { key ->
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        when (key) {
+                                            "" -> Spacer(Modifier.size(52.dp))
+                                            "⌫" -> {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(52.dp)
+                                                        .clip(CircleShape)
+                                                        .clickable { onBackspace() },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Backspace,
+                                                        contentDescription = stringResource(R.string.pin_backspace),
+                                                        tint = Color(0xFF8899AA),
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                }
                                             }
-                                        }
-                                        else -> {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(52.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF243352))
-                                                    .border(1.dp, Color(0xFF3A4F6A), CircleShape)
-                                                    .clickable { onDigit(key) },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    key,
-                                                    fontSize = 20.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color.White
-                                                )
+                                            else -> {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(52.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFF243352))
+                                                        .border(1.dp, Color(0xFF3A4F6A), CircleShape)
+                                                        .clickable { onDigit(key) },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        key,
+                                                        fontSize = 20.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = Color.White
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -166,13 +180,13 @@ fun PinVerifyDialog(
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
+                Spacer(Modifier.height(24.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.common_cancel), color = Color(0xFF8899AA))
+                    }
+                }
             }
         }
-    )
+    }
 }
