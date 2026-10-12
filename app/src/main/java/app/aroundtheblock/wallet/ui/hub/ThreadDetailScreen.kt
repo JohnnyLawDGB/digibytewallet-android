@@ -27,6 +27,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import app.aroundtheblock.wallet.R
+import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
+import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.hub.ForumThread
 import app.aroundtheblock.wallet.core.hub.Reply
 import app.aroundtheblock.wallet.core.hub.ThreadDetail
@@ -52,6 +57,15 @@ fun ThreadDetailScreen(
 
     var replyText by remember { mutableStateOf("") }
     var showReplyInput by remember { mutableStateOf(false) }
+
+    // A reply is signed with the wallet's identity, so it takes the same gate as a spend.
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    val context = LocalContext.current
+    val signScope = rememberCoroutineScope()
+    val signTitle = stringResource(R.string.hub_sign_title)
+    val signSubtitle = stringResource(R.string.hub_sign_subtitle)
+    var signing by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -114,21 +128,30 @@ fun ThreadDetailScreen(
                     visible = showReplyInput,
                     text = replyText,
                     onTextChange = { replyText = it },
-                    isReplying = isReplying,
+                    isReplying = isReplying || signing,
                     error = replyError,
                     onToggle = {
                         showReplyInput = !showReplyInput
                         viewModel.clearReplyError()
                     },
                     onSend = {
-                        viewModel.replyToThread(
-                            threadId = threadId,
-                            content = replyText.trim(),
-                            onSuccess = {
-                                replyText = ""
-                                showReplyInput = false
+                        signing = true
+                        signScope.launch {
+                            try {
+                                if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, signTitle, signSubtitle)) {
+                                    viewModel.replyToThread(
+                                        threadId = threadId,
+                                        content = replyText.trim(),
+                                        onSuccess = {
+                                            replyText = ""
+                                            showReplyInput = false
+                                        }
+                                    )
+                                }
+                            } finally {
+                                signing = false
                             }
-                        )
+                        }
                     }
                 )
             }

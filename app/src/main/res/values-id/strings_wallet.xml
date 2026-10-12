@@ -474,6 +474,8 @@
     <string name="did_login">Masuk Digi-ID</string>
     <string name="did_auth_title">Autentikasi Digi-ID</string>
     <string name="did_auth_subtitle">Autentikasi untuk masuk ke %1$s</string>
+    <string name="hub_sign_title">Tanda Tangani Posting Hub</string>
+    <string name="hub_sign_subtitle">Autentikasi untuk menandatangani posting ini dengan identitas Anda</string>
     <string name="did_requesting">meminta autentikasi Digi-ID</string>
     <string name="did_warning">Peringatan</string>
     <string name="did_insecure">Koneksi Tidak Aman</string>

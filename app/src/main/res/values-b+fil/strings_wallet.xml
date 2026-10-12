@@ -477,6 +477,8 @@
     <string name="did_login">Digi-ID Login</string>
     <string name="did_auth_title">Digi-ID Authentication</string>
     <string name="did_auth_subtitle">Mag-authenticate para mag-log in sa %1$s</string>
+    <string name="hub_sign_title">Lagdaan ang Post sa Hub</string>
+    <string name="hub_sign_subtitle">Mag-authenticate para lagdaan ang post na ito gamit ang iyong pagkakakilanlan</string>
     <string name="did_requesting">ay humihiling ng Digi-ID authentication</string>
     <string name="did_warning">Babala</string>
     <string name="did_insecure">Hindi Ligtas na Koneksyon</string>

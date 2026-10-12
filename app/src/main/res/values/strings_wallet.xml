@@ -579,6 +579,8 @@
     <string name="did_login">Digi-ID Login</string>
     <string name="did_auth_title">Digi-ID Authentication</string>
     <string name="did_auth_subtitle">Authenticate to log in to %1$s</string>
+    <string name="hub_sign_title">Sign Hub Post</string>
+    <string name="hub_sign_subtitle">Authenticate to sign this post with your identity</string>
     <string name="did_requesting">is requesting Digi-ID authentication</string>
     <string name="did_warning">Warning</string>
     <string name="did_insecure">Insecure Connection</string>
