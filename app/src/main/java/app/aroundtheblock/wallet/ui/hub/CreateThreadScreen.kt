@@ -15,6 +15,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import app.aroundtheblock.wallet.R
+import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
+import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 
 private const val TITLE_MAX = 120
@@ -35,7 +40,16 @@ fun CreateThreadScreen(
     var selectedChannel by remember { mutableStateOf(FORUM_CHANNELS.first()) }
     var channelDropdownExpanded by remember { mutableStateOf(false) }
 
-    val canPost = title.isNotBlank() && content.isNotBlank() && !isCreating
+    // A thread is signed with the wallet's identity, so it takes the same gate as a spend.
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    val context = LocalContext.current
+    val signScope = rememberCoroutineScope()
+    val signTitle = stringResource(R.string.hub_sign_title)
+    val signSubtitle = stringResource(R.string.hub_sign_subtitle)
+    var signing by remember { mutableStateOf(false) }
+
+    val canPost = title.isNotBlank() && content.isNotBlank() && !isCreating && !signing
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -54,14 +68,23 @@ fun CreateThreadScreen(
                 actions = {
                     TextButton(
                         onClick = {
-                            viewModel.createThread(
-                                title = title.trim(),
-                                content = content.trim(),
-                                channelId = selectedChannel.id,
-                                onSuccess = { thread ->
-                                    onThreadCreated(thread.id)
+                            signing = true
+                            signScope.launch {
+                                try {
+                                    if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, signTitle, signSubtitle)) {
+                                        viewModel.createThread(
+                                            title = title.trim(),
+                                            content = content.trim(),
+                                            channelId = selectedChannel.id,
+                                            onSuccess = { thread ->
+                                                onThreadCreated(thread.id)
+                                            }
+                                        )
+                                    }
+                                } finally {
+                                    signing = false
                                 }
-                            )
+                            }
                         },
                         enabled = canPost
                     ) {

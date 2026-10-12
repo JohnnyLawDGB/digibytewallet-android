@@ -471,6 +471,8 @@
     <string name="did_login">Connexion Digi-ID</string>
     <string name="did_auth_title">Authentification Digi-ID</string>
     <string name="did_auth_subtitle">Authentifiez-vous pour vous connecter à %1$s</string>
+    <string name="hub_sign_title">Signer la publication du Hub</string>
+    <string name="hub_sign_subtitle">Authentifiez-vous pour signer cette publication avec votre identité</string>
     <string name="did_requesting">demande une authentification Digi-ID</string>
     <string name="did_warning">Avertissement</string>
     <string name="did_insecure">Connexion non sécurisée</string>

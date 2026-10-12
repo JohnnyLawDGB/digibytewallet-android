@@ -481,6 +481,8 @@
     <string name="did_login">Digi-ID लॉगिन</string>
     <string name="did_auth_title">Digi-ID प्रमाणीकरण</string>
     <string name="did_auth_subtitle">%1$s में लॉग इन करने के लिए प्रमाणित करें</string>
+    <string name="hub_sign_title">हब पोस्ट पर हस्ताक्षर करें</string>
+    <string name="hub_sign_subtitle">अपनी पहचान से इस पोस्ट पर हस्ताक्षर करने के लिए प्रमाणीकरण करें</string>
     <string name="did_requesting">Digi-ID प्रमाणीकरण का अनुरोध कर रहा है</string>
     <string name="did_warning">चेतावनी</string>
     <string name="did_insecure">असुरक्षित कनेक्शन</string>

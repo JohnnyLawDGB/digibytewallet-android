@@ -9,8 +9,9 @@ import org.junit.Test
  * Source-level WIRING gate, not a behaviour test: it proves each value-moving / identity
  * screen references the shared gate, and that no screen still performs the "no biometric →
  * proceed" branch on its own. The behaviour of the gate itself is covered by
- * [SpendAuthPolicyTest]; this exists because the seven sites were found ungated one at a
- * time, and a new site (or a refactor of an old one) that quietly drops the gate compiles.
+ * [SpendAuthPolicyTest]; this exists because the sites were found ungated one at a time (the
+ * three Hub posting screens last, BB-2026-10-10-superisme #1), and a new site (or a refactor of an old one)
+ * that quietly drops the gate compiles.
  *
  * It reads code, not text: a reference in a comment or a literal is no reference. And it reads
  * what the gate's answer decides — on each screen the answer is, by itself, the condition the
@@ -28,6 +29,9 @@ class SpendGateWiringTest {
         "digiid/DigiIdConfirmScreen.kt" to listOf("viewModel.authenticate"),            // Digi-ID approve
         "recovery/RecoverFundsScreen.kt" to listOf("vm.sweep", "vm.sweepForeign"),      // native / external / foreign sweep
         "hub/ProfileView.kt" to listOf("viewModel.quickLogin"),                         // Hub quick-login (identity signing)
+        "hub/ChatView.kt" to listOf("viewModel.sendMessage"),                           // Hub chat message (identity signing)
+        "hub/CreateThreadScreen.kt" to listOf("viewModel.createThread"),                // Hub forum thread (identity signing)
+        "hub/ThreadDetailScreen.kt" to listOf("viewModel.replyToThread"),               // Hub forum reply (identity signing)
         "settings/NodePairConfirmScreen.kt" to listOf("viewModel.pairFromUri"),         // own-node pairing
     )
 

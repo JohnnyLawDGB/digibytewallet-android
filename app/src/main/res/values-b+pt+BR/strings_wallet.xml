@@ -484,6 +484,8 @@
     <string name="did_login">Login Digi-ID</string>
     <string name="did_auth_title">Autenticação Digi-ID</string>
     <string name="did_auth_subtitle">Autentique-se para entrar em %1$s</string>
+    <string name="hub_sign_title">Assinar publicação do Hub</string>
+    <string name="hub_sign_subtitle">Autentique-se para assinar esta publicação com sua identidade</string>
     <string name="did_requesting">está solicitando autenticação Digi-ID</string>
     <string name="did_warning">Aviso</string>
     <string name="did_insecure">Conexão insegura</string>

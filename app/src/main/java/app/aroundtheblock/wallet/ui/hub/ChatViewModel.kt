@@ -3,7 +3,6 @@ package app.aroundtheblock.wallet.ui.hub
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.db.dao.CachedMessageDao
 import app.aroundtheblock.wallet.core.db.entity.CachedMessageEntity
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
@@ -26,11 +25,12 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     private val digiScopeClient: DigiScopeClient,
     private val hubWebSocket: HubWebSocket,
-    private val cachedMessageDao: CachedMessageDao
+    private val cachedMessageDao: CachedMessageDao,
+    private val hubIdentity: HubIdentity,
 ) : ViewModel() {
 
     // ── Current user's address (for identifying own messages) ──────────────
-    val myAddress: String = NativeBridge.getReceiveAddress(0, 0) ?: ""
+    val myAddress: String = hubIdentity.address()
 
     // ── Channels ──────────────────────────────────────────────────────────
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
@@ -85,10 +85,12 @@ class ChatViewModel @Inject constructor(
         }
         observeWebSocketEvents()
         loadHistory(channelId = 1)
-        // Poll for login state — reconnects WebSocket after login or disconnect
+        // Poll for login state — reconnects WebSocket after login or disconnect. Each wait is the
+        // socket's own: it grows while the server keeps refusing the socket, and starts over once
+        // a connection has held (HubWebSocket.reconnectDelayMs).
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(5000)
+                kotlinx.coroutines.delay(hubWebSocket.reconnectDelayMs().coerceAtLeast(HubWebSocket.RECONNECT_FIRST_MS))
                 if (digiScopeClient.isLoggedIn() &&
                     hubWebSocket.connectionState.value == ConnectionState.DISCONNECTED) {
                     hubWebSocket.connect()
@@ -217,17 +219,21 @@ class ChatViewModel @Inject constructor(
 
     // ── Send message ──────────────────────────────────────────────────────
 
+    /**
+     * Sends [content] to the selected channel, signed with the wallet's identity. The text signed
+     * and the text sent are one [ChatSignPayload]: the message exactly as sent, bound to the
+     * channel it is sent to. The screen calls this only once the spend gate has passed.
+     */
     fun sendMessage(content: String) {
-        if (content.isBlank()) return
+        val post = ChatSignPayload.chatMessage(selectedChannel.value, content) ?: return
         _sendError.value = null
-        val channelId = selectedChannel.value
-        // Sign content — returns null when native stub not available
+        // Sign the post — returns null when native stub not available
         val signature = try {
-            NativeBridge.signMessage(content, 1) ?: ""
+            hubIdentity.sign(post.signedText) ?: ""
         } catch (e: Exception) {
             ""
         }
-        hubWebSocket.sendMessage(channelId, content.trim(), signature)
+        hubWebSocket.sendMessage(post.destination, post.content, signature)
     }
 
     fun sendTypingIndicator() {

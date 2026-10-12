@@ -481,6 +481,8 @@
     <string name="did_login">Digi-ID girişi</string>
     <string name="did_auth_title">Digi-ID kimlik doğrulama</string>
     <string name="did_auth_subtitle">%1$s hesabına giriş için kimliğinizi doğrulayın</string>
+    <string name="hub_sign_title">Hub Gönderisini İmzala</string>
+    <string name="hub_sign_subtitle">Bu gönderiyi kimliğinizle imzalamak için kimlik doğrulaması yapın</string>
     <string name="did_requesting">Digi-ID kimlik doğrulaması istiyor</string>
     <string name="did_warning">Uyarı</string>
     <string name="did_insecure">Güvenli olmayan bağlantı</string>

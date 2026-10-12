@@ -478,6 +478,8 @@
     <string name="did_login">Digi-ID ログイン</string>
     <string name="did_auth_title">Digi-ID 認証</string>
     <string name="did_auth_subtitle">%1$s にログインするには認証してください</string>
+    <string name="hub_sign_title">Hub の投稿に署名</string>
+    <string name="hub_sign_subtitle">あなたの ID でこの投稿に署名するには認証してください</string>
     <string name="did_requesting">が Digi-ID 認証を要求しています</string>
     <string name="did_warning">警告</string>
     <string name="did_insecure">安全でない接続</string>

@@ -478,6 +478,8 @@
     <string name="did_login">Digi-ID 登录</string>
     <string name="did_auth_title">Digi-ID 认证</string>
     <string name="did_auth_subtitle">请验证身份以登录 %1$s</string>
+    <string name="hub_sign_title">签署 Hub 帖子</string>
+    <string name="hub_sign_subtitle">请验证身份，以使用您的身份签署此帖子</string>
     <string name="did_requesting">正在请求 Digi-ID 认证</string>
     <string name="did_warning">警告</string>
     <string name="did_insecure">连接不安全</string>
