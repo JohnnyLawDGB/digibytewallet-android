@@ -54,6 +54,80 @@ static size_t write_varint(uint8_t *buf, uint64_t val) {
     return 1;
 }
 
+/* ---- The message's bytes, as the app sends them ----
+ *
+ * A message is signed over the bytes the app sends for it: the standard UTF-8 of the Java string,
+ * which is what OkHttp and okio write. GetStringUTFChars gives JNI's modified UTF-8 instead, which
+ * writes a character outside the Basic Multilingual Plane (an emoji) as two 3-byte halves and U+0000
+ * as two bytes, so a signature over it would not be over the bytes sent. The bytes are read here from
+ * the string's UTF-16 code units; a surrogate without its partner is written '?', as Java's and
+ * okio's encoders write it. Returns a buffer the caller frees, holding *outLen bytes, or NULL.
+ */
+static uint8_t *message_utf8(JNIEnv *env, jstring message, size_t *outLen)
+{
+    jsize n = (*env)->GetStringLength(env, message);
+    if (n < 0) return NULL;
+    const jchar *units = (*env)->GetStringChars(env, message, NULL);
+    if (!units) return NULL;
+    /* A unit takes at most 3 bytes; a surrogate pair (two units) takes 4. */
+    uint8_t *out = malloc((size_t)n * 3 + 1);
+    if (!out) {
+        (*env)->ReleaseStringChars(env, message, units);
+        return NULL;
+    }
+    size_t len = 0;
+    for (jsize i = 0; i < n; i++) {
+        uint32_t c = units[i];
+        if (c < 0x80) {
+            out[len++] = (uint8_t)c;
+        } else if (c < 0x800) {
+            out[len++] = (uint8_t)(0xC0 | (c >> 6));
+            out[len++] = (uint8_t)(0x80 | (c & 0x3F));
+        } else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && units[i + 1] >= 0xDC00 && units[i + 1] <= 0xDFFF) {
+            uint32_t cp = 0x10000 + ((c - 0xD800) << 10) + ((uint32_t)units[i + 1] - 0xDC00);
+            i++;
+            out[len++] = (uint8_t)(0xF0 | (cp >> 18));
+            out[len++] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
+            out[len++] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+            out[len++] = (uint8_t)(0x80 | (cp & 0x3F));
+        } else if (c >= 0xD800 && c <= 0xDFFF) {
+            out[len++] = '?';
+        } else {
+            out[len++] = (uint8_t)(0xE0 | (c >> 12));
+            out[len++] = (uint8_t)(0x80 | ((c >> 6) & 0x3F));
+            out[len++] = (uint8_t)(0x80 | (c & 0x3F));
+        }
+    }
+    (*env)->ReleaseStringChars(env, message, units);
+    *outLen = len;
+    return out;
+}
+
+#ifdef SIGN_MESSAGE_BYTES_UNFIXED
+/* Comparison arm of identity_sign_bytes_kat only: the message read as JNI's modified UTF-8, as before. */
+static const char *read_message(JNIEnv *env, jstring message, size_t *outLen)
+{
+    const char *chars = (*env)->GetStringUTFChars(env, message, NULL);
+    if (chars) *outLen = strlen(chars);
+    return chars;
+}
+static void release_message(JNIEnv *env, jstring message, const char *chars)
+{
+    (*env)->ReleaseStringUTFChars(env, message, chars);
+}
+#else
+/* The message's bytes as sent (message_utf8); release with release_message. */
+static const char *read_message(JNIEnv *env, jstring message, size_t *outLen)
+{
+    return (const char *)message_utf8(env, message, outLen);
+}
+static void release_message(JNIEnv *env, jstring message, const char *chars)
+{
+    (void)env; (void)message;
+    free((void *)chars);
+}
+#endif
+
 /* ---- Shared signing core ----
  *
  * Signs msgChars with an ALREADY-DERIVED key using the Bitcoin-style
@@ -152,9 +226,9 @@ NativeBridge_signMessage(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    const char *msgChars = (*env)->GetStringUTFChars(env, message, NULL);
+    size_t msgLen = 0;
+    const char *msgChars = read_message(env, message, &msgLen);
     if (!msgChars) return NULL;
-    size_t msgLen = strlen(msgChars);
 
     /* Derive BIP32 key: external chain (0), index 0 — first receive address.
      * This gives a deterministic address for Digi-ID across sessions. */
@@ -162,12 +236,12 @@ NativeBridge_signMessage(JNIEnv *env, jobject thiz,
     memset(&key, 0, sizeof(key));
     if (!seed_derive_key(&key, 0, 0)) {
         LOGW("signMessage: failed to derive key — session locked");
-        (*env)->ReleaseStringUTFChars(env, message, msgChars);
+        release_message(env, message, msgChars);
         return NULL;
     }
 
     jstring out = sign_with_key(env, &key, msgChars, msgLen, addressFormat, "signMessage");
-    (*env)->ReleaseStringUTFChars(env, message, msgChars);
+    release_message(env, message, msgChars);
     return out;
 }
 
@@ -208,15 +282,15 @@ NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    const char *msgChars = (*env)->GetStringUTFChars(env, message, NULL);
+    size_t msgLen = 0;
+    const char *msgChars = read_message(env, message, &msgLen);
     if (!msgChars) {
         BRKeyClean(&key);
         return NULL;
     }
-    size_t msgLen = strlen(msgChars);
 
     jstring out = sign_with_key(env, &key, msgChars, msgLen, /*addressFormat=*/0,
                                 "signIdentityMessage");
-    (*env)->ReleaseStringUTFChars(env, message, msgChars);
+    release_message(env, message, msgChars);
     return out;
 }
