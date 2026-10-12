@@ -28,6 +28,7 @@ import app.aroundtheblock.wallet.BuildConfig
 import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
+import app.aroundtheblock.wallet.ui.util.openExternalUrl
 
 @Composable
 fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = hiltViewModel()) {
@@ -198,17 +199,7 @@ fun SettingsScreen(navController: NavController, viewModel: SettingsViewModel = 
                     iconTint = Color(0xFFFF6D00),
                     title = stringResource(R.string.set_report_bug),
                     subtitle = stringResource(R.string.set_report_bug_sub),
-                    onClick = {
-                        val url = buildBugReportUrl(context, syncFrontier.stage.name)
-                        runCatching {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(url)
-                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
+                    onClick = { openExternalUrl(context, buildBugReportUrl(context, syncFrontier.stage.name)) }
                 )
             }
         }

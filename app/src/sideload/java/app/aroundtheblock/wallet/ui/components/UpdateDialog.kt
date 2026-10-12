@@ -1,7 +1,5 @@
 package app.aroundtheblock.wallet.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import app.aroundtheblock.wallet.core.AppUpdate
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
+import app.aroundtheblock.wallet.ui.util.openExternalUrl
 import androidx.compose.ui.graphics.Color
 
 @Composable
@@ -87,12 +86,11 @@ fun UpdateDialog(
                 // Download button
                 Button(
                     onClick = {
-                        // UpdateChecker only lets this repository's release links through. A
-                        // device with nothing to open the link must not take the wallet down.
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
-                        }.onFailure {
-                            app.aroundtheblock.wallet.ui.util.openExternalUrl(context, update.htmlUrl)
+                        // UpdateChecker only lets this repository's release links through, and
+                        // the helper opens them (a device with nothing to open the link does not
+                        // take the wallet down). If the helper refuses it, the release page is next.
+                        if (!openExternalUrl(context, update.downloadUrl)) {
+                            openExternalUrl(context, update.htmlUrl)
                         }
                         onDismiss()
                     },
@@ -107,7 +105,7 @@ fun UpdateDialog(
 
                 // Release notes link
                 TextButton(
-                    onClick = { app.aroundtheblock.wallet.ui.util.openExternalUrl(context, update.htmlUrl) },
+                    onClick = { openExternalUrl(context, update.htmlUrl) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("View Full Release Notes", color = DigiByteAccent)
