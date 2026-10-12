@@ -42,7 +42,7 @@ class QuickLoginChallengePolicyTest {
             "digiid://api-digiscope.me/api/auth/digiid/callback?x=$NONCE",
             "digiid://apidigiscope.me/api/auth/digiid/callback?x=$NONCE",
             "digiid://api.digiscope.me./api/auth/digiid/callback?x=$NONCE",
-            "digiid://api.digiscope.mе/api/auth/digiid/callback?x=$NONCE", // a Cyrillic 'е'
+            "digiid://api.digiscope.m\u0435/api/auth/digiid/callback?x=$NONCE", // the last letter is Cyrillic (U+0435)
             "digiid://api.digiscope.me%2eother.example/api/auth/digiid/callback?x=$NONCE",
         )
         assertTrue("accepted: $accepted", accepted.isEmpty())

@@ -39,7 +39,7 @@ class ChatSignPayload private constructor(
         private const val FORM = "DigiScope Hub signed post v1"
 
         /** A line break in any spelling, and runs of them: a title is sent on one line. */
-        private val LINE_BREAKS = Regex("[\r\n  \u0085]+")
+        private val LINE_BREAKS = Regex("[\r\n\u2028\u2029\u0085]+")
 
         /** A chat message to [channelId], or null when [typed] holds nothing to send. */
         fun chatMessage(channelId: Int, typed: String): ChatSignPayload? {
@@ -70,6 +70,6 @@ class ChatSignPayload private constructor(
             (listOf(FORM) + names).joinToString("\n") + "\n\n" + content
 
         /** [typed] without the blank characters at its ends: Kotlin's whitespace, and the byte-order mark ECMAScript also trims. */
-        private fun sendable(typed: String): String = typed.trim { it.isWhitespace() || it == '﻿' }
+        private fun sendable(typed: String): String = typed.trim { it.isWhitespace() || it == '\uFEFF' }
     }
 }

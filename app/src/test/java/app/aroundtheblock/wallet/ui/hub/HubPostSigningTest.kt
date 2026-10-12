@@ -104,7 +104,7 @@ class HubPostSigningTest {
     @Test fun `nothing is signed for a post with nothing to send`() {
         chat().sendMessage(" \n ")
         forum().createThread(" ", "body", 6) { }
-        forum().replyToThread(42, "　") { }
+        forum().replyToThread(42, "\u3000") { }
 
         assertEquals(emptyList<String>(), signed)
         verify(exactly = 0) { socket.sendMessage(any(), any(), any()) }

@@ -20,9 +20,9 @@ class ChatSignPayloadTest {
 
     /** ECMAScript's String.prototype.trim set (WhiteSpace + LineTerminator): what the Hub trims off a post. */
     private val hubTrims = listOf(
-        '\u0009', '\u000A', '\u000B', '\u000C', '\u000D', ' ', ' ', ' ',
-        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
-        ' ', ' ', ' ', ' ', '　', '﻿',
+        '\u0009', '\u000A', '\u000B', '\u000C', '\u000D', '\u0020', '\u00A0', '\u1680',
+        '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006', '\u2007', '\u2008', '\u2009', '\u200A',
+        '\u2028', '\u2029', '\u202F', '\u205F', '\u3000', '\uFEFF',
     )
 
     @Test fun `a chat message is signed as the text sent, bound to its channel`() {
@@ -50,14 +50,14 @@ class ChatSignPayloadTest {
     @Test fun `the text signed ends with exactly the text sent`() {
         val typed = listOf(
             "  leading spaces", "trailing spaces  ", "\ttabs\t", "\n\nnew lines\n", "\r\nwindows lines\r\n",
-            "inner  spaces and\n\nlines stay", "emoji 😀 inside", " no-break ", "　ideographic　",
-            "﻿byte order mark", "line separator ",
+            "inner  spaces and\n\nlines stay", "emoji \uD83D\uDE00 inside", "\u00A0no-break\u00A0", "\u3000ideographic\u3000",
+            "\uFEFFbyte order mark", "line separator\u2028",
         )
         for (text in typed) {
             for (post in listOf(ChatSignPayload.chatMessage(1, text)!!, ChatSignPayload.forumReply(9, text)!!,
                     ChatSignPayload.forumThread(6, "t", text)!!)) {
                 assertTrue("'$text': the signed text does not end with what is sent", post.signedText.endsWith("\n\n" + post.content))
-                assertEquals("'$text'", text.trim { it.isWhitespace() || it == '﻿' }, post.content)
+                assertEquals("'$text'", text.trim { it.isWhitespace() || it == '\uFEFF' }, post.content)
             }
         }
     }
@@ -98,7 +98,7 @@ class ChatSignPayloadTest {
         val other = ChatSignPayload.forumThread(6, "a\nb", "c")!!
         assertEquals("a b", other.title)
         assertNotEquals(one.signedText, other.signedText)
-        for (breaker in listOf("\n", "\r", "\r\n", " ", " ", "\u0085")) {
+        for (breaker in listOf("\n", "\r", "\r\n", "\u2028", "\u2029", "\u0085")) {
             val post = ChatSignPayload.forumThread(6, "first${breaker}second", "body")!!
             assertEquals("first second", post.title)
             assertEquals("$header\nkind: forum-thread\nchannel: 6\ntitle: first second\n\nbody", post.signedText)
@@ -118,7 +118,7 @@ class ChatSignPayloadTest {
     @Test fun `a post with nothing to send is not signed`() {
         assertNull(ChatSignPayload.chatMessage(1, ""))
         assertNull(ChatSignPayload.chatMessage(1, " \n\t "))
-        assertNull(ChatSignPayload.chatMessage(1, "﻿　"))
+        assertNull(ChatSignPayload.chatMessage(1, "\uFEFF\u3000"))
         assertNull(ChatSignPayload.forumReply(1, "  "))
         assertNull(ChatSignPayload.forumThread(6, " ", "body"))
         assertNull(ChatSignPayload.forumThread(6, "title", "\n"))
