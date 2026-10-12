@@ -7,7 +7,11 @@ import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfRecoveryPolicy
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
+import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.service.cfRestoreResetReason
+import app.aroundtheblock.wallet.service.compactFilterBirthHeight
+import app.aroundtheblock.wallet.service.floorHintStep
 import app.aroundtheblock.wallet.ui.KotlinSourceGate
 import io.mockk.every
 import io.mockk.mockk
@@ -90,6 +94,39 @@ class StaleDataWiperWalletResetTest {
         assertEquals(BootGuard.RestoreRecovery.Sync, BootGuard.recoverFromCrashedRestoreIfNeeded(h.context))
 
         h.assertWalletReset("the crashed-restore recovery")
+    }
+
+    // ── What the next starts scan ────────────────────────────────────────────
+
+    /**
+     * The cleanup drops the scan ledger before the wallet is loaded, as the upgrade rebuild does,
+     * so like the rebuild it leaves the scan floor to be carried down to the wallet's anchor at the
+     * next sync start. A synced wallet has no persisted floor (it is removed once the wallet syncs):
+     * without that step the first start after the cleanup scans from the anchor, but a start that
+     * dies after the first saved-blocks write and before the first ledger write is followed by one
+     * that resumes 100 blocks under the saved tip, and what lies below is never scanned. Before this
+     * change the ledger survived the cleanup and the restore preflight's reset pinned the floor.
+     * The starts are SyncService's own decisions, in its order: [cfRestoreResetReason],
+     * [floorHintStep], [compactFilterBirthHeight].
+     */
+    @Test
+    fun `after the cleanup the next starts scan from the wallet's floor, not from near the saved tip`() {
+        val h = Harness()
+        h.syncState()
+        h.prefs.store("dgb_boot_guard")["pending_boots"] = BootGuard.THRESHOLD_BLOBS
+
+        BootGuard.beginBoot(h.context)
+
+        val anchor = 21_500_000L
+        val first = h.syncStart(anchor, savedTip = 0L)
+        assertTrue("the first start after the cleanup scans from $first, above the wallet's floor $anchor",
+            first <= anchor)
+        // Headers come in and the saved window is written near the tip; the start dies before its
+        // first ledger write.
+        h.savedWindow()
+        val resumed = h.syncStart(anchor, savedTip = 24_000_000L)
+        assertTrue("the start after that scans from $resumed, above the wallet's floor $anchor",
+            resumed <= anchor)
     }
 
     // ── How it writes ────────────────────────────────────────────────────────
@@ -249,6 +286,53 @@ class StaleDataWiperWalletResetTest {
             assertNotNull("test setup: no abandoned band recorded", CfAbandonmentStore.band(context))
             prefs.clearsCommitted.clear()
             prefs.clearsApplied.clear()
+        }
+
+        /** A saved-blocks window, as a start that has not synced yet writes one. */
+        fun savedWindow() = blocks.writeBytes(byteArrayOf(10, 11, 12))
+
+        /**
+         * One sync start as SyncService decides it from what is on disk: the restore preflight, whose
+         * reset drops the stored scan state and pins the floor at the wallet's anchor; the rebuild's
+         * floor step; then the height the compact-filter scan starts from, which this returns.
+         */
+        fun syncStart(anchor: Long, savedTip: Long): Long {
+            val settings = prefs.store("dgb_settings")
+            val sync = prefs.store("dgb_sync_data")
+            var synced = sync["has_synced"] == true
+            var tip = savedTip
+            val reset = cfRestoreResetReason(
+                CfScanLedgerStore.load(context),
+                SavedBlockStore.load(context),
+                synced,
+                sync["transactions_checkpointed"] == true || sync.containsKey("saved_transactions"),
+            )
+            if (reset != null) {
+                sync.remove("has_synced")
+                SavedBlockStore.delete(context)
+                FilterHeaderStore.delete(context)
+                CfScanLedgerStore.delete(context)
+                CfAbandonmentStore.clear(context)
+                if (anchor > 0L) settings["cf_birth_height"] = anchor else settings.remove("cf_birth_height")
+                synced = false
+                tip = 0L
+            }
+            val step = floorHintStep(
+                walletLoaded = true,
+                anchor = anchor,
+                persistedBirth = settings["cf_birth_height"] as Long?,
+                floorHint = HistoryRebuildOnUpgrade.floorHint(context),
+                floorPending = HistoryRebuildOnUpgrade.floorPending(context),
+            )
+            step.setBirth?.let { settings["cf_birth_height"] = it }
+            if (step.removeBirth) settings.remove("cf_birth_height")
+            if (step.clearHint) HistoryRebuildOnUpgrade.clearFloorHint(context)
+            return compactFilterBirthHeight(
+                wasSynced = synced,
+                savedTip = tip,
+                walletBirth = anchor,
+                persistedBirth = settings["cf_birth_height"] as Long?,
+            )
         }
 
         fun assertWalletReset(by: String) {
