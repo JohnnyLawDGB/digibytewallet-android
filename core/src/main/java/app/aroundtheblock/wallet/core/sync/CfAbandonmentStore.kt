@@ -320,11 +320,10 @@ object CfAbandonmentStore {
      * left to surface or recover. commit() (synchronous), NOT apply(): the rescan
      * caller kills the process immediately afterwards to force a clean reload, and an
      * async apply() would be dropped, resurrecting the banner for a band that no
-     * longer exists.
+     * longer exists. Returns whether the write landed.
      */
-    fun clear(ctx: Context) {
+    fun clear(ctx: Context): Boolean =
         prefs(ctx).edit().clear().commit()
-    }
 
     /**
      * [clear] for EVERY network's band, not only the selected one, for a full wallet reset: a

@@ -157,24 +157,16 @@ class RecoverFundsViewModel @Inject constructor(
      */
     private var lastFindings: List<RecoveryScanService.ProfileResult> = emptyList()
 
-
-    /** The findings the last sweep ran against, kept so the asset move can reuse them without
-     *  re-scanning. Cleared by [reset] with everything else. */
-    private var sweptFindings: List<RecoveryScanService.ProfileResult> = emptyList()
-
-    /** True when the last sweep used an entered phrase rather than this wallet's own seed —
-     *  which decides where [moveHeldAssets] gets its signing seed from. */
-    private var sweptForeign: Boolean = false
-
-    // Transient: the entered foreign phrase, held between classifyForeign and
-    // sweepForeign so the sweep re-derives the same seed. Cleared after sweep /
-    // on reset. (A JVM String can't be zeroed — same accepted limit as restore.)
-    private var pendingForeignMnemonic: String? = null
     /**
-     * NFKD UTF-8 bytes of the passphrase for the phrase being restored, or null. Never persisted,
-     * and zeroed on every reset path — this used to be a String that lived for the whole screen
-     * and could not be wiped.
+     * The phrase entered for a wallet that is not this one, and the NFKD UTF-8 bytes of its
+     * passphrase (null when none was given). The sweep derives the scanned seed again, so they are
+     * held from a scan whose findings offer a sweep until [sweepForeign] takes them — and for
+     * nothing else. A scan that ends any other way lets them go, as do a mode switch ([reset]) and
+     * the screen going away ([onCleared]); the passphrase bytes are zeroed whenever they are let
+     * go. Never persisted, so process death leaves nothing. A JVM String cannot be zeroed — the
+     * limit restore accepts too.
      */
+    private var pendingForeignMnemonic: String? = null
     private var pendingForeignPassphrase: ByteArray? = null
 
     /**
@@ -199,17 +191,30 @@ class RecoverFundsViewModel @Inject constructor(
      *  credential is confirmed. Cleared by the answer and by [reset]. */
     private var credentialRetry: (() -> Unit)? = null
 
-    /** Return to Idle, cancel any in-flight scan/sweep, and drop any held foreign phrase (mode switch / leaving). */
+    /** Return to Idle, cancel any in-flight scan/sweep, and drop any held foreign phrase (mode switch). */
     fun reset() {
         activeJob?.cancel()
         credentialRetry = null
+        dropForeignPhrase()
+        _passphraseVerdict.value = null
+        _state.value = UiState.Idle
+    }
+
+    /**
+     * The screen is gone — Back, leaving, or the lock clearing the back stack — and with it every
+     * step that could use a held phrase. The scope's work is already cancelled by now; a step that
+     * was running lets go of its own copy as it stops.
+     */
+    override fun onCleared() {
+        dropForeignPhrase()
+        super.onCleared()
+    }
+
+    /** Lets go of a held foreign phrase: the reference dropped, the passphrase bytes zeroed. */
+    private fun dropForeignPhrase() {
         pendingForeignMnemonic = null
         pendingForeignPassphrase?.fill(0)
         pendingForeignPassphrase = null
-        _passphraseVerdict.value = null
-        sweptFindings = emptyList()
-        sweptForeign = false
-        _state.value = UiState.Idle
     }
 
     /**
@@ -321,6 +326,15 @@ class RecoverFundsViewModel @Inject constructor(
         )
     }
 
+    /**
+     * The two native calls an entered phrase goes through: whether it is a valid phrase, and the
+     * seed it gives with its passphrase. Held here for the reason [destinationResolver] is: unit
+     * tests run without the native library and stand in for them.
+     */
+    internal var phraseIsValid: (String) -> Boolean = { NativeBridge.isValidMnemonic(it) }
+    internal var seedFromPhrase: (ByteArray, ByteArray?) -> ByteArray? =
+        { phrase, passphrase -> NativeBridge.mnemonicToSeed(phrase, passphrase) }
+
     fun sweep(destination: SweepDestination) = sweepOwn(destination, afterCredential = false)
 
     private fun sweepOwn(destination: SweepDestination, afterCredential: Boolean) {
@@ -347,8 +361,6 @@ class RecoverFundsViewModel @Inject constructor(
                         val outcome = withContext(Dispatchers.IO) {
                             runRecovery(seed, findings, res.address, destIsSelf, isForeign = false)
                         }
-                        sweptFindings = findings
-                        sweptForeign = false
                         _state.value = UiState.Done(
                             outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar,
                         )
@@ -578,23 +590,31 @@ class RecoverFundsViewModel @Inject constructor(
     }
 
 
-    /** Scan a DIFFERENT wallet's phrase (not this wallet's stored seed). */
+    /**
+     * Scan a DIFFERENT wallet's phrase (not this wallet's stored seed).
+     *
+     * The phrase and its passphrase are held afterwards only when the findings offer a sweep, the
+     * one step that uses them again; any other outcome lets them go here.
+     */
     fun classifyForeign(mnemonic: String, passphrase: String? = null) {
+        // Whatever an earlier scan held is not this scan's.
+        dropForeignPhrase()
         val phrase = mnemonic.trim().split(Regex("\\s+")).joinToString(" ") { it.lowercase() }
-        if (!NativeBridge.isValidMnemonic(phrase)) {
+        if (!phraseIsValid(phrase)) {
             _state.value = UiState.Error("That doesn't look like a valid recovery phrase.")
             return
         }
-        pendingForeignMnemonic = phrase
-        pendingForeignPassphrase?.fill(0)
-        pendingForeignPassphrase = app.aroundtheblock.wallet.core.Bip39Passphrase.prepare(passphrase)
+        val preparedPassphrase = app.aroundtheblock.wallet.core.Bip39Passphrase.prepare(passphrase)
         _state.value = UiState.Classifying
         activeJob = viewModelScope.launch {
-            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
-                _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
-            }
+            var seed: ByteArray? = null
+            var heldForSweep = false
             try {
-                when (val s = withContext(Dispatchers.IO) { scanService.scanFromSeed(seed) }) {
+                val derived = deriveForeignSeed(phrase, preparedPassphrase) ?: run {
+                    _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
+                }
+                seed = derived
+                when (val s = withContext(Dispatchers.IO) { scanService.scanFromSeed(derived) }) {
                     is RecoveryScanService.State.Done -> {
                         val set = sweepSet(s, isForeign = true)      // includes native
                         val total = set.sumOf { it.totalSat }
@@ -606,22 +626,33 @@ class RecoverFundsViewModel @Inject constructor(
                         // agreed to scan this phrase, once. The screen says what an empty passphrase
                         // result can mean instead.
                         _passphraseVerdict.value =
-                            if (pendingForeignPassphrase == null) null
+                            if (preparedPassphrase == null) null
                             else app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
                                 withPassphraseSat = total,
                                 withoutPassphraseSat = null,
                                 incomplete = s.unreachableProfileLabels.isNotEmpty(),
                             )
 
-                        _state.value = if (s.allBackendUnreachable) {
-                            UiState.Error("Couldn't reach the lookup service — try again")
-                        } else UiState.Findings(
-                            findings = set, totalSat = total,
-                            backendUnreachable = false, isForeign = true,
-                            partialFailurePaths = s.unreachableProfileLabels,
-                            assetOutpointCount = countAssetOutpoints(set),
-                            digiDollar = s.digiDollar,
-                        )
+                        if (s.allBackendUnreachable) {
+                            _state.value = UiState.Error("Couldn't reach the lookup service — try again")
+                        } else {
+                            // The sweep derives this seed again, so the phrase is held for it — and
+                            // only when these findings offer one. A scan that finished before this
+                            // one (a second press of Scan) gives up what it held.
+                            if (app.aroundtheblock.wallet.core.recovery.RecoverableValue.exists(set.size, s.digiDollar)) {
+                                dropForeignPhrase()
+                                pendingForeignMnemonic = phrase
+                                pendingForeignPassphrase = preparedPassphrase
+                                heldForSweep = true
+                            }
+                            _state.value = UiState.Findings(
+                                findings = set, totalSat = total,
+                                backendUnreachable = false, isForeign = true,
+                                partialFailurePaths = s.unreachableProfileLabels,
+                                assetOutpointCount = countAssetOutpoints(set),
+                                digiDollar = s.digiDollar,
+                            )
+                        }
                     }
                     is RecoveryScanService.State.Failed -> _state.value = UiState.Error(s.reason)
                     else -> _state.value = UiState.Error("Scan did not complete")
@@ -631,14 +662,33 @@ class RecoverFundsViewModel @Inject constructor(
             } catch (t: Throwable) {
                 _state.value = UiState.Error(t.message ?: "Scan failed")
             } finally {
-                seed.fill(0)
+                seed?.fill(0)
+                if (!heldForSweep) preparedPassphrase?.fill(0)
             }
         }
     }
 
-    /** Sweep the previously-scanned foreign phrase into THIS wallet (native). */
+    /** The seed of an entered phrase. The phrase's bytes exist only for this call. */
+    private fun deriveForeignSeed(phrase: String, passphrase: ByteArray?): ByteArray? {
+        val bytes = phrase.toByteArray()
+        return try {
+            seedFromPhrase(bytes, passphrase)
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
+    /**
+     * Sweep the previously-scanned foreign phrase into THIS wallet (native).
+     *
+     * This is the step the phrase was held for, and it takes it: from the moment the sweep starts
+     * nothing else holds it, the passphrase bytes are zeroed once the seed is derived, and the seed
+     * when the sweep ends, however it ends. A sweep that cannot start lets the phrase go too — a
+     * new attempt starts from a new scan.
+     */
     fun sweepForeign() {
-        val phrase = pendingForeignMnemonic ?: run {
+        if (pendingForeignMnemonic == null) {
+            dropForeignPhrase()
             _state.value = UiState.Error("Enter a recovery phrase and scan first."); return
         }
         val shown = _state.value as? UiState.Findings
@@ -647,32 +697,39 @@ class RecoverFundsViewModel @Inject constructor(
         // never lands in [findings]; gating on findings alone meant a wallet holding only dollars
         // could not be recovered at all — there was nothing to press.
         if (!app.aroundtheblock.wallet.core.recovery.RecoverableValue.exists(findings.size, shown?.digiDollar)) {
+            dropForeignPhrase()
             _state.value = UiState.Error("Nothing to recover"); return
         }
-        val dest = SweepDestination.Native.resolve(
-            nativeSupplier = { NativeBridge.getReceiveAddress(0, format = 2) },
-            validator = { NativeBridge.isValidAddress(it) },
-        )
+        val dest = destinationResolver(SweepDestination.Native)
         if (dest !is DestResolution.Ok) {
+            dropForeignPhrase()
             _state.value = UiState.Error("Could not get a destination address"); return
         }
         _state.value = UiState.Sweeping
         activeJob = viewModelScope.launch {
-            val seed = NativeBridge.mnemonicToSeed(phrase.toByteArray(), pendingForeignPassphrase) ?: run {
-                _state.value = UiState.Error("Could not derive keys from that phrase.")
-                pendingForeignMnemonic = null
-        pendingForeignPassphrase?.fill(0)
-        pendingForeignPassphrase = null
-        _passphraseVerdict.value = null
-                return@launch
+            // Taken here rather than before the launch: a sweep cancelled before it starts leaves
+            // the phrase where reset() and onCleared() let it go.
+            val phrase = pendingForeignMnemonic ?: run {
+                _state.value = UiState.Error("Enter a recovery phrase and scan first."); return@launch
             }
+            val passphrase = pendingForeignPassphrase
+            pendingForeignMnemonic = null
+            pendingForeignPassphrase = null
+            var seed: ByteArray? = null
             try {
+                val derived = try {
+                    deriveForeignSeed(phrase, passphrase)
+                } finally {
+                    passphrase?.fill(0)
+                }
+                if (derived == null) {
+                    _state.value = UiState.Error("Could not derive keys from that phrase."); return@launch
+                }
+                seed = derived
                 val outcome = withContext(Dispatchers.IO) {
                     // foreign: all-funded incl. native; lands in THIS wallet -> receive
-                    runRecovery(seed, findings, dest.address, destIsSelf = true, isForeign = true)
+                    runRecovery(derived, findings, dest.address, destIsSelf = true, isForeign = true)
                 }
-                sweptFindings = findings
-                sweptForeign = true
                 _state.value = UiState.Done(
                     outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar,
                 )
@@ -681,13 +738,7 @@ class RecoverFundsViewModel @Inject constructor(
             } catch (t: Throwable) {
                 _state.value = UiState.Error(t.message ?: "Sweep failed")
             } finally {
-                seed.fill(0)
-                // The phrase is deliberately NOT cleared here any more. Moving the DigiAssets the
-                // sweep held back needs the same seed, and it is a separate user-confirmed step
-                // that happens after this returns. It is cleared by reset() when the user leaves
-                // the screen, and by moveHeldAssets() as soon as the move finishes — so the
-                // window is "this screen, until the assets are dealt with" rather than the whole
-                // session. A JVM String still cannot be zeroed; that limit is unchanged.
+                seed?.fill(0)
                 _passphraseVerdict.value = null
             }
         }
