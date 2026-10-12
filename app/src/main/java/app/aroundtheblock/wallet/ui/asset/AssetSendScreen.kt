@@ -19,18 +19,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aroundtheblock.wallet.core.model.AssetQuantity
 import app.aroundtheblock.wallet.core.model.OwnedAsset
+import app.aroundtheblock.wallet.ui.components.SensitiveDialog
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
@@ -557,14 +556,8 @@ private fun AssetSendConfirmDialog(
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
-    val view = LocalView.current
-    // Security: filter touches when obscured (tapjacking protection)
-    DisposableEffect(view) {
-        view.filterTouchesWhenObscured = true
-        onDispose { view.filterTouchesWhenObscured = false }
-    }
-
-    Dialog(onDismissRequest = onCancel) {
+    // Its own window: obscured touches refused, no screenshots or snapshots, overlays hidden.
+    SensitiveDialog(onDismissRequest = onCancel) {
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(

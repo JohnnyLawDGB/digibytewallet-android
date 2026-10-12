@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Normal (install-time) permission: lets SensitiveDialog hide other apps' overlay windows
+         while a send confirmation or the PIN dialog is shown (Android 12 and later). -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 

@@ -6,6 +6,8 @@ import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
+import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 
 /**
  * Reference-counted owner of FLAG_SECURE. One instance per process; the count is the number of
@@ -38,21 +40,45 @@ class SecureWindowFlag(private val apply: (secure: Boolean) -> Unit) {
     }
 }
 
-/** RED STUB: today there is no holder per window — only the Activity window's. */
-class SecureWindowFlags<K : Any>(@Suppress("unused") private val apply: (window: K, secure: Boolean) -> Unit) {
-    fun acquire(window: K) {}
-    fun release(window: K) {}
-    fun holders(window: K): Int = 0
-    fun isSecure(window: K): Boolean = false
+/**
+ * One [SecureWindowFlag] per window. A dialog is a window of its own: FLAG_SECURE on the Activity
+ * window does not cover it, and its holders must neither clear nor be cleared by the Activity
+ * window's. Windows are held weakly, so a dismissed dialog's window is not kept alive here.
+ */
+class SecureWindowFlags<K : Any>(private val apply: (window: K, secure: Boolean) -> Unit) {
+    private val flags = WeakHashMap<K, SecureWindowFlag>()
+
+    @Synchronized
+    fun acquire(window: K) {
+        val ref = WeakReference(window)
+        flags.getOrPut(window) { SecureWindowFlag { secure -> ref.get()?.let { apply(it, secure) } } }.acquire()
+    }
+
+    @Synchronized
+    fun release(window: K) {
+        flags[window]?.release()
+    }
+
+    @Synchronized
+    fun holders(window: K): Int = flags[window]?.holders ?: 0
+
+    fun isSecure(window: K): Boolean = holders(window) > 0
+}
+
+/** Sets or clears FLAG_SECURE on a window: both holders below go through here. */
+private fun setSecure(window: Window, secure: Boolean) {
+    if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
 }
 
 private var currentWindow: Window? = null
 
 private val processFlag = SecureWindowFlag { secure ->
     val window = currentWindow ?: return@SecureWindowFlag
-    if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-    else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    setSecure(window, secure)
 }
+
+private val windowFlags = SecureWindowFlags<Window>(::setSecure)
 
 /**
  * Holds FLAG_SECURE on the Activity window for as long as the calling composable is on screen.
@@ -70,5 +96,18 @@ fun SecureWindow() {
         (context as? Activity)?.window?.let { currentWindow = it }
         processFlag.acquire()
         onDispose { processFlag.release() }
+    }
+}
+
+/**
+ * Holds FLAG_SECURE on [window] — a dialog's own window — for as long as the calling composable is
+ * on screen, counted per window like the Activity's (see [SecureWindowFlags]). [SensitiveDialog]
+ * takes it here for its window; nothing else sets the flag on a dialog.
+ */
+@Composable
+fun SecureWindow(window: Window) {
+    DisposableEffect(window) {
+        windowFlags.acquire(window)
+        onDispose { windowFlags.release(window) }
     }
 }
