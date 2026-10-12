@@ -170,6 +170,10 @@
     <string name="txd_not_found">Transaction not found</string>
     <string name="txd_sent">Sent</string>
     <string name="txd_received">Received</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Minted</string>
+    <string name="tx_dd_self_transfer">Moved to yourself</string>
+    <string name="tx_dd_redeemed">Redeemed</string>
     <string name="txd_transaction_id">Transaction ID</string>
     <string name="txd_block_height">Block Height</string>
     <string name="txd_pending">Pending</string>
@@ -290,7 +294,7 @@
     <string name="send_to">To</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">This DigiDollar send could not be prepared. Check that you hold enough DGB to pay its network fee.</string>
     <!-- WARNING: the last thing shown before an irreversible transfer. "Irreversible" must stay
          blunt — no softening to "cannot usually be undone". -->
     <string name="send_verify_warning">Verify the full address above carefully.\nTransactions are irreversible.</string>

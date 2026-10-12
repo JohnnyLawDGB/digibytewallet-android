@@ -129,6 +129,10 @@
     <string name="txd_not_found">Hindi nakita ang transaksyon</string>
     <string name="txd_sent">Naipadala</string>
     <string name="txd_received">Natanggap</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Na-mint</string>
+    <string name="tx_dd_self_transfer">Inilipat sa sarili mo</string>
+    <string name="tx_dd_redeemed">Na-redeem</string>
     <string name="txd_transaction_id">Transaction ID</string>
     <string name="txd_block_height">Block Height</string>
     <string name="txd_pending">Nakabinbin</string>
@@ -225,7 +229,7 @@
     <string name="send_to">Para kay</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Hindi maihanda ang pagpapadalang ito ng DigiDollar. Tiyaking may sapat kang DGB para bayaran ang bayad sa network.</string>
     <string name="send_verify_warning">Suriing mabuti ang buong address sa itaas.\nHindi na maibabalik ang mga transaksyon.</string>
     <string name="send_send">Ipadala</string>
     <string name="send_success">Tagumpay</string>

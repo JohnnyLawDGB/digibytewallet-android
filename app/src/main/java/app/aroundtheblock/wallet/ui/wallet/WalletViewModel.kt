@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import app.aroundtheblock.wallet.core.model.DigiDollarEvent
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.PriceData
 import app.aroundtheblock.wallet.core.PriceProvider
@@ -88,6 +89,12 @@ class WalletViewModel @Inject constructor(
     // units moved and the asset's name, worded by the UI. Absent → the row shows DGB.
     private val _txTypedAmounts = MutableStateFlow<Map<String, TypedAmount>>(emptyMap())
     val txTypedAmounts: StateFlow<Map<String, TypedAmount>> = _txTypedAmounts.asStateFlow()
+
+    /** Per DigiDollar txid, what the transaction did (minted, sent, received, moved to the wallet itself,
+     *  redeemed), read natively from the transaction itself: a DigiDollar row is labelled from this,
+     *  never from the sign of the transaction's DGB movement. */
+    private val _txDdEvents = MutableStateFlow<Map<String, DigiDollarEvent>>(emptyMap())
+    val txDdEvents: StateFlow<Map<String, DigiDollarEvent>> = _txDdEvents.asStateFlow()
 
     /** Pull-to-refresh spinner state for the wallet screen. */
     private val _isRefreshing = MutableStateFlow(false)
@@ -940,22 +947,30 @@ class WalletViewModel @Inject constructor(
                     }
                     if (kinds != _txKinds.value) _txKinds.value = kinds
 
-                    // Type-appropriate amount per non-DGB row: DigiDollar → its $ value
-                    // (native per-tx accessor), DigiAsset → the token count moved
-                    // (ownership-bucketed, direction-aware). Owned-script set built
-                    // once here, not per row. Absent entry → row shows plain DGB.
+                    // What each DigiDollar transaction did, read from the transaction itself (its
+                    // DigiDollar type, and whose outputs it pays and spends): a mint, a transfer sent or
+                    // received, a transfer to the wallet itself, a redemption. The DGB movement is not
+                    // read for it — a mint sends DGB away while dollars arrive, a redemption brings DGB
+                    // back while dollars are burned.
+                    val ddEvents = sorted.mapNotNull { tx ->
+                        if (kinds[tx.txid] != TxKind.DIGIDOLLAR) return@mapNotNull null
+                        DigiDollarEvent.of(runCatching { NativeBridge.digiDollarEvent(tx.txid) }.getOrNull())
+                            ?.takeIf { it.kind != DigiDollarEvent.Kind.NONE }
+                            ?.let { tx.txid to it }
+                    }.toMap()
+                    if (ddEvents != _txDdEvents.value) _txDdEvents.value = ddEvents
+
+                    // Type-appropriate amount per non-DGB row: DigiDollar → the dollars its event
+                    // moved, DigiAsset → the token count moved (ownership-bucketed, direction-aware).
+                    // Owned-script set built once here, not per row. Absent entry → row shows plain DGB.
                     val ownedScripts = runCatching { assetManager.buildOwnedScriptHexes() }
                         .getOrDefault(emptySet())
                     val typedAmounts = sorted.mapNotNull { tx ->
-                        val isSend = tx.amount < 0
                         val display: TypedAmount? = when (kinds[tx.txid]) {
-                            TxKind.DIGIDOLLAR -> {
-                                val cents = runCatching { NativeBridge.digiDollarTxAmount(tx.txid, isSend) }
-                                    .getOrDefault(0L)
-                                if (cents > 0L) TypedAmount.Formatted(formatDigiDollar(cents)) else null
-                            }
+                            TxKind.DIGIDOLLAR -> ddEvents[tx.txid]?.cents?.takeIf { it > 0L }
+                                ?.let { TypedAmount.Formatted(formatDigiDollar(it)) }
                             TxKind.DIGIASSET -> runCatching {
-                                assetManager.assetAmountForTx(tx.txid, isSend, ownedScripts)
+                                assetManager.assetAmountForTx(tx.txid, tx.amount < 0, ownedScripts)
                             }.getOrNull()?.let { TypedAmount.Asset(it) }
                             else -> null
                         }

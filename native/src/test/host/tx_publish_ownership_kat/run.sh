@@ -31,7 +31,7 @@
 # ==== SOURCE GATE [4/4] =====================================================
 # The arms above only MIRROR the JNI functions' shape: jni_transaction.c includes Android headers
 # and cannot be compiled on the host. So this runner also scans the real publishTransaction,
-# publishTransactionStem and sendDigiDollar and fails unless each of them hands its transaction
+# publishTransactionStem and sendApprovedDigiDollar and fails unless each of them hands its transaction
 # to ONE shared file-static helper before it publishes the original, makes no copy and no
 # registration of its own, and does not name the original again once the publisher has it; and
 # unless that helper looks the hash up first and returns when the wallet already holds it, copies
@@ -372,7 +372,7 @@ gate_entry_point() {
 
 gate_entry_point '_publishTransaction[[:space:]]*[(]'     publishTransaction
 gate_entry_point '_publishTransactionStem[[:space:]]*[(]' publishTransactionStem
-gate_entry_point '_sendDigiDollar[[:space:]]*[(]'         sendDigiDollar
+gate_entry_point '_sendApprovedDigiDollar[[:space:]]*[(]' sendApprovedDigiDollar
 
 # The one helper: (a)-(c), plus lookup-first and the conditional release of an untaken copy.
 if [ -n "$HELPER_SEEN" ]; then
@@ -421,7 +421,7 @@ if [ "$gate_fail" -ne 0 ]; then
     echo "SOURCE GATE FAILED"
     exit 1
 fi
-echo "SOURCE GATE confirmed: publishTransaction, publishTransactionStem and sendDigiDollar each hand their original to $HELPER_SEEN (lookup-first copy, registered, released only if untaken) and then publish the original and leave it alone."
+echo "SOURCE GATE confirmed: publishTransaction, publishTransactionStem and sendApprovedDigiDollar each hand their original to $HELPER_SEEN (lookup-first copy, registered, released only if untaken) and then publish the original and leave it alone."
 
 echo
 echo "tx_publish_ownership_kat: RED-BEFORE-GREEN OK (4 assertion-red arms kept safe by the core + 1 leak-red arm, 5/5 green), source gate OK"

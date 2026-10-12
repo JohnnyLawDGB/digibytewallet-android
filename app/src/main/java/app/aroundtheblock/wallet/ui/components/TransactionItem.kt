@@ -5,6 +5,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -17,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.aroundtheblock.wallet.core.asset.AssetTxAmount
 import app.aroundtheblock.wallet.core.db.entity.TransactionEntity
+import app.aroundtheblock.wallet.core.model.DigiDollarEvent
 import app.aroundtheblock.wallet.ui.asset.assetAmountText
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
 import app.aroundtheblock.wallet.ui.theme.DigiByteRed
@@ -53,6 +55,33 @@ fun classifyTxKind(isAssetTx: Boolean, digiDollarType: Int): TxKind = when {
     digiDollarType > 0 -> TxKind.DIGIDOLLAR
     else -> TxKind.DGB
 }
+
+/** Which way a row's value moved, as the row shows it. */
+enum class RowDirection { OUT, IN, SELF }
+
+/** How a row reads: its label, and which way its value moved. */
+data class RowLook(@androidx.annotation.StringRes val label: Int, val direction: RowDirection)
+
+/**
+ * How a DigiDollar row reads, from what the transaction did — its [DigiDollarEvent], which native code
+ * reads from the transaction itself — never from the sign of its DGB movement: a mint sends DGB away as
+ * collateral while dollars arrive, a transfer to the wallet's own address moves only its fee, and a
+ * redemption brings collateral back while dollars are burned. Null when there is no event to read.
+ */
+fun digiDollarRowLook(event: DigiDollarEvent?): RowLook? = when (event?.kind) {
+    DigiDollarEvent.Kind.MINTED -> RowLook(R.string.tx_dd_minted, RowDirection.IN)
+    DigiDollarEvent.Kind.SENT -> RowLook(R.string.txd_sent, RowDirection.OUT)
+    DigiDollarEvent.Kind.RECEIVED -> RowLook(R.string.txd_received, RowDirection.IN)
+    DigiDollarEvent.Kind.SELF_TRANSFER -> RowLook(R.string.tx_dd_self_transfer, RowDirection.SELF)
+    DigiDollarEvent.Kind.REDEEMED -> RowLook(R.string.tx_dd_redeemed, RowDirection.OUT)
+    DigiDollarEvent.Kind.NONE, null -> null
+}
+
+/** How a row reads: a DigiDollar row from its event; every other row — and a DigiDollar row with no
+ *  event — from the sign of its DGB amount. */
+fun rowLook(dgbAmount: Long, kind: TxKind, ddEvent: DigiDollarEvent?): RowLook =
+    (if (kind == TxKind.DIGIDOLLAR) digiDollarRowLook(ddEvent) else null)
+        ?: if (dgbAmount < 0) RowLook(R.string.txd_sent, RowDirection.OUT) else RowLook(R.string.txd_received, RowDirection.IN)
 
 /**
  * The amount a non-DGB row shows in place of its on-chain DGB value: a DigiDollar amount as
@@ -94,17 +123,17 @@ fun TransactionItem(
     // Type amount for a non-DGB row: DigiDollar "$X.XX" / DigiAsset "N CHANG".
     // Null → show the plain DGB amount (also the fallback for DGB rows).
     typedAmount: TypedAmount? = null,
+    // What a DigiDollar transaction did (minted, sent, received, to itself, redeemed): its label and
+    // direction. Null → the row reads from the sign of its DGB amount.
+    ddEvent: DigiDollarEvent? = null,
 ) {
-    val isSend = tx.amount < 0
+    val look = rowLook(tx.amount, kind, ddEvent)
     val amountAbs = kotlin.math.abs(tx.amount)
     val dgb = amountAbs / 100_000_000.0
     val amountFormatted = NumberFormat.getInstance().apply {
         maximumFractionDigits = 8
         minimumFractionDigits = 2
     }.format(dgb)
-
-    val amountColor: Color = if (isSend) DigiByteRed else DigiByteGreen
-    val amountPrefix = if (isSend) "- " else "+ "
 
     // DigiDollar / DigiAsset rows show their type amount ("$1.00" / "20 CHANG")
     // instead of the near-zero on-chain DGB value; everything else shows DGB.
@@ -113,10 +142,29 @@ fun TransactionItem(
         is TypedAmount.Asset -> assetAmountText(typedAmount.amount)
         null -> null
     }
-    val amountText = if (kind != TxKind.DGB && typedText != null) {
+    val showsTyped = kind != TxKind.DGB && typedText != null
+    // The amount's sign and colour follow what it measures: the row's direction for a typed amount,
+    // the DGB movement for a DGB amount (a redemption's DGB comes back while its dollars leave).
+    val amountDirection = if (showsTyped) look.direction else if (tx.amount < 0) RowDirection.OUT else RowDirection.IN
+    val amountColor: Color = when (amountDirection) {
+        RowDirection.OUT -> DigiByteRed
+        RowDirection.IN -> DigiByteGreen
+        RowDirection.SELF -> MaterialTheme.colorScheme.onSurface
+    }
+    val amountPrefix = when (amountDirection) {
+        RowDirection.OUT -> "- "
+        RowDirection.IN -> "+ "
+        RowDirection.SELF -> ""
+    }
+    val amountText = if (showsTyped) {
         amountPrefix + typedText
     } else {
         "$amountPrefix$amountFormatted DGB"
+    }
+    val iconTint: Color = when (look.direction) {
+        RowDirection.OUT -> DigiByteRed
+        RowDirection.IN -> DigiByteGreen
+        RowDirection.SELF -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     // DateDisplay, not a pattern string: a pattern pins American day/month order even when the
@@ -124,7 +172,7 @@ fun TransactionItem(
     val dateStr = app.aroundtheblock.wallet.core.DateDisplay.date(tx.timestamp * 1000L)
 
     // Show first 8 + ellipsis + last 8 chars of the counterpart address
-    val address = if (isSend) tx.toAddress else tx.fromAddress
+    val address = if (look.direction == RowDirection.IN) tx.fromAddress else tx.toAddress
     val addressShort = if (address.length > 20) {
         "${address.take(8)}…${address.takeLast(8)}"
     } else address
@@ -145,16 +193,18 @@ fun TransactionItem(
             // Direction icon
             Surface(
                 shape = CircleShape,
-                color = if (isSend) DigiByteRed.copy(alpha = 0.15f)
-                        else DigiByteGreen.copy(alpha = 0.15f),
+                color = iconTint.copy(alpha = 0.15f),
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Icon(
-                        imageVector = if (isSend) Icons.Default.ArrowUpward
-                                      else Icons.Default.ArrowDownward,
-                        contentDescription = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received),
-                        tint = if (isSend) DigiByteRed else DigiByteGreen,
+                        imageVector = when (look.direction) {
+                            RowDirection.OUT -> Icons.Default.ArrowUpward
+                            RowDirection.IN -> Icons.Default.ArrowDownward
+                            RowDirection.SELF -> Icons.Default.SwapHoriz
+                        },
+                        contentDescription = stringResource(look.label),
+                        tint = iconTint,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -168,7 +218,7 @@ fun TransactionItem(
                     // The label is measured first and keeps its word whole; the chip takes
                     // what is left of the column and is cut with an ellipsis, never wrapped.
                     Text(
-                        text = stringResource(if (isSend) R.string.txd_sent else R.string.txd_received),
+                        text = stringResource(look.label),
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,

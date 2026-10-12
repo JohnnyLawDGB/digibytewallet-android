@@ -129,6 +129,10 @@
     <string name="txd_not_found">Транзакция не найдена</string>
     <string name="txd_sent">Отправлено</string>
     <string name="txd_received">Получено</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Выпущено</string>
+    <string name="tx_dd_self_transfer">Перемещено себе</string>
+    <string name="tx_dd_redeemed">Погашено</string>
     <string name="txd_transaction_id">ID транзакции</string>
     <string name="txd_block_height">Высота блока</string>
     <string name="txd_pending">В ожидании</string>
@@ -225,7 +229,7 @@
     <string name="send_to">Кому</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Не удалось подготовить эту отправку DigiDollar. Убедитесь, что у вас достаточно DGB для оплаты комиссии сети.</string>
     <string name="send_verify_warning">Внимательно проверьте полный адрес выше.\nТранзакции необратимы.</string>
     <string name="send_send">Отправить</string>
     <string name="send_success">Успешно</string>

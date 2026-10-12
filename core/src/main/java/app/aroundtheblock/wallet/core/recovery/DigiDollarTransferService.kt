@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
  * ## Ordering
  *
  * Runs alongside the DigiAsset move and BEFORE the sweep, for the same reason: the DGB paying the
- * consensus fee is exactly what the sweep would otherwise take. Its inputs are then excluded from
+ * network fee (0.1 DGB at least, a wallet policy) is exactly what the sweep would otherwise take. Its inputs are then excluded from
  * the sweep by the same [RecoverySequence] mechanism the asset moves use.
  *
  * The native touchpoints are injected so the orchestration — what is reported when the lookup
@@ -30,8 +30,9 @@ import kotlinx.coroutines.withContext
 class DigiDollarTransferService(
     private val outgoingTxStore: OutgoingTxStore? = null,
     private val walletTxPersister: WalletTxPersister? = null,
-    /** Sign the planned transfer with the foreign seed. Signed hex, or null on refusal. */
-    private val sign: (DigiDollarTransferPlan.Plan, ByteArray, DerivationProfile) -> String? =
+    /** Sign the planned transfer with the foreign seed, each fee input with the derivation it was found
+     *  under (keyed by its outpoint, `txid:vout`). Signed hex, or null on refusal. */
+    private val sign: (DigiDollarTransferPlan.Plan, ByteArray, Map<String, DerivationProfile>) -> String? =
         ::nativeSign,
     private val broadcast: (ByteArray) -> String? = { Broadcaster.broadcast(it) },
     private val log: (level: Char, message: String) -> Unit = { level, message ->
@@ -73,7 +74,7 @@ class DigiDollarTransferService(
          * in DGB, which only the structured form allows.
          */
         val refusalReason: DigiDollarTransferPlan.Reason? = null,
-        /** Satoshis short of the consensus fee, when [refusalReason] is BELOW_FEE_FLOOR. */
+        /** Satoshis short of the network fee, when [refusalReason] is BELOW_FEE_FLOOR. */
         val shortfallSat: Long = 0L,
         /** Cents the broadcast transfer carried — the figure handed to the signer. Zero unless
          *  [txid] is set. */
@@ -88,15 +89,16 @@ class DigiDollarTransferService(
     /**
      * @param seedBytes    the FOREIGN seed. Caller owns it and must zero it.
      * @param scan         what [DigiDollarScan] found on that seed.
-     * @param feeInputs    plain DGB to pay the consensus fee with.
-     * @param feeProfile   the derivation the fee inputs came from — they are NOT at m/86'.
+     * @param feeInputs    plain DGB to pay the network fee with.
+     * @param feeProfiles  the derivation each fee input came from, in the order of [feeInputs] — they
+     *                     are NOT at m/86', and coins of different profiles may pay one fee together.
      * @param recipientKeyHex this wallet's taproot output key, from getDigiDollarReceiveAddress.
      */
     suspend fun move(
         seedBytes: ByteArray,
         scan: DigiDollarScan.Result,
         feeInputs: List<ForeignAssetTransferPlan.Spend>,
-        feeProfile: DerivationProfile,
+        feeProfiles: List<DerivationProfile>,
         recipientKeyHex: String,
         changeAddress: String,
         feePerKb: Long = DEFAULT_FEE_PER_KB,
@@ -133,7 +135,15 @@ class DigiDollarTransferService(
             "${plan.feeInputs.size} fee input(s), fee ${plan.feeSat} sats, " +
             "change ${plan.changeAmountSat} -> ${plan.changeAddress}")
 
-        val signed = sign(plan, seedBytes, feeProfile)
+        // Each fee input's own derivation, by outpoint: the plan carries the inputs it was given, and
+        // an input with no derivation of its own is never signed with another's.
+        if (feeProfiles.size != feeInputs.size) {
+            log('w', "DigiDollar move refused — ${feeInputs.size} fee input(s) but ${feeProfiles.size} derivation(s)")
+            return@withContext Result(scan.cents, null, "fee inputs and their derivations disagree",
+                unlocatableCents = scan.unlocatableCents, reachable = scan.reachable)
+        }
+        val profileOf = feeInputs.indices.associate { "${feeInputs[it].txid}:${feeInputs[it].vout}" to feeProfiles[it] }
+        val signed = sign(plan, seedBytes, profileOf)
         if (signed == null) {
             log('w', "native refused to sign the DigiDollar transfer")
             return@withContext Result(scan.cents, null,
@@ -217,28 +227,38 @@ class DigiDollarTransferService(
         private fun nativeSign(
             plan: DigiDollarTransferPlan.Plan,
             seedBytes: ByteArray,
-            feeProfile: DerivationProfile,
-        ): String? = NativeBridge.buildAndSignForeignDigiDollarTransfer(
-            seedBytes = seedBytes,
-            ddTxidsHex = plan.ddInputs.map { it.txid }.toTypedArray(),
-            ddVouts = plan.ddInputs.map { it.vout }.toIntArray(),
-            ddScriptsHex = plan.ddInputs.map { it.scriptPubKeyHex }.toTypedArray(),
-            ddChains = plan.ddInputs.map { it.address.chain }.toIntArray(),
-            ddIndices = plan.ddInputs.map { it.address.index }.toIntArray(),
-            // The fee inputs are NOT at m/86' — they sit wherever the scan found the plain DGB.
-            feeHmacKey = feeProfile.hmacKey,
-            feePrefixPath = feeProfile.prefixPath,
-            feeTxidsHex = plan.feeInputs.map { it.txid }.toTypedArray(),
-            feeVouts = plan.feeInputs.map { it.vout }.toIntArray(),
-            feeAmounts = plan.feeInputs.map { it.amountSat }.toLongArray(),
-            feeScriptsHex = plan.feeInputs.map { it.scriptPubKeyHex }.toTypedArray(),
-            feeChains = plan.feeInputs.map { it.chain }.toIntArray(),
-            feeIndices = plan.feeInputs.map { it.index }.toIntArray(),
-            recipientKeyHex = plan.recipientKeyHex,
-            changeAddress = plan.changeAddress.takeIf { plan.changeAmountSat > 0 },
-            changeAmount = plan.changeAmountSat,
-            cents = plan.cents,
-        )
+            profileOf: Map<String, DerivationProfile>,
+        ): String? {
+            // The fee inputs are NOT at m/86' — each sits wherever the scan found it, and carries the
+            // derivation it was found under; one without its own derivation is never signed.
+            val derivations = feeDerivations(plan, profileOf) ?: return null
+            return NativeBridge.buildAndSignForeignDigiDollarTransfer(
+                seedBytes = seedBytes,
+                ddTxidsHex = plan.ddInputs.map { it.txid }.toTypedArray(),
+                ddVouts = plan.ddInputs.map { it.vout }.toIntArray(),
+                ddScriptsHex = plan.ddInputs.map { it.scriptPubKeyHex }.toTypedArray(),
+                ddChains = plan.ddInputs.map { it.address.chain }.toIntArray(),
+                ddIndices = plan.ddInputs.map { it.address.index }.toIntArray(),
+                feeHmacKeys = derivations.map { it.hmacKey }.toTypedArray(),
+                feePrefixPaths = derivations.map { it.prefixPath }.toTypedArray(),
+                feeTxidsHex = plan.feeInputs.map { it.txid }.toTypedArray(),
+                feeVouts = plan.feeInputs.map { it.vout }.toIntArray(),
+                feeAmounts = plan.feeInputs.map { it.amountSat }.toLongArray(),
+                feeScriptsHex = plan.feeInputs.map { it.scriptPubKeyHex }.toTypedArray(),
+                feeChains = plan.feeInputs.map { it.chain }.toIntArray(),
+                feeIndices = plan.feeInputs.map { it.index }.toIntArray(),
+                recipientKeyHex = plan.recipientKeyHex,
+                changeAddress = plan.changeAddress.takeIf { plan.changeAmountSat > 0 },
+                changeAmount = plan.changeAmountSat,
+                cents = plan.cents,
+            )
+        }
+
+        /** The derivation of each of [plan]'s fee inputs, in its order — or null when one has none. */
+        internal fun feeDerivations(
+            plan: DigiDollarTransferPlan.Plan,
+            profileOf: Map<String, DerivationProfile>,
+        ): List<DerivationProfile>? = plan.feeInputs.map { profileOf["${it.txid}:${it.vout}"] ?: return null }
 
         private fun hexToBytes(hex: String): ByteArray {
             require(hex.length % 2 == 0) { "odd-length hex" }

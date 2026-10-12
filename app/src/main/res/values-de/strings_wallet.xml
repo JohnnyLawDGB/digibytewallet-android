@@ -137,6 +137,10 @@
     <string name="txd_not_found">Transaktion nicht gefunden</string>
     <string name="txd_sent">Gesendet</string>
     <string name="txd_received">Empfangen</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Geprägt</string>
+    <string name="tx_dd_self_transfer">An Sie selbst</string>
+    <string name="tx_dd_redeemed">Eingelöst</string>
     <string name="txd_transaction_id">Transaktions-ID</string>
     <string name="txd_block_height">Blockhöhe</string>
     <string name="txd_pending">Ausstehend</string>
@@ -233,7 +237,7 @@
     <string name="send_to">An</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Diese DigiDollar-Sendung konnte nicht vorbereitet werden. Prüfen Sie, ob Sie genug DGB für die Netzwerkgebühr haben.</string>
     <string name="send_verify_warning">Prüfen Sie die vollständige Adresse oben sorgfältig.\nTransaktionen sind unwiderruflich.</string>
     <string name="send_send">Senden</string>
     <string name="send_success">Erfolg</string>

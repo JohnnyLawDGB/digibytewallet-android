@@ -64,6 +64,8 @@ fun WalletScreen(
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
     val txKinds by viewModel.txKinds.collectAsStateWithLifecycle()
     val txTypedAmounts by viewModel.txTypedAmounts.collectAsStateWithLifecycle()
+    // What each DigiDollar transaction did: its row's label and direction.
+    val txDdEvents by viewModel.txDdEvents.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val displayCurrency by viewModel.displayCurrency.collectAsStateWithLifecycle()
@@ -362,7 +364,8 @@ fun WalletScreen(
                     onClick = { onNavigateTx(tx.txid) },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     kind = txKinds[tx.txid] ?: TxKind.DGB,
-                    typedAmount = txTypedAmounts[tx.txid]
+                    typedAmount = txTypedAmounts[tx.txid],
+                    ddEvent = txDdEvents[tx.txid]
                 )
             }
         }

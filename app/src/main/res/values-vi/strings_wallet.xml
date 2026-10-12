@@ -129,6 +129,10 @@
     <string name="txd_not_found">Không tìm thấy giao dịch</string>
     <string name="txd_sent">Đã gửi</string>
     <string name="txd_received">Đã nhận</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Đã đúc</string>
+    <string name="tx_dd_self_transfer">Chuyển cho chính bạn</string>
+    <string name="tx_dd_redeemed">Đã quy đổi</string>
     <string name="txd_transaction_id">ID giao dịch</string>
     <string name="txd_block_height">Độ cao khối</string>
     <string name="txd_pending">Đang chờ</string>
@@ -225,7 +229,7 @@
     <string name="send_to">Đến</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Không thể chuẩn bị lần gửi DigiDollar này. Hãy kiểm tra bạn có đủ DGB để trả phí mạng.</string>
     <string name="send_verify_warning">Hãy kiểm tra kỹ địa chỉ đầy đủ ở trên.\nGiao dịch không thể hoàn tác.</string>
     <string name="send_send">Gửi</string>
     <string name="send_success">Thành công</string>

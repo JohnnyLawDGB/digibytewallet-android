@@ -14,6 +14,8 @@
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 #include "prepared_send.h"   /* the quote and the checks of a prepared DGB send (fee_quote_kat) */
+#include "digidollar_send.h"   /* the preview and the checks of a DigiDollar send (dd_send_preview_kat) */
+#include "digidollar_event.h"  /* what a DigiDollar transaction did, for its activity row (digidollar_realtx_kat) */
 
 /* ---------- publish result callback ----------
  *
@@ -863,87 +865,176 @@ NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex) {
     return type;
 }
 
-/* digiDollarTxAmount: the wallet-relevant DigiDollar value (USD cents) moved in
- * this tx, or 0 if it isn't a DigiDollar tx / isn't known to the wallet.
- * Display-only — lets the UI show "$X" on a DigiDollar row instead of the ~0
- * on-chain DGB value. Direction-aware, bucketing BRDigiDollarOutputAmount over
- * the tx's DD-token outputs BY OWNERSHIP so it shows what actually moved, not the
- * change: a RECEIVE (isSend=0) sums the DD outputs the wallet OWNS; a SEND
- * (isSend=1) sums the DD outputs it does NOT own (the recipient's) — summing the
- * owned outputs on a send would report the DD CHANGE, not the amount sent.
- * Returns an unsigned magnitude; the UI applies +/- from the DGB direction.
- * Same BE->LE reversal + BRWalletTransactionForHash lookup as digiDollarTxType. */
-jlong JNICALL
-NativeBridge_digiDollarTxAmount(JNIEnv *env, jobject thiz, jstring txHashHex, jboolean isSend) {
-    (void)thiz;
-    if (! g_wallet || ! txHashHex) return 0;
-    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
-    if (! hashStr) return 0;
+/* ---------- digiDollarEvent: what a DigiDollar transaction did, for its activity row ----------
+ *
+ * The row says what the transaction IS -- minted, sent, received, moved to the wallet itself, redeemed
+ * -- computed in digidollar_event.h (digidollar_realtx_kat runs it on the host) from the wallet's own
+ * view of the transaction: whose outputs it pays, and whose outputs its inputs spend and how many
+ * cents of DigiDollar those held. The DGB the transaction moves is not an input: a mint sends DGB
+ * away as collateral while dollars arrive, and a redemption brings DGB back while dollars are burned.
+ * Display-only; reads the wallet, changes nothing. */
+static int _ddEventPaysWallet(void *ctx, const BRTxOutput *output)
+{
+    return output->address[0] != '\0' && BRWalletContainsAddress((BRWallet *)ctx, output->address);
+}
 
-    jlong cents = 0;
+static int _ddEventSpendsWallet(void *ctx, const BRTxInput *input, int64_t *ddCents)
+{
+    BRWallet *wallet = (BRWallet *)ctx;
+    BRTransaction *spent = BRWalletTransactionForHash(wallet, input->txHash);
+    *ddCents = -1;
+    if (! spent || input->index >= spent->outCount) return 0;
+    const BRTxOutput *output = &spent->outputs[input->index];
+    if (output->address[0] == '\0' || ! BRWalletContainsAddress(wallet, output->address)) return 0;
+    *ddCents = BRDigiDollarOutputAmount(spent, input->index);   /* -1: a DGB coin, not DigiDollar */
+    return 1;
+}
+
+/* `[kind, cents, changeCents]` for the wallet-known tx with this display (BE) txid -- kind 0 (none),
+ * 1 minted, 2 sent, 3 received, 4 to the wallet itself, 5 redeemed -- or NULL when the wallet does
+ * not hold the transaction. */
+jlongArray JNICALL
+NativeBridge_digiDollarEvent(JNIEnv *env, jobject thiz, jstring txHashHex) {
+    (void)thiz;
+    if (! g_wallet || ! txHashHex) return NULL;
+    const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
+    if (! hashStr) return NULL;
+
+    int known = 0;
+    DdEvent ev = { DD_EVENT_NONE, 0, 0 };
     if (strlen(hashStr) == 64) {
         UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
         BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
-        if (tx && BRDigiDollarTxType(tx) > 0) {
-            int64_t owned = 0, notOwned = 0;
-            for (size_t j = 0; j < tx->outCount; j++) {
-                int64_t dd = BRDigiDollarOutputAmount(tx, (uint32_t)j);
-                if (dd < 0) continue; /* not a DD-token output */
-                if (BRWalletContainsAddress(g_wallet, tx->outputs[j].address)) owned += dd;
-                else notOwned += dd;
-            }
-            cents = (jlong)(isSend ? notOwned : owned);
+        if (tx) {
+            DdEventWallet wallet = { g_wallet, _ddEventPaysWallet, _ddEventSpendsWallet, NULL };
+            ev = dd_event_of(tx, &wallet);
+            known = 1;
         }
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
-    return cents;
+    if (! known) return NULL;
+
+    jlongArray result = (*env)->NewLongArray(env, 3);
+    if (result) {
+        jlong out[3] = { (jlong)ev.kind, (jlong)ev.cents, (jlong)ev.changeCents };
+        (*env)->SetLongArrayRegion(env, result, 0, 3, out);
+    }
+    return result;
 }
 
-/* ---------- sendDigiDollar: decode TD -> build -> sign -> publish (in-memory) ---------- */
-jstring JNICALL
-NativeBridge_sendDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents) {
+/* ---------- a DigiDollar send: previewDigiDollar, sendApprovedDigiDollar ----------
+ *
+ * The fee a DigiDollar send's confirmation shows is the fee of the transfer that is signed. A transfer
+ * cannot be carried across the credential prompt as unsigned bytes (the serializer leaves out a zero
+ * input amount and DigiDollar inputs are zero-value, so the bytes do not parse back), so review builds
+ * it, reads what it pays and frees it (previewDigiDollar), and after the prompt it is built again and
+ * signed only when it is the approved send at the approved fee (sendApprovedDigiDollar). No native
+ * object outlives the prompt. Both decisions live in digidollar_send.h, which dd_send_preview_kat runs
+ * against the live core on the host; this file only decodes, builds, calls and publishes. */
+
+/* The taproot output key a DigiDollar address (TD... testnet / DD... mainnet) pays: 1, or 0 when it is
+ * not one. Runtime network -- see isValidDigiDollarAddress (a compile-time #ifdef BITCOIN_TESTNET was
+ * always true on the -DBITCOIN_TESTNET=0 mainnet build, so no mainnet DD... recipient ever decoded). */
+static int _ddRecipientKey(JNIEnv *env, jstring tdAddress, uint8_t key[32])
+{
+    const char *td = (*env)->GetStringUTFChars(env, tdAddress, NULL);
+    int decoded = td && BRDigiDollarAddressDecode(key, td, BRNetworkIsTestnet());
+    if (td) (*env)->ReleaseStringUTFChars(env, tdAddress, td);
+    return decoded;
+}
+
+/* `[fee, ddChangeCents, dgbChangeSats, inputCount]` of the transfer of `cents` to tdAddress the wallet
+ * would build now: the fee is the transfer's inputs minus its outputs. The transfer is freed before
+ * this returns; nothing is signed, kept or published. NULL when it cannot be built (not enough
+ * DigiDollar, not enough DGB for the fee, an amount outside the per-output bounds, not an address). */
+jlongArray JNICALL
+NativeBridge_previewDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents)
+{
     (void)thiz;
-    PEER_GUARD(); /* serialize g_peerManager access (v3.7.1 UAF fix); auto-releases on any return */
-    if (! g_wallet || ! g_peerManager) { LOGW("sendDigiDollar: wallet/peerManager not ready"); return NULL; }
-    if (! seed_is_valid()) { LOGW("sendDigiDollar: session locked (no seed)"); return NULL; }
+    if (! g_wallet) { LOGW("previewDigiDollar: wallet not initialized"); return NULL; }
     if (! tdAddress || cents <= 0) return NULL;
 
-    const char *td = (*env)->GetStringUTFChars(env, tdAddress, NULL);
     uint8_t key[32];
-    /* Runtime network — see isValidDigiDollarAddress note (compile-time #ifdef
-     * BITCOIN_TESTNET was always-true on the -DBITCOIN_TESTNET=0 mainnet build,
-     * so DD sends could never decode a mainnet DD… recipient). */
-    int isTestnet = BRNetworkIsTestnet();
-    int decoded = td && BRDigiDollarAddressDecode(key, td, isTestnet);
-    if (td) (*env)->ReleaseStringUTFChars(env, tdAddress, td);
-    if (! decoded) { LOGW("sendDigiDollar: bad TD address"); return NULL; }
+    if (! _ddRecipientKey(env, tdAddress, key)) { LOGW("previewDigiDollar: not a DigiDollar address"); return NULL; }
 
     BRTransaction *tx = BRWalletCreateDigiDollarTransfer(g_wallet, key, (uint64_t)cents);
-    if (! tx) { LOGW("sendDigiDollar: builder returned NULL (insufficient DD/DGB or bounds)"); return NULL; }
+    if (! tx) { LOGW("previewDigiDollar: the transfer cannot be built (DigiDollar, DGB for the fee, or bounds)"); return NULL; }
+    DdSendPreview preview;
+    int ok = dd_send_preview(g_wallet, tx, &preview);
+    BRTransactionFree(tx);   /* nothing native outlives the prompt */
+    if (! ok) { LOGW("previewDigiDollar: the transfer's fee cannot be told"); return NULL; }
 
-    int signed_ok = seed_sign_transaction(g_wallet, tx, 0);
-    if (! signed_ok || ! BRTransactionIsSigned(tx)) {
-        LOGW("sendDigiDollar: signing failed");
+    jlongArray result = (*env)->NewLongArray(env, 4);
+    if (result) {
+        jlong out[4] = { (jlong)preview.feeSats, (jlong)preview.ddChangeCents,
+                         (jlong)preview.dgbChangeSats, (jlong)preview.inputCount };
+        (*env)->SetLongArrayRegion(env, result, 0, 4, out);
+    }
+    return result;
+}
+
+/* Build the transfer of `cents` to tdAddress again, and sign and publish it only when it is the approved
+ * send: output 0 pays exactly those cents to that address, everything else is the OP_RETURN or change to
+ * this wallet, and it pays exactly approvedFeeSats -- checked before signing and again after. The wallet
+ * keeps its own copy (_registerWalletCopy) and the peer manager is handed the original. Returns the
+ * txid, or NULL when nothing was signed (the wallet changed while the prompt was up, the session is
+ * locked, or the transfer cannot be built). */
+jstring JNICALL
+NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats)
+{
+    (void)thiz;
+    PEER_GUARD(); /* serialize g_peerManager access (v3.7.1 UAF fix); auto-releases on any return */
+    if (! g_wallet || ! g_peerManager) { LOGW("sendApprovedDigiDollar: wallet/peerManager not ready"); return NULL; }
+    if (! seed_is_valid()) { LOGW("sendApprovedDigiDollar: session locked (no seed)"); return NULL; }
+    if (! tdAddress || cents <= 0 || approvedFeeSats <= 0) {
+        LOGW("sendApprovedDigiDollar: no approved amount or fee");
+        return NULL;
+    }
+
+    uint8_t key[32];
+    if (! _ddRecipientKey(env, tdAddress, key)) { LOGW("sendApprovedDigiDollar: not a DigiDollar address"); return NULL; }
+
+    BRTransaction *tx = BRWalletCreateDigiDollarTransfer(g_wallet, key, (uint64_t)cents);
+    if (! tx) { LOGW("sendApprovedDigiDollar: the transfer cannot be built"); return NULL; }
+
+    /* Before signing: the approved payment, at exactly the approved fee. */
+    DdSendVerdict verdict;
+    if ((verdict = dd_send_check(g_wallet, tx, key, (uint64_t)cents, (uint64_t)approvedFeeSats)) != DD_SEND_OK) {
+        LOGW("sendApprovedDigiDollar: not signed -- the transfer is no longer the approved send (verdict %d)", (int)verdict);
         BRTransactionFree(tx);
         return NULL;
     }
 
-    /* txid (reversed display order) before publish — BRPeerManagerPublishTx takes ownership */
+    if (! seed_sign_transaction(g_wallet, tx, 0) || ! BRTransactionIsSigned(tx)) {
+        LOGW("sendApprovedDigiDollar: signing failed");
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* After signing: what would be published is still exactly the approved send. */
+    if ((verdict = dd_send_check(g_wallet, tx, key, (uint64_t)cents, (uint64_t)approvedFeeSats)) != DD_SEND_OK) {
+        LOGE("sendApprovedDigiDollar: the signed transfer is not the approved send (verdict %d); not published", (int)verdict);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* txid (reversed display order) before publish -- BRPeerManagerPublishTx takes ownership */
     UInt256 txHash = tx->txHash;
     char txidHex[65];
     for (int i = 0; i < 32; i++) sprintf(txidHex + i * 2, "%02x", txHash.u8[31 - i]);
     txidHex[64] = '\0';
 
-    /* One owner per object — the same shape the plain-DGB paths (publishTransaction /
+    /* One owner per object -- the same shape the plain-DGB paths (publishTransaction /
      * publishTransactionStem) use: the wallet keeps its own record, the publisher is handed the
      * ORIGINAL. See _registerWalletCopy. */
     _registerWalletCopy(tx);
 
-    /* Non-NULL callback: see _publishResult — NULL makes the publish invisible to the
+    /* Non-NULL callback: see _publishResult -- NULL makes the publish invisible to the
        cancellation path and it never leaves publishedTx. */
     PublishCtx *ctx = calloc(1, sizeof(*ctx));
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
     BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* owns the original; do NOT free tx */
 
+    LOGD("sendApprovedDigiDollar: submitted txid=%s, fee %lld", txidHex, (long long)approvedFeeSats);
     return (*env)->NewStringUTF(env, txidHex);
 }

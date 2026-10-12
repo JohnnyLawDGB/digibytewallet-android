@@ -129,6 +129,10 @@
     <string name="txd_not_found">İşlem bulunamadı</string>
     <string name="txd_sent">Gönderildi</string>
     <string name="txd_received">Alındı</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Basıldı</string>
+    <string name="tx_dd_self_transfer">Kendinize aktarıldı</string>
+    <string name="tx_dd_redeemed">İtfa edildi</string>
     <string name="txd_transaction_id">İşlem kimliği</string>
     <string name="txd_block_height">Blok yüksekliği</string>
     <string name="txd_pending">Beklemede</string>
@@ -225,7 +229,7 @@
     <string name="send_to">Alıcı</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Bu DigiDollar gönderimi hazırlanamadı. Ağ ücretini ödemek için yeterli DGB\'niz olduğunu kontrol edin.</string>
     <string name="send_verify_warning">Yukarıdaki tam adresi dikkatle doğrulayın.\nİşlemler geri alınamaz.</string>
     <string name="send_send">Gönder</string>
     <string name="send_success">Başarılı</string>

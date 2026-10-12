@@ -556,7 +556,8 @@ class RecoverFundsViewModel @Inject constructor(
             seedBytes = seed,
             scan = scan,
             feeInputs = fee.inputs,
-            feeProfile = fee.profile,
+            // Each fee coin's own derivation: coins found under two profiles may pay one fee.
+            feeProfiles = fee.profiles,
             recipientKeyHex = recipient,
             changeAddress = change,
         )

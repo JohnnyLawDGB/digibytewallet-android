@@ -48,6 +48,7 @@ TYPES = {
     "IntArray": ("[I", "jintArray"),
     "LongArray": ("[J", "jlongArray"),
     "Array<String>": ("[Ljava/lang/String;", "jobjectArray"),
+    "Array<IntArray>": ("[[I", "jobjectArray"),
     "NativeCallback": (None, "jobject"),  # descriptor = CALLBACK_SIG macro
 }
 

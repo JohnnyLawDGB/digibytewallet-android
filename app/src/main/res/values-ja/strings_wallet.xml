@@ -129,6 +129,10 @@
     <string name="txd_not_found">取引が見つかりません</string>
     <string name="txd_sent">送金</string>
     <string name="txd_received">受取</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">発行</string>
+    <string name="tx_dd_self_transfer">自分宛て</string>
+    <string name="tx_dd_redeemed">償還</string>
     <string name="txd_transaction_id">取引 ID</string>
     <string name="txd_block_height">ブロック高</string>
     <string name="txd_pending">保留中</string>
@@ -225,7 +229,7 @@
     <string name="send_to">宛先</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">この DigiDollar の送金を準備できませんでした。ネットワーク手数料を支払うのに十分な DGB があるか確認してください。</string>
     <string name="send_verify_warning">上記の完全なアドレスをよく確認してください。\n取引は取り消せません。</string>
     <string name="send_send">送金</string>
     <string name="send_success">成功</string>

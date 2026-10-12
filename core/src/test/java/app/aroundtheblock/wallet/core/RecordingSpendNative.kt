@@ -66,7 +66,21 @@ open class RecordingSpendNative : SpendNative {
         return v
     }
 
-    override fun sendDigiDollar(tdAddress: String, cents: Long): String? { events += "sendDigiDollar"; return "ddtxid" }
+    /** What the DigiDollar preview reads from the transfer it builds: `[fee, ddChange, dgbChange, inputs]`, or null. */
+    var ddPreview: LongArray? = longArrayOf(10_030_000L, 0L, 0L, 2L)
+
+    /** What the approved DigiDollar send returns: its txid, or null when native code refused to sign. */
+    var ddTxid: String? = "ddtxid"
+
+    override fun previewDigiDollar(tdAddress: String, cents: Long): LongArray? {
+        events += "previewDigiDollar to=$tdAddress cents=$cents"
+        return ddPreview?.copyOf()
+    }
+
+    override fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String? {
+        events += "sendApprovedDigiDollar to=$tdAddress cents=$cents fee=$approvedFeeSats"
+        return ddTxid
+    }
 
     companion object {
         /** A native-segwit (P2WPKH) output script: OP_0, a 20-byte push. */

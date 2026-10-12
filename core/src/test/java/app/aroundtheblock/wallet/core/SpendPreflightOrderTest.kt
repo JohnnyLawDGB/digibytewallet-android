@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core
 
+import app.aroundtheblock.wallet.core.send.DigiDollarSend
+import app.aroundtheblock.wallet.core.send.DigiDollarSendState
 import android.util.Log
 import app.aroundtheblock.wallet.core.send.FeeRequest
 import app.aroundtheblock.wallet.core.send.SendFailure
@@ -46,13 +48,21 @@ class SpendPreflightOrderTest {
             events += "create"; return byteArrayOf(1)
         }
         override fun broadcast(signedTx: ByteArray): String? { events += "broadcast"; return "txid" }
-        override fun sendDigiDollar(tdAddress: String, cents: Long): String? { events += "sendDigiDollar"; return "ddtxid" }
+        override fun previewDigiDollar(tdAddress: String, cents: Long): LongArray? {
+            events += "previewDigiDollar"; return longArrayOf(10_000_000L, 0L, 0L, 2L)
+        }
+        override fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String? {
+            events += "sendApprovedDigiDollar"; return "ddtxid"
+        }
         override fun scriptPubKey(address: String): ByteArray? = RecordingSpendNative.P2WPKH
         override fun quoteTransaction(unsignedTx: ByteArray): LongArray? = longArrayOf(23_200, 208)
         override fun transactionOutputs(tx: ByteArray): Array<String>? = arrayOf("0|150000000|${RecordingSpendNative.P2WPKH_HEX}")
         override fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray? { events += "sign"; return byteArrayOf(2) }
         override fun publishResult(txid: String): Int = 0
     }
+
+    /** A DigiDollar send as review prepared it: $40.50 at a 0.1 DGB fee. */
+    private fun prepared() = PreparedDigiDollar("TDrecipient", 4_050L, 10_000_000L, 0L, 0L, 2L)
 
     private fun builder(beforeSpend: (suspend () -> Unit)? = null): TransactionBuilder {
         val utxoManager = mockk<UtxoManager>(relaxed = true)
@@ -164,10 +174,17 @@ class SpendPreflightOrderTest {
             events += "detect:end"
         }
 
-        val txid = b.sendDigiDollar("TDrecipient", 4_050L)
+        // Review builds the transfer to read its fee: detection first.
+        val review = b.prepareDigiDollar("TDrecipient", 4_050L)
+        assertEquals(listOf("detect:start", "detect:end", "previewDigiDollar"), events.toList())
+        assertTrue("review prepared nothing: $review", review is DigiDollarPrepareResult.Ready)
+        events.clear()
 
-        assertEquals(listOf("detect:start", "detect:end", "sendDigiDollar"), events.toList())
-        assertEquals("ddtxid", txid)
+        // After the prompt the transfer is built again and signed: detection again, first.
+        val state = b.sendDigiDollar((review as DigiDollarPrepareResult.Ready).send)
+
+        assertEquals(listOf("detect:start", "detect:end", "sendApprovedDigiDollar"), events.toList())
+        assertEquals(DigiDollarSendState.Sent("ddtxid"), state)
     }
 
     @Test fun `a DigiDollar send builds nothing when detection could not finish`() = runTest {
@@ -176,10 +193,15 @@ class SpendPreflightOrderTest {
             throw IOException("the pass did not finish")
         }
 
-        val txid = b.sendDigiDollar("TDrecipient", 4_050L)
+        val review = b.prepareDigiDollar("TDrecipient", 4_050L)
+        assertEquals(listOf("detect"), events.toList())
+        assertEquals(DigiDollarPrepareResult.Error(SpendPreflight.NOT_SENT), review)
+        events.clear()
+
+        val state = b.sendDigiDollar(prepared())
 
         assertEquals(listOf("detect"), events.toList())
-        assertNull(txid)
+        assertEquals(DigiDollarSendState.NotSent(DigiDollarSend.NOT_SENT), state)
     }
 
     @Test fun `a cancelled detection cancels the DigiDollar send and builds nothing`() = runTest {
@@ -188,10 +210,14 @@ class SpendPreflightOrderTest {
             throw CancellationException("the screen went away")
         }
 
-        val thrown = runCatching { b.sendDigiDollar("TDrecipient", 4_050L) }.exceptionOrNull()
-
+        val thrown = runCatching { b.prepareDigiDollar("TDrecipient", 4_050L) }.exceptionOrNull()
         assertEquals(listOf("detect"), events.toList())
         assertTrue("a cancellation must reach the caller, got $thrown", thrown is CancellationException)
+        events.clear()
+
+        val thrownAfterPrompt = runCatching { b.sendDigiDollar(prepared()) }.exceptionOrNull()
+        assertEquals(listOf("detect"), events.toList())
+        assertTrue("a cancellation must reach the caller, got $thrownAfterPrompt", thrownAfterPrompt is CancellationException)
     }
 
     // ── The production default ────────────────────────────────────────────
@@ -209,7 +235,8 @@ class SpendPreflightOrderTest {
         val b = builder()
 
         assertEquals(TxResult.Error(SpendPreflight.NOT_SENT), b.sendDgb())
-        assertNull(b.sendDigiDollar("TDrecipient", 4_050L))
+        assertEquals(DigiDollarPrepareResult.Error(SpendPreflight.NOT_SENT), b.prepareDigiDollar("TDrecipient", 4_050L))
+        assertEquals(DigiDollarSendState.NotSent(DigiDollarSend.NOT_SENT), b.sendDigiDollar(prepared()))
         assertEquals(listOf("address"), events.toList())
     }
 
