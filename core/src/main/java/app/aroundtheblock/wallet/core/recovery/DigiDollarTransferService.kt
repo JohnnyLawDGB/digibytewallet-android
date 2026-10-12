@@ -137,13 +137,12 @@ class DigiDollarTransferService(
 
         // Each fee input's own derivation, by outpoint: the plan carries the inputs it was given, and
         // an input with no derivation of its own is never signed with another's.
-        if (false) {   // STUB (red run): no check that each fee input has its own derivation
+        if (feeProfiles.size != feeInputs.size) {
             log('w', "DigiDollar move refused — ${feeInputs.size} fee input(s) but ${feeProfiles.size} derivation(s)")
             return@withContext Result(scan.cents, null, "fee inputs and their derivations disagree",
                 unlocatableCents = scan.unlocatableCents, reachable = scan.reachable)
         }
-        val one = feeProfiles.firstOrNull() ?: DerivationProfile.BUILT_INS.first()   // STUB (red run): one derivation for all
-        val profileOf = feeInputs.associate { "${it.txid}:${it.vout}" to one }
+        val profileOf = feeInputs.indices.associate { "${feeInputs[it].txid}:${feeInputs[it].vout}" to feeProfiles[it] }
         val signed = sign(plan, seedBytes, profileOf)
         if (signed == null) {
             log('w', "native refused to sign the DigiDollar transfer")

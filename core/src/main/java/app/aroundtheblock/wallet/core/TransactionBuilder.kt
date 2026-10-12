@@ -341,8 +341,6 @@ class TransactionBuilder(
     suspend fun prepareDigiDollar(tdAddress: String, cents: Long): DigiDollarPrepareResult =
         withContext(Dispatchers.IO) {
             if (cents <= 0) return@withContext DigiDollarPrepareResult.Error("Amount must be positive")
-            // STUB (red run): today's behaviour -- no transfer is built at review; the confirmation shows the 0.1 DGB floor.
-            if (cents > 0) return@withContext DigiDollarPrepareResult.Ready(PreparedDigiDollar(tdAddress, cents, 10_000_000L, 0L, 0L, 0L))
             if (!SpendPreflight.completed(beforeSpend)) {
                 return@withContext DigiDollarPrepareResult.Error(SpendPreflight.NOT_SENT)
             }
@@ -374,7 +372,7 @@ class TransactionBuilder(
             publish = { p ->
                 withContext(Dispatchers.IO) {
                     if (!SpendPreflight.completed(beforeSpend)) null
-                    else native.sendApprovedDigiDollar(p.address, p.cents, 0L)   // STUB (red run): no approved fee reaches native code
+                    else native.sendApprovedDigiDollar(p.address, p.cents, p.feeSats)
                 }
             },
             record = { txid, p ->

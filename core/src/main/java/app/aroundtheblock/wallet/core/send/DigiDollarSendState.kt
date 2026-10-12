@@ -48,7 +48,8 @@ class DigiDollarSend<P>(
         report(DigiDollarSendState.Sending)
         val txid = publish(prepared)
             ?: return DigiDollarSendState.NotSent(NOT_SENT).also(report)
-        // STUB (red run): today's behaviour -- the send is neither recorded for retry nor persisted.
+        record(txid, prepared)
+        persist()
         val outcome = if (awaitVerdict(txid) == Delivery.RELAYED) DigiDollarSendState.Sent(txid)
                       else DigiDollarSendState.NotYetRelayed(txid)
         report(outcome)

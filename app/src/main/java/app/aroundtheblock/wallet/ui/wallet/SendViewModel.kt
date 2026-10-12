@@ -425,7 +425,7 @@ class SendViewModel @Inject constructor(
                     return null
                 }
             }
-            val approved = typed   // STUB (red run): the approval carries no fee
+            val approved = typed.withFee(prepared.feeSats)
             if (!ddConfirmation.open(approved)) return null
             ddReviewed = approved to prepared
             android.util.Log.i(TAG, "DigiDollar review: ${prepared.cents} cents, fee ${prepared.feeSats} sats, " +
@@ -460,7 +460,7 @@ class SendViewModel @Inject constructor(
                     // The transfer review built for this very approval. Were they ever to differ, the
                     // confirmation would show one send while another is signed: nothing is sent.
                     val prepared = ddReviewed?.takeIf { it.first === approved }?.second
-                        ?.takeIf { it.address == approved.address && it.cents == approved.cents }
+                        ?.takeIf { it.address == approved.address && it.cents == approved.cents && it.feeSats == approved.feeSats }
                     if (prepared == null) {
                         android.util.Log.e(TAG, "DigiDollar send refused: no transfer was reviewed for the approval on screen")
                         DigiDollarSendState.NotSent(SpendPreflight.NOT_SENT)

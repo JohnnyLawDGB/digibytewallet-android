@@ -54,7 +54,7 @@ static inline int dd_fee_input_keys(BRKey *keys, const DdFeeInputPath *paths, si
 #if DIGIDOLLAR_FEE_KEYS_UNFIXED
         const DdFeeInputPath *d = &paths[0];   /* one derivation for every fee input */
 #else
-        const DdFeeInputPath *d = &paths[0];   /* STUB (red): today's behaviour -- one derivation for every fee input */
+        const DdFeeInputPath *d = &paths[i];
 #endif
         if (! d->hmacKey || d->prefixLen > DD_FEE_PATH_MAX) return 0;
         memcpy(full, d->prefix, d->prefixLen * sizeof(uint32_t));

@@ -96,11 +96,39 @@ static inline DdEvent dd_event_of(const BRTransaction *tx, const DdEventWallet *
     }
 #else
     {
-        /* STUB (red): today's behaviour -- the direction from the sign of the DGB movement. The fix follows. */
-        int isSend = w->dgbNet && w->dgbNet(w->ctx, tx) < 0;
-        (void)first;
-        ev.kind = isSend ? DD_EVENT_SENT : DD_EVENT_RECEIVED;
-        ev.cents = isSend ? other : own;
+        int spendsOwn = 0;
+        int64_t ownSpent = 0;
+
+        for (size_t i = 0; i < tx->inCount; i++) {
+            int64_t c = -1;
+            if (! w->spendsWallet(w->ctx, &tx->inputs[i], &c)) continue;
+            spendsOwn = 1;
+            if (c > 0) ownSpent += c;
+        }
+
+        switch (type) {
+        case DD_TYPE_MINT:
+            ev.kind = DD_EVENT_MINTED;
+            ev.cents = own > 0 ? own : other;
+            break;
+        case DD_TYPE_TRANSFER:
+            if (spendsOwn && other > 0) {
+                ev.kind = DD_EVENT_SENT; ev.cents = other; ev.changeCents = own;
+            } else if (spendsOwn && own > 0) {
+                /* every dollar paid back to the wallet: the payment is the first output, the rest change */
+                ev.kind = DD_EVENT_SELF_TRANSFER; ev.cents = first; ev.changeCents = own - first;
+            } else if (! spendsOwn && own > 0) {
+                ev.kind = DD_EVENT_RECEIVED; ev.cents = own;
+            }
+            break;
+        case DD_TYPE_REDEEM:
+            ev.kind = DD_EVENT_REDEEMED;
+            ev.cents = ownSpent > own ? ownSpent - own : 0;
+            ev.changeCents = own;
+            break;
+        default:
+            break;
+        }
         return ev;
     }
 #endif

@@ -84,15 +84,8 @@ object DigiDollarFeeSelection {
             }
         }
 
-        // STUB (red run): today's behaviour -- the first profile whose coins cover the fee, else the best-funded one.
-        var bestShort: List<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>> = emptyList()
-        for (profile in usable.map { it.second }.distinct()) {
-            val own = usable.filter { it.second == profile }.distinctBy { it.first.txid to it.first.vout }.sortedByDescending { it.first.amountSat }
-            val pick = ArrayList<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>>()
-            for (c in own) { pick += c; if (covers(pick.map { it.first })) return Choice(pick.map { it.first }, pick.map { it.second }) }
-            if (pick.sumOf { it.first.amountSat } > bestShort.sumOf { it.first.amountSat }) bestShort = pick
-        }
-        if (usable.isNotEmpty()) return Choice(bestShort.map { it.first }, bestShort.map { it.second })
+        // One outpoint is one input, however many times a lookup listed it — under one profile or
+        // two (the first, in scan order, is kept). Largest first; equal amounts keep scan order.
         val coins = usable
             .distinctBy { (spend, _) -> spend.txid to spend.vout }
             .sortedByDescending { (spend, _) -> spend.amountSat }

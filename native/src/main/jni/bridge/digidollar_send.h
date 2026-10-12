@@ -63,29 +63,87 @@ typedef enum {
     DD_SEND_NOT_APPROVED = 3,
 } DdSendVerdict;
 
+#if ! DIGIDOLLAR_SEND_UNFIXED
+/* 1 when output i of tx pays an address of this wallet. */
+static inline int dd_send_pays_wallet(BRWallet *wallet, const BRTransaction *tx, size_t i)
+{
+    const BRTxOutput *o = &tx->outputs[i];
+    return o->address[0] != '\0' && BRWalletContainsAddress(wallet, o->address);
+}
+
+/* 1 when output i of tx is an OP_RETURN. */
+static inline int dd_send_is_op_return(const BRTransaction *tx, size_t i)
+{
+    const BRTxOutput *o = &tx->outputs[i];
+    return o->amount == 0 && o->script && o->scriptLen > 0 && o->script[0] == 0x6a;
+}
+#endif
 
 /* What a built transfer pays and gives back: 1 with *out set, or 0 when there is no answer (the fee is
  * unknown, or does not fit a signed 64-bit value). Reads the wallet; changes nothing. */
 static inline int dd_send_preview(BRWallet *wallet, const BRTransaction *tx, DdSendPreview *out)
 {
-    /* STUB (red): today's behaviour in both arms -- the floor, whatever the transfer pays. The fix follows. */
+#if DIGIDOLLAR_SEND_UNFIXED
     if (! tx || ! out) return 0;
     (void)wallet;
-#if DIGIDOLLAR_SEND_UNFIXED
-    out->feeSats = DD_SEND_FEE_FLOOR_SATS;
-#else
-    out->feeSats = DD_SEND_FEE_FLOOR_SATS;
-#endif
-    out->ddChangeCents = 0; out->dgbChangeSats = 0; out->inputCount = 0;
+    out->feeSats = DD_SEND_FEE_FLOOR_SATS;   /* the floor, whatever the transfer pays */
+    out->ddChangeCents = 0;
+    out->dgbChangeSats = 0;
+    out->inputCount = 0;
     return 1;
+#else
+    uint64_t fee, ddChange = 0, dgbChange = 0;
+
+    if (! wallet || ! tx || ! out || tx->inCount == 0 || tx->outCount == 0) return 0;
+    fee = BRWalletFeeForTx(wallet, tx);                  /* UINT64_MAX: an input the wallet does not hold */
+    if (fee == UINT64_MAX || fee > (uint64_t)INT64_MAX) return 0;
+    for (size_t i = 1; i < tx->outCount; i++) {          /* output 0 is the payment */
+        if (! dd_send_pays_wallet(wallet, tx, i)) continue;
+        int64_t cents = BRDigiDollarOutputAmount(tx, i);
+        if (cents > 0) ddChange += (uint64_t)cents;
+        else dgbChange += tx->outputs[i].amount;
+    }
+    out->feeSats = fee;
+    out->ddChangeCents = ddChange;
+    out->dgbChangeSats = dgbChange;
+    out->inputCount = (uint64_t)tx->inCount;
+    return 1;
+#endif
 }
 
+/* Whether a rebuilt transfer may be signed -- or, once signed, handed on to be published -- as the
+ * approved send: `cents` to the taproot output key `key32`, at `approvedFee`. */
 static inline DdSendVerdict dd_send_check(BRWallet *wallet, const BRTransaction *tx, const uint8_t key32[32],
                                           uint64_t cents, uint64_t approvedFee)
 {
-    /* STUB (red): today's behaviour -- signed as built, nothing checked. The fix follows. */
+#if DIGIDOLLAR_SEND_UNFIXED
     (void)wallet; (void)tx; (void)key32; (void)cents; (void)approvedFee;
     return DD_SEND_OK;
+#else
+    uint64_t fee;
+    size_t opReturns = 0;
+    const BRTxOutput *pay;
+
+    if (! wallet || ! tx || ! key32) return DD_SEND_FEE_UNKNOWN;
+    fee = BRWalletFeeForTx(wallet, tx);
+    if (fee == UINT64_MAX) return DD_SEND_FEE_UNKNOWN;
+    if (fee != approvedFee) return DD_SEND_FEE_CHANGED;
+
+    /* A DigiDollar transfer whose output 0 is the approved payment: zero DGB, OP_1 <32-byte key>,
+     * bound by the OP_RETURN to exactly the approved cents. */
+    if (BRDigiDollarTxType(tx) != DD_TYPE_TRANSFER || tx->outCount < 2) return DD_SEND_NOT_APPROVED;
+    pay = &tx->outputs[0];
+    if (pay->amount != 0 || ! pay->script || pay->scriptLen != 34 || pay->script[0] != 0x51 ||
+        pay->script[1] != 0x20 || memcmp(pay->script + 2, key32, 32) != 0) return DD_SEND_NOT_APPROVED;
+    if (BRDigiDollarOutputAmount(tx, 0) != (int64_t)cents) return DD_SEND_NOT_APPROVED;
+
+    /* Everything else is the one OP_RETURN, or change to this wallet. */
+    for (size_t i = 1; i < tx->outCount; i++) {
+        if (dd_send_is_op_return(tx, i)) opReturns++;
+        else if (! dd_send_pays_wallet(wallet, tx, i)) return DD_SEND_NOT_APPROVED;
+    }
+    return opReturns == 1 ? DD_SEND_OK : DD_SEND_NOT_APPROVED;
+#endif
 }
 
 #endif /* DIGIDOLLAR_SEND_H */

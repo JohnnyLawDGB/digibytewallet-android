@@ -796,11 +796,10 @@ private fun DigiDollarConfirmationDialog(
                 // The fee of the transfer review built — its inputs minus its outputs — which is the fee
                 // signed: native code refuses to sign the transfer at any other. An exact number, spelled
                 // like the DGB confirmation's fee row: a dot in every language.
-                // STUB (red run): today's behaviour -- the 0.1 DGB floor, whatever the transfer pays.
-                val ddFeeDgb = java.math.BigDecimal.valueOf(app.aroundtheblock.wallet.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS, 8)
+                val ddFeeDgb = java.math.BigDecimal.valueOf(feeSats, 8)
                 ConfirmRow(
                     label = stringResource(R.string.send_network_fee_row),
-                    value = "≈ " + String.format(java.util.Locale.US, "%.8f", ddFeeDgb) + " DGB"
+                    value = String.format(java.util.Locale.US, "%.8f DGB", ddFeeDgb)
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

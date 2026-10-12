@@ -68,7 +68,7 @@ data class RowLook(@androidx.annotation.StringRes val label: Int, val direction:
  * collateral while dollars arrive, a transfer to the wallet's own address moves only its fee, and a
  * redemption brings collateral back while dollars are burned. Null when there is no event to read.
  */
-fun digiDollarRowLook(event: DigiDollarEvent?): RowLook? = if (event != null) null /* STUB (red run): today's behaviour -- the DGB sign */ else when (event?.kind) {
+fun digiDollarRowLook(event: DigiDollarEvent?): RowLook? = when (event?.kind) {
     DigiDollarEvent.Kind.MINTED -> RowLook(R.string.tx_dd_minted, RowDirection.IN)
     DigiDollarEvent.Kind.SENT -> RowLook(R.string.txd_sent, RowDirection.OUT)
     DigiDollarEvent.Kind.RECEIVED -> RowLook(R.string.txd_received, RowDirection.IN)

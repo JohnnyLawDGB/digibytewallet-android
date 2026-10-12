@@ -159,6 +159,6 @@ class OutgoingTxStore(context: Context) {
          * Pure (no Android/JNI) so the decision is unit-testable in isolation.
          */
         fun shouldApplyOutgoingOverride(record: Record?): Boolean =
-            record != null && !record.isSelfTransfer   // STUB (red run)
+            record != null && !record.isSelfTransfer && !record.isDigiDollar
     }
 }
