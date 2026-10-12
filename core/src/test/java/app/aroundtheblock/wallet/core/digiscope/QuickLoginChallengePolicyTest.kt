@@ -65,6 +65,13 @@ class QuickLoginChallengePolicyTest {
         assertTrue("accepted: $accepted", accepted.isEmpty())
     }
 
+    // The port check alone refuses the two above; this one reaches the scheme check: an insecure
+    // callback on the HTTPS port is still plain HTTP, and is refused.
+    @Test fun `an insecure challenge on the https port is refused`() {
+        val accepted = acceptedAmong("digiid://api.digiscope.me:443/api/auth/digiid/callback?x=$NONCE&u=1")
+        assertTrue("accepted: $accepted", accepted.isEmpty())
+    }
+
     @Test fun `empty or garbage input is refused`() {
         val accepted = acceptedAmong(
             null, "", " ", "null", "garbage", "digiid://", "digiid:///api/auth/digiid/callback?x=$NONCE",
