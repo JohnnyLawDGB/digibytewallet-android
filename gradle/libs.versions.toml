@@ -23,7 +23,7 @@ detekt = "1.23.7"
 # declared below WITHOUT a version on purpose.
 composeBom = "2024.12.01"
 # com.google.dagger — Gradle plugin, runtime and KSP compiler all share this.
-hilt = "2.56.2"
+hilt = "2.60.1"
 # androidx.hilt — versioned independently of Dagger/Hilt above.
 androidxHilt = "1.2.0"
 room = "2.7.1"
