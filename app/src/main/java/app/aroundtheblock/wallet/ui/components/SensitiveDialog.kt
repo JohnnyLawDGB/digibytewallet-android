@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.window.SecureFlagPolicy
 
 private const val TAG = "SensitiveDialog"
 
@@ -66,5 +67,14 @@ private fun dialogWindowOf(view: View): Window? {
     return null
 }
 
-/** RED STUB: the properties the dialog is opened with today (the default policy). */
-internal fun sensitiveDialogProperties(): DialogProperties = DialogProperties()
+/**
+ * The properties every sensitive dialog opens with: the platform defaults, except FLAG_SECURE always on.
+ *
+ * Compose writes the dialog window's FLAG_SECURE itself when the dialog is created and again after
+ * every recomposition (its securePolicy). The default policy copies the screen behind, which over
+ * the Send screen is not secure — so each recomposition (the PIN dialog recomposes on every digit)
+ * would clear the flag under the [SecureWindow] holder. With SecureOn Compose's writes agree with
+ * the holder, and the window is secure from before its first frame.
+ */
+internal fun sensitiveDialogProperties(): DialogProperties =
+    DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)

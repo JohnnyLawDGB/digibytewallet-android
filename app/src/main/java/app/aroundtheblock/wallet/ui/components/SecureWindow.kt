@@ -1,6 +1,8 @@
 package app.aroundtheblock.wallet.ui.components
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.view.Window
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
@@ -65,17 +67,10 @@ class SecureWindowFlags<K : Any>(private val apply: (window: K, secure: Boolean)
     fun isSecure(window: K): Boolean = holders(window) > 0
 }
 
-/** Sets or clears FLAG_SECURE on a window: both holders below go through here. */
+/** Sets or clears FLAG_SECURE on a window: the only place in the app that does (see the gate). */
 private fun setSecure(window: Window, secure: Boolean) {
     if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-}
-
-private var currentWindow: Window? = null
-
-private val processFlag = SecureWindowFlag { secure ->
-    val window = currentWindow ?: return@SecureWindowFlag
-    setSecure(window, secure)
 }
 
 private val windowFlags = SecureWindowFlags<Window>(::setSecure)
@@ -86,23 +81,23 @@ private val windowFlags = SecureWindowFlags<Window>(::setSecure)
  * FLAG_SECURE blocks screenshots, screen recording and casting of the window. Every screen that
  * shows OR takes a recovery phrase or passphrase must call this: the words are exactly as
  * capturable while being typed as while being displayed, and until this helper existed only the
- * display screens set the flag. Holders are counted (see [SecureWindowFlag]) so the flag survives
- * a secure->secure navigation and is cleared only when the last secure screen leaves.
+ * display screens set the flag. Holders are counted per window (see [SecureWindowFlag] and
+ * [SecureWindowFlags]) so the flag survives a secure->secure navigation and is cleared only when
+ * the last secure screen on that window leaves.
  */
 @Composable
 fun SecureWindow() {
-    val context = LocalContext.current
-    DisposableEffect(Unit) {
-        (context as? Activity)?.window?.let { currentWindow = it }
-        processFlag.acquire()
-        onDispose { processFlag.release() }
-    }
+    // The Activity window is counted like any other: per window, never one count for the process
+    // applied to whichever window acquired first (a second Activity window would never get the flag).
+    val window = activityOf(LocalContext.current)?.window ?: return
+    SecureWindow(window)
 }
 
 /**
- * Holds FLAG_SECURE on [window] — a dialog's own window — for as long as the calling composable is
- * on screen, counted per window like the Activity's (see [SecureWindowFlags]). [SensitiveDialog]
- * takes it here for its window; nothing else sets the flag on a dialog.
+ * Holds FLAG_SECURE on [window] for as long as the calling composable is on screen, counted per
+ * window (see [SecureWindowFlags]). [SensitiveDialog] takes it here for its own dialog window; the
+ * no-argument form takes it for the Activity window. Every acquire is released by the same effect
+ * (dismiss, leaving composition, a different window), so the counts stay balanced.
  */
 @Composable
 fun SecureWindow(window: Window) {
@@ -110,4 +105,10 @@ fun SecureWindow(window: Window) {
         windowFlags.acquire(window)
         onDispose { windowFlags.release(window) }
     }
+}
+
+private tailrec fun activityOf(context: Context): Activity? = when (context) {
+    is Activity -> context
+    is ContextWrapper -> activityOf(context.baseContext)
+    else -> null
 }

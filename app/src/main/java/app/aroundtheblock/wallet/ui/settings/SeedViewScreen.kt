@@ -2,7 +2,6 @@
 
 package app.aroundtheblock.wallet.ui.settings
 
-import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -18,13 +17,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
+import app.aroundtheblock.wallet.ui.components.SecureWindow
 import app.aroundtheblock.wallet.ui.theme.DigiByteRed
 import app.aroundtheblock.wallet.R
 
@@ -40,16 +39,9 @@ fun SeedViewScreen(
     walletManager: WalletManager,
     keyStoreManager: KeyStoreManager
 ) {
-    val view = LocalView.current
-
-    // Apply FLAG_SECURE on entry, remove on exit
-    DisposableEffect(Unit) {
-        val window = (view.context as? android.app.Activity)?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
-    }
+    // FLAG_SECURE through the counted holder: a raw clear on leaving would take the flag off the
+    // window under any other screen still holding it (the unlock screen when the app locks here).
+    SecureWindow()
 
     /**
      * What this screen shows: the words with the stored BIP39 passphrase when this wallet has one —
