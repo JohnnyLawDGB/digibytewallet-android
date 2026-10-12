@@ -33,7 +33,7 @@ game/    — DigiRunner sync mini-game (standalone, no core dependency)
 adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 
 # Run all tests
-./gradlew testMainnetDebugUnitTest
+./gradlew :core:testMainnetDebugUnitTest :app:testMainnetPlayDebugUnitTest :app:testMainnetSideloadDebugUnitTest
 
 # Run security tests only
 ./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"
@@ -94,9 +94,9 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 - Warning system: amber for below relay minimum, red for zero fee
 
 ### Defensive Startup
-- `AppModule.provideDatabase()` wrapped in try/catch — if DB init fails for ANY reason, `wipeStaleData()` clears corrupt prefs/DB/keys and retries fresh. Wallet seed always preserved.
+- The database opens through `core/db/DatabaseKeyProvisioner` (`WalletDatabaseOpener`). **Nothing deletes a database or a key outside the user's wipe:** a database that cannot be opened is set aside (`wallet.db.aside-<reason>-<time>`, companions alongside), a missing key, a temporary Keystore error, a wrong password and a corrupt file are told apart, and the database password is re-wrapped and verified under its own key (`dgb_db_passphrase`) before any older key is deleted. A Keystore that cannot answer gives that session a temporary in-memory database. The wipe removes every database file of every network, set-aside copies included. Wallet seed always preserved.
 - Verbose logging at every init step: `adb logcat | grep AppModule`
-- `fallbackToDestructiveMigration()` on Room DB for upgrade safety
+- `fallbackToDestructiveMigration()` is still set on Room: it drops data on a downgrade or a missing migration (all steps 1→12 are registered today) — never ship a schema change without its migration
 
 ### Digi-ID
 - Real BRKeyCompactSign signing (Bitcoin message signing protocol)
