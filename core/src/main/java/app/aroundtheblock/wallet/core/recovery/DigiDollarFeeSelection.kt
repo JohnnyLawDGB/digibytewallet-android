@@ -3,7 +3,8 @@ package app.aroundtheblock.wallet.core.recovery
 import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
 
 /**
- * Picks the plain DGB that pays a DigiDollar transfer's consensus fee.
+ * Picks the plain DGB that pays a DigiDollar transfer's network fee (0.1 DGB at least: a wallet policy
+ * copied from DigiByte Core's builder).
  *
  * Total by construction: a wallet with no spendable DGB yields an EMPTY selection rather than no
  * selection. That distinction is the whole reason this exists. The recovery flow used to choose
@@ -20,10 +21,14 @@ import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
  * because "could not tell" is never read as "plain". An outpoint already claimed earlier in the
  * same pass is not offered a second time.
  *
- * One transfer signs its fee inputs with one derivation, so the choice is made per profile: the
- * first whose usable coins cover the fee, taken largest first and only until it is covered —
- * covered for the transfer at hand, as [DigiDollarTransferPlan] sizes it. What is not needed
- * stays where the sweep will find it.
+ * ## Which of them are taken
+ *
+ * The usable coins of every profile, largest first, and only until the fee is covered — covered for
+ * the transfer at hand, as [DigiDollarTransferPlan] sizes it. Coins of different profiles may pay one
+ * fee together: each input carries the derivation it was found under ([Choice.profiles]) and is signed
+ * with it, so a fee that only two profiles' coins can cover is paid rather than refused. What is not
+ * needed stays where the sweep will find it. When nothing covers the fee, every usable coin is handed
+ * over, so the refusal downstream states the true shortfall.
  *
  * The dollars themselves are NOT here: they live at m/86'/20'/0' and are found by
  * [DigiDollarScan]. This is only the fee.
@@ -32,9 +37,14 @@ object DigiDollarFeeSelection {
 
     data class Choice(
         val inputs: List<ForeignAssetTransferPlan.Spend>,
-        /** The derivation the inputs came from — they are NOT at m/86'. Signing needs it. */
-        val profile: DerivationProfile,
-    )
+        /** The derivation each input came from, in the order of [inputs] — they are NOT at m/86', and
+         *  they need not all be the same one. Signing needs each input's own. */
+        val profiles: List<DerivationProfile>,
+    ) {
+        init {
+            require(profiles.size == inputs.size) { "one derivation per fee input" }
+        }
+    }
 
     /**
      * @param findings         every profile the scan found coins on, in scan order.
@@ -52,11 +62,7 @@ object DigiDollarFeeSelection {
         excludeOutpoints: Set<String>,
         covers: (List<ForeignAssetTransferPlan.Spend>) -> Boolean,
     ): Choice {
-        // Kept for when no profile covers the fee: the best-funded one, in full, so the refusal
-        // downstream states the smallest true shortfall.
-        var bestShort: Choice? = null
-        var bestShortSat = 0L
-
+        val usable = ArrayList<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>>()
         for (found in findings) {
             val byAddress = found.derivedAddresses.associateBy { it.address }
             val plain = SweepPartition.split(
@@ -65,39 +71,37 @@ object DigiDollarFeeSelection {
                 classified = { verdicts[it]?.classified ?: false },
             ).sweepable
 
-            val usable = plain.mapNotNull { u ->
-                if (u.amountSatoshi <= 0L) return@mapNotNull null
-                if ("${u.txid}:${u.vout}" in excludeOutpoints) return@mapNotNull null
-                val d = byAddress[u.address] ?: return@mapNotNull null
+            plain.mapNotNullTo(usable) { u ->
+                if (u.amountSatoshi <= 0L) return@mapNotNullTo null
+                if ("${u.txid}:${u.vout}" in excludeOutpoints) return@mapNotNullTo null
+                val d = byAddress[u.address] ?: return@mapNotNullTo null
                 // No script means nothing to sign against — dropped rather than guessed at.
-                val script = u.scriptPubKeyHex ?: return@mapNotNull null
+                val script = u.scriptPubKeyHex ?: return@mapNotNullTo null
                 ForeignAssetTransferPlan.Spend(
                     txid = u.txid, vout = u.vout, amountSat = u.amountSatoshi,
                     scriptPubKeyHex = script, chain = d.chain, index = d.index,
-                )
-            }
-                // One outpoint is one input, however many times a lookup listed it.
-                .distinctBy { it.txid to it.vout }
-                .sortedByDescending { it.amountSat }
-            if (usable.isEmpty()) continue
-
-            val picked = ArrayList<ForeignAssetTransferPlan.Spend>()
-            // Only compared between profiles, so it is held at the top of the range rather than
-            // carried past it. Every amount here is above zero.
-            var have = 0L
-            for (coin in usable) {
-                picked += coin
-                have = if (coin.amountSat > Long.MAX_VALUE - have) Long.MAX_VALUE
-                       else have + coin.amountSat
-                if (covers(picked)) return Choice(picked.toList(), found.profile)
-            }
-
-            if (bestShort == null || have > bestShortSat) {
-                bestShort = Choice(picked, found.profile)
-                bestShortSat = have
+                ) to found.profile
             }
         }
 
-        return bestShort ?: Choice(emptyList(), DerivationProfile.BUILT_INS.first())
+        // STUB (red run): today's behaviour -- the first profile whose coins cover the fee, else the best-funded one.
+        var bestShort: List<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>> = emptyList()
+        for (profile in usable.map { it.second }.distinct()) {
+            val own = usable.filter { it.second == profile }.distinctBy { it.first.txid to it.first.vout }.sortedByDescending { it.first.amountSat }
+            val pick = ArrayList<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>>()
+            for (c in own) { pick += c; if (covers(pick.map { it.first })) return Choice(pick.map { it.first }, pick.map { it.second }) }
+            if (pick.sumOf { it.first.amountSat } > bestShort.sumOf { it.first.amountSat }) bestShort = pick
+        }
+        if (usable.isNotEmpty()) return Choice(bestShort.map { it.first }, bestShort.map { it.second })
+        val coins = usable
+            .distinctBy { (spend, _) -> spend.txid to spend.vout }
+            .sortedByDescending { (spend, _) -> spend.amountSat }
+
+        val picked = ArrayList<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>>()
+        for (coin in coins) {
+            picked += coin
+            if (covers(picked.map { it.first })) break
+        }
+        return Choice(picked.map { it.first }, picked.map { it.second })
     }
 }

@@ -129,6 +129,10 @@
     <string name="txd_not_found">未找到交易</string>
     <string name="txd_sent">已发送</string>
     <string name="txd_received">已接收</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">已铸造</string>
+    <string name="tx_dd_self_transfer">转给自己</string>
+    <string name="tx_dd_redeemed">已赎回</string>
     <string name="txd_transaction_id">交易 ID</string>
     <string name="txd_block_height">区块高度</string>
     <string name="txd_pending">待确认</string>
@@ -225,7 +229,7 @@
     <string name="send_to">收款方</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">无法准备此 DigiDollar 发送。请确认您持有足够的 DGB 来支付网络手续费。</string>
     <string name="send_verify_warning">请仔细核对上方的完整地址。\n交易不可撤销。</string>
     <string name="send_send">发送</string>
     <string name="send_success">成功</string>

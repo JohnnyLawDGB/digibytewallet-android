@@ -54,4 +54,16 @@ class OutgoingTxStoreOverrideTest {
         assertFalse(legacyStyle.isSelfTransfer)
         assertTrue(OutgoingTxStore.shouldApplyOutgoingOverride(legacyStyle))
     }
+
+    @Test
+    fun digiDollarSend_keepsTheWalletsOwnReadingOfItsRow() {
+        // A DigiDollar send is recorded so the stranded-send sweep looks after it, but it pays its
+        // payee no DGB (the dollars ride a zero-value output): the record's "sent" is 0. Applied, the
+        // override would show the send as a DGB movement of nothing — and the detail screen, which
+        // reads the sign, would call it received. The wallet's own reading (the fee, going out) stands.
+        val ddSend = OutgoingTxStore.Record(sentSats = 0L, feeSats = 10_030_000L, toAddress = "TDpayee", isDigiDollar = true)
+        assertFalse(OutgoingTxStore.shouldApplyOutgoingOverride(ddSend))
+        assertFalse("records written before the flag existed are not DigiDollar sends",
+            OutgoingTxStore.Record(100L, 1L, "someaddr").isDigiDollar)
+    }
 }

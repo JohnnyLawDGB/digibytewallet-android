@@ -127,6 +127,8 @@ class DigiDollarFeeWiringTest {
         val args = named(argumentsOf(moveDigiDollar, ").move("))
         assertEquals("scan", args["scan"])
         assertEquals("fee.inputs", args["feeInputs"])
-        assertEquals("fee.profile", args["feeProfile"])
+        // Each fee coin's own derivation, not one for all of them: coins of two profiles may pay one fee.
+        assertEquals("fee.profiles", args["feeProfiles"])
+        assertTrue("the move is still handed a single derivation for every fee coin", args["feeProfile"] == null)
     }
 }

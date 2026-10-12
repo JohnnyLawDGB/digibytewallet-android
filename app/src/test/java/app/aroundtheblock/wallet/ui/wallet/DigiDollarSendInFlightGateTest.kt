@@ -36,8 +36,13 @@ class DigiDollarSendInFlightGateTest {
         assertEquals(listOf("approved"), claims.single().arguments)
         val guarded = vm.guardedBy(claims.single())
             ?: throw AssertionError("the DigiDollar send does not stand under the claim: a second submit still sends")
-        val transfer = vm.calls("transactionBuilder.sendDigiDollar", send).single()
+        // The transfer goes through the view model's send seam, whose default is the builder's send.
+        val transfer = vm.calls("sendDd", send).single()
         assertTrue("the transfer is made outside the claim", transfer.range.first in guarded)
+        assertTrue(
+            "the send seam does not default to the builder's DigiDollar send",
+            vm.code.contains("var sendDd: suspend (PreparedDigiDollar) -> DigiDollarSendState = { transactionBuilder.sendDigiDollar(it) }"),
+        )
     }
 
     @Test fun `the claim is released when the send ends, whatever its outcome`() {

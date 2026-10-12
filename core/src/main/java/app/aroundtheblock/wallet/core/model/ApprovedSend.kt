@@ -59,8 +59,17 @@ sealed class ApprovedSend {
         override val address: String,
         /** Cents to send. */
         val cents: Long,
+        /**
+         * The fee the confirmation shows, in satoshis of DGB: once review has built the transfer
+         * ([withFee]) it is that transfer's own fee — its inputs minus its outputs — which is the fee
+         * signed: native code refuses to sign the transfer at any other fee. 0 until review has built it.
+         */
+        val feeSats: Long = 0L,
     ) : ApprovedSend() {
         override val amountText: String get() = UsdCents.format(cents)
+
+        /** This approval, carrying the fee of the transfer review built. The address and amount are unchanged. */
+        fun withFee(feeSats: Long): DigiDollar = DigiDollar(address, cents, feeSats)
     }
 
     class Asset internal constructor(

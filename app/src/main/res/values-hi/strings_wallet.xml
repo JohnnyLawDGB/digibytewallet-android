@@ -129,6 +129,10 @@
     <string name="txd_not_found">लेनदेन नहीं मिला</string>
     <string name="txd_sent">भेजा गया</string>
     <string name="txd_received">प्राप्त हुआ</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">मिंट किया गया</string>
+    <string name="tx_dd_self_transfer">स्वयं को भेजा गया</string>
+    <string name="tx_dd_redeemed">रिडीम किया गया</string>
     <string name="txd_transaction_id">लेनदेन आईडी</string>
     <string name="txd_block_height">ब्लॉक ऊँचाई</string>
     <string name="txd_pending">लंबित</string>
@@ -225,7 +229,7 @@
     <string name="send_to">प्रति</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">यह DigiDollar भेजना तैयार नहीं हो सका। जाँचें कि नेटवर्क शुल्क चुकाने के लिए आपके पास पर्याप्त DGB है।</string>
     <string name="send_verify_warning">ऊपर दिए पूरे पते को ध्यान से जाँचें।\nलेनदेन अपरिवर्तनीय हैं।</string>
     <string name="send_send">भेजें</string>
     <string name="send_success">सफल</string>

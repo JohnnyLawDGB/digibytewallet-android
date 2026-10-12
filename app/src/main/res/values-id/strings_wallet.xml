@@ -129,6 +129,10 @@
     <string name="txd_not_found">Transaksi tidak ditemukan</string>
     <string name="txd_sent">Terkirim</string>
     <string name="txd_received">Diterima</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Dicetak</string>
+    <string name="tx_dd_self_transfer">Dipindahkan ke diri sendiri</string>
+    <string name="tx_dd_redeemed">Ditebus</string>
     <string name="txd_transaction_id">ID Transaksi</string>
     <string name="txd_block_height">Tinggi Blok</string>
     <string name="txd_pending">Menunggu</string>
@@ -225,7 +229,7 @@
     <string name="send_to">Kepada</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Pengiriman DigiDollar ini tidak dapat disiapkan. Pastikan Anda memiliki cukup DGB untuk membayar biaya jaringan.</string>
     <string name="send_verify_warning">Periksa alamat lengkap di atas dengan teliti.\nTransaksi tidak dapat dibatalkan.</string>
     <string name="send_send">Kirim</string>
     <string name="send_success">Berhasil</string>

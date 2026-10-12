@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.Delivery
+import app.aroundtheblock.wallet.core.DigiDollarPrepareResult
 import app.aroundtheblock.wallet.core.PrepareResult
+import app.aroundtheblock.wallet.core.PreparedDigiDollar
 import app.aroundtheblock.wallet.core.PreparedSend
 import app.aroundtheblock.wallet.core.PriceProvider
 import app.aroundtheblock.wallet.core.SpendPreflight
@@ -16,6 +18,7 @@ import app.aroundtheblock.wallet.core.model.DigiByteUri
 import app.aroundtheblock.wallet.core.model.DgbAmount
 import app.aroundtheblock.wallet.core.model.SendConfirmation
 import app.aroundtheblock.wallet.core.model.UsdCents
+import app.aroundtheblock.wallet.core.send.DigiDollarSendState
 import app.aroundtheblock.wallet.core.send.FeeQuote
 import app.aroundtheblock.wallet.core.send.FeeRequest
 import kotlinx.coroutines.Dispatchers
@@ -382,25 +385,61 @@ class SendViewModel @Inject constructor(
     /** The DigiDollar confirmation on screen: the one approval [sendDigiDollar] accepts, and only once. */
     private val ddConfirmation = SendConfirmation<ApprovedSend.DigiDollar>()
 
+    /** The approval on the confirmation and the transfer review built for it, made together. */
+    @Volatile private var ddReviewed: Pair<ApprovedSend.DigiDollar, PreparedDigiDollar>? = null
+
+    /** A DigiDollar review is building the transfer: one review at a time. */
+    private val _ddReviewing = MutableStateFlow(false)
+    val ddReviewing: StateFlow<Boolean> = _ddReviewing.asStateFlow()
+
     /** A DigiDollar send is out: from its claim until it ends, whatever its outcome. */
     private val _ddSending = MutableStateFlow(false)
     val ddSending: StateFlow<Boolean> = _ddSending.asStateFlow()
 
     /**
-     * The DigiDollar send as it will be confirmed and sent, or null when the form is not sendable —
-     * or while another DigiDollar send is out. Read once, when the user asks to send; it is put on
-     * the confirmation, and the confirmation and [sendDigiDollar] use only this.
+     * The send after the credential prompt: the builder's, which builds the approved transfer again, has
+     * native code sign it only at the approved fee, records and persists it before anything is reported,
+     * and reports it sent only when a peer took it ([DigiDollarSendState]). A test replaces it.
      */
-    fun approveDigiDollar(): ApprovedSend.DigiDollar? {
+    internal var sendDd: suspend (PreparedDigiDollar) -> DigiDollarSendState = { transactionBuilder.sendDigiDollar(it) }
+
+    /**
+     * Review the DigiDollar send on the form: build the transfer and read its fee, before the confirmation
+     * (the builder runs detection first; nothing is signed). The approval returned carries that fee — the
+     * fee of the transfer that will be signed — and is put on the confirmation; the confirmation and
+     * [sendDigiDollar] use only it. Null when the form is not sendable, while another DigiDollar review or
+     * send is out, or when the transfer cannot be built — then [onNotBuilt] is told.
+     */
+    suspend fun approveDigiDollar(onNotBuilt: () -> Unit = {}): ApprovedSend.DigiDollar? {
         if (_ddAddressValid.value != true) return null
-        val approved = ApprovedSend.digiDollar(address.value, amountFiat.value)
+        val typed = ApprovedSend.digiDollar(address.value, amountFiat.value)
             ?.takeIf { ddAmountValid(it.cents, _ddBalance.value) }
             ?: return null
-        return approved.takeIf { ddConfirmation.open(it) }
+        if (_ddSending.value || !_ddReviewing.compareAndSet(false, true)) return null
+        try {
+            val prepared = when (val result = transactionBuilder.prepareDigiDollar(typed.address, typed.cents)) {
+                is DigiDollarPrepareResult.Ready -> result.send
+                is DigiDollarPrepareResult.Error -> {
+                    android.util.Log.w(TAG, "DigiDollar review built nothing: ${result.message}")
+                    onNotBuilt()
+                    return null
+                }
+            }
+            val approved = typed   // STUB (red run): the approval carries no fee
+            if (!ddConfirmation.open(approved)) return null
+            ddReviewed = approved to prepared
+            android.util.Log.i(TAG, "DigiDollar review: ${prepared.cents} cents, fee ${prepared.feeSats} sats, " +
+                "${prepared.inputCount} inputs, change ${prepared.ddChangeCents} cents + ${prepared.dgbChangeSats} sats")
+            return approved
+        } finally {
+            _ddReviewing.value = false
+        }
     }
 
-    /** The DigiDollar confirmation was dismissed, or its credential prompt refused: nothing is on screen to send. */
+    /** The DigiDollar confirmation was dismissed, or its credential prompt refused: nothing is on screen to
+     *  send, and the transfer review built goes with it. Nothing native outlived the prompt. */
     fun cancelDigiDollar() {
+        ddReviewed = null
         ddConfirmation.close()
     }
 
@@ -409,37 +448,46 @@ class SendViewModel @Inject constructor(
      * on screen, and only once. A second submit while this one is out, or one whose confirmation was
      * closed, finds nothing to send; each send would otherwise be a transfer and a fee of its own.
      *
-     * "Sent" only when a peer has taken it, as for a DGB send; [onNotSent] when nothing went out.
+     * The send is the transfer review built for this approval, at the fee the confirmation showed. It is
+     * recorded for retry and persisted before anything is said about it, and it is "Sent" only when a peer
+     * has taken it, as for a DGB send; [onNotSent] when nothing went out.
      */
     fun sendDigiDollar(approved: ApprovedSend.DigiDollar, onNotSent: () -> Unit) {
         if (ddConfirmation.claim(approved)) {
             _ddSending.value = true
-            viewModelScope.launch(Dispatchers.IO) {
+            viewModelScope.launch {
                 val outcome = try {
-                    // Through the builder, never the bridge: it runs asset detection to completion before
-                    // the native transfer takes its network fee from the plain-coin set.
-                    val txid = if (NativeBridge.isValidDigiDollarAddress(approved.address)) {
-                        transactionBuilder.sendDigiDollar(approved.address, approved.cents)
-                    } else null
-                    txid?.let { it to transactionBuilder.awaitDelivery(it) }
+                    // The transfer review built for this very approval. Were they ever to differ, the
+                    // confirmation would show one send while another is signed: nothing is sent.
+                    val prepared = ddReviewed?.takeIf { it.first === approved }?.second
+                        ?.takeIf { it.address == approved.address && it.cents == approved.cents }
+                    if (prepared == null) {
+                        android.util.Log.e(TAG, "DigiDollar send refused: no transfer was reviewed for the approval on screen")
+                        DigiDollarSendState.NotSent(SpendPreflight.NOT_SENT)
+                    } else {
+                        android.util.Log.i(TAG, "DigiDollar send attempt: ${prepared.cents} cents to " +
+                            "${prepared.address.take(12)}…, fee ${prepared.feeSats} sats")
+                        sendDd(prepared)
+                    }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (t: Throwable) {
-                    android.util.Log.w("SendViewModel", "sendDigiDollar failed", t)
-                    null
+                    android.util.Log.w(TAG, "sendDigiDollar failed", t)
+                    DigiDollarSendState.NotSent(t.message ?: SpendPreflight.NOT_SENT)
                 } finally {
+                    ddReviewed = null
                     ddConfirmation.close()
                     _ddSending.value = false
                 }
-                when {
-                    outcome == null -> onNotSent()
-                    outcome.second == Delivery.RELAYED -> _sendState.value = SendState.Success(outcome.first)
-                    else -> _sendState.value = SendState.NotYetRelayed(outcome.first)
+                when (outcome) {
+                    is DigiDollarSendState.Sent -> _sendState.value = SendState.Success(outcome.txid)
+                    is DigiDollarSendState.NotYetRelayed -> _sendState.value = SendState.NotYetRelayed(outcome.txid)
+                    else -> onNotSent()
                 }
             }
             return
         }
-        android.util.Log.w("SendViewModel", "DigiDollar send ignored: not the approval on screen, or already sent")
+        android.util.Log.w(TAG, "DigiDollar send ignored: not the approval on screen, or already sent")
     }
 
     companion object {

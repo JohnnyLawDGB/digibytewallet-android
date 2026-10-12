@@ -15,10 +15,10 @@ import org.junit.Test
  * to the native bridge, which has no library on the JVM, so no behaviour test can see which bridge
  * call a default makes, or that a new caller has appeared somewhere else.
  *
- * Four bridge calls read the plain-coin set for a spend: `createTransaction` (the DGB send's build at
+ * Five bridge calls read the plain-coin set for a spend: `createTransaction` (the DGB send's build at
  * review), `signPreparedTransaction` (its signature after the prompt, which checks the prepared coins
- * against the set), `sendDigiDollar` (its network fee) and `getSpendableDigiByteUtxos` (the network
- * fee of an asset send). The recovery services build from outpoints of another seed that they list
+ * against the set), `previewDigiDollar` and `sendApprovedDigiDollar` (a DigiDollar send's network fee,
+ * at review and after the prompt) and `getSpendableDigiByteUtxos` (the network fee of an asset send). The recovery services build from outpoints of another seed that they list
  * and classify themselves, and a re-publish builds nothing; neither reads the set.
  */
 class SpendPreflightWiringTest {
@@ -56,7 +56,8 @@ class SpendPreflightWiringTest {
     private val readsThePlainCoinSet = listOf(
         "NativeBridge.createTransaction(",
         "NativeBridge.signPreparedTransaction(",
-        "NativeBridge.sendDigiDollar(",
+        "NativeBridge.previewDigiDollar(",
+        "NativeBridge.sendApprovedDigiDollar(",
         "NativeBridge.getSpendableDigiByteUtxos(",
     )
 
@@ -74,7 +75,8 @@ class SpendPreflightWiringTest {
             setOf(
                 "TransactionBuilder.kt: NativeBridge.createTransaction(",
                 "TransactionBuilder.kt: NativeBridge.signPreparedTransaction(",
-                "TransactionBuilder.kt: NativeBridge.sendDigiDollar(",
+                "TransactionBuilder.kt: NativeBridge.previewDigiDollar(",
+                "TransactionBuilder.kt: NativeBridge.sendApprovedDigiDollar(",
                 "AssetManager.kt: NativeBridge.getSpendableDigiByteUtxos(",
             ),
             callers,
@@ -117,9 +119,15 @@ class SpendPreflightWiringTest {
             file.section("suspend fun sendPrepared(", "suspend fun sendDigiDollar("),
             "SpendPreflight.completed(beforeSpend)", "native.signPrepared(",
         )
+        // The DigiDollar review: the pass, then the build that reads the transfer's fee.
+        assertBefore(
+            file.section("suspend fun prepareDigiDollar(", "suspend fun sendDigiDollar("),
+            "SpendPreflight.completed(beforeSpend)", "native.previewDigiDollar(",
+        )
+        // The DigiDollar send after the prompt: the pass again, then the checked native send.
         assertBefore(
             file.section("suspend fun sendDigiDollar(", "suspend fun awaitDelivery("),
-            "SpendPreflight.completed(beforeSpend)", "native.sendDigiDollar(",
+            "SpendPreflight.completed(beforeSpend)", "native.sendApprovedDigiDollar(",
         )
     }
 

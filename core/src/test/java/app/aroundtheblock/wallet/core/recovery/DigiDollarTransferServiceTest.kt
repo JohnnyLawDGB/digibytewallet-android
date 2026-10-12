@@ -39,7 +39,7 @@ class DigiDollarTransferServiceTest {
     private val recorded = mutableListOf<Boolean>()
 
     private fun service(
-        sign: (DigiDollarTransferPlan.Plan, ByteArray, DerivationProfile) -> String? =
+        sign: (DigiDollarTransferPlan.Plan, ByteArray, Map<String, DerivationProfile>) -> String? =
             { _, _, _ -> "00ff" },
         broadcast: (ByteArray) -> String? = { "dd-txid" },
     ) = DigiDollarTransferService(
@@ -51,8 +51,44 @@ class DigiDollarTransferServiceTest {
         svc: DigiDollarTransferService,
         scan: DigiDollarScan.Result,
         fees: List<ForeignAssetTransferPlan.Spend> = listOf(feeInput()),
+        profiles: List<DerivationProfile> = fees.map { profile },
     ) = runBlocking {
-        svc.move(ByteArray(64) { 7 }, scan, fees, profile, recipient, changeAddr)
+        svc.move(ByteArray(64) { 7 }, scan, fees, profiles, recipient, changeAddr)
+    }
+
+    private val legacy = DerivationProfile(
+        label = "Legacy", description = "bread", hmacKey = DerivationProfile.HMAC_DIGIBYTE,
+        prefixPath = intArrayOf(0), addressFormat = 0, isNative = false,
+    )
+
+    // ---- fee coins of two profiles --------------------------------------------------------------
+
+    @Test fun `each fee input reaches the signer with the derivation it was found under`() {
+        var seen: List<DerivationProfile>? = null
+        val fees = listOf(
+            ForeignAssetTransferPlan.Spend("feeA", 0, 6_000_000L, script, chain = 0, index = 4),
+            ForeignAssetTransferPlan.Spend("feeB", 1, 5_000_000L, script, chain = 1, index = 7),
+        )
+        val result = run(
+            service(sign = { plan, _, profileOf ->
+                seen = DigiDollarTransferService.feeDerivations(plan, profileOf); "00ff"
+            }),
+            scanOf(100L), fees, profiles = listOf(profile, legacy),
+        )
+
+        assertEquals("dd-txid", result.txid)
+        assertEquals("the signer was not handed each fee input's own derivation", listOf(profile, legacy), seen)
+    }
+
+    @Test fun `fee inputs without a derivation each are not signed`() {
+        var signed = false
+        val result = run(
+            service(sign = { _, _, _ -> signed = true; "00ff" }),
+            scanOf(100L), listOf(feeInput()), profiles = emptyList(),
+        )
+
+        assertFalse("a fee input with no derivation of its own was signed", signed)
+        assertNull(result.txid)
     }
 
     private fun scanOf(cents: Long, holdings: List<DigiDollarScan.Holding> = listOf(holding()),

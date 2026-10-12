@@ -38,7 +38,6 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
-import app.aroundtheblock.wallet.core.recovery.DigiDollarTransferPlan
 
 @Composable
 fun SendScreen(
@@ -88,6 +87,7 @@ fun SendScreen(
     val bioAuthSubtitle = stringResource(R.string.send_auth_subtitle)
     val bioConfirmDdTitle = stringResource(R.string.send_confirm_dd_title)
     val ddFailedMsg = stringResource(R.string.send_dd_failed)
+    val ddNotBuiltMsg = stringResource(R.string.send_dd_not_built)
     val hasPeers = peerCount > 0
     val isFullySynced = syncProgressInfo.stage == app.aroundtheblock.wallet.core.model.SyncStage.Synced
     val canSend = hasPeers && isFullySynced
@@ -104,6 +104,8 @@ fun SendScreen(
     val effectiveAddressValid = if (effectiveDdMode) ddAddressValid else addressValid
     // A DigiDollar send is out: the view model's claim on the approval, held until the send ends.
     val ddSending by viewModel.ddSending.collectAsStateWithLifecycle()
+    // Review is building the transfer to read its fee: one review at a time.
+    val ddReviewing by viewModel.ddReviewing.collectAsStateWithLifecycle()
     // Non-null while the DigiDollar confirmation is up: the approval it shows, and the only
     // thing the send is then given.
     var ddApproved by remember { mutableStateOf<app.aroundtheblock.wallet.core.model.ApprovedSend.DigiDollar?>(null) }
@@ -188,6 +190,7 @@ fun SendScreen(
         DigiDollarConfirmationDialog(
             address = approvedDd.address,
             amountUsd = approvedDd.amountText,
+            feeSats = approvedDd.feeSats,
             onConfirm = {
                 // Synchronous re-entrancy guard: the first tap clears ddApproved
                 // immediately, so a second tap already queued on this button
@@ -206,7 +209,7 @@ fun SendScreen(
                         // The view model claims the approval once; its outcome is the send state's
                         // (Sent, or sent and not yet relayed), and only a failure comes back here.
                         viewModel.sendDigiDollar(approvedDd) {
-                            // The callback fires on a background dispatcher — hop back to Main for the Toast.
+                            // Posted through the screen's scope, so the Toast lands on the main thread.
                             coroutineScope.launch {
                                 android.widget.Toast.makeText(
                                     context,
@@ -584,25 +587,33 @@ fun SendScreen(
             Button(
                 // Gate DD sends behind the same confirm + biometric flow as DGB
                 // (finality parity) instead of broadcasting straight from the tap.
-                // The amount is read here, once; the dialog and the send use the approval.
-                onClick = { ddApproved = viewModel.approveDigiDollar() },
+                // The amount is read here, once, and review builds the transfer to read its fee; the
+                // dialog and the send use the approval, which carries that fee.
+                onClick = {
+                    coroutineScope.launch {
+                        ddApproved = viewModel.approveDigiDollar(onNotBuilt = {
+                            android.widget.Toast.makeText(context, ddNotBuiltMsg, android.widget.Toast.LENGTH_LONG).show()
+                        })
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                enabled = !ddSending && ddApproved == null && canSend && ddValid,
+                enabled = !ddSending && !ddReviewing && ddApproved == null && canSend && ddValid,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                if (ddSending) {
+                if (ddSending || ddReviewing) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.send_broadcasting))
+                    // Review builds the transfer to read its fee ("Preparing…"); then it goes out ("Broadcasting…").
+                    Text(stringResource(if (ddSending) R.string.send_broadcasting else R.string.send_preparing))
                 } else {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null,
                          modifier = Modifier.size(18.dp))
@@ -750,6 +761,8 @@ private fun SendConfirmationDialog(
 private fun DigiDollarConfirmationDialog(
     address: String,
     amountUsd: String,
+    /** The fee of the transfer review built: the fee signed. */
+    feeSats: Long,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -780,13 +793,14 @@ private fun DigiDollarConfirmationDialog(
 
                 ConfirmRow(label = stringResource(R.string.send_to), value = address) // FULL address — never truncated
                 ConfirmRow(label = stringResource(R.string.send_amount), value = stringResource(R.string.send_amount_dd, amountUsd))
-                // The fee the DigiDollar send pays, not only its currency (B235): the consensus floor,
-                // 0.1 DGB, which the builder charges at any practical size (plus at most a dust
-                // remainder). Spelled like the DGB confirmation's fee row: a dot in every language.
-                val ddFeeDgb = java.math.BigDecimal.valueOf(DigiDollarTransferPlan.DD_MIN_FEE_SATS, 8)
+                // The fee of the transfer review built — its inputs minus its outputs — which is the fee
+                // signed: native code refuses to sign the transfer at any other. An exact number, spelled
+                // like the DGB confirmation's fee row: a dot in every language.
+                // STUB (red run): today's behaviour -- the 0.1 DGB floor, whatever the transfer pays.
+                val ddFeeDgb = java.math.BigDecimal.valueOf(app.aroundtheblock.wallet.core.recovery.DigiDollarTransferPlan.DD_MIN_FEE_SATS, 8)
                 ConfirmRow(
                     label = stringResource(R.string.send_network_fee_row),
-                    value = stringResource(R.string.send_dd_fee_value, String.format(java.util.Locale.US, "%.8f", ddFeeDgb))
+                    value = "≈ " + String.format(java.util.Locale.US, "%.8f", ddFeeDgb) + " DGB"
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
