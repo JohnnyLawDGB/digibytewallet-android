@@ -74,8 +74,14 @@ class SensitiveDialogGateTest {
         assertTrue("the obscured-touch filter is not on the dialog window's decor view", src.contains(".decorView"))
         // FLAG_SECURE through the counted helper, for this window — not a second raw setter.
         assertTrue("SensitiveDialog does not take FLAG_SECURE through SecureWindow(window)", Regex("SecureWindow\\(\\s*window").containsMatchIn(src))
-        for (raw in listOf("FLAG_SECURE", "addFlags(", "clearFlags(", "setFlags(", "SecureFlagPolicy")) {
+        for (raw in listOf("FLAG_SECURE", "addFlags(", "clearFlags(", "setFlags(")) {
             assertFalse("SensitiveDialog sets the window's secure flag itself ($raw)", src.contains(raw))
+        }
+        // Compose re-applies the dialog's securePolicy on every recomposition: the dialog is opened with
+        // the one policy that agrees with the holder (see SensitiveDialogSecureFlagTest), and no other.
+        assertTrue("the dialog is not opened with sensitiveDialogProperties()", src.contains("properties = sensitiveDialogProperties()"))
+        for (other in listOf("SecureFlagPolicy.Inherit", "SecureFlagPolicy.SecureOff")) {
+            assertFalse("SensitiveDialog names $other", src.contains(other))
         }
         // Overlays hidden from Android 12 (API 31, VERSION_CODES.S), where the call exists.
         assertTrue("SensitiveDialog does not hide overlay windows", src.contains("setHideOverlayWindows(true)"))
@@ -153,5 +159,32 @@ class SensitiveDialogGateTest {
             val src = source(File(main, path))
             assertTrue("$path does not apply SecureWindow()", src.contains("SecureWindow()"))
         }
+    }
+
+    @Test
+    fun `FLAG_SECURE is set and cleared only by the counted holder in SecureWindow kt`() {
+        // A raw clear anywhere else releases the flag under every counted holder of that window:
+        // a screen leaving with clearFlags while the unlock screen holds the window leaves the
+        // keypad capturable with the count still at one.
+        val offenders = mainSources
+            .filter { it.name != "SecureWindow.kt" }
+            .filter { strip(it.readText()).contains("FLAG_SECURE") }
+            .map { it.relativeTo(main).path }
+        assertEquals("these files set or clear FLAG_SECURE themselves", emptyList<String>(), offenders)
+        assertTrue(
+            "SeedViewScreen does not hold FLAG_SECURE through SecureWindow()",
+            source(File(main, "ui/settings/SeedViewScreen.kt")).contains("SecureWindow()"),
+        )
+    }
+
+    @Test
+    fun `SecureWindow keeps one count per window and no process-wide window`() {
+        // One count for the process, applied to whichever window acquired first, leaves a second
+        // window (an Activity created while the first still holds) without the flag.
+        val src = source(File(components, "SecureWindow.kt"))
+        assertFalse("SecureWindow.kt keeps a process-wide current window", src.contains("currentWindow"))
+        assertFalse("SecureWindow.kt keeps a process-wide count", src.contains("processFlag"))
+        val screen = function(src, "SecureWindow")
+        assertTrue("SecureWindow() does not go through the per-window holder", screen.contains("SecureWindow(window)") || screen.contains("windowFlags."))
     }
 }

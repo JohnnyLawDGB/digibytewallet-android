@@ -34,10 +34,9 @@ private const val TAG = "SensitiveDialog"
 @Composable
 fun SensitiveDialog(
     onDismissRequest: () -> Unit,
-    properties: DialogProperties = DialogProperties(),
     content: @Composable () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismissRequest, properties = properties) {
+    Dialog(onDismissRequest = onDismissRequest, properties = sensitiveDialogProperties()) {
         val window = dialogWindowOf(LocalView.current)
         if (window == null) {
             val dismiss = rememberUpdatedState(onDismissRequest)
@@ -66,3 +65,6 @@ private fun dialogWindowOf(view: View): Window? {
     }
     return null
 }
+
+/** RED STUB: the properties the dialog is opened with today (the default policy). */
+internal fun sensitiveDialogProperties(): DialogProperties = DialogProperties()
