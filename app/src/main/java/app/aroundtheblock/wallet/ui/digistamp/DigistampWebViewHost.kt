@@ -34,6 +34,11 @@ object DigistampWebViewHost {
     @Volatile
     var onWalletAction: (android.net.Uri) -> Unit = {}
 
+    /** Opens a link the navigation policy approved for the browser. Held here for the same reason:
+     *  the browser is started from the current screen's context, not the first one's. */
+    @Volatile
+    var openInBrowser: (String) -> Unit = {}
+
     /** Whether a view already exists — i.e. whether this visit will re-attach rather than load. */
     fun exists(): Boolean = webView != null
 
