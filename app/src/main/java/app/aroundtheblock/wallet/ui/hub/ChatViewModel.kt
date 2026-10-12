@@ -85,10 +85,12 @@ class ChatViewModel @Inject constructor(
         }
         observeWebSocketEvents()
         loadHistory(channelId = 1)
-        // Poll for login state — reconnects WebSocket after login or disconnect
+        // Poll for login state — reconnects WebSocket after login or disconnect. Each wait is the
+        // socket's own: it grows while the server keeps refusing the socket, and starts over once
+        // a connection has held (HubWebSocket.reconnectDelayMs).
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(5000)
+                kotlinx.coroutines.delay(hubWebSocket.reconnectDelayMs().coerceAtLeast(HubWebSocket.RECONNECT_FIRST_MS))
                 if (digiScopeClient.isLoggedIn() &&
                     hubWebSocket.connectionState.value == ConnectionState.DISCONNECTED) {
                     hubWebSocket.connect()
