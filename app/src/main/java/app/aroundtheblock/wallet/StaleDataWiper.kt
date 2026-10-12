@@ -7,6 +7,7 @@ import app.aroundtheblock.wallet.core.sync.CfRecoveryPolicy
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.ChainTipStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
+import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 
 /**
@@ -59,7 +60,13 @@ object StaleDataWiper {
             // scan starts a new ledger at the wallet's own floor and records its own.
             CfScanLedgerStore.delete(context)
             val bandCleared = runCatching { CfAbandonmentStore.clear(context) }.getOrDefault(false)
-            filterState = filterState && gone { CfScanLedgerStore.file(context) } && bandCleared
+            // With the record gone the scan has to start from the wallet's floor, and keep starting
+            // there until it has a ledger again: a synced wallet has no persisted floor, so a start
+            // that dies before its first ledger write would otherwise be followed by one that
+            // resumes near the saved tip. The wallet is not loaded yet, so the next sync start pins
+            // the floor at its anchor — the step a rebuild's floor takes.
+            val floorPinned = runCatching { HistoryRebuildOnUpgrade.requestFloorAtAnchor(context) }.getOrDefault(false)
+            filterState = filterState && gone { CfScanLedgerStore.file(context) } && bandCleared && floorPinned
         }
         // ...and the FILE-BACKED saved-blocks window (`saved_blocks<net>.bin`,
         // I2 fix) — same reasoning: it moved out of dgb_sync_data too, so the
