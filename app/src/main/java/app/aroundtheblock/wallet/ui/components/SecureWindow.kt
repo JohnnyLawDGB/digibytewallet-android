@@ -38,6 +38,14 @@ class SecureWindowFlag(private val apply: (secure: Boolean) -> Unit) {
     }
 }
 
+/** RED STUB: today there is no holder per window — only the Activity window's. */
+class SecureWindowFlags<K : Any>(@Suppress("unused") private val apply: (window: K, secure: Boolean) -> Unit) {
+    fun acquire(window: K) {}
+    fun release(window: K) {}
+    fun holders(window: K): Int = 0
+    fun isSecure(window: K): Boolean = false
+}
+
 private var currentWindow: Window? = null
 
 private val processFlag = SecureWindowFlag { secure ->
