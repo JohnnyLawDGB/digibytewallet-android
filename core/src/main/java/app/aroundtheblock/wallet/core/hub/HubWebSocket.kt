@@ -18,7 +18,9 @@ import org.json.JSONObject
 
 class HubWebSocket(
     private val httpClient: OkHttpClient,
-    private val digiScopeClient: DigiScopeClient
+    private val digiScopeClient: DigiScopeClient,
+    /** Milliseconds on a clock that only moves forward; a parameter so tests can move it. */
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     companion object {
         const val WS_URL = "wss://api.digiscope.me/api/hub/ws"
@@ -31,6 +33,19 @@ class HubWebSocket(
 
         /** The close code sent for a frame over [MAX_FRAME_BYTES]: 1009, message too big (RFC 6455). */
         const val CLOSE_MESSAGE_TOO_BIG = 1009
+
+        /** The wait before the next try when nothing has been refused: soon after a login. */
+        const val RECONNECT_FIRST_MS = 5_000L
+
+        /** The longest wait between tries. */
+        const val RECONNECT_MAX_MS = 5 * 60_000L
+
+        /** A connection that stayed up this long was accepted, and its end starts the wait over. */
+        const val ACCEPTED_AFTER_MS = 60_000L
+
+        /** The wait after [refusals] refusals in a row: doubled for each, from [RECONNECT_FIRST_MS] up to [RECONNECT_MAX_MS]. */
+        fun reconnectDelayAfter(refusals: Int): Long =
+            (RECONNECT_FIRST_MS shl refusals.coerceIn(0, 16)).coerceAtMost(RECONNECT_MAX_MS)
     }
 
     private val _messages = MutableSharedFlow<WebSocketEvent>(replay = 0, extraBufferCapacity = 100)
@@ -40,7 +55,14 @@ class HubWebSocket(
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private var webSocket: WebSocket? = null
-    private var reconnectAttempts = 0
+    private var listener: Listener? = null
+
+    /**
+     * Connections refused in a row: one that failed, one the server ended within
+     * [ACCEPTED_AFTER_MS] of opening it (it opens the socket and then closes it when it does not
+     * accept the session), or one cut for a frame over the cap. A connection that held resets it.
+     */
+    @Volatile private var refusals = 0
 
     fun connect() {
         val token = digiScopeClient.getToken()
@@ -56,8 +78,15 @@ class HubWebSocket(
 
         _connectionState.value = ConnectionState.RECONNECTING
 
-        webSocket = httpClient.newWebSocket(request, Listener())
+        val listener = Listener().also { this.listener = it }
+        webSocket = httpClient.newWebSocket(request, listener)
     }
+
+    /**
+     * How long to wait before trying again: [reconnectDelayAfter] the refusals in a row so far. A
+     * server that keeps refusing is asked less and less often, up to once every 5 minutes.
+     */
+    fun reconnectDelayMs(): Long = reconnectDelayAfter(refusals)
 
     /**
      * One connection's events. A frame over [MAX_FRAME_BYTES] is not parsed or passed on: the
@@ -67,11 +96,15 @@ class HubWebSocket(
      */
     private inner class Listener : WebSocketListener() {
         @Volatile private var refused = false
+        @Volatile private var openedAtMs = -1L
+
+        /** This connection's end has been counted (or it was ended by the user, which is not counted). */
+        @Volatile var ended = false
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             android.util.Log.i("HubWS", "connected!")
+            openedAtMs = nowMs()
             _connectionState.value = ConnectionState.CONNECTED
-            reconnectAttempts = 0
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -93,19 +126,39 @@ class HubWebSocket(
             if (!refused && bytes.size > MAX_FRAME_BYTES) refuse(webSocket, bytes.size.toLong())
         }
 
+        /** The server is closing: answer at once, so the connection is down now, not when the server gives up waiting. */
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            android.util.Log.w("HubWS", "closing: $code $reason")
+            webSocket.close(1000, null)
+            end(refusal = !held())
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
+
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             android.util.Log.w("HubWS", "closed: $code $reason")
+            end(refusal = !held())
             _connectionState.value = ConnectionState.DISCONNECTED
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             android.util.Log.e("HubWS", "failure: ${t.message}, response=${response?.code}")
+            end(refusal = !held())
             _connectionState.value = ConnectionState.DISCONNECTED
-            // Auto-reconnect with exponential backoff would go here
+        }
+
+        /** True once this connection has stayed up [ACCEPTED_AFTER_MS]. */
+        private fun held(): Boolean = openedAtMs >= 0 && nowMs() - openedAtMs >= ACCEPTED_AFTER_MS
+
+        /** Counts this connection's end, once: a refusal lengthens the wait, a connection that held starts it over. */
+        private fun end(refusal: Boolean) {
+            if (ended) return
+            ended = true
+            refusals = if (refusal) refusals + 1 else 0
         }
 
         private fun refuse(webSocket: WebSocket, size: Long) {
             refused = true
+            end(refusal = true)
             android.util.Log.w("HubWS", "a frame of $size bytes is over the $MAX_FRAME_BYTES-byte limit; closing")
             webSocket.close(CLOSE_MESSAGE_TOO_BIG, "frame over the size limit")
             webSocket.cancel()
@@ -115,6 +168,8 @@ class HubWebSocket(
     }
 
     fun disconnect() {
+        // The user's own close is not a refusal: it is never counted.
+        listener?.ended = true
         webSocket?.close(1000, "User disconnect")
         webSocket = null
         _connectionState.value = ConnectionState.DISCONNECTED
