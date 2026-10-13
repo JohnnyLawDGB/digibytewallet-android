@@ -74,8 +74,10 @@ done
 #    unproven-height update -- what confirmLikeBridge() does.
 CONFIRM="$(fn_body "$BRIDGE_DIR/jni_transaction.c" '^NativeBridge_confirmTransaction')"
 [ -n "$CONFIRM" ] || gate_fail "confirmTransaction was not found in jni_transaction.c. Re-anchor the gate."
-for needle in "BRTransaction *existing = BRWalletTransactionForHash(g_wallet, h);" \
-              "if (existing && existing->blockHeight == TX_UNCONFIRMED) {" \
+#    The height is read from a copy the wallet makes under its lock (tx_read_snapshot_kat).
+for needle in "BRTransaction *existing = BRWalletCopyTransactionForHash(g_wallet, h);" \
+              "int pending = existing && existing->blockHeight == TX_UNCONFIRMED;" \
+              "if (pending) {" \
               "BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1, (uint32_t)blockHeight, (uint32_t)blockTimestamp);"; do
     <<<"$CONFIRM" grep -qF "$needle" ||
         gate_fail "confirmTransaction no longer contains: $needle"

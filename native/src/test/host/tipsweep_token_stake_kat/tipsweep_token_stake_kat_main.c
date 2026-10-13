@@ -386,8 +386,10 @@ static int utxoListed(BRWallet *w, UInt256 h)
  * TX_UNCONFIRMED to the height a node reported. */
 static int confirmLikeBridge(BRWallet *w, UInt256 h, uint32_t height, uint32_t ts)
 {
-    BRTransaction *existing = BRWalletTransactionForHash(w, h);
-    if (! existing || existing->blockHeight != TX_UNCONFIRMED) return 0;
+    BRTransaction *existing = BRWalletCopyTransactionForHash(w, h);
+    int pending = existing && existing->blockHeight == TX_UNCONFIRMED;
+    if (existing) BRTransactionFree(existing);
+    if (! pending) return 0;
     BRWalletUpdateTransactionsUnproven(w, &h, 1, height, ts);
     return 1;
 }

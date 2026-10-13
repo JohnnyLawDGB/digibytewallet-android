@@ -147,7 +147,7 @@ if [ -z "$EVENT" ]; then
     say "NativeBridge_digiDollarEvent not found"
 else
     grep -Eq 'dd_event_of[[:space:]]*\(' <<<"$EVENT" || say "digiDollarEvent does not compute the event through dd_event_of"
-    grep -Eq 'BRWalletTransactionForHash[[:space:]]*\(' <<<"$EVENT" || say "digiDollarEvent does not read the wallet's own transaction"
+    grep -Eq 'BRWalletCopyTransactionForHash[[:space:]]*\(' <<<"$EVENT" || say "digiDollarEvent does not read the wallet's transaction from a copy taken under the wallet lock"
     grep -Eq 'NewLongArray[[:space:]]*\(' <<<"$EVENT" || say "digiDollarEvent does not return [kind, cents, change]"
     # The wallet it hands the event: whose outputs, whose spent outputs -- and no DGB movement (4th member NULL).
     INIT="$(grep -oE 'DdEventWallet[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\{[^}]*\}' <<<"$EVENT")"
@@ -163,7 +163,7 @@ else
             grep -Eq 'BRWalletContainsAddress[[:space:]]*\(' <<<"$BODY" || say "callback $cb does not ask the wallet whose address it is"
         done
         SP_BODY="$(fn_body "^static[^(]*[^A-Za-z0-9_]$(tr -d ' ' <<<"$m_spends")[[:space:]]*[(]")"
-        grep -Eq 'BRWalletTransactionForHash[[:space:]]*\(' <<<"$SP_BODY" || say "the spends callback does not look up the output the input spends"
+        grep -Eq 'BRWalletCopyTransactionForHash[[:space:]]*\(' <<<"$SP_BODY" || say "the spends callback does not look up the output the input spends (from a copy taken under the wallet lock)"
         grep -Eq 'BRDigiDollarOutputAmount[[:space:]]*\(' <<<"$SP_BODY" || say "the spends callback does not read the cents that output held"
     fi
 fi
