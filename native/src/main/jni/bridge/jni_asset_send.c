@@ -300,10 +300,13 @@ NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env, jobject thiz)
     size_t off = 0;
 
     for (size_t i = 0; i < n; i++) {
-        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, utxos[i].hash);
-        if (!tx || utxos[i].n >= tx->outCount) continue;
+        /* A copy taken under the wallet lock: a wallet transaction pointer is not kept past it
+         * (tx_read_snapshot_kat). Freed at the end of every pass. */
+        BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, utxos[i].hash);
+        if (!tx) continue;
+        if (utxos[i].n >= tx->outCount) { BRTransactionFree(tx); continue; }
         BRTxOutput *o = &tx->outputs[utxos[i].n];
-        if (o->scriptLen == 0 || o->scriptLen > 256) continue;
+        if (o->scriptLen == 0 || o->scriptLen > 256) { BRTransactionFree(tx); continue; }
 
         char txidHex[65];
         for (int k = 0; k < 32; k++) sprintf(txidHex + k * 2, "%02x", utxos[i].hash.u8[31 - k]);
@@ -315,6 +318,7 @@ NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env, jobject thiz)
 
         int written = snprintf(buf + off, cap - off, "%s|%u|%llu|%s\n",
                                txidHex, utxos[i].n, (unsigned long long)o->amount, scriptHex);
+        BRTransactionFree(tx);
         if (written < 0 || (size_t)written >= cap - off) break;
         off += (size_t)written;
     }
