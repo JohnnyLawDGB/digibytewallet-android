@@ -91,7 +91,9 @@ class OnboardingViewModel @Inject constructor(
     fun setRecoveryMnemonic(phrase: String) {
         _mnemonic = phrase.trim().split("\\s+".toRegex())
         // A scan answers for the phrase it was run on. Going back and entering another phrase must
-        // not leave the old answer on screen, nor let it steer the post-restore sweep prompt.
+        // not leave the old answer on screen, nor let it steer the post-restore sweep prompt — and
+        // a scan still running for the old phrase must not deliver its answer afterwards.
+        cancelRecoveryScan()
         _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Idle
         _passphraseVerdict.value = null
     }
@@ -115,6 +117,18 @@ class OnboardingViewModel @Inject constructor(
             app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State
             > = _scanResults.asStateFlow()
 
+    /** The running scan, and the number of the phrase it was started for: a result is published
+     *  only while [scanGeneration] still names that phrase. The number is the guard that holds even
+     *  when the scan does not stop at a cancellation point. Main thread only. */
+    private var scanJob: kotlinx.coroutines.Job? = null
+    private var scanGeneration = 0L
+
+    private fun cancelRecoveryScan() {
+        scanGeneration++
+        scanJob?.cancel()
+        scanJob = null
+    }
+
     /** Run the multi-path derivation scan against the entered mnemonic and passphrase (see
      *  [setPassphrase]). Results land in [scanResults].
      *
@@ -129,10 +143,12 @@ class OnboardingViewModel @Inject constructor(
                 .State.Failed("No mnemonic entered")
             return
         }
+        cancelRecoveryScan()
+        val generation = scanGeneration
         _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService
             .State.Scanning("Deriving addresses…")
         val hadPassphrase = _passphrase != null
-        viewModelScope.launch {
+        scanJob = viewModelScope.launch {
             // A copy for the scan, zeroed straight after; _passphrase itself lives until the
             // wallet is restored.
             val passBytes = _passphrase?.copyOf()
@@ -148,6 +164,7 @@ class OnboardingViewModel @Inject constructor(
             // bare phrase. That would link the two at DigiScope, which is exactly what a hidden
             // wallet exists to prevent, and the user only agreed to send THIS phrase's addresses.
             // The screen says plainly what an empty passphrase result can mean instead.
+            if (generation != scanGeneration) return@launch   // the phrase changed: not this scan's answer to give
             _passphraseVerdict.value =
                 if (hadPassphrase && result is app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done) {
                     app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
