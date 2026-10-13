@@ -585,6 +585,8 @@
     <string name="did_auth_subtitle">Authenticate to log in to %1$s</string>
     <string name="hub_sign_title">Sign Hub Post</string>
     <string name="hub_sign_subtitle">Authenticate to sign this post with your identity</string>
+    <string name="hub_tip_auth_title">Send Hub Tip</string>
+    <string name="hub_tip_auth_subtitle">Authenticate to send this tip from your DigiScope tip balance</string>
     <string name="did_requesting">is requesting Digi-ID authentication</string>
     <string name="did_warning">Warning</string>
     <string name="did_insecure">Insecure Connection</string>

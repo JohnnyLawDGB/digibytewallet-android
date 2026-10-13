@@ -480,6 +480,8 @@
     <string name="did_auth_subtitle">Xác thực để đăng nhập vào %1$s</string>
     <string name="hub_sign_title">Ký bài đăng Hub</string>
     <string name="hub_sign_subtitle">Xác thực để ký bài đăng này bằng danh tính của bạn</string>
+    <string name="hub_tip_auth_title">Gửi tiền tip Hub</string>
+    <string name="hub_tip_auth_subtitle">Xác thực để gửi tiền tip này từ số dư tip DigiScope của bạn</string>
     <string name="did_requesting">đang yêu cầu xác thực Digi-ID</string>
     <string name="did_warning">Cảnh báo</string>
     <string name="did_insecure">Kết nối không an toàn</string>
