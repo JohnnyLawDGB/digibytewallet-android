@@ -1152,8 +1152,9 @@ NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz) {
         return NULL;
     }
 
-    /* 32 entries max (PEER_PENALTY_MAX) — under a kilobyte, so a stack buffer is fine. */
-    uint8_t buf[4 + 32 * 26];
+    /* Room for every entry the manager keeps (BR_PEER_PENALTY_MAX, 256: about 6.5 KB, fine on
+     * the stack), so a full live set serializes rather than coming back empty. */
+    uint8_t buf[BR_PEER_PENALTY_BLOB_MAX];
     size_t written = BRPeerManagerSerializePenalties(g_peerManager, buf, sizeof(buf));
     if (written == 0) {
         LOGW("serializePeerPenalties: serialization reported 0 bytes (buffer %zu)", sizeof(buf));
