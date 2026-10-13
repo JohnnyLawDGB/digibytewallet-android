@@ -828,7 +828,8 @@ class AssetManager(
                 "h=${row.blockHeight} src=${row.assetSource} credit=${row.assetCredit} state=$state " +
                 "owned=${scriptHex in owned} -> ${if (keep) "COUNT" else "drop"}")
             if (!keep) continue
-            qty[assetId] = (qty[assetId] ?: 0L) + row.assetQuantity
+            // Quantities come from the chain: a total past Long.MAX_VALUE stops there, never wraps.
+            qty[assetId] = saturatingAdd(qty[assetId] ?: 0L, row.assetQuantity)
             // "UTXOs Held" counts outputs that hold units. A send's plain change is stored as
             // an asset row with quantity 0 and is held like any other; it holds none of the asset.
             if (row.assetQuantity > 0L) cnt[assetId] = (cnt[assetId] ?: 0) + 1
@@ -837,6 +838,12 @@ class AssetManager(
         android.util.Log.i("AssetManager",
             "heldBalances: ${result.entries.joinToString { "${it.key.take(8)}=${it.value.quantity}(${it.value.utxoCount}u)" }}")
         return result
+    }
+
+    private fun saturatingAdd(a: Long, b: Long): Long {
+        val r = a + b
+        // The sum left the Long range iff both operands have the sign the result lacks.
+        return if (((a xor r) and (b xor r)) < 0) (if (a < 0) Long.MIN_VALUE else Long.MAX_VALUE) else r
     }
 
     /**
