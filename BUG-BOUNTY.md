@@ -183,15 +183,19 @@ The list above is closed: documented, deliberate trade-offs, and reports of them
 scope. This is a different case — a real vulnerability that we had already found ourselves but
 had **not** fixed in a release, published, or described anywhere you could have seen:
 
-- The **first** valid external report of it earns **half** of its tier's reward, and full credit.
-  You had no way of knowing we knew, so it is not treated as worth nothing; the reduction is for
-  the fix already being ours.
+- From **2026-10-13**, a report of something already known to us earns **credit, not a reward**,
+  whether or not it was public. Most reports now arrive in waves produced with automated review
+  tools, often several on the same root cause within hours, and the reward is for finding what we
+  had not.
+- Reports received **before 2026-10-13** keep the earlier rule: the first valid external report
+  earned half of its tier's reward.
 - Later reports of the same root cause are duplicates: credit, no payment.
 - When we apply this we tell you what we already knew — by tracking ID and the invariant the fix
   establishes — so the reduction can be checked from your side rather than taken on trust.
 
-_This rule was applied from the 2026-10 waves but was not written here until 2026-10-11, after a
-reporter rightly pointed out that the published rules did not cover it._
+_The half-tier rule was applied from the 2026-10 waves but was not written here until 2026-10-11,
+after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
+2026-10-13 as above._
 
 ### Generic / requires adversarial conditions outside threat model
 
@@ -333,3 +337,5 @@ not listed. Anonymity, or no answer, never affects payment.*
   public" (half the tier for the first external report). The scope rule is stated once instead
   of twice. The io.digibyte signing-lineage item corrected. Hall of Fame populated with the
   names of researchers who gave permission.
+- **2026-10-13 — Known-to-us earns credit.** From 2026-10-13 a report of something already known
+  to us earns credit, not a reward. Reports received earlier keep the half-tier rule.
