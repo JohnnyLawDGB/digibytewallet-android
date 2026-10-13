@@ -210,10 +210,22 @@ class ForeignAssetTransferService(
 
             val byAddress = result.derivedAddresses.associateBy { it.address }
 
+            // The split pays the wallet being recovered — only its seed can sign these, and the
+            // asset transfers are what spend them. The address is read from what this wallet
+            // DERIVED, never from a lookup row: a row's address field is the lookup's word, and
+            // the order of its rows is the lookup's choice. Preferred: the address of a plain
+            // coin the split actually spends (already in the derived set, or toSpend would have
+            // dropped it), so the rescan finds the outputs exactly where the coin was.
+            val splitTo: String? = provenPlain.firstNotNullOfOrNull { byAddress[it.address] }?.address
+                ?: result.derivedAddresses.firstOrNull { it.chain == 0 }?.address
+                ?: result.derivedAddresses.firstOrNull()?.address
+
             // More assets than spendable outputs: split the DGB before moving anything. Without
             // this, exactly one asset moves and the rest are stranded with no DGB behind them,
             // because a transfer's change goes to the destination and never returns.
-            val fan = ForeignAssetFanOut.plan(
+            // No derived address at all means no plain coin can be signed either, so there is
+            // nothing to split; each asset is then reported by the loop below.
+            val fan = if (splitTo == null) ForeignAssetFanOut.Result.NotNeeded else ForeignAssetFanOut.plan(
                 // Only the assets that are actually going to MOVE need an output of their own.
                 // Counting every asset-bearing outpoint counted ones the rule gate has already
                 // refused, and a wallet whose assets are all rule-bound was then told "not
@@ -224,10 +236,7 @@ class ForeignAssetTransferService(
                     verdicts[it]?.ruleState == app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE
                 },
                 plainInputs = provenPlain.mapNotNull { toSpend(it, byAddress) },
-                // Pays the wallet being recovered — only its seed can sign these, and the asset
-                // transfers are what spend them.
-                sourceAddress = partition.sweepable.firstOrNull()?.address
-                    ?: partition.assetBearing.first().address,
+                sourceAddress = splitTo,
                 feePerKb = feePerKb,
                 unreadInputs = unreadPlain,
             )
@@ -245,7 +254,7 @@ class ForeignAssetTransferService(
                     log('i', "fan-out: splitting ${fan.plan.inputs.size} input(s) into " +
                         "${fan.plan.outputs.count { it.isFeeOutput }} fee output(s), " +
                         "fee ${fan.plan.feeSat} sats")
-                    val outcome = broadcastFanOut(fan.plan, seedBytes, result.profile, feePerKb)
+                    val outcome = broadcastFanOut(fan.plan, seedBytes, result.profile, feePerKb, byAddress.keys)
                     // Its outputs are unconfirmed, so nothing can move this round. The caller
                     // waits for confirmation, re-scans, and calls again — at which point there
                     // is an output per asset and this branch is NotNeeded.
@@ -430,13 +439,22 @@ class ForeignAssetTransferService(
         inputs.map { "${it.txid}:${it.vout}" }
 
     /** Sign and broadcast the split. Reuses the foreign signer — a fan-out is an ordinary
-     *  DigiByte send that happens to have many outputs and no OP_RETURN. */
+     *  DigiByte send that happens to have many outputs and no OP_RETURN.
+     *
+     *  Every output must pay an address in [ownAddresses] (this seed's derived set). Checked
+     *  here, at the last step before signing, as well as where the destination is chosen: a
+     *  split is a send from the recovered wallet to itself, and nothing else may be signed. */
     private fun broadcastFanOut(
         plan: ForeignAssetFanOut.Plan,
         seedBytes: ByteArray,
         profile: DerivationProfile,
         feePerKb: Long,
+        ownAddresses: Set<String>,
     ): FanOut {
+        if (plan.outputs.isEmpty() || plan.outputs.any { it.address !in ownAddresses }) {
+            log('w', "fan-out not signed: an output pays an address this seed did not derive")
+            return FanOut.Failed("the split would pay an address this wallet did not derive — not signed")
+        }
         val asTransfer = ForeignAssetTransferPlan.Plan(
             inputs = plan.inputs,
             outputs = plan.outputs.map {
