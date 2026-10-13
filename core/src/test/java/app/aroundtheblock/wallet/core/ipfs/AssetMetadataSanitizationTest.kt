@@ -288,4 +288,49 @@ class AssetMetadataSanitizationTest {
         // Idempotent.
         assertEquals(shown, shown.displaySafe())
     }
+
+    // -------------------------------------------------------------------------
+    // Code points that draw nothing, whatever their category
+    // -------------------------------------------------------------------------
+
+    private fun cp(c: Int) = String(Character.toChars(c))
+
+    /** Unicode Default_Ignorable_Code_Point outside Cf, plus blanks that render as nothing. */
+    private val invisibleOutsideCf = listOf(
+        0x034F,                         // combining grapheme joiner (Mn)
+        0x115F, 0x1160, 0x3164, 0xFFA0, // Hangul fillers (Lo)
+        0x17B4, 0x17B5,                 // Khmer inherent vowels (Mn)
+        0x180B, 0x180C, 0x180D, 0x180F, // Mongolian free variation selectors (Mn)
+        0xFE00, 0xFE0E, 0xFE0F,         // variation selectors (Mn)
+        0xE0100, 0xE01EF,               // variation selectors supplement (Mn)
+        0x2065, 0xFFF0, 0xFFF8, 0xE0080, 0xE0FFF, // reserved as ignorable
+        0x2800,                         // braille pattern blank (So)
+    )
+
+    @Test
+    fun `every code point that draws nothing is stripped`() {
+        for (c in invisibleOutsideCf) {
+            assertFalse("U+%04X".format(c), AssetMetadataService.isDisplaySafe(c))
+            assertEquals("U+%04X".format(c), "DigiDollar", short("Digi" + cp(c) + "Dollar"))
+        }
+    }
+
+    @Test
+    fun `a name made only of fillers is no name`() {
+        assertNull(short("\u3164\u3164"))
+        assertNull(short("\u115F\u1160\uFFA0"))
+        assertNull(short("\u2800"))
+        assertNull(short("\u034F" + cp(0xE0100)))
+        assertNull(short("\uFE0F \u180B"))
+    }
+
+    @Test
+    fun `visible neighbours of the stripped code points survive`() {
+        // Hangul letters, Khmer letters, Mongolian letters, a braille dot and combining accents are text.
+        assertEquals("\u3131\uAC00", short("\u3131\uAC00"))
+        assertEquals("\u1780\u17B6", short("\u1780\u17B6"))
+        assertEquals("\u1820", short("\u1820"))
+        assertEquals("\u2801", short("\u2801"))
+        assertEquals("e\u0301", short("e\u0301"))
+    }
 }
