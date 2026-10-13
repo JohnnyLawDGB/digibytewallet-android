@@ -49,7 +49,9 @@ object AssetPayloadCheck {
             val percent = r.readBits(1) == 1L
             val output = r.readBits(if (range) 13 else 5).toInt()
             val amount = if (percent) r.readBits(8) else fixedPrecision(r)
-            read += TransferInstruction(skip, range, percent, output, amount, !range && output == 31)
+            // Output 31 is the destroy marker only in a BURN, as the decoder reads it.
+            val burn = !range && output == AssetTransferAllocator.BURN_OUTPUT && header.operation == AssetOperation.BURN
+            read += TransferInstruction(skip, range, percent, output, amount, burn)
         }
         if (r.bitsRemaining() != footer) return false
         return read == header.transferInstructions
