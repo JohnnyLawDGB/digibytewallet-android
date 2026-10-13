@@ -647,7 +647,7 @@ class AssetManager(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (t: Throwable) {
-            runCatching { android.util.Log.w("AssetManager", "rule walk failed for $txid", t) }
+            runCatching { android.util.Log.w("AssetManager", "rule walk failed for ${txid.take(12)}", t) }
             null
         } ?: return null to TransferRuleState.UNKNOWN
 
@@ -1204,7 +1204,7 @@ class AssetManager(
         // backed row of this transaction already names.
         if (!isIssuance) {
             runCatching { walkFactsForCreditedAssets(txHashHex) }
-                .onFailure { android.util.Log.d("AssetManager", "M3 facts walk threw for $txHashHex", it) }
+                .onFailure { android.util.Log.d("AssetManager", "M3 facts walk threw for ${txHashHex.take(12)}", it) }
         }
 
         // M3 parent-walk (issuance only): fire if we still have a placeholder OR if we
@@ -1228,10 +1228,10 @@ class AssetManager(
 
                     applyChainFacts(resolved)
                     android.util.Log.i("AssetManager",
-                        "M3 resolved $txHashHex → ${resolved.assetId} " +
+                        "M3 resolved ${txHashHex.take(12)} → ${resolved.assetId} " +
                         "(supply=${resolved.totalSupply} div=${resolved.divisibility}; placeholder rewritten)")
                 }
-            }.onFailure { android.util.Log.d("AssetManager", "M3 walk threw for $txHashHex", it) }
+            }.onFailure { android.util.Log.d("AssetManager", "M3 walk threw for ${txHashHex.take(12)}", it) }
         }
 
         val result = IncomingAssetInfo(header = header, assetId = placeholderAssetId)
@@ -1320,7 +1320,7 @@ class AssetManager(
                 ResolvedAsset(facts.assetId, facts.totalSupply, facts.divisibility, facts.metadataCid),
             )
             android.util.Log.i("AssetManager",
-                "M3 facts for ${facts.assetId} via $txHashHex " +
+                "M3 facts for ${facts.assetId} via ${txHashHex.take(12)} " +
                     "(supply=${facts.totalSupply} div=${facts.divisibility}; row named by its credit)")
         }
         if (allFound) {
@@ -1612,7 +1612,7 @@ class AssetManager(
     suspend fun resolveTransferAssetId(startTxHashHex: String): ResolvedAsset? {
         val facts = provenanceWalker.resolve(startTxHashHex)
         if (facts == null) {
-            android.util.Log.d("AssetManager", "M3 walk: no resolution yet for $startTxHashHex")
+            android.util.Log.d("AssetManager", "M3 walk: no resolution yet for ${startTxHashHex.take(12)}")
             return null
         }
         // Say WHICH it was. A resolve served from the provenance cache and one that walked the
@@ -1620,7 +1620,7 @@ class AssetManager(
         // the only way to see whether the cache is actually earning its keep.
         val fromCache = provenanceStore.assetFor(startTxHashHex) != null
         android.util.Log.i("AssetManager",
-            "M3 resolved $startTxHashHex → ${facts.assetId} " +
+            "M3 resolved ${startTxHashHex.take(12)} → ${facts.assetId} " +
             "(supply=${facts.totalSupply} div=${facts.divisibility}; " +
             "${if (fromCache) "cached" else "walked"})")
         return ResolvedAsset(
@@ -1678,7 +1678,7 @@ class AssetManager(
             app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE -> {
                 if (!header.locked) {
                     // M1.2b gap: an unlocked issuance needs the spent output's scriptPubKey.
-                    android.util.Log.d("AssetManager", "M3 hop: unlocked issuance at $txid — M1.2b gap")
+                    android.util.Log.d("AssetManager", "M3 hop: unlocked issuance at ${txid.take(12)} — M1.2b gap")
                     return AssetProvenanceWalker.Hop.DeadEnd
                 }
                 val firstInput = firstInputOfRawTx(rawTx)
@@ -1847,7 +1847,7 @@ class AssetManager(
                 processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
                     isOutgoingUnconfirmed = isOutgoingUnconfirmed)
             }.onFailure {
-                android.util.Log.d("AssetManager", "sweep: processIncoming failed for $txHash", it)
+                android.util.Log.d("AssetManager", "sweep: processIncoming failed for ${txHash.take(12)}", it)
             }.getOrNull()
             if (info != null) detected++
         }
@@ -3155,7 +3155,7 @@ class AssetManager(
             if (!isTxGone(row.txid)) continue
             candidates.add("${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
             android.util.Log.i("AssetManager",
-                "legacyHeal ${if (dryRun) "DRYRUN candidate" else "DELETE"}: ${row.txid}:${row.vout} qty=${row.assetQuantity}")
+                "legacyHeal ${if (dryRun) "DRYRUN candidate" else "DELETE"}: ${row.txid.take(12)}:${row.vout} qty=${row.assetQuantity}")
             if (!dryRun) deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
         }
         android.util.Log.i("AssetManager",
@@ -3218,7 +3218,7 @@ class AssetManager(
             val isOwned = scriptHex.isNotEmpty() && scriptHex in owned
             val state = spentState(row.txid, row.vout)  // diagnostic only — NEVER gates the delete
             android.util.Log.i("AssetManager",
-                "assetRow ${row.txid}:${row.vout} asset=${row.assetId} qty=${row.assetQuantity} " +
+                "assetRow ${row.txid.take(12)}:${row.vout} asset=${row.assetId} qty=${row.assetQuantity} " +
                     "spent=${row.spent} owned=$isOwned nativeSpentState=$state")
             // ONLY not-owned rows are phantoms we delete. Owned rows — including
             // dead-tx (state -1) and spent (state 0) — are left to the NATIVE-scoped
@@ -3228,7 +3228,7 @@ class AssetManager(
             candidates.add("${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
             android.util.Log.i("AssetManager",
                 "pruneUnowned ${if (dryRun) "DRYRUN candidate" else "DELETE"}: " +
-                    "${row.txid}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
+                    "${row.txid.take(12)}:${row.vout} qty=${row.assetQuantity} asset=${row.assetId}")
             if (!dryRun) deleted += utxoDao.deleteAssetUtxo(row.txid, row.vout)
         }
         android.util.Log.i("AssetManager",

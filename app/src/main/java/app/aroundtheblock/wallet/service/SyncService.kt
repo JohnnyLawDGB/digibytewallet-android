@@ -2885,7 +2885,7 @@ class SyncService : Service() {
                     assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L,
                         isOutgoingUnconfirmed = !isReceive, persistAfterDetect = true)
                 }.onFailure {
-                    android.util.Log.w("SyncService", "native asset detect failed for $txHash", it)
+                    android.util.Log.w("SyncService", "native asset detect failed for ${txHash.take(12)}", it)
                 }.getOrNull()
 
                 val entity = TransactionEntity(
@@ -3031,7 +3031,7 @@ class SyncService : Service() {
             // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
             // and ensures all Room writes are serialised through the supervisor job.
             if (assetId.isBlank()) {
-                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=$txHash, skipping insert")
+                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=${txHash.take(12)}, skipping insert")
                 return
             }
             serviceScope.launch {
@@ -3625,7 +3625,7 @@ class SyncService : Service() {
                         }
                     }
                     android.util.Log.i("SyncService",
-                        "Dandelion recovery: dropped conflicted (double-spend) send $txid")
+                        "Dandelion recovery: dropped conflicted (double-spend) send ${txid.take(12)}")
                 }
                 continue
             }
@@ -3644,7 +3644,7 @@ class SyncService : Service() {
             val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
             if (raw == null) {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: $txid not in wallet tx set — can't re-publish")
+                    "Dandelion recovery: ${txid.take(12)} not in wallet tx set — can't re-publish")
                 continue
             }
             // One publish per sweep. The retry is the next sweep, and the store's attempt count
@@ -3653,15 +3653,15 @@ class SyncService : Service() {
             // publish still awaits its verdict.
             val attempt = store.sweepAttempts(txid).count
             runCatching { NativeBridge.publishTransaction(raw) }
-                .onFailure { android.util.Log.w("SyncService", "re-publish $txid threw", it) }
+                .onFailure { android.util.Log.w("SyncService", "re-publish ${txid.take(12)} threw", it) }
             delay(15_000L)
             val relays = runCatching { NativeBridge.getRelayCount(txid) }.getOrDefault(0)
             if (relays > 0) {
                 android.util.Log.i("SyncService",
-                    "Dandelion recovery: $txid re-published & propagated (relays=$relays, attempt $attempt)")
+                    "Dandelion recovery: ${txid.take(12)} re-published & propagated (relays=$relays, attempt $attempt)")
             } else {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: $txid still un-relayed after re-publish (attempt $attempt)")
+                    "Dandelion recovery: ${txid.take(12)} still un-relayed after re-publish (attempt $attempt)")
             }
         }
         // Persist the wallet tx set so any drops survive a restart.

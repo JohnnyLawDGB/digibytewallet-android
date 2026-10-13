@@ -78,11 +78,42 @@ class LogRedactionSourceGateTest {
         assertTrue("log statements interpolating a secret value: $violations", violations.isEmpty())
     }
 
+    /** A full txid in logcat ties the device to an on-chain transaction; R8 keeps the Log calls in
+     *  release. The codebase logs a short prefix (`txid.take(12)`), and every log line in core/
+     *  and app/ must too: a txid-bearing value (`txid`, `txHash`, `txHashHex`, any name ending in
+     *  them) is interpolated only through `.take(` / `.takeLast(`, or as a count. */
+    @Test
+    fun `no Kotlin log line interpolates a full txid`() {
+        val chainId = Regex("""(txid|txhash)""", RegexOption.IGNORE_CASE)
+        val bare = Regex("""\$(?!\{)([A-Za-z_]\w*)""")
+        val braced = Regex("""\$\{([^{}]*)\}""")
+        val shortened = Regex("""\.(take|takeLast)\(|\.size\b|\.count\b|\.isEmpty|\.isNotEmpty""")
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                collectLogStatements(file.readText()).forEach { stmt ->
+                    val full = bare.findAll(stmt).map { it.groupValues[1] }.filter { chainId.containsMatchIn(it) } +
+                        braced.findAll(stmt).map { it.groupValues[1] }
+                            .filter { chainId.containsMatchIn(it) && !shortened.containsMatchIn(it) }
+                    if (full.any()) violations.add("${file.name}: ${full.toList()} in $stmt")
+                }
+            }
+        }
+        assertTrue("log statements interpolating a full txid:\n" + violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The gate above must see what it is meant to see. */
+    @Test
+    fun `the txid gate collects a multi-line log call and Log_wtf`() {
+        val stmts = collectLogStatements("Log.w(TAG,\n  \"x \${tx.txid}\")\nLog.wtf(TAG, \"y\")")
+        assertTrue(stmts.toString(), stmts.size == 2 && stmts[0].contains("tx.txid"))
+    }
+
     // Multi-line Log.x( ... ) calls are common in this codebase, so a line-based grep would miss
     // an argument on the next line. Collect each call from `Log.x(` to its balancing paren.
     private fun collectLogStatements(content: String): List<String> {
         val out = mutableListOf<String>()
-        val start = Regex("""\bLog\.[diwev]\(""")
+        val start = Regex("""\bLog\.(?:[diwev]|wtf)\(""")
         var m = start.find(content)
         while (m != null) {
             var depth = 0

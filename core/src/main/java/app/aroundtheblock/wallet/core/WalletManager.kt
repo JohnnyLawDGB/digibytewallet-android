@@ -591,7 +591,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 if (orphan) {
                     android.util.Log.w(
                         "WalletManager",
-                        "clearStuckSends: $txid is an ORPHAN — parent missing from the wallet, " +
+                        "clearStuckSends: ${txid.take(12)} is an ORPHAN — parent missing from the wallet, " +
                             "cannot ever confirm; clearing"
                     )
                 }

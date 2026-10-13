@@ -68,7 +68,7 @@ class MultiEndpointAssetClient(
                     if (!same) {
                         Log.w(
                             TAG,
-                            "getRawTransaction: ${endpoint.endpointLabel} answered $txHashHex with " +
+                            "getRawTransaction: ${endpoint.endpointLabel} answered ${txHashHex.take(12)} with " +
                                 "bytes whose id is ${id ?: "not computable"}; trying the next endpoint",
                         )
                     }
