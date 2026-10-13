@@ -8,7 +8,9 @@
 #
 # ARMS. Both are built at the header check levels the app ships, read from native/build.gradle.kts (this suite names
 # them itself, so it means the same thing run alone or from scripts/run-host-kats.sh).
-#   red    -DJUDGED_CONFIRMATION_UNFIXED (the earlier shape): each RED case MUST fail, each GUARD case MUST pass
+#   red    -DJUDGED_CONFIRMATION_UNFIXED (no rule): each RED case MUST fail, every other case not in RED2 MUST pass
+#   red2   -DJUDGED_CONFIRMATION_HOLD_UNFIXED (the rule without the held-state fixes): each RED2 case MUST fail,
+#          every other case MUST pass
 #   green  no seam flag: every case MUST pass
 # Every case, both arms, 64-bit and 32-bit: no sanitizer report.
 #
@@ -26,8 +28,12 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
+# arm 1 (-DJUDGED_CONFIRMATION_UNFIXED): no confirmation rule at all
 RED_CASES=(unjudged_receive_not_confirmed held_receive_confirmed_at_checkpoint unjudged_delivery_not_trusted
            unjudged_run_not_persisted)
+# arm 2 (-DJUDGED_CONFIRMATION_HOLD_UNFIXED): the rule holds receives, but a held one is stored as scanned and its
+# block may be pruned before the checkpoint pins it
+RED2_CASES=(held_receive_survives_restart held_block_stays_resident)
 GUARD_CASES=(judged_receive_confirmed network_without_contexts_unchanged)
 
 # the one level the app build sets for a header check macro
@@ -105,10 +111,12 @@ if [ "${1:-}" = "gen" ]; then
 fi
 
 # ---- verify the seam is real ---------------------------------------------------
-if [ "$(grep -c 'JUDGED_CONFIRMATION_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 1 ]; then
-    echo "GATE FAILURE: BRPeerManager.c has no JUDGED_CONFIRMATION_UNFIXED seam; -D would be inert."
-    exit 1
-fi
+for seam in JUDGED_CONFIRMATION_UNFIXED JUDGED_CONFIRMATION_HOLD_UNFIXED; do
+    if [ "$(grep -c "$seam" "$CORE_DIR/BRPeerManager.c")" -lt 1 ]; then
+        echo "GATE FAILURE: BRPeerManager.c has no $seam seam; -D would be inert."
+        exit 1
+    fi
+done
 echo "levels: proof of work $POW_LEVEL, difficulty target $DIFF_LEVEL (shipped, from native/build.gradle.kts)"
 
 FAIL=0
@@ -124,8 +132,9 @@ run_bits() {
     echo "=== ${bits}-bit build ==="
     echo "======================================================================"
 
-    if ! build "$BUILD_DIR/red${bits}" "$bits" -DJUDGED_CONFIRMATION_UNFIXED; then
-        echo "GATE FAILURE: ${bits}-bit red arm did not compile (a build error is not evidence)."
+    if ! build "$BUILD_DIR/red${bits}" "$bits" -DJUDGED_CONFIRMATION_UNFIXED ||
+       ! build "$BUILD_DIR/redb${bits}" "$bits" -DJUDGED_CONFIRMATION_HOLD_UNFIXED; then
+        echo "GATE FAILURE: ${bits}-bit comparison arm did not compile (a build error is not evidence)."
         FAIL=1; return
     fi
     if ! build "$BUILD_DIR/green${bits}" "$bits"; then
@@ -135,39 +144,49 @@ run_bits() {
 
     local known listed
     known="$("$BUILD_DIR/green${bits}" list | sort | tr '\n' ' ')"
-    listed="$(printf '%s\n' "${RED_CASES[@]}" "${GUARD_CASES[@]}" | sort | tr '\n' ' ')"
+    listed="$(printf '%s\n' "${RED_CASES[@]}" "${RED2_CASES[@]}" "${GUARD_CASES[@]}" | sort | tr '\n' ' ')"
     if [ "$known" != "$listed" ]; then
         echo "GATE FAILURE: case lists disagree"; echo "  binary: $known"; echo "  run.sh: $listed"
         FAIL=1; return
     fi
 
-    echo "--- RED ARM (-DJUDGED_CONFIRMATION_UNFIXED): each RED case MUST fail ---"
-    for c in "${RED_CASES[@]}"; do
-        run_case "$BUILD_DIR/red${bits}" "$c"
-        if <<<"$OUT" grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
-            <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
-        elif <<<"$OUT" grep -q "RESULT $c fail" && ! <<<"$OUT" grep -q '^FAIL: setup'; then
-            echo "  [$bits red $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:') | $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-150)"
-        else
-            echo "  [$bits red $c] GATE FAILURE: did not fail on what it asserts (rc=$RC)"
-            <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
-        fi
-    done
-
-    echo "--- RED ARM: each GUARD case MUST pass ---"
-    for c in "${GUARD_CASES[@]}"; do
-        run_case "$BUILD_DIR/red${bits}" "$c"
-        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
-            echo "  [$bits red $c] passed (guard)"
-        else
-            echo "  [$bits red $c] GATE FAILURE: guard did not pass in the comparison arm (rc=$RC)"
-            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
-        fi
-    done
+    # comparison_arm <tag> <binary> <flag> <must-fail cases...> -- <must-pass cases...>
+    comparison_arm() {
+        local tag="$1" bin="$2" flag="$3"; shift 3
+        local fails=() passes=() c
+        while [ $# -gt 0 ] && [ "$1" != "--" ]; do fails+=("$1"); shift; done
+        shift; passes=("$@")
+        echo "--- $tag ARM ($flag): each listed case MUST fail on what it asserts ---"
+        for c in "${fails[@]}"; do
+            run_case "$bin" "$c"
+            if <<<"$OUT" grep -Eq "$SAN_RE"; then
+                echo "  [$bits $tag $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
+                <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
+            elif <<<"$OUT" grep -q "RESULT $c fail" && ! <<<"$OUT" grep -q '^FAIL: setup'; then
+                echo "  [$bits $tag $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:') | $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-150)"
+            else
+                echo "  [$bits $tag $c] GATE FAILURE: did not fail on what it asserts (rc=$RC)"
+                <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
+            fi
+        done
+        echo "--- $tag ARM: every other case MUST pass ---"
+        for c in "${passes[@]}"; do
+            run_case "$bin" "$c"
+            if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
+                echo "  [$bits $tag $c] passed"
+            else
+                echo "  [$bits $tag $c] GATE FAILURE: did not pass in the comparison arm (rc=$RC)"
+                <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
+            fi
+        done
+    }
+    # arm 1 holds nothing, so the held-state cases cannot reach their assertion there; they are arm 2's
+    comparison_arm red "$BUILD_DIR/red${bits}" -DJUDGED_CONFIRMATION_UNFIXED "${RED_CASES[@]}" -- "${GUARD_CASES[@]}"
+    comparison_arm red2 "$BUILD_DIR/redb${bits}" -DJUDGED_CONFIRMATION_HOLD_UNFIXED "${RED2_CASES[@]}" -- \
+        "${RED_CASES[@]}" "${GUARD_CASES[@]}"
 
     echo "--- GREEN ARM (shipped): every case MUST pass, no sanitizer report ---"
-    for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
+    for c in "${RED_CASES[@]}" "${RED2_CASES[@]}" "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c"
         if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits green $c] passed: $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-150)"
@@ -189,7 +208,7 @@ run_bits 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: judged_confirmation_kat (${#RED_CASES[@]} red-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
+    echo "PASS: judged_confirmation_kat ($(( ${#RED_CASES[@]} + ${#RED2_CASES[@]} )) red-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
     exit 0
 else
     echo "FAIL: judged_confirmation_kat"

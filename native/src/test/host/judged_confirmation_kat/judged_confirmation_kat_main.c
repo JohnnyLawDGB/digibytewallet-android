@@ -23,6 +23,14 @@
 //                                        registration path.
 //     unjudged_run_not_persisted         Same table. The chain reaching the estimated height inside the unjudged run
 //                                        does not persist the run; reaching it at the checkpoint does.
+//     held_receive_survives_restart      Same table. While the receive is held, the scan ledger the manager hands to
+//                                        storage still lists its height as not scanned, so a restart (or a recreate)
+//                                        fetches that block again; once the checkpoint pins it, the stored ledger has
+//                                        it scanned. A height is never stored as done while its confirmation exists
+//                                        only in memory.
+//     held_block_stays_resident          Real mainnet parameters. With a receive held at 9,100,003, the chain grows
+//                                        far enough above it that memory clearing prunes old headers. The held block
+//                                        stays resident, so the checkpoint that later pins it can still confirm it.
 //   GUARD (pass in both builds):
 //     judged_receive_confirmed           testnet26 headers resident (as after a restart), a network that declares
 //                                        checkpoint contexts. A header on the tip carrying exactly the target the
@@ -456,6 +464,117 @@ static const char *case_unjudged_run_not_persisted(void)
     return g_fail ? "fail" : "pass";
 }
 
+// ledger bytes as last handed to storage
+static uint8_t *g_ledger = NULL;
+static size_t g_ledgerLen = 0;
+static void saveLedgerCb(void *info, const uint8_t *bytes, size_t len)
+{
+    (void)info;
+    free(g_ledger);
+    g_ledger = malloc(len);
+    memcpy(g_ledger, bytes, len);
+    g_ledgerLen = len;
+}
+
+// the stored ledger's scan frontier, or 0 if nothing was stored / it does not parse
+static uint32_t storedScannedThrough(void)
+{
+    BRCFScanLedger *l = calloc(1, sizeof(*l));
+    uint32_t h = (g_ledger && BRCFScanLedgerParse(l, g_ledger, g_ledgerLen)) ? BRCFScanLedgerScannedThrough(l) : 0;
+    free(l);
+    return h;
+}
+
+// RED. A held confirmation is never stored as a completed scan height.
+static const char *case_held_receive_survives_restart(void)
+{
+    const BRChainParams *params = paramsWithRunCheckpoint();
+    Fx f;
+    uint8_t run[RUN_LEN][80];
+
+    fxInit(&f, params, 0, startAtCp(), NULL, 0);
+    BRPeerManagerSetSaveCFLedger(f.m, NULL, saveLedgerCb);
+    check(setupRun(run, kRun, RUN_LEN, cpHash()), "setup: the run chains on the checkpoint");
+    BRTransaction *tx = receiveTx(f.w, 0x31);
+    uint32_t h = CP_HEIGHT + RECEIVE_INDEX + 1;
+
+    check(deliver(&f, run, 0, BRANCH_LEN) == 1, "setup: the first five headers are accepted");
+    deliverBlock(&f, run[RECEIVE_INDEX], h, tx);
+    uint32_t live = scannedThrough(&f), stored = storedScannedThrough();
+    check(txHeight(&f, tx->txHash) == TX_UNCONFIRMED && live == h, "setup: the receive is held, the live scan is past it");
+    check(deliver(&f, run, BRANCH_LEN, RUN_LEN) == 1 && txHeight(&f, tx->txHash) == h,
+          "setup: the checkpoint pins the run and the receive is confirmed");
+    uint32_t storedAfter = storedScannedThrough();
+
+    printf("NOTE: held at %" PRIu32 ": live scan through %" PRIu32 ", stored scan through %" PRIu32 "; after the "
+           "checkpoint the stored scan is through %" PRIu32 "\n", h, live, stored, storedAfter);
+    check(g_ledger != NULL && stored < h, "while held, the stored ledger has the height still to scan");
+    check(storedAfter == h, "once confirmed, the stored ledger has it scanned");
+    fxFree(&f);
+    return g_fail ? "fail" : "pass";
+}
+
+// RED. Memory clearing keeps a held block resident.
+static const char *case_held_block_stays_resident(void)
+{
+    Fx f;
+    uint8_t run[RUN_LEN][80];
+    const uint32_t extra = CLEAR_MEM_BLOCKS_COUNT_TRIGGER + 200;
+
+    fxInit(&f, &BRMainNetParams, 0, startAtCp(), NULL, 0);
+    check(setupRun(run, kRun, RUN_LEN, cpHash()), "setup: the run chains on the checkpoint");
+    BRTransaction *tx = receiveTx(f.w, 0x31);
+    uint32_t h = CP_HEIGHT + RECEIVE_INDEX + 1;
+    UInt256 held = hashOf(run[RECEIVE_INDEX]);
+
+    check(deliver(&f, run, 0, BRANCH_LEN) == 1, "setup: the first five headers are accepted");
+    deliverBlock(&f, run[RECEIVE_INDEX], h, tx);
+    check(txHeight(&f, tx->txHash) == TX_UNCONFIRMED, "setup: the receive is held");
+
+    // The chain grows well past the clearing trigger (stand-in headers: memory clearing reads only links and heights),
+    // and the scan has moved on far above the held height.
+    MGR_LOCK(f.m);
+    BRMerkleBlock *prev = f.m->lastBlock;
+    for (uint32_t i = 0; i < extra; i++) {
+        BRMerkleBlock *b = BRMerkleBlockNew();
+        b->prevBlock = prev->blockHash;
+        UInt32SetLE(&b->blockHash.u8[0], 0x5eed0000u + i);
+        memset(&b->blockHash.u8[4], 0xa7, 28);
+        b->height = prev->height + 1;
+        b->timestamp = prev->timestamp + 15;
+        b->unjudged = 1;
+        BRSetAdd(f.m->blocks, b);
+        prev = b;
+    }
+    f.m->lastBlock = prev;
+    BRCFScanLedgerInit(&f.m->cfLedger, prev->height - 10);
+    f.m->autoFetchCFiltersEnabled = 1;
+    f.m->autoFetchCFiltersStart = prev->height - 10;
+    size_t before = BRSetCount(f.m->blocks);
+    _BRPeerManagerClearMemory(f.m);
+    size_t after = BRSetCount(f.m->blocks);
+    int resident = BRSetGet(f.m->blocks, &held) != NULL;
+
+    // control: the same clearing with nothing waiting prunes the old headers, the held block's among them
+    size_t heldCount = f.m->confirmHeldCount;
+    f.m->confirmHeldCount = 0;
+    f.m->clearMemNoopFloor = 0;
+    f.m->lastPruneFloor = 0;
+    _BRPeerManagerClearMemory(f.m);
+    size_t afterControl = BRSetCount(f.m->blocks);
+    f.m->confirmHeldCount = heldCount;
+    MGR_UNLOCK(f.m);
+
+    printf("NOTE: tip %" PRIu32 ", held block at %" PRIu32 ": resident headers %zu -> %zu after clearing, held block "
+           "resident=%d; with nothing waiting the same clearing leaves %zu\n", prev->height, h, before, after, resident,
+           afterControl);
+    check(afterControl < after || (after < before && ! resident),
+          "setup: the clearing prunes the old headers when nothing keeps them");
+    check(resident, "the held block stays resident");
+    fxFree(&f);
+    return g_fail ? "fail" : "pass";
+}
+
 // GUARD. A judged header on a resident testnet26 history: its receive is confirmed at once.
 static const char *case_judged_receive_confirmed(void)
 {
@@ -625,6 +744,8 @@ static const Case kCases[] = {
     { "held_receive_confirmed_at_checkpoint", case_held_receive_confirmed_at_checkpoint },
     { "unjudged_delivery_not_trusted", case_unjudged_delivery_not_trusted },
     { "unjudged_run_not_persisted", case_unjudged_run_not_persisted },
+    { "held_receive_survives_restart", case_held_receive_survives_restart },
+    { "held_block_stays_resident", case_held_block_stays_resident },
     { "judged_receive_confirmed", case_judged_receive_confirmed },
     { "network_without_contexts_unchanged", case_network_without_contexts_unchanged },
 #endif
