@@ -669,8 +669,10 @@ NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
     if (!txid) return JNI_TRUE;
     jboolean valid = JNI_TRUE;
     if (strlen(txid) == 64) {
-        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, _u256FromTxidHex(txid));
+        /* a copy taken under the wallet lock: no wallet pointer is kept past it (tx_read_snapshot_kat) */
+        BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, _u256FromTxidHex(txid));
         if (tx) valid = BRWalletTransactionIsValid(g_wallet, tx) ? JNI_TRUE : JNI_FALSE;
+        if (tx) BRTransactionFree(tx);
     }
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
     return valid;
@@ -718,7 +720,8 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
 
     /* Fast-path duplicate check — avoids the memory leak in
      * BRWalletRegisterTransaction's duplicate branch. */
-    BRTransaction *existing = BRWalletTransactionForHash(g_wallet, tx->txHash);
+    /* The wallet's record is read from a copy taken under its lock (tx_read_snapshot_kat). */
+    BRTransaction *existing = BRWalletCopyTransactionForHash(g_wallet, tx->txHash);
     if (existing) {
         /* Already registered. If it's stuck UNCONFIRMED and the caller now has
          * its real confirming height, PROMOTE it rather than skip. This is the
@@ -743,6 +746,7 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
         } else {
             LOGD("registerRawTransaction: duplicate (already confirmed / incoming unconfirmed), skipping");
         }
+        BRTransactionFree(existing);
         BRTransactionFree(tx);
         return promoted;
     }
@@ -794,8 +798,11 @@ NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
     jboolean promoted = JNI_FALSE;
     if (strlen(hashStr) == 64) {
         UInt256 h = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
-        BRTransaction *existing = BRWalletTransactionForHash(g_wallet, h);
-        if (existing && existing->blockHeight == TX_UNCONFIRMED) {
+        /* the height is read from a copy taken under the wallet lock (tx_read_snapshot_kat) */
+        BRTransaction *existing = BRWalletCopyTransactionForHash(g_wallet, h);
+        int pending = existing && existing->blockHeight == TX_UNCONFIRMED;
+        if (existing) BRTransactionFree(existing);
+        if (pending) {
             /* A server's height, not one this wallet proved: the record stays signature-checked. */
             BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
                                                (uint32_t)blockHeight, (uint32_t)blockTimestamp);
@@ -858,8 +865,10 @@ NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex) {
     jint type = 0;
     if (strlen(hashStr) == 64) {
         UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
-        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+        /* a copy taken under the wallet lock (tx_read_snapshot_kat) */
+        BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, hash);
         if (tx) type = BRDigiDollarTxType(tx);
+        if (tx) BRTransactionFree(tx);
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
     return type;
@@ -881,13 +890,19 @@ static int _ddEventPaysWallet(void *ctx, const BRTxOutput *output)
 static int _ddEventSpendsWallet(void *ctx, const BRTxInput *input, int64_t *ddCents)
 {
     BRWallet *wallet = (BRWallet *)ctx;
-    BRTransaction *spent = BRWalletTransactionForHash(wallet, input->txHash);
+    /* a copy taken under the wallet lock (tx_read_snapshot_kat); freed on every path */
+    BRTransaction *spent = BRWalletCopyTransactionForHash(wallet, input->txHash);
+    int pays = 0;
     *ddCents = -1;
-    if (! spent || input->index >= spent->outCount) return 0;
-    const BRTxOutput *output = &spent->outputs[input->index];
-    if (output->address[0] == '\0' || ! BRWalletContainsAddress(wallet, output->address)) return 0;
-    *ddCents = BRDigiDollarOutputAmount(spent, input->index);   /* -1: a DGB coin, not DigiDollar */
-    return 1;
+    if (spent && input->index < spent->outCount) {
+        const BRTxOutput *output = &spent->outputs[input->index];
+        if (output->address[0] != '\0' && BRWalletContainsAddress(wallet, output->address)) {
+            *ddCents = BRDigiDollarOutputAmount(spent, input->index);   /* -1: a DGB coin, not DigiDollar */
+            pays = 1;
+        }
+    }
+    if (spent) BRTransactionFree(spent);
+    return pays;
 }
 
 /* `[kind, cents, changeCents]` for the wallet-known tx with this display (BE) txid -- kind 0 (none),
@@ -904,11 +919,13 @@ NativeBridge_digiDollarEvent(JNIEnv *env, jobject thiz, jstring txHashHex) {
     DdEvent ev = { DD_EVENT_NONE, 0, 0 };
     if (strlen(hashStr) == 64) {
         UInt256 hash = UInt256Reverse(uint256(hashStr)); /* display BE -> internal LE */
-        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+        /* a copy taken under the wallet lock (tx_read_snapshot_kat) */
+        BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, hash);
         if (tx) {
             DdEventWallet wallet = { g_wallet, _ddEventPaysWallet, _ddEventSpendsWallet, NULL };
             ev = dd_event_of(tx, &wallet);
             known = 1;
+            BRTransactionFree(tx);
         }
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
