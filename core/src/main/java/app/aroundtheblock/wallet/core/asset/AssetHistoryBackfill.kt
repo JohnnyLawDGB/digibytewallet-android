@@ -69,7 +69,7 @@ class AssetHistoryBackfill(
                         decoded++
                         progressedThisBatch = true
                     } catch (e: Exception) {
-                        Log.w(TAG, "Decode failed for txid=${tx.txid}: ${e.message}")
+                        Log.w(TAG, "Decode failed for txid=${tx.txid.take(12)}: ${e.message}")
                     }
                 }
                 // If a batch came back non-empty but we couldn't update any

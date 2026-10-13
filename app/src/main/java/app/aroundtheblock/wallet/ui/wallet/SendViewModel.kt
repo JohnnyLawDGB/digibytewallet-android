@@ -304,11 +304,11 @@ class SendViewModel @Inject constructor(
                 val result = transactionBuilder.sendPrepared(prepared)
                 _sendState.value = when (result) {
                     is TxResult.Success -> if (result.delivery == Delivery.RELAYED) {
-                        android.util.Log.i(TAG, "send relayed: ${result.txid}")
+                        android.util.Log.i(TAG, "send relayed: ${result.txid.take(12)}")
                         SendState.Success(result.txid)
                     } else {
                         // Not "Sent": no peer has taken it yet. The wallet holds it and keeps publishing it.
-                        android.util.Log.w(TAG, "send broadcast, no peer has taken it yet: ${result.txid}")
+                        android.util.Log.w(TAG, "send broadcast, no peer has taken it yet: ${result.txid.take(12)}")
                         SendState.NotYetRelayed(result.txid)
                     }
                     is TxResult.Error -> {

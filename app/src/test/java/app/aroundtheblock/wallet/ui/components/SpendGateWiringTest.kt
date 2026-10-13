@@ -32,6 +32,7 @@ class SpendGateWiringTest {
         "hub/ChatView.kt" to listOf("viewModel.sendMessage"),                           // Hub chat message (identity signing)
         "hub/CreateThreadScreen.kt" to listOf("viewModel.createThread"),                // Hub forum thread (identity signing)
         "hub/ThreadDetailScreen.kt" to listOf("viewModel.replyToThread"),               // Hub forum reply (identity signing)
+        "hub/TipBottomSheet.kt" to listOf("digiScopeClient.sendTip"),                   // Hub tip (moves the DigiScope tip balance)
         "settings/NodePairConfirmScreen.kt" to listOf("viewModel.pairFromUri"),         // own-node pairing
     )
 

@@ -486,6 +486,8 @@
     <string name="did_auth_subtitle">Autentique-se para entrar em %1$s</string>
     <string name="hub_sign_title">Assinar publicação do Hub</string>
     <string name="hub_sign_subtitle">Autentique-se para assinar esta publicação com sua identidade</string>
+    <string name="hub_tip_auth_title">Enviar gorjeta do Hub</string>
+    <string name="hub_tip_auth_subtitle">Autentique-se para enviar esta gorjeta do seu saldo de gorjetas DigiScope</string>
     <string name="did_requesting">está solicitando autenticação Digi-ID</string>
     <string name="did_warning">Aviso</string>
     <string name="did_insecure">Conexão insegura</string>

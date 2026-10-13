@@ -96,7 +96,10 @@ interface UtxoDao {
     // a 0-quantity asset row and holds none of the asset.
     // Only backed rows (see AssetCredit): a quantity read from a transfer's instructions alone
     // is a claim, not a holding.
-    @Query("SELECT asset_id as assetId, SUM(asset_quantity) as totalQuantity, SUM(CASE WHEN asset_quantity > 0 THEN 1 ELSE 0 END) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_credit IN ('BACKED', 'VERIFIED') GROUP BY asset_id HAVING SUM(asset_quantity) > 0")
+    // The quantity is summed as its high and low 32 bits (see AssetBalance): SQLite's SUM() fails
+    // the whole query on a total past Long.MAX_VALUE, and this Flow feeds the Assets tab. The
+    // HAVING test is done in floating point, where SQLite never raises.
+    @Query("SELECT asset_id as assetId, SUM(asset_quantity >> 32) as highWords, SUM(asset_quantity & 4294967295) as lowWords, SUM(CASE WHEN asset_quantity > 0 THEN 1 ELSE 0 END) as utxoCount FROM utxos WHERE is_asset = 1 AND spent = 0 AND asset_credit IN ('BACKED', 'VERIFIED') GROUP BY asset_id HAVING SUM(asset_quantity >> 32) * 4294967296.0 + SUM(asset_quantity & 4294967295) > 0")
     fun getAssetBalances(): Flow<List<AssetBalance>>
 
     /** All asset rows of a given provenance (unspent + spent). Used by the
