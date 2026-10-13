@@ -35,6 +35,7 @@ internal class ScriptedServer(private val script: (Request) -> Answer) : Interce
         val body: String,
         val followsRedirects: Boolean,
         val followsSslRedirects: Boolean,
+        val authorization: String? = null,
     )
 
     val seen = mutableListOf<Seen>()
@@ -44,7 +45,7 @@ internal class ScriptedServer(private val script: (Request) -> Answer) : Interce
         val request = chain.request()
         val caller = (chain.call() as RealCall).client
         val sent = request.body?.let { body -> Buffer().also { body.writeTo(it) }.readUtf8() } ?: ""
-        seen += Seen(request.url, request.method, sent, caller.followRedirects, caller.followSslRedirects)
+        seen += Seen(request.url, request.method, sent, caller.followRedirects, caller.followSslRedirects, request.header("Authorization"))
         val answer = script(request)
         val body = TrackedBody(answer.body).also { answers += it }
         return Response.Builder()

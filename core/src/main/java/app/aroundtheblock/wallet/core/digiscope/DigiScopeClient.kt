@@ -618,9 +618,38 @@ class DigiScopeClient(
     fun getToken(): String? = jwtToken
     fun isLoggedIn(): Boolean = jwtToken != null
 
+    /**
+     * Ends the Hub session on the phone and on the server. The phone forgets the token first, so
+     * it is logged out whatever the network does; then the token is sent once to
+     * `POST /api/auth/logout`, which deletes the session, so a copy of the token made earlier
+     * stops working too. Not followed through a redirect. The answer is only closed: a failed
+     * revocation leaves the phone logged out all the same, and the session to expire on its own.
+     */
     fun logout() {
+        val token = jwtToken
         jwtToken = null
         tokenStore.clear()
+        if (!token.isNullOrBlank()) revokeSession(token)
+    }
+
+    private fun revokeSession(token: String) {
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/auth/logout")
+                .header("Authorization", "Bearer $token")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            digiIdClient.newCall(request).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    android.util.Log.w("DigiScope", "session revoke not delivered: ${e.javaClass.simpleName}")
+                }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use { if (!it.isSuccessful) android.util.Log.w("DigiScope", "session revoke answered ${it.code}") }
+                }
+            })
+        } catch (e: Exception) {
+            android.util.Log.w("DigiScope", "session revoke not sent: ${e.javaClass.simpleName}")
+        }
     }
 
     // ── JSON helpers ──────────────────────────────────────────────────────────
