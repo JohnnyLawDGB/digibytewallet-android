@@ -24,7 +24,7 @@ class ScanAndMarketStringsTest {
         "reconcile_spendable" to "Spendable",
         "reconcile_wallet_spendable" to "Wallet spendable balance",
         "reconcile_matches_wallet" to "Matches the wallet\\'s spendable balance.",
-        "reconcile_does_not_match_wallet" to "Does not match the wallet\\'s spendable balance — see below.",
+        "reconcile_does_not_match_wallet" to "Does not match the wallet\\'s spendable balance: see below.",
         "reconcile_held_asset" to "Held for a DigiAsset",
         "reconcile_held_unknown" to "Held: asset state unknown",
         "reconcile_proven_plain" to "Plain DGB, spendable after restart",

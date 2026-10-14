@@ -3,12 +3,12 @@
   French (fr).
 
   STATUS: machine-assisted, NOT yet reviewed by a native speaker. The strings marked WARNING in
-  values/strings_wallet.xml carry real financial consequence — "ne pourront pas être récupérés",
-  "peut prendre vos DGB", "les transactions sont irréversibles" — and must be checked by someone
+  values/strings_wallet.xml carry real financial consequence - "ne pourront pas être récupérés",
+  "peut prendre vos DGB", "les transactions sont irréversibles" - and must be checked by someone
   fluent before this ships to users. Everything else is ordinary UI text and is safe to iterate on.
 
   REGISTER: formal "vous" throughout, matching how French-language financial software addresses
-  its users. If the community prefers "tu", it is a mechanical change — but it must be changed
+  its users. If the community prefers "tu", it is a mechanical change - but it must be changed
   EVERYWHERE at once. A file that mixes the two reads as careless, and carelessness is not what
   you want a user feeling on the screen that shows them their recovery phrase.
 
@@ -23,11 +23,11 @@
     <string name="onb_recover">Récupérer un portefeuille existant</string>
     <string name="onb_footer">Portefeuille indépendant pour le réseau DigiByte (DGB)</string>
     <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
-    <string name="seed_screenshot_blocked">Les captures d\'écran sont bloquées. Notez ces mots — ils ne pourront pas être récupérés.</string>
+    <string name="seed_screenshot_blocked">Les captures d\'écran sont bloquées. Notez ces mots : ils ne pourront pas être récupérés.</string>
     <string name="seed_title">Votre phrase de récupération</string>
     <string name="seed_word_count">Phrase de récupération de %1$d mots</string>
     <string name="seed_never_share">Ne partagez jamais votre phrase de récupération</string>
-    <string name="seed_tip_paper">Écrivez-la sur papier — pas sous forme numérique</string>
+    <string name="seed_tip_paper">Écrivez-la sur papier : pas sous forme numérique</string>
     <string name="seed_tip_safe">Conservez-la dans un endroit sûr et privé</string>
     <string name="seed_tip_anyone">Quiconque connaît ces mots peut prendre vos DGB</string>
     <string name="seed_written_down">Je les ai notés</string>
@@ -42,7 +42,7 @@
     <string name="pin_backspace">Retour arrière</string>
     <string name="unlock_title">Saisir le code PIN</string>
     <string name="unlock_subtitle">Saisissez votre code PIN à 6 chiffres pour déverrouiller</string>
-    <string name="unlock_locked">Verrouillé — réessayez dans %1$s</string>
+    <string name="unlock_locked">Verrouillé : réessayez dans %1$s</string>
     <string name="unlock_unlocking">Déverrouillage…</string>
     <string name="unlock_biometrics_cd">Déverrouiller par biométrie</string>
     <string name="recover_title">Récupérer le portefeuille</string>
@@ -66,7 +66,7 @@
     <string name="pin_err_wallet">Échec de la création du portefeuille. Veuillez réessayer.</string>
     <string name="unlock_err_failed">Échec du déverrouillage. Veuillez réessayer.</string>
     <string name="unlock_device_lock_removed">Le verrouillage d’écran de votre appareil a été supprimé, la clé protégée du portefeuille est donc perdue. Restaurez le portefeuille avec votre phrase de récupération.</string>
-    <string name="unlock_wiping">Trop de tentatives échouées — effacement du portefeuille</string>
+    <string name="unlock_wiping">Trop de tentatives échouées : effacement du portefeuille</string>
     <string name="unlock_attempts_left">Code PIN incorrect. Tentatives restantes : %1$d</string>
     <string name="battery_title">Maintenir la synchronisation en arrière-plan</string>
     <string name="battery_body">Android peut mettre ce portefeuille en veille lorsque l\'écran est éteint, ce qui coupe sa connexion au réseau DigiByte et peut le bloquer à 0 pair jusqu\'à ce que vous le rouvriez.\n\nAutorisez-le à fonctionner sans restriction pour que la synchronisation continue.</string>
@@ -97,13 +97,13 @@
     <string name="wallet_price_via">via %1$s</string>
     <string name="wallet_testnet_active">Testnet actif</string>
     <string name="wallet_tor_active">Tor actif</string>
-    <string name="wallet_tor_hidden">Tor — votre IP reste masquée</string>
+    <string name="wallet_tor_hidden">Tor : votre IP reste masquée</string>
     <string name="wallet_disconnected_peers">Déconnecté · %1$d pairs</string>
-    <string name="wallet_history_gap">Trou dans l\'historique — certains blocs n\'ont pas été vérifiés</string>
+    <string name="wallet_history_gap">Trou dans l\'historique : certains blocs n\'ont pas été vérifiés</string>
     <string name="wallet_scan_missing">Rechercher les transactions manquantes</string>
     <string name="wallet_balance_refresh_failed">Échec de l\'actualisation du solde</string>
     <string name="wallet_reconcile_unreachable">Nous n\'avons pas pu joindre le nœud de réconciliation après cette mise à jour. Le solde affiché peut ne pas être à jour.</string>
-    <string name="wallet_tor_unavailable">Tor indisponible — connexions directes utilisées</string>
+    <string name="wallet_tor_unavailable">Tor indisponible : connexions directes utilisées</string>
     <string name="wallet_tor_timeout">Tor n\'a pas atteint le réseau à temps ; le portefeuille se connecte donc directement aux pairs pour cette session. Votre IP est visible par les pairs jusqu\'à ce que vous redémarriez l\'application.</string>
     <string name="wallet_node_offline">Votre nœud est hors ligne</string>
     <string name="wallet_node_offline_body">Le nœud associé est injoignable ou ne fournit pas de compact filters pour le moment. Vérifiez qu\'il fonctionne, qu\'il est joignable et que peerblockfilters=1 est défini.</string>
@@ -121,7 +121,7 @@
     <string name="receive_request_amount">Demander un montant précis (facultatif)</string>
     <string name="receive_amount_label">Montant</string>
     <string name="receive_qr_encodes">Le QR contient : %1$s</string>
-    <string name="receive_dd_note">Les DigiDollar sont reçus sous forme de jetons libellés en USD. Partagez cette adresse DigiDollar — le QR ne contient que l\'adresse (aucune demande de montant).</string>
+    <string name="receive_dd_note">Les DigiDollar sont reçus sous forme de jetons libellés en USD. Partagez cette adresse DigiDollar : le QR ne contient que l\'adresse (aucune demande de montant).</string>
     <string name="txd_title">Détails de la transaction</string>
     <string name="txd_not_found">Transaction introuvable</string>
     <string name="txd_sent">Envoyé</string>
@@ -142,12 +142,12 @@
     <string name="txd_from_address">Adresse de l\'expéditeur</string>
     <string name="txd_view_explorer">Voir dans l\'explorateur</string>
     <string name="txd_back_to_wallet">Retour au portefeuille</string>
-    <string name="wallet_sync_gap_headline">Analyse terminée — une partie de votre historique n\'est pas vérifiée</string>
+    <string name="wallet_sync_gap_headline">Analyse terminée : une partie de votre historique n\'est pas vérifiée</string>
     <string name="wallet_sync_connecting">Connexion au réseau DigiByte</string>
     <string name="wallet_sync_scanning">Recherche de vos transactions</string>
     <string name="wallet_sync_uptodate">À jour</string>
     <string name="wallet_sync_failed">Échec de la synchronisation</string>
-    <string name="wallet_sync_finishing">Finalisation — vérification des blocs récents</string>
+    <string name="wallet_sync_finishing">Finalisation : vérification des blocs récents</string>
     <string name="wallet_blocks_count">%1$s blocs</string>
     <string name="wallet_sync_progress_eta">%1$d%% terminé · %2$s · %3$s restant</string>
     <string name="wallet_sync_progress_no_eta">%1$d%% terminé · %2$s restant · estimation…</string>
@@ -165,7 +165,7 @@
     <string name="wallet_status_connecting">Connexion…</string>
     <string name="wallet_gap_range_between">blocs %1$s–%2$s</string>
     <string name="wallet_gap_range_below">blocs en dessous de %1$s</string>
-    <string name="wallet_gap_body">Une partie de votre historique (%1$s) n\'a pas pu être vérifiée auprès du parc de filtres — appuyez pour rechercher les transactions manquantes.</string>
+    <string name="wallet_gap_body">Une partie de votre historique (%1$s) n\'a pas pu être vérifiée auprès du parc de filtres : appuyez pour rechercher les transactions manquantes.</string>
     <string name="receive_address_unavailable">Adresse indisponible</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -211,11 +211,11 @@
     <string name="send_network_fee_row">Frais de réseau</string>
     <string name="send_fee_default">Par défaut</string>
     <string name="send_fee_custom">Personnalisés</string>
-    <string name="send_fee_below_min">⚠ Inférieurs aux frais de relais minimum — la transaction pourrait ne pas être diffusée</string>
+    <string name="send_fee_below_min">⚠ Inférieurs aux frais de relais minimum : la transaction pourrait ne pas être diffusée</string>
     <string name="send_fee_required">Frais requis</string>
     <string name="send_confirms_15s">Confirmée en ~15 secondes</string>
-    <string name="send_no_peers">Aucun pair DigiByte connecté — diffusion impossible pour le moment. Reconnexion…</string>
-    <string name="send_wait_for_sync">Attendez la fin de la synchronisation avant d\'envoyer — votre solde complet est encore en cours de récupération.</string>
+    <string name="send_no_peers">Aucun pair DigiByte connecté : diffusion impossible pour le moment. Reconnexion…</string>
+    <string name="send_wait_for_sync">Attendez la fin de la synchronisation avant d\'envoyer : votre solde complet est encore en cours de récupération.</string>
     <string name="send_broadcasting">Diffusion en cours…</string>
     <string name="send_review">Vérifier et envoyer</string>
     <string name="send_dialog_title">Confirmer la transaction</string>
@@ -234,7 +234,7 @@
     <string name="common_done">Terminé</string>
     <string name="send_hint_dgb">dgb1q… ou D…</string>
     <string name="game_score_submitted">Score envoyé !</string>
-    <string name="game_score_failed">Échec de l\'envoi du score — êtes-vous connecté ?</string>
+    <string name="game_score_failed">Échec de l\'envoi du score : êtes-vous connecté ?</string>
     <string name="game_close">Fermer le jeu</string>
     <string name="set_title">Paramètres</string>
     <string name="set_cat_security">Sécurité et confidentialité</string>
@@ -257,22 +257,22 @@
     <string name="set_recover_other_sub">Balayer les pièces d\'anciens chemins de dérivation vers ce portefeuille</string>
     <string name="set_cat_info">Informations</string>
     <string name="set_beta">Mises à jour bêta</string>
-    <string name="set_beta_on">Activées — des versions préliminaires vous seront proposées pour test</string>
-    <string name="set_beta_off">Désactivées — seules les versions stables sont proposées</string>
+    <string name="set_beta_on">Activées : des versions préliminaires vous seront proposées pour test</string>
+    <string name="set_beta_off">Désactivées : seules les versions stables sont proposées</string>
     <string name="set_about">À propos</string>
     <string name="set_about_sub">Version, licences, code ouvert</string>
     <string name="set_report_bug">Signaler un bug / donner un avis</string>
-    <string name="set_report_bug_sub">Envoyez un problème ou une idée — les infos d\'appareil et de version sont pré-remplies</string>
+    <string name="set_report_bug_sub">Envoyez un problème ou une idée : les infos d\'appareil et de version sont pré-remplies</string>
     <string name="set_cat_advanced">Avancé / Développeur</string>
-    <string name="set_net_testnet">Testnet — chaîne de test, même phrase de récupération</string>
-    <string name="set_net_mainnet">Mainnet — chaîne de production</string>
+    <string name="set_net_testnet">Testnet : chaîne de test, même phrase de récupération</string>
+    <string name="set_net_mainnet">Mainnet : chaîne de production</string>
     <string name="set_switch_testnet">Passer au Testnet ?</string>
     <string name="set_switch_mainnet">Passer au Mainnet ?</string>
     <string name="set_switch_testnet_body">L\'application va redémarrer et synchroniser la chaîne de test. Votre phrase de récupération reste inchangée.</string>
     <string name="set_switch_mainnet_body">L\'application va redémarrer et synchroniser la chaîne principale. Votre phrase de récupération reste inchangée.</string>
     <string name="set_restart">Redémarrer</string>
     <string name="lang_restart_note">Ce changement redémarre l\'écran du portefeuille. Vos pièces, votre phrase et vos paramètres restent intacts.</string>
-    <string name="lang_unreviewed_note">Les traductions sont récentes et n\'ont pas encore été vérifiées par des locuteurs natifs. Si quelque chose vous semble incorrect — surtout un avertissement concernant votre phrase de récupération ou vos pièces — signalez-le via Paramètres → Signaler un bug.</string>
+    <string name="lang_unreviewed_note">Les traductions sont récentes et n\'ont pas encore été vérifiées par des locuteurs natifs. Si quelque chose vous semble incorrect (surtout un avertissement concernant votre phrase de récupération ou vos pièces), signalez-le via Paramètres → Signaler un bug.</string>
     <string name="lang_selected">Sélectionnée</string>
     <string name="as_send_title">Envoyer un actif</string>
     <string name="as_broadcast">Transaction diffusée</string>
@@ -347,15 +347,15 @@
     <string name="rf_native_addr_note">Les fonds apparaîtront à votre adresse de réception native</string>
     <string name="rf_advanced_send">Avancé ▸ Envoyer à une autre adresse</string>
     <string name="rf_address_hint">Adresse DigiByte (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">Cette adresse n\'est PAS dans votre portefeuille — les balayages sont irréversibles</string>
+    <string name="rf_not_in_wallet">Cette adresse n\'est PAS dans votre portefeuille : les balayages sont irréversibles</string>
     <string name="rf_sweep">Balayer les fonds</string>
     <string name="rf_sweep_submitted">Balayage soumis</string>
     <string name="rf_will_appear">Les fonds récupérés apparaîtront une fois confirmés.</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">En attente de confirmation du réseau</string>
-    <string name="rf_held_assets">%1$d laissés en arrière — DigiAssets</string>
-    <string name="rf_held_assets_body">Ces pièces portent des DigiAssets et leur déplacement a échoué — elles sont donc restées dans l\'ancien portefeuille plutôt que d\'être balayées comme des DGB ordinaires, ce qui les aurait détruites. Relancez la récupération pour réessayer.</string>
-    <string name="rf_held_unknown">%1$d laissés en arrière — vérification impossible</string>
+    <string name="rf_held_assets">%1$d laissés en arrière : DigiAssets</string>
+    <string name="rf_held_assets_body">Ces pièces portent des DigiAssets et leur déplacement a échoué : elles sont donc restées dans l\'ancien portefeuille plutôt que d\'être balayées comme des DGB ordinaires, ce qui les aurait détruites. Relancez la récupération pour réessayer.</string>
+    <string name="rf_held_unknown">%1$d laissés en arrière : vérification impossible</string>
     <string name="rf_held_unknown_body">Nous n\'avons pas pu lire les transactions dont ces pièces proviennent, donc impossible de savoir si elles portent des DigiAssets. Elles ont été laissées intactes plutôt que risquées. Réessayer plus tard peut résoudre ce point.</string>
     <string name="rf_and_more">…et %1$d de plus</string>
     <string name="rf_something_wrong">Une erreur est survenue</string>
@@ -363,12 +363,12 @@
     <string name="rf_err_timeout">La requête a expiré. Réessayez avec une connexion plus stable.</string>
     <string name="rf_err_seed">La graine du portefeuille n\'a pas pu être chargée. Déverrouillez votre portefeuille et réessayez.</string>
     <string name="rf_err_lookup">Impossible de joindre le service de consultation. Réessayez plus tard.</string>
-    <string name="rf_err_generic">Une erreur est survenue — réessayez.</string>
+    <string name="rf_err_generic">Une erreur est survenue : réessayez.</string>
     <string name="rf_fail_unknown">Échec pour une raison inconnue.</string>
     <string name="rf_fail_no_utxos">Aucune sortie dépensable n\'a pu être associée à des clés de signature.</string>
     <string name="rf_fail_derive">Impossible de dériver les clés depuis la graine pour ce chemin.</string>
     <string name="rf_fail_broadcast">Échec de la diffusion de la transaction. Réessayez une fois connecté à des pairs.</string>
-    <string name="rf_fail_generic">Impossible de balayer celui-ci — réessayez.</string>
+    <string name="rf_fail_generic">Impossible de balayer celui-ci : réessayez.</string>
     <string name="rf_this_wallet">Ce portefeuille</string>
     <string name="rf_other_phrase">La phrase d\'un autre portefeuille</string>
     <string name="rf_other_phrase_body">Saisissez la phrase de récupération d\'un autre portefeuille pour déplacer ses fonds vers celui-ci. La phrase sert une seule fois à signer le transfert et n\'est jamais enregistrée.</string>
@@ -413,7 +413,7 @@
     <string name="ab_open_source">Code ouvert</string>
     <string name="ab_source_code">Code source</string>
     <string name="ab_licenses">Licences</string>
-    <string name="ab_licenses_sub">Licence MIT — code ouvert</string>
+    <string name="ab_licenses_sub">Licence MIT : code ouvert</string>
     <string name="ab_community">Infos sur le réseau DigiByte</string>
     <string name="ab_report_bug">Signaler un bug</string>
     <string name="sec_pin_auth">Code PIN et authentification</string>
@@ -424,16 +424,16 @@
     <string name="sec_biometric_no">Non disponible sur cet appareil</string>
     <string name="sec_autolock">Délai de verrouillage automatique</string>
     <string name="sec_wipe_after">Effacer après %1$d codes PIN erronés</string>
-    <string name="sec_wipe_after_on">Activé — le portefeuille est effacé après %1$d codes PIN erronés</string>
-    <string name="sec_wipe_after_off">Désactivé — protection supplémentaire contre la force brute sur le code PIN</string>
-    <string name="sec_wipe_after_body">Une fois activé, %1$d saisies consécutives d\'un code PIN incorrect effaceront DÉFINITIVEMENT ce portefeuille — graine, clés et historique — de cet appareil.\n\nC\'est irréversible sur l\'appareil. Vos fonds ne sont récupérables qu\'à partir de votre phrase de récupération.</string>
+    <string name="sec_wipe_after_on">Activé : le portefeuille est effacé après %1$d codes PIN erronés</string>
+    <string name="sec_wipe_after_off">Désactivé : protection supplémentaire contre la force brute sur le code PIN</string>
+    <string name="sec_wipe_after_body">Une fois activé, %1$d saisies consécutives d\'un code PIN incorrect effaceront DÉFINITIVEMENT ce portefeuille (graine, clés et historique) de cet appareil.\n\nC\'est irréversible sur l\'appareil. Vos fonds ne sont récupérables qu\'à partir de votre phrase de récupération.</string>
     <string name="sec_wipe_after_ack">Ma phrase de récupération est sauvegardée</string>
     <string name="sec_wipe_after_enabled">Effacement après %1$d activé</string>
     <string name="sec_recovery_phrase">Phrase de récupération</string>
     <string name="sec_view_phrase">Afficher la phrase de récupération</string>
     <string name="sec_view_phrase_sub">Nécessite le code PIN + une vérification biométrique</string>
     <string name="sec_view_phrase_body">Votre phrase de récupération donne un accès complet à votre portefeuille.\n\n• Ne la partagez jamais avec personne\n• Ne la saisissez jamais sur un site web\n• Conservez-la hors ligne en lieu sûr\n\nPoursuivre nécessite une authentification par code PIN + biométrie.</string>
-    <string name="sec_understand">J\'ai compris — continuer</string>
+    <string name="sec_understand">J\'ai compris : continuer</string>
     <string name="sec_danger_zone">Zone dangereuse</string>
     <string name="sec_wipe_wallet">Effacer le portefeuille</string>
     <string name="sec_wipe_wallet_sub">Supprimer toutes les données du portefeuille de cet appareil</string>
@@ -495,7 +495,7 @@
     <string name="ni_state_synced">Synchronisé</string>
     <string name="ni_state_error">Erreur</string>
     <string name="ni_caught_up">À jour</string>
-    <string name="ni_tor_disabled">Désactivé — connexion directe</string>
+    <string name="ni_tor_disabled">Désactivé : connexion directe</string>
     <string name="ni_tor_starting">Démarrage…</string>
     <string name="ni_tor_connecting">Connexion au réseau Tor…</string>
     <string name="ni_tor_connected">Connecté via le port %1$d</string>
@@ -503,7 +503,7 @@
     <string name="ni_node_serving">✓ Fournit des compact filters</string>
     <string name="ni_node_connecting">Connexion…</string>
     <string name="ni_node_unreachable">⚠ Injoignable / ne fournit pas de filtres</string>
-    <string name="sec_locked_countdown">Verrouillé — réessayez dans %1$s</string>
+    <string name="sec_locked_countdown">Verrouillé : réessayez dans %1$s</string>
     <string name="sec_autolock_1m">1 minute</string>
     <string name="sec_autolock_5m">5 minutes</string>
     <string name="sec_autolock_15m">15 minutes</string>
@@ -514,16 +514,16 @@
     <string name="sec_biometric_required">Authentification biométrique requise</string>
     <string name="did_logged_in">Vous êtes maintenant connecté à %1$s</string>
     <string name="ab_type_value">Portefeuille HD (BIP84)</string>
-    <string name="ab_type_desc">Portefeuille déterministe hiérarchique créé à partir d\'une phrase de récupération. Il peut générer de nombreuses adresses à partir d\'une seule sauvegarde — comme disposer d\'un nombre illimité de numéros de compte à partir d\'une clé maîtresse unique.</string>
+    <string name="ab_type_desc">Portefeuille déterministe hiérarchique créé à partir d\'une phrase de récupération. Il peut générer de nombreuses adresses à partir d\'une seule sauvegarde : comme disposer d\'un nombre illimité de numéros de compte à partir d\'une clé maîtresse unique.</string>
     <string name="ab_path_desc">Le chemin de dérivation utilisé pour générer vos adresses. 84 = norme BIP84, 20 = type de pièce DigiByte (SLIP44), 0 = premier compte. Cela garantit que tout portefeuille compatible BIP84 peut restaurer vos adresses à partir de la même phrase de récupération. Compatible avec l\'outil BIP39 d\'Ian Coleman.</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">Utilise des adresses SegWit modernes commençant par dgb1. Elles sont plus efficaces et entraînent des frais plus faibles que les anciennes adresses Legacy commençant par D.</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">Le mainnet est le vrai réseau DigiByte, où les DGB ont une valeur réelle. Le testnet permet aux développeurs de tester sans argent réel.</string>
     <string name="ab_security_value">Auto-conservation</string>
-    <string name="ab_security_desc">Vos clés ne quittent jamais cet appareil. Aucune entreprise ni aucun serveur ne détient vos fonds — vous seul contrôlez votre portefeuille. Si vous perdez votre phrase de récupération, personne ne pourra la retrouver à votre place.</string>
+    <string name="ab_security_desc">Vos clés ne quittent jamais cet appareil. Aucune entreprise ni aucun serveur ne détient vos fonds : vous seul contrôlez votre portefeuille. Si vous perdez votre phrase de récupération, personne ne pourra la retrouver à votre place.</string>
     <string name="ab_sync_value">SPV (compact filters)</string>
-    <string name="ab_sync_desc">Simplified Payment Verification — synchronisation directe avec le réseau P2P DigiByte sans télécharger toute la blockchain. Utilise les compact block filters BIP157/158 : votre portefeuille télécharge les filtres et les vérifie sur l\'appareil, de sorte que les adresses que vous possédez ne quittent jamais votre téléphone.</string>
+    <string name="ab_sync_desc">Simplified Payment Verification : synchronisation directe avec le réseau P2P DigiByte sans télécharger toute la blockchain. Utilise les compact block filters BIP157/158 : votre portefeuille télécharge les filtres et les vérifie sur l\'appareil, de sorte que les adresses que vous possédez ne quittent jamais votre téléphone.</string>
     <string name="ab_security_build">Chiffrement de la graine AES-256-GCM, Keystore matériel</string>
     <string name="ab_core_value">9.26 (nœud SPV)</string>
     <string name="ab_mit">Ce logiciel est fourni sous licence MIT.</string>
@@ -534,17 +534,17 @@
     <string name="tx_conf_short">%1$d conf.</string>
     <string name="tx_confirmed">Confirmée</string>
     <string name="cur_title">Devise d\'affichage</string>
-    <string name="cur_note">Votre solde DigiByte reste toujours le vrai — ceci change seulement ce à quoi il est comparé.</string>
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
-    <string name="pass_advanced">Avancé — ajouter une phrase secrète</string>
+    <string name="cur_note">Votre solde DigiByte reste toujours le vrai : ceci change seulement ce à quoi il est comparé.</string>
+    <string name="dsp_currency_subtitle">%1$s : %2$s</string>
+    <string name="pass_advanced">Avancé : ajouter une phrase secrète</string>
     <string name="pass_optional">Facultatif</string>
-    <string name="pass_what">Une phrase secrète est un mot ou une phrase supplémentaire de votre choix. Avec elle, votre phrase de récupération seule ne suffit plus à ouvrir ce portefeuille — quelqu\'un qui trouverait les mots écrits ne pourrait pas dépenser vos pièces.</string>
-    <string name="pass_warn">Notez la phrase secrète, mais conservez-la SÉPARÉMENT de votre phrase de récupération — rangées au même endroit, elles ne forment à nouveau qu\'un seul secret et la phrase secrète ne protège plus rien. Si vous la perdez, ces mots seuls ne restaureront PAS votre portefeuille, et personne ne pourra le récupérer à votre place.</string>
+    <string name="pass_what">Une phrase secrète est un mot ou une phrase supplémentaire de votre choix. Avec elle, votre phrase de récupération seule ne suffit plus à ouvrir ce portefeuille : quelqu\'un qui trouverait les mots écrits ne pourrait pas dépenser vos pièces.</string>
+    <string name="pass_warn">Notez la phrase secrète, mais conservez-la SÉPARÉMENT de votre phrase de récupération : rangées au même endroit, elles ne forment à nouveau qu\'un seul secret et la phrase secrète ne protège plus rien. Si vous la perdez, ces mots seuls ne restaureront PAS votre portefeuille, et personne ne pourra le récupérer à votre place.</string>
     <string name="pass_scope">Ceci protège votre sauvegarde écrite. Sur ce téléphone, c\'est toujours votre code PIN qui verrouille le portefeuille.</string>
     <string name="pass_enter">Phrase secrète</string>
     <string name="pass_confirm">Confirmer la phrase secrète</string>
     <string name="pass_mismatch">Les phrases secrètes ne correspondent pas</string>
-    <string name="pass_too_long">Trop longue — %1$d caractères maximum</string>
+    <string name="pass_too_long">Trop longue : %1$d caractères maximum</string>
     <string name="pass_set">Phrase secrète définie</string>
     <string name="pass_none">Aucune phrase secrète</string>
     <string name="pass_restore_label">Phrase secrète (laissez vide si vous n\'en avez pas utilisé)</string>
@@ -556,7 +556,7 @@
     <string name="rf_move_assets_body">Utilise les DGB conservés ci-dessus pour envoyer les actifs vers ce portefeuille. Les transferts d\'actifs sont irréversibles.</string>
     <string name="rf_moving_assets">Déplacement des actifs…</string>
     <string name="rf_move_result">%1$d actifs sur %2$d déplacés</string>
-    <string name="rf_move_failed">%1$s — non déplacé : %2$s</string>
+    <string name="rf_move_failed">%1$s, non déplacé : %2$s</string>
     <string name="pass_screen_title">Ajouter une phrase secrète ?</string>
     <string name="pass_screen_subtitle">Facultatif, et la plupart des gens devraient passer cette étape. Une phrase secrète est un mot ou une phrase supplémentaire de votre choix, sans lequel votre phrase de récupération seule ne peut plus ouvrir ce portefeuille.</string>
     <string name="pass_screen_continue_with">Continuer avec une phrase secrète</string>
@@ -572,12 +572,12 @@
     <string name="send_fail_amount">Saisissez un montant supérieur à zéro.</string>
     <string name="send_fail_unknown">La transaction n\'a pas pu être envoyée.</string>
     <string name="send_fail_try_again">Réessayer</string>
-    <string name="rf_splitting_for_assets">Préparation du déplacement de %1$d DigiAssets — vos DGB sont répartis pour que chacun puisse payer ses propres frais de transfert. Attente d\'une confirmation, généralement moins d\'une minute.</string>
+    <string name="rf_splitting_for_assets">Préparation du déplacement de %1$d DigiAssets : vos DGB sont répartis pour que chacun puisse payer ses propres frais de transfert. Attente d\'une confirmation, généralement moins d\'une minute.</string>
     <string name="rf_nothing_moved">Rien n’a été déplacé</string>
-    <string name="rf_dd_fee_floor">Nécessite %1$s de frais de réseau — ce portefeuille a %2$s.</string>
+    <string name="rf_dd_fee_floor">Nécessite %1$s de frais de réseau : ce portefeuille a %2$s.</string>
     <string name="rf_dd_found">%1$s en DigiDollar trouvés</string>
     <string name="rf_dd_moved">%1$s en DigiDollar déplacés vers ce portefeuille</string>
-    <string name="rf_dd_left_behind">%1$s en DigiDollar sont restés — ils n\'ont pas pu être déplacés</string>
+    <string name="rf_dd_left_behind">%1$s en DigiDollar sont restés : ils n\'ont pas pu être déplacés</string>
     <string name="rf_dd_unreachable">Impossible de vérifier les DigiDollar ; ce portefeuille en détient peut-être</string>
     <string name="as_rules_checking">Vérification des règles de transfert de cet actif…</string>
     <string name="as_rules_bound_title">Cet actif a des règles de transfert</string>
@@ -607,7 +607,7 @@
     <string name="reconcile_spendable">Dépensable</string>
     <string name="reconcile_wallet_spendable">Solde dépensable du portefeuille</string>
     <string name="reconcile_matches_wallet">Correspond au solde dépensable du portefeuille.</string>
-    <string name="reconcile_does_not_match_wallet">Ne correspond pas au solde dépensable du portefeuille — voir ci-dessous.</string>
+    <string name="reconcile_does_not_match_wallet">Ne correspond pas au solde dépensable du portefeuille : voir ci-dessous.</string>
     <string name="reconcile_held_asset">Retenu pour un DigiAsset</string>
     <string name="reconcile_held_unknown">Retenu : état de l\'actif inconnu</string>
     <string name="reconcile_proven_plain">DGB ordinaire, dépensable après redémarrage</string>
@@ -624,7 +624,7 @@
     <string name="market_tor_notice_body">Le Marché ne passe pas par Tor ; le site verra votre adresse IP.</string>
     <string name="market_tor_notice_continue">Continuer</string>
     <string name="restore_pass_toggle">J’ai utilisé une phrase secrète</string>
-    <string name="restore_pass_body">Uniquement si vous en avez ajouté une en créant ce portefeuille. Une phrase secrète erronée ouvre un autre portefeuille, vide — sans aucun message d’erreur.</string>
+    <string name="restore_pass_body">Uniquement si vous en avez ajouté une en créant ce portefeuille. Une phrase secrète erronée ouvre un autre portefeuille, vide : sans aucun message d’erreur.</string>
 
     <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
          WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
@@ -636,7 +636,7 @@
     <string name="restore_err_invalid_words">Mot(s) invalide(s) : %1$s</string>
     <string name="restore_err_checksum">Cette phrase de récupération n’est pas valide. Vérifiez chaque mot et leur ordre.</string>
     <string name="restore_scan_title">Restaurer en toute confidentialité</string>
-    <string name="restore_scan_body">Une fois que vous continuez, ce téléphone retrouve lui-même les transactions de votre portefeuille — adresses natives (dgb1q…), legacy (D…), Taproot et DigiDollar — sans envoyer vos adresses à qui que ce soit.</string>
+    <string name="restore_scan_body">Une fois que vous continuez, ce téléphone retrouve lui-même les transactions de votre portefeuille: adresses natives (dgb1q…), legacy (D…), Taproot et DigiDollar, sans envoyer vos adresses à qui que ce soit.</string>
     <string name="restore_other_title">Phrase issue d’une autre application de portefeuille ?</string>
     <string name="restore_other_body">Coinomi, Ledger, Trezor et certains anciens portefeuilles conservent les pièces sur des formats d’adresse que ce portefeuille n’utilise pas, la synchronisation ne peut donc pas les voir. Une vérification peut les trouver, mais elle envoie les adresses dérivées de votre phrase à DigiScope (api.digiscope.me), qui signale les fonds qu’elles détiennent. Inutile pour une phrase issue de ATB Wallet ou de l’ancienne appli DigiByte. Vous pouvez aussi la lancer plus tard depuis Paramètres → Récupérer les fonds d’un autre portefeuille.</string>
     <string name="restore_other_check">Vérifier d’autres formats</string>
@@ -654,8 +654,8 @@
     </plurals>
     <string name="restore_unreachable_body">La vérification n’a pas pu s’exécuter. La synchronisation trouvera tout de même les formats propres à ce portefeuille une fois que vous continuez ; réessayez, ou utilisez plus tard Paramètres → Récupérer les fonds d’un autre portefeuille pour les formats d’autres applications.</string>
     <string name="restore_none_body">Rien de non dépensé sur les formats vérifiés. La synchronisation trouvera tout de même les transactions propres à ce portefeuille une fois que vous continuez.</string>
-    <string name="restore_nonnative_note">%1$s DGB se trouvent sur le format d’adresse d’une autre application. Après la restauration, vous serez dirigé vers Récupérer les fonds d’un autre portefeuille pour les transférer dans ce portefeuille — rien n’est déplacé tant que vous n’avez pas confirmé là-bas.</string>
-    <string name="restore_pass_nothing_found">Rien n’a été trouvé avec la phrase secrète saisie. Une phrase secrète n’a pas de somme de contrôle : une phrase erronée ouvre un autre portefeuille, vide, sans aucune erreur. Vérifiez qu’elle ne contient pas de faute de frappe — ou, si vous n’en avez pas défini à la création du portefeuille, revenez en arrière et fermez le champ de la phrase secrète.</string>
+    <string name="restore_nonnative_note">%1$s DGB se trouvent sur le format d’adresse d’une autre application. Après la restauration, vous serez dirigé vers Récupérer les fonds d’un autre portefeuille pour les transférer dans ce portefeuille : rien n’est déplacé tant que vous n’avez pas confirmé là-bas.</string>
+    <string name="restore_pass_nothing_found">Rien n’a été trouvé avec la phrase secrète saisie. Une phrase secrète n’a pas de somme de contrôle : une phrase erronée ouvre un autre portefeuille, vide, sans aucune erreur. Vérifiez qu’elle ne contient pas de faute de frappe, ou, si vous n’en avez pas défini à la création du portefeuille, revenez en arrière et fermez le champ de la phrase secrète.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d adresse analysée</item>
         <item quantity="many">%1$s · %2$d adresses analysées</item>
@@ -664,8 +664,8 @@
     <string name="restore_date_title">Quand avez-vous créé ce portefeuille ?</string>
     <string name="restore_date_body">Cela nous permet d’éviter une analyse inutile de la blockchain et de synchroniser plus vite.</string>
     <string name="restore_date_unsure">Je ne m’en souviens pas</string>
-    <string name="restore_date_unsure_sub">Analyse complète de la blockchain (la plus lente — à choisir en cas de doute)</string>
-    <string name="restore_date_warning">Les transactions antérieures à l’année sélectionnée ne seront pas détectées. Si votre portefeuille peut avoir un historique plus ancien, choisissez une année antérieure — ou « Je ne m’en souviens pas » pour une couverture complète (plus lent).</string>
+    <string name="restore_date_unsure_sub">Analyse complète de la blockchain (la plus lente : à choisir en cas de doute)</string>
+    <string name="restore_date_warning">Les transactions antérieures à l’année sélectionnée ne seront pas détectées. Si votre portefeuille peut avoir un historique plus ancien, choisissez une année antérieure, ou « Je ne m’en souviens pas » pour une couverture complète (plus lent).</string>
     <string name="restore_date_start">Lancer la récupération</string>
     <string name="restore_date_restoring">Restauration du portefeuille…</string>
     <string name="restore_date_onwards">À partir de janv. %1$d</string>
