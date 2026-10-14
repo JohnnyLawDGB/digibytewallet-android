@@ -46,5 +46,5 @@
     <color name="keyboard_text_color">#9c9eb9</color>
 
     <!-- Adaptive launcher icon background: ATB orange, behind the white "ATB" block mark. -->
-    <color name="ic_launcher_background">#F06A1D</color>
+    <color name="ic_launcher_background">#0066CC</color>
 </resources>
