@@ -22,8 +22,7 @@ import java.io.File
  * Adding them up never fails and never wraps: the total stops at Long.MAX_VALUE.
  *
  * SQLite's SUM() over integers fails the query past that limit instead, and the asset list's Flow has
- * no handler for it, so the fallback query must not SUM a quantity column directly (the host
- * check `audit/evidence/train-e/e5-f5/asset_sum_sqlite.py` runs the query itself on SQLite).
+ * no handler for it, so the fallback query must not SUM a quantity column directly.
  */
 class AssetQuantitySumTest {
     private val utxoDao = mockk<UtxoDao>(relaxed = true)
