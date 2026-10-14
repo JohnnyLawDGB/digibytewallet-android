@@ -212,6 +212,9 @@ seed** in a way not described here is new, and is assessed as new.
   report that it can be avoided, or that it loses funds, is not.
 - **Chain trust.** Choosing between competing chains by accumulated work, and cross-checking the
   data one peer serves against others, are scheduled structural changes.
+- **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
+  is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
+  A clearer message and a way to consolidate coins are planned.
 - **DigiDollar sends and Dandelion.** DigiDollar sends do not use Dandelion++ stem routing.
   Dandelion is off by default.
 - **Confirmations and recovery screens.** A user-initiated way to cancel a send stuck
@@ -361,6 +364,7 @@ not listed. Anonymity, or no answer, never affects payment.*
   public" (half the tier for the first external report). The scope rule is stated once instead
   of twice. The io.digibyte signing-lineage item corrected. Hall of Fame populated with the
   names of researchers who gave permission.
-- **4.1.0 — target moved; known-issue rule changed.** Bounty target DigiByte Mobile 4.1.0
-  (4.0.89 overlaps for 14 days). From 2026-10-13 a report of something already known to us earns
-  credit, not a reward. A published list of what is being addressed for 4.1.1.
+- **2026-10-13 — Known-to-us earns credit.** From 2026-10-13 a report of something already known
+  to us earns credit, not a reward. Reports received earlier keep the half-tier rule.
+- **4.1.0 — target moved.** Bounty target DigiByte Mobile 4.1.0 (4.0.89 overlaps for 14 days). A
+  published list of what is being addressed for 4.1.1.
