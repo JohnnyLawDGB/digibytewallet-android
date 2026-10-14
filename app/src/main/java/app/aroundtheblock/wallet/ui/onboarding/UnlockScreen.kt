@@ -382,7 +382,7 @@ fun UnlockScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                DigiByteLogoHeader()
+                AtbLogoHeader()
 
                 Spacer(Modifier.height(40.dp))
 

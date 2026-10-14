@@ -22,8 +22,8 @@
     <string name="onb_words_count">%1$d words</string>
     <string name="onb_create">Create New Wallet</string>
     <string name="onb_recover">Recover Existing Wallet</string>
-    <string name="onb_footer">DigiByte — Secure, Fast, Decentralized</string>
-    <string name="app_name_display">DigiByte Mobile</string>
+    <string name="onb_footer">Independent wallet for the DigiByte (DGB) network</string>
+    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
 
     <!-- ── Seed display ─────────────────────────────────────────────────────────── -->
     <!-- WARNING: "cannot be recovered" is the whole point. Do not soften it. -->
@@ -99,7 +99,7 @@
     <!-- Appended to battery_body on Samsung devices only. Device Care, Battery and the quoted
          setting name are Samsung\'s own UI labels — match the wording Samsung ships in that
          language, or the user cannot find the screen being described. -->
-    <string name="battery_body_samsung">\n\nOn Samsung, also open Device Care → Battery → \"Never sleeping apps\" and add DigiByte Mobile.</string>
+    <string name="battery_body_samsung">\n\nOn Samsung, also open Device Care → Battery → \"Never sleeping apps\" and add ATB Wallet.</string>
     <string name="battery_open_settings">Open settings</string>
 
     <!-- ── Tor prompt ───────────────────────────────────────────────────────────── -->
@@ -515,7 +515,7 @@
     <string name="ab_source_code">Source Code</string>
     <string name="ab_licenses">Licenses</string>
     <string name="ab_licenses_sub">MIT License — open source</string>
-    <string name="ab_community">DigiByte Community</string>
+    <string name="ab_community">DigiByte network info</string>
     <string name="ab_report_bug">Report a Bug</string>
 
     <!-- ── Security settings ────────────────────────────────────────────────────── -->
@@ -655,6 +655,9 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">This software is provided under the MIT License.</string>
     <string name="ab_tagline">DigiByte is a decentralized blockchain and digital currency.</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Independent wallet by Around The Block LLC; not affiliated with or endorsed by the DigiByte Foundation, DigiByte Alliance or DigiByte-Core.</string>
+    <string name="ab_website">Around The Block website</string>
 
     <!-- ── Activity list row ────────────────────────────────────────────────────────
          The most-read component in the app: every transaction on the home screen. -->
@@ -789,7 +792,7 @@
     <string name="restore_scan_title">Restore privately</string>
     <string name="restore_scan_body">After you continue, this phone finds your wallet\'s transactions itself — native (dgb1q…), legacy (D…), Taproot and DigiDollar addresses — without sending your addresses to anyone.</string>
     <string name="restore_other_title">Phrase from a different wallet app?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from DigiByte Mobile or the older DigiByte Wallet app. You can also run it later from Settings → Recover funds.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from ATB Wallet or the older DigiByte app. You can also run it later from Settings → Recover funds.</string>
     <string name="restore_other_check">Check other formats</string>
     <string name="restore_scan_deriving">Deriving addresses…</string>
     <string name="restore_scan_duration">This can take 30-90 seconds depending on the node.</string>

@@ -19,7 +19,7 @@ class BiometricAuth {
 
     suspend fun authenticate(
         activity: FragmentActivity,
-        title: String = "DigiByte Mobile",
+        title: String = "ATB Wallet",
         subtitle: String = "Authenticate to continue",
         negativeButtonText: String = "Use PIN"
     ): BiometricResult = suspendCancellableCoroutine { cont ->
@@ -59,7 +59,7 @@ class BiometricAuth {
      */
     suspend fun authenticateDeviceCredential(
         activity: FragmentActivity,
-        title: String = "DigiByte Mobile",
+        title: String = "ATB Wallet",
         subtitle: String = "Confirm your device lock to unlock the wallet key",
     ): BiometricResult = suspendCancellableCoroutine { cont ->
         val executor = ContextCompat.getMainExecutor(activity)

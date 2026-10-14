@@ -63,6 +63,7 @@ fun SecuritySettingsScreen(
     // Hoisted: used inside click/callback lambdas, which are not composable.
     val wipeEnabledMsg = stringResource(R.string.sec_wipe_after_enabled, PinManager.WIPE_THRESHOLD)
     val authViewPhraseMsg = stringResource(R.string.sec_auth_view_phrase)
+    val appName = stringResource(R.string.app_name)
     val incorrectPinMsg = stringResource(R.string.sec_incorrect_pin)
     val context = LocalContext.current
     val activity = context as? FragmentActivity
@@ -413,7 +414,7 @@ fun SecuritySettingsScreen(
                                             if (activity != null && biometricAvailable) {
                                                 val result = biometricAuth.authenticate(
                                                     activity,
-                                                    title = "DigiByte Mobile",
+                                                    title = appName,
                                                     subtitle = authViewPhraseMsg
                                                 )
                                                 if (result is BiometricResult.Success) {
