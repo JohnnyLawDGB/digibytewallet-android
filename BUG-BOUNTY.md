@@ -2,9 +2,9 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **DigiByte Mobile 4.0.90** (`app.aroundtheblock.wallet`), from its release date.
+**Bounty target:** **DigiByte Mobile 4.1.0** (`app.aroundtheblock.wallet`), from its release date.
 4.0.89 stays in scope for **14 days** after that date under the overlap rule below. Before you
-start, read "Known issues being addressed for 4.0.91" below: those are already on our list.
+start, read "Known issues being addressed for 4.1.1" below: those are already on our list.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
 reports earn named credit rather than payment; please read the tiers before spending time on a
@@ -32,7 +32,7 @@ DigiByte Mobile release and name its exact version.
 | Asset | Where to get it |
 |-------|-----------------|
 | DigiByte Mobile from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-v4.0.90.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.0.90 |
+| `aroundtheblock-wallet-v4.1.0.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.0 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
@@ -198,7 +198,7 @@ _The half-tier rule was applied from the 2026-10 waves but was not written here 
 after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
 2026-10-13 as above._
 
-### Known issues being addressed for 4.0.91
+### Known issues being addressed for 4.1.1
 
 These are on our list for the next release. A report that only restates one of them is a
 duplicate: credit, no payment. A report that shows one of them reaching **DGB, DigiDollar or the
@@ -208,7 +208,7 @@ seed** in a way not described here is new, and is assessed as new.
   (unrecognised instructions, several asset carriers in one transaction, issuance with transfer
   rules, transfers whose result cannot be decided from the transaction alone) are handled by
   holding the affected outputs rather than spending them. The wallet fails closed: such an output
-  can show as unspendable until 4.0.91 settles it. A report that the hold happens is known; a
+  can show as unspendable until 4.1.1 settles it. A report that the hold happens is known; a
   report that it can be avoided, or that it loses funds, is not.
 - **Chain trust.** Choosing between competing chains by accumulated work, and cross-checking the
   data one peer serves against others, are scheduled structural changes.
@@ -361,6 +361,6 @@ not listed. Anonymity, or no answer, never affects payment.*
   public" (half the tier for the first external report). The scope rule is stated once instead
   of twice. The io.digibyte signing-lineage item corrected. Hall of Fame populated with the
   names of researchers who gave permission.
-- **4.0.90 — target moved; known-issue rule changed.** Bounty target DigiByte Mobile 4.0.90
+- **4.1.0 — target moved; known-issue rule changed.** Bounty target DigiByte Mobile 4.1.0
   (4.0.89 overlaps for 14 days). From 2026-10-13 a report of something already known to us earns
-  credit, not a reward. A published list of what is being addressed for 4.0.91.
+  credit, not a reward. A published list of what is being addressed for 4.1.1.
