@@ -91,7 +91,8 @@ object ForeignAssetFanOut {
      * @param assetCount    asset-bearing outpoints that need to move.
      * @param plainInputs   spendable plain-DGB outpoints. Never asset-bearing — the caller passes
      *                      [SweepPartition]'s sweepable set, so an asset can never be split up.
-     * @param sourceAddress an address of the wallet being recovered. Every output pays here.
+     * @param sourceAddress an address of the wallet being recovered. Every output pays here. The
+     *                      caller reads it from the seed's derived set, never from a lookup row.
      * @param unreadInputs  plain outpoints ("txid:vout") the caller left out of [plainInputs]
      *                      because the transaction each came from could not be read. They are
      *                      never spent here; a refusal names them, so "this wallet has no DGB"

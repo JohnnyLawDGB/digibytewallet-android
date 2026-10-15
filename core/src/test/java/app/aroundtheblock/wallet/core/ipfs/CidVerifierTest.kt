@@ -95,6 +95,45 @@ class CidVerifierTest {
     }
 
     // -------------------------------------------------------------------------
+    // Hash functions: a CID verifies only under a function the verifier computes as named
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `a SHA-1 multihash is unverifiable even when its digest matches`() {
+        // 0x11 = sha1. A match under a broken hash says nothing about which content it was.
+        val cid = buildCidV1Base32(knownContent, code = 0x11, algorithm = "SHA-1")
+        assertFalse("a SHA-1 CID whose digest matches verified", verifier.verify(cid, knownContent))
+        assertNull(verifier.extractHashAlgorithm(cid))
+    }
+
+    @Test
+    fun `code 0x14 is sha3-512, so a SHA-512 digest filed under it does not verify`() {
+        // multicodec: 0x13 = sha2-512, 0x14 = sha3-512. Hashing 0x14 with SHA-512 made a CID that
+        // names one function verify against another.
+        val cid = buildCidV1Base32(knownContent, code = 0x14, algorithm = "SHA-512")
+        assertFalse("a CID naming sha3-512 verified against a SHA-512 digest", verifier.verify(cid, knownContent))
+        assertNull(verifier.extractHashAlgorithm(cid))
+    }
+
+    @Test
+    fun `a sha3-512 CID is unverifiable, like every code the verifier does not compute`() {
+        val sha3 = buildCidV1Base32(knownContent, code = 0x14, algorithm = "SHA3-512")
+        assertFalse(verifier.verify(sha3, knownContent))
+        // 0x16 = sha3-256: an unknown code, the path 0x11 and 0x14 now take
+        val unknown = buildCidV1Base32(knownContent, code = 0x16, algorithm = "SHA3-256")
+        assertNull(verifier.extractHashAlgorithm(unknown))
+        assertFalse(verifier.verify(unknown, knownContent))
+    }
+
+    @Test
+    fun `sha2-512 (0x13) verifies`() {
+        val cid = buildCidV1Base32(knownContent, code = 0x13, algorithm = "SHA-512")
+        assertEquals("SHA-512", verifier.extractHashAlgorithm(cid))
+        assertTrue(verifier.verify(cid, knownContent))
+        assertFalse(verifier.verify(cid, "Wrong content".toByteArray(Charsets.UTF_8)))
+    }
+
+    // -------------------------------------------------------------------------
     // Edge cases
     // -------------------------------------------------------------------------
 
@@ -128,10 +167,12 @@ class CidVerifierTest {
     /**
      * Build a CIDv1 with base32 multibase:
      *   'b' + base32( version(1) + codec(0x55 = raw) + multihash )
+     * The multihash names [code] and carries [algorithm]'s digest of [content] (sha2-256 by default).
      */
-    private fun buildCidV1Base32(content: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(content)
-        val multihash = byteArrayOf(0x12.toByte(), 0x20.toByte()) + digest
+    private fun buildCidV1Base32(content: ByteArray, code: Int = 0x12, algorithm: String = "SHA-256"): String {
+        val digest = MessageDigest.getInstance(algorithm).digest(content)
+        // multihash = function code + digest length + digest (each code and length here < 0x80: one varint byte)
+        val multihash = byteArrayOf(code.toByte(), digest.size.toByte()) + digest
         // version=1 (varint 0x01), codec=raw (0x55 as single-byte varint)
         val raw = byteArrayOf(0x01, 0x55) + multihash
         return "b" + encodeBase32(raw)

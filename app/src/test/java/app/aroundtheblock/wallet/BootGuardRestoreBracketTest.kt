@@ -84,6 +84,7 @@ class BootGuardRestoreBracketTest {
         assertTrue(harness.factory.requestedNames.contains("dgb_bloom_peers"))
         // The DB was NOT touched on a single crash.
         assertFalse(harness.factory.requestedNames.contains("dgb_db_key"))
+        assertEquals("the database was moved on a single crash", "rows", harness.database.readText())
 
         // The flag is cleared — a subsequent call this same launch is a no-op
         // (recoverFromCrashedRestoreIfNeeded only fires once per crashed restore).
@@ -96,6 +97,8 @@ class BootGuardRestoreBracketTest {
     @Test
     fun `begin-crash twice escalates to syncAndDb`() {
         val harness = Harness()
+        val record = "c1c2:a1a2"
+        harness.factory.prefsFor("dgb_db_key").edit().putString("encrypted_key", record).commit()
 
         BootGuard.beginRestore(harness.context)
         val first = BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context)
@@ -106,7 +109,48 @@ class BootGuardRestoreBracketTest {
         val second = BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context)
 
         assertEquals(BootGuard.RestoreRecovery.SyncAndDb, second)
-        assertTrue(harness.factory.requestedNames.contains("dgb_db_key"))
+        // The escalated recovery sets the database aside, never deletes it, and keeps the record
+        // and key that read it: the aside copy stays readable and the next database uses the same key.
+        assertFalse("the escalated recovery left the database at its live name", harness.database.exists())
+        val aside = harness.asides()
+        assertEquals("the escalated recovery deleted the database instead of setting it aside", listOf("rows"), aside.map { it.readText() })
+        assertEquals("the escalated recovery discarded the database's key record",
+            record, harness.factory.prefsFor("dgb_db_key").getString("encrypted_key", null))
+    }
+
+    // ---------- (c2) a re-key in progress is left to finish ----------
+
+    /**
+     * While a database's re-key is pending (its new password kept, `pending_key`, before the file is
+     * re-keyed), the next start resumes the re-key on its own. The crash-loop breaker must not set that
+     * database aside — a start killed while re-keying is exactly what it would otherwise count.
+     */
+    @Test
+    fun `the crash-loop breaker leaves a database alone while a re-key is pending`() {
+        val harness = Harness()
+        harness.factory.prefsFor("dgb_db_key").edit().putString("pending_key", "c1c2:a1a2").commit()
+
+        BootGuard.beginRestore(harness.context)
+        BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context)
+        BootGuard.beginRestore(harness.context)
+        assertEquals(BootGuard.RestoreRecovery.SyncAndDb, BootGuard.recoverFromCrashedRestoreIfNeeded(harness.context))
+
+        assertTrue("the crash-loop breaker set aside a database whose re-key is pending", harness.database.exists())
+        assertEquals("rows", harness.database.readText())
+        assertTrue("a database whose re-key is pending was set aside", harness.asides().isEmpty())
+    }
+
+    @Test
+    fun `the boot counter's recovery leaves a database alone while a re-key is pending`() {
+        val harness = Harness()
+        harness.factory.prefsFor("dgb_db_key").edit().putString("pending_key", "c1c2:a1a2").commit()
+        harness.factory.prefsFor("dgb_boot_guard").edit().putInt("pending_boots", BootGuard.THRESHOLD_DB).commit()
+
+        BootGuard.beginBoot(harness.context)
+
+        assertTrue("the boot counter's recovery set aside a database whose re-key is pending", harness.database.exists())
+        assertEquals("rows", harness.database.readText())
+        assertTrue(harness.asides().isEmpty())
     }
 
     // ---------- (d) NEVER-begin (idle user, never unlocked) -> none. THE CRITICAL CASE ----------
@@ -124,6 +168,7 @@ class BootGuardRestoreBracketTest {
         assertFalse(harness.factory.requestedNames.contains("dgb_sync_data"))
         assertFalse(harness.factory.requestedNames.contains("dgb_bloom_peers"))
         assertFalse(harness.factory.requestedNames.contains("dgb_db_key"))
+        assertEquals("rows", harness.database.readText())
 
         // Repeating across many idle "launches" must stay idle-safe too.
         repeat(5) {
@@ -180,11 +225,15 @@ class BootGuardRestoreBracketTest {
             .findAll(src)
             .map { it.groupValues[1] }
             .toSet()
+        // It touches none at all now: the database is set aside together with the key that reads it.
         assertEquals(
-            "StaleDataWiper must only ever touch the DB-dedicated Keystore alias",
-            setOf("dgb_db_passphrase"),
+            "StaleDataWiper must touch no Keystore alias — not the seed's, and not the database's, " +
+                "whose key keeps the aside copy readable",
+            emptySet<String>(),
             keystoreAliasArgs
         )
+        assertTrue("scanner is blind: StaleDataWiper does not set the database aside",
+            src.contains("setAside("))
         assertFalse("StaleDataWiper must never reference the raw seed prefs key",
             src.contains("\"dgb_wallet_seed\""))
     }
@@ -250,15 +299,17 @@ class BootGuardRestoreBracketTest {
     private class Harness {
         val factory = InMemoryPrefsFactory()
         private val tempDir = createTempDirForTest()
+        /** The wallet database at its live name, as the recovery finds it. */
+        val database: File = File(tempDir, "wallet.db").apply { writeText("rows") }
+        fun asides(): List<File> = tempDir.listFiles()!!.filter { it.name.startsWith("wallet.db.aside-") && !it.name.endsWith("-wal") }
         val context: Context = mockk(relaxed = true)
 
         init {
             every { context.getSharedPreferences(any(), any()) } answers {
                 factory.prefsFor(firstArg())
             }
-            // StaleDataWiper.wipeDatabase() deletes DB files via getDatabasePath();
-            // point it at a scratch temp dir so .delete() is a real, harmless no-op
-            // (files never exist there).
+            // StaleDataWiper.wipeDatabase() finds the DB files via getDatabasePath();
+            // point it at a scratch temp dir holding a stand-in database file.
             every { context.getDatabasePath(any()) } answers {
                 File(tempDir, firstArg<String>())
             }

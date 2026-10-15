@@ -2,7 +2,12 @@ package app.aroundtheblock.wallet.core
 
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.dandelion.Broadcaster
-import app.aroundtheblock.wallet.core.db.entity.UtxoEntity
+import app.aroundtheblock.wallet.core.send.DigiDollarSend
+import app.aroundtheblock.wallet.core.send.DigiDollarSendState
+import app.aroundtheblock.wallet.core.send.DustPolicy
+import app.aroundtheblock.wallet.core.send.FeeQuote
+import app.aroundtheblock.wallet.core.send.FeeRequest
+import app.aroundtheblock.wallet.core.sync.PublishOutcome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,8 +26,20 @@ enum class SendRefusal {
     ASSET_SPANS_ADDRESSES,
 }
 
+/** What is known of a broadcast send: whether a peer has taken it. */
+enum class Delivery {
+    /** A peer took the transaction (it requested or relayed it), or a block confirmed it. */
+    RELAYED,
+
+    /** It went out and no peer has taken it yet. The wallet keeps it and keeps trying. */
+    NOT_YET_RELAYED,
+
+    /** The caller did not wait for a peer's answer. */
+    NOT_AWAITED,
+}
+
 sealed class TxResult {
-    data class Success(val txid: String) : TxResult()
+    data class Success(val txid: String, val delivery: Delivery = Delivery.NOT_AWAITED) : TxResult()
     data class Error(val message: String) : TxResult()
     /** Refused by policy, not by failure: nothing was selected, built, signed or broadcast.
      *  Typed so the screen can say why in the user's language. */
@@ -89,21 +106,110 @@ object SpendPreflight {
  */
 interface SpendNative {
     fun isValidAddress(address: String): Boolean
+    /** The script an address is paid with; null when it is not an address. */
+    fun scriptPubKey(address: String): ByteArray?
     fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?
-    fun signTransaction(unsignedTx: ByteArray): ByteArray?
+    /** `[fee, vsize]` of a transaction the wallet built, read from its bytes; null when the fee is unknown. */
+    fun quoteTransaction(unsignedTx: ByteArray): LongArray?
+    /** The outputs of raw transaction bytes, one `"vout|satoshis|scriptHex"` each. */
+    fun transactionOutputs(tx: ByteArray): Array<String>?
+    /**
+     * Signs prepared bytes, or null: only the approved send. Native code refuses, before signing, bytes
+     * whose outputs are not [amountSats] to [toAddress] plus change to a wallet address, that do not
+     * pay exactly [approvedFeeSats], or that spend a coin which is no longer one of the wallet's
+     * spendable plain coins; and refuses to return a signed transaction that fails the same check.
+     * The only signer a DGB send has.
+     */
+    fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray?
     fun broadcast(signedTx: ByteArray): String?
-    fun sendDigiDollar(tdAddress: String, cents: Long): String?
+    /** The publish result ring's answer for [txid]: 0 a peer took it, an errno, or -1 while pending. */
+    fun publishResult(txid: String): Int
+    /**
+     * `[fee, ddChangeCents, dgbChangeSats, inputCount]` of the DigiDollar transfer of [cents] to [tdAddress]
+     * the wallet would build now — the fee is the transfer's inputs minus its outputs — or null when it
+     * cannot be built. The transfer is built and freed: nothing is signed, kept or published.
+     */
+    fun previewDigiDollar(tdAddress: String, cents: Long): LongArray?
+    /**
+     * Builds the transfer of [cents] to [tdAddress] again and signs and publishes it only when it is the
+     * approved send at exactly [approvedFeeSats] (native code checks before signing and after); the txid,
+     * or null when nothing was signed. The only signer a DigiDollar send has.
+     */
+    fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String?
 
     /** Touches [NativeBridge] only when a method is called, so constructing a builder loads nothing. */
     object Bridge : SpendNative {
         override fun isValidAddress(address: String): Boolean = NativeBridge.isValidAddress(address)
+        override fun scriptPubKey(address: String): ByteArray? = NativeBridge.addressToScriptPubKey(address)
         override fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray? =
             NativeBridge.createTransaction(toAddress, amountSatoshis, feePerKb)
-        override fun signTransaction(unsignedTx: ByteArray): ByteArray? = NativeBridge.signTransaction(unsignedTx)
+        override fun quoteTransaction(unsignedTx: ByteArray): LongArray? = NativeBridge.quoteTransaction(unsignedTx)
+        override fun transactionOutputs(tx: ByteArray): Array<String>? = NativeBridge.getRawTransactionOutputs(tx)
+        override fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray? =
+            NativeBridge.signPreparedTransaction(unsignedTx, toAddress, amountSats, approvedFeeSats)
         override fun broadcast(signedTx: ByteArray): String? = Broadcaster.broadcast(signedTx)
-        override fun sendDigiDollar(tdAddress: String, cents: Long): String? =
-            NativeBridge.sendDigiDollar(tdAddress, cents)
+        override fun publishResult(txid: String): Int = NativeBridge.getPublishResult(txid)
+        override fun previewDigiDollar(tdAddress: String, cents: Long): LongArray? =
+            NativeBridge.previewDigiDollar(tdAddress, cents)
+        override fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String? =
+            NativeBridge.sendApprovedDigiDollar(tdAddress, cents, approvedFeeSats)
     }
+}
+
+/**
+ * A DGB send built and quoted before the credential prompt: the exact bytes that are signed after it,
+ * and their fee. Plain bytes and numbers, never a native object, so nothing native outlives the prompt;
+ * an abandoned prompt drops it and the next review builds afresh.
+ */
+class PreparedSend internal constructor(
+    val toAddress: String,
+    val amountSats: Long,
+    /** The rate the bytes were built at, sat/kB. */
+    val feePerKb: Long,
+    /** The fee of these bytes: what the confirmation shows and the approval carries. */
+    val quote: FeeQuote,
+    unsignedTx: ByteArray,
+) {
+    private val bytes: ByteArray = unsignedTx.copyOf()
+
+    /** A copy of the unsigned bytes. */
+    fun unsignedTx(): ByteArray = bytes.copyOf()
+}
+
+/**
+ * A DigiDollar send previewed before the credential prompt: the transfer the wallet would build, read and
+ * freed. Plain numbers, never a native object. After the prompt the transfer is built again and signed only
+ * if it is still this send at exactly [feeSats]; an abandoned prompt drops it and the next review builds afresh.
+ */
+class PreparedDigiDollar internal constructor(
+    /** The DigiDollar address paid. */
+    val address: String,
+    /** Cents paid. */
+    val cents: Long,
+    /** The transfer's own fee — its inputs minus its outputs: what the confirmation shows and the approval carries. */
+    val feeSats: Long,
+    /** DigiDollar the transfer pays back to the wallet. */
+    val ddChangeCents: Long,
+    /** DGB the transfer pays back to the wallet. */
+    val dgbChangeSats: Long,
+    /** How many inputs it spends (DigiDollar and DGB). */
+    val inputCount: Long,
+)
+
+/** What a DigiDollar review produced: a send ready to confirm, or why there is none. Nothing is signed either way. */
+sealed class DigiDollarPrepareResult {
+    data class Ready(val send: PreparedDigiDollar) : DigiDollarPrepareResult()
+    data class Error(val message: String) : DigiDollarPrepareResult()
+}
+
+/** What review produced: a send ready to confirm, or why there is none. Nothing is signed either way. */
+sealed class PrepareResult {
+    data class Ready(val send: PreparedSend) : PrepareResult()
+
+    /** The payment is below the smallest output the network relays to that address type. */
+    data class BelowDust(val thresholdSats: Long) : PrepareResult()
+
+    data class Error(val message: String) : PrepareResult()
 }
 
 class TransactionBuilder(
@@ -116,86 +222,234 @@ class TransactionBuilder(
     private val native: SpendNative = SpendNative.Bridge,
 ) {
     /**
-     * Build, sign, and broadcast a transaction.
-     * Returns txid on success, error message on failure.
+     * Review: build the send and quote it, before the credential prompt. Nothing is signed.
+     *
+     * The quote is the built transaction's own fee — its inputs minus its outputs — and that is what
+     * the confirmation shows and the approval carries; [sendPrepared] then signs these same bytes,
+     * through the signer that checks them against that fee. A custom fee is a total: it becomes a
+     * rate over this transaction's size, measured by building it at the default rate first, and the
+     * quote says when the transaction pays more than the total ([FeeQuote.raised]).
+     *
+     * A payment below the dust line of its address type is refused before anything is built, and
+     * every output of the built bytes is held to the same line — the bytes that are signed are the
+     * bytes checked.
      */
-    suspend fun sendTransaction(
-        toAddress: String,
-        amountSatoshis: Long,
-        feePerKb: Long,
-        spendableUtxos: List<UtxoEntity>
-    ): TxResult = withContext(Dispatchers.IO) {
-        // Off the caller's thread (SendViewModel launches on Main): build, sign,
-        // and BROADCAST are blocking native calls that take the C-core peer/wallet
-        // locks. Running them on the UI thread froze the app at "broadcasting",
-        // especially once the compact-filter confirmation path started holding the
-        // peer-manager lock across full-block processing.
-        // Validate address
-        if (!native.isValidAddress(toAddress)) {
-            return@withContext TxResult.Error("Invalid DigiByte address")
+    suspend fun prepareTransaction(toAddress: String, amountSatoshis: Long, fee: FeeRequest): PrepareResult =
+        withContext(Dispatchers.IO) {
+            if (!native.isValidAddress(toAddress)) return@withContext PrepareResult.Error("Invalid DigiByte address")
+            if (amountSatoshis <= 0) return@withContext PrepareResult.Error("Amount must be positive")
+
+            // The payment itself, before anything is built: below its line every node refuses the transaction.
+            val destination = native.scriptPubKey(toAddress)
+                ?: return@withContext PrepareResult.Error("Invalid DigiByte address")
+            if (DustPolicy.isDust(amountSatoshis, destination, txIsDigiDollar = false)) {
+                return@withContext PrepareResult.BelowDust(DustPolicy.threshold(destination))
+            }
+
+            // Detection first, to completion: the C core selects coins from its plain-coin set on the
+            // next step, and that set is right to select from once every transaction the wallet
+            // holds has been looked at. A pass that did not finish means nothing is built.
+            if (!SpendPreflight.completed(beforeSpend)) {
+                return@withContext PrepareResult.Error(SpendPreflight.NOT_SENT)
+            }
+
+            // At the default rate first: a default-fee send's bytes, and the size a custom total is taken over.
+            val atDefault = buildAndQuote(toAddress, amountSatoshis, FeeQuote.DEFAULT_FEE_PER_KB, requestedSats = null)
+            if (atDefault !is Built.Ok) return@withContext atDefault.asError()
+            val built = when (fee) {
+                is FeeRequest.Default -> atDefault
+                is FeeRequest.CustomTotal -> {
+                    // A rate of 0 would fall back to the wallet's own rate; 1 sat/kB builds at the floor.
+                    val rate = FeeQuote.rateForTotal(fee.totalSats, atDefault.quote.vsize).coerceAtLeast(1L)
+                    buildAndQuote(toAddress, amountSatoshis, rate, requestedSats = fee.totalSats)
+                }
+            }
+            if (built !is Built.Ok) return@withContext built.asError()
+
+            // Every output of what will be signed, not only the payment. The builder folds change
+            // below the line into the fee, so today this only ever confirms it.
+            belowDustLine(built.bytes)?.let { return@withContext it }
+
+            PrepareResult.Ready(PreparedSend(toAddress, amountSatoshis, built.rate, built.quote, built.bytes))
         }
 
-        // Validate amount
-        if (amountSatoshis <= 0) {
-            return@withContext TxResult.Error("Amount must be positive")
+    /**
+     * After the credential prompt: sign the prepared bytes, broadcast them, and say whether a peer took them.
+     *
+     * Nothing is built here. The bytes go to the checked signer with the approved payment and fee;
+     * native code signs only that send — refusing bytes whose outputs are not that payment plus change
+     * to the wallet, that do not pay exactly that fee, or that spend a coin which is no longer one of
+     * the wallet's spendable plain coins (another send spent it, or detection now holds it as an asset
+     * carrier, while the prompt was up) — and nothing is broadcast. The record keeps the fee signed.
+     *
+     * The send is [Delivery.RELAYED] only when a peer has taken it; otherwise [Delivery.NOT_YET_RELAYED]
+     * — the wallet holds it and keeps publishing it, and it is never reported as sent.
+     */
+    suspend fun sendPrepared(prepared: PreparedSend): TxResult {
+        val sent = withContext(Dispatchers.IO) {
+            // Detection to completion again: the prompt took time, and the signer checks the coins
+            // against the plain-coin set that detection keeps.
+            if (!SpendPreflight.completed(beforeSpend)) {
+                return@withContext TxResult.Error(SpendPreflight.NOT_SENT)
+            }
+
+            val signedTx = native.signPrepared(
+                prepared.unsignedTx(), prepared.toAddress, prepared.amountSats, prepared.quote.feeSats,
+            )
+            if (signedTx == null) {
+                // Not the approved send any more (its payment, fee or coins), or the session is
+                // locked: nothing is signed or sent, and reviewing again builds afresh.
+                android.util.Log.w(TAG, "the prepared send no longer matches its approval; nothing was signed")
+                return@withContext TxResult.Error(SpendPreflight.NOT_SENT)
+            }
+
+            val txid = native.broadcast(signedTx)
+                ?: return@withContext TxResult.Error("Failed to broadcast transaction")
+
+            // Record the outgoing tx so the activity list can categorize it as "Sent" even if
+            // BRWalletAmountSentByTx later returns 0 because the parent UTXO txs aren't in
+            // BRWallet->allTx. The fee recorded is the fee signed. Best-effort: the record only
+            // feeds the activity list and never affects on-chain state.
+            outgoingTxStore.record(
+                txid = txid,
+                sentSats = prepared.amountSats,
+                feeSats = prepared.quote.feeSats,
+                toAddress = prepared.toAddress,
+            )
+
+            // Snapshot the wallet's tx set to disk synchronously so a force-stop or crash right
+            // after the broadcast doesn't drop the just-sent tx from the persisted state. The
+            // C side registers the tx before publishing, so getSerializedTransactions sees it.
+            walletTxPersister.persist()
+
+            TxResult.Success(txid)
         }
-
-        // Detection first, to completion: the C core selects coins from its plain-coin set on the
-        // next line, and that set is right to select from once every transaction the wallet
-        // holds has been looked at. A pass that did not finish means nothing is built.
-        if (!SpendPreflight.completed(beforeSpend)) {
-            return@withContext TxResult.Error(SpendPreflight.NOT_SENT)
-        }
-
-        // Create unsigned transaction via C core — the C core's BRWallet handles
-        // UTXO selection internally using its own transaction set. The Room-based
-        // CoinSelector was redundant and failed because Room UTXOs weren't populated
-        // from the SPV sync. Let the C core do what it's designed to do.
-        val unsignedTx = native.createTransaction(toAddress, amountSatoshis, feePerKb)
-            ?: return@withContext TxResult.Error("Insufficient balance")
-
-        // Sign via C core (uses RFC 6979 deterministic nonces)
-        val signedTx = native.signTransaction(unsignedTx)
-            ?: return@withContext TxResult.Error("Failed to sign transaction")
-
-        // Broadcast via C core
-        val txid = native.broadcast(signedTx)
-            ?: return@withContext TxResult.Error("Failed to broadcast transaction")
-
-        // Record the outgoing tx so the activity list can categorize it as
-        // "Sent" even if BRWalletAmountSentByTx later returns 0 because the
-        // parent UTXO txs aren't in BRWallet->allTx. Best-effort: a stored
-        // tx hash is only useful for the activity-list override and never
-        // affects on-chain state, so failures here are silent.
-        val feeSats = estimateFee(signedTx.size, feePerKb)
-        outgoingTxStore.record(
-            txid = txid,
-            sentSats = amountSatoshis,
-            feeSats = feeSats,
-            toAddress = toAddress,
-        )
-
-        // Snapshot the wallet's tx set to disk synchronously so a
-        // force-stop or crash immediately after broadcast doesn't drop
-        // the just-sent tx from the persisted state. The companion
-        // C-side change (publishTransaction → BRWalletRegisterTransaction)
-        // guarantees getSerializedTransactions sees this tx by the time
-        // persist() runs.
-        walletTxPersister.persist()
-
-        TxResult.Success(txid)
+        if (sent !is TxResult.Success) return sent
+        // The send is recorded and persisted before the wait, so leaving the screen loses nothing.
+        return sent.copy(delivery = awaitDelivery(sent.txid))
     }
 
     /**
-     * Send DigiDollar. The transfer is built, signed and published natively in one step, and its
-     * network fee is paid from the plain-coin set — so detection runs to completion first, exactly
-     * as for a DGB send. Returns the txid, or null when nothing was sent.
+     * Review a DigiDollar send, before the credential prompt: build the transfer, read what it pays and
+     * free it. Nothing is signed. The fee is the transfer's own — its inputs minus its outputs — and that is
+     * what the confirmation shows and the approval carries; [sendDigiDollar] builds the transfer again after
+     * the prompt and native code signs it only at exactly that fee.
+     *
+     * The network fee is paid from the plain-coin set, so detection runs to completion first, exactly as
+     * for a DGB review; a pass that did not finish means nothing is built.
      */
-    suspend fun sendDigiDollar(tdAddress: String, cents: Long): String? = withContext(Dispatchers.IO) {
-        if (!SpendPreflight.completed(beforeSpend)) return@withContext null
-        native.sendDigiDollar(tdAddress, cents)
+    suspend fun prepareDigiDollar(tdAddress: String, cents: Long): DigiDollarPrepareResult =
+        withContext(Dispatchers.IO) {
+            if (cents <= 0) return@withContext DigiDollarPrepareResult.Error("Amount must be positive")
+            if (!SpendPreflight.completed(beforeSpend)) {
+                return@withContext DigiDollarPrepareResult.Error(SpendPreflight.NOT_SENT)
+            }
+            val preview = native.previewDigiDollar(tdAddress, cents)
+            if (preview == null || preview.size != 4 || preview[0] <= 0L || preview.any { it < 0L }) {
+                // Not enough DigiDollar, or not enough DGB for the fee, or the fee cannot be told.
+                return@withContext DigiDollarPrepareResult.Error(SpendPreflight.NOT_SENT)
+            }
+            DigiDollarPrepareResult.Ready(
+                PreparedDigiDollar(tdAddress, cents, preview[0], preview[1], preview[2], preview[3]),
+            )
+        }
+
+    /**
+     * After the credential prompt: send the DigiDollar transfer [prepared] previews, exactly as a DGB send
+     * is sent ([sendPrepared]), through [DigiDollarSend]:
+     *  - detection runs to completion again, then the transfer is built again and native code signs and
+     *    publishes it only when it is still the approved send at exactly [PreparedDigiDollar.feeSats] —
+     *    a wallet that changed while the prompt was up builds something else, which is refused;
+     *  - its txid is recorded for the stranded-send sweep and the wallet's transactions are persisted
+     *    BEFORE anything is reported about it, so leaving the screen or a force-stop loses nothing;
+     *  - it is [DigiDollarSendState.Sent] only when a peer took it, else [DigiDollarSendState.NotYetRelayed].
+     *
+     * The record says no DGB went to the payee ([OutgoingTxStore.Record.isDigiDollar]): the activity list
+     * keeps the wallet's own reading of the transfer's DGB movement, its fee.
+     */
+    suspend fun sendDigiDollar(prepared: PreparedDigiDollar): DigiDollarSendState =
+        DigiDollarSend<PreparedDigiDollar>(
+            publish = { p ->
+                withContext(Dispatchers.IO) {
+                    if (!SpendPreflight.completed(beforeSpend)) null
+                    else native.sendApprovedDigiDollar(p.address, p.cents, p.feeSats)
+                }
+            },
+            record = { txid, p ->
+                withContext(Dispatchers.IO) {
+                    outgoingTxStore.record(
+                        txid = txid, sentSats = 0L, feeSats = p.feeSats, toAddress = p.address, isDigiDollar = true,
+                    )
+                }
+            },
+            persist = { withContext(Dispatchers.IO) { walletTxPersister.persist() } },
+            awaitVerdict = { txid -> awaitDelivery(txid) },
+        ).run(prepared)
+
+    /**
+     * Whether a peer has taken the published [txid]: [Delivery.RELAYED] on a verdict of 0, otherwise
+     * [Delivery.NOT_YET_RELAYED] — no verdict within the wait, or any other verdict. See
+     * [PublishOutcome.await]. The wait itself stays on the caller's dispatcher; only the reads go to IO.
+     */
+    suspend fun awaitDelivery(txid: String): Delivery {
+        val outcome = PublishOutcome.await(read = { withContext(Dispatchers.IO) { native.publishResult(txid) } })
+        return if (outcome?.userVisiblySent == true) Delivery.RELAYED else Delivery.NOT_YET_RELAYED
     }
 
-    private fun estimateFee(signedSize: Int, feePerKb: Long): Long =
-        (signedSize.toLong() * feePerKb + 999L) / 1000L
+    /** One build and its quote, or why there is none. */
+    private sealed class Built {
+        class Ok(val bytes: ByteArray, val quote: FeeQuote, val rate: Long) : Built()
+        /** The builder found no coins to cover the amount and the fee. */
+        data object Short : Built()
+        /** Built bytes whose fee the wallet cannot tell: an input it does not hold. */
+        data object Unquoted : Built()
+
+        fun asError(): PrepareResult = when (this) {
+            is Ok -> throw IllegalStateException("not an error")
+            Short -> PrepareResult.Error("Insufficient balance")
+            Unquoted -> PrepareResult.Error(SpendPreflight.NOT_SENT)
+        }
+    }
+
+    private fun buildAndQuote(toAddress: String, amountSatoshis: Long, rate: Long, requestedSats: Long?): Built {
+        val bytes = native.createTransaction(toAddress, amountSatoshis, rate) ?: return Built.Short
+        val quote = FeeQuote.of(native.quoteTransaction(bytes), requestedSats) ?: return Built.Unquoted
+        return Built.Ok(bytes, quote, rate)
+    }
+
+    /** [PrepareResult.BelowDust] for the first output of [tx] below its line; an error when they cannot be read; else null. */
+    private fun belowDustLine(tx: ByteArray): PrepareResult? {
+        val outputs = native.transactionOutputs(tx) ?: return PrepareResult.Error(SpendPreflight.NOT_SENT)
+        val digiDollar = DustPolicy.isDigiDollarTransaction(versionOf(tx))
+        for (line in outputs) {
+            val parts = line.split('|')
+            val sats = parts.getOrNull(1)?.toLongOrNull()
+            val script = parts.getOrNull(2)?.let(::hexToBytes)
+            if (parts.size != 3 || sats == null || script == null) return PrepareResult.Error(SpendPreflight.NOT_SENT)
+            if (DustPolicy.isDust(sats, script, digiDollar)) return PrepareResult.BelowDust(DustPolicy.threshold(script))
+        }
+        return null
+    }
+
+    private companion object {
+        const val TAG = "DGB-Send"
+
+        /** A serialized transaction's version: its first four bytes, little-endian. */
+        fun versionOf(tx: ByteArray): Int =
+            if (tx.size < 4) 0
+            else (tx[0].toInt() and 0xff) or ((tx[1].toInt() and 0xff) shl 8) or
+                ((tx[2].toInt() and 0xff) shl 16) or ((tx[3].toInt() and 0xff) shl 24)
+
+        fun hexToBytes(hex: String): ByteArray? {
+            if (hex.length % 2 != 0) return null
+            val out = ByteArray(hex.length / 2)
+            for (i in out.indices) {
+                val hi = Character.digit(hex[2 * i], 16)
+                val lo = Character.digit(hex[2 * i + 1], 16)
+                if (hi < 0 || lo < 0) return null
+                out[i] = ((hi shl 4) or lo).toByte()
+            }
+            return out
+        }
+    }
 }

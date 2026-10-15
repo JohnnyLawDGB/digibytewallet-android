@@ -442,6 +442,80 @@ class ForeignAssetTransferServiceTest {
         assertEquals("nothing may be broadcast", 0, broadcasts)
     }
 
+    // ---- where the split pays ------------------------------------------------------------------
+
+    /** A plain row at an address this seed did not derive. The lookup's answer names it; the
+     *  wallet never derived it, so nothing the wallet signs may pay it. */
+    private val otherAddr = "DOther333333333333333333333333333"
+
+    private fun fanOutService(signed: MutableList<ForeignAssetTransferPlan.Plan>) = ForeignAssetTransferService(
+        assetClassifier = ForeignUtxoAssetClassifier(
+            fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
+            isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+            resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+        ),
+        stackOf = { txid, _ ->
+            if (txid.startsWith("asset")) app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(listOf(app.aroundtheblock.wallet.core.asset.send.StackEntry("La-test", 1L)))
+            else app.aroundtheblock.wallet.core.asset.send.StackLookup.Found(emptyList())
+        },
+        ruleStateOf = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+        parents = book.binding,
+        parseOutputs = { parentOutputs },
+        sign = { plan, _, _, _ -> signed += plan; "00ff" },
+        broadcast = { "fanout-txid" },
+        log = { _, _ -> },
+        recordOutgoing = { _, _, _, _, _ -> },
+    )
+
+    private fun derivedSet(r: RecoveryScanService.ProfileResult) = r.derivedAddresses.map { it.address }.toSet()
+
+    /**
+     * Every output of the split pays an address this seed derived, whatever order the lookup
+     * lists its rows in. A row at an address the seed never derived, listed first, must not
+     * become the split's destination.
+     */
+    @Test fun `every split output pays an address the seed derived, whatever the row order`() {
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 5_000_000L)
+        val notOurs = utxo("plainother", otherAddr, 1_000L)
+        val result = profileResult(utxos = listOf(notOurs) + assets + plain)
+        val signed = mutableListOf<ForeignAssetTransferPlan.Plan>()
+
+        val r = runBlocking { fanOutService(signed).moveAssets(ByteArray(64) { 7 }, listOf(result), dest) }
+
+        assertTrue("expected a split, got ${r.fanOut}", r.fanOut is ForeignAssetTransferService.FanOut.Broadcast)
+        assertEquals("one split signed", 1, signed.size)
+        val paid = signed.single().outputs.map { it.address }
+        assertTrue("split outputs $paid must all be in ${derivedSet(result)}",
+            paid.isNotEmpty() && paid.all { it in derivedSet(result) })
+    }
+
+    /** The same holds when the only rows in front of the plain coin are ones the seed did not derive. */
+    @Test fun `the split never pays an underived address even when several lead the list`() {
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 5_000_000L)
+        val notOurs = (1..2).map { utxo("plainother$it", otherAddr, 1_000L) }
+        val result = profileResult(utxos = notOurs + assets + plain)
+        val signed = mutableListOf<ForeignAssetTransferPlan.Plan>()
+
+        runBlocking { fanOutService(signed).moveAssets(ByteArray(64) { 7 }, listOf(result), dest) }
+
+        val paid = signed.flatMap { p -> p.outputs.map { it.address } }
+        assertTrue("split outputs $paid must all be in ${derivedSet(result)}", paid.all { it in derivedSet(result) })
+    }
+
+    /** Control: with the seed's own coin listed first the split pays it, before and after. */
+    @Test fun `with the seed's own coin first the split pays that coin's address`() {
+        val assets = (1..3).map { utxo("asset$it", assetAddr, DA_MARKER_SATS, vout = it) }
+        val plain = utxo("plain", feeAddr, 5_000_000L)
+        val result = profileResult(utxos = listOf(plain) + assets)
+        val signed = mutableListOf<ForeignAssetTransferPlan.Plan>()
+
+        runBlocking { fanOutService(signed).moveAssets(ByteArray(64) { 7 }, listOf(result), dest) }
+
+        assertEquals(setOf(feeAddr), signed.single().outputs.map { it.address }.toSet())
+    }
+
     // ---- transfer rules ------------------------------------------------------------------------
 
     @Test fun `a rule-bound asset is not signed, not broadcast, and reported as refused`() {

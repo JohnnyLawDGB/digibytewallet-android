@@ -8,11 +8,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
+import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.core.hub.UserInfo
+import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
 import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
 import kotlinx.coroutines.launch
@@ -22,6 +26,9 @@ import kotlinx.coroutines.launch
  *
  * [target] is the user to tip (handle or address).
  * [onDismiss] is called after a successful tip or on explicit close.
+ *
+ * A tip moves the user's DigiScope tip balance, so it passes the same PIN/biometric gate as an
+ * on-chain send: an unlocked app does not by itself authorise moving value.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,6 +39,11 @@ fun TipBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    val authTitle = stringResource(R.string.hub_tip_auth_title)
+    val authSubtitle = stringResource(R.string.hub_tip_auth_subtitle)
 
     var amountText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
@@ -139,17 +151,23 @@ fun TipBottomSheet(
                     isSending = true
                     resultMessage = null
                     scope.launch {
-                        val success = digiScopeClient.sendTip(toHandle, satoshis)
-                        isSending = false
-                        if (success) {
-                            isSuccess = true
-                            resultMessage = "Tip sent successfully!"
-                            // Auto-dismiss after a short delay
-                            kotlinx.coroutines.delay(1_500)
-                            onDismiss()
-                        } else {
-                            isSuccess = false
-                            resultMessage = "Failed to send tip. You may need to log in or link a tip wallet."
+                        try {
+                            if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, authTitle, authSubtitle)) {
+                                val success = digiScopeClient.sendTip(toHandle, satoshis)
+                                isSending = false
+                                if (success) {
+                                    isSuccess = true
+                                    resultMessage = "Tip sent successfully!"
+                                    // Auto-dismiss after a short delay
+                                    kotlinx.coroutines.delay(1_500)
+                                    onDismiss()
+                                } else {
+                                    isSuccess = false
+                                    resultMessage = "Failed to send tip. You may need to log in or link a tip wallet."
+                                }
+                            }
+                        } finally {
+                            isSending = false
                         }
                     }
                 },

@@ -36,7 +36,7 @@ class AssetMetadataService(
     private val ipfsClient: IpfsClient,
     private val assetMetadataDao: AssetMetadataDao,
     /** Optional fallback network client that queries digiasset_core instances
-     *  (digiscope.me proxy, api.digiassets.net) when the IPFS fetch fails or
+     *  (digistamp's indexer, the digiscope.me proxy) when the IPFS fetch fails or
      *  no CID is available. Nullable so tests can construct without one. */
     private val assetNetworkClient: app.aroundtheblock.wallet.core.asset.network.AssetNetworkClient? = null,
 ) {
@@ -98,9 +98,12 @@ class AssetMetadataService(
          *  - The cap counts code points, so it never cuts an emoji or any other astral character in
          *    half. It stops a megabyte name from bloating the local DB: issuer-controlled IPFS
          *    metadata is fully attacker-controlled in the worst case.
+         *  - Code points that draw nothing whatever their category (see [drawsNothing]): variation
+         *    selectors, the combining grapheme joiner, the Hangul fillers, U+2800.
          *
          * Unassigned code points are kept on purpose: which ones are unassigned depends on the
          * device's Unicode version, and a newer emoji must not vanish from a name on an older phone.
+         * The exception is the unassigned ranges Unicode reserves as default-ignorable.
          *
          * Internal so the security test suite can verify the predicate
          * directly without standing up Room + IPFS infrastructure.
@@ -129,8 +132,34 @@ class AssetMetadataService(
             Character.SURROGATE,            // Cs: an unpaired half of a surrogate pair
             Character.PRIVATE_USE,          // Co: renders as whatever the installed fonts decide
             -> false
-            else -> true
+            else -> !drawsNothing(codePoint)
         }
+
+        /**
+         * Code points that draw nothing but are not in the categories above. Unicode marks them
+         * Default_Ignorable_Code_Point; outside Cf they are combining marks (Mn) and letters (Lo),
+         * so a category filter alone lets them through and "Digi\u180BDollar" renders exactly as
+         * "DigiDollar". The ranges are the property's non-Cf part (Unicode 15.1
+         * DerivedCoreProperties.txt), unassigned ones included: those are reserved as ignorable,
+         * so a newer font draws them as nothing too. U+2800 is not ignorable but is a blank cell.
+         *
+         * Stripping U+FE0E/U+FE0F only changes an emoji's presentation (text vs. colour), never
+         * which character it is.
+         */
+        private fun drawsNothing(cp: Int): Boolean =
+            cp == 0x034F ||                 // combining grapheme joiner
+            cp == 0x115F || cp == 0x1160 || // Hangul choseong / jungseong fillers
+            cp == 0x17B4 || cp == 0x17B5 || // Khmer inherent vowels
+            cp in 0x180B..0x180F ||         // Mongolian free variation selectors (U+180E is Cf)
+            cp in 0x2060..0x206F ||         // word joiner block; U+2065 is reserved
+            cp == 0x3164 ||                 // Hangul filler
+            cp in 0xFE00..0xFE0F ||         // variation selectors
+            cp == 0xFFA0 ||                 // halfwidth Hangul filler
+            cp in 0xFFF0..0xFFF8 ||         // reserved
+            cp in 0x1BCA0..0x1BCA3 ||       // shorthand format controls
+            cp in 0x1D173..0x1D17A ||       // musical symbol format controls
+            cp in 0xE0000..0xE0FFF ||       // tags, variation selectors supplement, reserved
+            cp == 0x2800                    // braille pattern blank
 
         internal fun isDisplaySafe(ch: Char): Boolean = isDisplaySafe(ch.code)
 

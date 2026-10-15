@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -82,12 +83,12 @@ fun AboutScreen(navController: NavController) {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = app.aroundtheblock.wallet.R.drawable.dgb_symbol),
-                            contentDescription = "DigiByte",
+                            painter = painterResource(id = R.drawable.atb_logo),
+                            contentDescription = stringResource(R.string.app_name),
                             modifier = Modifier.size(64.dp)
                         )
                         Text(
-                            text = "DigiByte Mobile",
+                            text = stringResource(R.string.app_name_display),
                             style = MaterialTheme.typography.titleLarge,
                             color = Color.White,
                             fontWeight = FontWeight.Bold
@@ -101,6 +102,15 @@ fun AboutScreen(navController: NavController) {
                             text = stringResource(R.string.ab_powered_by),
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF8899AA)
+                        )
+                        // Publisher disclaimer: this is an independent wallet, and the About
+                        // screen is where a reviewer or a user looks to see who makes it.
+                        Text(
+                            text = stringResource(R.string.ab_disclaimer),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF8899AA),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 6.dp)
                         )
                     }
                 }
@@ -190,6 +200,14 @@ fun AboutScreen(navController: NavController) {
                         label = stringResource(R.string.ab_licenses),
                         subtitle = stringResource(R.string.ab_licenses_sub),
                         onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android/blob/phase1-modernization/LICENSE") }
+                    )
+                    SettingsRowDivider()
+                    AboutLinkRow(
+                        icon = Icons.Default.Language,
+                        iconTint = Color(0xFFF06A1D),
+                        label = stringResource(R.string.ab_website),
+                        subtitle = "aroundtheblock.us",
+                        onClick = { openUrl("https://www.aroundtheblock.us/") }
                     )
                     SettingsRowDivider()
                     AboutLinkRow(

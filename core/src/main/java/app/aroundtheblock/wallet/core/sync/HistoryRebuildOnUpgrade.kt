@@ -57,8 +57,8 @@ object HistoryRebuildOnUpgrade {
     const val KEY_ROOM_CLEAR_PENDING = "room_clear_pending"
     /** Set in the same commit as [KEY_IN_PROGRESS] when the run recorded a floor (height or
      *  time): the scan start still has to be carried down to the anchor. Needed because a floor
-     *  time can exist without a floor height (the oldest records all unconfirmed). Cleared with the
-     *  hint by [clearFloorHint] once SyncService applied it. */
+     *  time can exist without a floor height (the oldest records all unconfirmed). Also set by
+     *  [requestFloorAtAnchor]. Cleared with the hint by [clearFloorHint] once SyncService applied it. */
     const val KEY_FLOOR_PENDING = "floor_pending"
 
     /** Matches the default mempool expiry: a send still unconfirmed after this is in no default
@@ -341,6 +341,17 @@ object HistoryRebuildOnUpgrade {
         if (forgetFloor) e.remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_TIME).remove(KEY_FLOOR_PENDING).remove(KEY_ROOM_CLEAR_PENDING)
         return e.commit()
     }
+
+    /**
+     * Ask the next sync start to carry the compact-filter floor down to the wallet's anchor, the step
+     * a rebuild's floor takes ([KEY_FLOOR_PENDING] with no height or time): for a reset outside this
+     * runner that drops the scan record before the wallet is loaded — the crash-recovery cleanup —
+     * so that a start that has not synced yet scans from the wallet's own floor, never from near the
+     * saved tip. A persisted floor already at or below the anchor is kept. Returns whether the write
+     * landed.
+     */
+    fun requestFloorAtAnchor(context: Context): Boolean =
+        statePrefs(context).edit().putBoolean(KEY_FLOOR_PENDING, true).commit()
 
     /** True while a rebuild has started clearing and not finished (the cache may be partial). */
     fun isInProgress(context: Context): Boolean = statePrefs(context).getBoolean(KEY_IN_PROGRESS, false)

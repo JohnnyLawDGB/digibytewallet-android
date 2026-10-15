@@ -19,18 +19,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aroundtheblock.wallet.core.model.AssetQuantity
 import app.aroundtheblock.wallet.core.model.OwnedAsset
+import app.aroundtheblock.wallet.ui.components.SensitiveDialog
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
@@ -116,6 +115,7 @@ fun AssetSendScreen(
             quantityDivisibility = approved.divisibility,
             feeSats = approved.feeEstimateSats,
             plannedCost = planned?.takeIf { it.approval === approved }?.cost,
+            raisedFromSats = planned?.takeIf { it.approval === approved }?.raisedFromSats,
             sending = sendState is AssetViewModel.SendState.Sending,
             onConfirm = {
                 coroutineScope.launch {
@@ -451,9 +451,9 @@ fun AssetSendScreen(
                     isError = feeWarning is AssetFeeWarning.ZeroFee
                 )
             } else {
-                val defaultFeeDgb = viewModel.defaultFeeSat / 100_000_000.0
+                // No figure here: the fee is the planned transfer's, which the confirmation shows.
                 Text(
-                    text = String.format("%.8f DGB", defaultFeeDgb),
+                    text = stringResource(R.string.send_fee_exact_at_review),
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -462,11 +462,6 @@ fun AssetSendScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             when (feeWarning) {
-                is AssetFeeWarning.BelowRelay -> Text(
-                    text = stringResource(R.string.send_fee_below_min),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFFFA000)
-                )
                 is AssetFeeWarning.ZeroFee -> Text(
                     text = stringResource(R.string.send_fee_required),
                     style = MaterialTheme.typography.labelSmall,
@@ -555,18 +550,14 @@ private fun AssetSendConfirmDialog(
     feeSats: Long,
     /** The markers and fee of the transfer as planned for this approval. */
     plannedCost: AssetSendCost?,
+    /** The custom total typed, when the planned transfer pays more than it; null otherwise. */
+    raisedFromSats: Long?,
     sending: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
-    val view = LocalView.current
-    // Security: filter touches when obscured (tapjacking protection)
-    DisposableEffect(view) {
-        view.filterTouchesWhenObscured = true
-        onDispose { view.filterTouchesWhenObscured = false }
-    }
-
-    Dialog(onDismissRequest = onCancel) {
+    // Its own window: obscured touches refused, no screenshots or snapshots, overlays hidden.
+    SensitiveDialog(onDismissRequest = onCancel) {
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
@@ -601,6 +592,15 @@ private fun AssetSendConfirmDialog(
                     label = stringResource(R.string.send_network_fee_row),
                     value = String.format("%.8f DGB", feeSats / 100_000_000.0)
                 )
+                // A custom fee the transfer pays more than: said beside the fee, never shown as the lower figure.
+                raisedFromSats?.let { typed ->
+                    Text(
+                        text = stringResource(R.string.send_fee_raised, app.aroundtheblock.wallet.core.model.DgbAmount.format(typed)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFFA000),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
                 CostPreviewCard(

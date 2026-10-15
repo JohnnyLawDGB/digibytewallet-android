@@ -166,6 +166,21 @@ class UtxoDaoTest {
         assertEquals(12L, utxoDao.getAssetBalances().first().first { it.assetId == "asset123" }.totalQuantity)
     }
 
+    /** Quantities that add up past Long.MAX_VALUE: the query answers (SQLite's SUM() would fail
+     *  it), and the total stops at Long.MAX_VALUE. */
+    @Test
+    fun getAssetBalances_totalPastLongMaxStopsThere() = runTest {
+        utxoDao.insertAll(listOf(
+            UtxoEntity("tx1", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "big", assetQuantity = 7_000_000_000_000_000_000L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx2", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "big", assetQuantity = 7_000_000_000_000_000_000L, assetCredit = "BACKED"),
+            UtxoEntity("tx3", 0, ownedScript, 6000, 1000, isAsset = true, assetId = "small", assetQuantity = 5_000_000_000L, assetCredit = "VERIFIED"),
+        ))
+        val balances = utxoDao.getAssetBalances().first()
+        assertEquals(Long.MAX_VALUE, balances.first { it.assetId == "big" }.totalQuantity)
+        assertEquals(2, balances.first { it.assetId == "big" }.utxoCount)
+        assertEquals(5_000_000_000L, balances.first { it.assetId == "small" }.totalQuantity)
+    }
+
     /** markUnspent is scoped to the exact (txid, vout) outpoint — a sibling
      *  vout that is still spent must stay spent. */
     @Test

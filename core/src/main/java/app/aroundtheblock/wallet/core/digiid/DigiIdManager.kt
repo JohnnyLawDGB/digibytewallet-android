@@ -20,7 +20,13 @@ private const val TAG = "DigiIdManager"
 class DigiIdManager(
     baseClient: OkHttpClient,
     private val historyDao: DigiIdHistoryDao,
-    private val digiScopeClient: DigiScopeClient
+    private val digiScopeClient: DigiScopeClient,
+    /**
+     * Signs the login URI with the identity [IdentityKeyKind] names and answers
+     * "address|signature", or null when the wallet cannot sign. A parameter only so a login can be
+     * driven without the native library; the app always takes this default.
+     */
+    private val sign: (DigiIdRequest, IdentityKeyKind) -> String? = ::signNatively,
 ) {
     // Derived from the shared client, so its Tor proxy, pins and timeouts carry over. Redirects
     // are not followed: the signed login goes to the host the user approved, or nowhere.
@@ -53,13 +59,7 @@ class DigiIdManager(
             val keyKind = IdentityKeyPolicy.choose(request.domain, hasLegacyHistory)
 
             // Sign the original digiid:// URI (includes nonce) with the chosen identity key.
-            val signResult = when (keyKind) {
-                IdentityKeyKind.LEGACY -> NativeBridge.signMessage(request.rawUri, 0)
-                // Derivation input is the canonical callback URL (no query, so no nonce):
-                // stable per site, unlinkable across sites.
-                IdentityKeyKind.PER_SITE ->
-                    NativeBridge.signIdentityMessage(request.rawUri, request.callbackUrl, 0)
-            }
+            val signResult = sign(request, keyKind)
             if (signResult == null) {
                 Log.e(TAG, "signMessage returned null — wallet locked or not initialized")
                 return@withContext DigiIdResult.Error(1, "Wallet is locked — cannot sign")
@@ -89,7 +89,8 @@ class DigiIdManager(
                 .build()
 
             val response = httpClient.newCall(httpRequest).execute()
-            val responseBody = response.body?.string()
+            // Only the status decides the result: the answer's body is closed unread.
+            response.close()
             val success = response.isSuccessful
 
             // MEDIUM-2: Don't log response body — could contain tokens or attacker content
@@ -133,4 +134,13 @@ class DigiIdManager(
 
     private fun isDigiScopeDomain(domain: String): Boolean =
         IdentityKeyPolicy.isDigiScopeDomain(domain)
+}
+
+/** The login URI signed with the chosen identity, through the native library. */
+private fun signNatively(request: DigiIdRequest, keyKind: IdentityKeyKind): String? = when (keyKind) {
+    IdentityKeyKind.LEGACY -> NativeBridge.signMessage(request.rawUri, 0)
+    // Derivation input is the canonical callback URL (no query, so no nonce):
+    // stable per site, unlinkable across sites.
+    IdentityKeyKind.PER_SITE ->
+        NativeBridge.signIdentityMessage(request.rawUri, request.callbackUrl, 0)
 }

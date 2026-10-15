@@ -134,6 +134,17 @@ class NativeMemorySecurityTest {
     }
 
     @Test
+    fun `restoreWalletFromBytes zeros phraseChars after seed derivation`() {
+        val content = readNativeFile("native/src/main/jni/bridge/jni_wallet.c")
+        // Its definition, not the prototype the recover wrapper needs: a definition opens a body.
+        val body = Regex("""NativeBridge_restoreWalletFromBytes\([^)]*\)\s*\{""").find(content)
+        assertTrue("scanner is blind: no restoreWalletFromBytes body", body != null)
+        val section = content.substring(body!!.range.first).substringBefore("lockSession")
+        assertTrue("restoreWalletFromBytes must zero phraseChars after use",
+            section.contains("secure_zero(phraseChars,"))
+    }
+
+    @Test
     fun `g_seed is static not extern`() {
         val header = readNativeFile("native/src/main/jni/bridge/jni_bridge.h")
         assertFalse("g_seed must not be declared extern in header",

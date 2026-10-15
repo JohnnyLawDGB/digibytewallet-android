@@ -11,7 +11,7 @@ import kotlinx.coroutines.sync.withLock
  *
  * Pattern is borrowed from RenzoDD's `digibyte-js` MultiEndpoint Blockbook
  * client, adapted for coroutine-based suspend fns and our particular
- * endpoint set (digiscope.me, api.digiassets.net, user-configured).
+ * endpoint set (AppModule.provideAssetNetworkClient: digistamp, then digiscope.me).
  *
  * Failure semantics per method: each call tries endpoints in order, skipping
  * any that are currently "open circuit" (cooled-down after consecutive
@@ -68,7 +68,7 @@ class MultiEndpointAssetClient(
                     if (!same) {
                         Log.w(
                             TAG,
-                            "getRawTransaction: ${endpoint.endpointLabel} answered $txHashHex with " +
+                            "getRawTransaction: ${endpoint.endpointLabel} answered ${txHashHex.take(12)} with " +
                                 "bytes whose id is ${id ?: "not computable"}; trying the next endpoint",
                         )
                     }

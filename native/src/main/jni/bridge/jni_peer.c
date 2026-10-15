@@ -752,6 +752,22 @@ NativeBridge_compactFilterPeerStatus(JNIEnv *env, jobject thiz,
     return status;
 }
 
+/* ---------- peerManagerGeneration ----------
+ * How many peer managers this process has built, as of the current one: startSync builds one at first
+ * start and on every recreate (forceReconnect, a wallet change), and bumps this right after each build.
+ * Only ever incremented, and only there. A new manager starts with no relay or rejection records, so the
+ * stranded-send sweep's refusal hold (RefusalHold) ties each sighting to a generation: a hold started on
+ * one manager never completes on another. Guarded by g_peerManagerMutex (PEER_GUARD). */
+static uint64_t s_peerManagerGeneration;
+
+/* The current peer manager's generation, or 0 while none exists. */
+jlong JNICALL
+NativeBridge_peerManagerGeneration(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    PEER_GUARD();
+    return g_peerManager ? (jlong)s_peerManagerGeneration : 0;
+}
+
 /* ---------- forceReconnect ---------- */
 
 /* Flag the peer manager for a clean recreate on the next startSync(). Recovers a
@@ -935,6 +951,7 @@ NativeBridge_startSync(JNIEnv *env, jobject thiz) {
             LOGE("startSync: peer manager creation failed (testnet=%d)", BRNetworkIsTestnet());
             return;
         }
+        s_peerManagerGeneration++;   /* a new manager, with no relay or rejection records yet */
 
         /* OWNERSHIP TRANSFER. BRPeerManagerNewEx adopts the BRMerkleBlock pointers — it inserts
          * them into manager->blocks / manager->orphans and frees them individually as it prunes
@@ -1135,8 +1152,9 @@ NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz) {
         return NULL;
     }
 
-    /* 32 entries max (PEER_PENALTY_MAX) — under a kilobyte, so a stack buffer is fine. */
-    uint8_t buf[4 + 32 * 26];
+    /* Room for every entry the manager keeps (BR_PEER_PENALTY_MAX, 256: about 6.5 KB, fine on
+     * the stack), so a full live set serializes rather than coming back empty. */
+    uint8_t buf[BR_PEER_PENALTY_BLOB_MAX];
     size_t written = BRPeerManagerSerializePenalties(g_peerManager, buf, sizeof(buf));
     if (written == 0) {
         LOGW("serializePeerPenalties: serialization reported 0 bytes (buffer %zu)", sizeof(buf));

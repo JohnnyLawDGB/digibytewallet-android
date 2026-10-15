@@ -37,8 +37,16 @@ object DigistampPins {
     /** Pins that were live in the past and must never be re-added. */
     val RETIRED_PINS = emptyList<String>()
 
+    /**
+     * The pinner for a client made to reach this host: these pins AND the DigiScope pins
+     * ([DigiScopePins]). A pinner set on a client derived from the shared one replaces the shared
+     * pinner, so one holding only these pins would let that client reach the DigiScope host — by a
+     * redirect, say — with no pin check. OkHttp checks a pinner only for the hosts it holds pins
+     * for, so the DigiScope pins change nothing for this host.
+     */
     fun certificatePinner(): CertificatePinner =
         CertificatePinner.Builder()
             .apply { PINS.forEach { add(HOST, it) } }
+            .apply { DigiScopePins.PINS.forEach { add(DigiScopePins.HOST, it) } }
             .build()
 }

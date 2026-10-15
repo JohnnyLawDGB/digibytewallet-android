@@ -3,7 +3,6 @@ package app.aroundtheblock.wallet.ui.hub
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import app.aroundtheblock.wallet.core.hub.ForumThread
 import app.aroundtheblock.wallet.core.hub.Reply
@@ -38,7 +37,8 @@ sealed class ThreadDetailState {
 
 @HiltViewModel
 class ForumViewModel @Inject constructor(
-    private val digiScopeClient: DigiScopeClient
+    private val digiScopeClient: DigiScopeClient,
+    private val hubIdentity: HubIdentity,
 ) : ViewModel() {
 
     // ── Thread list state ─────────────────────────────────────────────────
@@ -117,13 +117,19 @@ class ForumViewModel @Inject constructor(
 
     // ── Create thread ─────────────────────────────────────────────────────
 
+    /**
+     * Creates a thread in [channelId], signed with the wallet's identity. The text signed and the
+     * text sent are one [ChatSignPayload]: the title and text exactly as sent, bound to the
+     * channel. The screen calls this only once the spend gate has passed.
+     */
     fun createThread(
         title: String,
         content: String,
         channelId: Int,
         onSuccess: (ForumThread) -> Unit
     ) {
-        if (title.isBlank() || content.isBlank()) {
+        val post = ChatSignPayload.forumThread(channelId, title, content)
+        if (post == null) {
             _createError.value = "Title and content are required"
             return
         }
@@ -131,14 +137,13 @@ class ForumViewModel @Inject constructor(
         _isCreating.value = true
 
         viewModelScope.launch {
-            val signContent = "$title\n$content"
             val signature = try {
-                NativeBridge.signMessage(signContent, 1) ?: ""
+                hubIdentity.sign(post.signedText) ?: ""
             } catch (e: Exception) {
                 ""
             }
 
-            val thread = digiScopeClient.createThread(channelId, title, content, signature)
+            val thread = digiScopeClient.createThread(post.destination, post.title, post.content, signature)
             _isCreating.value = false
 
             if (thread != null) {
@@ -157,12 +162,18 @@ class ForumViewModel @Inject constructor(
 
     // ── Reply ─────────────────────────────────────────────────────────────
 
+    /**
+     * Replies to [threadId], signed with the wallet's identity. The text signed and the text sent
+     * are one [ChatSignPayload]: the reply exactly as sent, bound to the thread. The screen calls
+     * this only once the spend gate has passed.
+     */
     fun replyToThread(
         threadId: Int,
         content: String,
         onSuccess: (Reply) -> Unit
     ) {
-        if (content.isBlank()) {
+        val post = ChatSignPayload.forumReply(threadId, content)
+        if (post == null) {
             _replyError.value = "Reply cannot be empty"
             return
         }
@@ -171,12 +182,12 @@ class ForumViewModel @Inject constructor(
 
         viewModelScope.launch {
             val signature = try {
-                NativeBridge.signMessage(content, 1) ?: ""
+                hubIdentity.sign(post.signedText) ?: ""
             } catch (e: Exception) {
                 ""
             }
 
-            val reply = digiScopeClient.replyToThread(threadId, content, signature)
+            val reply = digiScopeClient.replyToThread(post.destination, post.content, signature)
             _isReplying.value = false
 
             if (reply != null) {

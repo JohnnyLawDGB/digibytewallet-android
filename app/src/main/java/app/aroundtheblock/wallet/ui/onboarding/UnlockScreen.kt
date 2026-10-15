@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.ui.onboarding
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,6 +32,7 @@ import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.BiometricResult
 import app.aroundtheblock.wallet.core.security.PinManager
 import app.aroundtheblock.wallet.core.security.PinVerifyResult
+import app.aroundtheblock.wallet.ui.components.SecureWindow
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteRed
@@ -59,6 +61,22 @@ private fun formatLockCountdown(remainingMs: Long): String {
     return "%d:%02d".format(m, s)
 }
 
+/**
+ * The unlock screen's countdown, on the monotonic clock. PinManager says when a cooldown ends as a
+ * wall-clock epoch-ms; [endOnMonotonicClock] turns that into an end on `SystemClock.elapsedRealtime()`
+ * once, as it arrives, and from then on the screen reads only the monotonic clock: changing the date can
+ * neither bring the keypad back before the cooldown is over nor keep it disabled after.
+ */
+internal object LockCountdown {
+    /** Where a cooldown that ends at wall-clock [untilWallMs] ends on the monotonic clock, from both clocks
+     *  read now; 0 when there is none or it has already ended. */
+    fun endOnMonotonicClock(untilWallMs: Long, nowWallMs: Long, nowElapsedMs: Long): Long =
+        if (untilWallMs > nowWallMs) nowElapsedMs + (untilWallMs - nowWallMs) else 0L
+
+    /** The time left at [nowElapsedMs] of a countdown that ends at [endElapsedMs]; 0 once it has ended. */
+    fun leftMs(endElapsedMs: Long, nowElapsedMs: Long): Long = (endElapsedMs - nowElapsedMs).coerceAtLeast(0L)
+}
+
 @Composable
 fun UnlockScreen(
     navController: NavController,
@@ -66,6 +84,8 @@ fun UnlockScreen(
     biometricAuth: BiometricAuth,
     walletManager: WalletManager
 ) {
+    // The PIN keypad stays out of screenshots and the task-switcher snapshot (counted holder).
+    SecureWindow()
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
@@ -78,13 +98,20 @@ fun UnlockScreen(
     val attemptsLeftFmt = stringResource(R.string.unlock_attempts_left)
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    // Persisted PIN rate-limit (PinManager). lockedUntil is the wall-clock epoch-ms
-    // the lockout expires (0 = not locked); nowTick drives the live M:SS countdown.
-    // Both survive a process restart because PinManager persists the lockout in
-    // dgb_pin_store — currentLockout() rehydrates it on enter (below).
-    var lockedUntil by remember { mutableStateOf(0L) }
-    var nowTick by remember { mutableStateOf(System.currentTimeMillis()) }
-    val isLocked = lockedUntil > nowTick
+    // Persisted PIN rate-limit (PinManager). lockEndsAt is where the running cooldown ends on the
+    // monotonic clock (0 = not locked), converted once from the wall-clock end PinManager reports
+    // (LockCountdown); nowTick, on the same clock, drives the live M:SS countdown, so a date change
+    // neither ends the countdown early nor holds the keypad. Both survive a process restart because
+    // PinManager persists the lockout in dgb_pin_store — currentLockout() rehydrates it on enter (below).
+    var lockEndsAt by remember { mutableStateOf(0L) }
+    var nowTick by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    val isLocked = LockCountdown.leftMs(lockEndsAt, nowTick) > 0L
+
+    /** Counts down to a cooldown PinManager says ends at wall-clock [untilWallMs]. */
+    fun countDownTo(untilWallMs: Long) {
+        nowTick = SystemClock.elapsedRealtime()
+        lockEndsAt = LockCountdown.endOnMonotonicClock(untilWallMs, System.currentTimeMillis(), nowTick)
+    }
     // True while unlockFromUi()/restoreFromDisk() are running in the background.
     // restoreFromDisk() calls NativeBridge.stopSync(), which takes the native
     // peer-manager lock (PEER_GUARD) — the keepalive sweep can hold that lock for
@@ -196,14 +223,13 @@ fun UnlockScreen(
                 } else {
                     // Restore-crash bracket: BootGuard lives in the app module and
                     // WalletManager.restoreFromDisk() is core (core cannot depend on
-                    // app), so beginRestore is armed here, at the call site, rather
-                    // than inside restoreFromDisk() itself. This IS the start of the
-                    // post-unlock restore — recoverWalletFromBytes runs synchronously
-                    // inside the call below. commit()'d before the risky call so a
-                    // crash mid-restore leaves restore_pending=true for BootGuard
-                    // .recoverFromCrashedRestoreIfNeeded to see next launch.
-                    BootGuard.beginRestore(context)
-                    walletManager.restoreFromDisk()
+                    // app), so the arming is handed to restoreFromDisk, which runs it at
+                    // the start of the post-unlock restore's risky native window —
+                    // restoreWalletFromBytes runs synchronously inside the call below.
+                    // commit()'d before the risky call so a crash mid-restore leaves
+                    // restore_pending=true for BootGuard.recoverFromCrashedRestoreIfNeeded
+                    // to see next launch.
+                    walletManager.restoreFromDisk(beforeNative = { BootGuard.beginRestore(context) })
                 }
             }
             if (!opened) {
@@ -275,21 +301,18 @@ fun UnlockScreen(
     // Rehydrate a persisted lockout on enter (survives force-stop / process restart).
     LaunchedEffect(Unit) {
         val until = pinManager.currentLockout()
-        if (until > System.currentTimeMillis()) {
-            lockedUntil = until
-            nowTick = System.currentTimeMillis()
-        }
+        if (until > 0L) countDownTo(until)
     }
 
-    // Live countdown: tick while locked, then re-enable the keypad automatically.
-    LaunchedEffect(lockedUntil) {
-        if (lockedUntil > 0L) {
-            while (System.currentTimeMillis() < lockedUntil) {
-                nowTick = System.currentTimeMillis()
+    // Live countdown on the monotonic clock: tick while locked, then re-enable the keypad automatically.
+    LaunchedEffect(lockEndsAt) {
+        if (lockEndsAt > 0L) {
+            while (LockCountdown.leftMs(lockEndsAt, SystemClock.elapsedRealtime()) > 0L) {
+                nowTick = SystemClock.elapsedRealtime()
                 delay(500)
             }
-            lockedUntil = 0L
-            nowTick = System.currentTimeMillis()
+            lockEndsAt = 0L
+            nowTick = SystemClock.elapsedRealtime()
             errorMessage = null
         }
     }
@@ -317,8 +340,7 @@ fun UnlockScreen(
                 currentInput = ""
                 val startedLockout = result.lockedUntil
                 if (startedLockout != null) {
-                    lockedUntil = startedLockout
-                    nowTick = System.currentTimeMillis()
+                    countDownTo(startedLockout)
                     errorMessage = null // the countdown text takes over
                 } else {
                     val before = (PinManager.FREE_ATTEMPTS + 1) - result.failCount
@@ -333,8 +355,7 @@ fun UnlockScreen(
             }
             is PinVerifyResult.LockedOut -> {
                 currentInput = ""
-                lockedUntil = result.until
-                nowTick = System.currentTimeMillis()
+                countDownTo(result.until)
                 errorMessage = null
             }
             is PinVerifyResult.ShouldWipe -> {
@@ -361,7 +382,7 @@ fun UnlockScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                DigiByteLogoHeader()
+                AtbLogoHeader()
 
                 Spacer(Modifier.height(40.dp))
 
@@ -405,7 +426,7 @@ fun UnlockScreen(
                     Text(
                         text = stringResource(
                             R.string.unlock_locked,
-                            formatLockCountdown(lockedUntil - nowTick),
+                            formatLockCountdown(LockCountdown.leftMs(lockEndsAt, nowTick)),
                         ),
                         color = Color(0xFFFF9800),
                         style = MaterialTheme.typography.bodySmall,

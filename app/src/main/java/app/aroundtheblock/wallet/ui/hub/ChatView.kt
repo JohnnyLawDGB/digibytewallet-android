@@ -28,6 +28,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import app.aroundtheblock.wallet.R
+import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
+import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.Channel
 import app.aroundtheblock.wallet.core.hub.ConnectionState
@@ -61,6 +66,15 @@ fun ChatScreen(
     val typingUsers by viewModel.typingUsers.collectAsStateWithLifecycle()
     val onlineCount by viewModel.onlineCount.collectAsStateWithLifecycle()
     val sendError by viewModel.sendError.collectAsStateWithLifecycle()
+
+    // A message is signed with the wallet's identity, so it takes the same gate as a spend.
+    val spendAuth = rememberSpendAuth()
+    spendAuth.Dialogs()
+    val context = LocalContext.current
+    val signScope = rememberCoroutineScope()
+    val signTitle = stringResource(R.string.hub_sign_title)
+    val signSubtitle = stringResource(R.string.hub_sign_subtitle)
+    var signing by remember { mutableStateOf(false) }
 
     // Tip sheet state
     var tipTarget by remember { mutableStateOf<UserInfo?>(null) }
@@ -154,7 +168,21 @@ fun ChatScreen(
         // ── Input bar ─────────────────────────────────────────────────────
         MessageInputBar(
             enabled = isLoggedIn,
-            onSend = { content -> viewModel.sendMessage(content) },
+            onSend = { content, sent ->
+                if (!signing) {
+                    signing = true
+                    signScope.launch {
+                        try {
+                            if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, signTitle, signSubtitle)) {
+                                viewModel.sendMessage(content)
+                                sent()
+                            }
+                        } finally {
+                            signing = false
+                        }
+                    }
+                }
+            },
             onTyping = { viewModel.sendTypingIndicator() }
         )
     }
@@ -473,10 +501,17 @@ private fun MessageBubble(
 @Composable
 private fun MessageInputBar(
     enabled: Boolean,
-    onSend: (String) -> Unit,
+    onSend: (text: String, sent: () -> Unit) -> Unit,
     onTyping: () -> Unit
 ) {
     var text by remember { mutableStateOf("") }
+    // The field is emptied once the message has gone: one whose signing was declined stays, to send again.
+    val send = {
+        if (text.isNotBlank() && enabled) {
+            val typed = text
+            onSend(typed) { if (text == typed) text = "" }
+        }
+    }
     val charCount = text.length
     val nearLimit = charCount >= MAX_MESSAGE_LENGTH - 200
 
@@ -525,12 +560,7 @@ private fun MessageInputBar(
                     enabled = enabled,
                     maxLines = 5,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (text.isNotBlank() && enabled) {
-                            onSend(text)
-                            text = ""
-                        }
-                    }),
+                    keyboardActions = KeyboardActions(onSend = { send() }),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = DigiByteBlue,
                         unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
@@ -539,12 +569,7 @@ private fun MessageInputBar(
                 )
 
                 IconButton(
-                    onClick = {
-                        if (text.isNotBlank() && enabled) {
-                            onSend(text)
-                            text = ""
-                        }
-                    },
+                    onClick = { send() },
                     enabled = enabled && text.isNotBlank(),
                     modifier = Modifier
                         .size(44.dp)

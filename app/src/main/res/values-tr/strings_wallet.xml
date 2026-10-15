@@ -17,10 +17,10 @@
     <string name="onb_words_count">%1$d kelime</string>
     <string name="onb_create">Yeni Cüzdan Oluştur</string>
     <string name="onb_recover">Mevcut Cüzdanı Kurtar</string>
-    <string name="onb_footer">DigiByte — Güvenli, Hızlı, Merkeziyetsiz</string>
-    <string name="app_name_display">DigiByte Mobile</string>
+    <string name="onb_footer">DigiByte (DGB) ağı için bağımsız cüzdan</string>
+    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
     <!-- WARNING -->
-    <string name="seed_screenshot_blocked">Ekran görüntüleri engellendi. Bu kelimeleri yazın — geri getirilemezler.</string>
+    <string name="seed_screenshot_blocked">Ekran görüntüleri engellendi. Bu kelimeleri yazın: geri getirilemezler.</string>
     <string name="seed_title">Kurtarma İfadeniz</string>
     <string name="seed_word_count">%1$d kelimelik kurtarma ifadesi</string>
     <!-- WARNING -->
@@ -43,7 +43,7 @@
     <string name="pin_backspace">Geri sil</string>
     <string name="unlock_title">PIN girin</string>
     <string name="unlock_subtitle">Kilidi açmak için 6 haneli PIN\'inizi girin</string>
-    <string name="unlock_locked">Kilitli — %1$s sonra tekrar deneyin</string>
+    <string name="unlock_locked">Kilitli: %1$s sonra tekrar deneyin</string>
     <string name="unlock_unlocking">Kilit açılıyor…</string>
     <string name="unlock_biometrics_cd">Biyometri ile aç</string>
     <string name="recover_title">Cüzdanı Kurtar</string>
@@ -68,11 +68,11 @@
     <string name="pin_err_wallet">Cüzdan oluşturulamadı. Lütfen tekrar deneyin.</string>
     <string name="unlock_err_failed">Kilit açılamadı. Lütfen tekrar deneyin.</string>
     <string name="unlock_device_lock_removed">Cihazınızın ekran kilidi kaldırıldığı için cüzdanın korunan anahtarı yok oldu. Cüzdanı kurtarma ifadenizle geri yükleyin.</string>
-    <string name="unlock_wiping">Çok fazla başarısız deneme — cüzdan siliniyor</string>
+    <string name="unlock_wiping">Çok fazla başarısız deneme: cüzdan siliniyor</string>
     <string name="unlock_attempts_left">Yanlış PIN. Kalan deneme: %1$d</string>
     <string name="battery_title">Eşitlemeyi arka planda çalışır durumda tut</string>
     <string name="battery_body">Ekran kapalıyken Android bu cüzdanı uyku moduna alabilir; bu, DigiByte ağıyla bağlantısını keser ve siz uygulamayı yeniden açana kadar 0 eşte takılı kalmasına yol açabilir.\n\nEşitlemeyi sürdürebilmesi için kısıtlamasız çalışmasına izin verin.</string>
-    <string name="battery_body_samsung">\n\nSamsung cihazlarda ayrıca Cihaz bakımı → Pil → \"Hiç uyumayan uygulamalar\" bölümünü açıp DigiByte Mobile\'ı ekleyin.</string>
+    <string name="battery_body_samsung">\n\nSamsung cihazlarda ayrıca Cihaz bakımı → Pil → \"Hiç uyumayan uygulamalar\" bölümünü açıp ATB Wallet\'ı ekleyin.</string>
     <string name="battery_open_settings">Ayarları aç</string>
     <string name="tor_title">Yeni Gizlilik Özelliği</string>
     <string name="tor_body">Tor yönlendirmesi artık kullanılabilir. Etkinleştirildiğinde cüzdanınız DigiByte ağına Tor üzerinden bağlanır ve IP adresinizi eşlerden gizler.\n\nTor yönlendirmesi etkinleştirilsin mi?</string>
@@ -100,13 +100,13 @@
     <string name="wallet_price_via">kaynak: %1$s</string>
     <string name="wallet_testnet_active">Testnet etkin</string>
     <string name="wallet_tor_active">Tor etkin</string>
-    <string name="wallet_tor_hidden">Tor — IP adresiniz gizli kalır</string>
+    <string name="wallet_tor_hidden">Tor: IP adresiniz gizli kalır</string>
     <string name="wallet_disconnected_peers">Bağlantı kesildi · %1$d eş</string>
-    <string name="wallet_history_gap">Geçmişte boşluk — bazı bloklar doğrulanmadı</string>
+    <string name="wallet_history_gap">Geçmişte boşluk: bazı bloklar doğrulanmadı</string>
     <string name="wallet_scan_missing">Eksik işlemleri tara</string>
     <string name="wallet_balance_refresh_failed">Bakiye yenilenemedi</string>
     <string name="wallet_reconcile_unreachable">Bu güncellemeden sonra mutabakat düğümüne ulaşamadık. Gösterilen bakiyeniz güncel olmayabilir.</string>
-    <string name="wallet_tor_unavailable">Tor kullanılamıyor — doğrudan bağlantılar kullanılıyor</string>
+    <string name="wallet_tor_unavailable">Tor kullanılamıyor: doğrudan bağlantılar kullanılıyor</string>
     <string name="wallet_tor_timeout">Tor ağa zamanında ulaşamadı, bu nedenle cüzdan bu oturumda eşlere doğrudan bağlanıyor. Uygulamayı yeniden başlatana kadar IP adresiniz eşler tarafından görülebilir.</string>
     <string name="wallet_node_offline">Düğümünüz çevrimdışı</string>
     <string name="wallet_node_offline_body">Eşleştirilen düğüme ulaşılamıyor ya da şu anda compact filters sunmuyor. Çalıştığından, erişilebilir olduğundan ve peerblockfilters=1 ayarının bulunduğundan emin olun.</string>
@@ -124,11 +124,15 @@
     <string name="receive_request_amount">Belirli bir tutar iste (isteğe bağlı)</string>
     <string name="receive_amount_label">Tutar</string>
     <string name="receive_qr_encodes">QR şunu içerir: %1$s</string>
-    <string name="receive_dd_note">DigiDollar, USD cinsinden token olarak alınır. Bu DigiDollar adresini paylaşın — QR yalnızca adresi taşır (tutar isteği içermez).</string>
+    <string name="receive_dd_note">DigiDollar, USD cinsinden token olarak alınır. Bu DigiDollar adresini paylaşın: QR yalnızca adresi taşır (tutar isteği içermez).</string>
     <string name="txd_title">İşlem Ayrıntıları</string>
     <string name="txd_not_found">İşlem bulunamadı</string>
     <string name="txd_sent">Gönderildi</string>
     <string name="txd_received">Alındı</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Basıldı</string>
+    <string name="tx_dd_self_transfer">Kendinize aktarıldı</string>
+    <string name="tx_dd_redeemed">İtfa edildi</string>
     <string name="txd_transaction_id">İşlem kimliği</string>
     <string name="txd_block_height">Blok yüksekliği</string>
     <string name="txd_pending">Beklemede</string>
@@ -142,12 +146,12 @@
     <string name="txd_view_explorer">Explorer\'da görüntüle</string>
     <string name="txd_back_to_wallet">Cüzdana dön</string>
 
-    <string name="wallet_sync_gap_headline">Tarama tamamlandı — geçmişinizin bir kısmı doğrulanmadı</string>
+    <string name="wallet_sync_gap_headline">Tarama tamamlandı: geçmişinizin bir kısmı doğrulanmadı</string>
     <string name="wallet_sync_connecting">DigiByte ağına bağlanılıyor</string>
     <string name="wallet_sync_scanning">İşlemleriniz aranıyor</string>
     <string name="wallet_sync_uptodate">Güncel</string>
     <string name="wallet_sync_failed">Eşitleme başarısız</string>
-    <string name="wallet_sync_finishing">Tamamlanıyor — son bloklar doğrulanıyor</string>
+    <string name="wallet_sync_finishing">Tamamlanıyor: son bloklar doğrulanıyor</string>
     <string name="wallet_blocks_count">%1$s blok</string>
     <string name="wallet_sync_progress_eta">%%%1$d tamamlandı · %2$s · %3$s kaldı</string>
     <string name="wallet_sync_progress_no_eta">%%%1$d tamamlandı · %2$s kaldı · tahmin ediliyor…</string>
@@ -165,7 +169,7 @@
     <string name="wallet_status_connecting">Bağlanıyor…</string>
     <string name="wallet_gap_range_between">blok %1$s–%2$s</string>
     <string name="wallet_gap_range_below">%1$s altındaki bloklar</string>
-    <string name="wallet_gap_body">Geçmişinizin bir kısmı (%1$s) filtre filosundan doğrulanamadı — eksik işlemleri taramak için dokunun.</string>
+    <string name="wallet_gap_body">Geçmişinizin bir kısmı (%1$s) filtre filosundan doğrulanamadı: eksik işlemleri taramak için dokunun.</string>
     <string name="receive_address_unavailable">Adres kullanılamıyor</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -213,11 +217,11 @@
     <string name="send_network_fee_row">Ağ ücreti</string>
     <string name="send_fee_default">Varsayılan</string>
     <string name="send_fee_custom">Özel</string>
-    <string name="send_fee_below_min">⚠ Asgari aktarım ücretinin altında — işlem yayınlanmayabilir</string>
+    <string name="send_fee_below_min">⚠ Asgari aktarım ücretinin altında: işlem yayınlanmayabilir</string>
     <string name="send_fee_required">Ücret gerekli</string>
     <string name="send_confirms_15s">~15 saniyede onaylanır</string>
-    <string name="send_no_peers">Bağlı DigiByte eşi yok — şu anda yayınlanamıyor. Yeniden bağlanılıyor…</string>
-    <string name="send_wait_for_sync">Göndermeden önce eşitlemenin bitmesini bekleyin — tam bakiyeniz hâlâ kurtarılıyor.</string>
+    <string name="send_no_peers">Bağlı DigiByte eşi yok: şu anda yayınlanamıyor. Yeniden bağlanılıyor…</string>
+    <string name="send_wait_for_sync">Göndermeden önce eşitlemenin bitmesini bekleyin: tam bakiyeniz hâlâ kurtarılıyor.</string>
     <string name="send_broadcasting">Yayınlanıyor…</string>
     <string name="send_review">İncele ve gönder</string>
     <string name="send_dialog_title">İşlemi onayla</string>
@@ -225,7 +229,7 @@
     <string name="send_to">Alıcı</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Bu DigiDollar gönderimi hazırlanamadı. Ağ ücretini ödemek için yeterli DGB\'niz olduğunu kontrol edin.</string>
     <string name="send_verify_warning">Yukarıdaki tam adresi dikkatle doğrulayın.\nİşlemler geri alınamaz.</string>
     <string name="send_send">Gönder</string>
     <string name="send_success">Başarılı</string>
@@ -237,7 +241,7 @@
 
     <string name="send_hint_dgb">dgb1q… veya D…</string>
     <string name="game_score_submitted">Puan gönderildi!</string>
-    <string name="game_score_failed">Puan gönderilemedi — oturum açtınız mı?</string>
+    <string name="game_score_failed">Puan gönderilemedi: oturum açtınız mı?</string>
     <string name="game_close">Oyunu kapat</string>
 
     <string name="set_title">Ayarlar</string>
@@ -261,15 +265,15 @@
     <string name="set_recover_other_sub">Eski/diğer türetme yollarındaki coinleri bu cüzdana aktar</string>
     <string name="set_cat_info">Bilgi</string>
     <string name="set_beta">Beta güncellemeleri</string>
-    <string name="set_beta_on">Açık — test için ön sürümler sunulacak</string>
-    <string name="set_beta_off">Kapalı — yalnızca kararlı sürümler sunulur</string>
+    <string name="set_beta_on">Açık: test için ön sürümler sunulacak</string>
+    <string name="set_beta_off">Kapalı: yalnızca kararlı sürümler sunulur</string>
     <string name="set_about">Hakkında</string>
     <string name="set_about_sub">Sürüm, lisanslar, açık kaynak</string>
     <string name="set_report_bug">Hata bildir / geri bildirim</string>
-    <string name="set_report_bug_sub">Bir sorun veya fikir gönderin — cihaz ve sürüm bilgileri sizin için doldurulur</string>
+    <string name="set_report_bug_sub">Bir sorun veya fikir gönderin: cihaz ve sürüm bilgileri sizin için doldurulur</string>
     <string name="set_cat_advanced">Gelişmiş / Geliştirici</string>
-    <string name="set_net_testnet">Testnet — test zinciri, aynı kurtarma ifadesi</string>
-    <string name="set_net_mainnet">Mainnet — üretim zinciri</string>
+    <string name="set_net_testnet">Testnet: test zinciri, aynı kurtarma ifadesi</string>
+    <string name="set_net_mainnet">Mainnet: üretim zinciri</string>
     <string name="set_switch_testnet">Testnet\'e geçilsin mi?</string>
     <string name="set_switch_mainnet">Mainnet\'e geçilsin mi?</string>
     <string name="set_switch_testnet_body">Uygulama yeniden başlayacak ve test zincirini eşitleyecek. Kurtarma ifadeniz değişmez.</string>
@@ -277,7 +281,7 @@
     <string name="set_restart">Yeniden başlat</string>
 
     <string name="lang_restart_note">Bu değişiklik cüzdan ekranını yeniden başlatır. Coinleriniz, ifadeniz ve ayarlarınız değişmez.</string>
-    <string name="lang_unreviewed_note">Çeviriler yeni ve henüz anadili konuşanlarca kontrol edilmedi. Bir şey yanlış görünüyorsa — özellikle kurtarma ifadeniz veya coinlerinizle ilgili bir uyarı — lütfen Ayarlar → Hata bildir üzerinden bize iletin.</string>
+    <string name="lang_unreviewed_note">Çeviriler yeni ve henüz anadili konuşanlarca kontrol edilmedi. Bir şey yanlış görünüyorsa (özellikle kurtarma ifadeniz veya coinlerinizle ilgili bir uyarı) lütfen Ayarlar → Hata bildir üzerinden bize iletin.</string>
     <string name="lang_selected">Seçili</string>
 
     <string name="as_send_title">Varlık gönder</string>
@@ -342,7 +346,7 @@
     <string name="rf_may_take">Bu biraz sürebilir</string>
     <string name="rf_couldnt_finish">Kontrol tamamlanamadı</string>
     <string name="rf_none_found">Kurtarılabilir bakiye bulunamadı</string>
-    <string name="rf_partial_body">Bazı türetme yolları kontrol edilemedi, bu yüzden bu nihai bir sonuç değil — görmediğimiz bakiye olabilir. Birazdan tekrar deneyin.\n\nKontrol edilmeyen: %1$s</string>
+    <string name="rf_partial_body">Bazı türetme yolları kontrol edilemedi, bu yüzden bu nihai bir sonuç değil: görmediğimiz bakiye olabilir. Birazdan tekrar deneyin.\n\nKontrol edilmeyen: %1$s</string>
     <string name="rf_no_coins">Bu tohumun diğer türetme yollarında coin yok.</string>
     <string name="rf_recoverable_balance">Kurtarılabilir bakiye</string>
     <string name="rf_found_on">BULUNDUĞU YER</string>
@@ -351,15 +355,15 @@
     <string name="rf_native_addr_note">Bakiye, yerel alma adresinizde görünecek</string>
     <string name="rf_advanced_send">Gelişmiş ▸ Farklı bir adrese gönder</string>
     <string name="rf_address_hint">DigiByte adresi (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">Bu adres cüzdanınızda DEĞİL — aktarımlar geri alınamaz</string>
+    <string name="rf_not_in_wallet">Bu adres cüzdanınızda DEĞİL: aktarımlar geri alınamaz</string>
     <string name="rf_sweep">Bakiyeyi aktar</string>
     <string name="rf_sweep_submitted">Aktarım gönderildi</string>
     <string name="rf_will_appear">Kurtarılan bakiye onaylandığında görünecek.</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Ağ onayı bekleniyor</string>
-    <string name="rf_held_assets">%1$d tanesi bırakıldı — DigiAssets</string>
-    <string name="rf_held_assets_body">Bu coinler DigiAssets taşıyor ve taşınmaları başarısız oldu — bu yüzden onları yok edecek olan sıradan DGB olarak süpürmek yerine eski cüzdanda bırakıldılar. Yeniden denemek için kurtarmayı tekrar çalıştırın.</string>
-    <string name="rf_held_unknown">%1$d tanesi bırakıldı — kontrol edilemedi</string>
+    <string name="rf_held_assets">%1$d tanesi bırakıldı: DigiAssets</string>
+    <string name="rf_held_assets_body">Bu coinler DigiAssets taşıyor ve taşınmaları başarısız oldu, bu yüzden onları yok edecek olan sıradan DGB olarak süpürmek yerine eski cüzdanda bırakıldılar. Yeniden denemek için kurtarmayı tekrar çalıştırın.</string>
+    <string name="rf_held_unknown">%1$d tanesi bırakıldı: kontrol edilemedi</string>
     <string name="rf_held_unknown_body">Bunların geldiği işlemleri okuyamadık, bu yüzden DigiAssets taşıyıp taşımadıklarını belirleyemedik. Riske atmak yerine oldukları gibi bırakıldılar. Daha sonra tekrar denemek bunu çözebilir.</string>
     <string name="rf_and_more">…ve %1$d tane daha</string>
     <string name="rf_something_wrong">Bir şeyler ters gitti</string>
@@ -367,12 +371,12 @@
     <string name="rf_err_timeout">İstek zaman aşımına uğradı. Daha güçlü bir bağlantıyla tekrar deneyin.</string>
     <string name="rf_err_seed">Cüzdan tohumu yüklenemedi. Cüzdanınızın kilidini açıp tekrar deneyin.</string>
     <string name="rf_err_lookup">Sorgu servisine ulaşılamadı. Daha sonra tekrar deneyin.</string>
-    <string name="rf_err_generic">Bir şeyler ters gitti — tekrar deneyin.</string>
+    <string name="rf_err_generic">Bir şeyler ters gitti: tekrar deneyin.</string>
     <string name="rf_fail_unknown">Bilinmeyen bir nedenle başarısız oldu.</string>
     <string name="rf_fail_no_utxos">İmzalama anahtarlarıyla eşleşen harcanabilir çıktı bulunamadı.</string>
     <string name="rf_fail_derive">Bu yol için tohumdan anahtar türetilemedi.</string>
     <string name="rf_fail_broadcast">İşlem yayını başarısız oldu. Eşlere bağlıyken tekrar deneyin.</string>
-    <string name="rf_fail_generic">Bu aktarılamadı — tekrar deneyin.</string>
+    <string name="rf_fail_generic">Bu aktarılamadı: tekrar deneyin.</string>
     <string name="rf_this_wallet">Bu cüzdan</string>
     <string name="rf_other_phrase">Başka bir cüzdanın ifadesi</string>
     <string name="rf_other_phrase_body">Başka bir cüzdanın kurtarma ifadesini girerek bakiyesini bu cüzdana taşıyın. İfade, transferi imzalamak için yalnızca bir kez kullanılır ve asla kaydedilmez.</string>
@@ -418,8 +422,8 @@
     <string name="ab_open_source">Açık kaynak</string>
     <string name="ab_source_code">Kaynak kodu</string>
     <string name="ab_licenses">Lisanslar</string>
-    <string name="ab_licenses_sub">MIT Lisansı — açık kaynak</string>
-    <string name="ab_community">DigiByte topluluğu</string>
+    <string name="ab_licenses_sub">MIT Lisansı: açık kaynak</string>
+    <string name="ab_community">DigiByte ağı hakkında bilgi</string>
     <string name="ab_report_bug">Hata bildir</string>
 
     <string name="sec_pin_auth">PIN ve kimlik doğrulama</string>
@@ -430,16 +434,16 @@
     <string name="sec_biometric_no">Bu cihazda kullanılamıyor</string>
     <string name="sec_autolock">Otomatik kilit süresi</string>
     <string name="sec_wipe_after">%1$d hatalı PIN sonrası sil</string>
-    <string name="sec_wipe_after_on">Açık — %1$d hatalı PIN sonrası cüzdan silinir</string>
-    <string name="sec_wipe_after_off">Kapalı — PIN deneme saldırılarına karşı ek koruma</string>
-    <string name="sec_wipe_after_body">Etkinleştirildiğinde, arka arkaya %1$d hatalı PIN girişi bu cüzdanı — tohum, anahtarlar ve geçmiş — bu cihazdan KALICI olarak siler.\n\nCihazda bu geri alınamaz. Paranız yalnızca kurtarma ifadenizle geri getirilebilir.</string>
+    <string name="sec_wipe_after_on">Açık: %1$d hatalı PIN sonrası cüzdan silinir</string>
+    <string name="sec_wipe_after_off">Kapalı: PIN deneme saldırılarına karşı ek koruma</string>
+    <string name="sec_wipe_after_body">Etkinleştirildiğinde, arka arkaya %1$d hatalı PIN girişi bu cüzdanı (tohum, anahtarlar ve geçmiş) bu cihazdan KALICI olarak siler.\n\nCihazda bu geri alınamaz. Paranız yalnızca kurtarma ifadenizle geri getirilebilir.</string>
     <string name="sec_wipe_after_ack">Kurtarma ifademin yedeği var</string>
     <string name="sec_wipe_after_enabled">%1$d sonrası silme etkin</string>
     <string name="sec_recovery_phrase">Kurtarma ifadesi</string>
     <string name="sec_view_phrase">Kurtarma ifadesini görüntüle</string>
     <string name="sec_view_phrase_sub">PIN + biyometrik doğrulama gerekir</string>
     <string name="sec_view_phrase_body">Kurtarma ifadeniz cüzdanınıza tam erişim sağlar.\n\n• Kimseyle asla paylaşmayın\n• Hiçbir web sitesine asla girmeyin\n• Çevrimdışı, güvenli bir yerde saklayın\n\nDevam etmek için PIN + biyometrik kimlik doğrulama gerekir.</string>
-    <string name="sec_understand">Anladım — devam et</string>
+    <string name="sec_understand">Anladım: devam et</string>
     <string name="sec_danger_zone">Tehlikeli bölge</string>
     <string name="sec_wipe_wallet">Cüzdanı sil</string>
     <string name="sec_wipe_wallet_sub">Tüm cüzdan verilerini bu cihazdan kaldır</string>
@@ -477,6 +481,10 @@
     <string name="did_login">Digi-ID girişi</string>
     <string name="did_auth_title">Digi-ID kimlik doğrulama</string>
     <string name="did_auth_subtitle">%1$s hesabına giriş için kimliğinizi doğrulayın</string>
+    <string name="hub_sign_title">Hub Gönderisini İmzala</string>
+    <string name="hub_sign_subtitle">Bu gönderiyi kimliğinizle imzalamak için kimlik doğrulaması yapın</string>
+    <string name="hub_tip_auth_title">Hub Bahşişi Gönder</string>
+    <string name="hub_tip_auth_subtitle">Bu bahşişi DigiScope bahşiş bakiyenizden göndermek için kimlik doğrulaması yapın</string>
     <string name="did_requesting">Digi-ID kimlik doğrulaması istiyor</string>
     <string name="did_warning">Uyarı</string>
     <string name="did_insecure">Güvenli olmayan bağlantı</string>
@@ -498,7 +506,7 @@
     <string name="ni_state_synced">Eşitlendi</string>
     <string name="ni_state_error">Hata</string>
     <string name="ni_caught_up">Güncel</string>
-    <string name="ni_tor_disabled">Devre dışı — doğrudan bağlanılıyor</string>
+    <string name="ni_tor_disabled">Devre dışı: doğrudan bağlanılıyor</string>
     <string name="ni_tor_starting">Başlatılıyor…</string>
     <string name="ni_tor_connecting">Tor ağına bağlanılıyor…</string>
     <string name="ni_tor_connected">%1$d numaralı port üzerinden bağlandı</string>
@@ -506,7 +514,7 @@
     <string name="ni_node_serving">✓ Compact filters sunuluyor</string>
     <string name="ni_node_connecting">Bağlanıyor…</string>
     <string name="ni_node_unreachable">⚠ Ulaşılamıyor / filtre sunmuyor</string>
-    <string name="sec_locked_countdown">Kilitli — %1$s sonra tekrar deneyin</string>
+    <string name="sec_locked_countdown">Kilitli: %1$s sonra tekrar deneyin</string>
     <string name="sec_autolock_1m">1 dakika</string>
     <string name="sec_autolock_5m">5 dakika</string>
     <string name="sec_autolock_15m">15 dakika</string>
@@ -517,38 +525,41 @@
     <string name="sec_biometric_required">Biyometrik kimlik doğrulama gerekli</string>
     <string name="did_logged_in">Artık %1$s hesabına giriş yaptınız</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">Bir kurtarma ifadesinden oluşturulan Hiyerarşik Deterministik cüzdan. Tek bir yedekten birçok adres üretebilir — tek bir ana anahtardan sınırsız hesap numarası almak gibi.</string>
+    <string name="ab_type_desc">Bir kurtarma ifadesinden oluşturulan Hiyerarşik Deterministik cüzdan. Tek bir yedekten birçok adres üretebilir: tek bir ana anahtardan sınırsız hesap numarası almak gibi.</string>
     <string name="ab_path_desc">Adreslerinizi üretmek için kullanılan türetme yolu. 84 = BIP84 standardı, 20 = DigiByte coin türü (SLIP44), 0 = ilk hesap. Böylece BIP84 uyumlu her cüzdan adreslerinizi aynı kurtarma ifadesinden geri getirebilir. Ian Coleman\'ın BIP39 aracıyla uyumludur.</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">dgb1 ile başlayan modern SegWit adreslerini kullanır. Bunlar D ile başlayan eski Legacy adreslerden daha verimlidir ve ücretleri daha düşüktür.</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">Mainnet, DGB\'nin gerçek değere sahip olduğu asıl DigiByte ağıdır. Testnet, geliştiricilerin gerçek para kullanmadan test etmesi içindir.</string>
     <string name="ab_security_value">Kendi saklaması</string>
-    <string name="ab_security_desc">Anahtarlarınız bu cihazdan asla çıkmaz. Hiçbir şirket veya sunucu paranızı tutmaz — cüzdanınızı yalnızca siz kontrol edersiniz. Kurtarma ifadenizi kaybederseniz, kimse sizin için geri getiremez.</string>
+    <string name="ab_security_desc">Anahtarlarınız bu cihazdan asla çıkmaz. Hiçbir şirket veya sunucu paranızı tutmaz: cüzdanınızı yalnızca siz kontrol edersiniz. Kurtarma ifadenizi kaybederseniz, kimse sizin için geri getiremez.</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">Basitleştirilmiş Ödeme Doğrulaması — blok zincirinin tamamını indirmeden doğrudan DigiByte P2P ağıyla eşitlenir. BIP157/158 compact block filters kullanır: cüzdanınız filtreleri indirip cihazda denetler, böylece sahip olduğunuz adresler telefonunuzdan hiç çıkmaz.</string>
+    <string name="ab_sync_desc">Basitleştirilmiş Ödeme Doğrulaması: blok zincirinin tamamını indirmeden doğrudan DigiByte P2P ağıyla eşitlenir. BIP157/158 compact block filters kullanır: cüzdanınız filtreleri indirip cihazda denetler, böylece sahip olduğunuz adresler telefonunuzdan hiç çıkmaz.</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Bu yazılım MIT Lisansı kapsamında sunulmaktadır.</string>
     <string name="ab_tagline">DigiByte merkeziyetsiz bir blok zinciri ve dijital para birimidir.</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC tarafından geliştirilen bağımsız cüzdan; DigiByte Foundation, DigiByte Alliance veya DigiByte-Core ile bağlantılı değildir ve bunlar tarafından onaylanmamıştır.</string>
+    <string name="ab_website">Around The Block web sitesi</string>
 
     <string name="tx_conf_short">%1$d onay</string>
     <string name="tx_confirmed">Onaylandı</string>
 
     <string name="cur_title">Görüntüleme para birimi</string>
-    <string name="cur_note">DigiByte bakiyeniz her zaman gerçek olandır — bu yalnızca neyle karşılaştırıldığını değiştirir.</string>
+    <string name="cur_note">DigiByte bakiyeniz her zaman gerçek olandır: bu yalnızca neyle karşılaştırıldığını değiştirir.</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s: %2$s</string>
 
-    <string name="pass_advanced">Gelişmiş — parola ekle</string>
+    <string name="pass_advanced">Gelişmiş: parola ekle</string>
     <string name="pass_optional">İsteğe bağlı</string>
-    <string name="pass_what">Parola, kendi seçtiğiniz ek bir kelime ya da cümledir. Parola varsa kurtarma ifadeniz tek başına bu cüzdanı açmaya yetmez — yazılı kelimeleri bulan biri coinlerinizi harcayamaz.</string>
-    <string name="pass_warn">Parolayı yazın, ancak kurtarma ifadenizden AYRI bir yerde saklayın — aynı yerde tutulduklarında ikisi yeniden tek bir sır olur ve parola hiçbir şeyi korumaz. Parolayı kaybederseniz, bu kelimeler tek başına cüzdanınızı geri YÜKLEYEMEZ ve kimse sizin için kurtaramaz.</string>
+    <string name="pass_what">Parola, kendi seçtiğiniz ek bir kelime ya da cümledir. Parola varsa kurtarma ifadeniz tek başına bu cüzdanı açmaya yetmez: yazılı kelimeleri bulan biri coinlerinizi harcayamaz.</string>
+    <string name="pass_warn">Parolayı yazın, ancak kurtarma ifadenizden AYRI bir yerde saklayın: aynı yerde tutulduklarında ikisi yeniden tek bir sır olur ve parola hiçbir şeyi korumaz. Parolayı kaybederseniz, bu kelimeler tek başına cüzdanınızı geri YÜKLEYEMEZ ve kimse sizin için kurtaramaz.</string>
     <string name="pass_scope">Bu, yazılı yedeğinizi korur. Bu telefonda cüzdanı kilitli tutan hâlâ PIN\'inizdir.</string>
     <string name="pass_enter">Parola</string>
     <string name="pass_confirm">Parolayı onayla</string>
     <string name="pass_mismatch">Parolalar eşleşmiyor</string>
-    <string name="pass_too_long">Çok uzun — en fazla %1$d karakter</string>
+    <string name="pass_too_long">Çok uzun: en fazla %1$d karakter</string>
     <string name="pass_set">Parola ayarlandı</string>
     <string name="pass_none">Parola yok</string>
     <string name="pass_restore_label">Parola (kullanmadıysanız boş bırakın)</string>
@@ -562,7 +573,7 @@
     <string name="rf_move_assets_body">Varlıkları bu cüzdana göndermek için yukarıda ayrılan DGB kullanılır. Varlık transferleri geri alınamaz.</string>
     <string name="rf_moving_assets">Varlıklar taşınıyor…</string>
     <string name="rf_move_result">%2$d varlıktan %1$d tanesi taşındı</string>
-    <string name="rf_move_failed">%1$s — taşınamadı: %2$s</string>
+    <string name="rf_move_failed">%1$s, taşınamadı: %2$s</string>
     <string name="pass_screen_title">Parola eklensin mi?</string>
     <string name="pass_screen_subtitle">İsteğe bağlıdır ve çoğu kişi bunu atlamalıdır. Parola, kendi belirlediğiniz ek bir kelime veya cümledir; o olmadan kurtarma ifadeniz tek başına bu cüzdanı artık açamaz.</string>
     <string name="pass_screen_continue_with">Parola ile devam et</string>
@@ -578,12 +589,12 @@
     <string name="send_fail_amount">Sıfırdan büyük bir tutar girin.</string>
     <string name="send_fail_unknown">İşlem gönderilemedi.</string>
     <string name="send_fail_try_again">Tekrar dene</string>
-    <string name="rf_splitting_for_assets">%1$d DigiAssets taşınmaya hazırlanıyor — her biri kendi transfer ücretini ödeyebilsin diye DGB\'niz bölünüyor. Bir onay bekleniyor, genelde bir dakikadan kısa.</string>
+    <string name="rf_splitting_for_assets">%1$d DigiAssets taşınmaya hazırlanıyor: her biri kendi transfer ücretini ödeyebilsin diye DGB\'niz bölünüyor. Bir onay bekleniyor, genelde bir dakikadan kısa.</string>
     <string name="rf_nothing_moved">Hiçbir şey taşınmadı</string>
-    <string name="rf_dd_fee_floor">Ağ ücreti için %1$s gerekir — bu cüzdanda %2$s var.</string>
+    <string name="rf_dd_fee_floor">Ağ ücreti için %1$s gerekir: bu cüzdanda %2$s var.</string>
     <string name="rf_dd_found">%1$s DigiDollar bulundu</string>
     <string name="rf_dd_moved">%1$s DigiDollar bu cüzdana taşındı</string>
-    <string name="rf_dd_left_behind">%1$s DigiDollar geride kaldı — taşınamadı</string>
+    <string name="rf_dd_left_behind">%1$s DigiDollar geride kaldı: taşınamadı</string>
     <string name="rf_dd_unreachable">DigiDollar kontrol edilemedi; bu cüzdanda bir miktar olabilir</string>
     <string name="as_rules_checking">Bu varlığın transfer kuralları kontrol ediliyor…</string>
     <string name="as_rules_bound_title">Bu varlığın transfer kuralları var</string>
@@ -613,7 +624,7 @@
     <string name="reconcile_spendable">Harcanabilir</string>
     <string name="reconcile_wallet_spendable">Cüzdanın harcanabilir bakiyesi</string>
     <string name="reconcile_matches_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşiyor.</string>
-    <string name="reconcile_does_not_match_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşmiyor — aşağıya bakın.</string>
+    <string name="reconcile_does_not_match_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşmiyor: aşağıya bakın.</string>
     <string name="reconcile_held_asset">Bir DigiAsset için tutuluyor</string>
     <string name="reconcile_held_unknown">Tutuluyor: varlık durumu bilinmiyor</string>
     <string name="reconcile_proven_plain">Normal DGB, yeniden başlattıktan sonra harcanabilir</string>
@@ -630,7 +641,7 @@
     <string name="market_tor_notice_body">Pazar Tor üzerinden geçmiyor; site IP adresinizi görecek.</string>
     <string name="market_tor_notice_continue">Devam</string>
     <string name="restore_pass_toggle">Parola kullandım</string>
-    <string name="restore_pass_body">Yalnızca bu cüzdanı oluştururken bir parola eklediyseniz. Yanlış parola başka, boş bir cüzdan açar — hiçbir hata uyarısı gösterilmez.</string>
+    <string name="restore_pass_body">Yalnızca bu cüzdanı oluştururken bir parola eklediyseniz. Yanlış parola başka, boş bir cüzdan açar: hiçbir hata uyarısı gösterilmez.</string>
 
     <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
          WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
@@ -642,9 +653,9 @@
     <string name="restore_err_invalid_words">Geçersiz kelime(ler): %1$s</string>
     <string name="restore_err_checksum">Bu kurtarma ifadesi geçerli değil. Her kelimeyi ve sırasını tekrar kontrol edin.</string>
     <string name="restore_scan_title">Gizli şekilde geri yükle</string>
-    <string name="restore_scan_body">Devam ettikten sonra bu telefon, cüzdanınızın işlemlerini kendisi bulur — yerel (dgb1q…), legacy (D…), Taproot ve DigiDollar adresleri — adreslerinizi kimseye göndermeden.</string>
+    <string name="restore_scan_body">Devam ettikten sonra bu telefon, cüzdanınızın işlemlerini kendisi bulur: yerel (dgb1q…), legacy (D…), Taproot ve DigiDollar adresleri, adreslerinizi kimseye göndermeden.</string>
     <string name="restore_other_title">Başka bir cüzdan uygulamasından bir ifade mi?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor ve bazı eski cüzdanlar coin\'leri bu cüzdanın kullanmadığı adres biçimlerinde tutar, bu yüzden eşitleme onları göremez. Bir kontrol onları bulabilir, ancak ifadenizden türetilen adresleri DigiScope\'a (api.digiscope.me) gönderir; DigiScope bu adreslerdeki bakiyeleri bildirir. DigiByte Mobile\'dan ya da eski DigiByte Wallet uygulamasından gelen bir ifade için gerekmez. Kontrolü daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünden de çalıştırabilirsiniz.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor ve bazı eski cüzdanlar coin\'leri bu cüzdanın kullanmadığı adres biçimlerinde tutar, bu yüzden eşitleme onları göremez. Bir kontrol onları bulabilir, ancak ifadenizden türetilen adresleri DigiScope\'a (api.digiscope.me) gönderir; DigiScope bu adreslerdeki bakiyeleri bildirir. ATB Wallet\'tan ya da eski DigiByte uygulamasından gelen bir ifade için gerekmez. Kontrolü daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünden de çalıştırabilirsiniz.</string>
     <string name="restore_other_check">Diğer biçimleri kontrol et</string>
     <string name="restore_scan_deriving">Adresler türetiliyor…</string>
     <string name="restore_scan_duration">Bu, düğüme bağlı olarak 30-90 saniye sürebilir.</string>
@@ -659,8 +670,8 @@
     </plurals>
     <string name="restore_unreachable_body">Kontrol çalıştırılamadı. Devam ettikten sonra eşitleme bu cüzdanın kendi biçimlerini yine de bulur; yeniden deneyin veya diğer uygulamaların biçimleri için daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünü kullanın.</string>
     <string name="restore_none_body">Kontrol edilen biçimlerde harcanmamış bir şey yok. Devam ettikten sonra eşitleme bu cüzdanın kendi işlemlerini yine de bulur.</string>
-    <string name="restore_nonnative_note">%1$s DGB başka bir uygulamanın adres biçiminde. Geri yüklemeden sonra bunu bu cüzdana taşımak için Başka bir cüzdandan bakiye kurtar ekranına yönlendirileceksiniz — orada onaylayana kadar hiçbir şey taşınmaz.</string>
-    <string name="restore_pass_nothing_found">Girdiğiniz parolayla hiçbir şey bulunamadı. Parolanın sağlama toplamı yoktur: yanlış bir parola hiçbir hata vermeden başka, boş bir cüzdan açar. Yazım hatası olup olmadığını kontrol edin — ya da cüzdanı oluştururken parola belirlemediyseniz geri dönüp parola alanını kapatın.</string>
+    <string name="restore_nonnative_note">%1$s DGB başka bir uygulamanın adres biçiminde. Geri yüklemeden sonra bunu bu cüzdana taşımak için Başka bir cüzdandan bakiye kurtar ekranına yönlendirileceksiniz: orada onaylayana kadar hiçbir şey taşınmaz.</string>
+    <string name="restore_pass_nothing_found">Girdiğiniz parolayla hiçbir şey bulunamadı. Parolanın sağlama toplamı yoktur: yanlış bir parola hiçbir hata vermeden başka, boş bir cüzdan açar. Yazım hatası olup olmadığını kontrol edin, ya da cüzdanı oluştururken parola belirlemediyseniz geri dönüp parola alanını kapatın.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d adres tarandı</item>
         <item quantity="other">%1$s · %2$d adres tarandı</item>
@@ -668,11 +679,24 @@
     <string name="restore_date_title">Bu cüzdanı ne zaman oluşturdunuz?</string>
     <string name="restore_date_body">Bu, gereksiz blok zinciri taramasını atlamamıza ve daha hızlı eşitlememize yardımcı olur.</string>
     <string name="restore_date_unsure">Hatırlamıyorum</string>
-    <string name="restore_date_unsure_sub">Tam blok zinciri taraması (en yavaş — emin değilseniz kullanın)</string>
-    <string name="restore_date_warning">Seçilen yıldan eski işlemler tespit edilmez. Cüzdanınızın daha eski bir geçmişi olabilirse daha erken bir yıl seçin — veya tam kapsam için \"Hatırlamıyorum\" seçeneğini kullanın (daha yavaş).</string>
+    <string name="restore_date_unsure_sub">Tam blok zinciri taraması (en yavaş: emin değilseniz kullanın)</string>
+    <string name="restore_date_warning">Seçilen yıldan eski işlemler tespit edilmez. Cüzdanınızın daha eski bir geçmişi olabilirse daha erken bir yıl seçin: veya tam kapsam için \"Hatırlamıyorum\" seçeneğini kullanın (daha yavaş).</string>
     <string name="restore_date_start">Kurtarmayı Başlat</string>
     <string name="restore_date_restoring">Cüzdan geri yükleniyor…</string>
     <string name="restore_date_onwards">Oca %1$d ve sonrası</string>
     <string name="restore_date_range">Oca %1$d – Ara %1$d</string>
     <string name="restore_date_genesis">DigiByte Ocak 2014\'te başladı</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, ağın asgari ücreti. Bu işlemin tam ücreti onaylamadan önce gösterilir.</string>
+    <string name="send_preparing">Hazırlanıyor…</string>
+    <string name="send_fee_raised">Girdiğiniz %1$s DGB tutarından yükseltildi: bu işlemin ödediği ücret budur.</string>
+    <string name="send_err_below_dust">Bu tutar, ağın bu adrese aktardığı en küçük ödemenin (%1$s DGB) altında. En az o kadar gönderin.</string>
+    <string name="send_not_relayed_title">Gönderildi, henüz aktarılmadı</string>
+    <string name="send_not_relayed_body">Cüzdanınız bu işlemi yayınladı, ancak henüz hiçbir eş onu almadı; bu yüzden ağa ulaşıp ulaşmadığı henüz bilinmiyor. Etkinliğinizde beklemede olarak görünür. Tekrar göndermeden önce etkinliğinizi kontrol edin.</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Parola okunamadı</string>
+    <string name="seedview_pass_unreadable_body">Bu cüzdanın parolası şu anda okunamadı. Kurtarma kelimeleriniz tek başına bu cüzdanı geri yüklemeyebilir; bu nedenle parola onlarla birlikte gösterilebilene kadar gösterilmezler. Tekrar deneyin.</string>
+    <string name="seedview_pass_retry">Yeniden dene</string>
+    <!-- /pkg E2-keys -->
 </resources>

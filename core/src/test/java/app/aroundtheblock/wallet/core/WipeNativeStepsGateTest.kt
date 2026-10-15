@@ -11,7 +11,7 @@ import java.io.File
  * Bridge readers check the wallet global or the peer-manager global and then use it; they rely on
  * neither being cleared under them while the process runs. So a wipe asks the native side for two
  * things only — stop sync, zero the seed — and no bridge entry point takes the wallet or the peer
- * manager away except the create and recover swaps, which put a new wallet in its place. After a
+ * manager away except the create, recover and restore swaps, which put a new wallet in its place. After a
  * VERIFIED wipe the app ends the process instead and starts a fresh one (the app's
  * FreshStartAfterWipe): the wiped wallet goes with the process, and the next wallet is made in one
  * that never loaded it.
@@ -54,7 +54,7 @@ class WipeNativeStepsGateTest {
     @Test fun `no bridge entry point takes the wallet away without putting one in its place`() {
         val entries = entryPoints(walletC)
         assertTrue("scanner is blind: found ${entries.size} entry points", entries.size >= 15)
-        val swaps = setOf("createWalletFromBytes", "recoverWalletFromBytes")
+        val swaps = setOf("createWalletFromBytes", "recoverWalletFromBytes", "restoreWalletFromBytes")
         val cleared = Regex("""\bg_wallet\s*=\s*NULL\s*;""")
         val clearing = entries.filter { (_, body) -> cleared.containsMatchIn(body) }.keys
         assertEquals("entry points that leave no wallet loaded", emptySet<String>(), clearing - swaps)

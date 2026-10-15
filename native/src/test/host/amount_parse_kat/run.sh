@@ -44,25 +44,25 @@ build "$BUILD_DIR/green" address,undefined || { echo "GATE FAILURE: shipped arm 
 
 echo "--- COMPARISON ARM (-DAMOUNT_PARSE_VIA_DOUBLE_UNFIXED) ---"
 out="$("$BUILD_DIR/red" 2>&1)"; rc=$?
-echo "$out" | grep -Eq "$SAN_RE" && { echo "  [red] GATE FAILURE: sanitizer report"; FAIL=1; }
+<<<"$out" grep -Eq "$SAN_RE" && { echo "  [red] GATE FAILURE: sanitizer report"; FAIL=1; }
 [ $rc -eq 0 ] && { echo "  [red] GATE FAILURE: exited 0; it proves nothing"; FAIL=1; }
 for c in "${RED_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c fail$" && echo "  [red $c] failed, as it must: $(echo "$out" | grep "^FAIL: $c" | head -1)" \
+    <<<"$out" grep -q "^RESULT $c fail$" && echo "  [red $c] failed, as it must: $(<<<"$out" grep "^FAIL: $c" | head -1)" \
         || { echo "  [red $c] GATE FAILURE: did not fail"; FAIL=1; }
 done
 for c in "${GUARD_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c pass$" && echo "  [red $c] GUARD held" \
-        || { echo "  [red $c] GATE FAILURE: GUARD did not hold"; echo "$out" | grep "^FAIL: $c" | sed 's/^/      /'; FAIL=1; }
+    <<<"$out" grep -q "^RESULT $c pass$" && echo "  [red $c] GUARD held" \
+        || { echo "  [red $c] GATE FAILURE: GUARD did not hold"; <<<"$out" grep "^FAIL: $c" | sed 's/^/      /'; FAIL=1; }
 done
 
 echo "--- SHIPPED ARM ---"
 out="$("$BUILD_DIR/green" 2>&1)"; rc=$?
-echo "$out" | grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; echo "$out" | grep -E "$SAN_RE" | head -3; FAIL=1; }
-if [ $rc -ne 0 ] || ! echo "$out" | grep -q "^ALL PASS$"; then
-    echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; echo "$out" | grep "^FAIL:" | sed 's/^/      /'; FAIL=1
+<<<"$out" grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; <<<"$out" grep -E "$SAN_RE" | head -3; FAIL=1; }
+if [ $rc -ne 0 ] || ! <<<"$out" grep -q "^ALL PASS$"; then
+    echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; <<<"$out" grep "^FAIL:" | sed 's/^/      /'; FAIL=1
 fi
 for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE"; FAIL=1; }
+    <<<"$out" grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE"; FAIL=1; }
 done
 [ $FAIL -eq 0 ] && echo "amount_parse_kat: GATE HELD (RED was a satoshi low; GREEN exact)"
 exit $FAIL

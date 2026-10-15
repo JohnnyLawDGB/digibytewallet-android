@@ -78,7 +78,10 @@ class ManifestSecurityTest {
             // Normal (install-time) permission — required for the ConnectivityManager
             // default-network callback that drives the network-regained reconnect
             // (SyncService.registerNetworkRegainedCallback, v4.0.19). Not dangerous.
-            "android.permission.ACCESS_NETWORK_STATE"
+            "android.permission.ACCESS_NETWORK_STATE",
+            // Normal (install-time) permission — SensitiveDialog hides other apps' overlay
+            // windows while a send confirmation or the PIN dialog is shown (API 31+). Not dangerous.
+            "android.permission.HIDE_OVERLAY_WINDOWS"
         )
         val permPattern = Regex("android:name=\"(android\\.permission\\.[A-Z_]+)\"")
         val declared = permPattern.findAll(manifest).map { it.groupValues[1] }.toSet()

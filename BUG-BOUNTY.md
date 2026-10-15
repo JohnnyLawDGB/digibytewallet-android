@@ -1,18 +1,21 @@
-# DigiByte Mobile — Bug Bounty Program
+# ATB Wallet for DigiByte (DGB): Bug Bounty Program
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **DigiByte Mobile 4.0.89** (`app.aroundtheblock.wallet`), from 2026-10-11.
-4.0.88 stays in scope until **2026-10-25** under the overlap rule below.
+**Bounty target:** **ATB Wallet for DigiByte (DGB) 4.1.0** (`app.aroundtheblock.wallet`), from its release date.
+4.0.89 stays in scope for **14 days** after that date under the overlap rule below. Before you
+start, read "Known issues being addressed for 4.1.1" below: those are already on our list.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
 reports earn named credit rather than payment; please read the tiers before spending time on a
 report.
 
 This program rewards security researchers who report verifiable vulnerabilities
-in DigiByte Mobile (`app.aroundtheblock.wallet`), the Android wallet published by
-Around The Block LLC. It was previously published as DigiByte Wallet (`io.digibyte`), whose
-final release was v4.0.87.2. The wallet is a non-custodial, sovereignty-first
+in ATB Wallet for DigiByte (DGB) (`app.aroundtheblock.wallet`), the Android wallet published by
+Around The Block LLC. The same app was named DigiByte Mobile in v4.0.88 and v4.0.89. It was
+previously published as DigiByte Wallet (`io.digibyte`), whose final release was v4.0.87.2.
+ATB Wallet is independent: it is not affiliated with or endorsed by the DigiByte Foundation,
+DigiByte Alliance or DigiByte-Core. The wallet is a non-custodial, sovereignty-first
 SPV wallet that holds user funds — bugs that compromise user funds, secrets,
 or privacy are taken seriously and rewarded accordingly.
 
@@ -22,16 +25,16 @@ or privacy are taken seriously and rewarded accordingly.
 
 ### Application
 
-**The wallet is now DigiByte Mobile, `app.aroundtheblock.wallet`.** The old app,
+**The wallet is now ATB Wallet, `app.aroundtheblock.wallet`.** The old app,
 `io.digibyte`, reached its final release at **v4.0.87.2 on 2026-10-10** and is **out of
 scope**: it receives no further fixes, so a report against it cannot be acted on. Several
 reports have already been closed for testing a retired or frozen version. Test the current
-DigiByte Mobile release and name its exact version.
+ATB Wallet release and name its exact version.
 
 | Asset | Where to get it |
 |-------|-----------------|
-| DigiByte Mobile from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-v4.0.89.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.0.89 |
+| ATB Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
+| `aroundtheblock-wallet-v4.1.0.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.0 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
@@ -135,7 +138,7 @@ A theoretical critical-tier finding without a PoC: scored as Medium until a PoC
 lands.
 
 Payment is in DGB to an address you provide. We do not pay in fiat or other
-cryptocurrencies — this is the DigiByte Mobile bounty, paid in DigiByte.
+cryptocurrencies. This is the ATB Wallet bounty, paid in DigiByte.
 
 One further rule, because most of what we now receive arrives in machine-generated batches: a
 reward is **per unique vulnerability, not per email**. Seven reports of one root cause are one
@@ -162,7 +165,7 @@ Reports about the following are **closed without payout**:
 ### Already known / accepted
 
 - The retired io.digibyte app's signature lineage starts from a debug certificate (Scheme v3
-  rotation by design). io.digibyte is out of scope; DigiByte Mobile is signed by a single release
+  rotation by design). io.digibyte is out of scope; ATB Wallet is signed by a single release
   key with no lineage, and its build refuses an artifact with any other signer.
 - AndroidX `WorkManager` / `ProfileInstaller` exported components
   protected by signature-level system permissions (third-party,
@@ -196,6 +199,32 @@ had **not** fixed in a release, published, or described anywhere you could have 
 _The half-tier rule was applied from the 2026-10 waves but was not written here until 2026-10-11,
 after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
 2026-10-13 as above._
+
+### Known issues being addressed for 4.1.1
+
+These are on our list for the next release. A report that only restates one of them is a
+duplicate: credit, no payment. A report that shows one of them reaching **DGB, DigiDollar or the
+seed** in a way not described here is new, and is assessed as new.
+
+- **DigiAsset transactions with uncommon shapes.** Some valid but unusual DigiAsset layouts
+  (unrecognised instructions, several asset carriers in one transaction, issuance with transfer
+  rules, transfers whose result cannot be decided from the transaction alone) are handled by
+  holding the affected outputs rather than spending them. The wallet fails closed: such an output
+  can show as unspendable until 4.1.1 settles it. A report that the hold happens is known; a
+  report that it can be avoided, or that it loses funds, is not.
+- **Chain trust.** Choosing between competing chains by accumulated work, and cross-checking the
+  data one peer serves against others, are scheduled structural changes.
+- **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
+  is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
+  A clearer message and a way to consolidate coins are planned.
+- **DigiDollar sends and Dandelion.** DigiDollar sends do not use Dandelion++ stem routing.
+  Dandelion is off by default.
+- **Confirmations and recovery screens.** A user-initiated way to cancel a send stuck
+  unconfirmed; protected-screen and confirmation treatment for wallet wipe, Digi-ID and node
+  pairing prompts; recovery of every DigiDollar and asset case from another wallet.
+
+This list is about what the wallet does, not how to trigger it, and it changes when a release
+ships. Watch this file.
 
 ### Generic / requires adversarial conditions outside threat model
 
@@ -269,7 +298,7 @@ Reports without these elements are returned for missing information:
 
 - Researchers must be **18 or older** (or have parent/guardian consent)
 - Researchers must **not** be a current or former employee or contractor
-  of the DigiByte Wallet team
+  of Around The Block LLC
 - One reward per unique vulnerability (first valid report wins; duplicates
   receive thanks + credit)
 - Researchers must comply with all applicable laws
@@ -339,3 +368,7 @@ not listed. Anonymity, or no answer, never affects payment.*
   names of researchers who gave permission.
 - **2026-10-13 — Known-to-us earns credit.** From 2026-10-13 a report of something already known
   to us earns credit, not a reward. Reports received earlier keep the half-tier rule.
+- **4.1.0 — target moved.** Bounty target ATB Wallet 4.1.0 (4.0.89 overlaps for 14 days). A
+  published list of what is being addressed for 4.1.1.
+- **4.1.0: renamed.** The app is now ATB Wallet for DigiByte (DGB), formerly DigiByte Mobile.
+  The package (`app.aroundtheblock.wallet`), the signing key and every scope rule are unchanged.

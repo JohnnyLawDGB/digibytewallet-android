@@ -25,11 +25,24 @@ object NativeBridge {
      *  checksum doesn't match — i.e. a typo'd/invalid seed. Touches no wallet state. */
     external fun isValidMnemonic(phrase: String): Boolean
 
-    /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
+    /** Create wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak.
+     *  Drops a pending [loadSerializedTransactions] load first: a wallet is never built from records
+     *  loaded for another one. */
     external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: ByteArray?): Boolean
 
-    /** Recover wallet from mnemonic as ByteArray (UTF-8). Avoids JVM String heap leak. */
+    /** Recover wallet from a mnemonic the user entered, as ByteArray (UTF-8). Avoids JVM String heap
+     *  leak. Drops a pending [loadSerializedTransactions] load first and builds from no saved records;
+     *  the restore of the stored wallet is [restoreWalletFromBytes]. */
     external fun recoverWalletFromBytes(
+        phraseBytes: ByteArray,
+        creationTimestamp: Long,
+        passphrase: ByteArray?,
+    ): Boolean
+
+    /** Restore the stored wallet from its mnemonic (UTF-8 ByteArray) and the records
+     *  [loadSerializedTransactions] loaded for it — WalletManager.restoreFromDisk, its only caller. The
+     *  only native call that builds a wallet from loaded records. */
+    external fun restoreWalletFromBytes(
         phraseBytes: ByteArray,
         creationTimestamp: Long,
         passphrase: ByteArray?,
@@ -80,9 +93,63 @@ object NativeBridge {
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
     external fun publishTransaction(signedTx: ByteArray): String?
 
-    /** Build+sign+publish a DigiDollar transfer to a TD… address for `cents` USD cents.
-     *  Returns the txid on success, or null on any failure (bad address, insufficient DD/DGB, sign/broadcast). */
-    external fun sendDigiDollar(tdAddress: String, cents: Long): String?
+    // --- pkg 2.1 ---
+    // The fee shown is the fee signed. A DGB send is built and quoted before the credential prompt
+    // ([createTransaction] + [quoteTransaction]) and the prepared bytes are signed after it
+    // ([signPreparedTransaction]), which checks them against the approved fee first.
+
+    /** `[fee, vsize]` of unsigned bytes the wallet built: the fee is the transaction's inputs minus its
+     *  outputs, the vsize the size it was priced at, signatures estimated. Null when the bytes do not
+     *  parse or an input is not a transaction the wallet holds (the fee is then unknown). */
+    external fun quoteTransaction(unsignedTx: ByteArray): LongArray?
+
+    /** Sign prepared unsigned bytes, or null: only the send that was approved. Refuses, before
+     *  signing, bytes whose outputs are not [amountSats] to [toAddress] plus change to a wallet
+     *  address, that do not pay exactly [approvedFeeSats], or that spend a coin which is no longer
+     *  one of the wallet's spendable plain coins; and refuses to hand back a signed transaction that
+     *  fails the same check. */
+    external fun signPreparedTransaction(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray?
+
+    /** True when the network has refused [txid] on evidence no single peer can supply: peers in at
+     *  least two network groups rejected it as invalid, non-standard or dust, and no peer has relayed
+     *  or announced it. One peer's rejection is never enough. */
+    external fun isRefusedByNetwork(txid: String): Boolean
+
+    /**
+     * The current peer manager's generation: how many the bridge has built in this process, as of this
+     * one (every build bumps it), or 0 while none exists. A rebuilt manager starts with no relay
+     * evidence, so the stranded-send sweep's refusal hold ties each sighting to a generation and never
+     * completes a hold on one that it started on another (core/sync/RefusalHold).
+     */
+    external fun peerManagerGeneration(): Long
+    // --- /pkg 2.1 ---
+
+    // --- pkg 3.5 ---
+    // The fee a DigiDollar send's confirmation shows is the fee of the transfer that is signed. A transfer
+    // cannot be held across the credential prompt as bytes (DigiDollar inputs are zero-value and the
+    // serializer leaves a zero input amount out), so review builds it, reads what it pays and frees it
+    // ([previewDigiDollar]), and after the prompt it is built again and signed only when it is the
+    // approved send at the approved fee ([sendApprovedDigiDollar]).
+
+    /** `[fee, ddChangeCents, dgbChangeSats, inputCount]` of the transfer of [cents] to [tdAddress] the wallet
+     *  would build now: the fee is the transfer's inputs minus its outputs. The transfer is freed before
+     *  this returns; nothing is signed, kept or published. Null when it cannot be built (not enough
+     *  DigiDollar, not enough DGB for the fee, an amount outside the per-output bounds, not an address). */
+    external fun previewDigiDollar(tdAddress: String, cents: Long): LongArray?
+
+    /** Build the transfer of [cents] to [tdAddress] again, and sign and publish it only when it is the
+     *  approved send: [cents] to that address, the rest change to this wallet, at exactly
+     *  [approvedFeeSats] — checked before signing and again after. The txid, or null when nothing was
+     *  signed (the wallet changed while the prompt was up, the session is locked, or it cannot be built). */
+    external fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String?
+
+    /** What the wallet-known tx with this display (BE) txid did, for its activity row:
+     *  `[kind, cents, changeCents]` — kind 0 none, 1 minted, 2 sent, 3 received, 4 to the wallet itself,
+     *  5 redeemed; cents what was minted, sent, received, moved or burned. Read from the transaction's
+     *  DigiDollar type and from whose outputs it pays and spends, never from its DGB movement. Null when
+     *  the wallet does not hold the transaction. See [app.aroundtheblock.wallet.core.model.DigiDollarEvent]. */
+    external fun digiDollarEvent(txHashHex: String): LongArray?
+    // --- /pkg 3.5 ---
 
     /** True if `addr` is a valid DigiDollar address for the current network (TD… testnet / DD… mainnet). */
     external fun isValidDigiDollarAddress(addr: String): Boolean
@@ -92,13 +159,6 @@ object NativeBridge {
      *  Read-only/display-only — used to label a transaction row DigiDollar vs DGB. */
     external fun digiDollarTxType(txHashHex: String): Int
 
-    /** Wallet-relevant DigiDollar value (USD cents) moved in the wallet-known tx
-     *  with this display (BE) txid, or 0 if not a DigiDollar tx / unknown.
-     *  Direction-aware: [isSend]=false sums the DD outputs the wallet OWNS (received);
-     *  [isSend]=true sums the DD outputs it does NOT own (sent) — otherwise a send
-     *  reports the DD change, not the amount sent. Unsigned magnitude — the UI applies
-     *  +/- from the DGB direction. Display-only: shows "$X" on a DigiDollar row. */
-    external fun digiDollarTxAmount(txHashHex: String, isSend: Boolean): Long
 
     // === Dandelion++ broadcast-origin privacy ===
     /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
@@ -343,7 +403,8 @@ object NativeBridge {
     /** Serialize all wallet transactions to a byte array for persistence. */
     external fun getSerializedTransactions(): ByteArray?
 
-    /** Load previously saved transactions before recoverWalletFromBytes/createWalletFromBytes. */
+    /** Load previously saved transactions for [restoreWalletFromBytes], which must follow. Creating a
+     *  wallet or recovering one from a phrase drops a pending load. */
     external fun loadSerializedTransactions(data: ByteArray): Int
 
     // === Validation ===
@@ -676,25 +737,6 @@ object NativeBridge {
     ): String?
 
     /**
-     * Build and sign a DigiDollar TRANSFER from a FOREIGN seed.
-     *
-     * Separate from [buildAndSignForeignAssetTransfer] for two structural reasons. A DigiDollar
-     * token output is zero-value by construction — the cents live in the OP_RETURN, not the
-     * satoshi amount — and that signer rejects any input with amount <= 0. And a DD transaction
-     * is identified by its nVersion (0x02000770), which the asset builder cannot express.
-     *
-     * Two derivation prefixes on purpose: the dollars sit at m/86'/20'/0' while the DGB paying
-     * their fee sits wherever the scan found it. The DD prefix is fixed internally; the fee
-     * inputs carry their own [feeHmacKey] and [feePrefixPath].
-     *
-     * Moves the WHOLE balance — [cents] is everything the DD inputs hold, so there is no DD
-     * change. Consensus requires at least 0.1 DGB of fee; below that the transfer is refused
-     * here rather than rejected by the network.
-     *
-     * @param recipientKeyHex the destination's 32-byte taproot output key, hex. Used verbatim.
-     * @return signed transaction hex, or null on any refusal — reasons are logged natively.
-     */
-    /**
      * A foreign seed's DigiDollar addresses at m/86'/20'/0', in BOTH encodings.
      *
      * One entry per address: `"<ddAddress>|<taprootOutputKeyHex>|<chain>|<index>"`, external chain
@@ -712,6 +754,28 @@ object NativeBridge {
         gapInternal: Int,
     ): Array<String>?
 
+    // --- pkg 4.3 ---
+    /**
+     * Build and sign a DigiDollar TRANSFER from a FOREIGN seed.
+     *
+     * Separate from [buildAndSignForeignAssetTransfer] for two structural reasons. A DigiDollar
+     * token output is zero-value by construction — the cents live in the OP_RETURN, not the
+     * satoshi amount — and that signer rejects any input with amount <= 0. And a DD transaction
+     * is identified by its nVersion (0x02000770), which the asset builder cannot express.
+     *
+     * A derivation per fee input on purpose: the dollars sit at m/86'/20'/0' while the DGB paying
+     * their fee sits wherever the scan found it, and one transfer's fee may need coins found under
+     * two profiles. The DD prefix is fixed internally; fee input `i` carries its own HMAC key
+     * ([feeHmacKeys]`[i]`) and prefix ([feePrefixPaths]`[i]`) besides its chain and index. Every
+     * fee array has one entry per fee input, or nothing is signed.
+     *
+     * Moves the WHOLE balance — [cents] is everything the DD inputs hold, so there is no DD
+     * change. The fee is at least 0.1 DGB, this wallet's policy (copied from DigiByte Core's
+     * DigiDollar builder); below that the transfer is refused here.
+     *
+     * @param recipientKeyHex the destination's 32-byte taproot output key, hex. Used verbatim.
+     * @return signed transaction hex, or null on any refusal — reasons are logged natively.
+     */
     external fun buildAndSignForeignDigiDollarTransfer(
         seedBytes: ByteArray,
         ddTxidsHex: Array<String>,
@@ -719,8 +783,8 @@ object NativeBridge {
         ddScriptsHex: Array<String>,
         ddChains: IntArray,
         ddIndices: IntArray,
-        feeHmacKey: String,
-        feePrefixPath: IntArray,
+        feeHmacKeys: Array<String>,
+        feePrefixPaths: Array<IntArray>,
         feeTxidsHex: Array<String>,
         feeVouts: IntArray,
         feeAmounts: LongArray,
@@ -732,6 +796,7 @@ object NativeBridge {
         changeAmount: Long,
         cents: Long,
     ): String?
+    // --- /pkg 4.3 ---
 
     external fun buildAndSignLegacySweep(
         seedBytes: ByteArray,

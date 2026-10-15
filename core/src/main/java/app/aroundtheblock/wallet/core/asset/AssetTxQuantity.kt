@@ -102,7 +102,9 @@ object AssetTxQuantity {
      * clamped zero. **The remainder is never more than the inputs carried, and never wraps.**
      *
      * ISSUANCE returns 0: the issued supply is credited by [forOutput]'s first-non-OP_RETURN
-     * convention, so computing a leftover here would double-count the issuer's marker.
+     * convention, so computing a leftover here would double-count the issuer's marker. This is the
+     * displayed claim only; whether the last output of an issuance is HELD is [targetsOutput]'s
+     * decision, which follows the issuance's real distribution.
      * UNCLASSIFIABLE returns null: with no instructions read, no remainder is known.
      */
     fun implicitChange(header: DecodedAssetHeader, inputUnits: Long?, outputCount: Int): Long? {
@@ -175,7 +177,10 @@ object AssetTxQuantity {
      * percent targets — a percent instruction still moves units to its output even though the
      * amount cannot be resolved here. And it does NOT count an owned output that no instruction
      * names (ordinary DGB change), so protecting a targeted output never locks change out of
-     * spending. Implicit change is targeted when the remainder is positive OR unknown.
+     * spending. Implicit change is targeted when the remainder is positive OR unknown, and also
+     * when the instructions may be void in a way the input total does not show (every input unit
+     * then lands on the last output). An issuance's last output is targeted unless its own
+     * distribution provably leaves it nothing.
      *
      * Every operation distributes units through the same instruction list — an issuance hands
      * out what it issues, and a burn transaction still delivers the units of its non-burn
@@ -205,11 +210,46 @@ object AssetTxQuantity {
         // The issuer's marker: [forOutput] credits the issued supply here.
         if (header.operation == AssetOperation.ISSUANCE && vout == firstNonOpReturnVout) return true
         if (vout == implicitChangeVout(outputCount)) {
+            // An issuance's remainder: what its instructions do not place lands here.
+            if (header.operation == AssetOperation.ISSUANCE) return issuanceMayCreditLastOutput(header, outputCount)
+            // Instructions the reference voids hand every input unit to this output, whatever
+            // they assign: held whenever the inputs may carry units.
+            if (inputUnits != 0L && mayVoid(header, outputCount)) return true
             val change = implicitChange(header, inputUnits, outputCount)
             return change == null || change > 0L
         }
         return false
     }
+
+    /**
+     * Can the last output of ISSUANCE [header] receive units? DigiAsset Core distributes the issued
+     * supply through the instructions and puts what they leave on the last output — all of it when
+     * an instruction is invalid ([AssetTransferAllocator.allocateIssuance]). True unless that
+     * distribution, read from the payload alone, leaves the last output nothing: also when it cannot
+     * be decided, and when the instructions are not known to be read as Core reads them (a rules
+     * block the decoder does not parse, or a version before 3).
+     */
+    private fun issuanceMayCreditLastOutput(header: DecodedAssetHeader, outputCount: Int): Boolean {
+        if (header.hasRules || header.version < 3) return true
+        return when (val r = AssetTransferAllocator.allocateIssuance(header, ISSUED_ASSET, outputCount, payloadExact = true)) {
+            is AssetTransferAllocator.Result.Allocated -> r.outputs[outputCount - 1].orEmpty().any { it.count != 0L }
+            is AssetTransferAllocator.Result.Indeterminate -> true
+            AssetTransferAllocator.Result.NotAnAssetTransfer -> false
+        }
+    }
+
+    /** The name the issued asset goes by in [issuanceMayCreditLastOutput]; only its shape matters. */
+    private const val ISSUED_ASSET = "issued"
+
+    /**
+     * Can the reference void [header]'s instructions for a reason the input total does not show?
+     * An instruction (the destroy marker aside) names an output the transaction does not have, or
+     * moves zero units (it still reads an input, and fails once the inputs are used up).
+     */
+    private fun mayVoid(header: DecodedAssetHeader, outputCount: Int): Boolean =
+        header.transferInstructions.any { inst ->
+            (!destroys(header, inst) && inst.outputIndex >= outputCount) || inst.amount == 0L
+        }
 
     /**
      * Is [inst] the destroy marker — units consumed, credited to nobody? Only the non-range

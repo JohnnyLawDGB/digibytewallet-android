@@ -46,7 +46,11 @@ interface WalletDataEraser {
      * leaves any behind hands the next wallet another wallet's scan/header state.
      */
     fun eraseCfSyncState(): Boolean
-    /** Delete the encrypted Room DB (tx/utxo/header/asset cache) + its key material. */
+    /**
+     * Delete every file of the encrypted Room DB (tx/utxo/header/asset cache, Digi-ID history) on
+     * every network — the live one, its companions, and every copy recovery set aside — and its key
+     * material. True only when none of those files remains when looked for again.
+     */
     fun eraseDatabase(): Boolean
     /**
      * Clear the per-wallet state no other step owns: the filter-peer and Dandelion peer caches
@@ -234,22 +238,35 @@ class AndroidWalletDataEraser internal constructor(
     }
 
     override fun eraseDatabase(): Boolean {
-        // Mirrors app.aroundtheblock.wallet.StaleDataWiper.wipeDatabase (app module — not importable
-        // from core). Deletes the DB files + the DB passphrase (prefs + Keystore alias).
+        // Deletes every DB file + the DB password (prefs + Keystore alias).
         // Does NOT touch "dgb_wallet_master": that seed key is destroyed separately via
         // KeyStoreManager.deleteKey() in wipeWallet.
-        // BOTH networks' databases go: they share the one passphrase deleted below, so a
-        // database left behind could never be opened again anyway.
-        val files = WALLET_NETWORK_SUFFIXES.flatMap { net ->
-            listOf("", "-journal", "-shm", "-wal").map { context.getDatabasePath("wallet$net.db$it") }
-        }.map(::deleteFile).all { it }
+        // BOTH networks' databases go, and every copy recovery set aside
+        // (DatabaseFiles.setAside — recovery never removes those; this wipe is the one place that
+        // does). Most asides could not be opened once the password below is gone, but one set
+        // aside under the published legacy password could be read by anyone with the file.
+        // A directory that cannot be listed is not one with nothing left in it: both steps fail.
+        val files = databaseFiles()?.map(::deleteFile)?.all { it } ?: false
         val passphrase = clearPrefs("dgb_db_key")
         val passphraseKey = step("database key alias") {
             if (keystore.contains(DB_KEY_ALIAS)) keystore.delete(DB_KEY_ALIAS)
             !keystore.contains(DB_KEY_ALIAS)
         }
-        return files && passphrase && passphraseKey
+        // READ-BACK: the database is gone only when no file of it is left on any network — not the
+        // live one, not an aside, not a companion.
+        val noneLeft = step("database files read-back") { databaseFiles()?.isEmpty() ?: false }
+        return files && noneLeft && passphrase && passphraseKey
     }
+
+    /**
+     * Every file of the wallet database on every network that is on disk now (see
+     * DatabaseFiles.everyFileOf); null when a directory that should hold them cannot be listed.
+     */
+    private fun databaseFiles(): List<java.io.File>? = WALLET_NETWORK_SUFFIXES.map { net ->
+        val live = context.getDatabasePath("wallet$net.db")
+        val dir = live.parentFile ?: return null
+        app.aroundtheblock.wallet.core.db.DatabaseFiles.everyFileOf(dir, live.name) ?: return null
+    }.flatten()
 
     override fun eraseLeftoverState(): Boolean {
         val filterPeers = clearPrefsOnEveryNetwork("dgb_filter_peers")

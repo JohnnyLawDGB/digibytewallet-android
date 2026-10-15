@@ -15,6 +15,11 @@ jobs:
     # The scheduled run is the native sweep below and nothing else.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    # Least privilege: the token only reads -- the checkout, its submodule and the pin check's fetch of
+    # the public core. No step writes through it; the cache and the artifact upload use the runner's own
+    # token, which this block does not govern.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +62,11 @@ jobs:
       # which is a much weaker claim. Enforced rather than documented.
       - name: No WebView JavaScript bridge
         run: ./scripts/check-no-js-bridge.sh
+
+      # The checkpoint generators write the wallet's trusted checkpoint tables from a remote node; they
+      # pin its host key (scripts/known_hosts.digiscope). No script may switch host-key checking off.
+      - name: No script trusts an unknown SSH host
+        run: ./scripts/check-ssh-host-keys.sh
 
       # JNI_OnLoad binds every NativeBridge native from a generated RegisterNatives table. The
       # script proves the table matches the Kotlin declarations and the C bodies type for type,
@@ -118,6 +128,9 @@ jobs:
   native-kats-weekly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    # Least privilege: the checkout and its submodule only.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:

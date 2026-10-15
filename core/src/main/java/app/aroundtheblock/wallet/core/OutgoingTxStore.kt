@@ -10,8 +10,8 @@ import android.content.Context
  * UTXO-only scan, or after the bloom-fallback re-download path that
  * doesn't replay historical parents).
  *
- * Stored as a flat SharedPreferences map: each broadcast writes up to four
- * keys per txid: `<txid>.sent`, `<txid>.fee`, `<txid>.to`, `<txid>.self`.
+ * Stored as a flat SharedPreferences map: each broadcast writes up to five
+ * keys per txid: `<txid>.sent`, `<txid>.fee`, `<txid>.to`, `<txid>.self`, `<txid>.dd`.
  * Lookups return null when the txid isn't ours.
  */
 class OutgoingTxStore(context: Context) {
@@ -28,6 +28,10 @@ class OutgoingTxStore(context: Context) {
         val feeSats: Long,
         val toAddress: String,
         val isSelfTransfer: Boolean = false,
+        /** A DigiDollar send: recorded so the stranded-send sweep publishes it again until it confirms,
+         *  but its DGB movement is the wallet's own reading (the fee), never this record's — see
+         *  [shouldApplyOutgoingOverride]. Its row says what it did from the transaction itself. */
+        val isDigiDollar: Boolean = false,
     )
 
     fun record(
@@ -36,12 +40,14 @@ class OutgoingTxStore(context: Context) {
         feeSats: Long,
         toAddress: String,
         isSelfTransfer: Boolean = false,
+        isDigiDollar: Boolean = false,
     ) {
         prefs.edit()
             .putLong("$txid.sent", sentSats)
             .putLong("$txid.fee", feeSats)
             .putString("$txid.to", toAddress)
             .putBoolean("$txid.self", isSelfTransfer)
+            .putBoolean("$txid.dd", isDigiDollar)
             .apply()
     }
 
@@ -53,6 +59,7 @@ class OutgoingTxStore(context: Context) {
             feeSats = prefs.getLong("$txid.fee", 0L),
             toAddress = prefs.getString("$txid.to", "") ?: "",
             isSelfTransfer = prefs.getBoolean("$txid.self", false),
+            isDigiDollar = prefs.getBoolean("$txid.dd", false),
         )
     }
 
@@ -107,6 +114,7 @@ class OutgoingTxStore(context: Context) {
             .remove("$txid.fee")
             .remove("$txid.to")
             .remove("$txid.self")
+            .remove("$txid.dd")
             .remove("$txid.settled")
             .remove("$txid.sweeps")
             .remove("$txid.sweptAt")
@@ -143,9 +151,14 @@ class OutgoingTxStore(context: Context) {
          * "the feature sent my money away". So: override external sends only;
          * let the C core's natural categorization stand for self-transfers.
          *
+         * A DigiDollar send is the other case the override does not fit: it pays its payee no DGB at
+         * all (the dollars ride a zero-value output), so the record's "sent" is 0 and the override
+         * would show a DGB movement of nothing. The wallet built it from its own coins, so its own
+         * reading — the fee, going out — stands.
+         *
          * Pure (no Android/JNI) so the decision is unit-testable in isolation.
          */
         fun shouldApplyOutgoingOverride(record: Record?): Boolean =
-            record != null && !record.isSelfTransfer
+            record != null && !record.isSelfTransfer && !record.isDigiDollar
     }
 }

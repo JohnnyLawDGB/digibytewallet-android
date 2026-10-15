@@ -9,6 +9,7 @@ import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
 import app.aroundtheblock.wallet.core.hub.Reply
 import app.aroundtheblock.wallet.core.hub.ThreadDetail
 import app.aroundtheblock.wallet.core.hub.UserInfo
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -26,10 +27,30 @@ data class DigiScopeProfile(
 
 class DigiScopeClient(
     baseClient: OkHttpClient,
-    context: Context
+    context: Context,
+    /**
+     * Signs a quick-login challenge with the shared identity key, m/0'/0/0, and answers
+     * "address|signature", or null when the wallet cannot sign. A parameter only so the login can
+     * be driven without the native library; the app always takes this default.
+     */
+    private val signWithSharedIdentity: (String) -> String? = {
+        app.aroundtheblock.wallet.core.bridge.NativeBridge.signMessage(it, 0)
+    },
 ) {
     companion object {
         const val BASE_URL = "https://api.digiscope.me/api"
+
+        /**
+         * The most a single Hub answer may be: 64 KiB — a login challenge or token, a profile, a
+         * thread or reply as created, the handle check, game stats and the leaderboard.
+         */
+        internal const val SMALL_BODY_BYTES = 64L * 1024
+
+        /**
+         * The most a Hub list may be: 4 MiB — the channels, a page of messages or threads, a thread
+         * with its replies. A message is at most 2,000 characters and a thread 5,000.
+         */
+        internal const val LIST_BODY_BYTES = 4L * 1024 * 1024
     }
 
     // Certificate pinning for api.digiscope.me — prevents MITM via rogue CA.
@@ -37,6 +58,16 @@ class DigiScopeClient(
     // update on rotation, so a stale pin can't linger in one client).
     private val client: OkHttpClient = baseClient.newBuilder()
         .certificatePinner(app.aroundtheblock.wallet.core.network.DigiScopePins.certificatePinner())
+        .build()
+
+    /**
+     * The client for the Digi-ID exchange — quick login's challenge and every signed login: the
+     * pinned client with redirects off. A signed login reaches the callback it was made for or
+     * nowhere: a redirect answer is a failed login and is never followed (ID-002).
+     */
+    private val digiIdClient: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     private val tokenStore = HubTokenStore(context)
@@ -64,6 +95,11 @@ class DigiScopeClient(
      * One-tap login — requests a Digi-ID challenge from the server, signs it
      * locally with the wallet's key, and authenticates. No QR scan needed.
      * Returns true on success.
+     *
+     * It signs with the shared identity key, m/0'/0/0, on purpose: the Hub account is bound to
+     * that key's address, and a per-site key would lock the user out of it. What keeps the
+     * signature DigiScope's is the check of the challenge before anything is signed (ID-001,
+     * [QuickLoginChallengePolicy]); the text checked is the text signed and the text submitted.
      */
     suspend fun quickLogin(): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -73,18 +109,25 @@ class DigiScopeClient(
                 .url("$BASE_URL/auth/digiid/challenge")
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
-            val challengeResp = client.newCall(challengeReq).execute()
-            if (!challengeResp.isSuccessful) {
-                android.util.Log.e("DigiScope", "quickLogin: challenge failed HTTP ${challengeResp.code}")
-                return@withContext false
+            val offered = digiIdClient.newCall(challengeReq).execute().use { challengeResp ->
+                if (!challengeResp.isSuccessful) {
+                    android.util.Log.e("DigiScope", "quickLogin: challenge failed HTTP ${challengeResp.code}")
+                    return@withContext false
+                }
+                val challengeJson = JSONObject(BoundedBody.text(challengeResp.body, SMALL_BODY_BYTES) ?: return@withContext false)
+                challengeJson.optString("uri", null)
             }
 
-            val challengeJson = JSONObject(challengeResp.body?.string() ?: return@withContext false)
-            val uri = challengeJson.optString("uri", null) ?: return@withContext false
+            // 2. Only a DigiScope login challenge is signed (ID-001)
+            val uri = QuickLoginChallengePolicy.accept(offered)
+            if (uri == null) {
+                android.util.Log.e("DigiScope", "quickLogin: the challenge is not a DigiScope login; nothing signed")
+                return@withContext false
+            }
             android.util.Log.i("DigiScope", "quickLogin: got challenge, signing")
 
-            // 2. Sign with wallet key
-            val signResult = app.aroundtheblock.wallet.core.bridge.NativeBridge.signMessage(uri, 0)
+            // 3. Sign with wallet key
+            val signResult = signWithSharedIdentity(uri)
             if (signResult == null) {
                 android.util.Log.e("DigiScope", "quickLogin: signMessage returned null — wallet locked?")
                 return@withContext false
@@ -95,7 +138,7 @@ class DigiScopeClient(
             val signature = parts[1]
             android.util.Log.i("DigiScope", "quickLogin: signed, submitting callback")
 
-            // 3. Submit to callback
+            // 4. Submit to callback
             val token = login(address, signature, uri)
             android.util.Log.i("DigiScope", "quickLogin: token=${if (token != null) "received" else "null"}")
             token != null
@@ -122,16 +165,17 @@ class DigiScopeClient(
                 .post(body)
                 .build()
 
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string()
-            // The callback body IS the session JWT — never log it, only the shape of the reply.
-            android.util.Log.i("DigiScope", "login callback: HTTP ${response.code} bodyLength=${responseBody?.length ?: -1}")
-            if (!response.isSuccessful || responseBody == null) return@withContext null
+            val token = digiIdClient.newCall(request).execute().use { response ->
+                val responseBody = BoundedBody.text(response.body, SMALL_BODY_BYTES)
+                // The callback body IS the session JWT — never log it, only the shape of the reply.
+                android.util.Log.i("DigiScope", "login callback: HTTP ${response.code} bodyLength=${responseBody?.length ?: -1}")
+                if (!response.isSuccessful || responseBody == null) return@withContext null
 
-            val responseJson = JSONObject(responseBody)
-            // Backend returns sessionToken (not token)
-            val token = responseJson.optString("sessionToken",
-                responseJson.optString("token", null))
+                val responseJson = JSONObject(responseBody)
+                // Backend returns sessionToken (not token)
+                responseJson.optString("sessionToken",
+                    responseJson.optString("token", null))
+            }
             if (token != null) {
                 persistToken(token)
             }
@@ -156,7 +200,7 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            client.newCall(request).execute().isSuccessful
+            client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
         }
@@ -175,7 +219,7 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            client.newCall(request).execute().isSuccessful
+            client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
         }
@@ -191,16 +235,17 @@ class DigiScopeClient(
                 .url("$BASE_URL/hub/profile")
                 .header("Authorization", "Bearer $token")
                 .build()
-            val response = client.newCall(request).execute()
-            if (!handleAuthResponse(response)) return@withContext null
+            client.newCall(request).execute().use { response ->
+                if (!handleAuthResponse(response)) return@withContext null
 
-            val json = JSONObject(response.body?.string() ?: return@withContext null)
-            val profile = json.optJSONObject("profile") ?: json
-            DigiScopeProfile(
-                handle = profile.optString("handle", null),
-                address = profile.optString("address", ""),
-                tipBalance = profile.optLong("tip_balance", profile.optLong("tipBalance", 0))
-            )
+                val json = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null)
+                val profile = json.optJSONObject("profile") ?: json
+                DigiScopeProfile(
+                    handle = profile.optString("handle", null),
+                    address = profile.optString("address", ""),
+                    tipBalance = profile.optLong("tip_balance", profile.optLong("tipBalance", 0))
+                )
+            }
         } catch (e: Exception) {
             null
         }
@@ -218,18 +263,19 @@ class DigiScopeClient(
                 .url("$BASE_URL/hub/channels")
                 .header("Authorization", "Bearer $token")
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
 
-            val array = JSONArray(response.body?.string() ?: return@withContext emptyList())
-            (0 until array.length()).map { i ->
-                val obj = array.getJSONObject(i)
-                Channel(
-                    id = obj.getInt("id"),
-                    name = obj.getString("name"),
-                    description = obj.optString("description", ""),
-                    type = obj.optString("type", "text")
-                )
+                val array = JSONArray(BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext emptyList())
+                (0 until array.length()).map { i ->
+                    val obj = array.getJSONObject(i)
+                    Channel(
+                        id = obj.getInt("id"),
+                        name = obj.getString("name"),
+                        description = obj.optString("description", ""),
+                        type = obj.optString("type", "text")
+                    )
+                }
             }
         } catch (e: Exception) {
             emptyList()
@@ -252,13 +298,14 @@ class DigiScopeClient(
                     .url(urlBuilder.toString())
                     .header("Authorization", "Bearer $token")
                     .build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) return@withContext emptyList()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext emptyList()
 
-                val bodyStr = response.body?.string() ?: return@withContext emptyList()
-                val json = JSONObject(bodyStr)
-                val array = json.optJSONArray("messages") ?: JSONArray(bodyStr)
-                parseChatMessages(array)
+                    val bodyStr = BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext emptyList()
+                    val json = JSONObject(bodyStr)
+                    val array = json.optJSONArray("messages") ?: JSONArray(bodyStr)
+                    parseChatMessages(array)
+                }
             } catch (e: Exception) {
                 emptyList()
             }
@@ -277,13 +324,14 @@ class DigiScopeClient(
                     .url("$BASE_URL/hub/threads?channelId=$channelId&page=$page")
                     .header("Authorization", "Bearer $token")
                     .build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) return@withContext emptyList()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext emptyList()
 
-                val bodyStr = response.body?.string() ?: return@withContext emptyList()
-                val json = JSONObject(bodyStr)
-                val array = json.optJSONArray("threads") ?: JSONArray(bodyStr)
-                parseForumThreads(array)
+                    val bodyStr = BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext emptyList()
+                    val json = JSONObject(bodyStr)
+                    val array = json.optJSONArray("threads") ?: JSONArray(bodyStr)
+                    parseForumThreads(array)
+                }
             } catch (e: Exception) {
                 emptyList()
             }
@@ -299,16 +347,17 @@ class DigiScopeClient(
                 .url("$BASE_URL/hub/threads/$threadId")
                 .header("Authorization", "Bearer $token")
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
 
-            val json = JSONObject(response.body?.string() ?: return@withContext null)
-            val thread = parseForumThread(json.getJSONObject("thread"))
-            val repliesArray = json.optJSONArray("replies") ?: JSONArray()
-            val replies = (0 until repliesArray.length()).map { i ->
-                parseReply(repliesArray.getJSONObject(i))
+                val json = JSONObject(BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext null)
+                val thread = parseForumThread(json.getJSONObject("thread"))
+                val repliesArray = json.optJSONArray("replies") ?: JSONArray()
+                val replies = (0 until repliesArray.length()).map { i ->
+                    parseReply(repliesArray.getJSONObject(i))
+                }
+                ThreadDetail(thread = thread, replies = replies)
             }
-            ThreadDetail(thread = thread, replies = replies)
         } catch (e: Exception) {
             null
         }
@@ -337,11 +386,12 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
 
-            val respJson = JSONObject(response.body?.string() ?: return@withContext null)
-            parseForumThread(respJson.optJSONObject("thread") ?: respJson)
+                val respJson = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null)
+                parseForumThread(respJson.optJSONObject("thread") ?: respJson)
+            }
         } catch (e: Exception) {
             null
         }
@@ -364,11 +414,12 @@ class DigiScopeClient(
                     .header("Authorization", "Bearer $token")
                     .post(body)
                     .build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) return@withContext null
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext null
 
-                val respJson = JSONObject(response.body?.string() ?: return@withContext null)
-                parseReply(respJson.optJSONObject("reply") ?: respJson)
+                    val respJson = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null)
+                    parseReply(respJson.optJSONObject("reply") ?: respJson)
+                }
             } catch (e: Exception) {
                 null
             }
@@ -386,7 +437,7 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            client.newCall(request).execute().isSuccessful
+            client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
         }
@@ -410,7 +461,7 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            client.newCall(request).execute().isSuccessful
+            client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
         }
@@ -439,7 +490,7 @@ class DigiScopeClient(
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            client.newCall(request).execute().isSuccessful
+            client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
         }
@@ -457,11 +508,12 @@ class DigiScopeClient(
                 .url("$BASE_URL/hub/profile/handle/${handle.trim()}/available")
                 .header("Authorization", "Bearer $token")
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext false
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext false
 
-            val json = JSONObject(response.body?.string() ?: return@withContext false)
-            json.optBoolean("available", false)
+                val json = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext false)
+                json.optBoolean("available", false)
+            }
         } catch (e: Exception) {
             false
         }
@@ -490,10 +542,11 @@ class DigiScopeClient(
                     .header("Authorization", "Bearer $token")
                     .post(body)
                     .build()
-                val response = client.newCall(request).execute()
-                val respBody = response.body?.string()
-                android.util.Log.d("DigiScope", "submitScore: ${response.code} — $respBody")
-                response.isSuccessful
+                client.newCall(request).execute().use { response ->
+                    val respBody = BoundedBody.text(response.body, SMALL_BODY_BYTES)
+                    android.util.Log.d("DigiScope", "submitScore: ${response.code} — $respBody")
+                    response.isSuccessful
+                }
             } catch (e: Exception) {
                 android.util.Log.e("DigiScope", "submitScore exception: ${e.message}")
                 false
@@ -508,20 +561,21 @@ class DigiScopeClient(
                     .url("$BASE_URL/hub/digirunner/leaderboard?period=$period&limit=$limit")
                     .header("Authorization", "Bearer $token")
                     .build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) return@withContext emptyList()
-                val json = JSONObject(response.body?.string() ?: return@withContext emptyList())
-                val arr = json.optJSONArray("leaderboard") ?: return@withContext emptyList()
-                (0 until arr.length()).map { i ->
-                    val e = arr.getJSONObject(i)
-                    LeaderboardEntry(
-                        rank = e.optInt("rank", i + 1),
-                        handle = e.optString("handle", "Anonymous"),
-                        score = e.getInt("score"),
-                        distance = e.optInt("distance", 0),
-                        coins = e.optInt("coins", 0),
-                        createdAt = e.optLong("createdAt", 0)
-                    )
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext emptyList()
+                    val json = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext emptyList())
+                    val arr = json.optJSONArray("leaderboard") ?: return@withContext emptyList()
+                    (0 until arr.length()).map { i ->
+                        val e = arr.getJSONObject(i)
+                        LeaderboardEntry(
+                            rank = e.optInt("rank", i + 1),
+                            handle = e.optString("handle", "Anonymous"),
+                            score = e.getInt("score"),
+                            distance = e.optInt("distance", 0),
+                            coins = e.optInt("coins", 0),
+                            createdAt = e.optLong("createdAt", 0)
+                        )
+                    }
                 }
             } catch (e: Exception) { emptyList() }
         }
@@ -533,15 +587,16 @@ class DigiScopeClient(
                 .url("$BASE_URL/hub/digirunner/me")
                 .header("Authorization", "Bearer $token")
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
-            val json = JSONObject(response.body?.string() ?: return@withContext null)
-            DigiRunnerStats(
-                bestScore = json.optInt("bestScore", 0),
-                bestRank = json.optInt("bestRank", 0),
-                totalGames = json.optInt("totalGames", 0),
-                totalCoins = json.optInt("totalCoins", 0)
-            )
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val json = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null)
+                DigiRunnerStats(
+                    bestScore = json.optInt("bestScore", 0),
+                    bestRank = json.optInt("bestRank", 0),
+                    totalGames = json.optInt("totalGames", 0),
+                    totalCoins = json.optInt("totalCoins", 0)
+                )
+            }
         } catch (e: Exception) { null }
     }
 
@@ -563,9 +618,38 @@ class DigiScopeClient(
     fun getToken(): String? = jwtToken
     fun isLoggedIn(): Boolean = jwtToken != null
 
+    /**
+     * Ends the Hub session on the phone and on the server. The phone forgets the token first, so
+     * it is logged out whatever the network does; then the token is sent once to
+     * `POST /api/auth/logout`, which deletes the session, so a copy of the token made earlier
+     * stops working too. Not followed through a redirect. The answer is only closed: a failed
+     * revocation leaves the phone logged out all the same, and the session to expire on its own.
+     */
     fun logout() {
+        val token = jwtToken
         jwtToken = null
         tokenStore.clear()
+        if (!token.isNullOrBlank()) revokeSession(token)
+    }
+
+    private fun revokeSession(token: String) {
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/auth/logout")
+                .header("Authorization", "Bearer $token")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            digiIdClient.newCall(request).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    android.util.Log.w("DigiScope", "session revoke not delivered: ${e.javaClass.simpleName}")
+                }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use { if (!it.isSuccessful) android.util.Log.w("DigiScope", "session revoke answered ${it.code}") }
+                }
+            })
+        } catch (e: Exception) {
+            android.util.Log.w("DigiScope", "session revoke not sent: ${e.javaClass.simpleName}")
+        }
     }
 
     // ── JSON helpers ──────────────────────────────────────────────────────────

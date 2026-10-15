@@ -18,7 +18,6 @@ import app.aroundtheblock.wallet.core.ipfs.AssetMetadataService
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.security.*
 import okhttp3.OkHttpClient
-import java.security.SecureRandom
 import javax.inject.Singleton
 
 @Module
@@ -37,187 +36,25 @@ object AppModule {
     @Provides @Singleton
     fun provideBiometricAuth(): BiometricAuth = BiometricAuth()
 
+    /**
+     * The wallet database. Every decision about its password — which key unwraps it, a database
+     * made before passwords were stored (re-keyed), a record still under the seed's legacy key
+     * (moved onto its own key), a file that cannot be opened (set aside, never deleted), a
+     * Keystore that cannot be asked right now (a temporary database for this run) — is made in
+     * core by DatabaseKeyProvisioner, where it is tested. Nothing here deletes a database or a key,
+     * and no failure is turned into a wipe.
+     */
     @Provides @Singleton
-    fun provideDatabase(@ApplicationContext context: Context, ksm: KeyStoreManager): WalletDatabase {
-        return try {
-            provideDatabaseInner(context, ksm)
-        } catch (e: Exception) {
-            // If ANYTHING fails during DB init, wipe stale data and try fresh.
-            // The wallet seed is in its own SharedPreferences — not lost.
-            android.util.Log.e("AppModule", "DB init failed, wiping stale data and retrying: ${e.message}", e)
-            app.aroundtheblock.wallet.StaleDataWiper.wipeAll(context)
-            provideDatabaseInner(context, ksm)
-        }
-    }
+    fun provideDatabase(@ApplicationContext context: Context): WalletDatabase = provideDatabaseInner(context)
 
-    private fun provideDatabaseInner(context: Context, ksm: KeyStoreManager): WalletDatabase {
+    private fun provideDatabaseInner(context: Context): WalletDatabase {
         // Per-network DB file (e.g. "wallet.db" mainnet / "wallet_testnet.db"
         // testnet) so a testnet session never opens the mainnet DB, and vice
-        // versa. dgb_db_key stays unsuffixed/shared — the same passphrase
+        // versa. The key record stays unsuffixed/shared — the same password
         // encrypts either network's DB file, no cross-network trust issue.
         val dbFileName = "wallet${networkSuffix(context)}.db"
-        val dbFile = context.getDatabasePath(dbFileName)
-        val prefs = context.getSharedPreferences("dgb_db_key", Context.MODE_PRIVATE)
-
-        val hasKey = prefs.contains("encrypted_key")
-        val dbExists = dbFile.exists()
-        val legacyConfirmed = prefs.getBoolean(LEGACY_KEY_CONFIRMED, false)
-        val key = databaseKeyPlan(hasKey, dbExists, legacyConfirmed) { probeLegacyPassphrase(context, dbFileName) }
-        android.util.Log.i("AppModule", "DB init: dbExists=$dbExists hasKey=$hasKey key=$key")
-        if (key == DatabaseKey.NEW_AFTER_DISCARD) discardUnopenableDatabase(context, dbFileName)
-        if (key == DatabaseKey.LEGACY && !legacyConfirmed) {
-            // The legacy passphrase has just opened this file: later starts do not ask it again.
-            prefs.edit().putBoolean(LEGACY_KEY_CONFIRMED, true).apply()
-        }
-
-        val passphrase: ByteArray = when (key) {
-            DatabaseKey.STORED -> {
-                // Existing install: decrypt the stored passphrase using the wallet key.
-                // The wallet key no longer requires user authentication, so this works
-                // on all API levels without UserNotAuthenticatedException.
-                android.util.Log.i("AppModule", "Decrypting stored DB passphrase")
-                val stored = prefs.getString("encrypted_key", "")!!
-                val parts = stored.split(":")
-                if (parts.size != 2) throw IllegalStateException("Corrupt DB key format")
-
-                // Handle both old dedicated DB key and wallet key
-                val alias = prefs.getString("db_key_alias", null)
-                if (alias != null) {
-                    val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
-                    keyStore.load(null)
-                    val key = keyStore.getKey(alias, null)
-                        ?: throw IllegalStateException("Keystore key '$alias' missing")
-                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key,
-                        javax.crypto.spec.GCMParameterSpec(128, hexToBytes(parts[1])))
-                    cipher.doFinal(hexToBytes(parts[0]))
-                } else {
-                    ksm.decrypt(EncryptedData(hexToBytes(parts[0]), hexToBytes(parts[1])))
-                }
-            }
-            DatabaseKey.LEGACY, DatabaseKey.LEGACY_UNCONFIRMED -> {
-                // Legacy DB from earlier version — use hardcoded passphrase
-                android.util.Log.i("AppModule", "Legacy DB — using hardcoded passphrase")
-                LEGACY_DB_PASSPHRASE.toByteArray()
-            }
-            DatabaseKey.NEW, DatabaseKey.NEW_AFTER_DISCARD -> newDatabaseKey(ksm, prefs)
-        }
-
-        return WalletDatabase.create(context, passphrase, dbFileName)
+        return app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.openWalletDatabase(context, dbFileName)
     }
-
-    private const val LEGACY_DB_PASSPHRASE = "digibyte-wallet-db"
-
-    /** Which key the wallet database opens with at start. See [databaseKeyPlan]. */
-    internal enum class DatabaseKey { STORED, LEGACY, LEGACY_UNCONFIRMED, NEW, NEW_AFTER_DISCARD }
-
-    /**
-     * STORED when a key is stored. With no stored key, a database file is one of three:
-     *  - a file the legacy passphrase opens — an install from before keys were stored: LEGACY. Once
-     *    that is known ([legacyConfirmed], recorded the first time it opens) it is not asked again,
-     *    so such an install opens its database once per start, not twice;
-     *  - a file that answers it is not a database under the legacy passphrase: no key on this device
-     *    opens it any more (a completed wipe removed its key, and a session still running at the
-     *    time wrote the file back). It is discarded and a NEW database made, so the start opens; it
-     *    held only what the chain and the wallet rebuild: NEW_AFTER_DISCARD;
-     *  - a file whose probe failed for any other reason — locked, a disk or space failure, a file
-     *    that could not be opened at all — which says nothing about its key: kept and opened with
-     *    the legacy passphrase as before, and nothing recorded: LEGACY_UNCONFIRMED.
-     * No file and no key: a NEW database. [probeLegacy] is asked only about a file with no stored
-     * key and no record that the legacy passphrase opens it.
-     */
-    internal fun databaseKeyPlan(
-        hasStoredKey: Boolean,
-        databaseExists: Boolean,
-        legacyConfirmed: Boolean,
-        probeLegacy: () -> LegacyProbe,
-    ): DatabaseKey = when {
-        hasStoredKey -> DatabaseKey.STORED
-        !databaseExists -> DatabaseKey.NEW
-        legacyConfirmed -> DatabaseKey.LEGACY
-        else -> when (probeLegacy()) {
-            LegacyProbe.OPENS -> DatabaseKey.LEGACY
-            LegacyProbe.NOT_A_DATABASE -> DatabaseKey.NEW_AFTER_DISCARD
-            LegacyProbe.UNDECIDED -> DatabaseKey.LEGACY_UNCONFIRMED
-        }
-    }
-
-    /** What trying the legacy passphrase on a database file answered. See [legacyProbeAnswer]. */
-    internal enum class LegacyProbe { OPENS, NOT_A_DATABASE, UNDECIDED }
-
-    /**
-     * Reads a probe's failure (null: it opened). Only the file's own answer that it is not a
-     * database under the key it was opened with — SQLite's code 26, as the cipher library words it,
-     * anywhere in the chain of causes — is NOT_A_DATABASE. Anything else says nothing about the key:
-     * UNDECIDED.
-     */
-    internal fun legacyProbeAnswer(failure: Throwable?): LegacyProbe {
-        if (failure == null) return LegacyProbe.OPENS
-        val fileAnswered = generateSequence(failure) { it.cause }
-            .take(MAX_CAUSES_READ)
-            .any { it is android.database.sqlite.SQLiteException && it.message?.let(NOT_A_DATABASE_MESSAGE::containsMatchIn) == true }
-        return if (fileAnswered) LegacyProbe.NOT_A_DATABASE else LegacyProbe.UNDECIDED
-    }
-
-    private const val MAX_CAUSES_READ = 8
-    private val NOT_A_DATABASE_MESSAGE = Regex("""\bcode 26\b|file is not a database""")
-
-    /** In dgb_db_key: the legacy passphrase has opened this install's database file. A new key clears it. */
-    private const val LEGACY_KEY_CONFIRMED = "legacy_key_confirmed"
-
-    /**
-     * Tries the legacy passphrase on the database file the way the app opens it (Room over the
-     * cipher helper), then closes it again. An SQLite failure is read by [legacyProbeAnswer]; any
-     * other failure is left to [provideDatabase]'s own recovery.
-     */
-    private fun probeLegacyPassphrase(context: Context, dbFileName: String): LegacyProbe {
-        val probe = WalletDatabase.create(context, LEGACY_DB_PASSPHRASE.toByteArray(), dbFileName)
-        val failure: android.database.sqlite.SQLiteException? = try {
-            probe.openHelper.writableDatabase
-            null
-        } catch (e: android.database.sqlite.SQLiteException) {
-            e
-        } finally {
-            runCatching { probe.close() }
-        }
-        val answer = legacyProbeAnswer(failure)
-        if (failure != null) {
-            android.util.Log.w("AppModule", "DB init: legacy passphrase probe answered $answer (${failure.javaClass.simpleName})")
-        }
-        return answer
-    }
-
-    /** Delete a database file that no key on this device opens, with its journal files. */
-    private fun discardUnopenableDatabase(context: Context, dbFileName: String) {
-        for (suffix in listOf("", "-journal", "-shm", "-wal")) {
-            val file = context.getDatabasePath(dbFileName + suffix)
-            if (file.exists() && !file.delete()) {
-                android.util.Log.w("AppModule", "DB init: could not delete ${file.name}")
-            }
-        }
-        android.util.Log.w("AppModule", "DB init: discarded a database file no key on this device opens")
-    }
-
-    /** New database: a random passphrase, stored encrypted under the wallet key. */
-    private fun newDatabaseKey(ksm: KeyStoreManager, prefs: android.content.SharedPreferences): ByteArray {
-        android.util.Log.i("AppModule", "New install — generating DB passphrase")
-        ksm.createKey()
-        val newPassphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        val encrypted = ksm.encrypt(newPassphrase)
-        prefs.edit()
-            .putString("encrypted_key",
-                "${bytesToHex(encrypted.ciphertext)}:${bytesToHex(encrypted.iv)}")
-            // The file this key opens is not a legacy one: a record that one was goes with it.
-            .remove(LEGACY_KEY_CONFIRMED)
-            .apply()
-        return newPassphrase
-    }
-
-    private fun bytesToHex(bytes: ByteArray): String =
-        bytes.joinToString("") { "%02x".format(it) }
-
-    private fun hexToBytes(hex: String): ByteArray =
-        hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
     @Provides fun provideTransactionDao(db: WalletDatabase): TransactionDao = db.transactionDao()
     @Provides fun provideUtxoDao(db: WalletDatabase): UtxoDao = db.utxoDao()
@@ -336,6 +173,10 @@ object AppModule {
      *
      * digiscope stays as fallback rather than being replaced. Depending on one host is the
      * state that produced the outage; two providers speaking the same shapes is the point.
+     *
+     * Only providers that we, or a known operator, run belong here: the chain takes the first
+     * answer any endpoint gives, so every endpoint is trusted for asset names, metadata and images
+     * whenever the ones before it cannot be reached (AssetEndpointChainTest).
      */
     @Provides @Singleton
     fun provideAssetNetworkClient(
@@ -345,7 +186,6 @@ object AppModule {
             endpoints = listOf(
                 app.aroundtheblock.wallet.core.asset.network.DigistampAssetClient(baseClient = okHttpClient),
                 app.aroundtheblock.wallet.core.asset.network.DigiScopeAssetClient(baseClient = okHttpClient),
-                app.aroundtheblock.wallet.core.asset.network.DigiAssetsNetClient(baseClient = okHttpClient),
             )
         )
 

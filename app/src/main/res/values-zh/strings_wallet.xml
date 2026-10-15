@@ -17,10 +17,10 @@
     <string name="onb_words_count">%1$d 个词</string>
     <string name="onb_create">创建新钱包</string>
     <string name="onb_recover">恢复现有钱包</string>
-    <string name="onb_footer">DigiByte — 安全、快速、去中心化</string>
-    <string name="app_name_display">DigiByte Mobile</string>
+    <string name="onb_footer">适用于 DigiByte (DGB) 网络的独立钱包</string>
+    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
     <!-- WARNING -->
-    <string name="seed_screenshot_blocked">截图已被禁用。请把这些词抄写下来——它们无法找回。</string>
+    <string name="seed_screenshot_blocked">截图已被禁用。请把这些词抄写下来，它们无法找回。</string>
     <string name="seed_title">您的助记词</string>
     <string name="seed_word_count">%1$d 个词的助记词</string>
     <!-- WARNING -->
@@ -43,7 +43,7 @@
     <string name="pin_backspace">退格</string>
     <string name="unlock_title">输入 PIN</string>
     <string name="unlock_subtitle">输入 6 位 PIN 以解锁</string>
-    <string name="unlock_locked">已锁定——请在 %1$s 后重试</string>
+    <string name="unlock_locked">已锁定，请在 %1$s 后重试</string>
     <string name="unlock_unlocking">正在解锁…</string>
     <string name="unlock_biometrics_cd">使用生物识别解锁</string>
     <string name="recover_title">恢复钱包</string>
@@ -68,11 +68,11 @@
     <string name="pin_err_wallet">钱包创建失败，请重试。</string>
     <string name="unlock_err_failed">解锁失败，请重试。</string>
     <string name="unlock_device_lock_removed">设备的屏幕锁已被移除，钱包的受保护密钥已丢失。请使用恢复短语恢复钱包。</string>
-    <string name="unlock_wiping">失败次数过多 — 正在清除钱包</string>
+    <string name="unlock_wiping">失败次数过多：正在清除钱包</string>
     <string name="unlock_attempts_left">PIN 码错误。剩余尝试次数：%1$d</string>
     <string name="battery_title">保持后台同步</string>
     <string name="battery_body">息屏时 Android 可能会让此钱包休眠，从而中断它与 DigiByte 网络的连接，并可能使其停留在 0 个节点，直到您重新打开应用。\n\n请允许其无限制运行，以便持续同步。</string>
-    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 DigiByte Mobile。</string>
+    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 ATB Wallet。</string>
     <string name="battery_open_settings">打开设置</string>
     <string name="tor_title">新的隐私功能</string>
     <string name="tor_body">现已支持 Tor 路由。启用后，您的钱包将通过 Tor 连接到 DigiByte 网络，向节点隐藏您的 IP 地址。\n\n是否启用 Tor 路由？</string>
@@ -100,13 +100,13 @@
     <string name="wallet_price_via">来源：%1$s</string>
     <string name="wallet_testnet_active">测试网已启用</string>
     <string name="wallet_tor_active">Tor 已启用</string>
-    <string name="wallet_tor_hidden">Tor — 您的 IP 保持隐藏</string>
+    <string name="wallet_tor_hidden">Tor：您的 IP 保持隐藏</string>
     <string name="wallet_disconnected_peers">已断开 · %1$d 个节点</string>
-    <string name="wallet_history_gap">历史存在缺口 — 部分区块未验证</string>
+    <string name="wallet_history_gap">历史存在缺口：部分区块未验证</string>
     <string name="wallet_scan_missing">扫描缺失的交易</string>
     <string name="wallet_balance_refresh_failed">余额刷新失败</string>
     <string name="wallet_reconcile_unreachable">本次升级后无法连接对账节点。显示的余额可能不是最新的。</string>
-    <string name="wallet_tor_unavailable">Tor 不可用 — 正在使用直接连接</string>
+    <string name="wallet_tor_unavailable">Tor 不可用：正在使用直接连接</string>
     <string name="wallet_tor_timeout">Tor 未能及时连接到网络，因此本次会话中钱包将直接连接节点。在您重启应用前，您的 IP 对节点可见。</string>
     <string name="wallet_node_offline">您的节点已离线</string>
     <string name="wallet_node_offline_body">配对的节点当前不可达，或未提供 compact filters。请检查它是否正在运行且可达，并已设置 peerblockfilters=1。</string>
@@ -124,11 +124,15 @@
     <string name="receive_request_amount">请求指定金额（可选）</string>
     <string name="receive_amount_label">金额</string>
     <string name="receive_qr_encodes">二维码包含：%1$s</string>
-    <string name="receive_dd_note">DigiDollar 以美元计价的代币形式接收。分享此 DigiDollar 地址 — 二维码仅包含地址（不含金额请求）。</string>
+    <string name="receive_dd_note">DigiDollar 以美元计价的代币形式接收。分享此 DigiDollar 地址：二维码仅包含地址（不含金额请求）。</string>
     <string name="txd_title">交易详情</string>
     <string name="txd_not_found">未找到交易</string>
     <string name="txd_sent">已发送</string>
     <string name="txd_received">已接收</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">已铸造</string>
+    <string name="tx_dd_self_transfer">转给自己</string>
+    <string name="tx_dd_redeemed">已赎回</string>
     <string name="txd_transaction_id">交易 ID</string>
     <string name="txd_block_height">区块高度</string>
     <string name="txd_pending">待确认</string>
@@ -142,12 +146,12 @@
     <string name="txd_view_explorer">在浏览器中查看</string>
     <string name="txd_back_to_wallet">返回钱包</string>
 
-    <string name="wallet_sync_gap_headline">扫描完成 — 部分历史记录未经验证</string>
+    <string name="wallet_sync_gap_headline">扫描完成：部分历史记录未经验证</string>
     <string name="wallet_sync_connecting">正在连接 DigiByte 网络</string>
     <string name="wallet_sync_scanning">正在查找您的交易</string>
     <string name="wallet_sync_uptodate">已是最新</string>
     <string name="wallet_sync_failed">同步失败</string>
-    <string name="wallet_sync_finishing">即将完成 — 正在验证最新区块</string>
+    <string name="wallet_sync_finishing">即将完成：正在验证最新区块</string>
     <string name="wallet_blocks_count">%1$s 个区块</string>
     <string name="wallet_sync_progress_eta">已完成 %1$d%% · %2$s · 剩余 %3$s</string>
     <string name="wallet_sync_progress_no_eta">已完成 %1$d%% · 剩余 %2$s · 正在估算…</string>
@@ -165,7 +169,7 @@
     <string name="wallet_status_connecting">连接中…</string>
     <string name="wallet_gap_range_between">区块 %1$s–%2$s</string>
     <string name="wallet_gap_range_below">%1$s 以下的区块</string>
-    <string name="wallet_gap_body">您的部分历史记录（%1$s）无法通过过滤器节点验证 — 点按以扫描缺失的交易。</string>
+    <string name="wallet_gap_body">您的部分历史记录（%1$s）无法通过过滤器节点验证：点按以扫描缺失的交易。</string>
     <string name="receive_address_unavailable">地址不可用</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -213,11 +217,11 @@
     <string name="send_network_fee_row">网络手续费</string>
     <string name="send_fee_default">默认</string>
     <string name="send_fee_custom">自定义</string>
-    <string name="send_fee_below_min">⚠ 低于最低中继费 — 交易可能无法广播</string>
+    <string name="send_fee_below_min">⚠ 低于最低中继费：交易可能无法广播</string>
     <string name="send_fee_required">必须填写手续费</string>
     <string name="send_confirms_15s">约 15 秒确认</string>
-    <string name="send_no_peers">没有已连接的 DigiByte 节点 — 目前无法广播。正在重新连接…</string>
-    <string name="send_wait_for_sync">请等待同步完成后再发送 — 您的完整余额仍在恢复中。</string>
+    <string name="send_no_peers">没有已连接的 DigiByte 节点：目前无法广播。正在重新连接…</string>
+    <string name="send_wait_for_sync">请等待同步完成后再发送：您的完整余额仍在恢复中。</string>
     <string name="send_broadcasting">正在广播…</string>
     <string name="send_review">查看并发送</string>
     <string name="send_dialog_title">确认交易</string>
@@ -225,7 +229,7 @@
     <string name="send_to">收款方</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">无法准备此 DigiDollar 发送。请确认您持有足够的 DGB 来支付网络手续费。</string>
     <string name="send_verify_warning">请仔细核对上方的完整地址。\n交易不可撤销。</string>
     <string name="send_send">发送</string>
     <string name="send_success">成功</string>
@@ -237,7 +241,7 @@
 
     <string name="send_hint_dgb">dgb1q… 或 D…</string>
     <string name="game_score_submitted">分数已提交！</string>
-    <string name="game_score_failed">分数提交失败 — 您是否已登录？</string>
+    <string name="game_score_failed">分数提交失败：您是否已登录？</string>
     <string name="game_close">关闭游戏</string>
 
     <string name="set_title">设置</string>
@@ -261,15 +265,15 @@
     <string name="set_recover_other_sub">将旧的或其他派生路径上的币归集到此钱包</string>
     <string name="set_cat_info">信息</string>
     <string name="set_beta">Beta 更新</string>
-    <string name="set_beta_on">开启 — 将向您提供预发布版本以供测试</string>
-    <string name="set_beta_off">关闭 — 仅提供稳定版本</string>
+    <string name="set_beta_on">开启：将向您提供预发布版本以供测试</string>
+    <string name="set_beta_off">关闭：仅提供稳定版本</string>
     <string name="set_about">关于</string>
     <string name="set_about_sub">版本、许可证、开源</string>
     <string name="set_report_bug">报告问题 / 反馈</string>
-    <string name="set_report_bug_sub">提交问题或建议 — 设备与版本信息将自动填写</string>
+    <string name="set_report_bug_sub">提交问题或建议：设备与版本信息将自动填写</string>
     <string name="set_cat_advanced">高级 / 开发者</string>
-    <string name="set_net_testnet">测试网 — 测试链，恢复助记词相同</string>
-    <string name="set_net_mainnet">主网 — 生产链</string>
+    <string name="set_net_testnet">测试网：测试链，恢复助记词相同</string>
+    <string name="set_net_mainnet">主网：生产链</string>
     <string name="set_switch_testnet">切换到测试网？</string>
     <string name="set_switch_mainnet">切换到主网？</string>
     <string name="set_switch_testnet_body">应用将重启并同步测试链。您的恢复助记词不会改变。</string>
@@ -277,7 +281,7 @@
     <string name="set_restart">重启</string>
 
     <string name="lang_restart_note">更改后钱包界面会重启。您的币、助记词和设置都不会受影响。</string>
-    <string name="lang_unreviewed_note">翻译是新增的，尚未经母语者校对。如果有措辞不对 — 尤其是关于恢复助记词或您的币的警告 — 请通过“设置 → 报告问题”告诉我们。</string>
+    <string name="lang_unreviewed_note">翻译是新增的，尚未经母语者校对。如果有措辞不对（尤其是关于恢复助记词或您的币的警告）请通过“设置 → 报告问题”告诉我们。</string>
     <string name="lang_selected">已选择</string>
 
     <string name="as_send_title">发送资产</string>
@@ -339,7 +343,7 @@
     <string name="rf_may_take">这可能需要一点时间</string>
     <string name="rf_couldnt_finish">无法完成检查</string>
     <string name="rf_none_found">未找到可恢复的资金</string>
-    <string name="rf_partial_body">部分派生路径无法检查，因此这不是最终结果 — 可能还有我们没看到的资金。请稍后重试。\n\n未检查：%1$s</string>
+    <string name="rf_partial_body">部分派生路径无法检查，因此这不是最终结果：可能还有我们没看到的资金。请稍后重试。\n\n未检查：%1$s</string>
     <string name="rf_no_coins">该助记词在其他派生路径上没有币。</string>
     <string name="rf_recoverable_balance">可恢复余额</string>
     <string name="rf_found_on">发现于</string>
@@ -348,15 +352,15 @@
     <string name="rf_native_addr_note">资金将出现在您的原生接收地址</string>
     <string name="rf_advanced_send">高级 ▸ 发送到其他地址</string>
     <string name="rf_address_hint">DigiByte 地址（D…、S…、dgb1q…）</string>
-    <string name="rf_not_in_wallet">此地址不在您的钱包中 — 归集不可撤销</string>
+    <string name="rf_not_in_wallet">此地址不在您的钱包中：归集不可撤销</string>
     <string name="rf_sweep">归集资金</string>
     <string name="rf_sweep_submitted">已提交归集</string>
     <string name="rf_will_appear">恢复的资金将在确认后显示。</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">等待网络确认</string>
-    <string name="rf_held_assets">%1$d 笔留在原处 — DigiAssets</string>
-    <string name="rf_held_assets_body">这些币携带 DigiAssets，且转移未成功——因此它们被留在旧钱包中，而不是作为普通 DGB 转出（那样会销毁资产）。请重新运行恢复以重试。</string>
-    <string name="rf_held_unknown">%1$d 笔留在原处 — 无法检查</string>
+    <string name="rf_held_assets">%1$d 笔留在原处：DigiAssets</string>
+    <string name="rf_held_assets_body">这些币携带 DigiAssets，且转移未成功，因此它们被留在旧钱包中，而不是作为普通 DGB 转出（那样会销毁资产）。请重新运行恢复以重试。</string>
+    <string name="rf_held_unknown">%1$d 笔留在原处：无法检查</string>
     <string name="rf_held_unknown_body">我们无法读取它们来源的交易，因此无法判断其是否携带 DigiAssets。为避免风险，它们被保留原处。稍后重试可能可以解决。</string>
     <string name="rf_and_more">…还有 %1$d 笔</string>
     <string name="rf_something_wrong">出了点问题</string>
@@ -364,12 +368,12 @@
     <string name="rf_err_timeout">请求超时。请在网络更稳定时重试。</string>
     <string name="rf_err_seed">无法加载钱包助记种子。请解锁钱包后重试。</string>
     <string name="rf_err_lookup">无法连接查询服务。请稍后重试。</string>
-    <string name="rf_err_generic">出了点问题 — 请重试。</string>
+    <string name="rf_err_generic">出了点问题：请重试。</string>
     <string name="rf_fail_unknown">因未知原因失败。</string>
     <string name="rf_fail_no_utxos">没有可花费的输出能够匹配到签名密钥。</string>
     <string name="rf_fail_derive">无法从助记种子为此路径派生密钥。</string>
     <string name="rf_fail_broadcast">交易广播失败。请在连接到节点后重试。</string>
-    <string name="rf_fail_generic">这一笔无法归集 — 请重试。</string>
+    <string name="rf_fail_generic">这一笔无法归集：请重试。</string>
     <string name="rf_this_wallet">本钱包</string>
     <string name="rf_other_phrase">其他钱包的助记词</string>
     <string name="rf_other_phrase_body">输入其他钱包的恢复助记词，将其资金转入本钱包。助记词仅用于签署本次转账一次，绝不会被保存。</string>
@@ -415,8 +419,8 @@
     <string name="ab_open_source">开源</string>
     <string name="ab_source_code">源代码</string>
     <string name="ab_licenses">许可证</string>
-    <string name="ab_licenses_sub">MIT 许可证 — 开源</string>
-    <string name="ab_community">DigiByte 社区</string>
+    <string name="ab_licenses_sub">MIT 许可证：开源</string>
+    <string name="ab_community">DigiByte 网络信息</string>
     <string name="ab_report_bug">报告问题</string>
 
     <string name="sec_pin_auth">PIN 与认证</string>
@@ -427,16 +431,16 @@
     <string name="sec_biometric_no">此设备不支持</string>
     <string name="sec_autolock">自动锁定超时</string>
     <string name="sec_wipe_after">输错 %1$d 次 PIN 后清除</string>
-    <string name="sec_wipe_after_on">已开启 — 输错 %1$d 次 PIN 后清除钱包</string>
-    <string name="sec_wipe_after_off">已关闭 — 额外防止 PIN 暴力破解</string>
-    <string name="sec_wipe_after_body">开启后，连续 %1$d 次输入错误的 PIN 码将从本设备永久清除此钱包 — 包括助记种子、密钥和历史记录。\n\n在设备上此操作不可撤销。您的资金只能通过恢复助记词找回。</string>
+    <string name="sec_wipe_after_on">已开启：输错 %1$d 次 PIN 后清除钱包</string>
+    <string name="sec_wipe_after_off">已关闭：额外防止 PIN 暴力破解</string>
+    <string name="sec_wipe_after_body">开启后，连续 %1$d 次输入错误的 PIN 码将从本设备永久清除此钱包：包括助记种子、密钥和历史记录。\n\n在设备上此操作不可撤销。您的资金只能通过恢复助记词找回。</string>
     <string name="sec_wipe_after_ack">我的恢复助记词已备份</string>
     <string name="sec_wipe_after_enabled">已开启输错 %1$d 次清除</string>
     <string name="sec_recovery_phrase">恢复助记词</string>
     <string name="sec_view_phrase">查看恢复助记词</string>
     <string name="sec_view_phrase_sub">需要 PIN 码 + 生物识别验证</string>
     <string name="sec_view_phrase_body">您的恢复助记词可完全访问您的钱包。\n\n• 切勿与任何人分享\n• 切勿在任何网站上输入\n• 请离线保存在安全的地方\n\n继续需要 PIN 码 + 生物识别认证。</string>
-    <string name="sec_understand">我已了解 — 继续</string>
+    <string name="sec_understand">我已了解：继续</string>
     <string name="sec_danger_zone">危险区域</string>
     <string name="sec_wipe_wallet">清除钱包</string>
     <string name="sec_wipe_wallet_sub">从本设备移除所有钱包数据</string>
@@ -474,6 +478,10 @@
     <string name="did_login">Digi-ID 登录</string>
     <string name="did_auth_title">Digi-ID 认证</string>
     <string name="did_auth_subtitle">请验证身份以登录 %1$s</string>
+    <string name="hub_sign_title">签署 Hub 帖子</string>
+    <string name="hub_sign_subtitle">请验证身份，以使用您的身份签署此帖子</string>
+    <string name="hub_tip_auth_title">发送 Hub 打赏</string>
+    <string name="hub_tip_auth_subtitle">请验证身份，以从您的 DigiScope 打赏余额发送此打赏</string>
     <string name="did_requesting">正在请求 Digi-ID 认证</string>
     <string name="did_warning">警告</string>
     <string name="did_insecure">连接不安全</string>
@@ -495,7 +503,7 @@
     <string name="ni_state_synced">已同步</string>
     <string name="ni_state_error">错误</string>
     <string name="ni_caught_up">已是最新</string>
-    <string name="ni_tor_disabled">已停用 — 直接连接</string>
+    <string name="ni_tor_disabled">已停用：直接连接</string>
     <string name="ni_tor_starting">正在启动…</string>
     <string name="ni_tor_connecting">正在连接 Tor 网络…</string>
     <string name="ni_tor_connected">已通过端口 %1$d 连接</string>
@@ -503,7 +511,7 @@
     <string name="ni_node_serving">✓ 正在提供 compact filters</string>
     <string name="ni_node_connecting">连接中…</string>
     <string name="ni_node_unreachable">⚠ 不可达 / 未提供过滤器</string>
-    <string name="sec_locked_countdown">已锁定 — 请在 %1$s 后重试</string>
+    <string name="sec_locked_countdown">已锁定：请在 %1$s 后重试</string>
     <string name="sec_autolock_1m">1 分钟</string>
     <string name="sec_autolock_5m">5 分钟</string>
     <string name="sec_autolock_15m">15 分钟</string>
@@ -514,38 +522,41 @@
     <string name="sec_biometric_required">需要生物识别认证</string>
     <string name="did_logged_in">您已登录 %1$s</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">由助记词创建的分层确定性钱包。可从一份备份生成多个地址 — 就像从一把主密钥得到无限多的账号。</string>
+    <string name="ab_type_desc">由助记词创建的分层确定性钱包。可从一份备份生成多个地址：就像从一把主密钥得到无限多的账号。</string>
     <string name="ab_path_desc">用于生成您地址的派生路径。84 = BIP84 标准，20 = DigiByte 币种类型（SLIP44），0 = 第一个账户。这确保任何兼容 BIP84 的钱包都能用同一助记词恢复您的地址。兼容 Ian Coleman 的 BIP39 工具。</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">使用以 dgb1 开头的现代 SegWit 地址。相比以 D 开头的旧版 Legacy 地址，它们更高效且手续费更低。</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">主网是真实的 DigiByte 网络，DGB 在其中具有实际价值。测试网供开发者在不使用真钱的情况下测试。</string>
     <string name="ab_security_value">自我托管</string>
-    <string name="ab_security_desc">您的密钥永远不会离开此设备。没有任何公司或服务器持有您的资金 — 只有您控制自己的钱包。如果您丢失助记词，没有人能替您找回。</string>
+    <string name="ab_security_desc">您的密钥永远不会离开此设备。没有任何公司或服务器持有您的资金：只有您控制自己的钱包。如果您丢失助记词，没有人能替您找回。</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">简化支付验证 — 无需下载完整区块链即可直接与 DigiByte P2P 网络同步。使用 BIP157/158 紧凑区块过滤器：您的钱包下载过滤器并在设备本地检查，因此您拥有的地址永远不会离开您的手机。</string>
+    <string name="ab_sync_desc">简化支付验证：无需下载完整区块链即可直接与 DigiByte P2P 网络同步。使用 BIP157/158 紧凑区块过滤器：您的钱包下载过滤器并在设备本地检查，因此您拥有的地址永远不会离开您的手机。</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">本软件依据 MIT 许可证提供。</string>
     <string name="ab_tagline">DigiByte 是一条去中心化区块链和数字货币。</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC 出品的独立钱包；与 DigiByte Foundation、DigiByte Alliance 或 DigiByte-Core 无关联，也未获其认可。</string>
+    <string name="ab_website">Around The Block 网站</string>
 
     <string name="tx_conf_short">%1$d 次确认</string>
     <string name="tx_confirmed">已确认</string>
 
     <string name="cur_title">显示货币</string>
-    <string name="cur_note">您的 DigiByte 余额始终是真实的 — 这只改变它与什么进行比较。</string>
+    <string name="cur_note">您的 DigiByte 余额始终是真实的：这只改变它与什么进行比较。</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s：%2$s</string>
 
-    <string name="pass_advanced">高级 — 添加密码短语</string>
+    <string name="pass_advanced">高级：添加密码短语</string>
     <string name="pass_optional">可选</string>
-    <string name="pass_what">密码短语是您自己设定的一个额外单词或句子。设置后，仅凭恢复助记词已不足以打开此钱包 — 即使有人找到了写下的单词，也无法动用您的币。</string>
-    <string name="pass_warn">请写下密码短语，但要与助记词分开保管——放在同一个地方，两者又变回同一个秘密，密码短语就失去了保护作用。如果遗失，仅凭这些助记词将无法恢复您的钱包，也没有人能替您找回。</string>
+    <string name="pass_what">密码短语是您自己设定的一个额外单词或句子。设置后，仅凭恢复助记词已不足以打开此钱包：即使有人找到了写下的单词，也无法动用您的币。</string>
+    <string name="pass_warn">请写下密码短语，但要与助记词分开保管，放在同一个地方，两者又变回同一个秘密，密码短语就失去了保护作用。如果遗失，仅凭这些助记词将无法恢复您的钱包，也没有人能替您找回。</string>
     <string name="pass_scope">这保护的是您写下的备份。在这部手机上，锁住钱包的仍然是您的 PIN 码。</string>
     <string name="pass_enter">密码短语</string>
     <string name="pass_confirm">确认密码短语</string>
     <string name="pass_mismatch">密码短语不一致</string>
-    <string name="pass_too_long">过长 — 最多 %1$d 个字符</string>
+    <string name="pass_too_long">过长：最多 %1$d 个字符</string>
     <string name="pass_set">已设置密码短语</string>
     <string name="pass_none">无密码短语</string>
     <string name="pass_restore_label">密码短语（未使用则留空）</string>
@@ -559,7 +570,7 @@
     <string name="rf_move_assets_body">使用上方保留的 DGB 将资产发送到此钱包。资产转账不可撤销。</string>
     <string name="rf_moving_assets">正在转移资产…</string>
     <string name="rf_move_result">已转移 %2$d 项资产中的 %1$d 项</string>
-    <string name="rf_move_failed">%1$s — 未转移：%2$s</string>
+    <string name="rf_move_failed">%1$s，未转移：%2$s</string>
     <string name="pass_screen_title">添加密码短语？</string>
     <string name="pass_screen_subtitle">可选，大多数人应跳过。密码短语是您自己设定的额外单词或句子；没有它，仅凭助记词将无法打开此钱包。</string>
     <string name="pass_screen_continue_with">使用密码短语继续</string>
@@ -575,12 +586,12 @@
     <string name="send_fail_amount">请输入大于零的金额。</string>
     <string name="send_fail_unknown">交易无法发送。</string>
     <string name="send_fail_try_again">重试</string>
-    <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets——正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
+    <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets，正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
     <string name="rf_nothing_moved">没有转移任何资产</string>
-    <string name="rf_dd_fee_floor">需要 %1$s 网络手续费 — 此钱包只有 %2$s。</string>
+    <string name="rf_dd_fee_floor">需要 %1$s 网络手续费：此钱包只有 %2$s。</string>
     <string name="rf_dd_found">找到 %1$s DigiDollar</string>
     <string name="rf_dd_moved">%1$s DigiDollar 已转入此钱包</string>
-    <string name="rf_dd_left_behind">%1$s DigiDollar 被留下——无法转移</string>
+    <string name="rf_dd_left_behind">%1$s DigiDollar 被留下，无法转移</string>
     <string name="rf_dd_unreachable">无法检查 DigiDollar，此钱包可能持有一些</string>
     <string name="as_rules_checking">正在检查此资产的转账规则…</string>
     <string name="as_rules_bound_title">此资产带有转账规则</string>
@@ -610,7 +621,7 @@
     <string name="reconcile_spendable">可花费</string>
     <string name="reconcile_wallet_spendable">钱包可花费余额</string>
     <string name="reconcile_matches_wallet">与钱包的可花费余额一致。</string>
-    <string name="reconcile_does_not_match_wallet">与钱包的可花费余额不一致 — 见下文。</string>
+    <string name="reconcile_does_not_match_wallet">与钱包的可花费余额不一致：见下文。</string>
     <string name="reconcile_held_asset">为 DigiAsset 保留</string>
     <string name="reconcile_held_unknown">保留：资产状态未知</string>
     <string name="reconcile_proven_plain">普通 DGB，重启后可花费</string>
@@ -639,9 +650,9 @@
     <string name="restore_err_invalid_words">无效的词：%1$s</string>
     <string name="restore_err_checksum">此助记词无效。请仔细检查每个词及其顺序。</string>
     <string name="restore_scan_title">私密恢复</string>
-    <string name="restore_scan_body">继续后，这部手机会自行查找您钱包的交易 — 原生 (dgb1q…)、Legacy (D…)、Taproot 和 DigiDollar 地址 — 不会将您的地址发送给任何人。</string>
+    <string name="restore_scan_body">继续后，这部手机会自行查找您钱包的交易（原生 (dgb1q…)、Legacy (D…)、Taproot 和 DigiDollar 地址）不会将您的地址发送给任何人。</string>
     <string name="restore_other_title">助记词来自其他钱包应用？</string>
-    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自 DigiByte Mobile 或旧版 DigiByte Wallet 应用，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自 ATB Wallet 或旧版 DigiByte 应用，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
     <string name="restore_other_check">检查其他格式</string>
     <string name="restore_scan_deriving">正在派生地址…</string>
     <string name="restore_scan_duration">根据节点不同，这可能需要 30-90 秒。</string>
@@ -655,7 +666,7 @@
     </plurals>
     <string name="restore_unreachable_body">检查未能运行。继续后，同步仍会找到本钱包自身的格式；请重试，或稍后使用“设置 → 从其他钱包恢复资金”查找其他应用的格式。</string>
     <string name="restore_none_body">所检查的格式上没有未花费的资金。继续后，同步仍会找到本钱包自身的交易。</string>
-    <string name="restore_nonnative_note">%1$s DGB 位于其他应用的地址格式上。恢复完成后，您将被带到“从其他钱包恢复资金”以将其转入本钱包 — 在您于该处确认之前，不会转移任何资金。</string>
+    <string name="restore_nonnative_note">%1$s DGB 位于其他应用的地址格式上。恢复完成后，您将被带到“从其他钱包恢复资金”以将其转入本钱包：在您于该处确认之前，不会转移任何资金。</string>
     <string name="restore_pass_nothing_found">使用您输入的密码短语未找到任何资金。密码短语没有校验码：输错会在没有任何错误提示的情况下打开另一个空钱包。请检查是否有拼写错误；如果您创建钱包时没有设置密码短语，请返回并关闭密码短语栏。</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="other">%1$s · 已扫描 %2$d 个地址</item>
@@ -663,11 +674,24 @@
     <string name="restore_date_title">您是什么时候创建这个钱包的？</string>
     <string name="restore_date_body">这有助于跳过不必要的区块链扫描，加快同步速度。</string>
     <string name="restore_date_unsure">我不记得了</string>
-    <string name="restore_date_unsure_sub">完整区块链扫描（最慢 — 不确定时使用）</string>
-    <string name="restore_date_warning">早于所选年份的交易将不会被检测到。如果您的钱包可能有更早的记录，请选择更早的年份 — 或选择“我不记得了”以完整覆盖（较慢）。</string>
+    <string name="restore_date_unsure_sub">完整区块链扫描（最慢：不确定时使用）</string>
+    <string name="restore_date_warning">早于所选年份的交易将不会被检测到。如果您的钱包可能有更早的记录，请选择更早的年份：或选择“我不记得了”以完整覆盖（较慢）。</string>
     <string name="restore_date_start">开始恢复</string>
     <string name="restore_date_restoring">正在恢复钱包…</string>
     <string name="restore_date_onwards">%1$d年1月起</string>
     <string name="restore_date_range">%1$d年1月 – %1$d年12月</string>
     <string name="restore_date_genesis">DigiByte 于 2014 年 1 月上线</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB，网络最低费率。确认前会显示这笔交易的确切手续费。</string>
+    <string name="send_preparing">正在准备…</string>
+    <string name="send_fee_raised">已从您输入的 %1$s DGB 提高：这是这笔交易实际支付的手续费。</string>
+    <string name="send_err_below_dust">此金额低于网络向该地址中继的最小付款（%1$s DGB）。请至少发送该金额。</string>
+    <string name="send_not_relayed_title">已发送，尚未中继</string>
+    <string name="send_not_relayed_body">您的钱包已广播这笔交易，但尚无节点接收，因此还不能确定它已到达网络。它在您的活动记录中显示为待处理。再次发送前，请先查看您的活动记录。</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">无法读取密码短语</string>
+    <string name="seedview_pass_unreadable_body">暂时无法读取此钱包的密码短语。仅凭您的助记词可能无法恢复此钱包，因此在密码短语能够与它们一起显示之前，不会显示这些助记词。请重试。</string>
+    <string name="seedview_pass_retry">重试</string>
+    <!-- /pkg E2-keys -->
 </resources>

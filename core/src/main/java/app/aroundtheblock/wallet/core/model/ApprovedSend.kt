@@ -32,7 +32,11 @@ sealed class ApprovedSend {
         val sats: Long,
         /** Fee rate handed to the transaction builder, in satoshis per kilobyte. */
         val feePerKb: Long,
-        /** The fee estimate the confirmation shows, in satoshis. */
+        /**
+         * The fee the confirmation shows, in satoshis. Once review has quoted the send ([withQuote])
+         * it is the fee of the transaction built for it — its inputs minus its outputs — which is the
+         * fee signed: native code refuses to sign those bytes at any other fee.
+         */
         val feeEstimateSats: Long,
         /**
          * Whole cents for the confirmation's approximate-dollars row, or null when there is no
@@ -45,14 +49,27 @@ sealed class ApprovedSend {
 
         /** The approximate-dollars row, written from whole cents as [amountText] is; "" for no row. */
         val approxUsdText: String get() = approxUsdCents?.let { UsdCents.format(it) }.orEmpty()
+
+        /** This approval, carrying the quote review made: the rate the send was built at and the fee
+         *  of the transaction built. The address, the amount and the dollars row are unchanged. */
+        fun withQuote(feePerKb: Long, feeSats: Long): Dgb = Dgb(address, sats, feePerKb, feeSats, approxUsdCents)
     }
 
     class DigiDollar internal constructor(
         override val address: String,
         /** Cents to send. */
         val cents: Long,
+        /**
+         * The fee the confirmation shows, in satoshis of DGB: once review has built the transfer
+         * ([withFee]) it is that transfer's own fee — its inputs minus its outputs — which is the fee
+         * signed: native code refuses to sign the transfer at any other fee. 0 until review has built it.
+         */
+        val feeSats: Long = 0L,
     ) : ApprovedSend() {
         override val amountText: String get() = UsdCents.format(cents)
+
+        /** This approval, carrying the fee of the transfer review built. The address and amount are unchanged. */
+        fun withFee(feeSats: Long): DigiDollar = DigiDollar(address, cents, feeSats)
     }
 
     class Asset internal constructor(
@@ -77,6 +94,11 @@ sealed class ApprovedSend {
          *  Everything else, and so what is sent, is unchanged. */
         fun withPlannedFee(feeSats: Long): Asset =
             Asset(address, assetId, units, divisibility, feePerKb, feeSats)
+
+        /** This approval, planned at [feePerKb]: the rate a custom total comes to over the planned
+         *  transfer's own size. The asset, the units and the recipient — what is sent — are unchanged. */
+        fun atRate(feePerKb: Long): Asset =
+            Asset(address, assetId, units, divisibility, feePerKb, feeEstimateSats)
     }
 
     companion object {
@@ -105,7 +127,9 @@ sealed class ApprovedSend {
 
         /**
          * An approval for [typedQuantity] of the asset [assetId], which has [divisibility]
-         * decimals, or null when the text is not a positive quantity of such an asset.
+         * decimals, or null when the text is not a positive quantity of such an asset. The asset
+         * form passes its recipient text on as typed or pasted; the approval holds the address
+         * without the whitespace around it, so the address confirmed is exactly the one paid.
          */
         fun asset(
             address: String,
@@ -116,7 +140,7 @@ sealed class ApprovedSend {
             feeEstimateSats: Long,
         ): Asset? {
             val units = AssetQuantity.parse(typedQuantity, divisibility) ?: return null
-            return Asset(address, assetId, units, divisibility, feePerKb, feeEstimateSats)
+            return Asset(address.trim(), assetId, units, divisibility, feePerKb, feeEstimateSats)
         }
     }
 }

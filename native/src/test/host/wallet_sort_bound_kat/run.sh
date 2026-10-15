@@ -74,8 +74,8 @@ if ! build "$BUILD_DIR/red" -DWALLET_ASCENDING_DEPTH_UNFIXED; then echo "GATE FA
 
 maxsteps() {   # <bin> <N> -> echoes maxsteps, or "SAN"/"ERR"
     local out; out="$("$1" bound "$2" 2>&1)"
-    if echo "$out" | grep -Eq "$SAN_RE"; then echo "SAN"; return; fi
-    echo "$out" | grep -oE 'maxsteps [0-9]+' | grep -oE '[0-9]+$' || echo "ERR"
+    if <<<"$out" grep -Eq "$SAN_RE"; then echo "SAN"; return; fi
+    <<<"$out" grep -oE 'maxsteps [0-9]+' | grep -oE '[0-9]+$' || echo "ERR"
 }
 
 echo "per-comparison bound from source: $BUDGET (+1 top node = $BOUND)"
@@ -103,9 +103,9 @@ fi
 
 # HONEST ORDER: identical in both arms (the bound never reorders an honest set).
 og="$("$BUILD_DIR/green" honest 2>&1)"; orr="$("$BUILD_DIR/red" honest 2>&1)"
-if echo "$og" | grep -Eq "$SAN_RE" || echo "$orr" | grep -Eq "$SAN_RE"; then
+if <<<"$og" grep -Eq "$SAN_RE" || <<<"$orr" grep -Eq "$SAN_RE"; then
     echo "  [honest] GATE FAILURE: sanitizer report"; echo "$og$orr" | sed 's/^/      /' | head -6; FAIL=1
-elif [ "$og" = "$orr" ] && echo "$og" | grep -q '^order:'; then
+elif [ "$og" = "$orr" ] && <<<"$og" grep -q '^order:'; then
     echo "  [honest] both arms present the same order ($og)"
 else
     echo "  [honest] GATE FAILURE: the honest order differs between arms"

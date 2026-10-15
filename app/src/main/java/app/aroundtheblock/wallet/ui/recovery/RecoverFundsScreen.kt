@@ -176,8 +176,18 @@ fun RecoverFundsScreen(
                     is RecoverFundsViewModel.UiState.Findings -> FindingsBody(
                         findings = s.findings,
                         totalSat = s.totalSat,
-                        // Foreign: sweep to THIS wallet only (no external option shown).
-                        onSweepNative = { gated { if (s.isForeign) vm.sweepForeign() else vm.sweep(SweepDestination.Native) } },
+                        // Foreign: sweep to THIS wallet only (no external option shown). The sweep
+                        // takes the phrase the ViewModel holds for it, so the screen lets go of its
+                        // own copy here: once the sweep has run, nothing on this screen holds it.
+                        onSweepNative = {
+                            gated {
+                                if (s.isForeign) {
+                                    phrase = ""
+                                    passphrase = ""
+                                    vm.sweepForeign()
+                                } else vm.sweep(SweepDestination.Native)
+                            }
+                        },
                         onSweepExternal = if (s.isForeign) null else { addr -> gated { vm.sweep(SweepDestination.External(addr)) } },
                         partialFailurePaths = s.partialFailurePaths,
                         verdict = passphraseVerdict,

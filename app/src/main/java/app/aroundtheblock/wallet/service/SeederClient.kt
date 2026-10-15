@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.network.BoundedBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -55,19 +56,12 @@ class SeederClient(baseClient: OkHttpClient, private val bodyCap: Long = MAX_BOD
                     onFailure("Seeder API answered without a body")
                     return null
                 }
-                if (body.contentLength() > bodyCap) {
-                    onFailure("Seeder API body of ${body.contentLength()} bytes is over the $bodyCap-byte bound")
-                    return null
-                }
-                // request(n) buffers until n bytes are held or the source ends, one segment at a
-                // time, so at most the bound plus one segment is ever held; when it can be filled
-                // past the bound the answer is over it and is refused without reading the rest.
-                val source = body.source()
-                if (source.request(bodyCap + 1)) {
+                // Read through the one bounded reader: a declared length over the bound is refused
+                // unread, and any other answer is read only to the bound plus one byte.
+                BoundedBody.text(body, bodyCap) ?: run {
                     onFailure("Seeder API body is over the $bodyCap-byte bound")
                     return null
                 }
-                source.readUtf8()
             }
         } catch (e: Exception) {
             onFailure("Seeder API unreachable: ${e.message}")

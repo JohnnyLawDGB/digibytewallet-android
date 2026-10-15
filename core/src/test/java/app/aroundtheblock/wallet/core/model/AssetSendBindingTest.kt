@@ -48,6 +48,20 @@ class AssetSendBindingTest {
         }
     }
 
+    /**
+     * The asset form passes its recipient text on as typed or pasted, and a pasted address often
+     * carries a newline or a space. The approval names the address without that whitespace, so the
+     * confirmation shows, and the send pays, exactly the address. The native decoders answer 0 for
+     * any string that is not wholly an address, so whitespace left in would refuse the send.
+     */
+    @Test fun `the approval names the recipient without the whitespace around it`() {
+        for (text in listOf("$addr\n", " $addr", "\t$addr \r\n", "$addr\u00a0")) {
+            val approved = ApprovedSend.asset(text, assetId, "1", 0, feePerKb = 100_000L, feeEstimateSats = 61_300L)
+            assertNotNull(approved)
+            assertEquals(text.map { it.code }.toString(), addr, approved!!.address)
+        }
+    }
+
     @Test fun `each spelling of a quantity is approved as the same text`() {
         assertEquals("1.5", asset("1.50", 2)!!.amountText)
         assertEquals("1.5", asset("01.5", 2)!!.amountText)

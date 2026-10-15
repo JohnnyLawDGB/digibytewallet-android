@@ -93,7 +93,7 @@ FAIL=0
 run_case() {   # run_case <bin> <case> -> OUT, RC
     OUT="$("$1" "$2" 2>&1)"; RC=$?
 }
-san() { echo "$OUT" | grep -Eq "$SAN_RE"; }
+san() { <<<"$OUT" grep -Eq "$SAN_RE"; }
 
 run_bits() {
     local bits="$1"
@@ -114,9 +114,9 @@ run_bits() {
     echo "--- GREEN (fixed): every case PASSES, no sanitizer report ---"
     for c in $known; do
         run_case "$BUILD_DIR/green${bits}" "$c"
-        if san; then echo "  [$bits green $c] GATE FAILURE: sanitizer report"; echo "$OUT" | grep -E "$SAN_RE" | head -3; FAIL=1
-        elif [ $RC -eq 0 ] && echo "$OUT" | grep -q "RESULT $c PASS"; then echo "  [$bits green $c] PASS"
-        else echo "  [$bits green $c] GATE FAILURE: did not pass (rc=$RC)"; echo "$OUT" | grep -E "FAIL|RESULT" | sed 's/^/      /'; FAIL=1; fi
+        if san; then echo "  [$bits green $c] GATE FAILURE: sanitizer report"; <<<"$OUT" grep -E "$SAN_RE" | head -3; FAIL=1
+        elif [ $RC -eq 0 ] && <<<"$OUT" grep -q "RESULT $c PASS"; then echo "  [$bits green $c] PASS"
+        else echo "  [$bits green $c] GATE FAILURE: did not pass (rc=$RC)"; <<<"$OUT" grep -E "FAIL|RESULT" | sed 's/^/      /'; FAIL=1; fi
     done
 
     for a in "${ARMS[@]}"; do
@@ -127,15 +127,15 @@ run_bits() {
         for c in ${RED[$a]}; do
             run_case "$BUILD_DIR/red_${a}_${bits}" "$c"
             if san; then echo "  [$bits $a $c] GATE FAILURE: sanitizer report"; FAIL=1
-            elif [ $RC -ne 0 ] && echo "$OUT" | grep -q "RESULT $c FAIL"; then
-                echo "  [$bits $a $c] failed, as required: $(echo "$OUT" | grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
+            elif [ $RC -ne 0 ] && <<<"$OUT" grep -q "RESULT $c FAIL"; then
+                echo "  [$bits $a $c] failed, as required: $(<<<"$OUT" grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
             else echo "  [$bits $a $c] GATE FAILURE: passed in the earlier shape (rc=$RC) -- the seam is not load-bearing"; FAIL=1; fi
         done
         for c in "${GUARD_CASES[@]}"; do
             run_case "$BUILD_DIR/red_${a}_${bits}" "$c"
             if san; then echo "  [$bits $a $c] GATE FAILURE: sanitizer report"; FAIL=1
-            elif [ $RC -eq 0 ] && echo "$OUT" | grep -q "RESULT $c PASS"; then echo "  [$bits $a $c] guard holds"
-            else echo "  [$bits $a $c] GATE FAILURE: guard failed (rc=$RC)"; echo "$OUT" | grep FAIL | sed 's/^/      /'; FAIL=1; fi
+            elif [ $RC -eq 0 ] && <<<"$OUT" grep -q "RESULT $c PASS"; then echo "  [$bits $a $c] guard holds"
+            else echo "  [$bits $a $c] GATE FAILURE: guard failed (rc=$RC)"; <<<"$OUT" grep FAIL | sed 's/^/      /'; FAIL=1; fi
         done
     done
 }

@@ -11,7 +11,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > built in CI: `scripts/build-release.sh` builds and signs them on the owner's machine, because the
 > release key is also Play's app-signing key. Until 2026-10-11 `develop` still built io.digibyte
 > while the shipping app lived only on release branches; `RELEASING.md` §0 says how not to repeat it.
-**Version:** v4.0.89 (versionCode 40089)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.1.0 (versionCode 40100)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -33,7 +33,7 @@ game/    — DigiRunner sync mini-game (standalone, no core dependency)
 adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 
 # Run all tests
-./gradlew testMainnetDebugUnitTest
+./gradlew :core:testMainnetDebugUnitTest :app:testMainnetPlayDebugUnitTest :app:testMainnetSideloadDebugUnitTest
 
 # Run security tests only
 ./gradlew :core:testMainnetDebugUnitTest --tests "*.security.*"
@@ -94,9 +94,9 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 - Warning system: amber for below relay minimum, red for zero fee
 
 ### Defensive Startup
-- `AppModule.provideDatabase()` wrapped in try/catch — if DB init fails for ANY reason, `wipeStaleData()` clears corrupt prefs/DB/keys and retries fresh. Wallet seed always preserved.
+- The database opens through `core/db/DatabaseKeyProvisioner` (`WalletDatabaseOpener`). **Nothing deletes a database or a key outside the user's wipe:** a database that cannot be opened is set aside (`wallet.db.aside-<reason>-<time>`, companions alongside), a missing key, a temporary Keystore error, a wrong password and a corrupt file are told apart, and the database password is re-wrapped and verified under its own key (`dgb_db_passphrase`) before any older key is deleted. A Keystore that cannot answer gives that session a temporary in-memory database. The wipe removes every database file of every network, set-aside copies included. Wallet seed always preserved.
 - Verbose logging at every init step: `adb logcat | grep AppModule`
-- `fallbackToDestructiveMigration()` on Room DB for upgrade safety
+- `fallbackToDestructiveMigration()` is still set on Room: it drops data on a downgrade or a missing migration (all steps 1→12 are registered today) — never ship a schema change without its migration
 
 ### Digi-ID
 - Real BRKeyCompactSign signing (Bitcoin message signing protocol)

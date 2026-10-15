@@ -55,7 +55,8 @@ class SpendPreflightAppWiringTest {
     private val buildsASpend = listOf(
         "NativeBridge.createTransaction(",
         "NativeBridge.signTransaction(",
-        "NativeBridge.sendDigiDollar(",
+        "NativeBridge.previewDigiDollar(",
+        "NativeBridge.sendApprovedDigiDollar(",
         "NativeBridge.getSpendableDigiByteUtxos(",
         "NativeBridge.buildAndSignAssetTransferTx(",
     )
@@ -69,17 +70,30 @@ class SpendPreflightAppWiringTest {
     }
 
     @Test fun `the DigiDollar send goes through the builder`() {
-        val send = source("ui/wallet/SendViewModel.kt").section("fun sendDigiDollar(", "companion object")
+        val vm = source("ui/wallet/SendViewModel.kt")
+        val send = vm.section("fun sendDigiDollar(", "companion object")
+        // The review builds through the builder (detection first); the send hands the builder the
+        // transfer review built for the approval on screen, through the view model's send seam.
         assertTrue(
-            "sendDigiDollar() does not hand the approved send to the builder",
-            send.contains("transactionBuilder.sendDigiDollar(approved.address, approved.cents)"),
+            "the DigiDollar review does not build through the builder",
+            vm.section("suspend fun approveDigiDollar(", "fun cancelDigiDollar(")
+                .contains("transactionBuilder.prepareDigiDollar(typed.address, typed.cents)"),
+        )
+        assertTrue("sendDigiDollar() does not hand the reviewed transfer to the send", send.contains("sendDd(prepared)"))
+        assertTrue(
+            "the send seam does not default to the builder",
+            vm.contains("= { transactionBuilder.sendDigiDollar(it) }"),
         )
         assertFalse("sendDigiDollar() swallows a cancellation", send.contains("runCatching"))
     }
 
     @Test fun `the DGB send goes through the builder`() {
-        val send = source("ui/wallet/SendViewModel.kt").section("fun send(", "fun resetState(")
-        assertTrue("send() does not go through the builder", send.contains("transactionBuilder.sendTransaction("))
+        // Two steps, both the builder's: review builds and quotes the send, and the send signs it.
+        val vm = source("ui/wallet/SendViewModel.kt")
+        val review = vm.section("fun requestConfirm(", "fun cancelConfirm(")
+        assertTrue("review does not go through the builder", review.contains("transactionBuilder.prepareTransaction("))
+        val send = vm.section("fun send(", "fun resetState(")
+        assertTrue("send() does not go through the builder", send.contains("transactionBuilder.sendPrepared("))
     }
 
     @Test fun `the asset send goes through the asset layer`() {

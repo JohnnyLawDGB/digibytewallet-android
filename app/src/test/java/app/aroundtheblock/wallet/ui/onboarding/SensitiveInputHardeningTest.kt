@@ -68,7 +68,8 @@ class SensitiveInputHardeningTest {
         assertTrue(helper.contains("clearFlags(WindowManager.LayoutParams.FLAG_SECURE)"))
         // The composable must route through SecureWindowFlag (see SecureWindowFlagTest): a direct
         // clearFlags in onDispose is the secure->secure navigation regression.
-        assertTrue(helper.contains("onDispose { processFlag.release() }"))
+        // Counted per window since the sensitive dialogs (SensitiveDialogGateTest, SecureWindowFlagTest).
+        assertTrue(helper.contains("onDispose { windowFlags.release(window) }"))
         assertFalse(helper.contains("onDispose {\n            window?.clearFlags"))
     }
 

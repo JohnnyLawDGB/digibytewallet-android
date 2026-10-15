@@ -390,7 +390,7 @@ class ChainReconciliationService(
                 )
             },
             onImported = { tx ->
-                android.util.Log.i("ChainReconciliation", "history-recovered ${tx.txid} @${tx.height}")
+                android.util.Log.i("ChainReconciliation", "history-recovered ${tx.txid.take(12)} @${tx.height}")
             },
         )
         // Coverage means: the node answered for the whole owned address set AND every

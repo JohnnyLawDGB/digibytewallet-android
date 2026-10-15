@@ -20,7 +20,7 @@ object NativeBridge {
     external fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?
     external fun signTransaction(unsignedTx: ByteArray): ByteArray?
     external fun publishTransaction(signedTx: ByteArray): String?
-    external fun sendDigiDollar(tdAddress: String, cents: Long): String?
+    external fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String?
     external fun isValidDigiDollarAddress(addr: String): Boolean
     external fun getEstimatedFee(priority: Int): Long
     external fun setSocksProxy(host: String, port: Int)
@@ -46,6 +46,8 @@ object NativeBridge {
      *  JNI lookup fails with UnsatisfiedLinkError — the same silent drift noted on mnemonicToSeed. */
     external fun createWalletFromBytes(phraseBytes: ByteArray, passphrase: ByteArray?): Boolean
     external fun recoverWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long, passphrase: ByteArray?): Boolean
+    /** The restore of a stored wallet: the only call that builds a wallet from loadSerializedTransactions' records. */
+    external fun restoreWalletFromBytes(phraseBytes: ByteArray, creationTimestamp: Long, passphrase: ByteArray?): Boolean
     external fun getWalletBirthCheckpointHeight(): Long
     external fun isWalletLoaded(): Boolean
     external fun dumpAllAddresses(): String

@@ -43,7 +43,7 @@ GUARD_CASES=(penalty_roundtrip peers_roundtrip blocks_roundtrip txs_roundtrip)
 shipped_level() {
     local found
     found="$(grep -o "D$1=[0-9][0-9]*" "$REPO_ROOT/native/build.gradle.kts" 2>/dev/null | sort -u)"
-    [ "$(printf '%s' "$found" | grep -c .)" -eq 1 ] || return 1
+    [ "$(<<<"$found" grep -c .)" -eq 1 ] || return 1
     printf '%s' "${found#D$1=}"
 }
 POW_LEVEL="$(shipped_level DGB_HEADER_POW_CHECK)" || { echo "GATE FAILURE: no single shipped DGB_HEADER_POW_CHECK"; exit 1; }
@@ -115,7 +115,7 @@ run_case() {   # sets OUT and RC
     RC=$?
 }
 
-clean_pass() { ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $1 pass"; }
+clean_pass() { ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $1 pass"; }
 
 run_bits() {
     local bits="$1"
@@ -146,8 +146,8 @@ run_bits() {
     echo "--- RED ARM (-DBB_2026_10_09_HARLEY_UNFIXED): each case MUST draw a sanitizer report ---"
     for c in "${must_fault[@]}"; do
         run_case "$BUILD_DIR/red${bits}" "$c"
-        if echo "$OUT" | grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] tripped (rc=$RC): $(echo "$OUT" | grep -Eom1 "($SAN_RE).*" | cut -c1-110)"
+        if <<<"$OUT" grep -Eq "$SAN_RE"; then
+            echo "  [$bits red $c] tripped (rc=$RC): $(<<<"$OUT" grep -Eom1 "($SAN_RE).*" | cut -c1-110)"
         else
             echo "  [$bits red $c] GATE FAILURE: no sanitizer report (rc=$RC)"
             echo "$OUT" | sed 's/^/      /' | head -8; FAIL=1
@@ -162,7 +162,7 @@ run_bits() {
                 echo "  [$bits red $c] rejected cleanly (rc=$RC): the defect is the 32-bit wrap"
             else
                 echo "  [$bits red $c] GATE FAILURE: the 64-bit control did not pass (rc=$RC)"
-                echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
+                <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
             fi
         done
     fi
@@ -174,7 +174,7 @@ run_bits() {
             echo "  [$bits red $c] passed (guard)"
         else
             echo "  [$bits red $c] GATE FAILURE: guard did not pass in the comparison arm (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
         fi
     done
 
@@ -182,10 +182,10 @@ run_bits() {
     for c in "${WRAP_CASES[@]}" "${ALLOC_CASES[@]}" "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c"
         if clean_pass "$c"; then
-            echo "  [$bits green $c] passed ($(echo "$OUT" | grep -c '^PASS:') checks)"
+            echo "  [$bits green $c] passed ($(<<<"$OUT" grep -c '^PASS:') checks)"
         else
             echo "  [$bits green $c] GATE FAILURE (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
         fi
     done
 }

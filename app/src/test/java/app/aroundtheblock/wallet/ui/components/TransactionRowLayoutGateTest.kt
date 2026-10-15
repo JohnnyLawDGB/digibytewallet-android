@@ -51,7 +51,8 @@ class TransactionRowLayoutGateTest {
     }
 
     @Test fun `the direction label stays on one line`() {
-        val label = textCallWhose("text", "stringResource(if (isSend) R.string.txd_sent")
+        // The label is the row's look (sent, received, minted, moved to yourself, redeemed): one line whichever.
+        val label = textCallWhose("text", "stringResource(look.label)")
         assertEquals("1", label.named["maxLines"])
         assertEquals("false", label.named["softWrap"])
     }

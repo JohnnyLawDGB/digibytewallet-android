@@ -56,14 +56,14 @@ if ! build "$BUILD_DIR/red" -DPEER_KNOWN_TX_CAP_UNFIXED; then echo "GATE FAILURE
 echo "--- shipped arm (capped) ---"
 out="$("$BUILD_DIR/green" 2>&1)"; rc=$?
 echo "$out" | sed 's/^/  /'
-if echo "$out" | grep -Eq "$SAN_RE"; then echo "  GATE FAILURE: sanitizer report in the shipped arm"; FAIL=1; fi
-echo "$out" | grep -q "PASS: peer_known_tx_cap_kat" || { echo "  GATE FAILURE: shipped checks did not all pass (rc=$rc)"; FAIL=1; }
+if <<<"$out" grep -Eq "$SAN_RE"; then echo "  GATE FAILURE: sanitizer report in the shipped arm"; FAIL=1; fi
+<<<"$out" grep -q "PASS: peer_known_tx_cap_kat" || { echo "  GATE FAILURE: shipped checks did not all pass (rc=$rc)"; FAIL=1; }
 
 echo "--- comparison arm (uncapped: shows the unbounded growth the cap removes) ---"
 out="$("$BUILD_DIR/red" 2>&1)"; rc=$?
 echo "$out" | sed 's/^/  /'
-if echo "$out" | grep -Eq "$SAN_RE"; then echo "  GATE FAILURE: sanitizer report in the comparison arm"; FAIL=1; fi
-echo "$out" | grep -q "RESULT count 15000" || { echo "  GATE FAILURE: comparison arm did not grow unbounded (rc=$rc)"; FAIL=1; }
+if <<<"$out" grep -Eq "$SAN_RE"; then echo "  GATE FAILURE: sanitizer report in the comparison arm"; FAIL=1; fi
+<<<"$out" grep -q "RESULT count 15000" || { echo "  GATE FAILURE: comparison arm did not grow unbounded (rc=$rc)"; FAIL=1; }
 
 echo
 if [ "$FAIL" -eq 0 ]; then

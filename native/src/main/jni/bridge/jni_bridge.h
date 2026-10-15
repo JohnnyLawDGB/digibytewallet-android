@@ -159,6 +159,12 @@ extern int g_peerManagerNeedsRecreate;
  * PEER_GUARD, as g_peerManager is. */
 extern int g_walletSwapped;
 
+/* jni_transaction_persist.c: the records loadSerializedTransactions parsed for the disk restore. Once
+ * restoreWalletFromBytes has built a wallet from them the bridge keeps no pointer to any of them; creating a
+ * wallet or recovering one from a phrase drops a pending load, so no wallet is built from another's. */
+void saved_transactions_release_after_build(BRWallet *wallet);
+void saved_transactions_discard(void);
+
 /* Callback handler (NativeCallback interface) */
 extern jobject  g_callbackHandler;
 

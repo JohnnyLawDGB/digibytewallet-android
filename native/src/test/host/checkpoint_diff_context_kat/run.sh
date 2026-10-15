@@ -90,24 +90,24 @@ run_case() { OUT="$("$1" "$2" 2>&1)"; RC=$?; }
 expect() {
     local bin="$1" label="$2" c="$3" want="$4"
     run_case "$bin" "$c"
-    if echo "$OUT" | grep -Eq "$SAN_RE"; then
-        echo "  [$label $c] GATE FAILURE: sanitizer report (rc=$RC)"; echo "$OUT" | grep -Em4 "$SAN_RE" | sed 's/^/      /'
+    if <<<"$OUT" grep -Eq "$SAN_RE"; then
+        echo "  [$label $c] GATE FAILURE: sanitizer report (rc=$RC)"; <<<"$OUT" grep -Em4 "$SAN_RE" | sed 's/^/      /'
         FAIL=1
-    elif echo "$OUT" | grep -q "RESULT $c $want\$"; then
-        echo "  [$label $c] $want: $(echo "$OUT" | grep -E '^(NOTE|PASS)' | tail -1 | cut -c1-170)"
+    elif <<<"$OUT" grep -q "RESULT $c $want\$"; then
+        echo "  [$label $c] $want: $(<<<"$OUT" grep -E '^(NOTE|PASS)' | tail -1 | cut -c1-170)"
     else
-        echo "  [$label $c] GATE FAILURE: expected '$want', got: $(echo "$OUT" | grep -o "RESULT $c [a-z_]*" | head -1) (rc=$RC)"
-        echo "$OUT" | grep -E '^(FAIL|NOTE)|diff-' | head -8 | sed 's/^/      /'; FAIL=1
+        echo "  [$label $c] GATE FAILURE: expected '$want', got: $(<<<"$OUT" grep -o "RESULT $c [a-z_]*" | head -1) (rc=$RC)"
+        <<<"$OUT" grep -E '^(FAIL|NOTE)|diff-' | head -8 | sed 's/^/      /'; FAIL=1
     fi
 }
 
 expect_red() {
     local bin="$1" label="$2" c="$3"
     run_case "$bin" "$c"
-    if echo "$OUT" | grep -Eq "$SAN_RE"; then
+    if <<<"$OUT" grep -Eq "$SAN_RE"; then
         echo "  [$label $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"; FAIL=1
-    elif echo "$OUT" | grep -q "RESULT $c fail"; then
-        echo "  [$label $c] failed, as required: $(echo "$OUT" | grep -m1 '^FAIL:' | cut -c1-150)"
+    elif <<<"$OUT" grep -q "RESULT $c fail"; then
+        echo "  [$label $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:' | cut -c1-150)"
     else
         echo "  [$label $c] GATE FAILURE: did not fail (rc=$RC); this case cannot see the context"; FAIL=1
     fi
@@ -141,8 +141,8 @@ run_bits() {
     for c in "${EASY_CASES[@]}"; do expect "$BUILD_DIR/l1_$bits" "$bits L1" "$c" accepted_counted; done
 
     run_case "$BUILD_DIR/l1_$bits" easiest_on_checkpoint
-    echo "$OUT" | grep -q 'diff-mismatch v=20000202' \
-        && echo "  [$bits L1] log: '$(echo "$OUT" | grep -m1 -o 'diff-mismatch.*' | cut -c1-120)'" \
+    <<<"$OUT" grep -q 'diff-mismatch v=20000202' \
+        && echo "  [$bits L1] log: '$(<<<"$OUT" grep -m1 -o 'diff-mismatch.*' | cut -c1-120)'" \
         || { echo "  [$bits L1] GATE FAILURE: the diff-mismatch log line is missing"; FAIL=1; }
 }
 

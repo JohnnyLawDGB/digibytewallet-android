@@ -12,6 +12,7 @@
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
 #include "BRWalletFilterElements.h"
+#include "tx_details_format.h"
 
 /* ---------- Global state definitions ---------- */
 
@@ -232,6 +233,13 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
      * create may wait behind a startSync's bounded disconnect wait. */
     PEER_GUARD();
 
+    /* A wallet is never built from records loaded for another one: creating a wallet first drops any
+     * pending load, so no later restore can build from it. (-DSAVED_TX_PENDING_LOAD_UNFIXED, the host
+     * KAT's comparison arm only, keeps it.) */
+#ifndef SAVED_TX_PENDING_LOAD_UNFIXED
+    saved_transactions_discard();
+#endif
+
     if (!phraseBytes) {
         LOGW("createWalletFromBytes: phraseBytes is null");
         return JNI_FALSE;
@@ -325,24 +333,51 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
     return JNI_TRUE;
 }
 
-/* ---------- recoverWalletFromBytes ---------- */
+/* ---------- recoverWalletFromBytes ----------
+ * Recover a wallet from a phrase the user entered (WalletManager.recoverWallet). It is never built from
+ * loaded records: any pending load is dropped first -- it was loaded for a disk restore, possibly of
+ * another wallet -- and the wallet is then built as restoreWalletFromBytes builds it, from no records.
+ */
+jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes,
+                                                     jlong creationTimestamp, jbyteArray passphrase);
 
 jboolean JNICALL
 NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
                                                                    jbyteArray phraseBytes,
                                                                    jlong creationTimestamp,
                                                                    jbyteArray passphrase) {
+    PEER_GUARD();   /* the drop and the swap are one step for every other user of (g_wallet, g_peerManager) */
+
+    /* (-DSAVED_TX_PENDING_LOAD_UNFIXED, the host KAT's comparison arm only, keeps the pending load.) */
+#ifndef SAVED_TX_PENDING_LOAD_UNFIXED
+    saved_transactions_discard();
+#endif
+    jboolean ok = NativeBridge_restoreWalletFromBytes(env, thiz, phraseBytes, creationTimestamp, passphrase);
+    if (ok) LOGI("recoverWalletFromBytes: wallet recovered, creationTime=%u", g_walletCreationTime);
+    return ok;
+}
+
+/* ---------- restoreWalletFromBytes ----------
+ * Restore the wallet from its stored phrase and the records loadSerializedTransactions loaded for it
+ * (WalletManager.restoreFromDisk: the load, then this). The only entry that builds a wallet from loaded
+ * records; after the build the bridge keeps none of them (saved_transactions_release_after_build).
+ */
+jboolean JNICALL
+NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz,
+                                    jbyteArray phraseBytes,
+                                    jlong creationTimestamp,
+                                    jbyteArray passphrase) {
     (void)thiz;
     PEER_GUARD();   /* the swap is serialised with every other user of (g_wallet, g_peerManager) */
 
     if (!phraseBytes) {
-        LOGW("recoverWalletFromBytes: phraseBytes is null");
+        LOGW("restoreWalletFromBytes: phraseBytes is null");
         return JNI_FALSE;
     }
 
     jsize phraseLen = (*env)->GetArrayLength(env, phraseBytes);
     if (phraseLen <= 0 || phraseLen > 1024) {
-        LOGW("recoverWalletFromBytes: invalid length=%d", phraseLen);
+        LOGW("restoreWalletFromBytes: invalid length=%d", phraseLen);
         return JNI_FALSE;
     }
 
@@ -351,7 +386,7 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     phraseChars[phraseLen] = '\0';
 
     if (!BRBIP39PhraseIsValid(BRBIP39WordsEn, phraseChars)) {
-        LOGW("recoverWalletFromBytes: invalid BIP39 phrase");
+        LOGW("restoreWalletFromBytes: invalid BIP39 phrase");
         secure_zero(phraseChars, sizeof(phraseChars));
         return JNI_FALSE;
     }
@@ -395,13 +430,20 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     extern size_t g_savedTransactionCount;
 
     if (g_savedTransactions && g_savedTransactionCount > 0) {
-        LOGI("recoverWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
+        LOGI("restoreWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
         g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
     } else {
         g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
     }
+    /* The wallet owns the records it took, and the bridge keeps none of them (jni_transaction_persist.c).
+     * Nothing else uses the new wallet before this: the swap holds PEER_GUARD, and no peer manager is
+     * built on it until startSync. (-DSAVED_TX_ARRAY_UNFIXED, the host KAT's comparison arm only, leaves
+     * the array naming them.) */
+#ifndef SAVED_TX_ARRAY_UNFIXED
+    saved_transactions_release_after_build(g_wallet);
+#endif
     if (!g_wallet) {
-        LOGE("recoverWalletFromBytes: BRWalletNewDual failed");
+        LOGE("restoreWalletFromBytes: BRWalletNewDual failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
@@ -419,7 +461,7 @@ NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz,
     g_walletCreationTime = creationTimestamp > 0 ? (uint32_t)creationTimestamp : (uint32_t)time(NULL);
     g_peerManagerNeedsRecreate = 1;
 
-    LOGI("recoverWalletFromBytes: wallet recovered, creationTime=%u", g_walletCreationTime);
+    LOGI("restoreWalletFromBytes: wallet built, creationTime=%u", g_walletCreationTime);
     return JNI_TRUE;
 }
 
@@ -670,16 +712,16 @@ NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
     if (!result) return NULL;
     if (txCount == 0) return result;
 
-    BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
-    if (!txs) return result;
-    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+    /* The hashes are copied while the wallet holds its lock: a wallet transaction pointer is not kept
+     * past it (tx_read_snapshot_kat). */
+    UInt256 *hashes = malloc(txCount * sizeof(UInt256));
+    if (!hashes) return result;
+    txCount = BRWalletTransactionHashes(g_wallet, hashes, txCount);
 
     for (size_t i = 0; i < txCount; i++) {
-        BRTransaction *tx = txs[i];
-        if (!tx) continue;
         char hashHex[65];
         for (int j = 0; j < 32; j++) {
-            sprintf(&hashHex[j * 2], "%02x", tx->txHash.u8[31 - j]);
+            sprintf(&hashHex[j * 2], "%02x", hashes[i].u8[31 - j]);
         }
         hashHex[64] = '\0';
         jstring s = (*env)->NewStringUTF(env, hashHex);
@@ -688,7 +730,7 @@ NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
             (*env)->DeleteLocalRef(env, s);
         }
     }
-    free(txs);
+    free(hashes);
     return result;
 }
 
@@ -697,7 +739,30 @@ NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
  * "txHash|amount|fee|blockHeight|timestamp|sent|received\n..."
  * Amount is signed: positive = received, negative = sent.
  * sent/received are unsigned raw values for self-send detection.
+ * The list is built by tx_details_format.h; this file reads each row from the wallet.
  */
+
+/* TxDetailsRowFn over the copies BRWalletCopyTransactions filled (ctx). */
+static int tx_details_row_from_wallet(void *ctx, size_t i, TxDetailsRow *row) {
+    BRTransaction *tx = ((BRTransaction **)ctx)[i];
+    if (!tx) return 0;
+
+    /* Calculate amount: received - sent */
+    uint64_t received = BRWalletAmountReceivedFromTx(g_wallet, tx);
+    uint64_t sent = BRWalletAmountSentByTx(g_wallet, tx);
+    memcpy(row->txHash, tx->txHash.u8, sizeof(row->txHash));
+    row->amount = (int64_t)received - (int64_t)sent;
+    row->fee = BRWalletFeeForTx(g_wallet, tx);
+    row->blockHeight = tx->blockHeight;
+
+    /* Use tx timestamp if available, otherwise fall back to current time.
+     * tx->timestamp is 0 until the block header is processed by the peer manager. */
+    row->timestamp = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
+    row->sent = sent;
+    row->received = received;
+    return 1;
+}
+
 jstring JNICALL
 NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
     (void)thiz;
@@ -706,57 +771,16 @@ NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
     size_t txCount = BRWalletTransactions(g_wallet, NULL, 0);
     if (txCount == 0) return (*env)->NewStringUTF(env, "");
 
+    /* Copies taken while the wallet holds its lock: a wallet transaction pointer is not kept past it,
+     * so a removal on the peer thread cannot free a row being read (tx_read_snapshot_kat). */
     BRTransaction **txs = malloc(txCount * sizeof(BRTransaction *));
     if (!txs) return (*env)->NewStringUTF(env, "");
-    txCount = BRWalletTransactions(g_wallet, txs, txCount);
+    txCount = BRWalletCopyTransactions(g_wallet, txs, txCount);
 
-    /* Build result string — estimate 160 chars per tx (added sent|received fields) */
-    size_t bufSize = txCount * 160 + 1;
-    char *buf = malloc(bufSize);
-    if (!buf) { free(txs); return (*env)->NewStringUTF(env, ""); }
-    buf[0] = '\0';
-    size_t pos = 0;
-
-    /* BRWalletTransactions returns txs sorted by date OLDEST-FIRST (BRWallet.c).
-     * To cap at the 100 MOST RECENT we must start near the end of the array, not
-     * at index 0 — otherwise a wallet with >100 txs keeps its oldest 100 and drops
-     * every new send past the cap (balance still updates because it sums all txs,
-     * but the new tx never appears in the list). Start offset = txCount-100. */
-    size_t startIdx = (txCount > 100) ? (txCount - 100) : 0;
-    for (size_t i = startIdx; i < txCount; i++) { /* the 100 most recent */
-        BRTransaction *tx = txs[i];
-        if (!tx) continue;
-
-        /* Calculate amount: received - sent */
-        uint64_t received = BRWalletAmountReceivedFromTx(g_wallet, tx);
-        uint64_t sent = BRWalletAmountSentByTx(g_wallet, tx);
-        int64_t amount = (int64_t)received - (int64_t)sent;
-        uint64_t fee = BRWalletFeeForTx(g_wallet, tx);
-
-        /* txHash as hex string */
-        char hashHex[65];
-        for (int j = 0; j < 32; j++) {
-            sprintf(&hashHex[j*2], "%02x", tx->txHash.u8[31 - j]);
-        }
-        hashHex[64] = '\0';
-
-        /* Use tx timestamp if available, otherwise fall back to current time.
-         * tx->timestamp is 0 until the block header is processed by the peer manager. */
-        uint32_t ts = tx->timestamp ? tx->timestamp : (uint32_t)time(NULL);
-
-        int written = snprintf(buf + pos, bufSize - pos,
-            "%s|%lld|%llu|%u|%u|%llu|%llu\n",
-            hashHex,
-            (long long)amount,
-            (unsigned long long)fee,
-            tx->blockHeight,
-            ts,
-            (unsigned long long)sent,
-            (unsigned long long)received);
-        if (written > 0) pos += written;
-    }
-
+    char *buf = tx_details_format(txCount, tx_details_row_from_wallet, txs);
+    for (size_t i = 0; i < txCount; i++) if (txs[i]) BRTransactionFree(txs[i]);
     free(txs);
+    if (!buf) return (*env)->NewStringUTF(env, "");
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
     return result;
@@ -1018,7 +1042,8 @@ NativeBridge_classifyOutpoints(JNIEnv *env, jobject thiz,
             if (end && *end == '\0' && end != s + 65 && v <= UINT32_MAX) {
                 UInt256 hash = UInt256Reverse(uint256(hex)); /* display BE -> internal LE */
                 uint32_t n = (uint32_t)v;
-                BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+                /* a copy taken under the wallet lock: no wallet pointer is kept past it */
+                BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, hash);
                 if (!tx || n >= tx->outCount) code = -1;
                 else if (!BRWalletTransactionIsValid(g_wallet, tx)) code = -2;
                 else if (_utxoListHas(utxos, nUtxo, hash, n)) code = 1;
@@ -1036,6 +1061,7 @@ NativeBridge_classifyOutpoints(JNIEnv *env, jobject thiz,
                     else if (coinbase) code = 4;
                     else code = 2;
                 }
+                if (tx) BRTransactionFree(tx);
             }
         }
         if (s) (*env)->ReleaseStringUTFChars(env, line, s);
@@ -1093,9 +1119,10 @@ NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz,
     jlong out[2] = { 0, 0 };
     for (size_t i = 0; i < nUtxo; i++) {
         if (_utxoListHas(listed, nListed, utxos[i].hash, utxos[i].n)) continue;
-        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, utxos[i].hash);
+        BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, utxos[i].hash);   /* under the lock */
         out[0]++;
         if (tx && utxos[i].n < tx->outCount) out[1] += (jlong)tx->outputs[utxos[i].n].amount;
+        if (tx) BRTransactionFree(tx);
     }
     free(listed); free(utxos);
 

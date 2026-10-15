@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.ui.digistamp
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.webkit.WebSettings
 import android.webkit.WebView
 
 /**
@@ -33,29 +34,46 @@ object DigistampWebViewHost {
     @Volatile
     var onWalletAction: (android.net.Uri) -> Unit = {}
 
+    /** Opens a link the navigation policy approved for the browser. Held here for the same reason:
+     *  the browser is started from the current screen's context, not the first one's. */
+    @Volatile
+    var openInBrowser: (String) -> Unit = {}
+
     /** Whether a view already exists — i.e. whether this visit will re-attach rather than load. */
     fun exists(): Boolean = webView != null
 
-    @SuppressLint("SetJavaScriptEnabled")
     fun obtain(context: Context, configure: (WebView) -> Unit): WebView {
         // Re-attaching a View that still has a parent throws, and AndroidView will try.
         webView?.let { detach(); return it }
 
-        val created = WebView(context.applicationContext).apply {
-            settings.javaScriptEnabled = true          // Next.js will not render without it
-            settings.domStorageEnabled = true
-
-            // Deliberately closed. Each would hand page script a capability it has no business
-            // having next to a wallet.
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.javaScriptCanOpenWindowsAutomatically = false
-            settings.setGeolocationEnabled(false)
-            // NOTE: addJavascriptInterface is NEVER called. See DigistampScreen.
-        }
+        val created = WebView(context.applicationContext)
+        applyLeastSettings(created.settings)
         configure(created)
         webView = created
         return created
+    }
+
+    /**
+     * Every setting the Market's view has, each the least the page needs (DigistampWebSettingsTest
+     * holds the list; a setting added here is added there, with what the page needs it for).
+     *
+     * What the page needs was read from the site: it is a Next.js app, and the only thing it keeps
+     * in DOM storage is a theme choice, read inside a try/catch that falls back to the system theme.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    internal fun applyLeastSettings(settings: WebSettings) {
+        // Kept: the site renders nothing without script. Script cannot reach the wallet: there is
+        // no JavaScript bridge (see DigistampScreen), and its only way out of the page is a
+        // navigation, which the view's client decides.
+        settings.javaScriptEnabled = true
+
+        // Off: nothing on the site needs them, and each would hand page script a capability it
+        // has no business having next to a wallet.
+        settings.domStorageEnabled = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.javaScriptCanOpenWindowsAutomatically = false
+        settings.setGeolocationEnabled(false)
     }
 
     /**

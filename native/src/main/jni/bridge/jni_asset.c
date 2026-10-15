@@ -361,17 +361,19 @@ NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz,
     UInt256 hash = UInt256Reverse(uint256(hashStr));
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
 
-    BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+    /* A copy taken under the wallet lock: a wallet transaction pointer is not kept past it
+     * (tx_read_snapshot_kat). Freed on every path below. */
+    BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, hash);
     if (!tx) {
         LOGD("getTransactionOutputsForHash: tx not in wallet");
         return NULL;
     }
 
     jclass stringClass = (*env)->FindClass(env, "java/lang/String");
-    if (!stringClass) return NULL;
+    if (!stringClass) { BRTransactionFree(tx); return NULL; }
 
     jobjectArray result = (*env)->NewObjectArray(env, (jsize)tx->outCount, stringClass, NULL);
-    if (!result) return NULL;
+    if (!result) { BRTransactionFree(tx); return NULL; }
 
     for (size_t i = 0; i < tx->outCount; i++) {
         const BRTxOutput *out = &tx->outputs[i];
@@ -398,6 +400,7 @@ NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz,
     }
 
     LOGD("getTransactionOutputsForHash: returned %zu outputs", tx->outCount);
+    BRTransactionFree(tx);
     return result;
 }
 
@@ -428,14 +431,15 @@ NativeBridge_getSerializedTransactionForHash(JNIEnv *env, jobject thiz,
     UInt256 hash = UInt256Reverse(uint256(hashStr));
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
 
-    BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+    /* A copy taken under the wallet lock (tx_read_snapshot_kat); serialized, then freed. */
+    BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, hash);
     if (!tx) return NULL;
 
     size_t len = BRTransactionSerialize(tx, NULL, 0);
-    if (len == 0) return NULL;
-    uint8_t *buf = (uint8_t *)malloc(len);
+    uint8_t *buf = len ? (uint8_t *)malloc(len) : NULL;
+    size_t written = buf ? BRTransactionSerialize(tx, buf, len) : 0;
+    BRTransactionFree(tx);
     if (!buf) return NULL;
-    size_t written = BRTransactionSerialize(tx, buf, len);
     if (written != len) { free(buf); return NULL; }
 
     jbyteArray result = (*env)->NewByteArray(env, (jsize)len);
@@ -470,13 +474,14 @@ NativeBridge_getTransactionInputsForHash(JNIEnv *env, jobject thiz,
     UInt256 hash = UInt256Reverse(uint256(hashStr));
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
 
-    BRTransaction *tx = BRWalletTransactionForHash(g_wallet, hash);
+    /* A copy taken under the wallet lock (tx_read_snapshot_kat). Freed on every path below. */
+    BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, hash);
     if (!tx) return NULL;
 
     jclass stringClass = (*env)->FindClass(env, "java/lang/String");
-    if (!stringClass) return NULL;
+    if (!stringClass) { BRTransactionFree(tx); return NULL; }
     jobjectArray result = (*env)->NewObjectArray(env, (jsize)tx->inCount, stringClass, NULL);
-    if (!result) return NULL;
+    if (!result) { BRTransactionFree(tx); return NULL; }
 
     for (size_t i = 0; i < tx->inCount; i++) {
         const BRTxInput *in = &tx->inputs[i];
@@ -497,6 +502,7 @@ NativeBridge_getTransactionInputsForHash(JNIEnv *env, jobject thiz,
             (*env)->DeleteLocalRef(env, s);
         }
     }
+    BRTransactionFree(tx);
     return result;
 }
 

@@ -60,6 +60,8 @@ set -euo pipefail
 
 SSH_TARGET="${1:-root@digiscope.me}"
 SSH_KEY="${2:-$HOME/.ssh/DigitalOcean}"
+# The checkpoint source is pinned: a host with any other key is refused (scripts/known_hosts.digiscope).
+KNOWN_HOSTS="${KNOWN_HOSTS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/known_hosts.digiscope}"
 SPACING="${3:-50000}"
 # MINIMUM DEPTH BELOW THE TIP — DO NOT LOWER. A checkpoint is not a hint: a
 # relayed block whose hash differs from the checkpoint at that height fails
@@ -110,7 +112,7 @@ echo "pulling from $SSH_TARGET (spacing $SPACING)..." >&2
 if [ "$SSH_TARGET" = "local" ]; then
   NODE_SH=(bash -s)
 else
-  NODE_SH=(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_TARGET" bash -s)
+  NODE_SH=(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null "$SSH_TARGET" bash -s)
 fi
 RAW="$("${NODE_SH[@]}" <<EOF
 CLI=$DGB_CLI

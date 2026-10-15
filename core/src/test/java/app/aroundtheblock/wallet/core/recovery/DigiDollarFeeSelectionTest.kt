@@ -92,7 +92,7 @@ class DigiDollarFeeSelectionTest {
     fun `no findings still yields a usable selection`() {
         val choice = select(emptyList())
         assertTrue("no DGB means no fee inputs", choice.inputs.isEmpty())
-        assertEquals("a profile is always supplied", DerivationProfile.BUILT_INS.first(), choice.profile)
+        assertTrue("and no derivations to sign them with", choice.profiles.isEmpty())
     }
 
     @Test
@@ -111,7 +111,7 @@ class DigiDollarFeeSelectionTest {
                 result(profileB, listOf(utxo("D2", 20_000_000L)), listOf(derived("D2", 1, 3))),
             )
         )
-        assertEquals(profileB, choice.profile)
+        assertEquals(listOf(profileB), choice.profiles)
         assertEquals(1, choice.inputs.size)
         assertEquals(20_000_000L, choice.inputs[0].amountSat)
         assertEquals("the true (chain,index) is carried, never a positional guess", 1, choice.inputs[0].chain)
@@ -239,11 +239,11 @@ class DigiDollarFeeSelectionTest {
             excluded = setOf("${"f".repeat(64)}:0"),
         )
 
-        assertEquals(profileB, choice.profile)
+        assertEquals(listOf(profileB), choice.profiles)
         assertEquals(listOf("${"d".repeat(64)}:0"), outpoints(choice))
     }
 
-    /** One transfer signs with one profile, so one that covers the fee beats one that cannot. */
+    /** Largest first across profiles: a later profile's coin that covers the fee alone is the whole selection. */
     @Test
     fun `a later profile that covers the fee is preferred over an earlier one that cannot`() {
         val small = utxo("D1", 3_000_000L, txid = "c".repeat(64))
@@ -255,8 +255,36 @@ class DigiDollarFeeSelectionTest {
 
         val choice = select(findings)
 
-        assertEquals(profileB, choice.profile)
+        assertEquals(listOf(profileB), choice.profiles)
         assertEquals(listOf("${"d".repeat(64)}:0"), outpoints(choice))
+    }
+
+    // ---- coins of two profiles ----------------------------------------------------------------
+
+    /**
+     * A fee that only two profiles' coins can cover together is paid, not refused: each coin carries
+     * the derivation it was found under, so the transfer signs each with its own. Largest first across
+     * both, and no further than the fee needs: the profile's third coin stays for the sweep.
+     */
+    @Test
+    fun `coins of two profiles together pay a fee neither covers alone`() {
+        val a = utxo("D1", 6_000_000L, txid = "1".repeat(64))
+        val b = utxo("D2", 5_000_000L, txid = "2".repeat(64))
+        val spare = utxo("D2", 1_000_000L, txid = "3".repeat(64))
+        val findings = listOf(
+            result(profileA, listOf(a), listOf(derived("D1", 0, 4))),
+            result(profileB, listOf(spare, b), listOf(derived("D2", 1, 7))),
+        )
+
+        val choice = select(findings)
+
+        assertEquals("the fee is paid by one coin of each profile, largest first",
+            listOf("${"1".repeat(64)}:0", "${"2".repeat(64)}:0"), outpoints(choice))
+        assertEquals("each coin carries the derivation it was found under", listOf(profileA, profileB), choice.profiles)
+        assertEquals("the true (chain,index) under each profile is carried", listOf(0 to 4, 1 to 7),
+            choice.inputs.map { it.chain to it.index })
+        assertTrue("the coins picked cover the transfer they pay for",
+            DigiDollarTransferService.feeInputsSuffice(dollarsOn(1), choice.inputs, recipient, changeAddr))
     }
 
     // ---- how many coins -----------------------------------------------------------------------
@@ -362,8 +390,9 @@ class DigiDollarFeeSelectionTest {
     }
 
     /**
-     * When nothing covers the fee, every usable coin of the best-funded profile is still handed
-     * over, so the refusal the transfer service produces states the true shortfall.
+     * When nothing covers the fee, every usable coin is still handed over — of every profile, since
+     * coins of two profiles may pay one fee — so the refusal the transfer service produces states the
+     * true shortfall.
      */
     @Test
     fun `coins that cannot cover the fee are all offered so the shortfall is exact`() {
@@ -382,7 +411,9 @@ class DigiDollarFeeSelectionTest {
 
         val choice = select(findings)
 
-        assertEquals(profileB, choice.profile)
-        assertEquals(5_000_000L, choice.inputs.sumOf { it.amountSat })
+        // Every usable coin of every profile — not only the best-funded profile's — so the refusal
+        // states the true shortfall: 0.1 DGB less the 0.06 DGB the wallet holds, not less 0.05.
+        assertEquals(6_000_000L, choice.inputs.sumOf { it.amountSat })
+        assertEquals(listOf(profileB, profileB, profileA), choice.profiles)
     }
 }

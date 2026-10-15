@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.security.PinManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -90,7 +91,9 @@ class OnboardingViewModel @Inject constructor(
     fun setRecoveryMnemonic(phrase: String) {
         _mnemonic = phrase.trim().split("\\s+".toRegex())
         // A scan answers for the phrase it was run on. Going back and entering another phrase must
-        // not leave the old answer on screen, nor let it steer the post-restore sweep prompt.
+        // not leave the old answer on screen, nor let it steer the post-restore sweep prompt — and
+        // a scan still running for the old phrase must not deliver its answer afterwards.
+        cancelRecoveryScan()
         _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Idle
         _passphraseVerdict.value = null
     }
@@ -114,6 +117,18 @@ class OnboardingViewModel @Inject constructor(
             app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State
             > = _scanResults.asStateFlow()
 
+    /** The running scan, and the number of the phrase it was started for: a result is published
+     *  only while [scanGeneration] still names that phrase. The number is the guard that holds even
+     *  when the scan does not stop at a cancellation point. Main thread only. */
+    private var scanJob: kotlinx.coroutines.Job? = null
+    private var scanGeneration = 0L
+
+    private fun cancelRecoveryScan() {
+        scanGeneration++
+        scanJob?.cancel()
+        scanJob = null
+    }
+
     /** Run the multi-path derivation scan against the entered mnemonic and passphrase (see
      *  [setPassphrase]). Results land in [scanResults].
      *
@@ -128,10 +143,12 @@ class OnboardingViewModel @Inject constructor(
                 .State.Failed("No mnemonic entered")
             return
         }
+        cancelRecoveryScan()
+        val generation = scanGeneration
         _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService
             .State.Scanning("Deriving addresses…")
         val hadPassphrase = _passphrase != null
-        viewModelScope.launch {
+        scanJob = viewModelScope.launch {
             // A copy for the scan, zeroed straight after; _passphrase itself lives until the
             // wallet is restored.
             val passBytes = _passphrase?.copyOf()
@@ -147,6 +164,7 @@ class OnboardingViewModel @Inject constructor(
             // bare phrase. That would link the two at DigiScope, which is exactly what a hidden
             // wallet exists to prevent, and the user only agreed to send THIS phrase's addresses.
             // The screen says plainly what an empty passphrase result can mean instead.
+            if (generation != scanGeneration) return@launch   // the phrase changed: not this scan's answer to give
             _passphraseVerdict.value =
                 if (hadPassphrase && result is app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done) {
                     app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
@@ -169,20 +187,30 @@ class OnboardingViewModel @Inject constructor(
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
+        // This create's own copy: clearing the screen's copy (onCleared) never changes the bytes a
+        // create in progress is using, and this one is zeroed however the create ends.
+        val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
-            val success = withContext(Dispatchers.Default) {
-                // Do NOT clearPin here — PinSetupScreen calls setPin() right
-                // before this, and clearing afterward wipes the freshly-set
-                // PIN. (recoverWallet keeps its clearPin because it runs
-                // before pin_setup, replacing any stale-from-prior-install PIN.)
-                walletManager.createWallet(phrase, _passphrase)
+            val success = try {
+                withContext(Dispatchers.Default) {
+                    // Do NOT clearPin here — PinSetupScreen calls setPin() right
+                    // before this, and clearing afterward wipes the freshly-set
+                    // PIN. (recoverWallet keeps its clearPin because it runs
+                    // before pin_setup, replacing any stale-from-prior-install PIN.)
+                    walletManager.createWallet(phrase, pass)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A create that throws has failed: reported as such, not let out of the scope.
+                false
+            } finally {
+                // Created or not, the passphrase has no further use here — and now it can be wiped.
+                pass?.fill(0)
+                clearPassphrase()
             }
             wipeMnemonicFromMemory()
-            // The passphrase is now in the Keystore envelope; there is no reason for the
-            // ViewModel to keep holding it — and now it can actually be wiped.
-            _passphrase?.fill(0)
-            _passphrase = null
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet creation failed")
             onResult(success)
         }
@@ -192,6 +220,8 @@ class OnboardingViewModel @Inject constructor(
     fun recoverWallet(onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
         val ts = _recoveryTimestamp
+        // This restore's own copy, as in createWallet.
+        val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
 
@@ -199,19 +229,25 @@ class OnboardingViewModel @Inject constructor(
             // paced convoy bounds the memory of an arbitrarily deep CF scan, so
             // there is nothing to refuse. (A backup you can't restore from isn't a
             // backup.)
-            val success = withContext(Dispatchers.Default) {
-                // Clear any stale PIN from a previous install so the user
-                // is routed to PIN setup, not the unlock screen. Done inside
-                // the worker dispatcher so the Keystore-backed prefs write
-                // never lands on the main thread.
-                pinManager.clearPin()
-                walletManager.recoverWallet(phrase, ts, _passphrase)
+            val success = try {
+                withContext(Dispatchers.Default) {
+                    // Clear any stale PIN from a previous install so the user
+                    // is routed to PIN setup, not the unlock screen. Done inside
+                    // the worker dispatcher so the Keystore-backed prefs write
+                    // never lands on the main thread.
+                    pinManager.clearPin()
+                    walletManager.recoverWallet(phrase, ts, pass)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A restore that throws has failed: reported as such, not let out of the scope.
+                false
+            } finally {
+                // As in createWallet: restored or not, the passphrase has no further use here.
+                pass?.fill(0)
+                clearPassphrase()
             }
-
-            // As in createWallet: once restored, the passphrase is in the Keystore envelope and
-            // this copy has no further use.
-            _passphrase?.fill(0)
-            _passphrase = null
 
             // If the pre-recovery scan found funds on non-native paths, signal
             // the UI to navigate to RecoverFundsScreen after the wallet lands.
@@ -250,9 +286,17 @@ class OnboardingViewModel @Inject constructor(
         _mnemonic = emptyList()
     }
 
+    /** Every byte of the held passphrase zeroed, then let go (AND-006). */
+    private fun clearPassphrase() {
+        _passphrase?.fill(0)
+        _passphrase = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         wipeMnemonicFromMemory()
+        // Setup abandoned or finished: the passphrase is zeroed here too, not only after a create.
+        clearPassphrase()
     }
 }
 

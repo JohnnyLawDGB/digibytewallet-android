@@ -1,12 +1,7 @@
 package app.aroundtheblock.wallet.ui.digistamp
 
-import android.annotation.SuppressLint
-import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
-import android.webkit.WebResourceRequest
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import app.aroundtheblock.wallet.core.digistamp.DigistampUris
+import app.aroundtheblock.wallet.ui.util.openExternalUrl
 
 /**
  * The digistamp marketplace, housed in the wallet.
@@ -41,13 +37,16 @@ import app.aroundtheblock.wallet.core.digistamp.DigistampUris
  *
  * ## Origin lock
  *
- * Only `https://assets.digistamp.co` renders here ([DigistampUris.isInAppOrigin]). Everything
- * else — other hosts, plaintext HTTP, `javascript:`, `data:`, `file:` — is handed to the system
- * browser, where the user gets a URL bar and the browser's sandbox. A link that leaves the site
- * leaves the app.
+ * Only `https://assets.digistamp.co` renders here ([DigistampUris.isInAppOrigin]), and
+ * [DigistampNavigationPolicy] decides every navigation: a frame inside the page decides nothing; an
+ * HTTPS link elsewhere opens in the browser, through openExternalUrl, where the user gets a URL bar
+ * and the browser's sandbox; anything else is dropped. A main-frame page outside the origin that
+ * commits anyway — a form POST, which the platform never asks the client about — is stopped and
+ * the view goes home ([DigistampWebViewClient]).
  *
- * JavaScript is enabled because the site is a Next.js app and will not render without it. That
- * is safe precisely because of the two rules above: script can run, but it cannot reach out.
+ * JavaScript is enabled because the site is a Next.js app and will not render without it; every
+ * other capability is off (DigistampWebViewHost.applyLeastSettings). That is safe precisely
+ * because of the two rules above: script can run, but it cannot reach out.
  */
 @Composable
 fun DigistampScreen(
@@ -121,11 +120,12 @@ private fun DigistampWebContent(
     var loading by remember { mutableStateOf(!DigistampWebViewHost.exists()) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
-    // Refreshed every composition; the retained client reads it rather than capturing it.
+    // Refreshed every composition; the retained client reads them rather than capturing them.
     DigistampWebViewHost.onWalletAction = { uri ->
         DigistampWebViewHost.reloadOnReturn = true
         onWalletAction(uri)
     }
+    DigistampWebViewHost.openInBrowser = { url -> openExternalUrl(context, url) }
 
     // Returning from a wallet action: ask the site what it thinks now rather than trusting a poll
     // to have survived the detach. Digi-ID is completed by the SERVER, so a reload is how the
@@ -167,43 +167,14 @@ private fun DigistampWebContent(
                 // the page's poll is what collects the session cookie — disposing this view
                 // mid-navigation killed it. See DigistampWebViewHost.
                 DigistampWebViewHost.obtain(ctx) { view ->
-                    view.webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView,
-                            request: WebResourceRequest,
-                        ): Boolean {
-                            val url = request.url.toString()
-
-                            // A wallet action: the page asked for a native screen. It supplies a
-                            // destination, never an instruction — whatever opens must build its
-                            // own confirmation from data the wallet fetched and verified itself.
-                            if (request.url.scheme == "digibyte" || request.url.scheme == "digiid") {
-                                DigistampWebViewHost.onWalletAction(request.url)
-                                return true
-                            }
-
-                            if (DigistampUris.isInAppOrigin(url)) return false  // let it load here
-
-                            // Anything else belongs to the browser, with its URL bar and sandbox.
-                            runCatching {
-                                ctx.startActivity(
-                                    Intent(Intent.ACTION_VIEW, request.url)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            }.onFailure {
-                                android.util.Log.w("Digistamp", "no handler for $url", it)
-                            }
-                            return true
-                        }
-
-                        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                            loading = true
-                        }
-
-                        override fun onPageFinished(view: WebView, url: String) {
-                            loading = false
-                        }
-                    }
+                    view.webViewClient = DigistampWebViewClient(
+                        // A wallet action: the page asked for a native screen. It supplies a
+                        // destination, never an instruction — whatever opens must build its own
+                        // confirmation from data the wallet fetched and verified itself.
+                        walletScreen = { uri -> DigistampWebViewHost.onWalletAction(uri) },
+                        openInBrowser = { url -> DigistampWebViewHost.openInBrowser(url) },
+                        onLoading = { loading = it },
+                    )
 
                     view.loadUrl(startUrl)
                 }.also { webView = it }

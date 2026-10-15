@@ -2271,7 +2271,7 @@ class SyncService : Service() {
         // now provably clear of the corrupt-blob crash vector — loadSavedBlocks
         // (and loadSavedPeers) just ran without crashing and the C core has
         // consumed them. Clearing here — rather than right after
-        // recoverWalletFromBytes in restoreFromDisk() — is deliberate: that's
+        // restoreWalletFromBytes in restoreFromDisk() — is deliberate: that's
         // still BEFORE the saved_blocks bytes are ever handed to the native
         // block deserializer, so it would miss the actual crash this bracket
         // exists to catch. A no-op if no restore is pending this launch (e.g.
@@ -2885,7 +2885,7 @@ class SyncService : Service() {
                     assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L,
                         isOutgoingUnconfirmed = !isReceive, persistAfterDetect = true)
                 }.onFailure {
-                    android.util.Log.w("SyncService", "native asset detect failed for $txHash", it)
+                    android.util.Log.w("SyncService", "native asset detect failed for ${txHash.take(12)}", it)
                 }.getOrNull()
 
                 val entity = TransactionEntity(
@@ -3031,7 +3031,7 @@ class SyncService : Service() {
             // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
             // and ensures all Room writes are serialised through the supervisor job.
             if (assetId.isBlank()) {
-                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=$txHash, skipping insert")
+                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=${txHash.take(12)}, skipping insert")
                 return
             }
             serviceScope.launch {
@@ -3571,6 +3571,34 @@ class SyncService : Service() {
                         "(retry=${outcome.shouldRetry}, terminal=${outcome.isTerminal})"
                 )
             }
+            // A plain DGB send the network refused for good can never be accepted: remove it, which
+            // gives its coins back to the wallet, and forget its record. It used to be logged and
+            // kept — coins spent, row "pending" — for good. No single peer's message decides that:
+            // the terminal verdict can be one peer's rejection, so removal also needs the core's
+            // corroboration (peers in two network groups rejected it, none relayed, announced or asked
+            // for it), and that answer must have held: seen at two sweeps ten minutes apart, on one peer
+            // manager, and at every sweep in between (refusalHold), since one reading can predate the
+            // answers of honest peers and a rebuilt manager starts with no relay evidence;
+            // otherwise it is kept and its coins stay locked. An asset or DigiDollar send is left to
+            // its own handling: the asset layer's CONFLICTED accounting reads an abandoned attempt
+            // from the wallet, so this never removes one, and never calls into the asset layer.
+            val action = outcome?.actionFor(
+                plainDgb = isPlainDgbSend(txid),
+                refusedByPeers = refusalHold.observe(txid) { isRefusedByPeers(txid) },
+            ) ?: app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.KEEP
+            if (action == app.aroundtheblock.wallet.core.sync.PublishOutcome.Action.REMOVE_AND_UNLOCK) {
+                if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
+                    store.remove(txid)
+                    refusalHold.forget(txid)
+                    dropped = true
+                    android.util.Log.i("SyncService",
+                        "stranded-send sweep: removed refused send ${txid.take(12)}; its coins are spendable again")
+                } else {
+                    android.util.Log.w("SyncService",
+                        "stranded-send sweep: refused send ${txid.take(12)} is still held by the wallet; kept")
+                }
+                continue
+            }
             // Definitive double-spend: the C core marks a tx invalid when its
             // inputs were already spent by another (confirmed) tx. Such a tx can
             // never confirm — drop the phantom and forget the record rather than
@@ -3597,7 +3625,7 @@ class SyncService : Service() {
                         }
                     }
                     android.util.Log.i("SyncService",
-                        "Dandelion recovery: dropped conflicted (double-spend) send $txid")
+                        "Dandelion recovery: dropped conflicted (double-spend) send ${txid.take(12)}")
                 }
                 continue
             }
@@ -3616,7 +3644,7 @@ class SyncService : Service() {
             val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
             if (raw == null) {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: $txid not in wallet tx set — can't re-publish")
+                    "Dandelion recovery: ${txid.take(12)} not in wallet tx set — can't re-publish")
                 continue
             }
             // One publish per sweep. The retry is the next sweep, and the store's attempt count
@@ -3625,15 +3653,15 @@ class SyncService : Service() {
             // publish still awaits its verdict.
             val attempt = store.sweepAttempts(txid).count
             runCatching { NativeBridge.publishTransaction(raw) }
-                .onFailure { android.util.Log.w("SyncService", "re-publish $txid threw", it) }
+                .onFailure { android.util.Log.w("SyncService", "re-publish ${txid.take(12)} threw", it) }
             delay(15_000L)
             val relays = runCatching { NativeBridge.getRelayCount(txid) }.getOrDefault(0)
             if (relays > 0) {
                 android.util.Log.i("SyncService",
-                    "Dandelion recovery: $txid re-published & propagated (relays=$relays, attempt $attempt)")
+                    "Dandelion recovery: ${txid.take(12)} re-published & propagated (relays=$relays, attempt $attempt)")
             } else {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: $txid still un-relayed after re-publish (attempt $attempt)")
+                    "Dandelion recovery: ${txid.take(12)} still un-relayed after re-publish (attempt $attempt)")
             }
         }
         // Persist the wallet tx set so any drops survive a restart.
@@ -3646,6 +3674,43 @@ class SyncService : Service() {
             }
         }
     }
+
+    /**
+     * A recorded send that moves only DGB: the wallet holds it, it carries no DigiAsset transfer
+     * instructions, and it is no DigiDollar transaction. Anything else, or anything that cannot be
+     * read, is not one — and so is never removed by the stranded-send sweep.
+     */
+    private fun isPlainDgbSend(txid: String): Boolean {
+        val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull() ?: return false
+        val asset = runCatching { NativeBridge.isAssetTransaction(raw) }.getOrDefault(true)
+        val digiDollar = runCatching { NativeBridge.digiDollarTxType(txid) }.getOrDefault(-1)
+        return !asset && digiDollar == 0
+    }
+
+    /**
+     * Whether the network has refused [txid] on evidence no single peer can supply — the core's
+     * answer: peers in at least two network groups rejected it and none has relayed, announced or
+     * asked for it while the core has run. Anything that cannot be read is not a refusal. The sweep
+     * reads it only through [refusalHold].
+     */
+    private fun isRefusedByPeers(txid: String): Boolean {
+        return runCatching { NativeBridge.isRefusedByNetwork(txid) }.getOrDefault(false)
+    }
+
+    /**
+     * When, and on which peer manager, the core first called each recorded send refused, in this
+     * session. The sweep removes a send only once that answer has held at two observations at least ten
+     * minutes apart, on one peer manager, and at every observation in between
+     * ([app.aroundtheblock.wallet.core.sync.RefusalHold]): one reading can come before every connected
+     * peer has answered, and a manager rebuilt here or anywhere else starts with no relay evidence. The
+     * manager is named by the bridge's generation, which every build bumps; an unreadable one is
+     * unknown and never completes a hold. Awake time, so a change of the device's clock cannot pass the
+     * hold and time asleep does not count; never persisted.
+     */
+    private val refusalHold = app.aroundtheblock.wallet.core.sync.RefusalHold(
+        clock = android.os.SystemClock::uptimeMillis,
+        manager = { runCatching { NativeBridge.peerManagerGeneration() }.getOrNull() },
+    )
 
     /** Most recent serialized block window from [NativeCallback.onSaveBlocks],
      *  paired with the [SavedBlockStore] epoch captured AT RECEIPT — mirrors
@@ -3830,7 +3895,7 @@ class SyncService : Service() {
         val indeterminate = pct == 0 && peerCount == 0
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("DigiByte Mobile")
+            .setContentTitle(getString(app.aroundtheblock.wallet.R.string.app_name))
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setProgress(100, pct, indeterminate)

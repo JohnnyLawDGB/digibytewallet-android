@@ -3,12 +3,12 @@
   German (de).
 
   STATUS: machine-assisted, NOT yet reviewed by a native speaker. The strings marked WARNING in
-  values/strings_wallet.xml carry real financial consequence — "können nicht wiederhergestellt
-  werden", "kann Ihre DGB nehmen" — and must be checked by someone fluent before this ships to
+  values/strings_wallet.xml carry real financial consequence - "können nicht wiederhergestellt
+  werden", "kann Ihre DGB nehmen" - and must be checked by someone fluent before this ships to
   users. Everything else is ordinary UI text and is safe to iterate on.
 
   REGISTER: formal "Sie" throughout, matching how German-language financial software addresses
-  its users. If the community prefers "du", it is a mechanical change — but it must be changed
+  its users. If the community prefers "du", it is a mechanical change - but it must be changed
   EVERYWHERE at once. A file that mixes the two reads as careless, and carelessness is not what
   you want a user feeling on the screen that shows them their recovery phrase.
 
@@ -25,14 +25,14 @@
     <string name="onb_words_count">%1$d Wörter</string>
     <string name="onb_create">Neue Wallet erstellen</string>
     <string name="onb_recover">Bestehende Wallet wiederherstellen</string>
-    <string name="onb_footer">DigiByte — Sicher, schnell, dezentral</string>
-    <string name="app_name_display">DigiByte Mobile</string>
+    <string name="onb_footer">Unabhängige Wallet für das DigiByte-Netzwerk (DGB)</string>
+    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
 
-    <string name="seed_screenshot_blocked">Screenshots sind blockiert. Schreiben Sie diese Wörter auf — sie können nicht wiederhergestellt werden.</string>
+    <string name="seed_screenshot_blocked">Screenshots sind blockiert. Schreiben Sie diese Wörter auf: sie können nicht wiederhergestellt werden.</string>
     <string name="seed_title">Ihre Wiederherstellungsphrase</string>
     <string name="seed_word_count">Wiederherstellungsphrase mit %1$d Wörtern</string>
     <string name="seed_never_share">Teilen Sie Ihre Wiederherstellungsphrase niemals</string>
-    <string name="seed_tip_paper">Schreiben Sie sie auf Papier — nicht digital</string>
+    <string name="seed_tip_paper">Schreiben Sie sie auf Papier: nicht digital</string>
     <string name="seed_tip_safe">Bewahren Sie sie an einem sicheren, privaten Ort auf</string>
     <string name="seed_tip_anyone">Wer diese Wörter kennt, kann Ihre DGB nehmen</string>
     <string name="seed_written_down">Ich habe sie aufgeschrieben</string>
@@ -50,7 +50,7 @@
 
     <string name="unlock_title">PIN eingeben</string>
     <string name="unlock_subtitle">Geben Sie Ihre 6-stellige PIN ein, um zu entsperren</string>
-    <string name="unlock_locked">Gesperrt — erneut versuchen in %1$s</string>
+    <string name="unlock_locked">Gesperrt: erneut versuchen in %1$s</string>
     <string name="unlock_unlocking">Wird entsperrt…</string>
     <string name="unlock_biometrics_cd">Mit Biometrie entsperren</string>
 
@@ -76,11 +76,11 @@
     <string name="pin_err_wallet">Wallet konnte nicht erstellt werden. Bitte versuchen Sie es erneut.</string>
     <string name="unlock_err_failed">Entsperren fehlgeschlagen. Bitte versuchen Sie es erneut.</string>
     <string name="unlock_device_lock_removed">Die Bildschirmsperre Ihres Geräts wurde entfernt, daher ist der geschützte Schlüssel der Wallet verloren. Stellen Sie die Wallet mit Ihrer Wiederherstellungsphrase wieder her.</string>
-    <string name="unlock_wiping">Zu viele Fehlversuche — Wallet wird gelöscht</string>
+    <string name="unlock_wiping">Zu viele Fehlversuche: Wallet wird gelöscht</string>
     <string name="unlock_attempts_left">Falsche PIN. Verbleibende Versuche: %1$d</string>
     <string name="battery_title">Synchronisierung im Hintergrund fortsetzen</string>
     <string name="battery_body">Android kann diese Wallet in den Ruhezustand versetzen, wenn der Bildschirm aus ist. Dabei bricht die Verbindung zum DigiByte-Netzwerk ab und die Wallet bleibt möglicherweise bei 0 Peers stehen, bis Sie sie erneut öffnen.\n\nErlauben Sie die uneingeschränkte Ausführung, damit die Synchronisierung weiterläuft.</string>
-    <string name="battery_body_samsung">\n\nÖffnen Sie auf Samsung-Geräten zusätzlich Gerätewartung → Akku → \"Nie deaktivierte Apps\" und fügen Sie DigiByte Mobile hinzu.</string>
+    <string name="battery_body_samsung">\n\nÖffnen Sie auf Samsung-Geräten zusätzlich Gerätewartung → Akku → \"Nie deaktivierte Apps\" und fügen Sie ATB Wallet hinzu.</string>
     <string name="battery_open_settings">Einstellungen öffnen</string>
     <string name="tor_title">Neue Datenschutzfunktion</string>
     <string name="tor_body">Tor-Routing ist jetzt verfügbar. Wenn es aktiviert ist, verbindet sich Ihre Wallet über Tor mit dem DigiByte-Netzwerk und verbirgt Ihre IP-Adresse vor Peers.\n\nTor-Routing aktivieren?</string>
@@ -108,13 +108,13 @@
     <string name="wallet_price_via">über %1$s</string>
     <string name="wallet_testnet_active">Testnet aktiv</string>
     <string name="wallet_tor_active">Tor aktiv</string>
-    <string name="wallet_tor_hidden">Tor — Ihre IP bleibt verborgen</string>
+    <string name="wallet_tor_hidden">Tor: Ihre IP bleibt verborgen</string>
     <string name="wallet_disconnected_peers">Getrennt · %1$d Peers</string>
-    <string name="wallet_history_gap">Verlaufslücke — einige Blöcke wurden nicht verifiziert</string>
+    <string name="wallet_history_gap">Verlaufslücke: einige Blöcke wurden nicht verifiziert</string>
     <string name="wallet_scan_missing">Nach fehlenden Transaktionen suchen</string>
     <string name="wallet_balance_refresh_failed">Aktualisierung des Guthabens fehlgeschlagen</string>
     <string name="wallet_reconcile_unreachable">Der Abgleichsknoten war nach diesem Update nicht erreichbar. Ihr angezeigtes Guthaben ist möglicherweise nicht aktuell.</string>
-    <string name="wallet_tor_unavailable">Tor nicht verfügbar — direkte Verbindungen werden verwendet</string>
+    <string name="wallet_tor_unavailable">Tor nicht verfügbar: direkte Verbindungen werden verwendet</string>
     <string name="wallet_tor_timeout">Tor hat das Netzwerk nicht rechtzeitig erreicht, daher verbindet sich die Wallet in dieser Sitzung direkt mit Peers. Ihre IP ist für Peers sichtbar, bis Sie die App neu starten.</string>
     <string name="wallet_node_offline">Ihr Knoten ist offline</string>
     <string name="wallet_node_offline_body">Der gekoppelte Knoten ist nicht erreichbar oder liefert derzeit keine Compact Filters. Prüfen Sie, ob er läuft und erreichbar ist und ob peerblockfilters=1 gesetzt ist.</string>
@@ -132,11 +132,15 @@
     <string name="receive_request_amount">Bestimmten Betrag anfordern (optional)</string>
     <string name="receive_amount_label">Betrag</string>
     <string name="receive_qr_encodes">QR enthält: %1$s</string>
-    <string name="receive_dd_note">DigiDollar wird als USD-denominierte Token empfangen. Teilen Sie diese DigiDollar-Adresse — der QR-Code enthält nur die Adresse (keine Betragsanforderung).</string>
+    <string name="receive_dd_note">DigiDollar wird als USD-denominierte Token empfangen. Teilen Sie diese DigiDollar-Adresse: der QR-Code enthält nur die Adresse (keine Betragsanforderung).</string>
     <string name="txd_title">Transaktionsdetails</string>
     <string name="txd_not_found">Transaktion nicht gefunden</string>
     <string name="txd_sent">Gesendet</string>
     <string name="txd_received">Empfangen</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Geprägt</string>
+    <string name="tx_dd_self_transfer">An Sie selbst</string>
+    <string name="tx_dd_redeemed">Eingelöst</string>
     <string name="txd_transaction_id">Transaktions-ID</string>
     <string name="txd_block_height">Blockhöhe</string>
     <string name="txd_pending">Ausstehend</string>
@@ -150,12 +154,12 @@
     <string name="txd_view_explorer">Im Explorer ansehen</string>
     <string name="txd_back_to_wallet">Zurück zur Wallet</string>
 
-    <string name="wallet_sync_gap_headline">Scan abgeschlossen — ein Teil Ihrer Historie ist unverifiziert</string>
+    <string name="wallet_sync_gap_headline">Scan abgeschlossen: ein Teil Ihrer Historie ist unverifiziert</string>
     <string name="wallet_sync_connecting">Verbindung zum DigiByte-Netzwerk</string>
     <string name="wallet_sync_scanning">Suche nach Ihren Transaktionen</string>
     <string name="wallet_sync_uptodate">Aktuell</string>
     <string name="wallet_sync_failed">Synchronisierung fehlgeschlagen</string>
-    <string name="wallet_sync_finishing">Abschluss — aktuelle Blöcke werden verifiziert</string>
+    <string name="wallet_sync_finishing">Abschluss: aktuelle Blöcke werden verifiziert</string>
     <string name="wallet_blocks_count">%1$s Blöcke</string>
     <string name="wallet_sync_progress_eta">%1$d%% abgeschlossen · %2$s · noch %3$s</string>
     <string name="wallet_sync_progress_no_eta">%1$d%% abgeschlossen · noch %2$s · wird geschätzt…</string>
@@ -173,7 +177,7 @@
     <string name="wallet_status_connecting">Verbindung wird hergestellt…</string>
     <string name="wallet_gap_range_between">Blöcke %1$s–%2$s</string>
     <string name="wallet_gap_range_below">Blöcke unter %1$s</string>
-    <string name="wallet_gap_body">Ein Teil Ihrer Historie (%1$s) konnte von der Filter-Fleet nicht verifiziert werden — tippen, um nach fehlenden Transaktionen zu suchen.</string>
+    <string name="wallet_gap_body">Ein Teil Ihrer Historie (%1$s) konnte von der Filter-Fleet nicht verifiziert werden: tippen, um nach fehlenden Transaktionen zu suchen.</string>
     <string name="receive_address_unavailable">Adresse nicht verfügbar</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -221,11 +225,11 @@
     <string name="send_network_fee_row">Netzwerkgebühr</string>
     <string name="send_fee_default">Standard</string>
     <string name="send_fee_custom">Benutzerdefiniert</string>
-    <string name="send_fee_below_min">⚠ Unter der Mindest-Relay-Gebühr — die Transaktion wird möglicherweise nicht übertragen</string>
+    <string name="send_fee_below_min">⚠ Unter der Mindest-Relay-Gebühr: die Transaktion wird möglicherweise nicht übertragen</string>
     <string name="send_fee_required">Gebühr erforderlich</string>
     <string name="send_confirms_15s">Bestätigung in ~15 Sekunden</string>
-    <string name="send_no_peers">Keine DigiByte-Peers verbunden — derzeit keine Übertragung möglich. Verbindung wird wiederhergestellt…</string>
-    <string name="send_wait_for_sync">Warten Sie mit dem Senden, bis die Synchronisierung abgeschlossen ist — Ihr vollständiges Guthaben wird noch wiederhergestellt.</string>
+    <string name="send_no_peers">Keine DigiByte-Peers verbunden: derzeit keine Übertragung möglich. Verbindung wird wiederhergestellt…</string>
+    <string name="send_wait_for_sync">Warten Sie mit dem Senden, bis die Synchronisierung abgeschlossen ist: Ihr vollständiges Guthaben wird noch wiederhergestellt.</string>
     <string name="send_broadcasting">Wird übertragen…</string>
     <string name="send_review">Prüfen &amp; senden</string>
     <string name="send_dialog_title">Transaktion bestätigen</string>
@@ -233,7 +237,7 @@
     <string name="send_to">An</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Diese DigiDollar-Sendung konnte nicht vorbereitet werden. Prüfen Sie, ob Sie genug DGB für die Netzwerkgebühr haben.</string>
     <string name="send_verify_warning">Prüfen Sie die vollständige Adresse oben sorgfältig.\nTransaktionen sind unwiderruflich.</string>
     <string name="send_send">Senden</string>
     <string name="send_success">Erfolg</string>
@@ -245,7 +249,7 @@
 
     <string name="send_hint_dgb">dgb1q… oder D…</string>
     <string name="game_score_submitted">Punktzahl übermittelt!</string>
-    <string name="game_score_failed">Übermittlung der Punktzahl fehlgeschlagen — sind Sie angemeldet?</string>
+    <string name="game_score_failed">Übermittlung der Punktzahl fehlgeschlagen: sind Sie angemeldet?</string>
     <string name="game_close">Spiel schließen</string>
 
     <string name="set_title">Einstellungen</string>
@@ -269,15 +273,15 @@
     <string name="set_recover_other_sub">Coins aus alten/anderen Ableitungspfaden in diese Wallet übertragen</string>
     <string name="set_cat_info">Info</string>
     <string name="set_beta">Beta-Updates</string>
-    <string name="set_beta_on">Ein — Ihnen werden Vorabversionen zum Testen angeboten</string>
-    <string name="set_beta_off">Aus — nur stabile Versionen werden angeboten</string>
+    <string name="set_beta_on">Ein: Ihnen werden Vorabversionen zum Testen angeboten</string>
+    <string name="set_beta_off">Aus: nur stabile Versionen werden angeboten</string>
     <string name="set_about">Über</string>
     <string name="set_about_sub">Version, Lizenzen, Open Source</string>
     <string name="set_report_bug">Fehler melden / Feedback</string>
-    <string name="set_report_bug_sub">Senden Sie ein Problem oder eine Idee — Geräte- &amp; Versionsinfos werden für Sie ausgefüllt</string>
+    <string name="set_report_bug_sub">Senden Sie ein Problem oder eine Idee: Geräte- &amp; Versionsinfos werden für Sie ausgefüllt</string>
     <string name="set_cat_advanced">Erweitert / Entwickler</string>
-    <string name="set_net_testnet">Testnet — Testkette, gleiche Wiederherstellungsphrase</string>
-    <string name="set_net_mainnet">Mainnet — Produktivkette</string>
+    <string name="set_net_testnet">Testnet: Testkette, gleiche Wiederherstellungsphrase</string>
+    <string name="set_net_mainnet">Mainnet: Produktivkette</string>
     <string name="set_switch_testnet">Zu Testnet wechseln?</string>
     <string name="set_switch_mainnet">Zu Mainnet wechseln?</string>
     <string name="set_switch_testnet_body">Die App startet neu und synchronisiert die Testkette. Ihre Wiederherstellungsphrase bleibt unverändert.</string>
@@ -285,7 +289,7 @@
     <string name="set_restart">Neu starten</string>
 
     <string name="lang_restart_note">Dies startet den Wallet-Bildschirm neu. Ihre Coins, Ihre Phrase und Ihre Einstellungen bleiben unverändert.</string>
-    <string name="lang_unreviewed_note">Die Übersetzungen sind neu und wurden noch nicht von Muttersprachlern geprüft. Wenn etwas falsch klingt — insbesondere eine Warnung zu Ihrer Wiederherstellungsphrase oder Ihren Coins — teilen Sie es uns bitte über Einstellungen → Fehler melden mit.</string>
+    <string name="lang_unreviewed_note">Die Übersetzungen sind neu und wurden noch nicht von Muttersprachlern geprüft. Wenn etwas falsch klingt (insbesondere eine Warnung zu Ihrer Wiederherstellungsphrase oder Ihren Coins), teilen Sie es uns bitte über Einstellungen → Fehler melden mit.</string>
     <string name="lang_selected">Ausgewählt</string>
 
     <string name="as_send_title">Asset senden</string>
@@ -350,7 +354,7 @@
     <string name="rf_may_take">Das kann einen Moment dauern</string>
     <string name="rf_couldnt_finish">Prüfung konnte nicht abgeschlossen werden</string>
     <string name="rf_none_found">Kein wiederherstellbares Guthaben gefunden</string>
-    <string name="rf_partial_body">Einige Ableitungspfade konnten nicht geprüft werden, daher ist dies keine endgültige Antwort — es kann Guthaben geben, das wir nicht gesehen haben. Versuchen Sie es gleich erneut.\n\nNicht geprüft: %1$s</string>
+    <string name="rf_partial_body">Einige Ableitungspfade konnten nicht geprüft werden, daher ist dies keine endgültige Antwort: es kann Guthaben geben, das wir nicht gesehen haben. Versuchen Sie es gleich erneut.\n\nNicht geprüft: %1$s</string>
     <string name="rf_no_coins">Dieser Seed hat auf anderen Ableitungspfaden keine Coins.</string>
     <string name="rf_recoverable_balance">Wiederherstellbares Guthaben</string>
     <string name="rf_found_on">GEFUNDEN AUF</string>
@@ -359,15 +363,15 @@
     <string name="rf_native_addr_note">Guthaben erscheint an Ihrer nativen Empfangsadresse</string>
     <string name="rf_advanced_send">Erweitert ▸ An eine andere Adresse senden</string>
     <string name="rf_address_hint">DigiByte-Adresse (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">Diese Adresse ist NICHT in Ihrer Wallet — Sweeps sind unwiderruflich</string>
+    <string name="rf_not_in_wallet">Diese Adresse ist NICHT in Ihrer Wallet: Sweeps sind unwiderruflich</string>
     <string name="rf_sweep">Guthaben übertragen</string>
     <string name="rf_sweep_submitted">Sweep eingereicht</string>
     <string name="rf_will_appear">Wiederhergestelltes Guthaben erscheint nach der Bestätigung.</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Warten auf Netzwerkbestätigung</string>
-    <string name="rf_held_assets">%1$d zurückgelassen — DigiAssets</string>
-    <string name="rf_held_assets_body">Diese Coins tragen DigiAssets, und ihr Transfer ist nicht gelungen — sie blieben daher in der alten Wallet, statt als gewöhnliche DGB verschoben und dabei zerstört zu werden. Führen Sie die Wiederherstellung erneut aus.</string>
-    <string name="rf_held_unknown">%1$d zurückgelassen — konnte nicht geprüft werden</string>
+    <string name="rf_held_assets">%1$d zurückgelassen: DigiAssets</string>
+    <string name="rf_held_assets_body">Diese Coins tragen DigiAssets, und ihr Transfer ist nicht gelungen: sie blieben daher in der alten Wallet, statt als gewöhnliche DGB verschoben und dabei zerstört zu werden. Führen Sie die Wiederherstellung erneut aus.</string>
+    <string name="rf_held_unknown">%1$d zurückgelassen: konnte nicht geprüft werden</string>
     <string name="rf_held_unknown_body">Wir konnten die Transaktionen, aus denen diese stammen, nicht lesen und daher nicht feststellen, ob sie DigiAssets tragen. Sie wurden in Ruhe gelassen statt riskiert. Ein späterer Versuch kann das klären.</string>
     <string name="rf_and_more">…und %1$d weitere</string>
     <string name="rf_something_wrong">Etwas ist schiefgelaufen</string>
@@ -375,12 +379,12 @@
     <string name="rf_err_timeout">Zeitüberschreitung der Anfrage. Versuchen Sie es bei besserer Verbindung erneut.</string>
     <string name="rf_err_seed">Der Wallet-Seed konnte nicht geladen werden. Entsperren Sie Ihre Wallet und versuchen Sie es erneut.</string>
     <string name="rf_err_lookup">Der Lookup-Dienst war nicht erreichbar. Versuchen Sie es später erneut.</string>
-    <string name="rf_err_generic">Etwas ist schiefgelaufen — bitte erneut versuchen.</string>
+    <string name="rf_err_generic">Etwas ist schiefgelaufen: bitte erneut versuchen.</string>
     <string name="rf_fail_unknown">Aus unbekanntem Grund fehlgeschlagen.</string>
     <string name="rf_fail_no_utxos">Keine ausgabefähigen Outputs konnten Signaturschlüsseln zugeordnet werden.</string>
     <string name="rf_fail_derive">Für diesen Pfad konnten keine Schlüssel aus dem Seed abgeleitet werden.</string>
     <string name="rf_fail_broadcast">Die Übertragung der Transaktion ist fehlgeschlagen. Versuchen Sie es erneut, wenn Sie mit Peers verbunden sind.</string>
-    <string name="rf_fail_generic">Dieser konnte nicht übertragen werden — bitte erneut versuchen.</string>
+    <string name="rf_fail_generic">Dieser konnte nicht übertragen werden: bitte erneut versuchen.</string>
     <string name="rf_this_wallet">Diese Wallet</string>
     <string name="rf_other_phrase">Phrase einer anderen Wallet</string>
     <string name="rf_other_phrase_body">Geben Sie die Wiederherstellungsphrase einer anderen Wallet ein, um deren Guthaben in diese Wallet zu übertragen. Die Phrase wird einmalig zum Signieren verwendet und niemals gespeichert.</string>
@@ -426,8 +430,8 @@
     <string name="ab_open_source">Open Source</string>
     <string name="ab_source_code">Quellcode</string>
     <string name="ab_licenses">Lizenzen</string>
-    <string name="ab_licenses_sub">MIT-Lizenz — Open Source</string>
-    <string name="ab_community">DigiByte-Community</string>
+    <string name="ab_licenses_sub">MIT-Lizenz: Open Source</string>
+    <string name="ab_community">Infos zum DigiByte-Netzwerk</string>
     <string name="ab_report_bug">Fehler melden</string>
 
     <string name="sec_pin_auth">PIN &amp; Authentifizierung</string>
@@ -438,16 +442,16 @@
     <string name="sec_biometric_no">Auf diesem Gerät nicht verfügbar</string>
     <string name="sec_autolock">Zeitlimit für automatische Sperre</string>
     <string name="sec_wipe_after">Löschen nach %1$d falschen PINs</string>
-    <string name="sec_wipe_after_on">Aktiviert — Wallet wird nach %1$d falschen PINs gelöscht</string>
-    <string name="sec_wipe_after_off">Aus — zusätzlicher Schutz gegen PIN-Brute-Force</string>
-    <string name="sec_wipe_after_body">Wenn aktiviert, löschen %1$d aufeinanderfolgende falsche PIN-Eingaben diese Wallet — Seed, Schlüssel und Verlauf — DAUERHAFT von diesem Gerät.\n\nAuf dem Gerät ist das unwiderruflich. Ihr Guthaben ist nur über Ihre Wiederherstellungsphrase wiederherstellbar.</string>
+    <string name="sec_wipe_after_on">Aktiviert: Wallet wird nach %1$d falschen PINs gelöscht</string>
+    <string name="sec_wipe_after_off">Aus: zusätzlicher Schutz gegen PIN-Brute-Force</string>
+    <string name="sec_wipe_after_body">Wenn aktiviert, löschen %1$d aufeinanderfolgende falsche PIN-Eingaben diese Wallet (Seed, Schlüssel und Verlauf) DAUERHAFT von diesem Gerät.\n\nAuf dem Gerät ist das unwiderruflich. Ihr Guthaben ist nur über Ihre Wiederherstellungsphrase wiederherstellbar.</string>
     <string name="sec_wipe_after_ack">Meine Wiederherstellungsphrase ist gesichert</string>
     <string name="sec_wipe_after_enabled">Löschen nach %1$d aktiviert</string>
     <string name="sec_recovery_phrase">Wiederherstellungsphrase</string>
     <string name="sec_view_phrase">Wiederherstellungsphrase anzeigen</string>
     <string name="sec_view_phrase_sub">Erfordert PIN + biometrische Verifizierung</string>
     <string name="sec_view_phrase_body">Ihre Wiederherstellungsphrase gewährt vollständigen Zugriff auf Ihre Wallet.\n\n• Teilen Sie sie niemals mit jemandem\n• Geben Sie sie niemals auf einer Website ein\n• Bewahren Sie sie offline an einem sicheren Ort auf\n\nZum Fortfahren sind PIN + biometrische Authentifizierung erforderlich.</string>
-    <string name="sec_understand">Ich habe verstanden — fortfahren</string>
+    <string name="sec_understand">Ich habe verstanden: fortfahren</string>
     <string name="sec_danger_zone">Gefahrenbereich</string>
     <string name="sec_wipe_wallet">Wallet löschen</string>
     <string name="sec_wipe_wallet_sub">Alle Wallet-Daten von diesem Gerät entfernen</string>
@@ -485,6 +489,10 @@
     <string name="did_login">Digi-ID-Anmeldung</string>
     <string name="did_auth_title">Digi-ID-Authentifizierung</string>
     <string name="did_auth_subtitle">Authentifizieren, um sich bei %1$s anzumelden</string>
+    <string name="hub_sign_title">Hub-Beitrag signieren</string>
+    <string name="hub_sign_subtitle">Authentifiziere dich, um diesen Beitrag mit deiner Identität zu signieren</string>
+    <string name="hub_tip_auth_title">Hub-Trinkgeld senden</string>
+    <string name="hub_tip_auth_subtitle">Authentifiziere dich, um dieses Trinkgeld von deinem DigiScope-Trinkgeldguthaben zu senden</string>
     <string name="did_requesting">fordert eine Digi-ID-Authentifizierung an</string>
     <string name="did_warning">Warnung</string>
     <string name="did_insecure">Unsichere Verbindung</string>
@@ -506,7 +514,7 @@
     <string name="ni_state_synced">Synchronisiert</string>
     <string name="ni_state_error">Fehler</string>
     <string name="ni_caught_up">Auf dem neuesten Stand</string>
-    <string name="ni_tor_disabled">Deaktiviert — direkte Verbindung</string>
+    <string name="ni_tor_disabled">Deaktiviert: direkte Verbindung</string>
     <string name="ni_tor_starting">Wird gestartet…</string>
     <string name="ni_tor_connecting">Verbindung zum Tor-Netzwerk…</string>
     <string name="ni_tor_connected">Verbunden über Port %1$d</string>
@@ -514,7 +522,7 @@
     <string name="ni_node_serving">✓ Liefert Compact Filters</string>
     <string name="ni_node_connecting">Verbindung wird hergestellt…</string>
     <string name="ni_node_unreachable">⚠ Nicht erreichbar / liefert keine Filter</string>
-    <string name="sec_locked_countdown">Gesperrt — erneut versuchen in %1$s</string>
+    <string name="sec_locked_countdown">Gesperrt: erneut versuchen in %1$s</string>
     <string name="sec_autolock_1m">1 Minute</string>
     <string name="sec_autolock_5m">5 Minuten</string>
     <string name="sec_autolock_15m">15 Minuten</string>
@@ -525,38 +533,41 @@
     <string name="sec_biometric_required">Biometrische Authentifizierung erforderlich</string>
     <string name="did_logged_in">Sie sind jetzt bei %1$s angemeldet</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">Hierarchisch deterministische Wallet, erstellt aus einer Seed-Phrase. Kann aus einem einzigen Backup viele Adressen erzeugen — wie unbegrenzt viele Kontonummern aus einem Hauptschlüssel.</string>
+    <string name="ab_type_desc">Hierarchisch deterministische Wallet, erstellt aus einer Seed-Phrase. Kann aus einem einzigen Backup viele Adressen erzeugen: wie unbegrenzt viele Kontonummern aus einem Hauptschlüssel.</string>
     <string name="ab_path_desc">Der Ableitungspfad, mit dem Ihre Adressen erzeugt werden. 84 = BIP84-Standard, 20 = DigiByte-Coin-Typ (SLIP44), 0 = erstes Konto. So kann jede BIP84-kompatible Wallet Ihre Adressen aus derselben Seed-Phrase wiederherstellen. Kompatibel mit Ian Colemans BIP39-Tool.</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">Verwendet moderne SegWit-Adressen, die mit dgb1 beginnen. Diese sind effizienter und haben niedrigere Gebühren als ältere Legacy-Adressen, die mit D beginnen.</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">Mainnet ist das echte DigiByte-Netzwerk, in dem DGB tatsächlichen Wert hat. Testnet dient Entwicklern zum Testen ohne echtes Geld.</string>
     <string name="ab_security_value">Selbstverwahrung</string>
-    <string name="ab_security_desc">Ihre Schlüssel verlassen dieses Gerät nie. Kein Unternehmen und kein Server hält Ihr Guthaben — nur Sie kontrollieren Ihre Wallet. Wenn Sie Ihre Seed-Phrase verlieren, kann sie niemand für Sie wiederherstellen.</string>
+    <string name="ab_security_desc">Ihre Schlüssel verlassen dieses Gerät nie. Kein Unternehmen und kein Server hält Ihr Guthaben: nur Sie kontrollieren Ihre Wallet. Wenn Sie Ihre Seed-Phrase verlieren, kann sie niemand für Sie wiederherstellen.</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">Simplified Payment Verification — synchronisiert direkt mit dem DigiByte-P2P-Netzwerk, ohne die gesamte Blockchain herunterzuladen. Nutzt BIP157/158 Compact Block Filters: Ihre Wallet lädt Filter herunter und prüft sie auf dem Gerät, sodass Ihre Adressen Ihr Telefon nie verlassen.</string>
+    <string name="ab_sync_desc">Simplified Payment Verification: synchronisiert direkt mit dem DigiByte-P2P-Netzwerk, ohne die gesamte Blockchain herunterzuladen. Nutzt BIP157/158 Compact Block Filters: Ihre Wallet lädt Filter herunter und prüft sie auf dem Gerät, sodass Ihre Adressen Ihr Telefon nie verlassen.</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Diese Software wird unter der MIT-Lizenz bereitgestellt.</string>
     <string name="ab_tagline">DigiByte ist eine dezentrale Blockchain und digitale Währung.</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Unabhängige Wallet von Around The Block LLC; nicht verbunden mit oder unterstützt von der DigiByte Foundation, der DigiByte Alliance oder DigiByte-Core.</string>
+    <string name="ab_website">Website von Around The Block</string>
 
     <string name="tx_conf_short">%1$d Best.</string>
     <string name="tx_confirmed">Bestätigt</string>
 
     <string name="cur_title">Anzeigewährung</string>
-    <string name="cur_note">Ihr DigiByte-Guthaben ist immer das echte — dies ändert nur, womit es verglichen wird.</string>
+    <string name="cur_note">Ihr DigiByte-Guthaben ist immer das echte: dies ändert nur, womit es verglichen wird.</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s: %2$s</string>
 
-    <string name="pass_advanced">Erweitert — Passphrase hinzufügen</string>
+    <string name="pass_advanced">Erweitert: Passphrase hinzufügen</string>
     <string name="pass_optional">Optional</string>
-    <string name="pass_what">Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl. Mit ihr reicht Ihre Wiederherstellungsphrase allein nicht mehr aus, um diese Wallet zu öffnen — wer die notierten Wörter findet, kann Ihre Coins nicht ausgeben.</string>
-    <string name="pass_warn">Notieren Sie die Passphrase, bewahren Sie sie aber GETRENNT von Ihrer Wiederherstellungsphrase auf — am selben Ort sind beide wieder ein einziges Geheimnis, und die Passphrase schützt nichts mehr. Wenn Sie sie verlieren, stellen diese Wörter allein Ihre Wallet NICHT wieder her, und niemand kann sie für Sie wiederherstellen.</string>
+    <string name="pass_what">Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl. Mit ihr reicht Ihre Wiederherstellungsphrase allein nicht mehr aus, um diese Wallet zu öffnen: wer die notierten Wörter findet, kann Ihre Coins nicht ausgeben.</string>
+    <string name="pass_warn">Notieren Sie die Passphrase, bewahren Sie sie aber GETRENNT von Ihrer Wiederherstellungsphrase auf: am selben Ort sind beide wieder ein einziges Geheimnis, und die Passphrase schützt nichts mehr. Wenn Sie sie verlieren, stellen diese Wörter allein Ihre Wallet NICHT wieder her, und niemand kann sie für Sie wiederherstellen.</string>
     <string name="pass_scope">Dies schützt Ihr notiertes Backup. Auf diesem Telefon bleibt Ihre PIN das, was die Wallet sperrt.</string>
     <string name="pass_enter">Passphrase</string>
     <string name="pass_confirm">Passphrase bestätigen</string>
     <string name="pass_mismatch">Passphrasen stimmen nicht überein</string>
-    <string name="pass_too_long">Zu lang — maximal %1$d Zeichen</string>
+    <string name="pass_too_long">Zu lang: maximal %1$d Zeichen</string>
     <string name="pass_set">Passphrase gesetzt</string>
     <string name="pass_none">Keine Passphrase</string>
     <string name="pass_restore_label">Passphrase (leer lassen, wenn Sie keine verwendet haben)</string>
@@ -570,9 +581,9 @@
     <string name="rf_move_assets_body">Verwendet die oben zurückbehaltenen DGB, um die Assets an diese Wallet zu senden. Asset-Übertragungen sind unwiderruflich.</string>
     <string name="rf_moving_assets">Assets werden bewegt…</string>
     <string name="rf_move_result">%1$d von %2$d Assets bewegt</string>
-    <string name="rf_move_failed">%1$s — nicht bewegt: %2$s</string>
+    <string name="rf_move_failed">%1$s, nicht bewegt: %2$s</string>
     <string name="pass_screen_title">Passphrase hinzufügen?</string>
-    <string name="pass_screen_subtitle">Optional — die meisten sollten dies überspringen. Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl, ohne den Ihre Wiederherstellungsphrase diese Wallet nicht mehr öffnen kann.</string>
+    <string name="pass_screen_subtitle">Optional: die meisten sollten dies überspringen. Eine Passphrase ist ein zusätzliches Wort oder ein Satz Ihrer Wahl, ohne den Ihre Wiederherstellungsphrase diese Wallet nicht mehr öffnen kann.</string>
     <string name="pass_screen_continue_with">Mit Passphrase fortfahren</string>
     <string name="pass_screen_continue_without">Ohne fortfahren</string>
     <string name="pass_screen_separate_note">Bewahren Sie sie getrennt von den soeben notierten Wörtern auf.</string>
@@ -586,12 +597,12 @@
     <string name="send_fail_amount">Geben Sie einen Betrag größer als null ein.</string>
     <string name="send_fail_unknown">Die Transaktion konnte nicht gesendet werden.</string>
     <string name="send_fail_try_again">Erneut versuchen</string>
-    <string name="rf_splitting_for_assets">Vorbereitung zum Verschieben von %1$d DigiAssets — Ihre DGB werden aufgeteilt, damit jedes seine eigene Übertragungsgebühr zahlen kann. Wartet auf eine Bestätigung, meist unter einer Minute.</string>
+    <string name="rf_splitting_for_assets">Vorbereitung zum Verschieben von %1$d DigiAssets: Ihre DGB werden aufgeteilt, damit jedes seine eigene Übertragungsgebühr zahlen kann. Wartet auf eine Bestätigung, meist unter einer Minute.</string>
     <string name="rf_nothing_moved">Nichts wurde verschoben</string>
-    <string name="rf_dd_fee_floor">Benötigt %1$s Netzwerkgebühr — diese Wallet hat %2$s.</string>
+    <string name="rf_dd_fee_floor">Benötigt %1$s Netzwerkgebühr: diese Wallet hat %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar gefunden</string>
     <string name="rf_dd_moved">%1$s in DigiDollar in diese Wallet verschoben</string>
-    <string name="rf_dd_left_behind">%1$s in DigiDollar blieb zurück — es konnte nicht verschoben werden</string>
+    <string name="rf_dd_left_behind">%1$s in DigiDollar blieb zurück: es konnte nicht verschoben werden</string>
     <string name="rf_dd_unreachable">DigiDollar konnte nicht geprüft werden; diese Wallet hält möglicherweise welche</string>
     <string name="as_rules_checking">Übertragungsregeln dieses Assets werden geprüft…</string>
     <string name="as_rules_bound_title">Dieses Asset hat Übertragungsregeln</string>
@@ -621,7 +632,7 @@
     <string name="reconcile_spendable">Ausgabefähig</string>
     <string name="reconcile_wallet_spendable">Ausgabefähiges Guthaben der Wallet</string>
     <string name="reconcile_matches_wallet">Stimmt mit dem ausgabefähigen Guthaben der Wallet überein.</string>
-    <string name="reconcile_does_not_match_wallet">Stimmt nicht mit dem ausgabefähigen Guthaben der Wallet überein — siehe unten.</string>
+    <string name="reconcile_does_not_match_wallet">Stimmt nicht mit dem ausgabefähigen Guthaben der Wallet überein: siehe unten.</string>
     <string name="reconcile_held_asset">Für ein DigiAsset zurückgehalten</string>
     <string name="reconcile_held_unknown">Zurückgehalten: Asset-Status unbekannt</string>
     <string name="reconcile_proven_plain">Einfache DGB, nach einem Neustart ausgabefähig</string>
@@ -638,7 +649,7 @@
     <string name="market_tor_notice_body">Markt wird nicht über Tor geleitet; die Website sieht Ihre IP-Adresse.</string>
     <string name="market_tor_notice_continue">Weiter</string>
     <string name="restore_pass_toggle">Ich habe eine Passphrase verwendet</string>
-    <string name="restore_pass_body">Nur wenn Sie beim Erstellen dieser Wallet eine hinzugefügt haben. Eine falsche Passphrase öffnet eine andere, leere Wallet — ohne Fehlermeldung.</string>
+    <string name="restore_pass_body">Nur wenn Sie beim Erstellen dieser Wallet eine hinzugefügt haben. Eine falsche Passphrase öffnet eine andere, leere Wallet: ohne Fehlermeldung.</string>
 
     <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
          WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
@@ -650,9 +661,9 @@
     <string name="restore_err_invalid_words">Ungültige Wörter: %1$s</string>
     <string name="restore_err_checksum">Diese Wiederherstellungsphrase ist ungültig. Prüfen Sie jedes Wort und die Reihenfolge.</string>
     <string name="restore_scan_title">Privat wiederherstellen</string>
-    <string name="restore_scan_body">Sobald Sie fortfahren, findet dieses Telefon die Transaktionen Ihrer Wallet selbst — native (dgb1q…), Legacy- (D…), Taproot- und DigiDollar-Adressen — ohne Ihre Adressen an irgendjemanden zu senden.</string>
+    <string name="restore_scan_body">Sobald Sie fortfahren, findet dieses Telefon die Transaktionen Ihrer Wallet selbst: native (dgb1q…), Legacy- (D…), Taproot- und DigiDollar-Adressen, ohne Ihre Adressen an irgendjemanden zu senden.</string>
     <string name="restore_other_title">Phrase aus einer anderen Wallet-App?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus DigiByte Mobile oder der älteren App DigiByte Wallet nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus ATB Wallet oder der älteren DigiByte-App nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
     <string name="restore_other_check">Andere Formate prüfen</string>
     <string name="restore_scan_deriving">Adressen werden abgeleitet…</string>
     <string name="restore_scan_duration">Dies kann je nach Node 30–90 Sekunden dauern.</string>
@@ -667,8 +678,8 @@
     </plurals>
     <string name="restore_unreachable_body">Die Prüfung konnte nicht ausgeführt werden. Die Synchronisierung findet die eigenen Formate dieser Wallet trotzdem, nachdem Sie fortfahren; versuchen Sie es erneut oder nutzen Sie später Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen für die Formate anderer Apps.</string>
     <string name="restore_none_body">Auf den geprüften Formaten liegt nichts Unausgegebenes. Die Synchronisierung findet die eigenen Transaktionen dieser Wallet trotzdem, nachdem Sie fortfahren.</string>
-    <string name="restore_nonnative_note">%1$s DGB liegen auf dem Adressformat einer anderen App. Nach der Wiederherstellung werden Sie zu „Guthaben aus einer anderen Wallet wiederherstellen“ weitergeleitet, um sie in diese Wallet zu übertragen — nichts wird übertragen, bevor Sie dort bestätigen.</string>
-    <string name="restore_pass_nothing_found">Mit der eingegebenen Passphrase wurde nichts gefunden. Eine Passphrase hat keine Prüfsumme: Eine falsche öffnet ohne Fehlermeldung eine andere, leere Wallet. Prüfen Sie sie auf Tippfehler — oder, falls Sie beim Erstellen der Wallet keine festgelegt haben, gehen Sie zurück und schließen Sie das Passphrase-Feld.</string>
+    <string name="restore_nonnative_note">%1$s DGB liegen auf dem Adressformat einer anderen App. Nach der Wiederherstellung werden Sie zu „Guthaben aus einer anderen Wallet wiederherstellen“ weitergeleitet, um sie in diese Wallet zu übertragen: nichts wird übertragen, bevor Sie dort bestätigen.</string>
+    <string name="restore_pass_nothing_found">Mit der eingegebenen Passphrase wurde nichts gefunden. Eine Passphrase hat keine Prüfsumme: Eine falsche öffnet ohne Fehlermeldung eine andere, leere Wallet. Prüfen Sie sie auf Tippfehler, oder, falls Sie beim Erstellen der Wallet keine festgelegt haben, gehen Sie zurück und schließen Sie das Passphrase-Feld.</string>
     <plurals name="restore_addresses_scanned">
         <item quantity="one">%1$s · %2$d Adresse geprüft</item>
         <item quantity="other">%1$s · %2$d Adressen geprüft</item>
@@ -676,11 +687,24 @@
     <string name="restore_date_title">Wann haben Sie diese Wallet erstellt?</string>
     <string name="restore_date_body">So können wir unnötiges Durchsuchen der Blockchain überspringen und schneller synchronisieren.</string>
     <string name="restore_date_unsure">Ich weiß es nicht mehr</string>
-    <string name="restore_date_unsure_sub">Vollständiger Blockchain-Scan (am langsamsten — im Zweifel wählen)</string>
-    <string name="restore_date_warning">Transaktionen vor dem gewählten Jahr werden nicht erkannt. Wenn Ihre Wallet einen älteren Verlauf haben könnte, wählen Sie ein früheres Jahr — oder „Ich weiß es nicht mehr“ für vollständige Abdeckung (langsamer).</string>
+    <string name="restore_date_unsure_sub">Vollständiger Blockchain-Scan (am langsamsten: im Zweifel wählen)</string>
+    <string name="restore_date_warning">Transaktionen vor dem gewählten Jahr werden nicht erkannt. Wenn Ihre Wallet einen älteren Verlauf haben könnte, wählen Sie ein früheres Jahr, oder „Ich weiß es nicht mehr“ für vollständige Abdeckung (langsamer).</string>
     <string name="restore_date_start">Wiederherstellung starten</string>
     <string name="restore_date_restoring">Wallet wird wiederhergestellt…</string>
     <string name="restore_date_onwards">ab Jan. %1$d</string>
     <string name="restore_date_range">Jan. %1$d – Dez. %1$d</string>
     <string name="restore_date_genesis">DigiByte startete im Januar 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, das Netzwerkminimum. Die genaue Gebühr dieser Transaktion wird angezeigt, bevor Sie bestätigen.</string>
+    <string name="send_preparing">Wird vorbereitet…</string>
+    <string name="send_fee_raised">Erhöht von den eingegebenen %1$s DGB: Dies ist die Gebühr, die diese Transaktion zahlt.</string>
+    <string name="send_err_below_dust">Dieser Betrag liegt unter der kleinsten Zahlung, die das Netzwerk an diese Adresse weiterleitet (%1$s DGB). Senden Sie mindestens so viel.</string>
+    <string name="send_not_relayed_title">Gesendet, noch nicht weitergeleitet</string>
+    <string name="send_not_relayed_body">Ihre Wallet hat diese Transaktion übertragen, aber noch kein Peer hat sie angenommen, daher ist noch nicht bekannt, ob sie das Netzwerk erreicht hat. Sie wird in Ihren Aktivitäten als ausstehend angezeigt. Prüfen Sie Ihre Aktivitäten, bevor Sie sie erneut senden.</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Passphrase konnte nicht gelesen werden</string>
+    <string name="seedview_pass_unreadable_body">Die Passphrase dieser Wallet konnte gerade nicht gelesen werden. Ihre Wiederherstellungswörter allein stellen diese Wallet möglicherweise nicht wieder her. Deshalb werden sie erst angezeigt, wenn die Passphrase zusammen mit ihnen angezeigt werden kann. Versuchen Sie es erneut.</string>
+    <string name="seedview_pass_retry">Erneut versuchen</string>
+    <!-- /pkg E2-keys -->
 </resources>

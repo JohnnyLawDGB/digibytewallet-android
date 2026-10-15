@@ -73,4 +73,48 @@ class SecureWindowFlagTest {
         assertEquals(listOf(true, false, true), applied)
         assertTrue(flag.isSecure)
     }
+
+    // ── One counted holder per window ────────────────────────────────────────────────────
+    // A dialog is its own window: FLAG_SECURE on the Activity window does not cover it, and the
+    // flag on the dialog window must not be cleared by the Activity's holders leaving, or the
+    // other way round. The same counted holder, kept per window.
+
+    private val perWindow = mutableListOf<Pair<String, Boolean>>()
+    private val windows = SecureWindowFlags<String> { window, secure -> perWindow += window to secure }
+
+    @Test
+    fun `a dialog window gets the flag on itself, not on the activity window`() {
+        windows.acquire("dialog")
+        assertEquals(listOf("dialog" to true), perWindow)
+        assertTrue(windows.isSecure("dialog"))
+        assertFalse(windows.isSecure("activity"))
+    }
+
+    @Test
+    fun `each window counts its own holders`() {
+        windows.acquire("activity")
+        windows.acquire("dialog")
+        windows.acquire("dialog")
+        windows.release("dialog")
+        assertEquals(listOf("activity" to true, "dialog" to true), perWindow)
+        assertEquals(1, windows.holders("dialog"))
+        assertEquals(1, windows.holders("activity"))
+    }
+
+    @Test
+    fun `the last holder of one window leaving does not clear another`() {
+        windows.acquire("activity")
+        windows.acquire("dialog")
+        windows.release("dialog")
+        assertEquals(listOf("activity" to true, "dialog" to true, "dialog" to false), perWindow)
+        assertTrue(windows.isSecure("activity"))
+        assertFalse(windows.isSecure("dialog"))
+    }
+
+    @Test
+    fun `releasing a window nobody holds changes nothing`() {
+        windows.release("dialog")
+        assertEquals(emptyList<Pair<String, Boolean>>(), perWindow)
+        assertEquals(0, windows.holders("dialog"))
+    }
 }

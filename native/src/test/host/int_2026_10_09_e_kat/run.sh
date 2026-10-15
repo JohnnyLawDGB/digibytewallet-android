@@ -33,7 +33,7 @@ GUARD_CASES=(unjudged_extends_tip_kept unjudged_known_header_kept short_reorg_ne
 shipped_level() {
     local found
     found="$(grep -o "D$1=[0-9][0-9]*" "$REPO_ROOT/native/build.gradle.kts" 2>/dev/null | sort -u)"
-    [ "$(printf '%s' "$found" | grep -c .)" -eq 1 ] || return 1
+    [ "$(<<<"$found" grep -c .)" -eq 1 ] || return 1
     printf '%s' "${found#D$1=}"
 }
 POW_LEVEL="$(shipped_level DGB_HEADER_POW_CHECK)" || { echo "GATE FAILURE: no single shipped DGB_HEADER_POW_CHECK"; exit 1; }
@@ -143,43 +143,43 @@ run_bits() {
     echo "--- RED ARM (-DINT_2026_10_09_E_UNFIXED): each RED case MUST fail ---"
     for c in "${RED_CASES[@]}"; do
         run_case "$BUILD_DIR/red${bits}" "$c"
-        if echo "$OUT" | grep -Eq "$SAN_RE"; then
+        if <<<"$OUT" grep -Eq "$SAN_RE"; then
             echo "  [$bits red $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
-            echo "$OUT" | grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
-        elif echo "$OUT" | grep -q "RESULT $c fail" && ! echo "$OUT" | grep -q '^FAIL: setup'; then
-            echo "  [$bits red $c] failed, as required: $(echo "$OUT" | grep -m1 '^FAIL:') | $(echo "$OUT" | grep -m1 '^NOTE:' | cut -c1-150)"
+            <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
+        elif <<<"$OUT" grep -q "RESULT $c fail" && ! <<<"$OUT" grep -q '^FAIL: setup'; then
+            echo "  [$bits red $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:') | $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-150)"
         else
             echo "  [$bits red $c] GATE FAILURE: did not fail on what it asserts (rc=$RC)"
-            echo "$OUT" | grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
+            <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
         fi
     done
 
     echo "--- RED ARM: each GUARD case MUST pass ---"
     for c in "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/red${bits}" "$c"
-        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass"; then
+        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits red $c] passed (guard)"
         else
             echo "  [$bits red $c] GATE FAILURE: guard did not pass in the comparison arm (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
         fi
     done
 
     echo "--- GREEN ARM (shipped): every case MUST pass, no sanitizer report ---"
     for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c"
-        if ! echo "$OUT" | grep -Eq "$SAN_RE" && echo "$OUT" | grep -q "RESULT $c pass"; then
-            echo "  [$bits green $c] passed: $(echo "$OUT" | grep -m1 '^NOTE:' | cut -c1-150)"
+        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
+            echo "  [$bits green $c] passed: $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-150)"
         else
             echo "  [$bits green $c] GATE FAILURE (rc=$RC)"
-            echo "$OUT" | grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
+            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -10; FAIL=1
         fi
     done
 
     # the log line a device check greps for
     run_case "$BUILD_DIR/green${bits}" unjudged_fork_refused
-    echo "$OUT" | grep -q "diff-unjudged-fork h=" \
-        && echo "  [$bits green] log: '$(echo "$OUT" | grep -m1 -o 'diff-unjudged-fork.*' | cut -c1-140)'" \
+    <<<"$OUT" grep -q "diff-unjudged-fork h=" \
+        && echo "  [$bits green] log: '$(<<<"$OUT" grep -m1 -o 'diff-unjudged-fork.*' | cut -c1-140)'" \
         || { echo "  [$bits green] GATE FAILURE: the refusal log line is missing"; FAIL=1; }
 }
 

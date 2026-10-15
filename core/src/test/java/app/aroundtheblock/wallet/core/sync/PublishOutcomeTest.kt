@@ -1,7 +1,10 @@
 package app.aroundtheblock.wallet.core.sync
 
+import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -75,8 +78,89 @@ class PublishOutcomeTest {
     /** The user-facing distinction the old code could not make: "sent" vs "not sent". */
     @Test fun only_acceptance_may_be_described_to_the_user_as_sent() {
         assertTrue(PublishOutcome.of(0).userVisiblySent)
-        for (e in listOf(PublishOutcome.EINVAL, PublishOutcome.ENOTCONN, PublishOutcome.ETIMEDOUT, 9999)) {
+        for (e in listOf(PublishOutcome.EINVAL, PublishOutcome.ENOTCONN, PublishOutcome.ETIMEDOUT, PublishOutcome.ECANCELED, 9999)) {
             assertFalse("errno $e must not read as sent", PublishOutcome.of(e).userVisiblySent)
         }
+    }
+
+    // ── What the stranded-send sweep does with it ─────────────────────────
+
+    /**
+     * A plain DGB send the network refused can never be accepted. The sweep used to log the
+     * verdict and carry on: the send stayed in the wallet with its coins spent, and stayed
+     * "pending" in the activity list, for good. Refused on evidence no single peer can supply
+     * (peers in two network groups rejected it, and none has it), it is removed, which unlocks its
+     * coins, and its record goes with it.
+     */
+    @Test fun a_refusal_peers_corroborate_removes_a_plain_DGB_send_and_unlocks_its_coins() {
+        assertEquals(
+            "a send the network refused for good is only logged; its coins stay locked",
+            PublishOutcome.Action.REMOVE_AND_UNLOCK,
+            PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = true, refusedByPeers = true),
+        )
+    }
+
+    /**
+     * One peer's rejection is one peer's word. A peer can reject a valid transaction that honest
+     * peers already relayed; removing it would give its coins back, the user would pay again with
+     * other coins, and both payments could confirm. The terminal verdict the first rejection gives
+     * says the send is not relayed. It does not unlock anything.
+     */
+    @Test fun a_single_peers_terminal_rejection_removes_nothing() {
+        assertEquals(
+            "one peer's rejection removed the send and unlocked its coins",
+            PublishOutcome.Action.KEEP,
+            PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = true, refusedByPeers = false),
+        )
+    }
+
+    /** An asset or DigiDollar send keeps its own handling, however refused: removing it would unseat
+     *  the asset layer's CONFLICTED accounting, which reads the abandoned attempt from the wallet. */
+    @Test fun a_refused_asset_or_DigiDollar_send_is_left_to_its_own_handling() {
+        for (corroborated in listOf(true, false)) {
+            assertEquals(PublishOutcome.Action.KEEP, PublishOutcome.of(PublishOutcome.EINVAL).actionFor(plainDgb = false, refusedByPeers = corroborated))
+        }
+    }
+
+    /** Nothing short of a terminal verdict removes a send: a slow relay must never lose one. */
+    @Test fun nothing_but_a_terminal_rejection_removes_a_send() {
+        for (e in listOf(0, PublishOutcome.ENOTCONN, PublishOutcome.ETIMEDOUT, PublishOutcome.ECANCELED, 9999)) {
+            for (plain in listOf(true, false)) {
+                assertEquals("errno $e (plain DGB: $plain) must not remove a send", PublishOutcome.Action.KEEP,
+                    PublishOutcome.of(e).actionFor(plain, refusedByPeers = true))
+            }
+        }
+    }
+
+    /** The wallet removing its own send cancels the publish: no verdict about the transaction. */
+    @Test fun a_cancelled_publish_is_not_terminal() {
+        val o = PublishOutcome.of(PublishOutcome.ECANCELED)
+        assertEquals(PublishOutcome.Kind.NOT_DELIVERED, o.kind)
+        assertFalse(o.isTerminal)
+    }
+
+    // ── Waiting for a verdict after a send ────────────────────────────────
+
+    /** "Sent" means a peer took it. Until a verdict arrives the answer is none — never "sent". */
+    @Test fun no_verdict_within_the_wait_is_no_verdict() = runTest {
+        var reads = 0
+        val o = PublishOutcome.await(read = { reads++; PublishOutcome.PENDING })
+        assertNull("a send no peer answered for was given a verdict", o)
+        assertTrue("the wait gave up before a peer could answer (${currentTime} ms)", currentTime >= 20_000L)
+        assertTrue("the wait did not poll", reads > 1)
+    }
+
+    @Test fun a_peer_taking_the_send_ends_the_wait_as_accepted() = runTest {
+        var reads = 0
+        val o = PublishOutcome.await(read = { if (++reads < 3) PublishOutcome.PENDING else 0 })
+        assertEquals(PublishOutcome.Kind.ACCEPTED, o?.kind)
+        assertEquals(3, reads)
+    }
+
+    /** The core answers each publish once, so the first verdict is the verdict. */
+    @Test fun the_first_verdict_ends_the_wait() = runTest {
+        val o = PublishOutcome.await(read = { PublishOutcome.ETIMEDOUT })
+        assertEquals(PublishOutcome.Kind.UNCONFIRMED_DELIVERY, o?.kind)
+        assertEquals("the wait went on after the verdict", 0L, currentTime)
     }
 }

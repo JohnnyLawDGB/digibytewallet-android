@@ -57,7 +57,7 @@ fun OnboardingScreen(
             verticalArrangement = Arrangement.Center
         ) {
             // Logo / brand header
-            DigiByteLogoHeader()
+            AtbLogoHeader()
 
             Spacer(modifier = Modifier.height(48.dp))
 
@@ -193,11 +193,11 @@ private fun WordCountToggle(selected: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-fun DigiByteLogoHeader() {
+fun AtbLogoHeader() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Image(
-            painter = painterResource(id = app.aroundtheblock.wallet.R.drawable.dgb_symbol),
-            contentDescription = "DigiByte",
+            painter = painterResource(id = R.drawable.atb_logo),
+            contentDescription = stringResource(R.string.app_name),
             modifier = Modifier.size(80.dp)
         )
         Spacer(modifier = Modifier.height(16.dp))

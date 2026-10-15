@@ -53,23 +53,23 @@ build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile.";
 
 echo "--- COMPARISON ARM (-DSAVED_TRANSACTIONS_METADATA_UNFIXED): every RED case MUST fail, every GUARD case pass ---"
 out="$("$BUILD_DIR/red" 2>&1)"; rc=$?
-echo "$out" | grep -Eq "$SAN_RE" && { echo "  [red] GATE FAILURE: sanitizer report"; FAIL=1; }
+<<<"$out" grep -Eq "$SAN_RE" && { echo "  [red] GATE FAILURE: sanitizer report"; FAIL=1; }
 [ $rc -eq 0 ] && { echo "  [red] GATE FAILURE: the comparison arm exited 0; it proves nothing"; FAIL=1; }
 for c in "${RED_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c fail$" && echo "  [red $c] failed, as it must" || { echo "  [red $c] GATE FAILURE: did not fail"; FAIL=1; }
+    <<<"$out" grep -q "^RESULT $c fail$" && echo "  [red $c] failed, as it must" || { echo "  [red $c] GATE FAILURE: did not fail"; FAIL=1; }
 done
 for c in "${GUARD_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c pass$" && echo "  [red $c] GUARD held" || { echo "  [red $c] GATE FAILURE: GUARD did not hold"; FAIL=1; }
+    <<<"$out" grep -q "^RESULT $c pass$" && echo "  [red $c] GUARD held" || { echo "  [red $c] GATE FAILURE: GUARD did not hold"; FAIL=1; }
 done
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 out="$("$BUILD_DIR/green" 2>&1)"; rc=$?
-echo "$out" | grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; echo "$out" | grep -E "$SAN_RE" | head -3; FAIL=1; }
-if [ $rc -ne 0 ] || ! echo "$out" | grep -q "^ALL PASS$"; then
-    echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; echo "$out" | grep "^FAIL:" | sed 's/^/      /'; FAIL=1
+<<<"$out" grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; <<<"$out" grep -E "$SAN_RE" | head -3; FAIL=1; }
+if [ $rc -ne 0 ] || ! <<<"$out" grep -q "^ALL PASS$"; then
+    echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; <<<"$out" grep "^FAIL:" | sed 's/^/      /'; FAIL=1
 fi
 for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE: not passed"; FAIL=1; }
+    <<<"$out" grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE: not passed"; FAIL=1; }
 done
 
 [ $FAIL -eq 0 ] && echo "saved_transactions_core_kat: GATE HELD (RED dropped the metadata; GREEN restored it)"

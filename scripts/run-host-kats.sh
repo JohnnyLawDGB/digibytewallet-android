@@ -54,7 +54,7 @@ GRADLE_NATIVE="$REPO_ROOT/native/build.gradle.kts"
 shipped_level() {   # $1 = macro name; prints its one level, or fails
     local found
     found="$(grep -o "D$1=[0-9][0-9]*" "$GRADLE_NATIVE" 2>/dev/null | sort -u)"
-    if [ "$(printf '%s' "$found" | grep -c .)" -ne 1 ]; then
+    if [ "$(<<<"$found" grep -c .)" -ne 1 ]; then
         echo "error: expected exactly one -D$1=<level> in $GRADLE_NATIVE, found: ${found:-none}" >&2
         return 1
     fi
