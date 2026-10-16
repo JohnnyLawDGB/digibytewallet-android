@@ -342,10 +342,11 @@ Names only, each with that researcher's permission and in the form they chose. W
 found is credited in the notes of the release that fixes it, and not before: several of these
 findings are fixed but not yet released, and naming them here would disclose them.
 
-0xasuma · 0xradu · Advena · Akbarrsw · @Lord99900 (Bima maulana) · Danu Fandiyana · folox ·
-iblitzc0de · Jackai · Jo Arsy · Keyzo · Lou · Luis_MZ · Mr Fz · Muhammad Harley · oncodewa ·
-Redi Sinaga · Rensisme · Ricki Ariadi · rreiissz · Toshit · Tsaqif · Umiroh123 · w4ke · xbyteid ·
-Yudha Eka Saputra
+@0x1cb · 0xasuma · 0xradu · Advena · Akbarrsw · apienz · AsrHardi · Astung · Danu Fandiyana ·
+Eula Lawrence · folox · FZN research · @haikaljim9 · iblitzc0de · Jackai · Jo Arsy · Keyzo · Ki ·
+@Lord99900 (Bima maulana) · Lou · Luis_MZ · Mr Fz · Muhammad Harley · naresaelvara · oncodewa ·
+Redi Sinaga · Rensisme · Ricki Ariadi · rreiissz · sayligood · Toshit · Tsaqif · Umiroh123 ·
+VanSecQA · w4ke · xbyteid · Yudha Eka Saputra
 
 *Reporters from the 2026-09 and 2026-10 waves who have not yet answered the credit question are
 not listed. Anonymity, or no answer, never affects payment.*
