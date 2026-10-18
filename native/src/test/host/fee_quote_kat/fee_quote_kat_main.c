@@ -2,8 +2,8 @@
 //
 // THE INVARIANT. A send is built and quoted at review, before the credential prompt (the bridge's
 // createTransaction + quoteTransaction), and after the prompt the SAME bytes are signed
-// (signPreparedTransaction). The bridge does both through prepared_send.h, which this KAT compiles
-// against the live core:
+// (signPreparedTransaction). The bridge does both through the core's BRPreparedSend.h (shared with
+// iOS), which this KAT compiles against the live core; prepared_send_kat covers the header's edges:
 //   (1) the quote is the built transaction's own fee -- its inputs minus its outputs, looked up in
 //       the wallet's own transactions -- and its own size; not a typical 141-vbyte transaction at
 //       the default rate (14,100 sat), which is what every confirmation used to show;
@@ -36,7 +36,7 @@
 #include "BRBIP32Sequence.h"
 #include "BRBIP39Mnemonic.h"
 #include "BRDigiDollar.h"
-#include "prepared_send.h"
+#include "BRPreparedSend.h"
 
 static int g_failed = 0;
 
@@ -188,7 +188,7 @@ static void quote_is_fee_built(void)
     if (!tx) { BRWalletFree(w); return; }
     BRTransaction *bytes = roundTrip(tx);
     uint64_t fee = 0, vsize = 0;
-    int ok = bytes && prepared_send_quote(w, bytes, &fee, &vsize);
+    int ok = bytes && BRPreparedSendQuote(w, bytes, &fee, &vsize);
     printf("NOTE: six inputs, %zu outputs, %zu vB as built; the transaction pays %llu sat\n",
            tx->outCount, BRTransactionVSize(tx), (unsigned long long)paid(tx));
     ck(ok, "the built bytes have a quote");
@@ -214,7 +214,7 @@ static void quote_unknown_parent(void)
     BRTransaction *bytes = roundTrip(tx);
     BRWalletRemoveTransaction(w, tx->inputs[0].txHash);   // the wallet no longer holds the coin's transaction
     uint64_t fee = 0, vsize = 0;
-    int ok = bytes && prepared_send_quote(w, bytes, &fee, &vsize);
+    int ok = bytes && BRPreparedSendQuote(w, bytes, &fee, &vsize);
     ck(!ok, "bytes spending a coin of a transaction the wallet does not hold have no quote (got %llu sat)",
        (unsigned long long)fee);
     if (bytes) BRTransactionFree(bytes);
@@ -270,7 +270,7 @@ static void quote_includes_round_off(void)
     if (!tx) { BRWalletFree(w); return; }
     BRTransaction *bytes = roundTrip(tx);
     uint64_t q = 0, v = 0;
-    int ok = bytes && prepared_send_quote(w, bytes, &q, &v);
+    int ok = bytes && BRPreparedSendQuote(w, bytes, &q, &v);
     ck(ok && q == paid(tx), "the quote includes the round-off the transaction pays: quoted %llu, it pays %llu",
        (unsigned long long)q, (unsigned long long)paid(tx));
     if (bytes) BRTransactionFree(bytes);
@@ -301,9 +301,9 @@ static int prepare(Prepared *p)
     return p->bytes != NULL;
 }
 
-static PreparedSendVerdict checkAsApproved(const Prepared *p, const BRTransaction *tx, uint64_t fee)
+static BRPreparedSendVerdict checkAsApproved(const Prepared *p, const BRTransaction *tx, uint64_t fee)
 {
-    return prepared_send_check(p->w, tx, p->payScript, p->payScriptLen, p->payAmount, fee);
+    return BRPreparedSendCheck(p->w, tx, p->payScript, p->payScriptLen, p->payAmount, fee);
 }
 
 // The prepared send with its outputs replaced: the same inputs, so the same coins -- and, when the
@@ -339,14 +339,14 @@ static void release(Prepared *p)
     if (p->w) BRWalletFree(p->w);
 }
 
-static const char *verdictName(PreparedSendVerdict v)
+static const char *verdictName(BRPreparedSendVerdict v)
 {
     switch (v) {
-    case PREPARED_SEND_OK: return "OK";
-    case PREPARED_SEND_FEE_UNKNOWN: return "FEE_UNKNOWN";
-    case PREPARED_SEND_FEE_CHANGED: return "FEE_CHANGED";
-    case PREPARED_SEND_COIN_UNAVAILABLE: return "COIN_UNAVAILABLE";
-    case PREPARED_SEND_NOT_APPROVED: return "NOT_APPROVED";
+    case BRPreparedSendOK: return "OK";
+    case BRPreparedSendFeeUnknown: return "FEE_UNKNOWN";
+    case BRPreparedSendFeeChanged: return "FEE_CHANGED";
+    case BRPreparedSendCoinUnavailable: return "COIN_UNAVAILABLE";
+    case BRPreparedSendNotApproved: return "NOT_APPROVED";
     }
     return "?";
 }
@@ -356,12 +356,12 @@ static void check_approved_signs(void)
     Prepared p;
     ck(prepare(&p), "review prepares a send");
     if (!p.bytes) { release(&p); return; }
-    PreparedSendVerdict before = checkAsApproved(&p, p.bytes, p.approved);
-    ck(before == PREPARED_SEND_OK, "bytes paying the approved fee pass before signing (%s)", verdictName(before));
+    BRPreparedSendVerdict before = checkAsApproved(&p, p.bytes, p.approved);
+    ck(before == BRPreparedSendOK, "bytes paying the approved fee pass before signing (%s)", verdictName(before));
     int s = BRWalletSignTransaction(p.w, p.bytes, 0, g_seed, sizeof(g_seed));
     ck(s && BRTransactionIsSigned(p.bytes), "the prepared bytes are signed");
-    PreparedSendVerdict after = checkAsApproved(&p, p.bytes, p.approved);
-    ck(after == PREPARED_SEND_OK, "the signed transaction pays the approved fee (%s)", verdictName(after));
+    BRPreparedSendVerdict after = checkAsApproved(&p, p.bytes, p.approved);
+    ck(after == BRPreparedSendOK, "the signed transaction pays the approved fee (%s)", verdictName(after));
     BRTransaction *again = roundTrip(p.bytes);
     ck(again && BRTransactionIsSigned(again) && BRWalletFeeForTx(p.w, again) == p.approved,
        "the signed bytes, read back, pay exactly %llu sat", (unsigned long long)p.approved);
@@ -374,8 +374,8 @@ static void check_fee_lower(void)
     Prepared p;
     ck(prepare(&p), "review prepares a send");
     if (!p.bytes) { release(&p); return; }
-    PreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved - 1);
-    ck(v == PREPARED_SEND_FEE_CHANGED, "bytes paying 1 sat more than approved are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved - 1);
+    ck(v == BRPreparedSendFeeChanged, "bytes paying 1 sat more than approved are refused before signing (%s)", verdictName(v));
     release(&p);
 }
 
@@ -384,8 +384,8 @@ static void check_fee_higher(void)
     Prepared p;
     ck(prepare(&p), "review prepares a send");
     if (!p.bytes) { release(&p); return; }
-    PreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved + 100);
-    ck(v == PREPARED_SEND_FEE_CHANGED, "bytes paying less than approved are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved + 100);
+    ck(v == BRPreparedSendFeeChanged, "bytes paying less than approved are refused before signing (%s)", verdictName(v));
     release(&p);
 }
 
@@ -400,8 +400,8 @@ static void check_coin_spent(void)
     int registered = signedOther && BRWalletRegisterTransaction(p.w, other);
     ck(registered, "a second send of the same coins is registered");
     if (!registered && other) BRTransactionFree(other);
-    PreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved);
-    ck(v == PREPARED_SEND_COIN_UNAVAILABLE, "bytes spending a coin another send has spent are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved);
+    ck(v == BRPreparedSendCoinUnavailable, "bytes spending a coin another send has spent are refused before signing (%s)", verdictName(v));
     release(&p);
 }
 
@@ -413,8 +413,8 @@ static void check_coin_held(void)
     // While the prompt is up, asset detection holds one of the coins out of the plain set.
     ck(BRWalletRegisterAssetOutpoint(p.w, p.bytes->inputs[0].txHash, p.bytes->inputs[0].index),
        "the coin is held as an asset carrier");
-    PreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved);
-    ck(v == PREPARED_SEND_COIN_UNAVAILABLE, "bytes spending a coin now held as an asset carrier are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved);
+    ck(v == BRPreparedSendCoinUnavailable, "bytes spending a coin now held as an asset carrier are refused before signing (%s)", verdictName(v));
     release(&p);
 }
 
@@ -424,8 +424,8 @@ static void check_parent_gone(void)
     ck(prepare(&p), "review prepares a send");
     if (!p.bytes) { release(&p); return; }
     BRWalletRemoveTransaction(p.w, p.bytes->inputs[0].txHash);
-    PreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved);
-    ck(v == PREPARED_SEND_FEE_UNKNOWN, "bytes spending a coin of a transaction the wallet no longer holds are refused (%s)", verdictName(v));
+    BRPreparedSendVerdict v = checkAsApproved(&p, p.bytes, p.approved);
+    ck(v == BRPreparedSendFeeUnknown, "bytes spending a coin of a transaction the wallet no longer holds are refused (%s)", verdictName(v));
     release(&p);
 }
 
@@ -447,8 +447,8 @@ static void check_recipient_changed(void)
     BRTxOutput outs[2] = { { "", p.payAmount, other, sizeof(other) }, { "", change->amount, change->script, change->scriptLen } };
     BRTransaction *altered = withOutputs(p.built, outs, 2);
     ck(altered && BRWalletFeeForTx(p.w, altered) == p.approved, "the altered bytes pay the same fee");
-    PreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : PREPARED_SEND_OK;
-    ck(v == PREPARED_SEND_NOT_APPROVED, "bytes paying the approved amount to another recipient are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : BRPreparedSendOK;
+    ck(v == BRPreparedSendNotApproved, "bytes paying the approved amount to another recipient are refused before signing (%s)", verdictName(v));
     if (altered) BRTransactionFree(altered);
     release(&p);
 }
@@ -464,8 +464,8 @@ static void check_amount_changed(void)
                            { "", change->amount + 100000, change->script, change->scriptLen } };
     BRTransaction *altered = withOutputs(p.built, outs, 2);
     ck(altered && BRWalletFeeForTx(p.w, altered) == p.approved, "the altered bytes pay the same fee");
-    PreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : PREPARED_SEND_OK;
-    ck(v == PREPARED_SEND_NOT_APPROVED, "bytes paying the approved recipient another amount are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : BRPreparedSendOK;
+    ck(v == BRPreparedSendNotApproved, "bytes paying the approved recipient another amount are refused before signing (%s)", verdictName(v));
     if (altered) BRTransactionFree(altered);
     release(&p);
 }
@@ -483,8 +483,8 @@ static void check_extra_output(void)
                            { "", 100000, other, sizeof(other) } };
     BRTransaction *altered = withOutputs(p.built, outs, 3);
     ck(altered && BRWalletFeeForTx(p.w, altered) == p.approved, "the altered bytes pay the same fee");
-    PreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : PREPARED_SEND_OK;
-    ck(v == PREPARED_SEND_NOT_APPROVED, "bytes adding a payment nobody approved are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : BRPreparedSendOK;
+    ck(v == BRPreparedSendNotApproved, "bytes adding a payment nobody approved are refused before signing (%s)", verdictName(v));
     if (altered) BRTransactionFree(altered);
     release(&p);
 }
@@ -500,8 +500,8 @@ static void check_change_foreign(void)
     BRTxOutput outs[2] = { { "", p.payAmount, p.payScript, p.payScriptLen }, { "", change->amount, other, sizeof(other) } };
     BRTransaction *altered = withOutputs(p.built, outs, 2);
     ck(altered && BRWalletFeeForTx(p.w, altered) == p.approved, "the altered bytes pay the same fee");
-    PreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : PREPARED_SEND_OK;
-    ck(v == PREPARED_SEND_NOT_APPROVED, "bytes sending the change to an address not the wallet's are refused before signing (%s)", verdictName(v));
+    BRPreparedSendVerdict v = altered ? checkAsApproved(&p, altered, p.approved) : BRPreparedSendOK;
+    ck(v == BRPreparedSendNotApproved, "bytes sending the change to an address not the wallet's are refused before signing (%s)", verdictName(v));
     if (altered) BRTransactionFree(altered);
     release(&p);
 }
@@ -516,8 +516,8 @@ static void check_self_send_signs(void)
     ck(tx != NULL, "a send to one of the wallet's own addresses is built");
     if (!tx) { BRWalletFree(w); return; }
     BRTransaction *bytes = roundTrip(tx);
-    PreparedSendVerdict v = bytes ? prepared_send_check(w, bytes, script, scriptLen, 3000000, paid(tx)) : PREPARED_SEND_NOT_APPROVED;
-    ck(v == PREPARED_SEND_OK, "the approved payment to the wallet's own address, plus change, passes (%s)", verdictName(v));
+    BRPreparedSendVerdict v = bytes ? BRPreparedSendCheck(w, bytes, script, scriptLen, 3000000, paid(tx)) : BRPreparedSendNotApproved;
+    ck(v == BRPreparedSendOK, "the approved payment to the wallet's own address, plus change, passes (%s)", verdictName(v));
     if (bytes) BRTransactionFree(bytes);
     BRTransactionFree(tx);
     BRWalletFree(w);
