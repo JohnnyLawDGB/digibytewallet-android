@@ -132,6 +132,7 @@ add_library(
         src/main/jni/bridge/jni_publish_outcome.c
         src/main/jni/bridge/jni_recreate_sequence.c
         src/main/jni/bridge/jni_peer_penalty_persist.c
+        src/main/jni/bridge/jni_dust_policy.c
         src/main/jni/bridge/jni_class_paths.h
         src/main/jni/bridge/jni_registry_gen.h
         src/main/jni/bridge/jni_registry.c

@@ -31,6 +31,10 @@ jlongArray JNICALL NativeBridge_digiDollarEvent(JNIEnv *env, jobject thiz, jstri
 jint JNICALL NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex);  /* jni_transaction.c */
 void JNICALL NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jstring JNICALL NativeBridge_dumpAllAddresses(JNIEnv *env, jobject thiz);  /* jni_wallet.c */
+jint JNICALL NativeBridge_dustDecide(JNIEnv *env, jobject thiz, jlong amount, jbyteArray script, jboolean txIsDigiDollar);  /* jni_dust_policy.c */
+jint JNICALL NativeBridge_dustDigiDollarTxType(JNIEnv *env, jobject thiz, jint version);  /* jni_dust_policy.c */
+jlong JNICALL NativeBridge_dustRelayFeePerKb(JNIEnv *env, jobject thiz);  /* jni_dust_policy.c */
+jlong JNICALL NativeBridge_dustThreshold(JNIEnv *env, jobject thiz, jbyteArray script);  /* jni_dust_policy.c */
 void JNICALL NativeBridge_enableAutoCompactFilterFetch(JNIEnv *env, jobject thiz, jlong startHeight);  /* jni_peer.c */
 void JNICALL NativeBridge_fluffTransaction(JNIEnv *env, jobject thiz, jstring jtxid);  /* jni_transaction.c */
 void JNICALL NativeBridge_forceReconnect(JNIEnv *env, jobject thiz);  /* jni_peer.c */
@@ -173,6 +177,10 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "digiDollarTxType", "(Ljava/lang/String;)I", (void *) NativeBridge_digiDollarTxType }, \
     { "disableAutoCompactFilterFetch", "()V", (void *) NativeBridge_disableAutoCompactFilterFetch }, \
     { "dumpAllAddresses", "()Ljava/lang/String;", (void *) NativeBridge_dumpAllAddresses }, \
+    { "dustDecide", "(J[BZ)I", (void *) NativeBridge_dustDecide }, \
+    { "dustDigiDollarTxType", "(I)I", (void *) NativeBridge_dustDigiDollarTxType }, \
+    { "dustRelayFeePerKb", "()J", (void *) NativeBridge_dustRelayFeePerKb }, \
+    { "dustThreshold", "([B)J", (void *) NativeBridge_dustThreshold }, \
     { "enableAutoCompactFilterFetch", "(J)V", (void *) NativeBridge_enableAutoCompactFilterFetch }, \
     { "fluffTransaction", "(Ljava/lang/String;)V", (void *) NativeBridge_fluffTransaction }, \
     { "forceReconnect", "()V", (void *) NativeBridge_forceReconnect }, \
@@ -290,6 +298,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "stopSync", "()V", (void *) NativeBridge_stopSync }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 140
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 144
 
 #endif

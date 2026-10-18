@@ -379,6 +379,26 @@ object NativeBridge {
      */
     external fun cfRecoveryDecide(reason: Int): Int
 
+    // === Dust policy (test-support only) ===
+    /**
+     * The C dust line for an output paying [script], in satoshis ([BRDustPolicy.h]'s
+     * `BRDustThreshold`); -1 if the array could not be read.
+     *
+     * **Not for production use — call [app.aroundtheblock.wallet.core.send.DustPolicy] instead.**
+     * This exists so `DustPolicyParityTest` can bind the Kotlin mirror to the C header, which is
+     * the source of truth (iOS imports it). Pure function: no wallet state, no lock.
+     */
+    external fun dustThreshold(script: ByteArray?): Long
+
+    /** The C decision for one output, packed: bit 0 = isDust, bit 1 = isDigiDollarExempt; -1 if unreadable. */
+    external fun dustDecide(amount: Long, script: ByteArray?, txIsDigiDollar: Boolean): Int
+
+    /** The core's `BRDigiDollarTxType` for a transaction of this [version]: 1-3, or 0 for none. */
+    external fun dustDigiDollarTxType(version: Int): Int
+
+    /** `BR_DUST_RELAY_FEE_PER_KB`, so `DustPolicy.DUST_RELAY_FEE_PER_KB` is asserted against the header. */
+    external fun dustRelayFeePerKb(): Long
+
     // === Message signing ===
     /**
      * Sign an arbitrary message with the wallet's key at the given address index.
