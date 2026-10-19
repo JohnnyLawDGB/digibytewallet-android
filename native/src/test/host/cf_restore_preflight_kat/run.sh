@@ -12,6 +12,9 @@
 #            -DCF_RESTORE_TRUNCATION_RED  the window reader reading a truncated window short
 #            -DCF_RESTORE_ARM_RED         the stored floor wins even after sync
 #   GREEN  the shipped header: every case passes, ALL PASS, exit 0.
+#   VECTORS the core's vectors/cf-restore-preflight/vectors.txt (which Android's host-JVM
+#          CfRestorePreflightVectorsTest holds the Kotlin to) must be its generator's current
+#          output, and every line must agree with the KAT's model of the Kotlin.
 # Every arm under ASan + UBSan; a sanitizer report fails the gate.
 #
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
@@ -25,6 +28,7 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 CC="${CC:-clang}"
+VECTORS="$CORE_DIR/vectors/cf-restore-preflight/vectors.txt"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
@@ -37,7 +41,7 @@ ALL_CASES=(kt_healthy_frontier_keeps_window kt_abandoned_covered_resumes kt_aban
            edge_empty_stored_copies_are_unreadable edge_floor_boundary edge_frontier_does_not_wrap
            edge_arm_heights edge_reset_names edge_window_cap_is_the_parsers
            model_agrees_preflight model_agrees_arm
-           parsers_load_every_valid_ledger parsers_walk_every_valid_window)
+           parsers_load_every_valid_ledger parsers_walk_every_valid_window vectors_match_the_model)
 
 build() {
     local out="$1"; shift
@@ -61,7 +65,7 @@ red_arm() {
     local reds=" $* " out rc c
     build "$BUILD_DIR/$seam" "-D$seam" || { echo "GATE FAILURE: the $seam arm did not compile."; FAIL=1; return; }
     echo "--- COMPARISON ARM (-D$seam): its RED cases MUST fail, every other case pass ---"
-    out="$("$BUILD_DIR/$seam" 2>&1)"; rc=$?
+    out="$("$BUILD_DIR/$seam" "$VECTORS" 2>&1)"; rc=$?
     echo "$out" | grep -Eq "$SAN_RE" && { echo "  [$seam] GATE FAILURE: sanitizer report"; FAIL=1; }
     [ $rc -eq 0 ] && { echo "  [$seam] GATE FAILURE: the comparison arm exited 0; it proves nothing"; FAIL=1; }
     for c in "${ALL_CASES[@]}"; do
@@ -88,7 +92,7 @@ red_arm CF_RESTORE_ARM_RED kt_synced_resume_ignores_stale_deep_birth edge_arm_he
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
-out="$("$BUILD_DIR/green" 2>&1)"; rc=$?
+out="$("$BUILD_DIR/green" "$VECTORS" 2>&1)"; rc=$?
 echo "$out" | grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; FAIL=1; }
 if [ $rc -ne 0 ] || ! echo "$out" | grep -q "^ALL PASS$"; then
     echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; echo "$out" | grep "^FAIL:" | sed 's/^/      /'; FAIL=1
@@ -97,6 +101,15 @@ echo "$out" | grep "^  " | sed 's/^/  [green]/'
 for c in "${ALL_CASES[@]}"; do
     echo "$out" | grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE: not passed"; FAIL=1; }
 done
+
+echo "--- VECTORS: the committed file is the generator's current output ---"
+if ! "$CC" -w -I "$CORE_DIR" "$CORE_DIR/vectors/cf-restore-preflight/generate.c" -o "$BUILD_DIR/gen"; then
+    echo "  [vectors] GATE FAILURE: the generator did not compile"; FAIL=1
+elif ! "$BUILD_DIR/gen" | cmp -s - "$VECTORS"; then
+    echo "  [vectors] GATE FAILURE: $VECTORS is not what generate.c writes; regenerate it (see its header)"; FAIL=1
+else
+    echo "  [vectors] current"
+fi
 
 [ $FAIL -eq 0 ] && echo "cf_restore_preflight_kat: GATE HELD (each RED arm failed its cases; GREEN matches the Kotlin model)"
 exit $FAIL

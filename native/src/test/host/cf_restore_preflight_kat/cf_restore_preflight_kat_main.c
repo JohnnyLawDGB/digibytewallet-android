@@ -11,6 +11,9 @@
 //   parsers_* every ledger the header reads as whole, BRCFScanLedgerParse loads with the same
 //             frontier; every window it reads as whole, BRSavedBlocksDeserialize walks to its last
 //             entry (a stub block parser counts the calls)
+//   vectors_* every line of the core's vectors/cf-restore-preflight/vectors.txt (argv[1]), the file
+//             Android's host-JVM CfRestorePreflightVectorsTest holds the Kotlin to, agrees with the
+//             model (run.sh separately checks the file is the generator's current output)
 //
 // Built five ways by run.sh: the shipped header, and one comparison arm per RED seam
 // (CF_RESTORE_PREFLIGHT_RED, CF_RESTORE_FRONTIER_RED, CF_RESTORE_TRUNCATION_RED,
@@ -631,7 +634,71 @@ static void parser_cases(void)
     result("parsers_walk_every_valid_window", windows > 1000 && walked == windows);
 }
 
-int main(void)
+static int hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; }
+
+static int parse_hex(const char *h, Blob *out)
+{
+    size_t n = strlen(h), i;
+    if (! strcmp(h, "empty")) { out->b = NULL; out->len = 0; return 1; }
+    if (n % 2) return 0;
+    out->len = n / 2;
+    out->b = malloc(out->len ? out->len : 1);
+    for (i = 0; i < out->len; i++) {
+        int hi = hexval(h[2 * i]), lo = hexval(h[2 * i + 1]);
+        if (hi < 0 || lo < 0) return 0;
+        out->b[i] = (uint8_t)(hi << 4 | lo);
+    }
+    return 1;
+}
+
+static const char *reason_name(BRCFRestoreReset r)
+{
+    return r == BR_CF_RESTORE_RESUME ? "RESUME" : BRCFRestoreResetName(r);
+}
+
+// The vector file, line by line, against the model of the Kotlin (not the header: the header's
+// agreement with the file is the generator's, and run.sh diffs that).
+static void vector_cases(const char *path)
+{
+    static Blob ledgers[8192], windows[8192];
+    char line[1 << 16];
+    size_t resets = 0, arms = 0, bad = 0, n = 0;
+    FILE *f = path ? fopen(path, "r") : NULL;
+
+    if (! f) { printf("  vectors: cannot open %s\n", path ? path : "(no path)"); result("vectors_match_the_model", 0); return; }
+    while (fgets(line, sizeof(line), f)) {
+        char a[16], b[16], hex[1 << 16], want[64];
+        int id, synced, checkpoint;
+        long long tip, birth, height;
+        n++;
+        line[strcspn(line, "\n")] = 0;
+        if (line[0] == '#' || ! line[0]) continue;
+        if (sscanf(line, "blob L%d %65535s", &id, hex) == 2 && id >= 0 && id < 8192) {
+            if (! parse_hex(hex, &ledgers[id])) bad++;
+        } else if (sscanf(line, "blob W%d %65535s", &id, hex) == 2 && id >= 0 && id < 8192) {
+            if (! parse_hex(hex, &windows[id])) bad++;
+        } else if (sscanf(line, "reset %15s %15s %d %d %63s", a, b, &synced, &checkpoint, want) == 5) {
+            Blob *l = a[0] == 'L' ? &ledgers[atoi(a + 1)] : NULL, *w = b[0] == 'W' ? &windows[atoi(b + 1)] : NULL;
+            const char *got = reason_name(kt_preflight(l, w, synced, checkpoint));
+            resets++;
+            if (strcmp(got, want)) { if (bad++ < 5) printf("  vectors line %zu: the model says %s, the file %s\n", n, got, want); }
+        } else if (sscanf(line, "arm %d %lld %lld %15s %lld", &synced, &tip, &birth, a, &height) == 5) {
+            int hasFloor = strcmp(a, "-") != 0;
+            arms++;
+            if (kt_model_compactFilterBirthHeight(synced, tip, birth, hasFloor, hasFloor ? atoll(a) : 0) != height) {
+                if (bad++ < 5) printf("  vectors line %zu: the model's arming height differs\n", n);
+            }
+        } else {
+            if (bad++ < 5) printf("  vectors line %zu: unreadable\n", n);
+        }
+    }
+    fclose(f);
+    printf("  vectors: %zu reset and %zu arming lines, %zu disagree with the model\n", resets, arms, bad);
+    result("vectors_match_the_model", bad == 0 && resets > 2000 && arms > 100);
+    for (size_t i = 0; i < 8192; i++) { free(ledgers[i].b); free(windows[i].b); }
+}
+
+int main(int argc, char **argv)
 {
     kotlin_cases();
     edge_cases();
@@ -639,6 +706,7 @@ int main(void)
     printf("  corpus: %zu ledgers, %zu windows\n", g_nLedgers, g_nWindows);
     model_cases();
     parser_cases();
+    vector_cases(argc > 1 ? argv[1] : NULL);
     for (size_t i = 0; i < g_nLedgers; i++) blob_free(&g_ledgers[i]);
     for (size_t i = 0; i < g_nWindows; i++) blob_free(&g_windows[i]);
     if (! g_failed) printf("ALL PASS\n");
