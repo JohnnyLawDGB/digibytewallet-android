@@ -51,7 +51,7 @@ build() {
     [ "$bits" = "32" ] && m=(-m32)
     local san="${SAN:-address,undefined}"
     clang -w -include stdint.h -g -fsanitize="$san" -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/merkle_tree_depth_kat_main.c" \

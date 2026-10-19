@@ -61,7 +61,7 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/merkleblock_pow_kat_main.c" "${UNITS[@]}" \
         -lpthread -lm -o "$out"
@@ -153,7 +153,7 @@ if [ "${1:-}" = "--bench" ] || [ -n "${POW_KAT_BENCH:-}" ]; then
     echo "======================================================================"
     for bits in 64 32; do
         m=(); [ "$bits" = "32" ] && m=(-m32)
-        if clang -w -include stdint.h -O2 "${m[@]}" -DDGB_HEADER_POW_CHECK=2 -DNDEBUG \
+        if clang -w -include stdint.h -O2 ${m[@]+"${m[@]}"} -DDGB_HEADER_POW_CHECK=2 -DNDEBUG \
             -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
             "$SCRIPT_DIR/merkleblock_pow_kat_main.c" "${UNITS[@]}" -lpthread -lm -o "$BUILD_DIR/bench_$bits"; then
             "$BUILD_DIR/bench_$bits" --bench 2>&1 | sed "s/^/  [$bits] /"

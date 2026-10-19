@@ -57,7 +57,7 @@ vendor_objs() {
     local i=0
     for src in "${VENDOR_UNITS[@]}"; do
         local o="$BUILD_DIR/vendor$bits/$((i++))_$(basename "$src" .c).o"
-        clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" \
+        clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} \
             -I "$CORE_DIR" -c "$src" -o "$o" || return 1
     done
 }
@@ -68,7 +68,7 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -DDEBUG -fsanitize=address,undefined -fno-sanitize=vla-bound \
-        -fno-sanitize-recover=undefined -fno-omit-frame-pointer -DDGB_HEADER_POW_CHECK=2 "${m[@]}" "$@" \
+        -fno-sanitize-recover=undefined -fno-omit-frame-pointer -DDGB_HEADER_POW_CHECK=2 ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" -I "$SCRIPT_DIR" \
         "$SCRIPT_DIR/checkpoint_diff_context_kat_main.c" "${UNITS[@]}" "$BUILD_DIR/vendor$bits"/*.o \
         -lm -lpthread -o "$out"

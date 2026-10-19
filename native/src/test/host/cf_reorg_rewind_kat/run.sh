@@ -72,7 +72,7 @@ build() {
     # built. This suite is about the filter chain and the scan ledger, not the target; the level-2 verdicts are
     # pinned in header_diff_v4_kat and int_2026_10_09_e_kat. Proof of work stays at the shipped level.
     "${CC:-clang}" -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
-        -DDGB_HEADER_DIFF_CHECK=1 "${m[@]}" "$@" \
+        -DDGB_HEADER_DIFF_CHECK=1 ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/cf_reorg_rewind_kat_main.c" "${UNITS[@]}" \
         -lm -lpthread -o "$out"

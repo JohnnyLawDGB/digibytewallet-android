@@ -31,7 +31,7 @@ build() {
     shift 2
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
-    clang -w -include stdint.h "${m[@]}" "$@" \
+    clang -w -include stdint.h ${m[@]+"${m[@]}"} "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
