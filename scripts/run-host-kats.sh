@@ -121,7 +121,10 @@ for dir in "$HOST_DIR"/*/; do
         continue
     fi
 
-    if out=$(bash "$dir/run.sh" 2>&1); then
+    # A shell error is a failure whatever the exit code: bash 3.2 (macOS's /bin/bash) stops a
+    # script at an unbound variable and then exits with its EXIT trap's status, often 0, so a
+    # suite that never ran would read as passed.
+    if out=$(bash "$dir/run.sh" 2>&1) && ! grep -Eq 'run\.sh: line [0-9]+: .*unbound variable' <<<"$out"; then
         printf '%-32s %s\n' "$name" "PASS"
         pass=$((pass + 1))
     else

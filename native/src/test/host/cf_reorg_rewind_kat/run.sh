@@ -20,6 +20,9 @@
 # RED cases must FAIL in their arm and PASS in green. GUARD cases must PASS in every arm built.
 # Every case, every arm, both word sizes: no sanitizer report. A build error is never evidence.
 set -uo pipefail   # not -e: the red arms' nonzero exits must be captured
+# Needs bash 4 or later (declare -A). Under an older bash (macOS's /bin/bash is 3.2) the script would
+# stop at it, and the EXIT trap would then report success. Refuse instead.
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "GATE FAILURE: needs bash 4 or later (declare -A); this is bash $BASH_VERSION"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
