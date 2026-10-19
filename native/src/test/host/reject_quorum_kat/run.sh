@@ -83,7 +83,7 @@ UNITS=("$CORE_DIR"/BRWallet.c "$CORE_DIR"/BRTransaction.c "$CORE_DIR"/BRMerkleBl
 build() {   # <out> <64|32> [-D...]
     local out="$1" bits="$2"; shift 2
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" "$@" \
+    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/reject_quorum_kat_main.c" "${UNITS[@]}" -lm -lpthread -o "$out"
 }
