@@ -38,6 +38,21 @@ ATB Wallet release and name its exact version.
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
+### DigiScope services the app uses
+
+The app signs in to and talks to DigiScope at `api.digiscope.me` (the Hub, Digi-ID sign-in,
+quick login, asset metadata). The **server side of those services is in scope**: sign-in and
+session handling, taking over another user's account, reading or changing another user's data,
+and anything that moves value the service holds for its users. These are scored like app
+findings, by the value actually at risk. Features with no security consequence, such as content,
+leaderboards and statistics, are Informational at most.
+
+Test only with accounts you own, and never against another user's account or balance. The Safe
+Harbor rules below apply in full, including no denial-of-service testing.
+
+_This was already stated in SECURITY.md's scope list but missing here, and some server reports were
+closed as out of scope on 2026-10-13. Those reports have been reassessed under this section._
+
 ### The bounty target is one named version, and it holds still
 
 **Test the bounty target named at the top of this file.** It is a single published version, not
@@ -373,3 +388,7 @@ not listed. Anonymity, or no answer, never affects payment.*
   published list of what is being addressed for 4.1.1.
 - **4.1.0: renamed.** The app is now ATB Wallet for DigiByte (DGB), formerly DigiByte Mobile.
   The package (`app.aroundtheblock.wallet`), the signing key and every scope rule are unchanged.
+- **2026-10-21 — DigiScope services stated.** The server side of the DigiScope services the app
+  uses was already in SECURITY.md's scope list; it is now stated here too, with what counts.
+  Reports closed as out of scope on that ground on 2026-10-13 have been reassessed. SECURITY.md
+  no longer restates the version rule ("latest released tag") and points here instead.
