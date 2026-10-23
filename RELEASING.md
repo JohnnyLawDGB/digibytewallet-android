@@ -11,7 +11,7 @@ If this file and anything else disagree, this file wins — then fix the other o
 
 | Product | Package | Status |
 |---|---|---|
-| **DigiByte Mobile** | `app.aroundtheblock.wallet` | **Ships.** Play (open testing) and sideload. |
+| **HoldFast Wallet** (named DigiByte Mobile, then ATB Wallet, before 4.1.1) | `app.aroundtheblock.wallet` | **Ships.** Play (open testing) and sideload. |
 | DigiByte Wallet | `io.digibyte` | **Retired at v4.0.87.2 (2026-10-10).** Receives nothing, not even security fixes. |
 
 > **`develop` builds DigiByte Mobile** since 2026-10-11. Before that it still built
