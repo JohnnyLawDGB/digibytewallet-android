@@ -18,7 +18,7 @@
     <string name="onb_create">नया वॉलेट बनाएँ</string>
     <string name="onb_recover">मौजूदा वॉलेट पुनर्प्राप्त करें</string>
     <string name="onb_footer">DigiByte (DGB) नेटवर्क के लिए स्वतंत्र वॉलेट</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">स्क्रीनशॉट अवरुद्ध हैं। इन शब्दों को लिख लें: इन्हें पुनर्प्राप्त नहीं किया जा सकता।</string>
     <string name="seed_title">आपका रिकवरी वाक्यांश</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">गलत PIN। शेष प्रयास: %1$d</string>
     <string name="battery_title">पृष्ठभूमि में सिंक चालू रखें</string>
     <string name="battery_body">स्क्रीन बंद होने पर Android इस वॉलेट को स्लीप में डाल सकता है, जिससे DigiByte नेटवर्क से इसका कनेक्शन टूट जाता है और यह तब तक 0 पीयर पर अटका रह सकता है जब तक आप इसे दोबारा न खोलें।\n\nइसे बिना प्रतिबंध चलने दें ताकि सिंक जारी रहे।</string>
-    <string name="battery_body_samsung">\n\nSamsung पर, Device Care → Battery → \"Never sleeping apps\" भी खोलें और ATB Wallet जोड़ें।</string>
+    <string name="battery_body_samsung">\n\nSamsung पर, Device Care → Battery → \"Never sleeping apps\" भी खोलें और HoldFast Wallet जोड़ें।</string>
     <string name="battery_open_settings">सेटिंग्स खोलें</string>
     <string name="tor_title">नई गोपनीयता सुविधा</string>
     <string name="tor_body">Tor रूटिंग अब उपलब्ध है। सक्षम होने पर, आपका वॉलेट Tor के माध्यम से DigiByte नेटवर्क से जुड़ता है और पीयर से आपका IP पता छिपाता है।\n\nTor रूटिंग सक्षम करें?</string>
@@ -539,9 +539,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">यह सॉफ़्टवेयर MIT लाइसेंस के तहत प्रदान किया गया है।</string>
     <string name="ab_tagline">DigiByte एक विकेंद्रीकृत ब्लॉकचेन और डिजिटल मुद्रा है।</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Around The Block LLC का स्वतंत्र वॉलेट; DigiByte Foundation, DigiByte Alliance या DigiByte-Core से संबद्ध या उनके द्वारा समर्थित नहीं।</string>
-    <string name="ab_website">Around The Block वेबसाइट</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC का स्वतंत्र वॉलेट। यह आधिकारिक DigiByte ऐप नहीं है।</string>
 
     <string name="tx_conf_short">%1$d पुष्टि</string>
     <string name="tx_confirmed">पुष्ट</string>
@@ -655,7 +654,7 @@
     <string name="restore_scan_title">निजी रूप से पुनर्स्थापित करें</string>
     <string name="restore_scan_body">आगे बढ़ने के बाद, यह फ़ोन आपके वॉलेट के लेन-देन खुद ढूँढता है: नेटिव (dgb1q…), legacy (D…), Taproot और DigiDollar पते, आपके पते किसी को भेजे बिना।</string>
     <string name="restore_other_title">किसी दूसरे वॉलेट ऐप का वाक्यांश?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor और कुछ पुराने वॉलेट सिक्के ऐसे पता फ़ॉर्मैट पर रखते हैं जिनका यह वॉलेट उपयोग नहीं करता, इसलिए सिंक उन्हें नहीं देख सकता। एक जाँच उन्हें ढूँढ सकती है, लेकिन यह आपके वाक्यांश से बने पते DigiScope (api.digiscope.me) को भेजती है, जो उन पर मौजूद किसी भी फंड की जानकारी देता है। ATB Wallet या पुराने DigiByte ऐप के वाक्यांश के लिए ज़रूरी नहीं। आप इसे बाद में सेटिंग्स → दूसरे वॉलेट से फंड पुनर्प्राप्त करें से भी चला सकते हैं।</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor और कुछ पुराने वॉलेट सिक्के ऐसे पता फ़ॉर्मैट पर रखते हैं जिनका यह वॉलेट उपयोग नहीं करता, इसलिए सिंक उन्हें नहीं देख सकता। एक जाँच उन्हें ढूँढ सकती है, लेकिन यह आपके वाक्यांश से बने पते DigiScope (api.digiscope.me) को भेजती है, जो उन पर मौजूद किसी भी फंड की जानकारी देता है। HoldFast Wallet या पुराने DigiByte ऐप के वाक्यांश के लिए ज़रूरी नहीं। आप इसे बाद में सेटिंग्स → दूसरे वॉलेट से फंड पुनर्प्राप्त करें से भी चला सकते हैं।</string>
     <string name="restore_other_check">अन्य फ़ॉर्मैट जाँचें</string>
     <string name="restore_scan_deriving">पते बनाए जा रहे हैं…</string>
     <string name="restore_scan_duration">नोड के अनुसार इसमें 30-90 सेकंड लग सकते हैं।</string>
