@@ -83,7 +83,7 @@ fun AboutScreen(navController: NavController) {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.atb_logo),
+                            painter = painterResource(id = R.drawable.holdfast_logo),
                             contentDescription = stringResource(R.string.app_name),
                             modifier = Modifier.size(64.dp)
                         )
