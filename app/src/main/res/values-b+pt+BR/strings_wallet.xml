@@ -413,7 +413,7 @@
     <string name="ni_save">Salvar</string>
     <string name="ni_exclusive">Somente meu nó (exclusivo)</string>
     <string name="ni_exclusive_sub">Sincronizar exclusivamente pelo seu nó. Se ele ficar offline, a carteira não terá outros pares até você reativar os pares públicos.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Compatível com nós DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Informações da carteira</string>
     <string name="ab_wallet_type">Tipo de carteira</string>
     <string name="ab_hd_path">Caminho HD</string>

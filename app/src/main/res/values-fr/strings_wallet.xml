@@ -401,7 +401,7 @@
     <string name="ni_save">Enregistrer</string>
     <string name="ni_exclusive">Uniquement mon nœud (exclusif)</string>
     <string name="ni_exclusive_sub">Synchroniser exclusivement via votre nœud. S\'il se déconnecte, le portefeuille n\'a plus aucun pair jusqu\'à ce que vous réactiviez les pairs publics.</string>
-    <string name="ab_powered_by">Propulsé par DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Compatible avec les nœuds DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Infos du portefeuille</string>
     <string name="ab_wallet_type">Type de portefeuille</string>
     <string name="ab_hd_path">Chemin HD</string>

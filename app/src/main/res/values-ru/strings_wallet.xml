@@ -416,7 +416,7 @@
     <string name="ni_save">Сохранить</string>
     <string name="ni_exclusive">Только мой узел (эксклюзивно)</string>
     <string name="ni_exclusive_sub">Синхронизироваться исключительно через ваш узел. Если он отключится, у кошелька не будет других узлов, пока вы снова не включите публичные.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Совместим с узлами DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Сведения о кошельке</string>
     <string name="ab_wallet_type">Тип кошелька</string>
     <string name="ab_hd_path">HD-путь</string>

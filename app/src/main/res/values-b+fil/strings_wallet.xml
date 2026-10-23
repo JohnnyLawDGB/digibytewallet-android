@@ -410,7 +410,7 @@
     <string name="ni_save">I-save</string>
     <string name="ni_exclusive">Ang node ko lang (eksklusibo)</string>
     <string name="ni_exclusive_sub">Mag-sync lamang sa pamamagitan ng node mo. Kapag na-offline ito, walang ibang peer ang wallet hanggang muli mong i-enable ang pampublikong peers.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Gumagana sa mga DigiByte Core 9.26 node</string>
     <string name="ab_wallet_info">Impormasyon ng Wallet</string>
     <string name="ab_wallet_type">Uri ng Wallet</string>
     <string name="ab_hd_path">HD Path</string>

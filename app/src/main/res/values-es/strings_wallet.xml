@@ -415,7 +415,7 @@
     <string name="ni_save">Guardar</string>
     <string name="ni_exclusive">Solo mi nodo (exclusivo)</string>
     <string name="ni_exclusive_sub">Sincronizar únicamente a través de tu nodo. Si se desconecta, la billetera no tendrá otros pares hasta que vuelvas a habilitar los pares públicos.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Compatible con nodos DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Información de la billetera</string>
     <string name="ab_wallet_type">Tipo de billetera</string>
     <string name="ab_hd_path">Ruta HD</string>

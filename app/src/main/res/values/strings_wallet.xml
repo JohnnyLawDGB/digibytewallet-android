@@ -502,7 +502,7 @@
     <string name="ni_exclusive_sub">Sync solely through your node. If it goes offline the wallet has no other peers until you re-enable public peers.</string>
 
     <!-- ── About ────────────────────────────────────────────────────────────────── -->
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Works with DigiByte Core 9.26 nodes</string>
     <string name="ab_wallet_info">Wallet Info</string>
     <string name="ab_wallet_type">Wallet Type</string>
     <string name="ab_hd_path">HD Path</string>

@@ -407,7 +407,7 @@
     <string name="ni_save">保存</string>
     <string name="ni_exclusive">自分のノードのみ（排他）</string>
     <string name="ni_exclusive_sub">自分のノードだけで同期します。オフラインになると、公開ピアを再度有効にするまでウォレットには他のピアがありません。</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">DigiByte Core 9.26 ノードに対応</string>
     <string name="ab_wallet_info">ウォレット情報</string>
     <string name="ab_wallet_type">ウォレット種別</string>
     <string name="ab_hd_path">HD パス</string>

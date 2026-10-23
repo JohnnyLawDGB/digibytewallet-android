@@ -407,7 +407,7 @@
     <string name="ni_save">Simpan</string>
     <string name="ni_exclusive">Hanya node saya (eksklusif)</string>
     <string name="ni_exclusive_sub">Sinkron hanya lewat node Anda. Jika node offline, dompet tidak punya peer lain sampai Anda mengaktifkan kembali peer publik.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Kompatibel dengan node DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Info Dompet</string>
     <string name="ab_wallet_type">Jenis Dompet</string>
     <string name="ab_hd_path">Jalur HD</string>

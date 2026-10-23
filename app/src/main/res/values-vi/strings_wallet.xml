@@ -407,7 +407,7 @@
     <string name="ni_save">Lưu</string>
     <string name="ni_exclusive">Chỉ nút của tôi (độc quyền)</string>
     <string name="ni_exclusive_sub">Chỉ đồng bộ qua nút của bạn. Nếu nút ngoại tuyến, ví sẽ không có peer nào khác cho đến khi bạn bật lại peer công khai.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Tương thích với nút DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Thông tin ví</string>
     <string name="ab_wallet_type">Loại ví</string>
     <string name="ab_hd_path">Đường dẫn HD</string>

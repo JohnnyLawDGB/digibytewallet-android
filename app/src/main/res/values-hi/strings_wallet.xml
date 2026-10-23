@@ -410,7 +410,7 @@
     <string name="ni_save">सहेजें</string>
     <string name="ni_exclusive">केवल मेरा नोड (विशेष)</string>
     <string name="ni_exclusive_sub">केवल अपने नोड से सिंक करें। यदि वह ऑफ़लाइन हो जाए तो जब तक आप सार्वजनिक पीयर पुनः सक्षम नहीं करते, वॉलेट के पास कोई अन्य पीयर नहीं होगा।</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">DigiByte Core 9.26 नोड्स के साथ संगत</string>
     <string name="ab_wallet_info">वॉलेट जानकारी</string>
     <string name="ab_wallet_type">वॉलेट प्रकार</string>
     <string name="ab_hd_path">HD पाथ</string>

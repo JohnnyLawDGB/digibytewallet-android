@@ -418,7 +418,7 @@
     <string name="ni_save">Speichern</string>
     <string name="ni_exclusive">Nur mein Knoten (exklusiv)</string>
     <string name="ni_exclusive_sub">Ausschließlich über Ihren Knoten synchronisieren. Geht er offline, hat die Wallet keine anderen Peers, bis Sie öffentliche Peers wieder aktivieren.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Kompatibel mit DigiByte-Core-9.26-Nodes</string>
     <string name="ab_wallet_info">Wallet-Info</string>
     <string name="ab_wallet_type">Wallet-Typ</string>
     <string name="ab_hd_path">HD-Pfad</string>

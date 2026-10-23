@@ -407,7 +407,7 @@
     <string name="ni_save">保存</string>
     <string name="ni_exclusive">仅使用我的节点（独占）</string>
     <string name="ni_exclusive_sub">仅通过您的节点同步。若它离线，在您重新启用公共节点前，钱包将没有其他节点可用。</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">兼容 DigiByte Core 9.26 节点</string>
     <string name="ab_wallet_info">钱包信息</string>
     <string name="ab_wallet_type">钱包类型</string>
     <string name="ab_hd_path">HD 路径</string>
