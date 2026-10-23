@@ -3895,7 +3895,7 @@ class SyncService : Service() {
         val indeterminate = pct == 0 && peerCount == 0
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(app.aroundtheblock.wallet.R.string.app_name))
+            .setContentTitle(getString(app.aroundtheblock.wallet.R.string.app_name_display))
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setProgress(100, pct, indeterminate)

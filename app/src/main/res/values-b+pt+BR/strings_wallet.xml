@@ -18,7 +18,7 @@
     <string name="onb_create">Criar nova carteira</string>
     <string name="onb_recover">Recuperar carteira existente</string>
     <string name="onb_footer">Carteira independente para a rede DigiByte (DGB)</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">As capturas de tela estão bloqueadas. Anote estas palavras: elas não podem ser recuperadas.</string>
     <string name="seed_title">Sua frase de recuperação</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">PIN incorreto. Tentativas restantes: %1$d</string>
     <string name="battery_title">Manter a sincronização em segundo plano</string>
     <string name="battery_body">O Android pode suspender esta carteira quando a tela está desligada, o que interrompe a conexão com a rede DigiByte e pode deixá-la parada em 0 pares até você abri-la novamente.\n\nPermita que ela seja executada sem restrições para continuar sincronizando.</string>
-    <string name="battery_body_samsung">\n\nNo Samsung, abra também Assistência do dispositivo → Bateria → \"Apps que nunca entram em suspensão\" e adicione o ATB Wallet.</string>
+    <string name="battery_body_samsung">\n\nNo Samsung, abra também Assistência do dispositivo → Bateria → \"Apps que nunca entram em suspensão\" e adicione o HoldFast Wallet.</string>
     <string name="battery_open_settings">Abrir configurações</string>
     <string name="tor_title">Novo recurso de privacidade</string>
     <string name="tor_body">O roteamento Tor já está disponível. Quando ativado, sua carteira se conecta à rede DigiByte por meio do Tor, ocultando seu endereço IP dos pares.\n\nAtivar o roteamento Tor?</string>
@@ -413,7 +413,7 @@
     <string name="ni_save">Salvar</string>
     <string name="ni_exclusive">Somente meu nó (exclusivo)</string>
     <string name="ni_exclusive_sub">Sincronizar exclusivamente pelo seu nó. Se ele ficar offline, a carteira não terá outros pares até você reativar os pares públicos.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Compatível com nós DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Informações da carteira</string>
     <string name="ab_wallet_type">Tipo de carteira</string>
     <string name="ab_hd_path">Caminho HD</string>
@@ -542,9 +542,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Este software é fornecido sob a Licença MIT.</string>
     <string name="ab_tagline">O DigiByte é uma blockchain descentralizada e uma moeda digital.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Carteira independente da Around The Block LLC; não é afiliada nem endossada pela DigiByte Foundation, DigiByte Alliance ou DigiByte-Core.</string>
-    <string name="ab_website">Site da Around The Block</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Carteira independente da Around The Block LLC. Não é um app oficial da DigiByte.</string>
 
     <string name="tx_conf_short">%1$d conf.</string>
     <string name="tx_confirmed">Confirmada</string>
@@ -658,7 +657,7 @@
     <string name="restore_scan_title">Restaurar com privacidade</string>
     <string name="restore_scan_body">Depois que você continuar, este celular encontrará sozinho as transações da sua carteira: endereços nativos (dgb1q…), legacy (D…), Taproot e DigiDollar, sem enviar seus endereços a ninguém.</string>
     <string name="restore_other_title">Frase de outro app de carteira?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor e algumas carteiras antigas guardam moedas em formatos de endereço que esta carteira não usa, então a sincronização não consegue vê-las. Uma verificação pode encontrá-las, mas ela envia os endereços derivados da sua frase para a DigiScope (api.digiscope.me), que informa os fundos que houver neles. Não é necessária para uma frase do ATB Wallet ou do antigo app DigiByte. Você também pode executá-la depois em Configurações → Recuperar fundos de outra carteira.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor e algumas carteiras antigas guardam moedas em formatos de endereço que esta carteira não usa, então a sincronização não consegue vê-las. Uma verificação pode encontrá-las, mas ela envia os endereços derivados da sua frase para a DigiScope (api.digiscope.me), que informa os fundos que houver neles. Não é necessária para uma frase do HoldFast Wallet ou do antigo app DigiByte. Você também pode executá-la depois em Configurações → Recuperar fundos de outra carteira.</string>
     <string name="restore_other_check">Verificar outros formatos</string>
     <string name="restore_scan_deriving">Derivando endereços…</string>
     <string name="restore_scan_duration">Isso pode levar de 30 a 90 segundos, dependendo do nó.</string>

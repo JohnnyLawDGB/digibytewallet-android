@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <resources>
-  <string name="app_name" translatable="false">ATB Wallet</string>
+  <string name="app_name" translatable="false">HoldFast</string>
   <string name="tab_wallet">Wallet</string>
   <string name="tab_hub">Hub</string>
   <string name="tab_digi_id">Digi-ID</string>
@@ -16,7 +16,7 @@
   <string name="About.reddit">https://www.reddit.com/r/Digibyte/</string>
   <!-- Terms of Use button label -->
   <!-- About screen title -->
-  <string name="About.title">ATB Wallet is an independent, open-source wallet for DigiByte (DGB), built by Around The Block LLC. It is simple enough for a first-time user, yet powerful enough for regular power-users.</string>
+  <string name="About.title">HoldFast Wallet is an independent, open-source wallet for the DigiByte (DGB) network, built by Around The Block LLC. It is simple enough for a first-time user, yet powerful enough for regular power-users.</string>
   <!-- About screen twitter label -->
   <string name="About.twitter">https://twitter.com/digibytecoin</string>
   <!-- Close modal button accessibility label -->
@@ -28,7 +28,7 @@
   <!-- Keystore error -->
   <string name="Alert.keystore.generic.android">There is a problem with your Android OS keystore, please contact us at https://www.aroundtheblock.us/contact/</string>
   <!-- KeyStore error, keys are invalidated -->
-  <string name="Alert.keystore.invalidated.android">Your ATB Wallet encrypted data was recently invalidated because your Android lock screen was disabled.</string>
+  <string name="Alert.keystore.invalidated.android">Your HoldFast Wallet encrypted data was recently invalidated because your Android lock screen was disabled.</string>
   <!-- Keystore error title -->
   <string name="Alert.keystore.title.android">Android KeyStore Error</string>
   <!-- Alert Header Label (the paper key was set) -->
@@ -63,7 +63,7 @@
   <!-- Exchange rate label -->
   <string name="DefaultCurrency.rateLabel">Exchange Rate</string>
   <!-- Message that gets shown when we've detected the user has encountered the looping lock-screen bug. (preserve [ ] characters) -->
-  <string name="ErrorMessages.loopingLockScreen.android">ATB Wallet can not be authenticated due to a bug in your version of Android. [Please tap here for more information.]</string>
+  <string name="ErrorMessages.loopingLockScreen.android">HoldFast Wallet can not be authenticated due to a bug in your version of Android. [Please tap here for more information.]</string>
   <!-- Fingerprint was not recognized by the scanner, please try scanning again -->
   <string name="ErrorMessages.touchIdFailed.android">Fingerprint not recognized. Please try again.</string>
   <!-- Checking private key balance progress view text -->
@@ -77,7 +77,7 @@
   <!-- Import signing error message -->
   <string name="Import.Error.signing">Error signing transaction</string>
   <!-- Import wallet intro screen message -->
-  <string name="Import.message">Importing a wallet transfers all the DigiByte from your other wallet into your ATB Wallet using a single transaction.</string>
+  <string name="Import.message">Importing a wallet transfers all the DigiByte from your other wallet into your HoldFast Wallet using a single transaction.</string>
   <!-- Enter password alert view title -->
   <string name="Import.password">This private key is password protected.</string>
   <!-- Scan Private key button label -->
@@ -89,8 +89,8 @@
   <!-- Ignore jailbreak warning button -->
   <!-- Jailbreak warning message -->
   <string name="JailbreakWarnings.messageWithoutBalance">DEVICE SECURITY COMPROMISED\n Any
-    \'jailbreak\' app can access ATB Wallet\'s keychain data and steal your DigiByte. Please only
-    use ATB Wallet on a non-jailbroken device.
+    \'jailbreak\' app can access HoldFast Wallet\'s keychain data and steal your DigiByte. Please only
+    use HoldFast Wallet on a non-jailbroken device.
   </string>
   <!-- Jailbreak warning title -->
   <string name="JailbreakWarnings.title">WARNING</string>
@@ -143,11 +143,11 @@
   <!-- Button on fingerprint prompt so the user can enter their PIN instead -->
   <string name="Prompts.TouchId.usePin.android">PIN</string>
   <!-- Upgrade PIN prompt body. -->
-  <string name="Prompts.UpgradePin.body">ATB Wallet has upgraded to using a 6-digit PIN. Tap here to upgrade.</string>
+  <string name="Prompts.UpgradePin.body">HoldFast Wallet has upgraded to using a 6-digit PIN. Tap here to upgrade.</string>
   <!-- Upgrade PIN prompt title. -->
   <string name="Prompts.UpgradePin.title">Upgrade PIN</string>
   <!-- Notifications will be added later but users can set their preferences now, which is why we specify "in the future". -->
-  <string name="PushNotifications.body">Turn on notifications to receive special messages from ATB Wallet in the future.</string>
+  <string name="PushNotifications.body">Turn on notifications to receive special messages from HoldFast Wallet in the future.</string>
   <!-- Push notifications toggle switch label -->
   <string name="PushNotifications.label">Push Notifications</string>
   <!-- Push notifications settings view title label -->
@@ -215,9 +215,9 @@
   <!-- Security center fingerprint authentication button -->
   <string name="SecurityCenter.touchIdTitle.android">Fingerprint Authentication</string>
   <!-- Instructions how to allow the camera access for the app -->
-  <string name="Send.cameraUnavailabeMessage.android">Allow camera access in \"Settings\" &gt; \"Apps\" &gt; \"ATB Wallet\" &gt; \"Permissions\"</string>
+  <string name="Send.cameraUnavailabeMessage.android">Allow camera access in \"Settings\" &gt; \"Apps\" &gt; \"HoldFast Wallet\" &gt; \"Permissions\"</string>
   <!-- Permission required to access camera -->
-  <string name="Send.cameraUnavailabeTitle.android">ATB Wallet is not allowed to access the camera</string>
+  <string name="Send.cameraUnavailabeTitle.android">HoldFast Wallet is not allowed to access the camera</string>
   <!-- Warning when sending to self. -->
   <string name="Send.containsAddress">The destination is your own address. You cannot send to yourself.</string>
   <!-- Description for sending money label -->
@@ -255,13 +255,13 @@
   <!-- Import wallet left message -->
   <string name="Settings.importLeftMessage">Wallet to be Imported</string>
   <!-- Import wallet right message -->
-  <string name="Settings.importRightMessage">Your ATB Wallet</string>
+  <string name="Settings.importRightMessage">Your HoldFast Wallet</string>
   <!-- Import wallet label -->
   <string name="Settings.importTitle">Import Wallet</string>
   <!-- Manage settings section header -->
   <string name="Settings.manage">Manage</string>
   <!-- Restore screen lower label. -->
-  <string name="Settings.restore_label">Your ATB Wallet on this Device</string>
+  <string name="Settings.restore_label">Your HoldFast Wallet on this Device</string>
   <!-- Sync blockchain label -->
   <string name="Settings.sync">Sync Blockchain</string>
   <!-- The fingerprint spending limit -->
@@ -330,9 +330,9 @@
   <!-- Updating webview message -->
   <string name="Webview.updating">Updating...</string>
   <!-- Welcome screen text. (?) will be replaced with the help icon users should look for. -->
-  <string name="Welcome.body">ATB Wallet has a brand new look and some new features.\n\nIf you need help, look for the (?) in the top right of most screens.</string>
+  <string name="Welcome.body">HoldFast Wallet has a brand new look and some new features.\n\nIf you need help, look for the (?) in the top right of most screens.</string>
   <!-- Top title of welcome screen -->
-  <string name="Welcome.title">Welcome to ATB Wallet!</string>
+  <string name="Welcome.title">Welcome to HoldFast Wallet!</string>
   <!-- Wipe wallet alert message -->
   <string name="WipeWallet.alertMessage">Are you sure you want to delete this wallet?</string>
   <!-- Wipe wallet alert title -->

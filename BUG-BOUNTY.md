@@ -1,8 +1,8 @@
-# ATB Wallet for DigiByte (DGB): Bug Bounty Program
+# HoldFast Wallet: Bug Bounty Program
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **ATB Wallet for DigiByte (DGB) 4.1.0** (`app.aroundtheblock.wallet`), from its release date.
+**Bounty target:** **HoldFast Wallet 4.1.0** (`app.aroundtheblock.wallet`, published as ATB Wallet for DigiByte (DGB) until the rename), from its release date.
 4.0.89 stays in scope for **14 days** after that date under the overlap rule below. Before you
 start, read "Known issues being addressed for 4.1.1" below: those are already on our list.
 
@@ -11,11 +11,11 @@ reports earn named credit rather than payment; please read the tiers before spen
 report.
 
 This program rewards security researchers who report verifiable vulnerabilities
-in ATB Wallet for DigiByte (DGB) (`app.aroundtheblock.wallet`), the Android wallet published by
-Around The Block LLC. The same app was named DigiByte Mobile in v4.0.88 and v4.0.89. It was
-previously published as DigiByte Wallet (`io.digibyte`), whose final release was v4.0.87.2.
-ATB Wallet is independent: it is not affiliated with or endorsed by the DigiByte Foundation,
-DigiByte Alliance or DigiByte-Core. The wallet is a non-custodial, sovereignty-first
+in HoldFast Wallet (`app.aroundtheblock.wallet`), the Android wallet published by
+Around The Block LLC. The same app was formerly named ATB Wallet for DigiByte (DGB), and
+DigiByte Mobile in v4.0.88 and v4.0.89; the package is unchanged and each rename updated it in
+place. It was previously published as DigiByte Wallet (`io.digibyte`), whose final release was
+v4.0.87.2. HoldFast Wallet is independent: it is not an official DigiByte app. The wallet is a non-custodial, sovereignty-first
 SPV wallet that holds user funds — bugs that compromise user funds, secrets,
 or privacy are taken seriously and rewarded accordingly.
 
@@ -25,15 +25,15 @@ or privacy are taken seriously and rewarded accordingly.
 
 ### Application
 
-**The wallet is now ATB Wallet, `app.aroundtheblock.wallet`.** The old app,
+**The wallet is now HoldFast Wallet, `app.aroundtheblock.wallet`.** The old app,
 `io.digibyte`, reached its final release at **v4.0.87.2 on 2026-10-10** and is **out of
 scope**: it receives no further fixes, so a report against it cannot be acted on. Several
 reports have already been closed for testing a retired or frozen version. Test the current
-ATB Wallet release and name its exact version.
+HoldFast Wallet release and name its exact version.
 
 | Asset | Where to get it |
 |-------|-----------------|
-| ATB Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
+| HoldFast Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
 | `aroundtheblock-wallet-v4.1.0.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.0 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
@@ -138,7 +138,7 @@ A theoretical critical-tier finding without a PoC: scored as Medium until a PoC
 lands.
 
 Payment is in DGB to an address you provide. We do not pay in fiat or other
-cryptocurrencies. This is the ATB Wallet bounty, paid in DigiByte.
+cryptocurrencies. This is the HoldFast Wallet bounty, paid in DigiByte.
 
 One further rule, because most of what we now receive arrives in machine-generated batches: a
 reward is **per unique vulnerability, not per email**. Seven reports of one root cause are one
@@ -165,7 +165,7 @@ Reports about the following are **closed without payout**:
 ### Already known / accepted
 
 - The retired io.digibyte app's signature lineage starts from a debug certificate (Scheme v3
-  rotation by design). io.digibyte is out of scope; ATB Wallet is signed by a single release
+  rotation by design). io.digibyte is out of scope; HoldFast Wallet is signed by a single release
   key with no lineage, and its build refuses an artifact with any other signer.
 - AndroidX `WorkManager` / `ProfileInstaller` exported components
   protected by signature-level system permissions (third-party,
@@ -373,3 +373,6 @@ not listed. Anonymity, or no answer, never affects payment.*
   published list of what is being addressed for 4.1.1.
 - **4.1.0: renamed.** The app is now ATB Wallet for DigiByte (DGB), formerly DigiByte Mobile.
   The package (`app.aroundtheblock.wallet`), the signing key and every scope rule are unchanged.
+- **2026-10-23: renamed again.** The app is now HoldFast Wallet, formerly ATB Wallet for
+  DigiByte (DGB) and DigiByte Mobile. The package (`app.aroundtheblock.wallet`), the signing key
+  and every scope rule are unchanged, and an installed copy updates in place.

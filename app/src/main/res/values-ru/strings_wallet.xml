@@ -18,7 +18,7 @@
     <string name="onb_create">Создать новый кошелёк</string>
     <string name="onb_recover">Восстановить существующий кошелёк</string>
     <string name="onb_footer">Независимый кошелёк для сети DigiByte (DGB)</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Снимки экрана заблокированы. Запишите эти слова: восстановить их невозможно.</string>
     <string name="seed_title">Ваша фраза восстановления</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Неверный PIN-код. Осталось попыток: %1$d</string>
     <string name="battery_title">Продолжать синхронизацию в фоне</string>
     <string name="battery_body">Когда экран выключен, Android может перевести кошелёк в спящий режим. Это разрывает соединение с сетью DigiByte, и кошелёк может остаться с 0 узлов, пока вы не откроете приложение снова.\n\nРазрешите работу без ограничений, чтобы синхронизация продолжалась.</string>
-    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте ATB Wallet.</string>
+    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте HoldFast Wallet.</string>
     <string name="battery_open_settings">Открыть настройки</string>
     <string name="tor_title">Новая функция приватности</string>
     <string name="tor_body">Маршрутизация через Tor теперь доступна. При включении кошелёк подключается к сети DigiByte через Tor, скрывая ваш IP-адрес от узлов.\n\nВключить маршрутизацию Tor?</string>
@@ -416,7 +416,7 @@
     <string name="ni_save">Сохранить</string>
     <string name="ni_exclusive">Только мой узел (эксклюзивно)</string>
     <string name="ni_exclusive_sub">Синхронизироваться исключительно через ваш узел. Если он отключится, у кошелька не будет других узлов, пока вы снова не включите публичные.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Совместим с узлами DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Сведения о кошельке</string>
     <string name="ab_wallet_type">Тип кошелька</string>
     <string name="ab_hd_path">HD-путь</string>
@@ -545,9 +545,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Это программное обеспечение распространяется по лицензии MIT.</string>
     <string name="ab_tagline">DigiByte: децентрализованный блокчейн и цифровая валюта.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Независимый кошелёк от Around The Block LLC; не связан с DigiByte Foundation, DigiByte Alliance или DigiByte-Core и не одобрен ими.</string>
-    <string name="ab_website">Сайт Around The Block</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Независимый кошелёк от Around The Block LLC. Не является официальным приложением DigiByte.</string>
 
     <string name="tx_conf_short">подтв.: %1$d</string>
     <string name="tx_confirmed">Подтверждена</string>
@@ -661,7 +660,7 @@
     <string name="restore_scan_title">Приватное восстановление</string>
     <string name="restore_scan_body">После продолжения этот телефон сам найдёт транзакции вашего кошелька: нативные (dgb1q…), legacy (D…), Taproot- и DigiDollar-адреса, никому не отправляя ваши адреса.</string>
     <string name="restore_other_title">Фраза из другого приложения-кошелька?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor и некоторые старые кошельки хранят монеты на форматах адресов, которые этот кошелёк не использует, поэтому синхронизация их не видит. Проверка может их найти, но она отправляет адреса, производные от вашей фразы, в DigiScope (api.digiscope.me), который сообщает о средствах на них. Для фразы из ATB Wallet или из старого приложения DigiByte не требуется. Её также можно запустить позже: Настройки → Восстановить средства из другого кошелька.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor и некоторые старые кошельки хранят монеты на форматах адресов, которые этот кошелёк не использует, поэтому синхронизация их не видит. Проверка может их найти, но она отправляет адреса, производные от вашей фразы, в DigiScope (api.digiscope.me), который сообщает о средствах на них. Для фразы из HoldFast Wallet или из старого приложения DigiByte не требуется. Её также можно запустить позже: Настройки → Восстановить средства из другого кошелька.</string>
     <string name="restore_other_check">Проверить другие форматы</string>
     <string name="restore_scan_deriving">Деривация адресов…</string>
     <string name="restore_scan_duration">Это может занять 30–90 секунд в зависимости от узла.</string>
