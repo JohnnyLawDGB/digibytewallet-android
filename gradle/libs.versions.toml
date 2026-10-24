@@ -56,7 +56,7 @@ junit = "4.13.2"
 mockk = "1.13.12"
 orgJson = "20240303"
 androidxTestRunner = "1.6.2"
-androidxTestRules = "1.6.1"
+androidxTestRules = "1.7.0"
 androidxTestExtJunit = "1.2.1"
 
 [libraries]
