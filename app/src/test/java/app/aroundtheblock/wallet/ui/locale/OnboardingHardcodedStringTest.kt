@@ -111,7 +111,7 @@ class OnboardingHardcodedStringTest {
         // Send: literal address prefixes and value+ticker composites.
         "TD…", "DD…", "%.8f DGB", "\$amountDgb DGB", "\$\$amountFiat", "txid",
         // Build flavour, a version fallback, and the brand+version footer.
-        "digiTestnet", "unknown", "ATB Wallet v\$versionName",
+        "digiTestnet", "unknown", "HoldFast Wallet v\$versionName",
         // Asset screens: truncated ids, unit composites ("sats" is a unit like DGB) and format
         // patterns. Each is a value plus a symbol, with no sentence to translate.
         "txid \${s.txid.take(12)}…\${s.txid.takeLast(8)}",
@@ -135,8 +135,10 @@ class OnboardingHardcodedStringTest {
         "SEK", "NOK", "\$it — \${currencyName(it)}", "CoinGecko · Binance",
         "m/84\'/20\'/0\'", "v\$versionName",
         "github.com/JohnnyLawDGB/digibytewallet-android", "digibyte.org",
-        // The publisher's site, shown under the "Around The Block website" link on About.
-        "aroundtheblock.us",
+        // About links: the DigiScope brand site and the publisher's site. Labels are names,
+        // shown untranslated; subtitles are domains.
+        "DigiScope", "digiscope.me",
+        "Around The Block", "aroundtheblock.us",
         "github.com/JohnnyLawDGB/digibytewallet-android/issues",
         "• \$range", "  ·  \$it", "10.0.0.5  or  node.example.com:12024",
         // Activity row: value+ticker composites, a date pattern, a truncated address, and the

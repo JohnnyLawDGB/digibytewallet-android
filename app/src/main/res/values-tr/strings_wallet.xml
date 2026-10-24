@@ -18,7 +18,7 @@
     <string name="onb_create">Yeni Cüzdan Oluştur</string>
     <string name="onb_recover">Mevcut Cüzdanı Kurtar</string>
     <string name="onb_footer">DigiByte (DGB) ağı için bağımsız cüzdan</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Ekran görüntüleri engellendi. Bu kelimeleri yazın: geri getirilemezler.</string>
     <string name="seed_title">Kurtarma İfadeniz</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Yanlış PIN. Kalan deneme: %1$d</string>
     <string name="battery_title">Eşitlemeyi arka planda çalışır durumda tut</string>
     <string name="battery_body">Ekran kapalıyken Android bu cüzdanı uyku moduna alabilir; bu, DigiByte ağıyla bağlantısını keser ve siz uygulamayı yeniden açana kadar 0 eşte takılı kalmasına yol açabilir.\n\nEşitlemeyi sürdürebilmesi için kısıtlamasız çalışmasına izin verin.</string>
-    <string name="battery_body_samsung">\n\nSamsung cihazlarda ayrıca Cihaz bakımı → Pil → \"Hiç uyumayan uygulamalar\" bölümünü açıp ATB Wallet\'ı ekleyin.</string>
+    <string name="battery_body_samsung">\n\nSamsung cihazlarda ayrıca Cihaz bakımı → Pil → \"Hiç uyumayan uygulamalar\" bölümünü açıp HoldFast Wallet\'ı ekleyin.</string>
     <string name="battery_open_settings">Ayarları aç</string>
     <string name="tor_title">Yeni Gizlilik Özelliği</string>
     <string name="tor_body">Tor yönlendirmesi artık kullanılabilir. Etkinleştirildiğinde cüzdanınız DigiByte ağına Tor üzerinden bağlanır ve IP adresinizi eşlerden gizler.\n\nTor yönlendirmesi etkinleştirilsin mi?</string>
@@ -410,7 +410,7 @@
     <string name="ni_save">Kaydet</string>
     <string name="ni_exclusive">Yalnızca kendi düğümüm (özel)</string>
     <string name="ni_exclusive_sub">Yalnızca kendi düğümünüz üzerinden eşitleyin. Düğüm çevrimdışı olursa, herkese açık eşleri yeniden etkinleştirene kadar cüzdanın başka eşi olmaz.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">DigiByte Core 9.26 düğümleriyle uyumlu</string>
     <string name="ab_wallet_info">Cüzdan bilgisi</string>
     <string name="ab_wallet_type">Cüzdan türü</string>
     <string name="ab_hd_path">HD yolu</string>
@@ -539,9 +539,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Bu yazılım MIT Lisansı kapsamında sunulmaktadır.</string>
     <string name="ab_tagline">DigiByte merkeziyetsiz bir blok zinciri ve dijital para birimidir.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Around The Block LLC tarafından geliştirilen bağımsız cüzdan; DigiByte Foundation, DigiByte Alliance veya DigiByte-Core ile bağlantılı değildir ve bunlar tarafından onaylanmamıştır.</string>
-    <string name="ab_website">Around The Block web sitesi</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC tarafından geliştirilen bağımsız cüzdan. Resmi bir DigiByte uygulaması değildir.</string>
 
     <string name="tx_conf_short">%1$d onay</string>
     <string name="tx_confirmed">Onaylandı</string>
@@ -655,7 +654,7 @@
     <string name="restore_scan_title">Gizli şekilde geri yükle</string>
     <string name="restore_scan_body">Devam ettikten sonra bu telefon, cüzdanınızın işlemlerini kendisi bulur: yerel (dgb1q…), legacy (D…), Taproot ve DigiDollar adresleri, adreslerinizi kimseye göndermeden.</string>
     <string name="restore_other_title">Başka bir cüzdan uygulamasından bir ifade mi?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor ve bazı eski cüzdanlar coin\'leri bu cüzdanın kullanmadığı adres biçimlerinde tutar, bu yüzden eşitleme onları göremez. Bir kontrol onları bulabilir, ancak ifadenizden türetilen adresleri DigiScope\'a (api.digiscope.me) gönderir; DigiScope bu adreslerdeki bakiyeleri bildirir. ATB Wallet\'tan ya da eski DigiByte uygulamasından gelen bir ifade için gerekmez. Kontrolü daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünden de çalıştırabilirsiniz.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor ve bazı eski cüzdanlar coin\'leri bu cüzdanın kullanmadığı adres biçimlerinde tutar, bu yüzden eşitleme onları göremez. Bir kontrol onları bulabilir, ancak ifadenizden türetilen adresleri DigiScope\'a (api.digiscope.me) gönderir; DigiScope bu adreslerdeki bakiyeleri bildirir. HoldFast Wallet\'tan ya da eski DigiByte uygulamasından gelen bir ifade için gerekmez. Kontrolü daha sonra Ayarlar → Başka bir cüzdandan bakiye kurtar bölümünden de çalıştırabilirsiniz.</string>
     <string name="restore_other_check">Diğer biçimleri kontrol et</string>
     <string name="restore_scan_deriving">Adresler türetiliyor…</string>
     <string name="restore_scan_duration">Bu, düğüme bağlı olarak 30-90 saniye sürebilir.</string>
