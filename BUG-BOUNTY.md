@@ -2,9 +2,10 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **HoldFast Wallet 4.1.0** (`app.aroundtheblock.wallet`, published as ATB Wallet for DigiByte (DGB) until the rename), from its release date.
-4.0.89 stays in scope for **14 days** after that date under the overlap rule below. Before you
-start, read "Known issues being addressed for 4.1.1" below: those are already on our list.
+**Bounty target:** **HoldFast Wallet 4.1.1** (`app.aroundtheblock.wallet`), from its release date.
+4.1.0 (published as ATB Wallet for DigiByte (DGB)) stays in scope for **14 days** after that date
+under the overlap rule below. Before you start, read "Known issues being addressed for 4.1.2"
+below: those are already on our list.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
 reports earn named credit rather than payment; please read the tiers before spending time on a
@@ -34,9 +35,24 @@ HoldFast Wallet release and name its exact version.
 | Asset | Where to get it |
 |-------|-----------------|
 | HoldFast Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-v4.1.0.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.0 |
+| `aroundtheblock-wallet-v4.1.1.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.1 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
+
+### DigiScope services the app uses
+
+The app signs in to and talks to DigiScope at `api.digiscope.me` (the Hub, Digi-ID sign-in,
+quick login, asset metadata). The **server side of those services is in scope**: sign-in and
+session handling, taking over another user's account, reading or changing another user's data,
+and anything that moves value the service holds for its users. These are scored like app
+findings, by the value actually at risk. Features with no security consequence, such as content,
+leaderboards and statistics, are Informational at most.
+
+Test only with accounts you own, and never against another user's account or balance. The Safe
+Harbor rules below apply in full, including no denial-of-service testing.
+
+_This was already stated in SECURITY.md's scope list but missing here, and some server reports were
+closed as out of scope on 2026-10-13. Those reports have been reassessed under this section._
 
 ### The bounty target is one named version, and it holds still
 
@@ -146,6 +162,11 @@ reward. Paid findings are capped at **three per reporter per wave**, and a repor
 that is not in scope — see "The bounty target is one named version" above, which is the only
 statement of that rule — is closed without triage.
 
+A **reporter** is a person or team, not an email address. Reports sent from several addresses by
+the same person or team — shared numbering, cross-references to "my earlier report" sent from
+another address, the same credit name — count as one reporter for the per-wave cap and for
+first-or-duplicate decisions. If you work as a team, say so and name one contact.
+
 ---
 
 ## Out of Scope
@@ -200,7 +221,7 @@ _The half-tier rule was applied from the 2026-10 waves but was not written here 
 after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
 2026-10-13 as above._
 
-### Known issues being addressed for 4.1.1
+### Known issues being addressed for 4.1.2
 
 These are on our list for the next release. A report that only restates one of them is a
 duplicate: credit, no payment. A report that shows one of them reaching **DGB, DigiDollar or the
@@ -210,7 +231,7 @@ seed** in a way not described here is new, and is assessed as new.
   (unrecognised instructions, several asset carriers in one transaction, issuance with transfer
   rules, transfers whose result cannot be decided from the transaction alone) are handled by
   holding the affected outputs rather than spending them. The wallet fails closed: such an output
-  can show as unspendable until 4.1.1 settles it. A report that the hold happens is known; a
+  can show as unspendable until a later release settles it. A report that the hold happens is known; a
   report that it can be avoided, or that it loses funds, is not.
 - **Chain trust.** Choosing between competing chains by accumulated work, and cross-checking the
   data one peer serves against others, are scheduled structural changes.
@@ -219,6 +240,14 @@ seed** in a way not described here is new, and is assessed as new.
   A clearer message and a way to consolidate coins are planned.
 - **DigiDollar sends and Dandelion.** DigiDollar sends do not use Dandelion++ stem routing.
   Dandelion is off by default.
+- **Confirmation status from a server.** Confirmation status that a server reports, rather than
+  the wallet's own chain, is being taken out of the decision about when a payment counts as
+  confirmed and spendable.
+- **Tor coverage.** Some connections made while Tor is enabled or starting are not yet routed
+  through Tor.
+- **Release-build logging.** Some transaction details still reach the device log in release builds.
+- **DigiDollar recovery from another wallet.** Fee coins, the range of addresses scanned, and the
+  status shown after a move that does not confirm.
 - **Confirmations and recovery screens.** A user-initiated way to cancel a send stuck
   unconfirmed; protected-screen and confirmation treatment for wallet wipe, Digi-ID and node
   pairing prompts; recovery of every DigiDollar and asset case from another wallet.
@@ -373,6 +402,15 @@ not listed. Anonymity, or no answer, never affects payment.*
   published list of what is being addressed for 4.1.1.
 - **4.1.0: renamed.** The app is now ATB Wallet for DigiByte (DGB), formerly DigiByte Mobile.
   The package (`app.aroundtheblock.wallet`), the signing key and every scope rule are unchanged.
+- **2026-10-21 — DigiScope services stated.** The server side of the DigiScope services the app
+  uses was already in SECURITY.md's scope list; it is now stated here too, with what counts.
+  Reports closed as out of scope on that ground on 2026-10-13 have been reassessed. SECURITY.md
+  no longer restates the version rule ("latest released tag") and points here instead.
 - **2026-10-23: renamed again.** The app is now HoldFast Wallet, formerly ATB Wallet for
   DigiByte (DGB) and DigiByte Mobile. The package (`app.aroundtheblock.wallet`), the signing key
   and every scope rule are unchanged, and an installed copy updates in place.
+- **4.1.1 — target moved.** Bounty target HoldFast Wallet 4.1.1 (4.1.0 overlaps for 14 days). The
+  known-issues list now names what is being addressed for 4.1.2.
+- **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses
+  counts as one reporter for the per-wave cap and duplicate decisions. Applied from the 2026-10-24
+  intake on.
