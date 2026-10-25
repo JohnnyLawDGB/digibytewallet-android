@@ -6,6 +6,15 @@
 > The running per-release record, including the most recent cycle, is [`AUDIT-LOG.md`](AUDIT-LOG.md); current scope
 > and how to report are in [`BUG-BOUNTY.md`](../BUG-BOUNTY.md).
 
+## Founder security review: Jared Tate (2026-09-05 to 2026-09-20)
+
+Jared Tate, the founder of DigiByte, independently reviewed this repository and its native core between
+2026-09-05 and 2026-09-20 and delivered his findings to us privately. They are fixed on private branches
+and released as security updates: the first fixes shipped in v4.0.81 (2026-09-21), and the work has
+continued through each security release since. Each release's notes describe what it fixed. As with every
+private report (see [`BUG-BOUNTY.md`](../BUG-BOUNTY.md)), a finding is described in public only once its
+fix has shipped. This review is separate from the 2026-08-30 external audit recorded further down.
+
 ## v3.0.1 baseline (historical)
 
 **Date:** 2026-03-28
