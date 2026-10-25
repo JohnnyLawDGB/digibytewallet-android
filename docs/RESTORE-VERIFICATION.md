@@ -297,7 +297,8 @@ being fetched, and `getRawTransactionInputs` parses them through `BRTransactionP
 hardened parser every other raw-tx path uses. An unreadable transaction proves nothing and so
 drops nothing; the worst case is the old behaviour, reported rather than silent.
 
-With the fix, both dollars moved in one transaction:
+With the fix, both dollars moved in one transaction. (The log lines are as 4.1.1 printed them; from 4.1.2 they
+carry counts only, no amounts, fee, change or transaction id, so the on-chain record below is the check.)
 
 ```
 found $2.00 in DigiDollar across 2 outpoint(s); 0 cents unlocatable

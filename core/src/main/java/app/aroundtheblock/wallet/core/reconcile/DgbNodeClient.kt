@@ -102,6 +102,9 @@ class DgbNodeClient(
         // LE intermediate (not just the leaf) survives routine ~90-day leaf renewals;
         // a stale leaf-only pin previously killed "Scan for missing funds" for everyone.
         .certificatePinner(app.aroundtheblock.wallet.core.network.DigiScopePins.certificatePinner())
+        // A redirect would carry the wallet's addresses to a host the pins do not cover (row 30, R4).
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     private val unpinnedClient: OkHttpClient = baseClient.newBuilder()

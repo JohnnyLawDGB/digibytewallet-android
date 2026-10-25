@@ -493,6 +493,12 @@
     <string name="did_insecure">Conexão insegura</string>
     <string name="did_insecure_body">Este site usa HTTP, não HTTPS. Sua autenticação pode ser interceptada.</string>
     <string name="did_callback_url">URL de callback</string>
+    <string name="did_identity_title">Qual login este site conhece?</string>
+    <string name="did_identity_hint">Restaurou esta carteira? Escolha a identidade que você usava neste site. Depois que um login funcionar, a carteira lembra a escolha.</string>
+    <string name="did_identity_per_site">Chave própria para este site (app DigiByte original)</string>
+    <string name="did_identity_shared">Chave compartilhada para todos os sites (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">É a mesma em todos os sites, então os sites podem vincular seus logins. Escolha só se este site conhecia você por ela.</string>
+    <string name="did_identity_address">Endereço: %1$s</string>
     <string name="did_approve">Aprovar</string>
     <string name="did_deny">Negar</string>
     <string name="did_success">Autenticação bem-sucedida</string>
@@ -596,6 +602,7 @@
     <string name="rf_dd_fee_floor">Precisa de %1$s de taxa de rede: esta carteira tem %2$s.</string>
     <string name="rf_dd_found">%1$s em DigiDollar encontrados</string>
     <string name="rf_dd_moved">%1$s em DigiDollar movidos para esta carteira</string>
+    <string name="rf_dd_sent_unrelayed">%1$s em DigiDollar foram enviados, mas a rede ainda não confirmou. Guarde sua frase de recuperação antiga até aparecer nesta carteira.</string>
     <string name="rf_dd_left_behind">%1$s em DigiDollar ficaram para trás: não foi possível movê-los</string>
     <string name="rf_dd_unreachable">Não foi possível verificar DigiDollar; esta carteira pode ter algum</string>
     <string name="as_rules_checking">Verificando as regras de transferência deste ativo…</string>
@@ -703,4 +710,7 @@
     <string name="seedview_pass_unreadable_body">A frase-senha desta carteira não pôde ser lida agora. Suas palavras de recuperação sozinhas podem não restaurar esta carteira, por isso elas só aparecem quando a frase-senha puder aparecer junto. Tente novamente.</string>
     <string name="seedview_pass_retry">Tentar novamente</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Seu PIN não pode ser verificado agora</string>
+    <string name="pinstore_body">O armazenamento seguro de chaves do celular não abriu, então a carteira continua bloqueada. Nada foi apagado. Feche o app e abra de novo. Se continuar acontecendo, reinicie o celular; sua frase de recuperação ainda restaura a carteira em qualquer aparelho.</string>
+    <string name="pinstore_close">Fechar o app</string>
 </resources>

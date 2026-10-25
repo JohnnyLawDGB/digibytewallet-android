@@ -593,6 +593,12 @@
     <!-- WARNING: the only signal that credentials may be intercepted. -->
     <string name="did_insecure_body">This site uses HTTP, not HTTPS. Your authentication may be intercepted.</string>
     <string name="did_callback_url">Callback URL</string>
+    <string name="did_identity_title">Which sign-in does this site know?</string>
+    <string name="did_identity_hint">Restored this wallet? Pick the identity you used on this site before. Once a sign-in works, the wallet remembers it.</string>
+    <string name="did_identity_per_site">Separate key for this site (original DigiByte app)</string>
+    <string name="did_identity_shared">Shared key for all sites (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">The same on every site, so sites can link your sign-ins. Choose it only if this site knew you by it.</string>
+    <string name="did_identity_address">Address: %1$s</string>
     <string name="did_approve">Approve</string>
     <string name="did_deny">Deny</string>
     <string name="did_success">Authentication Successful</string>
@@ -726,6 +732,7 @@
     <string name="rf_dd_fee_floor">Needs %1$s for the network fee: this wallet has %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar found</string>
     <string name="rf_dd_moved">%1$s in DigiDollar moved into this wallet</string>
+    <string name="rf_dd_sent_unrelayed">%1$s in DigiDollar was sent, but the network has not confirmed it yet. Keep your old recovery phrase until it shows in this wallet.</string>
     <string name="rf_dd_left_behind">%1$s in DigiDollar was left behind: it could not be moved</string>
     <string name="rf_dd_unreachable">DigiDollar could not be checked, so this wallet may hold some</string>
     <!-- Transfer-rule gate: assets issued with rules (royalty, deflation, …) must not be sent by
@@ -835,4 +842,7 @@
     <string name="seedview_pass_unreadable_body">The passphrase of this wallet could not be read just now. Your recovery words alone may not restore this wallet, so they are not shown until the passphrase can be shown with them. Try again.</string>
     <string name="seedview_pass_retry">Try again</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Your PIN can\'t be checked right now</string>
+    <string name="pinstore_body">The phone\'s secure key store did not open, so the wallet stays locked. Nothing has been deleted. Close the app and open it again. If this keeps happening, restart the phone; your recovery phrase still restores the wallet on any device.</string>
+    <string name="pinstore_close">Close the app</string>
 </resources>

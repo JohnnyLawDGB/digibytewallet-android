@@ -23,7 +23,7 @@ data class DerivationProfile(
     /** Hardened prefix (indices without the BIP32_HARD bit). Library adds
      *  the hardening bit internally. Example: BIP44 DGB = [44, 20, 0]. */
     val prefixPath: IntArray,
-    /** 0 = P2PKH (D...), 1 = P2WPKH bech32 (dgb1q...), 2 = P2SH-P2WPKH (S...). */
+    /** 0 = P2PKH (D...), 1 = P2WPKH bech32 (dgb1q...), 2 = P2SH-P2WPKH (S...), 3 = P2TR (dgb1p...). */
     val addressFormat: Int,
     /**
      * Other encodings of the SAME keys to probe as well.
@@ -65,6 +65,8 @@ data class DerivationProfile(
         private const val P2PKH = 0
         private const val P2WPKH = 1
         private const val P2SH_P2WPKH = 2
+        /** P2TR key-path (BIP86), dgb1p… — what this wallet's Receive hands out on the Taproot tab. */
+        internal const val P2TR = 3
 
         /** Add the hardened bit to each element. BIP32's hardened-offset
          *  constant is 0x80000000. */
@@ -127,6 +129,18 @@ data class DerivationProfile(
                 prefixPath = hardened(49, 20, 0),
                 addressFormat = P2SH_P2WPKH,
                 isNative = false,
+            ),
+            // 4.1.2 row 34 (rosabarker6 1a1530fe): Receive hands out taproot addresses at m/86'/20'/0',
+            // but Recover funds never derived them, so a foreign seed's taproot DGB was neither found
+            // nor swept, and the flow said it was done. Native: this wallet's own sync watches m/86'
+            // already, so recovering its own phrase sweeps nothing from here.
+            DerivationProfile(
+                label = "BIP86 DGB (Taproot)",
+                description = "m/86'/20'/0' — taproot addresses (dgb1p…)",
+                hmacKey = HMAC_STANDARD,
+                prefixPath = hardened(86, 20, 0),
+                addressFormat = P2TR,
+                isNative = true,
             ),
         )
     }

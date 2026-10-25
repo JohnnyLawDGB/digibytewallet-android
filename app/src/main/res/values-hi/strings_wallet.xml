@@ -490,6 +490,12 @@
     <string name="did_insecure">असुरक्षित कनेक्शन</string>
     <string name="did_insecure_body">यह साइट HTTPS नहीं, HTTP उपयोग करती है। आपका प्रमाणीकरण इंटरसेप्ट हो सकता है।</string>
     <string name="did_callback_url">कॉलबैक URL</string>
+    <string name="did_identity_title">यह साइट कौन-सा साइन-इन पहचानती है?</string>
+    <string name="did_identity_hint">क्या आपने यह वॉलेट रिस्टोर किया है? वह पहचान चुनें जो आपने पहले इस साइट पर इस्तेमाल की थी। साइन-इन सफल होने के बाद वॉलेट इसे याद रखेगा।</string>
+    <string name="did_identity_per_site">इस साइट के लिए अलग कुंजी (मूल DigiByte ऐप)</string>
+    <string name="did_identity_shared">सभी साइटों के लिए साझा कुंजी (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">यह हर साइट पर एक जैसी है, इसलिए साइटें आपके साइन-इन को जोड़ सकती हैं। इसे तभी चुनें जब यह साइट आपको इसी से पहचानती थी।</string>
+    <string name="did_identity_address">पता: %1$s</string>
     <string name="did_approve">स्वीकृत करें</string>
     <string name="did_deny">अस्वीकार करें</string>
     <string name="did_success">प्रमाणीकरण सफल</string>
@@ -593,6 +599,7 @@
     <string name="rf_dd_fee_floor">नेटवर्क शुल्क के लिए %1$s चाहिए: इस वॉलेट में %2$s है।</string>
     <string name="rf_dd_found">%1$s DigiDollar मिले</string>
     <string name="rf_dd_moved">%1$s DigiDollar इस वॉलेट में आ गए</string>
+    <string name="rf_dd_sent_unrelayed">DigiDollar में %1$s भेजे गए, लेकिन नेटवर्क ने अभी पुष्टि नहीं की है। जब तक यह इस वॉलेट में न दिखे, अपना पुराना रिकवरी फ़्रेज़ संभालकर रखें।</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar पीछे रह गए: उन्हें भेजा नहीं जा सका</string>
     <string name="rf_dd_unreachable">DigiDollar की जाँच नहीं हो सकी; इस वॉलेट में कुछ हो सकता है</string>
     <string name="as_rules_checking">इस एसेट के ट्रांसफ़र नियम जाँचे जा रहे हैं…</string>
@@ -698,4 +705,7 @@
     <string name="seedview_pass_unreadable_body">इस वॉलेट का पासफ़्रेज़ अभी पढ़ा नहीं जा सका। केवल आपके रिकवरी शब्द इस वॉलेट को बहाल नहीं कर सकते, इसलिए वे तब तक नहीं दिखाए जाते जब तक पासफ़्रेज़ उनके साथ नहीं दिखाया जा सकता। फिर से कोशिश करें।</string>
     <string name="seedview_pass_retry">फिर से कोशिश करें</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">अभी आपका PIN जाँचा नहीं जा सकता</string>
+    <string name="pinstore_body">फ़ोन का सुरक्षित कुंजी भंडार नहीं खुला, इसलिए वॉलेट लॉक रहेगा। कुछ भी हटाया नहीं गया है। ऐप बंद करें और फिर से खोलें। अगर ऐसा बार-बार हो, तो फ़ोन रीस्टार्ट करें; आपका रिकवरी फ़्रेज़ किसी भी डिवाइस पर वॉलेट को अब भी वापस ला सकता है।</string>
+    <string name="pinstore_close">ऐप बंद करें</string>
 </resources>

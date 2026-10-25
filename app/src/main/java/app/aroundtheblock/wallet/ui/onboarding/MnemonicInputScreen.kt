@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +36,8 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
+import app.aroundtheblock.wallet.ui.components.keyboardBottomPx
 
 @Composable
 fun MnemonicInputScreen(
@@ -68,7 +69,7 @@ fun MnemonicInputScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
+                .keyboardPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 24.dp)
         ) {
@@ -268,8 +269,7 @@ private fun WordInputField(
     // (initial show, autocomplete state changes, configuration changes).
     val bringIntoView = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val imeBottomPx = keyboardBottomPx()
 
     LaunchedEffect(isFocused, imeBottomPx) {
         if (isFocused && imeBottomPx > 0) {

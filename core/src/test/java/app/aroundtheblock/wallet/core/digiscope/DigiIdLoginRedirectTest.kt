@@ -6,6 +6,7 @@ import app.aroundtheblock.wallet.core.db.dao.DigiIdHistoryDao
 import app.aroundtheblock.wallet.core.digiid.DigiIdManager
 import app.aroundtheblock.wallet.core.digiscope.ScriptedServer.Answer
 import app.aroundtheblock.wallet.core.digiscope.ScriptedServer.Companion.CALLBACK_PATH
+import app.aroundtheblock.wallet.core.digiscope.ScriptedServer.Companion.CHALLENGE_PATH
 import app.aroundtheblock.wallet.core.digiscope.ScriptedServer.Companion.DIGISCOPE_CHALLENGE
 import app.aroundtheblock.wallet.core.model.DigiIdRequest
 import app.aroundtheblock.wallet.core.model.DigiIdResult
@@ -34,21 +35,26 @@ class DigiIdLoginRedirectTest {
 
     @After fun restoreLog() = unmockkStatic(Log::class)
 
-    private fun hub(server: ScriptedServer) = DigiScopeClient(server.client(), mockk<Context>(relaxed = true))
+    private fun hub(server: ScriptedServer) = DigiScopeClient(
+        server.client(), mockk<Context>(relaxed = true), signWithSharedIdentity = { "Didentity|c2lnbmF0dXJl" },
+    )
 
     private fun manager(server: ScriptedServer) = DigiIdManager(
         server.client(), historyDao, hub(server), sign = { _, _ -> "Didentity|c2lnbmF0dXJl" },
     )
 
     @Test fun `the Hub login made after a DigiScope approval is made by a client that follows no redirect`() {
-        val server = ScriptedServer { Answer(200, """{"sessionToken":"session"}""") }
+        val server = ScriptedServer { r ->
+            if (r.url.encodedPath == CHALLENGE_PATH) Answer(200, """{"uri":"$DIGISCOPE_CHALLENGE"}""")
+            else Answer(200, """{"sessionToken":"session"}""")
+        }
         val request = DigiIdRequest.parse(DIGISCOPE_CHALLENGE)!!
 
         val result = runBlocking { manager(server).authenticate(request) }
 
         assertTrue("the approval failed: $result", result is DigiIdResult.Success)
-        // The approved login's callback, then the wallet's own Hub login with the same signature.
-        assertEquals(listOf(CALLBACK_PATH, CALLBACK_PATH), server.seen.map { it.url.encodedPath })
+        // The approved login's callback, then the wallet's own Hub login on a fresh challenge.
+        assertEquals(listOf(CALLBACK_PATH, CHALLENGE_PATH, CALLBACK_PATH), server.seen.map { it.url.encodedPath })
         server.seen.forEachIndexed { i, sent ->
             assertFalse("request $i is made by a client that follows redirects", sent.followsRedirects)
             assertFalse("request $i is made by a client that follows https redirects", sent.followsSslRedirects)

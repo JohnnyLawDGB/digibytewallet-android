@@ -70,6 +70,7 @@ class TorManager(private val context: Context) {
         if (port != null && _bootstrapProgress.value >= 100 && _state.value !is TorState.Connected) {
             // Connected again: traffic goes through Tor, so an announced fallback is over.
             _clearnetFallbackAnnounced.value = false
+            publishPeersRequireTor()
             _state.value = TorState.Connected(port)
             Log.i(TAG, "Tor connected — SOCKS5 on 127.0.0.1:$port (bootstrap 100%)")
         }
@@ -94,6 +95,32 @@ class TorManager(private val context: Context) {
     fun announceClearnetFallback() {
         if (!_clearnetFallbackAnnounced.value) Log.w(TAG, "clearnet fallback announced — app traffic may go direct until Tor reconnects")
         _clearnetFallbackAnnounced.value = true
+        publishPeersRequireTor()
+    }
+
+    /**
+     * Whether peer connections must go through Tor: the same rule as [route], for the peer-to-peer
+     * core. While true the core dials only through the SOCKS proxy and sends nothing on a
+     * connection opened without it, so a peer waits for Tor rather than going direct — including
+     * while Tor bootstraps and on a refresh before the proxy is wired.
+     */
+    val peersRequireTor: Boolean get() = isEnabled && !_clearnetFallbackAnnounced.value
+
+    @Volatile private var peersRequireTorSink: ((Boolean) -> Unit)? = null
+
+    /**
+     * Hand [peersRequireTor] to [sink] now and synchronously on every change, so the core never
+     * acts on a stale value (the fallback path dials direct right after announcing). The app
+     * binds the native core here at process start; JVM tests leave it unbound.
+     */
+    fun bindPeersRequireTor(sink: (Boolean) -> Unit) {
+        peersRequireTorSink = sink
+        publishPeersRequireTor()
+    }
+
+    // Under the lock so two changes on different threads cannot reach the core out of order.
+    @Synchronized private fun publishPeersRequireTor() {
+        peersRequireTorSink?.invoke(peersRequireTor)
     }
 
     /** Where an app-made connection may go right now; see [TorRoute]. */
@@ -113,6 +140,7 @@ class TorManager(private val context: Context) {
             // starts again from "wait for Tor" until it connects or a new banner is raised.
             if (!value) _clearnetFallbackAnnounced.value = false
             _enabled.value = value
+            publishPeersRequireTor()
         }
 
     var upgradePromptShown: Boolean

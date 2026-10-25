@@ -19,4 +19,17 @@ object SeedViewGate {
     fun consume(): Boolean = granted.getAndSet(false)
 
     fun revoke() = granted.set(false)
+
+    /**
+     * Different in every process. The phrase screen saves the token of the pass it spent, not a
+     * plain "passed": state saved before a process death carries the dead process's token, which
+     * never matches here, so a restored screen asks again (LOCK-PD).
+     */
+    val processToken: String = java.util.UUID.randomUUID().toString()
+
+    /** The token to save for a pass spent now, or "" when there was no pass. */
+    fun spend(): String = if (consume()) processToken else ""
+
+    /** Whether a saved [spend] token is a pass of this process. */
+    fun isLive(token: String): Boolean = token.isNotEmpty() && token == processToken
 }

@@ -495,6 +495,12 @@
     <string name="did_insecure">Conexión insegura</string>
     <string name="did_insecure_body">Este sitio usa HTTP, no HTTPS. Tu autenticación podría ser interceptada.</string>
     <string name="did_callback_url">URL de retorno</string>
+    <string name="did_identity_title">¿Qué inicio de sesión conoce este sitio?</string>
+    <string name="did_identity_hint">¿Restauraste esta billetera? Elige la identidad que usabas antes en este sitio. Cuando un inicio de sesión funcione, la billetera lo recordará.</string>
+    <string name="did_identity_per_site">Clave propia para este sitio (app original de DigiByte)</string>
+    <string name="did_identity_shared">Clave compartida para todos los sitios (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Es el mismo en todos los sitios, así que los sitios pueden vincular tus inicios de sesión. Elígelo solo si este sitio te conocía con él.</string>
+    <string name="did_identity_address">Dirección: %1$s</string>
     <string name="did_approve">Aprobar</string>
     <string name="did_deny">Denegar</string>
     <string name="did_success">Autenticación correcta</string>
@@ -598,6 +604,7 @@
     <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red: esta cartera tiene %2$s.</string>
     <string name="rf_dd_found">Se encontraron %1$s en DigiDollar</string>
     <string name="rf_dd_moved">%1$s en DigiDollar movidos a esta billetera</string>
+    <string name="rf_dd_sent_unrelayed">Se enviaron %1$s en DigiDollar, pero la red aún no lo ha confirmado. Guarda tu frase de recuperación anterior hasta que aparezca en esta billetera.</string>
     <string name="rf_dd_left_behind">%1$s en DigiDollar se quedaron: no se pudieron mover</string>
     <string name="rf_dd_unreachable">No se pudo comprobar DigiDollar; esta billetera podría tener algo</string>
     <string name="as_rules_checking">Comprobando las reglas de transferencia de este activo…</string>
@@ -705,4 +712,7 @@
     <string name="seedview_pass_unreadable_body">La frase de contraseña de esta billetera no se pudo leer en este momento. Es posible que tus palabras de recuperación por sí solas no restauren esta billetera, así que no se muestran hasta que la frase de contraseña pueda mostrarse con ellas. Inténtalo de nuevo.</string>
     <string name="seedview_pass_retry">Reintentar</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Ahora no se puede comprobar tu PIN</string>
+    <string name="pinstore_body">El almacén seguro de claves del teléfono no se abrió, así que la billetera sigue bloqueada. No se ha borrado nada. Cierra la app y vuelve a abrirla. Si sigue pasando, reinicia el teléfono; tu frase de recuperación sigue restaurando la billetera en cualquier dispositivo.</string>
+    <string name="pinstore_close">Cerrar la app</string>
 </resources>

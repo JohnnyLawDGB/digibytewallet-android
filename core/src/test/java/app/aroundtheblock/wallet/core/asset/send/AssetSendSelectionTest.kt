@@ -4,6 +4,7 @@ import app.aroundtheblock.wallet.core.db.entity.UtxoEntity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /** [AssetInputCheck] and [AssetSendSelection]: an asset send spends only outputs the indexer
@@ -62,6 +63,29 @@ class AssetSendSelectionTest {
         val out = choose(src, listOf(row("a", 5)), 3)
         assertTrue(out is AssetSendSelection.Outcome.Planned)
         assertEquals(listOf("a"), (out as AssetSendSelection.Outcome.Planned).plan.assetInputs.map { it.txid })
+    }
+
+    /**
+     * 4.1.2 row 27: two rows of 7e18 units made the total negative, and every send of the asset was
+     * refused "not enough asset". The decision sums saturate, so the send is planned from one row.
+     */
+    @Test fun rows_whose_sum_overflows_do_not_block_the_send() {
+        // 5e18 + 5e18 does not fit a Long. The instruction amounts are ones the encoder can carry
+        // (exponent at most 15): send 4996e15, change 4e15.
+        val big = 5_000_000_000_000_000_000L
+        val src = FakeSource(mapOf("a" to found(asset to big), "b" to found(asset to big)))
+        // At two addresses: each is its own source group, and either can pay.
+        val out = choose(src, listOf(row("a", big), row("b", big, y)), 4_996_000_000_000_000_000L)
+        assertTrue("the send was refused: $out", out is AssetSendSelection.Outcome.Planned)
+    }
+
+    /** The transfer's own totals are exact: inputs whose units do not fit a Long plan nothing. */
+    @Test fun a_transfer_whose_inputs_overflow_is_never_planned() {
+        val big = 5_000_000_000_000_000_000L
+        val src = FakeSource(mapOf("a" to found(asset to big), "b" to found(asset to big)))
+        // Both at one address: the group is spent whole, and its units do not fit a Long.
+        val out = choose(src, listOf(row("a", big), row("b", big)), big + 1)
+        assertTrue("an overflowing transfer was planned: $out", out !is AssetSendSelection.Outcome.Planned)
     }
 
     @Test fun an_input_holding_something_else_is_set_aside_and_the_send_uses_another() {
