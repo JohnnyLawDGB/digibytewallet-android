@@ -480,6 +480,12 @@
     <string name="did_insecure">Connexion non sécurisée</string>
     <string name="did_insecure_body">Ce site utilise HTTP, et non HTTPS. Votre authentification pourrait être interceptée.</string>
     <string name="did_callback_url">URL de rappel</string>
+    <string name="did_identity_title">Quelle connexion ce site connaît-il ?</string>
+    <string name="did_identity_hint">Portefeuille restauré ? Choisissez l\'identité utilisée auparavant sur ce site. Une fois une connexion réussie, le portefeuille s\'en souvient.</string>
+    <string name="did_identity_per_site">Clé propre à ce site (application DigiByte d\'origine)</string>
+    <string name="did_identity_shared">Clé partagée pour tous les sites (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Identique sur tous les sites, qui peuvent donc relier vos connexions. Choisissez-la seulement si ce site vous connaissait ainsi.</string>
+    <string name="did_identity_address">Adresse : %1$s</string>
     <string name="did_approve">Approuver</string>
     <string name="did_deny">Refuser</string>
     <string name="did_success">Authentification réussie</string>
@@ -576,6 +582,7 @@
     <string name="rf_dd_fee_floor">Nécessite %1$s de frais de réseau : ce portefeuille a %2$s.</string>
     <string name="rf_dd_found">%1$s en DigiDollar trouvés</string>
     <string name="rf_dd_moved">%1$s en DigiDollar déplacés vers ce portefeuille</string>
+    <string name="rf_dd_sent_unrelayed">%1$s en DigiDollar ont été envoyés, mais le réseau ne l\'a pas encore confirmé. Gardez votre ancienne phrase de récupération jusqu\'à ce que cela apparaisse dans ce portefeuille.</string>
     <string name="rf_dd_left_behind">%1$s en DigiDollar sont restés : ils n\'ont pas pu être déplacés</string>
     <string name="rf_dd_unreachable">Impossible de vérifier les DigiDollar ; ce portefeuille en détient peut-être</string>
     <string name="as_rules_checking">Vérification des règles de transfert de cet actif…</string>
@@ -683,4 +690,7 @@
     <string name="seedview_pass_unreadable_body">La phrase secrète de ce portefeuille n\'a pas pu être lue pour le moment. Vos mots de récupération seuls risquent de ne pas restaurer ce portefeuille : ils ne s\'affichent donc que lorsque la phrase secrète peut s\'afficher avec eux. Réessayez.</string>
     <string name="seedview_pass_retry">Réessayer</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Votre code PIN ne peut pas être vérifié pour l\'instant</string>
+    <string name="pinstore_body">Le stockage sécurisé des clés du téléphone ne s\'est pas ouvert : le portefeuille reste verrouillé. Rien n\'a été supprimé. Fermez l\'application et rouvrez-la. Si cela se reproduit, redémarrez le téléphone ; votre phrase de récupération restaure toujours le portefeuille sur n\'importe quel appareil.</string>
+    <string name="pinstore_close">Fermer l\'application</string>
 </resources>

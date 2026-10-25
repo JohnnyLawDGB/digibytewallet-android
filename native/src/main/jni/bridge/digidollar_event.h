@@ -68,6 +68,18 @@ typedef struct {
     int64_t (*dgbNet)(void *ctx, const BRTransaction *tx);
 } DdEventWallet;
 
+/* acc += v, or 0 when the sum would not fit an int64 (4.1.2 row 10, N5). DD_EVENT_OVERFLOW_UNFIXED
+ * keeps the plain add for dd_event_overflow_kat's red arm. */
+static inline int dd_event_add(int64_t *acc, int64_t v)
+{
+#if defined(DD_EVENT_OVERFLOW_UNFIXED) && DD_EVENT_OVERFLOW_UNFIXED
+    *acc += v;
+    return 1;
+#else
+    return ! __builtin_add_overflow(*acc, v, acc);
+#endif
+}
+
 static inline DdEvent dd_event_of(const BRTransaction *tx, const DdEventWallet *w)
 {
     DdEvent ev = { DD_EVENT_NONE, 0, 0 };
@@ -83,8 +95,9 @@ static inline DdEvent dd_event_of(const BRTransaction *tx, const DdEventWallet *
         int64_t c = BRDigiDollarOutputAmount(tx, i);
         if (c <= 0) continue;   /* not a DigiDollar token output */
         if (first == 0) first = c;
-        if (w->paysWallet(w->ctx, &tx->outputs[i])) own += c;
-        else other += c;
+        /* Amounts no transaction can carry -- their sum does not fit an int64 -- make no activity row,
+         * rather than one with a wrapped amount. */
+        if (! dd_event_add(w->paysWallet(w->ctx, &tx->outputs[i]) ? &own : &other, c)) return ev;
     }
 
 #if DIGIDOLLAR_EVENT_UNFIXED
@@ -103,7 +116,7 @@ static inline DdEvent dd_event_of(const BRTransaction *tx, const DdEventWallet *
             int64_t c = -1;
             if (! w->spendsWallet(w->ctx, &tx->inputs[i], &c)) continue;
             spendsOwn = 1;
-            if (c > 0) ownSpent += c;
+            if (c > 0 && ! dd_event_add(&ownSpent, c)) return (DdEvent){ DD_EVENT_NONE, 0, 0 };
         }
 
         switch (type) {

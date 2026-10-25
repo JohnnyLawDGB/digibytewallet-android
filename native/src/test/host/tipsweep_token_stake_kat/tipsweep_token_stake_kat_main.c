@@ -384,6 +384,8 @@ static int utxoListed(BRWallet *w, UInt256 h)
 
 /* NativeBridge_confirmTransaction's core step: promote a record the wallet still holds at
  * TX_UNCONFIRMED to the height a node reported. */
+/* The bridge's confirmTransaction on the path where the server height is taken (BRPeerManagerApplyServerHeight,
+ * checkpoint-pinned): the pending check, then the unproven update. run.sh pins both against the source. */
 static int confirmLikeBridge(BRWallet *w, UInt256 h, uint32_t height, uint32_t ts)
 {
     BRTransaction *existing = BRWalletCopyTransactionForHash(w, h);
@@ -456,11 +458,19 @@ static void scenario_dd_receive(void)
     check(peerCountFor(f.m->txRequests, dH) == 0 && peerCountFor(f.m->txRelays, dH) == 0,
           "no request is outstanding and no peer relays the receive");
     check(! held(&f, sH), "control: the plain record with no stake and no token was removed -- the cleanup ran");
+#ifdef TIPSWEEP_TOKEN_STAKE_UNFIXED
     check(held(&f, pH), "the DGB receive is kept");
+#else
+    /* 4.1.2 row 32: a foreign unconfirmed DGB receive no peer relays is no stake (unconf_credit_kat). */
+    check(! held(&f, pH), "the unrelayed foreign DGB receive is removed");
+#endif
     d = BRWalletTransactionForHash(f.w, dH);
     check(d != NULL, "INVARIANT: the DigiDollar receive is kept (it carries a token output the wallet owns)");
     check(! d || (BRWalletTransactionIsPending(f.w, d) && ! utxoListed(f.w, dH)),
           "it is still pending and its output is in no plain-coin list");
+#ifndef TIPSWEEP_TOKEN_STAKE_UNFIXED
+    dgb = BRWalletBalance(f.w);   /* the removed receive's credit went with it */
+#endif
     check(BRWalletBalance(f.w) == dgb && BRWalletDigiDollarBalance(f.w) == 0,
           "the DGB balance is unchanged and there is still no DigiDollar credit before it confirms");
 

@@ -154,6 +154,40 @@ class AssetPreSpendPassTest {
         assertTrue("nothing was registered at all — the test is blind", held.isNotEmpty())
     }
 
+    // ── 4.1.2 row 13 (K5, DA-014): a plain OP_RETURN before the carrier ──────────
+
+    /**
+     * [plain OP_RETURN, DA carrier, ours, ours]: native code reads the carrier (the last output
+     * whose OP_RETURN is a DigiAsset carrier) and holds what it names (asset_plain_opreturn_first_kat);
+     * reading the FIRST OP_RETURN, this pass decoded nothing and held nothing. The inputs' units are
+     * unknown, so a remainder can ride to the last output: this pass holds it, registering it with native.
+     */
+    @Test fun `a plain OP_RETURN before the carrier does not hide the carrier`() = runTest {
+        val shadowed = id("c1")
+        wallet.clear()
+        wallet[shadowed] = arrayOf("0|0|6a04deadbeef", "1|0|$transferTenToOutputZero", "2|50000|$ours", "3|50000|$ours")
+        inputs[shadowed] = arrayOf("$funding|1")
+
+        manager().pass()
+
+        assertEquals(listOf(shadowed to 3), held)
+    }
+
+    /**
+     * [unclassifiable carrier, readable carrier, ours, ours]: native code holds EVERY output once any
+     * tagged carrier cannot be classified. Choosing the readable carrier would hold only what it names.
+     */
+    @Test fun `an unclassifiable carrier beside a readable one holds every owned output`() = runTest {
+        val mixed = id("c2")
+        wallet.clear()
+        wallet[mixed] = arrayOf("0|0|6a4d060044410215000a", "1|0|$transferTenToOutputZero", "2|50000|$ours", "3|50000|$ours")
+        inputs[mixed] = arrayOf("$funding|1")
+
+        manager().pass()
+
+        assertEquals(setOf(mixed to 2, mixed to 3), held.toSet())
+    }
+
     // ── A carrier the decoder cannot classify ─────────────────────────────
 
     /** The same ten-units-to-output-0 payload, framed with OP_PUSHDATA2 (length 6, little-endian). */

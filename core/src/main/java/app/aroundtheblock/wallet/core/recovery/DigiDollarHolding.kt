@@ -51,6 +51,13 @@ object DigiDollarHolding {
      *  - the value is zero. A P2TR output at the same key carrying satoshis is ordinary DGB, not
      *    dollars, and spending it as a DD input would misstate the transaction's value.
      */
+    /** Every output of [outputs] paying this key (a transaction can pay one key twice; 4.1.2 row 20). */
+    fun locateAll(outputs: List<Output>, taprootOutputKeyHex: String): List<Outpoint> {
+        val want = (P2TR_PREFIX + taprootOutputKeyHex).lowercase()
+        return outputs.filter { it.amountSat == 0L && it.scriptPubKeyHex.lowercase() == want }
+            .map { Outpoint(it.vout, it.scriptPubKeyHex) }
+    }
+
     fun locate(outputs: List<Output>, taprootOutputKeyHex: String): Outpoint? {
         val want = (P2TR_PREFIX + taprootOutputKeyHex).lowercase()
         return outputs

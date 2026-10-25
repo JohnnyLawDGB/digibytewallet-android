@@ -112,6 +112,17 @@ NativeBridge_clearSocksProxy(
     LOGI("clearSocksProxy: proxy cleared");
 }
 
+/* While required, peers are reached through the SOCKS proxy or not at all (BRPeerSetTorRequired). */
+void JNICALL
+NativeBridge_setTorRequired(
+    JNIEnv *env, jobject thiz, jboolean required)
+{
+    (void)env;
+    (void)thiz;
+    BRPeerSetTorRequired(required ? 1 : 0);
+    LOGI("setTorRequired: %d", required ? 1 : 0);
+}
+
 /* ---------- BRPeerManager callback bridges ---------- */
 
 static int g_initialSyncDone = 0;
@@ -1266,6 +1277,7 @@ NativeBridge_getSavedBlocksTip(JNIEnv *env, jobject thiz) {
  */
 jlong JNICALL
 NativeBridge_getWalletBirthCheckpointHeight(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)env;
     (void)thiz;
 

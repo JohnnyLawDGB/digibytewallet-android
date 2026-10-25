@@ -487,6 +487,12 @@
     <string name="did_insecure">连接不安全</string>
     <string name="did_insecure_body">此站点使用 HTTP 而非 HTTPS。您的认证可能被拦截。</string>
     <string name="did_callback_url">回调 URL</string>
+    <string name="did_identity_title">此网站认识哪个登录身份？</string>
+    <string name="did_identity_hint">恢复了此钱包？请选择您以前在此网站使用的身份。登录成功后，钱包会记住它。</string>
+    <string name="did_identity_per_site">此网站专用密钥（原版 DigiByte 应用）</string>
+    <string name="did_identity_shared">所有网站共用密钥（DigiByte wallet 3.x–4.0.76）</string>
+    <string name="did_identity_shared_note">所有网站都相同，因此网站可以关联您的登录。仅当此网站以前通过它识别您时才选择。</string>
+    <string name="did_identity_address">地址：%1$s</string>
     <string name="did_approve">批准</string>
     <string name="did_deny">拒绝</string>
     <string name="did_success">认证成功</string>
@@ -590,6 +596,7 @@
     <string name="rf_dd_fee_floor">需要 %1$s 网络手续费：此钱包只有 %2$s。</string>
     <string name="rf_dd_found">找到 %1$s DigiDollar</string>
     <string name="rf_dd_moved">%1$s DigiDollar 已转入此钱包</string>
+    <string name="rf_dd_sent_unrelayed">已发送 %1$s DigiDollar，但网络尚未确认。在它出现在此钱包之前，请保留您的旧恢复短语。</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar 被留下，无法转移</string>
     <string name="rf_dd_unreachable">无法检查 DigiDollar，此钱包可能持有一些</string>
     <string name="as_rules_checking">正在检查此资产的转账规则…</string>
@@ -693,4 +700,7 @@
     <string name="seedview_pass_unreadable_body">暂时无法读取此钱包的密码短语。仅凭您的助记词可能无法恢复此钱包，因此在密码短语能够与它们一起显示之前，不会显示这些助记词。请重试。</string>
     <string name="seedview_pass_retry">重试</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">暂时无法验证您的 PIN</string>
+    <string name="pinstore_body">手机的安全密钥存储未能打开，因此钱包保持锁定。没有删除任何内容。请关闭应用后重新打开。如果仍然出现，请重启手机；您的恢复短语仍可在任何设备上恢复钱包。</string>
+    <string name="pinstore_close">关闭应用</string>
 </resources>

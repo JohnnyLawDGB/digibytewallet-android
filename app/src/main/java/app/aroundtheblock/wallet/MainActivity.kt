@@ -78,8 +78,12 @@ class MainActivity : FragmentActivity() {
     /** The reconcile client, built by Hilt on [okHttpClient] (Tor routing and DigiScope pins). */
     @Inject lateinit var dgbNodeClient: app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
 
-    /** Pending Digi-ID URI from a deep link — processed after PIN unlock. */
-    var pendingDigiIdUri: String? = null
+    /**
+     * Pending Digi-ID URI from a deep link — opened once the wallet screen is showing. Snapshot
+     * state, so a link that arrives while the wallet screen is already up opens at once instead of
+     * waiting for the next route change (4.1.2 row 36); see [digiIdLinkToOpen].
+     */
+    var pendingDigiIdUri: String? by mutableStateOf(null)
 
     /**
      * Last touch/key, in `SystemClock.elapsedRealtime()` ms. Monotonic on purpose: wall time
@@ -89,13 +93,27 @@ class MainActivity : FragmentActivity() {
      */
     @Volatile private var lastInteractionMs: Long = android.os.SystemClock.elapsedRealtime()
 
+    /**
+     * When walletState last became Unlocked, same clock. A fingerprint unlock never reaches
+     * onUserInteraction, so without this the idle clock kept running from the last touch and
+     * the first tick after the unlock locked again — the Moto's endless sign-on loop.
+     */
+    @Volatile private var unlockedAtMs: Long = 0L
+
     override fun onUserInteraction() {
         super.onUserInteraction()
         lastInteractionMs = android.os.SystemClock.elapsedRealtime()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        // After a process death the saved navigation state would reopen the last screen with the
+        // wallet locked underneath; only state this process wrote is restored (LOCK-PD).
+        super.onCreate(
+            ProcessRestorePolicy.stateToRestore(
+                savedInstanceState,
+                savedInstanceState?.getString(ProcessRestorePolicy.KEY),
+            )
+        )
         enableEdgeToEdge()
 
         // Wipe-after-N backstop: if a prior wipe-after-N was interrupted (process
@@ -121,7 +139,7 @@ class MainActivity : FragmentActivity() {
         // message is shown at most once per launch, including the one the restart carried.
         val incomplete = FreshStartAfterWipe.atLaunch(
             this,
-            wipeOwed = pinManager.isWipePending(),
+            wipeOwed = pinManager.wipeOwedAtLaunch(),
             walletStored = walletManager.hasSavedWallet(),
             launch = intent,
             recreated = savedInstanceState != null,
@@ -180,6 +198,14 @@ class MainActivity : FragmentActivity() {
         // routes Locked → "unlock"; nothing here navigates and nothing here touches native.
         // A missing wallet_config row (nothing seeds it) means the entity default, not
         // "no lock"; a DAO failure is the only thing that skips a tick.
+        // Every unlock path — PIN, fingerprint, restore — ends in this state, so stamp it here
+        // rather than in each screen. Not lifecycle-scoped: an unlock that lands while the
+        // biometric sheet has us paused must still count.
+        lifecycleScope.launch {
+            walletManager.walletState.collect { state ->
+                if (state is WalletState.Unlocked) unlockedAtMs = android.os.SystemClock.elapsedRealtime()
+            }
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
@@ -187,15 +213,15 @@ class MainActivity : FragmentActivity() {
                     if (walletManager.walletState.value !is WalletState.Unlocked) continue
                     val (timeoutMs, hasPin) = withContext(Dispatchers.IO) {
                         runCatching {
-                            autoLockTimeoutOrDefault(walletConfigDao.get()?.autoLockTimeoutMs) to pinManager.hasPin()
+                            autoLockTimeoutOrDefault(walletConfigDao.get()?.autoLockTimeoutMs) to pinManager.pinAssumedForLock()
                         }
                             .onFailure { android.util.Log.w("MainActivity", "auto-lock: config read failed, skipping tick", it) }
                             .getOrNull()
                     } ?: continue
                     val now = android.os.SystemClock.elapsedRealtime()
                     val last = lastInteractionMs
-                    if (shouldAutoLock(walletManager.walletState.value, hasPin, last, now, timeoutMs)) {
-                        android.util.Log.i("MainActivity", "auto-lock: idle ${(now - last) / 1000}s >= ${timeoutMs / 1000}s — locking UI")
+                    if (shouldAutoLock(walletManager.walletState.value, hasPin, last, unlockedAtMs, now, timeoutMs)) {
+                        android.util.Log.i("MainActivity", "auto-lock: idle ${(now - maxOf(last, unlockedAtMs)) / 1000}s >= ${timeoutMs / 1000}s — locking UI")
                         walletManager.lockUi()
                     }
                 }
@@ -278,7 +304,7 @@ class MainActivity : FragmentActivity() {
                 androidx.compose.runtime.LaunchedEffect(walletStateForNotif) {
                     if (android.os.Build.VERSION.SDK_INT < 33) return@LaunchedEffect
                     if (walletStateForNotif !is app.aroundtheblock.wallet.core.WalletState.Unlocked) return@LaunchedEffect
-                    while (!pinManager.hasPin()) kotlinx.coroutines.delay(500)
+                    while (!pinManager.pinKnownToExist()) kotlinx.coroutines.delay(500)
                     val prefs = this@MainActivity.getSharedPreferences("dgb_settings", android.content.Context.MODE_PRIVATE)
                     val granted = ContextCompat.checkSelfPermission(
                         this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS
@@ -300,7 +326,7 @@ class MainActivity : FragmentActivity() {
                         // A restore unlocks the wallet on the date screen, BEFORE the PIN exists;
                         // prompting then lands the dialog on top of PIN setup. Wait for the PIN —
                         // create already has one by the time it unlocks, so this costs it nothing.
-                        while (!pinManager.hasPin()) kotlinx.coroutines.delay(500)
+                        while (!pinManager.pinKnownToExist()) kotlinx.coroutines.delay(500)
                         batteryPromptChecked = true
                         val prefs = this@MainActivity.getSharedPreferences(
                             "dgb_settings", android.content.Context.MODE_PRIVATE)
@@ -357,6 +383,11 @@ class MainActivity : FragmentActivity() {
      * when they return to the app. This prevents unauthorized access if
      * someone picks up an unlocked phone.
      */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(ProcessRestorePolicy.KEY, ProcessRestorePolicy.processToken)
+    }
+
     override fun onStop() {
         super.onStop()
         // UI-only lock — requires PIN/biometric to re-enter the app.

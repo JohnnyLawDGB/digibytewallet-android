@@ -37,9 +37,15 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- singleTask (4.1.2 row 38): one wallet screen. A digiid:// link reaches the open one
+             through onNewIntent instead of stacking another, whose arrival stopped the one beneath
+             and locked the wallet. taskAffinity="" (review R12): the screen never joins a task
+             another app created with this package's affinity. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

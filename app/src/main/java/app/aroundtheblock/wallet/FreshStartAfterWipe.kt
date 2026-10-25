@@ -70,8 +70,12 @@ object FreshStartAfterWipe {
      *   caller to report: the process is ending, and the fresh launch reports whatever is left.
      */
     fun afterWipe(context: Context, wipe: WipeReport): Boolean {
-        if (!wipe.seedGone) return true
         val app = context.applicationContext
+        // The wipe marked its erasure owed before it began (WalletManager.wipeThenReleasePin). A verified
+        // wipe owes nothing; one that never removed the seed left the wallet in place, and the mark goes
+        // with it (an owed erasure never runs over a stored wallet).
+        if (wipe.verified || !wipe.seedGone) clearOwedErasure(app)
+        if (!wipe.seedGone) return true
         val incomplete = !wipe.verified
         // Durable before the process ends; a mark that did not land still leaves the relaunch to say so.
         if (incomplete && !runCatching { owedErasure.mark(app) }.getOrDefault(false)) {
@@ -144,8 +148,9 @@ object FreshStartAfterWipe {
         }
         Log.w(TAG, "a wipe is owed at this launch; running it before anything else")
         val report = wipe()
-        // The mark stays until an erasure verifies, so every launch retries while a store refuses.
-        if (finishesErasure && report.verified) clearOwedErasure(app)
+        // The mark stays until an erasure verifies, so every launch retries while a store refuses. The
+        // wipe marks its own erasure owed before it starts, so any verified wipe here clears it.
+        if (report.verified) clearOwedErasure(app)
         if (madeByARestart) {
             if (report.seedGone) Log.w(TAG, "wipe ran again in the process a fresh start began; running on instead of restarting again")
             return !report.verified
@@ -169,6 +174,13 @@ object FreshStartAfterWipe {
      */
     private fun Intent?.flag(name: String): Boolean =
         this != null && runCatching { getBooleanExtra(name, false) }.getOrDefault(false)
+
+    /** Marks an erasure owed for the next launch to finish (WalletManager's hook; 4.1.2 rows 24/33). */
+    fun markErasureOwed(context: Context) {
+        if (!runCatching { owedErasure.mark(context.applicationContext) }.getOrDefault(false)) {
+            Log.w(TAG, "the erasure could not be marked owed")
+        }
+    }
 
     private fun clearOwedErasure(app: Context) {
         runCatching { owedErasure.clear(app) }.onFailure {

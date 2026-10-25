@@ -64,6 +64,7 @@ build() {
         "$BRIDGE_DIR/jni_wallet_sign.c" \
         "$BRIDGE_DIR/jni_transaction_persist.c" \
         "$BRIDGE_DIR/jni_wallet.c" \
+        "$BRIDGE_DIR/coin_reservation.c" \
         "$BRIDGE_DIR/slip13.c" \
         "$CORE_DIR/BRWallet.c" \
         "$CORE_DIR/BRTransaction.c" \

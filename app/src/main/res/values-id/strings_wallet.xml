@@ -487,6 +487,12 @@
     <string name="did_insecure">Koneksi Tidak Aman</string>
     <string name="did_insecure_body">Situs ini memakai HTTP, bukan HTTPS. Autentikasi Anda bisa disadap.</string>
     <string name="did_callback_url">URL Callback</string>
+    <string name="did_identity_title">Masuk mana yang dikenal situs ini?</string>
+    <string name="did_identity_hint">Memulihkan dompet ini? Pilih identitas yang dulu Anda pakai di situs ini. Setelah masuk berhasil, dompet akan mengingatnya.</string>
+    <string name="did_identity_per_site">Kunci terpisah untuk situs ini (aplikasi DigiByte asli)</string>
+    <string name="did_identity_shared">Kunci bersama untuk semua situs (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Sama di setiap situs, sehingga situs dapat menautkan proses masuk Anda. Pilih hanya jika situs ini mengenal Anda dengannya.</string>
+    <string name="did_identity_address">Alamat: %1$s</string>
     <string name="did_approve">Setujui</string>
     <string name="did_deny">Tolak</string>
     <string name="did_success">Autentikasi Berhasil</string>
@@ -590,6 +596,7 @@
     <string name="rf_dd_fee_floor">Perlu %1$s untuk biaya jaringan: dompet ini punya %2$s.</string>
     <string name="rf_dd_found">%1$s DigiDollar ditemukan</string>
     <string name="rf_dd_moved">%1$s DigiDollar dipindahkan ke dompet ini</string>
+    <string name="rf_dd_sent_unrelayed">%1$s dalam DigiDollar telah dikirim, tetapi jaringan belum mengonfirmasinya. Simpan frasa pemulihan lama Anda sampai muncul di dompet ini.</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar tertinggal: tidak dapat dipindahkan</string>
     <string name="rf_dd_unreachable">DigiDollar tidak dapat diperiksa; dompet ini mungkin memilikinya</string>
     <string name="as_rules_checking">Memeriksa aturan transfer aset ini…</string>
@@ -693,4 +700,7 @@
     <string name="seedview_pass_unreadable_body">Frasa sandi dompet ini tidak dapat dibaca saat ini. Kata-kata pemulihan Anda saja mungkin tidak dapat memulihkan dompet ini, jadi kata-kata itu tidak ditampilkan sampai frasa sandi dapat ditampilkan bersamanya. Coba lagi.</string>
     <string name="seedview_pass_retry">Coba lagi</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">PIN Anda tidak bisa diperiksa saat ini</string>
+    <string name="pinstore_body">Penyimpanan kunci aman ponsel tidak terbuka, jadi dompet tetap terkunci. Tidak ada yang dihapus. Tutup aplikasi lalu buka lagi. Jika terus terjadi, mulai ulang ponsel; frasa pemulihan Anda tetap bisa memulihkan dompet di perangkat mana pun.</string>
+    <string name="pinstore_close">Tutup aplikasi</string>
 </resources>

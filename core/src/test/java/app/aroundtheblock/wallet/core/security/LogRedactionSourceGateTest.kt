@@ -109,6 +109,95 @@ class LogRedactionSourceGateTest {
         assertTrue(stmts.toString(), stmts.size == 2 && stmts[0].contains("tx.txid"))
     }
 
+    /**
+     * 4.1.2 row 7 (K1): a transaction row never goes to logcat. The txid gate above matches names, and
+     * `txDetails...forEach { Log.d(TAG, "tx: $it") }` passed it while logging five full rows -- txid,
+     * amounts, addresses -- every minute. This one follows the VALUES: a variable assigned from a
+     * native call that returns wallet transaction data, any variable derived from one, and `it` inside
+     * a block that iterates one, may not be interpolated into a log statement.
+     */
+    @Test
+    fun `no Kotlin log line interpolates a value read from the wallet's transactions`() {
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                txRowLogs(file.readText()).forEach { violations.add("${file.name}: $it") }
+            }
+        }
+        assertTrue("log statements carrying wallet transaction data:\n" + violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The value gate must see the shape that leaked, and a named variant of it. */
+    @Test
+    fun `the transaction-value gate catches the row logger it was written for`() {
+        val leaked = """
+            val txDetails = NativeBridge.getTransactionDetails()
+            if (now % 60000 < 5000) {
+                txDetails.trim().lines().take(5).forEach { android.util.Log.d("WalletVM", "tx: ${'$'}it") }
+            }
+        """.trimIndent()
+        assertTrue("the original row logger is not caught", txRowLogs(leaked).isNotEmpty())
+        val named = "val rows = NativeBridge.getTransactionDetails().lines()\nval first = rows.first()\nLog.i(TAG, \"row ${'$'}first\")"
+        assertTrue("a derived variable is not followed", txRowLogs(named).isNotEmpty())
+        val counted = "val rows = NativeBridge.getTransactionDetails().lines()\nLog.i(TAG, \"rows=${'$'}{rows.size}\")"
+        assertTrue("a count of rows is not a row", txRowLogs(counted).isEmpty())
+    }
+
+    private val txDataSource = Regex(
+        """NativeBridge\.(getTransactionDetails|getAllTransactionHashes|getTransactionOutputsForHash|""" +
+            """getTransactionInputsForHash|getSerializedTransactionForHash|getSpendableDigiByteUtxos|dumpAllAddresses)\("""
+    )
+
+    // Per function: a name is a transaction value only in the function that read it (one SyncService
+    // function's `raw` is a serialized transaction, another's is a host:port).
+    private fun txRowLogs(content: String): List<String> =
+        Regex("""(?=\n[ \t]*(?:(?:private|internal|public|override|suspend|inline|protected)\s+)*fun\s)""")
+            .split(content).flatMap { txRowLogsIn(it) }
+
+    private fun txRowLogsIn(content: String): List<String> {
+        val assign = Regex("""\b(?:val|var)\s+(\w+)\s*(?::[^=\n]+)?=([^\n]*)""")
+        val tainted = mutableSetOf<String>()
+        var grew = true
+        while (grew) {
+            grew = false
+            assign.findAll(content).forEach { m ->
+                val name = m.groupValues[1]; val rhs = m.groupValues[2]
+                // Derived: the right-hand side starts from a tainted value (`rows.first()`, `x.trim().lines()`).
+                val head = Regex("""^\s*([A-Za-z_]\w*)""").find(rhs)?.groupValues?.get(1)
+                if (name !in tainted && (txDataSource.containsMatchIn(rhs) || head in tainted)) {
+                    tainted.add(name); grew = true
+                }
+            }
+        }
+        if (tainted.isEmpty()) return emptyList()
+        // A count, or the short prefix this codebase logs instead of a txid (`.take(12)`), is not a row.
+        val shortened = Regex("""\.(size|count|isEmpty|isNotEmpty|length)\b|\.(take|takeLast)\(""")
+        val out = mutableListOf<String>()
+        collectLogStatements(content).forEach { stmt ->
+            val bare = Regex("""\$(?!\{)([A-Za-z_]\w*)""").findAll(stmt).map { it.groupValues[1] }
+            val braced = Regex("""\$\{([^{}]*)\}""").findAll(stmt).map { it.groupValues[1] }
+                .filter { !shortened.containsMatchIn(it) }
+                .mapNotNull { Regex("""^\s*([A-Za-z_]\w*)""").find(it)?.groupValues?.get(1) }
+            if ((bare + braced).any { it in tainted }) out.add(stmt)
+        }
+        // `it` inside a block that iterates a tainted value: from the tainted name to the block's end.
+        tainted.forEach { name ->
+            Regex("""\b${Regex.escape(name)}\b[^\n{]*\.(forEach|onEach|map|mapNotNull|filter|forEachIndexed)\s*\{""")
+                .findAll(content).forEach { m ->
+                    var depth = 0; var i = m.range.last
+                    while (i < content.length) {
+                        when (content[i]) { '{' -> depth++; '}' -> depth-- }
+                        if (depth == 0) break
+                        i++
+                    }
+                    collectLogStatements(content.substring(m.range.last, minOf(i + 1, content.length)))
+                        .filter { Regex("""\$\{?it\b""").containsMatchIn(it) }
+                        .forEach { out.add(it) }
+                }
+        }
+        return out
+    }
+
     // Multi-line Log.x( ... ) calls are common in this codebase, so a line-based grep would miss
     // an argument on the next line. Collect each call from `Log.x(` to its balancing paren.
     private fun collectLogStatements(content: String): List<String> {

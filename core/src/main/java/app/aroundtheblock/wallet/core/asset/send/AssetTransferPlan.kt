@@ -80,12 +80,12 @@ object AssetTransferPlanner {
         assetUtxos
             .groupBy { it.scriptPubKey.toHexString() }
             .values
-            .filter { group -> group.sumOf { it.assetQuantity } >= quantity }
-            .sortedByDescending { group -> group.sumOf { it.assetQuantity } }
+            .filter { group -> app.aroundtheblock.wallet.core.asset.AssetSums.saturating(group.map { it.assetQuantity }) >= quantity }
+            .sortedByDescending { group -> app.aroundtheblock.wallet.core.asset.AssetSums.saturating(group.map { it.assetQuantity }) }
 
     /** The most of the asset any single address holds: the largest amount one send can move. */
     fun largestSingleSource(assetUtxos: List<UtxoEntity>): Long =
-        assetUtxos.groupBy { it.scriptPubKey.toHexString() }.values.maxOfOrNull { g -> g.sumOf { it.assetQuantity } } ?: 0L
+        assetUtxos.groupBy { it.scriptPubKey.toHexString() }.values.maxOfOrNull { g -> app.aroundtheblock.wallet.core.asset.AssetSums.saturating(g.map { it.assetQuantity }) } ?: 0L
 
     /**
      * Whether a plain coin may pay the fee of a send from [sourceScript]. A fee input's assets,
@@ -257,8 +257,10 @@ object AssetTransferPlanner {
         recipientVout: Int,
         assetChangeVout: Int,
     ): List<DigiAssetEncoder.TransferInstruction>? {
-        val totalIn = assetInputs.sumOf { it.assetQuantity }
-        if (totalIn != quantityToRecipient + assetChangeQty) return null
+        // Exact, never saturated: these totals become instruction amounts (4.1.2 row 27).
+        val totalIn = app.aroundtheblock.wallet.core.asset.AssetSums.exactOrNull(assetInputs.map { it.assetQuantity }) ?: return null
+        val totalOut = app.aroundtheblock.wallet.core.asset.AssetSums.exactOrNull(listOf(quantityToRecipient, assetChangeQty)) ?: return null
+        if (totalIn != totalOut) return null
 
         val out = mutableListOf<DigiAssetEncoder.TransferInstruction>()
         var qtyRemaining = quantityToRecipient

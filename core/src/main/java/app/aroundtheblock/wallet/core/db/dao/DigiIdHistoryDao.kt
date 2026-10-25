@@ -19,6 +19,12 @@ interface DigiIdHistoryDao {
     @Query("SELECT COUNT(*) FROM digiid_history WHERE domain = :domain COLLATE NOCASE AND success = 1 AND derivation = 'legacy'")
     suspend fun countSuccessfulLegacy(domain: String): Int
 
+    /** Has this domain ever completed a login, with either identity? With none on record a restored
+     *  wallet is offered the choice of identity (IdentityKeyPolicy.offersChoice). Case-insensitive,
+     *  as above. */
+    @Query("SELECT COUNT(*) FROM digiid_history WHERE domain = :domain COLLATE NOCASE AND success = 1")
+    suspend fun countSuccessful(domain: String): Int
+
     @Query("DELETE FROM digiid_history WHERE timestamp < :before")
     suspend fun pruneOlderThan(before: Long)
 }
