@@ -19,11 +19,14 @@ Every release is built and signed in CI — release signing keys are never held 
 what you downloaded before installing:
 
 ```bash
-sha256sum digibyte-wallet-v4.0.40.apk
+sha256sum aroundtheblock-wallet-v4.1.1.apk
+apksigner verify --print-certs aroundtheblock-wallet-v4.1.1.apk
 ```
 
-and compare against the SHA-256 published on the release page. The app is not on the Play Store
-yet (Play Store and F-Droid are Phase 4 on the roadmap), so a direct APK install is expected.
+and compare against the SHA-256 published on the release page; the signer certificate's SHA-256 digest must be
+`7e36ddb28561b7856ad0b627bf156539f8b57f97242148d565090cb0aa8edf87`. The app is also on
+[Google Play](https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet), signed with the same key, so a
+Play install and a release APK can update each other. F-Droid is still on the roadmap (Phase 4).
 
 ## Design principle: sovereignty first
 
@@ -183,9 +186,9 @@ See [VERIFICATION.md](VERIFICATION.md) for multi-party attestation instructions.
 | 0 | Legibility (`ARCHITECTURE` / `THREAT_MODEL` / `BIP_COMPLIANCE` / `PROCESS_FLOWS` docs) | ✅ Done |
 | 1 | Sovereign data layer — BIP157/158 client, bloom removal, own-node pairing | ✅ Client shipped · 🚧 CF fleet reliability remainder |
 | 1.5 | **v4.0.0** — bloom wire path fully excised, BIP157/158-only | ✅ Shipped |
-| 2 | Key & trust hardening — PIN rate-limit, duress PIN, Keystore auth-binding, Digi-ID key isolation, Tor disposition | 🚧 In progress (PIN rate-limit shipped) |
+| 2 | Key & trust hardening — PIN rate-limit, Keystore auth-binding, Digi-ID key isolation, Tor disposition | 🚧 In progress (PIN rate-limit shipped) |
 | 3 | Feature velocity — PSBT, multisig, watch-only, coin control, RBF, WIF sweep, DigiAsset send | 🚧 In progress |
-| 4 | Audit, distribution + hardware — third-party audit, F-Droid, Play Store, Coldcard QR, NFC | 🚧 Planned |
+| 4 | Audit, distribution + hardware — third-party audit, F-Droid, Play Store, Coldcard QR, NFC | 🚧 In progress (Play Store shipped) |
 
 ## Security
 

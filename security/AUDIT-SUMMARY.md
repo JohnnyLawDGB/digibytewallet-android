@@ -1,4 +1,12 @@
-# DigiByte Wallet v3.0.1 — Security Audit Summary
+# HoldFast Wallet — Security Audit Summary
+
+> **Read this first.** HoldFast Wallet (`app.aroundtheblock.wallet`, current release **v4.1.1**, branch `develop`) is
+> the same codebase that shipped as DigiByte Wallet (`io.digibyte`) until v4.0.87.2. This file starts with that app's
+> **v3.0.1 baseline audit (2026-03-28)**, kept as written, and appends a dated section for each later audit below it.
+> The running per-release record, including the most recent cycle, is [`AUDIT-LOG.md`](AUDIT-LOG.md); current scope
+> and how to report are in [`BUG-BOUNTY.md`](../BUG-BOUNTY.md).
+
+## v3.0.1 baseline (historical)
 
 **Date:** 2026-03-28
 **Version:** v3.0.1 (phase1-modernization branch)

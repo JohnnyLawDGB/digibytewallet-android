@@ -294,7 +294,7 @@ Reports without these elements are returned for missing information:
 
 - **Title** — one-line summary
 - **Severity claim** — your initial Critical/High/Medium/Low assessment
-- **Affected version** — the exact tag (e.g. `v3.5.31`) you tested against
+- **Affected version** — the exact tag (e.g. `v4.1.1`) you tested against
 - **Affected platform** — Android version, device model, ROM
 - **Repro steps** — numbered, deterministic; copy-pasteable commands where possible
 - **PoC** — minimal artifact that triggers the bug. For network bugs: a `curl` or
