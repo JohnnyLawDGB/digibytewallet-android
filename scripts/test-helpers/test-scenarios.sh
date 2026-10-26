@@ -100,6 +100,20 @@ test_C() {
         return
     fi
 
+    # An older APK of a DIFFERENT package installs beside this one instead of under it, and the
+    # "upgrade" then passes while upgrading nothing. That is what an io.digibyte APK does here.
+    local aapt2 prev_pkg
+    aapt2="$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)"
+    if [[ -z "$aapt2" ]]; then
+        echo "SKIP (aapt2 not found; cannot check the previous APK is the same package)"
+        return
+    fi
+    prev_pkg="$("$aapt2" dump packagename "$prev_apk" 2>/dev/null)"
+    if [[ "$prev_pkg" != "$package" ]]; then
+        echo "SKIP (previous APK is ${prev_pkg:-unreadable}, not $package)"
+        return
+    fi
+
     # Install old version
     adb -s "$serial" shell pm uninstall "$package" > /dev/null 2>&1 || true
     adb -s "$serial" install "$prev_apk" > /dev/null 2>&1
@@ -250,7 +264,7 @@ test_F() {
         elapsed=$((elapsed + 5))
     done
 
-    if logcat_contains "$serial" "ANR in io.digibyte"; then
+    if logcat_contains "$serial" "ANR in app.aroundtheblock.wallet"; then
         echo "FAIL"
     elif logcat_contains "$serial" "Sync complete"; then
         echo "PASS"

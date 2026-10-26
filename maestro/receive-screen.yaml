@@ -1,4 +1,4 @@
-appId: io.digibyte
+appId: app.aroundtheblock.wallet.debug
 name: "Receive screen — address display"
 tags:
   - requires-wallet

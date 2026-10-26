@@ -45,6 +45,9 @@
 /* Cached JVM pointer — set in JNI_OnLoad */
 extern JavaVM *g_jvm;
 
+/* jni_registry.c: binds NativeBridge's natives; 0 on success. Called once from JNI_OnLoad. */
+int dgb_register_natives(JNIEnv *env);
+
 /* Wallet and peer manager — owned by the C core, managed by jni_wallet.c / jni_peer.c */
 extern BRWallet     *g_wallet;
 extern BRPeerManager *g_peerManager;
@@ -124,6 +127,26 @@ static inline int _peerGuardStamp(void) {
          atomic_store_explicit(&g_peerGuardLine, __LINE__, memory_order_relaxed), \
          _peerGuardStamp())
 
+/* ---------- Wallet pointer guard (4.1.2 row 6, N7) ----------
+ *
+ * createWalletFromBytes / restoreWalletFromBytes free g_wallet and install a new one while holding
+ * PEER_GUARD. JNI entry points that read g_wallet without PEER_GUARD -- balance, addresses, quotes,
+ * signing, transaction details, many from the UI thread -- could read the old wallet as it was freed.
+ * They take WALLET_READ_GUARD() instead: a shared lock, so readers never wait on each other or on a
+ * slow peer-manager hold, and only the swap itself (write side, held from the free to the new
+ * wallet's assignment) excludes them. A reader never takes PEER_GUARD inside the read guard (the swap
+ * holds PEER_GUARD and then waits for the write side); wallet_read_guard_kat gates both rules.
+ * WALLET_READ_GUARD_UNFIXED compiles the guard out for that KAT's red arm. */
+extern pthread_rwlock_t g_walletRwLock;
+static inline void _walletReadUnlock(int *guard) { (void)guard; pthread_rwlock_unlock(&g_walletRwLock); }
+#ifdef WALLET_READ_GUARD_UNFIXED
+#define WALLET_READ_GUARD() ((void)0)
+#else
+#define WALLET_READ_GUARD() \
+    int _walletReadGuard __attribute__((cleanup(_walletReadUnlock), unused)) = \
+        (pthread_rwlock_rdlock(&g_walletRwLock), 0)
+#endif
+
 /* Session seed — managed by jni_wallet.c, accessed via functions below.
  * g_seed is static to jni_wallet.c — no direct extern access. */
 int seed_is_valid(void);
@@ -156,6 +179,12 @@ extern int g_peerManagerNeedsRecreate;
  * PEER_GUARD, as g_peerManager is. */
 extern int g_walletSwapped;
 
+/* jni_transaction_persist.c: the records loadSerializedTransactions parsed for the disk restore. Once
+ * restoreWalletFromBytes has built a wallet from them the bridge keeps no pointer to any of them; creating a
+ * wallet or recovering one from a phrase drops a pending load, so no wallet is built from another's. */
+void saved_transactions_release_after_build(BRWallet *wallet);
+void saved_transactions_discard(void);
+
 /* Callback handler (NativeCallback interface) */
 extern jobject  g_callbackHandler;
 
@@ -169,6 +198,11 @@ extern jmethodID g_mid_onSyncFailed;
 extern jmethodID g_mid_onBalanceChanged;
 
 /* ---------- Helper functions ---------- */
+
+/* The "<vout>|<satoshis>|<scriptHex>" listing of tx's outputs as a String[] (jni_asset.c). Parsing is
+ * the caller's: outside bytes are read with BRTransactionParseSigned (jni_asset.c), the wallet's own
+ * unsigned draft with BRTransactionParse (jni_transaction.c). who names the caller in the log. */
+jobjectArray bridge_transaction_outputs(JNIEnv *env, const BRTransaction *tx, const char *who);
 
 /* Get JNIEnv for the current thread, attaching if necessary. */
 static inline JNIEnv *jni_get_env(void) {

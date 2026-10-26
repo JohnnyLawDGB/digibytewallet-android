@@ -28,13 +28,13 @@ wire() { if grep -Eq "$1" "$PEER"; then echo "ok: $2"; else echo "FAIL: $2"; fai
 wire 'dandelion_state_set_enabled\(&g_dandelion,' "setDandelionEnabled remembers the setting"
 wire 'dandelion_state_add\(&g_dandelion,' "addDandelionPeer remembers the address"
 # The replay must directly follow the BIP158 re-apply in startSync's creation path.
-if grep -A1 -E '^\s*_applyPendingBip158State\(\);' "$PEER" | grep -Eq '^\s*_applyDandelionState\(\);'; then
+if <<<"$(grep -A1 -E '^\s*_applyPendingBip158State\(\);' "$PEER")" grep -Eq '^\s*_applyDandelionState\(\);'; then
     echo "ok: startSync replays the Dandelion state onto the manager it creates"
 else
     echo "FAIL: startSync replays the Dandelion state onto the manager it creates"; fail=1
 fi
 # Neither setter may drop the value when no manager exists yet (the B234 shape).
-if grep -A4 -E 'NativeBridge_(setDandelionEnabled|addDandelionPeer)\(' "$PEER" | grep -Eq 'if \(!g_peerManager( \|\| !ipStr)?\) *\{?\s*(return|LOGI)'; then
+if <<<"$(grep -A4 -E 'NativeBridge_(setDandelionEnabled|addDandelionPeer)\(' "$PEER")" grep -Eq 'if \(!g_peerManager( \|\| !ipStr)?\) *\{?\s*(return|LOGI)'; then
     echo "FAIL: a Dandelion setter still returns before remembering when there is no peer manager"; fail=1
 else
     echo "ok: the Dandelion setters remember before they need a peer manager"

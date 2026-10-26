@@ -8,6 +8,7 @@
  */
 
 #include "jni_bridge.h"
+#include "saved_transactions_deserialize.h"
 
 /* ---------- getSerializedTransactions ----------
  * Returns all wallet transactions as a single byte array:
@@ -18,8 +19,9 @@
  *   [4 bytes: timestamp]
  *   [N bytes: serialized tx data]
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz) {
+jbyteArray JNICALL
+NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) return NULL;
@@ -61,26 +63,36 @@ Java_io_digibyte_core_bridge_NativeBridge_getSerializedTransactions(JNIEnv *env,
 }
 
 /* ---------- loadSerializedTransactions ----------
- * Parse saved transactions and store them for use by BRWalletNew.
- * Must be called BEFORE recoverWallet/createWallet.
+ * Parse saved transactions and hold them for restoreWalletFromBytes, the disk restore, which must follow:
+ * it is the only entry that builds a wallet from loaded records. createWalletFromBytes and
+ * recoverWalletFromBytes drop a pending load instead (saved_transactions_discard), so a wallet is never
+ * built from records loaded for another one.
  */
 BRTransaction **g_savedTransactions = NULL;
 size_t g_savedTransactionCount = 0;
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
-                                                                       jbyteArray data) {
-    (void)thiz;
-
-    /* Free any previously loaded transactions */
+/* ---------- saved_transactions_discard ----------
+ * Drops a pending load: the records the array holds -- none of them a wallet's, since building a wallet
+ * from the array releases it (saved_transactions_release_after_build) -- then the array, which is cleared.
+ */
+void saved_transactions_discard(void) {
     if (g_savedTransactions) {
         for (size_t i = 0; i < g_savedTransactionCount; i++) {
             if (g_savedTransactions[i]) BRTransactionFree(g_savedTransactions[i]);
         }
         free(g_savedTransactions);
-        g_savedTransactions = NULL;
-        g_savedTransactionCount = 0;
     }
+    g_savedTransactions = NULL;
+    g_savedTransactionCount = 0;
+}
+
+jint JNICALL
+NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
+                                                                       jbyteArray data) {
+    (void)thiz;
+
+    /* A new load replaces a pending one. */
+    saved_transactions_discard();
 
     if (!data) return 0;
 
@@ -90,42 +102,36 @@ Java_io_digibyte_core_bridge_NativeBridge_loadSerializedTransactions(JNIEnv *env
     jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
     if (!bytes) return 0;
 
-    const uint8_t *buf = (const uint8_t *)bytes;
-    size_t pos = 0;
-
-    uint32_t txCount = UInt32GetLE(&buf[pos]); pos += 4;
-    if (txCount == 0 || txCount > 10000) {
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return 0;
-    }
-
-    g_savedTransactions = calloc(txCount, sizeof(BRTransaction *));
-    if (!g_savedTransactions) {
-        (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-        return 0;
-    }
-
-    size_t loaded = 0;
-    for (uint32_t i = 0; i < txCount && pos + 12 <= (size_t)len; i++) {
-        uint32_t txSize = UInt32GetLE(&buf[pos]); pos += 4;
-        uint32_t height = UInt32GetLE(&buf[pos]); pos += 4;
-        uint32_t timestamp = UInt32GetLE(&buf[pos]); pos += 4;
-
-        if (pos + txSize > (size_t)len) break;
-
-        BRTransaction *tx = BRTransactionParse(&buf[pos], txSize);
-        pos += txSize;
-
-        if (tx) {
-            tx->blockHeight = height;
-            tx->timestamp = timestamp;
-            g_savedTransactions[loaded++] = tx;
-        }
-    }
+    /* Guarded, JNI-free parse (saved_transactions_deserialize.h): a corrupt count, a failed
+     * allocation, or a record length that runs past the blob is never parsed. */
+    size_t loaded = deserialize_saved_transactions_guarded((const uint8_t *)bytes, (size_t)len,
+                                                           &g_savedTransactions);
 
     g_savedTransactionCount = loaded;
     (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
 
     LOGI("loadSerializedTransactions: loaded %zu transactions from persistent storage", loaded);
     return (jint)loaded;
+}
+
+/* ---------- saved_transactions_release_after_build ----------
+ * Called by restoreWalletFromBytes right after BRWalletNewDual has built `wallet` from the loaded records,
+ * before anything else uses the wallet. BRWalletNewDual takes the records it keeps -- the wallet owns them
+ * from then on, and BRWalletFree releases them -- and skips the rest (an unsigned record, a repeated hash,
+ * one outside the money range). From here the bridge names none of them: a record the wallet did not take
+ * is released, then the array, and the array is cleared. So a later load or drop frees nothing the wallet
+ * owns, and a later build never starts from a record a wallet has released.
+ */
+void saved_transactions_release_after_build(BRWallet *wallet) {
+    if (!wallet) return;   /* nothing was built: the records are still the array's */
+
+    if (g_savedTransactions) {
+        for (size_t i = 0; i < g_savedTransactionCount; i++) {
+            BRTransaction *tx = g_savedTransactions[i];
+            if (tx && BRWalletTransactionForHash(wallet, tx->txHash) != tx) BRTransactionFree(tx);
+        }
+        free(g_savedTransactions);
+    }
+    g_savedTransactions = NULL;
+    g_savedTransactionCount = 0;
 }

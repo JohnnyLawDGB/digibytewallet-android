@@ -70,14 +70,14 @@ if [ -z "$GETDATA_FN" ]; then
     echo "             over the served copy's release cannot hold. Re-anchor the gate."
     exit 1
 fi
-GETDATA_FREES=$(printf '%s\n' "$GETDATA_FN" | grep -c "BRTransactionFree(tx)")
+GETDATA_FREES=$(<<<"$GETDATA_FN" grep -c "BRTransactionFree(tx)")
 if [ "$GETDATA_FREES" -lt 2 ]; then
     echo "GATE FAILED: BRPeer.c's getdata handler must release the object requestedTx returns on"
     echo "             BOTH paths through an inv_tx item — after it has been sent, and when it is"
     echo "             too large to send. Found $GETDATA_FREES release(s) of tx, expected 2."
     exit 1
 fi
-if ! printf '%s\n' "$GETDATA_FN" | grep -q "tx = ctx->requestedTx ? ctx->requestedTx(ctx->info, hash) : NULL;"; then
+if ! <<<"$GETDATA_FN" grep -q "tx = ctx->requestedTx ? ctx->requestedTx(ctx->info, hash) : NULL;"; then
     echo "GATE FAILED: BRPeer.c's getdata handler must set tx for every inv_tx item (NULL when there"
     echo "             is no provider), so no item can read or send the previous item's object."
     exit 1
@@ -90,7 +90,7 @@ fi
 # tx_publish_ownership_kat's gate over the publish entry points. Needles are matched with white
 # space collapsed, so a re-indentation does not move the gate.
 BRIDGE_C="$REPO_ROOT/native/src/main/jni/bridge/jni_transaction.c"
-REMOVE_FN="$(awk '/^Java_io_digibyte_core_bridge_NativeBridge_removeTransaction/,/^\}/' "$BRIDGE_C" | tr -s '[:space:]' ' ')"
+REMOVE_FN="$(awk '/^NativeBridge_removeTransaction/,/^\}/' "$BRIDGE_C" | tr -s '[:space:]' ' ')"
 if [ -z "$REMOVE_FN" ]; then
     echo "GATE FAILED: removeTransaction was not found in jni_transaction.c. Re-anchor the gate."
     exit 1
@@ -100,7 +100,7 @@ for needle in "PEER_GUARD();" \
               "BRPeerManagerRemoveTransaction(g_peerManager, h)" \
               "BRWalletRemoveTransaction(g_wallet, h)" \
               "removed = BRWalletTransactionForHash(g_wallet, h) ? JNI_FALSE : JNI_TRUE;"; do
-    if ! printf '%s\n' "$REMOVE_FN" | grep -qF "$needle"; then
+    if ! <<<"$REMOVE_FN" grep -qF "$needle"; then
         echo "GATE FAILED: the bridge's removeTransaction no longer contains: $needle"
         echo "             It must hold the peer guard, take the manager-locked removal only while"
         echo "             the manager holds this g_wallet (the marker says it may not), fall back to"
@@ -117,13 +117,13 @@ if [ -z "$RESULT_FN" ]; then
     echo "GATE FAILED: _publishResult was not found in jni_transaction.c. Re-anchor the gate."
     exit 1
 fi
-if ! printf '%s\n' "$RESULT_FN" | grep -qE 'if \(error == EALREADY\) \{[^}]*free\(ctx\);[^}]*return;[^}]*\}'; then
+if ! <<<"$RESULT_FN" grep -qE 'if \(error == EALREADY\) \{[^}]*free\(ctx\);[^}]*return;[^}]*\}'; then
     echo "GATE FAILED: the bridge's _publishResult must consume EALREADY by releasing the context and"
     echo "             returning before anything is recorded (the earlier publish carries the verdict)."
     exit 1
 fi
 EARLY="${RESULT_FN%%_publishResultRecord*}"
-if ! printf '%s\n' "$EARLY" | grep -q 'EALREADY'; then
+if ! <<<"$EARLY" grep -q 'EALREADY'; then
     echo "GATE FAILED: _publishResult's EALREADY branch must come BEFORE the verdict is recorded."
     exit 1
 fi

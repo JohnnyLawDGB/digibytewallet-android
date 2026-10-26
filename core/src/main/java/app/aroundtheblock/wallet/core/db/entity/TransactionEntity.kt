@@ -1,0 +1,38 @@
+package app.aroundtheblock.wallet.core.db.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "transactions")
+data class TransactionEntity(
+    @PrimaryKey val txid: String,
+    val blockHeight: Long,
+    val timestamp: Long,
+    val amount: Long,
+    val fee: Long,
+    val toAddress: String,
+    val fromAddress: String,
+    val confirmations: Int,
+    val sent: Long = 0L,
+    val received: Long = 0L,
+    val isAssetTx: Boolean = false,
+    val rawBytes: ByteArray? = null,
+    /** DigiAsset identifier for per-asset history filtering. Null for DGB-only
+     *  transactions and for asset-tx rows that predated MIGRATION_4_5; the
+     *  latter are populated by AssetHistoryBackfill on first launch. */
+    val assetId: String? = null
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is TransactionEntity) return false
+        return txid == other.txid
+            && confirmations == other.confirmations
+            && amount == other.amount
+            && blockHeight == other.blockHeight
+    }
+    override fun hashCode(): Int {
+        var result = txid.hashCode()
+        result = 31 * result + confirmations
+        return result
+    }
+}

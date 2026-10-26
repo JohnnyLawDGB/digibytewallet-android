@@ -1,0 +1,10 @@
+# Pinned SSH host key of the checkpoint source node (digiscope.me, operator-controlled).
+# Used by gen_block_checkpoints.sh and gen_cf_checkpoints.sh with StrictHostKeyChecking=yes.
+# The tables those scripts write become the wallet's trusted checkpoints, so the host must be
+# the one we think it is: a host presenting any other key is refused, not learned.
+#
+# Provenance: the ed25519 key the owner's machine accepted on first contact and has used for
+# every deploy since (2026-10-11, from ~/.ssh/known_hosts). Fingerprint: SHA256:tKUWKVCrqu119HYmmi2KuBuA/5bO+3O8JpdgeTHJmHg
+# To change hosts: verify the new key's fingerprint out of band (the provider's console), then
+# replace this line. Never fill it with ssh-keyscan alone: that is the blind trust this replaces.
+digiscope.me ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEnuWxdxU9UDKQ5Nu/zGpEM69A0n8Fvg3CYIiTNxCA4x
