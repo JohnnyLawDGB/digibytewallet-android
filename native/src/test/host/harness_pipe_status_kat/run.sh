@@ -74,8 +74,16 @@ echo "--- SHIPPED: the harness scripts in this tree ---"
 if [ "$here_miss" -eq 0 ]; then echo "  [green mechanism] the here-string form never missed (0 in 5)"
 else echo "  [green mechanism] GATE FAILURE: the here-string form missed $here_miss time(s)"; FAIL=1; fi
 # This file is left out: it plants the forms on purpose (above), as the comparison.
-mapfile -t files < <(ls "$REPO_ROOT"/native/src/test/host/*/*.sh "$REPO_ROOT"/scripts/*.sh 2>/dev/null \
-                     | grep -vxF "$SCRIPT_DIR/run.sh")
+# A read loop, not mapfile: macOS bash 3.2 has no mapfile, and an empty list scanned nothing yet
+# reported the gate held. Too few scripts is a failure, never a pass.
+files=()
+while IFS= read -r f; do
+    [ "$f" = "$SCRIPT_DIR/run.sh" ] || files+=("$f")
+done < <(ls "$REPO_ROOT"/native/src/test/host/*/*.sh "$REPO_ROOT"/scripts/*.sh 2>/dev/null)
+if [ "${#files[@]}" -lt 100 ]; then
+    echo "  [green tree] GATE FAILURE: found ${#files[@]} scripts to scan (expected 100 or more)"; FAIL=1
+    files=(/dev/null)
+fi
 breaches="$(scan "${files[@]}")"
 if [ -z "$breaches" ]; then echo "  [green tree] ${#files[@]} scripts: no early-exit reader on a pipe under pipefail"
 else echo "  [green tree] GATE FAILURE: an early-exit reader reads a pipe under pipefail:"; echo "$breaches" | sed "s|$REPO_ROOT/||; s/^/      /"; FAIL=1; fi
