@@ -367,6 +367,15 @@ object NativeBridge {
      */
     external fun publishErrnoValue(index: Int): Int
 
+    /**
+     * `BR_PUBLISH_AWAIT_POLL_MS` and `BR_PUBLISH_AWAIT_TIMEOUT_MS`: the verdict wait a send screen
+     * gives a send it just published ([app.aroundtheblock.wallet.core.sync.PublishOutcome.await]'s
+     * defaults). Exist so `PublishOutcomeParityTest` holds that wait to the header iOS imports.
+     */
+    external fun publishAwaitPollMs(): Int
+
+    external fun publishAwaitTimeoutMs(): Int
+
     // === Stranded-send refusal hold (test-support only) ===
     /**
      * The C action for a recorded send ([BRStrandedSend.h]'s `BRStrandedRefusalActionFor`): 0 = keep,

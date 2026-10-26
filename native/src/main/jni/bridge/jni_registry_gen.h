@@ -115,6 +115,8 @@ jint JNICALL NativeBridge_peerPenaltyDecideLength(JNIEnv *env, jobject thiz, jin
 jint JNICALL NativeBridge_peerPenaltyEntryBytes(JNIEnv *env, jobject thiz);  /* jni_peer_penalty_persist.c */
 jint JNICALL NativeBridge_peerPenaltyHeaderBytes(JNIEnv *env, jobject thiz);  /* jni_peer_penalty_persist.c */
 jlongArray JNICALL NativeBridge_previewDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents);  /* jni_transaction.c */
+jint JNICALL NativeBridge_publishAwaitPollMs(JNIEnv *env, jobject thiz);  /* jni_publish_outcome.c */
+jint JNICALL NativeBridge_publishAwaitTimeoutMs(JNIEnv *env, jobject thiz);  /* jni_publish_outcome.c */
 jint JNICALL NativeBridge_publishErrnoValue(JNIEnv *env, jobject thiz, jint index);  /* jni_publish_outcome.c */
 jint JNICALL NativeBridge_publishOutcomeOf(JNIEnv *env, jobject thiz, jint error);  /* jni_publish_outcome.c */
 jstring JNICALL NativeBridge_publishTransaction(JNIEnv *env, jobject thiz, jbyteArray signedTx);  /* jni_transaction.c */
@@ -269,6 +271,8 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "peerPenaltyEntryBytes", "()I", (void *) NativeBridge_peerPenaltyEntryBytes }, \
     { "peerPenaltyHeaderBytes", "()I", (void *) NativeBridge_peerPenaltyHeaderBytes }, \
     { "previewDigiDollar", "(Ljava/lang/String;J)[J", (void *) NativeBridge_previewDigiDollar }, \
+    { "publishAwaitPollMs", "()I", (void *) NativeBridge_publishAwaitPollMs }, \
+    { "publishAwaitTimeoutMs", "()I", (void *) NativeBridge_publishAwaitTimeoutMs }, \
     { "publishErrnoValue", "(I)I", (void *) NativeBridge_publishErrnoValue }, \
     { "publishOutcomeOf", "(I)I", (void *) NativeBridge_publishOutcomeOf }, \
     { "publishTransaction", "([B)Ljava/lang/String;", (void *) NativeBridge_publishTransaction }, \
@@ -314,6 +318,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "strandedSendIsPlainDgb", "(ZZI)Z", (void *) NativeBridge_strandedSendIsPlainDgb }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 152
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 154
 
 #endif

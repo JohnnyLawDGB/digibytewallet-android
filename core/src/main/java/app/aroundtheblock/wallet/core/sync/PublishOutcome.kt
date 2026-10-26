@@ -113,7 +113,9 @@ data class PublishOutcome(
          * [pollMs] until it answers, for at most [timeoutMs]. Null when no verdict arrived — which is
          * never "sent". The core answers each publish once, so the first verdict is the verdict; and
          * it answers [ETIMEDOUT] once no peer has taken the transaction for 20 seconds (its protocol
-         * timeout), so the default wait outlasts that.
+         * timeout), so the default wait outlasts that. The defaults are the core's
+         * `BR_PUBLISH_AWAIT_POLL_MS` and `BR_PUBLISH_AWAIT_TIMEOUT_MS` (`BRPublishOutcome.h`, which
+         * iOS waits by); `PublishOutcomeParityTest` holds them there.
          */
         suspend fun await(
             read: suspend () -> Int,
