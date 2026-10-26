@@ -19,6 +19,12 @@ class CustomNodeTest {
         assertNull(CustomNode.parse("host:0", 12024))
         assertNull(CustomNode.parse("host:70000", 12024))
     }
+    @Test fun nonAsciiDigitPortIsNull() {
+        // toIntOrNull would read these as 12024 and 1; the port must be ASCII digits (BROwnNode.h).
+        assertNull(CustomNode.parse("host:\u0661\u0662\u0660\u0662\u0664", 12024))
+        assertNull(CustomNode.parse("host:\uFF11", 12024))
+        assertEquals(CustomNode("host", 12024), CustomNode.parse("host:+12024", 12024))
+    }
     @Test fun schemePrefixRejected() { assertNull(CustomNode.parse("http://host:12024", 12024)) }
     @Test fun ipv6Rejected() { assertNull(CustomNode.parse("2001:db8::1", 12024)) }
     @Test fun asHostPortRoundTrips() {
