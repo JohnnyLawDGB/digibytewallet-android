@@ -8,6 +8,8 @@
  */
 
 #include "jni_bridge.h"
+#include "coin_reservation.h"
+#include "spend_guard.h"
 #include "slip13.h"
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
@@ -20,6 +22,7 @@ JavaVM       *g_jvm          = NULL;
 BRWallet     *g_wallet       = NULL;
 BRPeerManager *g_peerManager = NULL;
 pthread_mutex_t g_peerManagerMutex;  /* recursive; initialized in JNI_OnLoad. Guards all g_peerManager access — see PEER_GUARD in jni_bridge.h */
+pthread_rwlock_t g_walletRwLock = PTHREAD_RWLOCK_INITIALIZER;   /* jni_bridge.h: WALLET_READ_GUARD */
 
 /* PEER_GUARD holder tracking — see jni_bridge.h. Answers "who holds g_peerManagerMutex and for
  * how long" WITHOUT taking any lock, so a thread already blocked on the guard can report it. */
@@ -212,6 +215,16 @@ static int passphrase_copy(JNIEnv *env, jbyteArray passphrase, char *out, size_t
         (*env)->GetByteArrayRegion(env, passphrase, 0, len, (jbyte *)out);
     }
     out[len] = '\0';
+#ifndef BIP39_NUL_UNFIXED
+    /* The derivation reads the passphrase as a C string: an embedded NUL would derive the wallet of the
+     * part before it (4.1.2 row 25). Refused, never truncated -- Kotlin refuses it first; this is the
+     * backstop. */
+    if (len > 0 && memchr(out, 0, (size_t)len) != NULL) {
+        secure_zero(out, outSize);
+        LOGW("passphrase rejected: contains a NUL");
+        return 0;
+    }
+#endif
     return 1;
 }
 
@@ -296,11 +309,12 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
          * below (no new wallet) still has startSync rebuild the manager. */
         g_walletSwapped = 1;
         g_peerManagerNeedsRecreate = 1;
-        BRWalletFree(g_wallet);
-        g_wallet = NULL;
     }
-
+    /* The swap excludes every WALLET_READ_GUARD reader, from the free to the new wallet's assignment. */
+    pthread_rwlock_wrlock(&g_walletRwLock);
+    if (g_wallet) BRWalletFree(g_wallet);
     g_wallet = BRWalletNew(NULL, 0, mpk);
+    pthread_rwlock_unlock(&g_walletRwLock);
     if (!g_wallet) {
         LOGE("createWalletFromBytes: BRWalletNew failed");
         secure_zero(seed, sizeof(seed));
@@ -422,19 +436,21 @@ NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz,
         /* Marked before the swap begins — see createWalletFromBytes. */
         g_walletSwapped = 1;
         g_peerManagerNeedsRecreate = 1;
-        BRWalletFree(g_wallet);
-        g_wallet = NULL;
     }
 
     extern BRTransaction **g_savedTransactions;
     extern size_t g_savedTransactionCount;
 
+    /* The swap excludes every WALLET_READ_GUARD reader, from the free to the new wallet's assignment. */
+    pthread_rwlock_wrlock(&g_walletRwLock);
+    if (g_wallet) BRWalletFree(g_wallet);
     if (g_savedTransactions && g_savedTransactionCount > 0) {
         LOGI("restoreWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
         g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
     } else {
         g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
     }
+    pthread_rwlock_unlock(&g_walletRwLock);
     /* The wallet owns the records it took, and the bridge keeps none of them (jni_transaction_persist.c).
      * Nothing else uses the new wallet before this: the swap holds PEER_GUARD, and no peer manager is
      * built on it until startSync. (-DSAVED_TX_ARRAY_UNFIXED, the host KAT's comparison arm only, leaves
@@ -486,7 +502,28 @@ int seed_is_valid(void) {
 
 int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId) {
     if (!g_seedValid) return 0;
-    return BRWalletSignTransaction(wallet, tx, forkId, g_seed, sizeof(g_seed));
+    /* A coin the wallet already holds as spent is never signed again (spend_guard.h): the reservation
+     * below ends when a send registers, and a signer handed its coins never asked the wallet. */
+    if (!spend_guard_inputs_unspent(wallet, tx)) {
+        LOGW("seed_sign_transaction: a coin it spends is already spent by a registered send; not signed");
+        return 0;
+    }
+    if (!BRWalletSignTransaction(wallet, tx, forkId, g_seed, sizeof(g_seed))) return 0;
+    /* A coin signed for one send is never signed into another before the first is published
+     * (coin_reservation.h). Refused: the caller frees the transaction; its signature never leaves. */
+    if (!coin_reservation_claim(tx->txHash, tx->inputs, tx->inCount, coin_reservation_now())) {
+        LOGW("seed_sign_transaction: a coin it spends is held by another signed send; not signed");
+        return 0;
+    }
+    /* Asked again now the claim is held: a send that registered while this one was signing released its
+     * claim at registration, so the check above can have passed and the claim been granted. Any other send
+     * on these coins now either still holds its claim (refused above) or is registered (refused here). */
+    if (!spend_guard_inputs_unspent(wallet, tx)) {
+        coin_reservation_release(tx->txHash);
+        LOGW("seed_sign_transaction: a coin it spends was spent by a send registered meanwhile; not signed");
+        return 0;
+    }
+    return 1;
 }
 
 int seed_derive_key(BRKey *outKey, uint32_t chain, uint32_t index) {
@@ -520,6 +557,7 @@ void seed_zero(void) {
 jstring JNICALL
 NativeBridge_getReceiveAddress(JNIEnv *env, jobject thiz,
                                                              jint index, jint format) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -548,6 +586,7 @@ NativeBridge_getReceiveAddress(JNIEnv *env, jobject thiz,
 void JNICALL
 NativeBridge_addWatchedAddresses(JNIEnv *env, jobject thiz,
                                                               jobjectArray addrs) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !addrs) return;
     jsize n = (*env)->GetArrayLength(env, addrs);
@@ -609,6 +648,7 @@ NativeBridge_getDigiDollarReceiveAddress(JNIEnv *env, jobject thiz) {
 jstring JNICALL
 NativeBridge_getChangeAddress(JNIEnv *env, jobject thiz,
                                                             jint index, jint format) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     (void)index;
     (void)format;
@@ -631,6 +671,7 @@ NativeBridge_getChangeAddress(JNIEnv *env, jobject thiz,
 
 jlong JNICALL
 NativeBridge_getBalance(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)env;
     (void)thiz;
 
@@ -642,6 +683,7 @@ NativeBridge_getBalance(JNIEnv *env, jobject thiz) {
 
 jlong JNICALL
 NativeBridge_getDigiDollarBalance(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)env;
     (void)thiz;
 
@@ -653,6 +695,7 @@ NativeBridge_getDigiDollarBalance(JNIEnv *env, jobject thiz) {
 
 jboolean JNICALL
 NativeBridge_isWalletLoaded(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)env; (void)thiz;
     return g_wallet != NULL ? JNI_TRUE : JNI_FALSE;
 }
@@ -685,6 +728,7 @@ NativeBridge_isValidAddress(JNIEnv *env, jobject thiz,
 
 jint JNICALL
 NativeBridge_getTransactionCount(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)env; (void)thiz;
     if (!g_wallet) return 0;
     return (jint)BRWalletTransactions(g_wallet, NULL, 0);
@@ -702,6 +746,7 @@ NativeBridge_getTransactionCount(JNIEnv *env, jobject thiz) {
  */
 jobjectArray JNICALL
 NativeBridge_getAllTransactionHashes(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet) return NULL;
 
@@ -765,6 +810,7 @@ static int tx_details_row_from_wallet(void *ctx, size_t i, TxDetailsRow *row) {
 
 jstring JNICALL
 NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet) return (*env)->NewStringUTF(env, "");
 
@@ -800,6 +846,7 @@ NativeBridge_getDerivationPath(JNIEnv *env, jobject thiz)
 jboolean JNICALL
 NativeBridge_hasLegacyFunds(JNIEnv *env, jobject thiz)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)env;
     (void)thiz;
     if (!g_wallet) return JNI_FALSE;
@@ -814,6 +861,7 @@ NativeBridge_hasLegacyFunds(JNIEnv *env, jobject thiz)
 jstring JNICALL
 NativeBridge_dumpAllAddresses(JNIEnv *env, jobject thiz)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet) return (*env)->NewStringUTF(env, "");
 
@@ -867,6 +915,7 @@ NativeBridge_dumpAllAddresses(JNIEnv *env, jobject thiz)
 jstring JNICALL
 NativeBridge_getFilterElementStats(JNIEnv *env, jobject thiz)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     BRWalletFilterElementsStats st;
@@ -888,6 +937,7 @@ jboolean JNICALL
 NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz,
                                                                 jstring address)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !address) return JNI_FALSE;
 
@@ -917,6 +967,7 @@ jboolean JNICALL
 NativeBridge_registerAssetOutpoint(JNIEnv *env, jobject thiz,
                                                                 jstring txHashHex, jint vout)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !txHashHex || vout < 0) return JNI_FALSE;
 
@@ -950,6 +1001,7 @@ jint JNICALL
 NativeBridge_outpointSpentState(JNIEnv *env, jobject thiz,
                                                              jstring txHashHex, jint vout)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !txHashHex || vout < 0) return -1;
 
@@ -1005,6 +1057,7 @@ jintArray JNICALL
 NativeBridge_classifyOutpoints(JNIEnv *env, jobject thiz,
                                                             jobjectArray outpoints)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !outpoints) return NULL;
     jsize count = (*env)->GetArrayLength(env, outpoints);
@@ -1086,6 +1139,7 @@ jlongArray JNICALL
 NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz,
                                                              jobjectArray outpoints)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !outpoints) return NULL;
     jsize count = (*env)->GetArrayLength(env, outpoints);

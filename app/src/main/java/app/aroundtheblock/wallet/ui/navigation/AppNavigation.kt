@@ -72,6 +72,7 @@ val bottomNavScreens =
 
 /** Routes that should NOT show the bottom navigation bar. */
 private val fullScreenRoutes = setOf(
+    PIN_STORE_UNAVAILABLE_ROUTE,
     "onboarding",
     "seed_display/{wordCount}",
     "seed_verify",
@@ -140,12 +141,20 @@ fun AppNavigation(
     // instead of revealing the screen underneath; UnlockScreen's existing success path then
     // navigates to "wallet" exactly as on a cold start. See shouldRouteToUnlock for the
     // flows deliberately left alone (lost-PIN → pin_setup, onboarding graph, cold start).
-    LaunchedEffect(walletState) {
-        val hasPin = try { pinManager.hasPin() } catch (e: Exception) { false }
+    // Also keyed on the route: a wallet screen that appears while the state is already Locked (no
+    // Unlocked→Locked change to react to) is routed to unlock too (LOCK-PD).
+    LaunchedEffect(walletState, currentRoute) {
+        // A store that cannot be read counts as PIN-protected: routed to unlock, never left open (row 23, R10).
+        val hasPin = pinManager.pinAssumedForLock()
         if (shouldRouteToUnlock(walletState, hasPin, currentRoute)) {
             android.util.Log.i("AppNavigation", "wallet locked on route=$currentRoute — routing to unlock")
             SeedViewGate.revoke()
             resumeAfterUnlock = routeToResumeAfterUnlock(currentRoute)
+            val loginUri = currentBackStack?.arguments?.getString("uri")   // decoded once, by Navigation
+            digiIdLinkToKeep(currentRoute, loginUri)?.let { kept ->
+                (context as? app.aroundtheblock.wallet.MainActivity)?.pendingDigiIdUri = kept
+                android.util.Log.i("AppNavigation", "keeping the Digi-ID login through the unlock")
+            }
             navController.navigate("unlock") {
                 popUpTo(0) { inclusive = true }
                 launchSingleTop = true
@@ -172,34 +181,17 @@ fun AppNavigation(
     // when walletState changes mid-session (causes double PIN prompt).
     val startDestination = remember {
         val walletState = walletManager.walletState.value
-        val hasPin = try { pinManager.hasPin() } catch (e: Exception) {
-            android.util.Log.e("AppNavigation", "hasPin() failed: ${e.message}")
-            false
+        // A PIN store that cannot be read is never "no PIN" (4.1.2 row 23): see startDestinationFor.
+        // The lost-PIN branch (wallet on disk, store readable, no PIN set) still routes to pin_setup,
+        // whose composable restores the wallet off the main thread -- restoreFromDisk() takes the
+        // native PEER_GUARD lock and must not run during composition (the ANR this once was).
+        val decision = startDestinationFor(walletState, pinManager.storeAvailable) { pinManager.hasPin() }
+        if (decision.restoreForLostPin) {
+            android.util.Log.w("AppNavigation", "Wallet exists but no PIN — routing to pin_setup, restore deferred off-main")
+            lostPinRestorePending.value = true
         }
-        val dest = when (walletState) {
-            is WalletState.NoWallet -> "onboarding"
-            is WalletState.Locked   -> {
-                if (hasPin) {
-                    "unlock"
-                } else {
-                    // Wallet exists but PIN was lost. Route to pin_setup to set
-                    // a new PIN — the wallet is already on disk, don't go to
-                    // onboarding. restoreFromDisk() must NOT run here: it calls
-                    // NativeBridge.stopSync(), which takes the native PEER_GUARD
-                    // lock and can block for many seconds inside the keepalive
-                    // sweep — doing that synchronously inside this remember{}
-                    // (i.e. during composition, on the main thread) is the exact
-                    // ANR this fix removes. The pin_setup composable performs
-                    // the restore off the main thread instead.
-                    android.util.Log.w("AppNavigation", "Wallet exists but no PIN — routing to pin_setup, restore deferred off-main")
-                    lostPinRestorePending.value = true
-                    "pin_setup"
-                }
-            }
-            is WalletState.Unlocked -> if (!hasPin) "pin_setup" else Screen.Wallet.route
-        }
-        android.util.Log.i("AppNavigation", "startDestination=$dest walletState=$walletState hasPin=$hasPin")
-        dest
+        android.util.Log.i("AppNavigation", "startDestination=${decision.route} walletState=$walletState pinStore=${pinManager.storeAvailable}")
+        decision.route
     }
 
     // Helper: start SPV sync foreground service whenever the wallet is unlocked.
@@ -249,15 +241,15 @@ fun AppNavigation(
                 syncStarted = true
                 startSyncService()
             }
-            // Handle pending Digi-ID deep link after reaching wallet screen
-            if (currentRoute == Screen.Wallet.route) {
-                val activity = context as? app.aroundtheblock.wallet.MainActivity
-                val pendingUri = activity?.pendingDigiIdUri
-                if (pendingUri != null) {
-                    activity.pendingDigiIdUri = null
-                    val encoded = java.net.URLEncoder.encode(pendingUri, "UTF-8")
-                    navController.navigate("digiid_confirm/$encoded")
-                }
+        }
+        // Open a pending Digi-ID deep link on the wallet screen. Keyed on the link as well as the
+        // route: one that arrives while the wallet screen is already up opens at once (row 36).
+        val activity = context as? app.aroundtheblock.wallet.MainActivity
+        val pendingDigiIdUri = activity?.pendingDigiIdUri
+        LaunchedEffect(currentRoute, pendingDigiIdUri, walletState) {
+            digiIdLinkToOpen(currentRoute, pendingDigiIdUri, walletState is WalletState.Unlocked)?.let { link ->
+                activity?.pendingDigiIdUri = null
+                navController.navigate(digiIdConfirmRoute(link))
             }
         }
 
@@ -399,6 +391,10 @@ fun AppNavigation(
             }
 
             // ── Unlock (returning users) ──────────────────────────────────────
+            composable(PIN_STORE_UNAVAILABLE_ROUTE) {
+                app.aroundtheblock.wallet.ui.settings.PinStoreUnavailableScreen()
+            }
+
             composable("unlock") {
                 UnlockScreen(
                     navController = navController,
@@ -443,8 +439,7 @@ fun AppNavigation(
                     onWalletAction = { uri ->
                         val raw = uri.toString()
                         if (uri.scheme == "digiid") {
-                            val encoded = java.net.URLEncoder.encode(raw, "UTF-8")
-                            navController.navigate("digiid_confirm/$encoded")
+                            navController.navigate(digiIdConfirmRoute(raw))
                         } else {
                             // Nothing else is wired yet. Say so rather than failing silently —
                             // mint needs the unsigned-transaction inspector first.
@@ -595,8 +590,10 @@ fun AppNavigation(
             }
 
             composable("settings_view_seed") {
-                // Spent once per visit; saveable so a rotation does not spend it twice.
-                val passed = rememberSaveable { SeedViewGate.consume() }
+                // Spent once per visit; saveable so a rotation does not spend it twice, and bound to
+                // this process so state restored after a process death never shows it (LOCK-PD).
+                val passToken = rememberSaveable { SeedViewGate.spend() }
+                val passed = SeedViewGate.isLive(passToken)
                 if (passed) {
                     SeedViewScreen(
                         navController = navController,
@@ -751,8 +748,7 @@ fun AppNavigation(
                 val returnTo = backStackEntry.arguments?.getString("returnTo") ?: ""
                 QrScannerScreen(
                     onDigiId = { request ->
-                        val encoded = Uri.encode(request.rawUri)
-                        navController.navigate("digiid_confirm/$encoded") {
+                        navController.navigate(digiIdConfirmRoute(request.rawUri)) {
                             popUpTo("qr_scanner") { inclusive = true }
                         }
                     },
@@ -767,7 +763,7 @@ fun AppNavigation(
                         }
                     },
                     onNode = { raw ->
-                        navController.navigate("node_pair_confirm/${Uri.encode(raw)}") {
+                        navController.navigate(nodePairConfirmRoute(raw)) {
                             popUpTo("qr_scanner") { inclusive = true }
                         }
                     },
@@ -780,9 +776,10 @@ fun AppNavigation(
             }
 
             // ── Digi-ID confirm (after scan) ──────────────────────────────
-            composable("digiid_confirm/{uri}") { backStackEntry ->
-                val encodedUri = backStackEntry.arguments?.getString("uri") ?: ""
-                val rawUri = Uri.decode(encodedUri)
+            composable(DIGIID_CONFIRM_ROUTE) { backStackEntry ->
+                // Navigation has already decoded the argument once; decoding it again respelled any
+                // %xx the scanned URI carried before it was shown, signed and posted (4.1.2 row 30).
+                val rawUri = backStackEntry.arguments?.getString("uri") ?: ""
                 val request = DigiIdRequest.parse(rawUri)
                 if (request == null) {
                     // Malformed — go back
@@ -797,8 +794,7 @@ fun AppNavigation(
 
             // ── Own-node pairing confirm (after scanning dgbnode://) ──────
             composable("node_pair_confirm/{uri}") { backStackEntry ->
-                val encodedUri = backStackEntry.arguments?.getString("uri") ?: ""
-                val rawUri = Uri.decode(encodedUri)
+                val rawUri = backStackEntry.arguments?.getString("uri") ?: ""   // decoded once, by Navigation
                 NodePairConfirmScreen(
                     rawUri = rawUri,
                     onDone = { navController.popBackStack() },
@@ -822,3 +818,11 @@ fun PlaceholderScreen(title: String) {
         )
     }
 }
+
+/** The Digi-ID confirm route for [rawUri]: percent-encoded once here, decoded once by Navigation, so the
+ *  screen sees exactly the scanned URI (4.1.2 row 30). URLEncoder is not used: it writes a space as '+',
+ *  which Navigation's decode leaves as '+'. */
+internal fun digiIdConfirmRoute(rawUri: String): String = "digiid_confirm/" + Uri.encode(rawUri)
+
+/** The own-node pairing confirm route for [raw], encoded the same way. */
+internal fun nodePairConfirmRoute(raw: String): String = "node_pair_confirm/" + Uri.encode(raw)

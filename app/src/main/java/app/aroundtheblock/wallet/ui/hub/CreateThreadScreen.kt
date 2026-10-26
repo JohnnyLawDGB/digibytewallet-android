@@ -21,6 +21,7 @@ import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 private const val TITLE_MAX = 120
 private const val CONTENT_MAX = 5000
@@ -52,7 +53,7 @@ fun CreateThreadScreen(
     val canPost = title.isNotBlank() && content.isNotBlank() && !isCreating && !signing
 
     Scaffold(
-        modifier = Modifier.imePadding(),
+        modifier = Modifier.keyboardPadding(),
         topBar = {
             TopAppBar(
                 title = { Text("New Thread", color = Color.White) },

@@ -78,7 +78,7 @@ class SharedClientPinsTest {
     }
 
     @Test fun `the Digi-ID callback is posted on a pinned client`() {
-        val manager = AppModule.provideDigiIdManager(shared, mockk(relaxed = true), mockk(relaxed = true))
+        val manager = AppModule.provideDigiIdManager(shared, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
         assertPinsDigiScope("the Digi-ID manager's client", clientOf(manager, "httpClient"))
     }
 

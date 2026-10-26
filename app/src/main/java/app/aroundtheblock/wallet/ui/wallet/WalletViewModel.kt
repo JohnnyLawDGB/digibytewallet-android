@@ -832,10 +832,10 @@ class WalletViewModel @Inject constructor(
                     }
                 }
                 val txDetails = NativeBridge.getTransactionDetails()
-                // Log every ~60s for debugging
+                // Log every ~60s for debugging. Heights and peers only: a transaction row (txid, amounts,
+                // addresses) never goes to logcat (4.1.2 row 7, K1).
                 if (System.currentTimeMillis() % 60000 < 5000) {
                     android.util.Log.d("WalletVM", "heights: last=$currentHeight est=$estHeight peers=$peers")
-                    txDetails.trim().lines().take(5).forEach { android.util.Log.d("WalletVM", "tx: $it") }
                 }
                 if (txDetails.isNotEmpty()) {
                     // Exclude unconfirmed txs: their blockHeight is TX_UNCONFIRMED

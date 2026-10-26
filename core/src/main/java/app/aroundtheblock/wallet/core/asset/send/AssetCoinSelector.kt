@@ -80,7 +80,7 @@ object AssetCoinSelector {
         for (u in sortedAsset) {
             if (assetSum >= assetNeeded) break
             pickedAsset += u
-            assetSum += u.assetQuantity
+            assetSum = app.aroundtheblock.wallet.core.asset.AssetSums.add(assetSum, u.assetQuantity)
         }
         if (assetSum < assetNeeded) {
             return Result.InsufficientAsset(required = assetNeeded, available = assetSum)

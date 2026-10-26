@@ -45,6 +45,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 // ── Enigma bot handle ─────────────────────────────────────────────────────
 private const val ENIGMA_HANDLE = "Enigma"
@@ -83,7 +84,7 @@ fun ChatScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .imePadding()
+            .keyboardPadding()
     ) {
         // ── Header ────────────────────────────────────────────────────────
         ChatHeader(
