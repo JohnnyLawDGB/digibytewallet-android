@@ -14,7 +14,7 @@
 #include "jni_bridge.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
-#include "prepared_send.h"   /* the quote and the checks of a prepared DGB send (fee_quote_kat) */
+#include "BRPreparedSend.h"   /* the quote and the checks of a prepared DGB send (core; fee_quote_kat, prepared_send_kat) */
 #include "digidollar_send.h"   /* the preview and the checks of a DigiDollar send (dd_send_preview_kat) */
 #include "digidollar_event.h"  /* what a DigiDollar transaction did, for its activity row (digidollar_realtx_kat) */
 
@@ -313,8 +313,9 @@ NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
  * the send (createTransaction) and quotes the bytes here; after the credential prompt the SAME bytes
  * come back to be signed. Kotlin holds them as bytes plus the quote, never a native object, so
  * nothing native outlives the prompt -- and the wallet may have changed while it was up, which is
- * why signing checks them first. Both decisions live in prepared_send.h, which fee_quote_kat runs
- * against the live core on the host; this file only parses, calls and serializes. */
+ * why signing checks them first. Both decisions live in the core's BRPreparedSend.h, shared with iOS,
+ * which fee_quote_kat and prepared_send_kat run on the host; this file only parses, calls and
+ * serializes. */
 
 /* [fee, vsize] of unsigned bytes the wallet built: the fee is the transaction's inputs minus its
  * outputs, the vsize the size it was built at. NULL when the bytes do not parse or the fee is
@@ -338,7 +339,7 @@ NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx)
     }
 
     uint64_t fee = 0, vsize = 0;
-    int quoted = prepared_send_quote(g_wallet, tx, &fee, &vsize);
+    int quoted = BRPreparedSendQuote(g_wallet, tx, &fee, &vsize);
     BRTransactionFree(tx);
     if (!quoted) {
         LOGW("quoteTransaction: the fee is unknown -- an input is not a transaction the wallet holds");
@@ -433,9 +434,9 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
     }
 
     /* Before signing: exactly the approved payment and fee, and only coins still the wallet's plain ones. */
-    PreparedSendVerdict verdict;
-    if ((verdict = prepared_send_check(g_wallet, tx, payScript, payScriptLen, (uint64_t)amountSats,
-                                       (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
+    BRPreparedSendVerdict verdict;
+    if ((verdict = BRPreparedSendCheck(g_wallet, tx, payScript, payScriptLen, (uint64_t)amountSats,
+                                       (uint64_t)approvedFeeSats)) != BRPreparedSendOK) {
         LOGW("signPreparedTransaction: not signed -- the prepared send no longer matches its approval (verdict %d)",
              (int)verdict);
         BRTransactionFree(tx);
@@ -450,8 +451,8 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
     }
 
     /* After signing: the transaction that would be broadcast is still exactly the approved send. */
-    if ((verdict = prepared_send_check(g_wallet, tx, payScript, payScriptLen, (uint64_t)amountSats,
-                                       (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
+    if ((verdict = BRPreparedSendCheck(g_wallet, tx, payScript, payScriptLen, (uint64_t)amountSats,
+                                       (uint64_t)approvedFeeSats)) != BRPreparedSendOK) {
         LOGE("signPreparedTransaction: the signed transaction is not the approved send (verdict %d); not returned",
              (int)verdict);
         BRTransactionFree(tx);

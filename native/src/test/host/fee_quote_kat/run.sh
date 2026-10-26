@@ -2,9 +2,9 @@
 # Host KAT runner: the fee a DGB send's confirmation shows is the fee of the transaction that is
 # signed. See fee_quote_kat_main.c for the invariant and the cases.
 #
-# Compiles the bridge's prepared_send.h (the JNI-free core of quoteTransaction and
-# signPreparedTransaction) against the live core sources, with AddressSanitizer, in a 64-bit and a
-# 32-bit (-m32) build, in two arms:
+# Compiles the core's BRPreparedSend.h (what quoteTransaction and signPreparedTransaction decide by,
+# shared with iOS) against the live core sources, with AddressSanitizer, in a 64-bit and a 32-bit
+# (-m32) build, in two arms:
 #   comparison  -DPREPARED_SEND_UNFIXED=1: today's behaviour (the typical 141-vbyte figure, nothing
 #               checked before signing). Each case meets the expectation CASES gives it:
 #                 fail  a failed check and no sanitizer report: the arm cannot keep the invariant
@@ -15,7 +15,7 @@
 # Gates first: the header must carry the seam and test its VALUE (#if, never #ifdef: the =0 build
 # would otherwise run the comparison arm). Last, a SOURCE GATE over the real jni_transaction.c
 # (Android headers keep it off the host): quoteTransaction and signPreparedTransaction must go
-# through this header -- the check before the signature and again after it, each handed the approved
+# through that header -- the check before the signature and again after it, each handed the approved
 # payment and fee, the signed bytes serialized only after the second check -- and publish nothing.
 # FEE_QUOTE_GATE_FILE=<path> points the source gate at another copy (used to show it refuses one).
 #
@@ -30,7 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BRIDGE_DIR="$REPO_ROOT/native/src/main/jni/bridge"
-HEADER="$BRIDGE_DIR/prepared_send.h"
+HEADER="$CORE_DIR/BRPreparedSend.h"
 JNI="${FEE_QUOTE_GATE_FILE:-$BRIDGE_DIR/jni_transaction.c}"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
@@ -85,7 +85,7 @@ build() {   # <out> <64|32> <unfixed 0|1>
     local m=(); [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" \
         -DPREPARED_SEND_UNFIXED="$unfixed" \
-        -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
+        -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/fee_quote_kat_main.c" "${UNITS[@]}" -lm -lpthread -o "$out"
 }
 
@@ -193,21 +193,24 @@ fn_body() {   # the definition of $1 through its column-0 close, flattened to on
 }
 offsets() { grep -obE -- "$1" <<<"$2" | cut -d: -f1; }   # byte offset of every match
 
-if ! grep -Eq '^[[:space:]]*#[[:space:]]*include[[:space:]]+"prepared_send\.h"' <<<"$STRIPPED"; then
-    say "jni_transaction.c does not include prepared_send.h"
+if ! grep -Eq '^[[:space:]]*#[[:space:]]*include[[:space:]]+"BRPreparedSend\.h"' <<<"$STRIPPED"; then
+    say "jni_transaction.c does not include BRPreparedSend.h"
+fi
+if [ -e "$BRIDGE_DIR/prepared_send.h" ]; then
+    say "the bridge carries prepared_send.h again: a second copy of the core's rules"
 fi
 
 QUOTE="$(fn_body quoteTransaction)"
 if [ -z "$QUOTE" ]; then
     say "NativeBridge_quoteTransaction not found"
 else
-    for need in 'BRTransactionParse[[:space:]]*\(' 'prepared_send_quote[[:space:]]*\(' 'NewLongArray[[:space:]]*\('; do
+    for need in 'BRTransactionParse[[:space:]]*\(' 'BRPreparedSendQuote[[:space:]]*\(' 'NewLongArray[[:space:]]*\('; do
         grep -Eq -- "$need" <<<"$QUOTE" || say "quoteTransaction does not call ${need%%\[*}"
     done
     for never in 'BRPeerManager(Publish|StemPublish)Tx' '_registerWalletCopy' 'seed_sign_transaction' 'BRWalletSetFeePerKb'; do
         grep -Eq -- "$never" <<<"$QUOTE" && say "quoteTransaction calls ${never} -- a quote changes nothing"
     done
-    [ "$gate_fail" -eq 0 ] && echo "  gate: quoteTransaction parses the bytes, quotes them through prepared_send_quote and returns [fee, vsize]"
+    [ "$gate_fail" -eq 0 ] && echo "  gate: quoteTransaction parses the bytes, quotes them through BRPreparedSendQuote and returns [fee, vsize]"
 fi
 
 SIGN="$(fn_body signPreparedTransaction)"
@@ -215,7 +218,7 @@ if [ -z "$SIGN" ]; then
     say "NativeBridge_signPreparedTransaction not found"
 else
     before=$gate_fail; gate_fail=0
-    CHECKS=($(offsets 'prepared_send_check[[:space:]]*\(' "$SIGN"))
+    CHECKS=($(offsets 'BRPreparedSendCheck[[:space:]]*\(' "$SIGN"))
     SIGNS=($(offsets 'seed_sign_transaction[[:space:]]*\(' "$SIGN"))
     SERS=($(offsets 'BRTransactionSerialize[[:space:]]*\(' "$SIGN"))
     PARSES=($(offsets 'BRTransactionParse[[:space:]]*\(' "$SIGN"))
@@ -231,14 +234,14 @@ else
         [ "${#SERS[@]}" -ge 1 ] || say "signPreparedTransaction does not serialize what it signed"
     fi
     # Each check refuses: its verdict is compared with OK and a refusal returns NULL.
-    REFUSE='prepared_send_check[[:space:]]*\([^;]*\)[[:space:]]*!=[[:space:]]*PREPARED_SEND_OK'
+    REFUSE='BRPreparedSendCheck[[:space:]]*\([^;]*\)[[:space:]]*!=[[:space:]]*BRPreparedSendOK'
     n_refuse="$(grep -oE -- "$REFUSE" <<<"$SIGN" | wc -l | tr -d ' ')"
-    [ "$n_refuse" -eq 2 ] || say "each check must refuse on a verdict other than PREPARED_SEND_OK (found $n_refuse such tests)"
+    [ "$n_refuse" -eq 2 ] || say "each check must refuse on a verdict other than BRPreparedSendOK (found $n_refuse such tests)"
     grep -Eq 'return[[:space:]]+NULL' <<<"$SIGN" || say "signPreparedTransaction never refuses (no return NULL)"
     # Sign only what was approved: the destination and amount are handed in, and both checks get them.
     { grep -Eq 'jstring[[:space:]]+toAddress' <<<"$SIGN" && grep -Eq 'jlong[[:space:]]+amountSats' <<<"$SIGN"; } ||
         say "signPreparedTransaction is not handed the approved destination and amount"
-    n_bound="$(grep -oE 'prepared_send_check[[:space:]]*\([^;]*payScript[^;]*amountSats[^;]*approvedFeeSats[^;]*\)' <<<"$SIGN" | wc -l | tr -d ' ')"
+    n_bound="$(grep -oE 'BRPreparedSendCheck[[:space:]]*\([^;]*payScript[^;]*amountSats[^;]*approvedFeeSats[^;]*\)' <<<"$SIGN" | wc -l | tr -d ' ')"
     [ "$n_bound" -eq 2 ] || say "each check must be handed the approved payment (payScript, amountSats) and fee (found $n_bound)"
     grep -Eq 'approvedFeeSats[[:space:]]*<=[[:space:]]*0' <<<"$SIGN" || say "signPreparedTransaction does not refuse an approval of no fee"
     grep -Eq 'seed_is_valid[[:space:]]*\(' <<<"$SIGN" || say "signPreparedTransaction does not refuse a locked session"

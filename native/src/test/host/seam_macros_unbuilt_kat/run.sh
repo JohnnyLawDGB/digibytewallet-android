@@ -2,7 +2,7 @@
 # Host gate: no Android build input defines a test seam.
 #
 # The C sources carry comparison-arm seams -- macros named *_UNFIXED or *_RED -- that host KATs
-# define to build the code as it was before a fix (prepared_send.h's PREPARED_SEND_UNFIXED turns the
+# define to build the code as it was before a fix (BRPreparedSend.h's PREPARED_SEND_UNFIXED turns the
 # signer's check into "always OK"), and test-only hooks named *_KAT_* / KAT_* that count or expose
 # internals. Defined in an app build, any of them ships the unfixed code or a test hook. Nothing in
 # the sources can stop a build from defining one, so this gate reads what an app build is made from:
