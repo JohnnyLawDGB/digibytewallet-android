@@ -27,7 +27,12 @@ data class CustomNode(val host: String, val port: Int) {
                 host = trimmed; port = defaultPort
             } else {
                 host = trimmed.substring(0, idx).trim()
-                port = trimmed.substring(idx + 1).trim().toIntOrNull() ?: return null
+                val portText = trimmed.substring(idx + 1).trim()
+                // ASCII digits only. toIntOrNull alone reads any Unicode decimal digit, so
+                // "host:" + 12024 in Arabic-Indic digits dialled port 12024; the shared core
+                // (BROwnNode.h) refuses it, and so does this.
+                if (portText.any { it !in '0'..'9' && it != '+' && it != '-' }) return null
+                port = portText.toIntOrNull() ?: return null
                 if (port !in 1..65535) return null
             }
             if (host.isEmpty()) return null

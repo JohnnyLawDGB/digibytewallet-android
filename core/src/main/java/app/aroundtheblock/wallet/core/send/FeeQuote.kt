@@ -10,6 +10,10 @@ import java.math.BigInteger
  * It is read from the transaction the wallet built for the send — its inputs minus its outputs — never
  * computed from a typical size. A transaction that gathers many coins is several times the size of a
  * typical one and pays several times the fee, and the confirmation shows that fee.
+ *
+ * [rateForTotal], [raised] and [FeeRequest.of] mirror the C core's `BRFeePolicy.h`, which is the
+ * source of truth (iOS imports it); `FeeQuoteParityTest` binds the two on a device. Change both, or
+ * that test fails.
  */
 data class FeeQuote(
     /** Inputs minus outputs of the built transaction, in satoshis. */

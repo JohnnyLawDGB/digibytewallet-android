@@ -179,6 +179,9 @@ class PublishOutcomeParityTest {
     fun awaitWaitsAsTheHeaderSays() = runTest {
         val poll = NativeBridge.publishAwaitPollMs().toLong()
         val timeout = NativeBridge.publishAwaitTimeoutMs().toLong()
+        // The counts below hold only for a timeout that is a whole number of polls; a header that
+        // breaks that fails here, by name, rather than on a count that looks like a divergence.
+        assertEquals("BR_PUBLISH_AWAIT_TIMEOUT_MS is not a multiple of BR_PUBLISH_AWAIT_POLL_MS", 0L, timeout % poll)
         var reads = 0
         assertNull(PublishOutcome.await(read = { reads++; PublishOutcome.PENDING }))
         assertEquals("the wait is not BR_PUBLISH_AWAIT_TIMEOUT_MS long", timeout, currentTime)

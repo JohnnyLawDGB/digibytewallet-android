@@ -424,6 +424,31 @@ object NativeBridge {
      */
     external fun cfRecoveryDecide(reason: Int): Int
 
+    // === Fee quote (test-support only) ===
+    /**
+     * The C fee request ([BRFeePolicy.h]'s `BRFeeRequestFor`) for the fee field as UTF-8 bytes:
+     * `[request, totalSats]`, request 0 = none, 1 = the default rate, 2 = a custom total;
+     * `[-1, 0]` if the bytes could not be read.
+     *
+     * **Not for production use — call [app.aroundtheblock.wallet.core.send.FeeRequest] and
+     * [app.aroundtheblock.wallet.core.send.FeeQuote] instead.** These exist so
+     * `FeeQuoteParityTest` can bind the Kotlin mirror to the C header, which is the source of
+     * truth (iOS imports it). Pure functions: no wallet state, no lock.
+     */
+    external fun feeRequestFor(custom: Boolean, utf8: ByteArray?): LongArray?
+
+    /** `BRFeeRateForTotal`: floor(total × 1000 / vsize) in sat/kB, 0 without a size or a total. */
+    external fun feeRateForTotal(totalSats: Long, vsize: Long): Long
+
+    /** `BRFeeRateForCustomTotal`: the rate a custom total is built at, never below 1. */
+    external fun feeRateForCustomTotal(totalSats: Long, builtVsize: Long): Long
+
+    /** `BRFeeQuoteRaised`: the built transaction pays more than the custom total typed. */
+    external fun feeQuoteRaised(custom: Boolean, typedTotalSats: Long, feeSats: Long): Boolean
+
+    /** The core's `DEFAULT_FEE_PER_KB`, so `FeeQuote.DEFAULT_FEE_PER_KB` is asserted against it. */
+    external fun feeDefaultPerKb(): Long
+
     // === Message signing ===
     /**
      * Sign an arbitrary message with the wallet's key at the given address index.
