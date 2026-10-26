@@ -79,6 +79,10 @@ data class PublishOutcome(
      * it is kept, its coins stay locked, and the sweep carries on as before. An asset or
      * DigiDollar send ([plainDgb] false) keeps its own handling either way: the asset layer's
      * CONFLICTED accounting reads an abandoned attempt from the wallet.
+     *
+     * A mirror of the C core's `BRStrandedRefusalActionFor` (`BRStrandedSend.h`), which is the source
+     * of truth (iOS imports it); `StrandedRefusalParityTest` binds the two on a device. Change both,
+     * or that test fails.
      */
     fun actionFor(plainDgb: Boolean, refusedByPeers: Boolean): Action =
         if (isTerminal && plainDgb && refusedByPeers) Action.REMOVE_AND_UNLOCK else Action.KEEP
@@ -90,6 +94,16 @@ data class PublishOutcome(
         const val ENOTCONN = 107
         const val ETIMEDOUT = 110
         const val ECANCELED = 125
+
+        /**
+         * Whether a recorded send moves only DGB, from the sweep's readings of the wallet's own copy:
+         * [held] (the copy could be read), [asset] (it carries DigiAsset transfer instructions, or that
+         * could not be read) and [digiDollarType] (0 for none, 1-3 for a DigiDollar transaction,
+         * negative when it could not be read). Anything but "held, no asset, no DigiDollar" is not.
+         * A mirror of `BRStrandedSendIsPlainDgb` (`BRStrandedSend.h`); `StrandedRefusalParityTest`.
+         */
+        fun isPlainDgb(held: Boolean, asset: Boolean, digiDollarType: Int): Boolean =
+            held && !asset && digiDollarType == 0
 
         /** The publish result ring's answer while no verdict has arrived. */
         const val PENDING = -1
