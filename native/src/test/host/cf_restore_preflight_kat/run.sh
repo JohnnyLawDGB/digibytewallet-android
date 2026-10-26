@@ -66,15 +66,15 @@ red_arm() {
     build "$BUILD_DIR/$seam" "-D$seam" || { echo "GATE FAILURE: the $seam arm did not compile."; FAIL=1; return; }
     echo "--- COMPARISON ARM (-D$seam): its RED cases MUST fail, every other case pass ---"
     out="$("$BUILD_DIR/$seam" "$VECTORS" 2>&1)"; rc=$?
-    echo "$out" | grep -Eq "$SAN_RE" && { echo "  [$seam] GATE FAILURE: sanitizer report"; FAIL=1; }
+    <<<"$out" grep -Eq "$SAN_RE" && { echo "  [$seam] GATE FAILURE: sanitizer report"; FAIL=1; }
     [ $rc -eq 0 ] && { echo "  [$seam] GATE FAILURE: the comparison arm exited 0; it proves nothing"; FAIL=1; }
     for c in "${ALL_CASES[@]}"; do
         case "$reds" in
             *" $c "*)
-                if echo "$out" | grep -q "^RESULT $c fail$"; then echo "  [$seam $c] failed, as it must"
+                if <<<"$out" grep -q "^RESULT $c fail$"; then echo "  [$seam $c] failed, as it must"
                 else echo "  [$seam $c] GATE FAILURE: did not fail in the comparison arm"; FAIL=1; fi ;;
             *)
-                if ! echo "$out" | grep -q "^RESULT $c pass$"; then
+                if ! <<<"$out" grep -q "^RESULT $c pass$"; then
                     echo "  [$seam $c] GATE FAILURE: GUARD case did not hold"; FAIL=1
                 fi ;;
         esac
@@ -93,13 +93,13 @@ red_arm CF_RESTORE_ARM_RED kt_synced_resume_ignores_stale_deep_birth edge_arm_he
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
 out="$("$BUILD_DIR/green" "$VECTORS" 2>&1)"; rc=$?
-echo "$out" | grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; FAIL=1; }
-if [ $rc -ne 0 ] || ! echo "$out" | grep -q "^ALL PASS$"; then
-    echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; echo "$out" | grep "^FAIL:" | sed 's/^/      /'; FAIL=1
+<<<"$out" grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; FAIL=1; }
+if [ $rc -ne 0 ] || ! <<<"$out" grep -q "^ALL PASS$"; then
+    echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; <<<"$out" grep "^FAIL:" | sed 's/^/      /'; FAIL=1
 fi
-echo "$out" | grep "^  " | sed 's/^/  [green]/'
+<<<"$out" grep "^  " | sed 's/^/  [green]/'
 for c in "${ALL_CASES[@]}"; do
-    echo "$out" | grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE: not passed"; FAIL=1; }
+    <<<"$out" grep -q "^RESULT $c pass$" && echo "  [green $c] passed" || { echo "  [green $c] GATE FAILURE: not passed"; FAIL=1; }
 done
 
 echo "--- VECTORS: the committed file is the generator's current output ---"
