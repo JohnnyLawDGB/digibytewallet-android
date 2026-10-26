@@ -26,6 +26,10 @@ package app.aroundtheblock.wallet.core.sync
  * milliseconds and should never step back; the service passes awake time (`SystemClock.uptimeMillis`),
  * which a change of the device's clock cannot move and which does not advance while the device sleeps
  * and no peer can be heard. A reading earlier than a send's first sighting never counts as time held.
+ *
+ * A mirror of the C core's `BRStrandedRefusalHoldObserve` (`BRStrandedSend.h`), which is the source of
+ * truth (iOS imports it; there the caller keeps one `BRStrandedRefusalHold` per key instead of this
+ * map); `StrandedRefusalParityTest` binds the two on a device. Change both, or that test fails.
  */
 class RefusalHold(
     private val clock: () -> Long,
