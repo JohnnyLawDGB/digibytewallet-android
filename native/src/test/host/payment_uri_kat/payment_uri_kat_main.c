@@ -120,6 +120,18 @@ int main(void)
          parse("digibyte:DReal?label=a%zzb%") && eqs(U.label, "a%zzb%");
     result("percent_needs_two_hex_digits", ok, U.label);
 
+    // Only ASCII 0-9 a-f A-F are hex digits. Kotlin's toIntOrNull(16) went through
+    // Character.digit and read full-width "\uFF16\uFF11" as 0x61, so "%<fw 6><fw 1>mount" was the
+    // key "amount" there and 1000 DGB, but an unknown key here and 1 DGB. DigiByteUri.kt now
+    // matches (hexDigit); DigiByteUriTest.kt carries the same inputs.
+    ok = parse("digibyte:DA?%\xEF\xBC\x96\xEF\xBC\x91mount=1000&amount=1") && eqs(U.address, "DA") &&
+         U.hasAmount && U.amount == 100000000 &&
+         parse("digibyte:DA?label=%\xEF\xBC\x96\xEF\xBC\x91") && eqs(U.label, "%\xEF\xBC\x96\xEF\xBC\x91") &&
+         parse("digibyte:DA?label=%\xD9\xA4\xD9\xA1x") && eqs(U.label, "%\xD9\xA4\xD9\xA1x") &&
+         parse("digibyte:DA?label=%4A%4a%61") && eqs(U.label, "JJa") &&
+         parse("digibyte:DA?%61mount=1") && U.hasAmount && U.amount == 100000000;
+    result("percent_escape_is_ascii_hex_only", ok, U.label);
+
     ok = parse("digibyte:DReal?label=%F0%9F%8D%95+%2B") && U.labelLen == 6 && memcmp(U.label, "\xF0\x9F\x8D\x95 +", 6) == 0;
     result("utf8_outside_bmp_survives", ok, NULL);
 
