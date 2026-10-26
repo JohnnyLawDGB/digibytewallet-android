@@ -23,6 +23,12 @@ hold:
    is moved only to a commit reachable from core `develop` (`check-submodule-pin.sh`,
    `Scripts/check-core-pin.sh`).
 5. **Merge commit or fast-forward, never a squash**, so pins stay reachable.
+6. **Generated files are regenerated, never merged.** `jni_registry_gen.h` can merge with no
+   conflict and still be stale (two PRs that each add natives). Before merging a PR that touches
+   it, merge current `develop` into the branch, run `python3 scripts/gen-jni-registry.py`, push,
+   and wait for its CI. One registry PR at a time.
+7. **A pin conflict is resolved to core `develop`, never to a PR's older pin**: an older pin can
+   silently roll back core fixes (check `git merge-base --is-ancestor <last release's core> <pin>`).
 
 ### Still Mark's, always
 
