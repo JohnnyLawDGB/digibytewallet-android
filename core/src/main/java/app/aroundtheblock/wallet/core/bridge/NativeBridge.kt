@@ -198,6 +198,12 @@ object NativeBridge {
     /** Clear SOCKS5 proxy — peers will connect directly. */
     external fun clearSocksProxy()
 
+    /**
+     * While true, peers are reached only through the SOCKS5 proxy: no direct dial, and nothing is
+     * sent on a connection opened without it. Clearing the proxy no longer means "connect directly".
+     */
+    external fun setTorRequired(required: Boolean)
+
     // === Peer / sync operations ===
     /** Inject a peer by IP address into the saved peers list for priority connection.
      *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle.
@@ -395,6 +401,10 @@ object NativeBridge {
      *  Returns "address|base64signature" (legacy P2PKH address) or null when locked. */
     external fun signIdentityMessage(message: String, siteUri: String, index: Int): String?
 
+    /** The P2PKH address a Digi-ID login would sign with, without signing: the per-site identity
+     *  for [siteUri], or the shared m/0'/0/0 identity when [siteUri] is null. Null when locked. */
+    external fun identityAddress(siteUri: String?, index: Int): String?
+
     // === Wallet state ===
     /** Returns true if the C core wallet is initialized (g_wallet != NULL). */
     external fun isWalletLoaded(): Boolean
@@ -465,6 +475,12 @@ object NativeBridge {
      *
      *  Null on a parse failure or an empty array — never partial output. */
     external fun getRawTransactionOutputs(rawTx: ByteArray): Array<String>?
+
+    /** The same `"<vout>|<satoshis>|<scriptHex>"` listing for the draft [createTransaction] just
+     *  built, before it is signed. The draft is in the wallet's internal unsigned form, which
+     *  [getRawTransactionOutputs] (network format only, 4.1.2 row 9) cannot read — the send review
+     *  pointed at it refused every DGB send. Only ever the builder's own bytes. */
+    external fun getBuiltTransactionOutputs(unsignedTx: ByteArray): Array<String>?
 
     /** What a transaction SPENDS, one `"prevTxidHex|prevVout"` per input, prev txid in display
      *  order.

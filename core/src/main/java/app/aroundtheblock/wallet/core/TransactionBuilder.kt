@@ -144,7 +144,7 @@ interface SpendNative {
         override fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray? =
             NativeBridge.createTransaction(toAddress, amountSatoshis, feePerKb)
         override fun quoteTransaction(unsignedTx: ByteArray): LongArray? = NativeBridge.quoteTransaction(unsignedTx)
-        override fun transactionOutputs(tx: ByteArray): Array<String>? = NativeBridge.getRawTransactionOutputs(tx)
+        override fun transactionOutputs(tx: ByteArray): Array<String>? = NativeBridge.getBuiltTransactionOutputs(tx)
         override fun signPrepared(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray? =
             NativeBridge.signPreparedTransaction(unsignedTx, toAddress, amountSats, approvedFeeSats)
         override fun broadcast(signedTx: ByteArray): String? = Broadcaster.broadcast(signedTx)

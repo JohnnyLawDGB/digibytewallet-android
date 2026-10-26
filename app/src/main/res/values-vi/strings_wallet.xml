@@ -487,6 +487,12 @@
     <string name="did_insecure">Kết nối không an toàn</string>
     <string name="did_insecure_body">Trang này dùng HTTP, không phải HTTPS. Thông tin xác thực của bạn có thể bị chặn bắt.</string>
     <string name="did_callback_url">URL callback</string>
+    <string name="did_identity_title">Trang web này nhận ra danh tính đăng nhập nào?</string>
+    <string name="did_identity_hint">Bạn đã khôi phục ví này? Hãy chọn danh tính bạn từng dùng trên trang này. Sau khi đăng nhập thành công, ví sẽ ghi nhớ lựa chọn.</string>
+    <string name="did_identity_per_site">Khóa riêng cho trang này (ứng dụng DigiByte gốc)</string>
+    <string name="did_identity_shared">Khóa dùng chung cho mọi trang (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Giống nhau trên mọi trang, nên các trang có thể liên kết các lần đăng nhập của bạn. Chỉ chọn nếu trang này từng nhận ra bạn bằng khóa này.</string>
+    <string name="did_identity_address">Địa chỉ: %1$s</string>
     <string name="did_approve">Chấp thuận</string>
     <string name="did_deny">Từ chối</string>
     <string name="did_success">Xác thực thành công</string>
@@ -590,6 +596,7 @@
     <string name="rf_dd_fee_floor">Cần %1$s phí mạng: ví này có %2$s.</string>
     <string name="rf_dd_found">Đã tìm thấy %1$s DigiDollar</string>
     <string name="rf_dd_moved">Đã chuyển %1$s DigiDollar về ví này</string>
+    <string name="rf_dd_sent_unrelayed">Đã gửi %1$s DigiDollar, nhưng mạng chưa xác nhận. Hãy giữ cụm từ khôi phục cũ cho đến khi khoản này hiện trong ví này.</string>
     <string name="rf_dd_left_behind">Còn lại %1$s DigiDollar: không thể chuyển</string>
     <string name="rf_dd_unreachable">Không thể kiểm tra DigiDollar; ví này có thể đang giữ một ít</string>
     <string name="as_rules_checking">Đang kiểm tra quy tắc chuyển của tài sản này…</string>
@@ -693,4 +700,7 @@
     <string name="seedview_pass_unreadable_body">Hiện không thể đọc cụm mật khẩu của ví này. Chỉ riêng các từ khôi phục có thể không khôi phục được ví này, vì vậy chúng sẽ không được hiển thị cho đến khi cụm mật khẩu có thể được hiển thị cùng với chúng. Hãy thử lại.</string>
     <string name="seedview_pass_retry">Thử lại</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Hiện không thể kiểm tra mã PIN của bạn</string>
+    <string name="pinstore_body">Kho khóa an toàn của điện thoại không mở được, nên ví vẫn bị khóa. Không có gì bị xóa. Hãy đóng ứng dụng rồi mở lại. Nếu vẫn xảy ra, hãy khởi động lại điện thoại; cụm từ khôi phục vẫn khôi phục được ví trên mọi thiết bị.</string>
+    <string name="pinstore_close">Đóng ứng dụng</string>
 </resources>

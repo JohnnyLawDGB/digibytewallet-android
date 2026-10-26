@@ -490,6 +490,12 @@
     <string name="did_insecure">Güvenli olmayan bağlantı</string>
     <string name="did_insecure_body">Bu site HTTPS değil HTTP kullanıyor. Kimlik doğrulamanız ele geçirilebilir.</string>
     <string name="did_callback_url">Geri dönüş URL\'si</string>
+    <string name="did_identity_title">Bu site hangi girişi tanıyor?</string>
+    <string name="did_identity_hint">Bu cüzdanı geri mi yüklediniz? Bu sitede daha önce kullandığınız kimliği seçin. Bir giriş başarılı olunca cüzdan bunu hatırlar.</string>
+    <string name="did_identity_per_site">Bu siteye özel anahtar (orijinal DigiByte uygulaması)</string>
+    <string name="did_identity_shared">Tüm siteler için ortak anahtar (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Her sitede aynıdır, bu yüzden siteler girişlerinizi ilişkilendirebilir. Yalnızca bu site sizi bununla tanıyorsa seçin.</string>
+    <string name="did_identity_address">Adres: %1$s</string>
     <string name="did_approve">Onayla</string>
     <string name="did_deny">Reddet</string>
     <string name="did_success">Kimlik doğrulama başarılı</string>
@@ -593,6 +599,7 @@
     <string name="rf_dd_fee_floor">Ağ ücreti için %1$s gerekir: bu cüzdanda %2$s var.</string>
     <string name="rf_dd_found">%1$s DigiDollar bulundu</string>
     <string name="rf_dd_moved">%1$s DigiDollar bu cüzdana taşındı</string>
+    <string name="rf_dd_sent_unrelayed">%1$s DigiDollar gönderildi, ancak ağ henüz onaylamadı. Bu cüzdanda görünene kadar eski kurtarma ifadenizi saklayın.</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar geride kaldı: taşınamadı</string>
     <string name="rf_dd_unreachable">DigiDollar kontrol edilemedi; bu cüzdanda bir miktar olabilir</string>
     <string name="as_rules_checking">Bu varlığın transfer kuralları kontrol ediliyor…</string>
@@ -698,4 +705,7 @@
     <string name="seedview_pass_unreadable_body">Bu cüzdanın parolası şu anda okunamadı. Kurtarma kelimeleriniz tek başına bu cüzdanı geri yüklemeyebilir; bu nedenle parola onlarla birlikte gösterilebilene kadar gösterilmezler. Tekrar deneyin.</string>
     <string name="seedview_pass_retry">Yeniden dene</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">PIN\'iniz şu anda doğrulanamıyor</string>
+    <string name="pinstore_body">Telefonun güvenli anahtar deposu açılamadı, bu yüzden cüzdan kilitli kalıyor. Hiçbir şey silinmedi. Uygulamayı kapatıp yeniden açın. Bu tekrar olursa telefonu yeniden başlatın; kurtarma ifadeniz cüzdanı yine her cihazda geri yükler.</string>
+    <string name="pinstore_close">Uygulamayı kapat</string>
 </resources>

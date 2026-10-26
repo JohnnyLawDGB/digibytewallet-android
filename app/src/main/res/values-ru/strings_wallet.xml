@@ -496,6 +496,12 @@
     <string name="did_insecure">Небезопасное соединение</string>
     <string name="did_insecure_body">Этот сайт использует HTTP, а не HTTPS. Вашу аутентификацию могут перехватить.</string>
     <string name="did_callback_url">URL обратного вызова</string>
+    <string name="did_identity_title">Какой вход знает этот сайт?</string>
+    <string name="did_identity_hint">Восстановили кошелёк? Выберите личность, которую вы раньше использовали на этом сайте. После успешного входа кошелёк запомнит выбор.</string>
+    <string name="did_identity_per_site">Отдельный ключ для этого сайта (оригинальное приложение DigiByte)</string>
+    <string name="did_identity_shared">Общий ключ для всех сайтов (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Он одинаков на всех сайтах, поэтому сайты могут связать ваши входы. Выбирайте его, только если этот сайт знал вас по нему.</string>
+    <string name="did_identity_address">Адрес: %1$s</string>
     <string name="did_approve">Одобрить</string>
     <string name="did_deny">Отклонить</string>
     <string name="did_success">Аутентификация выполнена</string>
@@ -599,6 +605,7 @@
     <string name="rf_dd_fee_floor">Требуется %1$s на комиссию сети: в этом кошельке %2$s.</string>
     <string name="rf_dd_found">Найдено %1$s в DigiDollar</string>
     <string name="rf_dd_moved">%1$s в DigiDollar перемещено в этот кошелёк</string>
+    <string name="rf_dd_sent_unrelayed">%1$s в DigiDollar отправлено, но сеть ещё не подтвердила. Сохраните старую фразу восстановления, пока сумма не появится в этом кошельке.</string>
     <string name="rf_dd_left_behind">%1$s в DigiDollar осталось: переместить не удалось</string>
     <string name="rf_dd_unreachable">Не удалось проверить DigiDollar; в этом кошельке они могут быть</string>
     <string name="as_rules_checking">Проверяем правила передачи этого актива…</string>
@@ -708,4 +715,7 @@
     <string name="seedview_pass_unreadable_body">Парольную фразу этого кошелька сейчас не удалось прочитать. Одних слов восстановления может быть недостаточно, чтобы восстановить этот кошелёк, поэтому они не показываются, пока парольную фразу нельзя показать вместе с ними. Попробуйте ещё раз.</string>
     <string name="seedview_pass_retry">Повторить</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Сейчас не удаётся проверить PIN-код</string>
+    <string name="pinstore_body">Защищённое хранилище ключей телефона не открылось, поэтому кошелёк остаётся заблокированным. Ничего не удалено. Закройте приложение и откройте снова. Если это повторяется, перезагрузите телефон; фраза восстановления по-прежнему восстанавливает кошелёк на любом устройстве.</string>
+    <string name="pinstore_close">Закрыть приложение</string>
 </resources>

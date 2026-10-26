@@ -547,6 +547,8 @@ class RecoverFundsViewModel @Inject constructor(
                     changeAddress = change,
                 )
             },
+            // Each fee coin signed at the amount its parent transaction states (4.1.2 row 17).
+            parents = app.aroundtheblock.wallet.core.recovery.RawTxBinding.native(),
         )
 
         return app.aroundtheblock.wallet.core.recovery.DigiDollarTransferService(

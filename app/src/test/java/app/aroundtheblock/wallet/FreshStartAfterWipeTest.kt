@@ -86,6 +86,29 @@ class FreshStartAfterWipeTest {
         unmockkStatic(Log::class)
     }
 
+    // ── 4.1.2 row 24: the wipe marks its erasure owed before it starts (WalletManager) ──────────────
+
+    /** A death mid-wipe, after the seed went: the mark is there, no wallet is stored, the next launch
+     *  finishes the erasure. */
+    @Test fun `a mark written before a wipe that died is finished at the next launch`() {
+        marked = true                                   // written by the wipe before it erased anything
+        var wipes = 0
+        FreshStartAfterWipe.atLaunch(screen, wipeOwed = false, walletStored = false, launch = null, recreated = false) {
+            wipes++; verified
+        }
+        assertEquals("the owed erasure did not run", 1, wipes)
+        assertFalse("a verified wipe left the mark", marked)
+    }
+
+    @Test fun `a verified wipe clears the mark it wrote, one that never removed the seed drops it too`() {
+        marked = true
+        FreshStartAfterWipe.afterWipe(screen, verified)
+        assertFalse(marked)
+        marked = true
+        FreshStartAfterWipe.afterWipe(screen, seedStillThere)
+        assertFalse("the wallet is still stored; its erasure is not owed", marked)
+    }
+
     private val app = mockk<Context>()
     private val screen = mockk<Context> { every { applicationContext } returns app }
 

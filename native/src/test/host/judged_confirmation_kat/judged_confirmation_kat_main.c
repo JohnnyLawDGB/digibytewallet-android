@@ -632,6 +632,106 @@ static const char *case_network_without_contexts_unchanged(void)
     fxFree(&f);
     return g_fail ? "fail" : "pass";
 }
+
+// ---- a confirmation height a server reports (N1/K4, BRPeerManagerHeightConfirmable) ----------------------------------
+
+// the mainnet fixture with the five unjudged headers on the context-less checkpoint, as in the first case
+static void unjudgedTipFixture(Fx *f, uint8_t (*run)[80])
+{
+    fxInit(f, &BRMainNetParams, 0, startAtCp(), NULL, 0);
+    check(setupRun(run, kRun, RUN_LEN, cpHash()), "setup: the run chains on the checkpoint");
+    check(deliver(f, run, 0, BRANCH_LEN) == 1 && tipHeight(f) == CP_HEIGHT + BRANCH_LEN,
+          "setup: five unjudged headers above the checkpoint are the tip");
+}
+
+// RED (SERVER_HEIGHT_UNFIXED). A height above the wallet's tip is not taken.
+static const char *case_server_height_above_tip_refused(void)
+{
+    Fx f;
+    uint8_t run[RUN_LEN][80];
+
+    unjudgedTipFixture(&f, run);
+    uint32_t tip = tipHeight(&f);
+    int a = BRPeerManagerHeightConfirmable(f.m, tip + 1), b = BRPeerManagerHeightConfirmable(f.m, tip + 1000000);
+    printf("NOTE: tip %" PRIu32 ": server height tip+1 -> %d, tip+1,000,000 -> %d\n", tip, a, b);
+    check(a == 0, "a height one above the tip is not confirmable");
+    check(b == 0, "a height far above the tip is not confirmable");
+    fxFree(&f);
+    return g_fail ? "fail" : "pass";
+}
+
+// RED (SERVER_HEIGHT_UNFIXED). A height on a block the wallet holds but has not judged is not taken.
+static const char *case_server_height_unjudged_refused(void)
+{
+    Fx f;
+    uint8_t run[RUN_LEN][80];
+
+    unjudgedTipFixture(&f, run);
+    uint32_t h = CP_HEIGHT + RECEIVE_INDEX + 1;
+    int got = BRPeerManagerHeightConfirmable(f.m, h);
+    printf("NOTE: server height %" PRIu32 " on an unjudged resident header (tip %" PRIu32 ") -> %d\n", h, tipHeight(&f), got);
+    check(got == 0, "a height on an unjudged block is not confirmable");
+    fxFree(&f);
+    return g_fail ? "fail" : "pass";
+}
+
+// GUARD. Heights that are not heights are never taken, in any arm.
+static const char *case_server_height_bounds_refused(void)
+{
+    Fx f;
+    uint8_t run[RUN_LEN][80];
+
+    unjudgedTipFixture(&f, run);
+    check(BRPeerManagerHeightConfirmable(f.m, 0) == 0, "height 0 (a mempool answer) is not confirmable");
+    check(BRPeerManagerHeightConfirmable(f.m, TX_UNCONFIRMED) == 0, "the unconfirmed marker is not confirmable");
+    check(BRPeerManagerHeightConfirmable(f.m, UINT32_MAX) == 0, "-1 read as a height is not confirmable");
+    fxFree(&f);
+    return g_fail ? "fail" : "pass";
+}
+
+// GUARD. A height a checkpoint at or below the tip pins is taken: the checkpoint itself, and a height below the
+// headers the wallet holds.
+static const char *case_server_height_pinned_confirmable(void)
+{
+    Fx f;
+    uint8_t run[RUN_LEN][80];
+
+    unjudgedTipFixture(&f, run);
+    int atCp = BRPeerManagerHeightConfirmable(f.m, CP_HEIGHT);
+    int below = BRPeerManagerHeightConfirmable(f.m, CP_HEIGHT - 1000);
+    printf("NOTE: server height at the checkpoint -> %d, 1,000 below it -> %d\n", atCp, below);
+    check(atCp == 1, "the checkpoint's height is confirmable");
+    check(below == 1, "a height below the headers held, under a checkpoint at or below the tip, is confirmable");
+    fxFree(&f);
+    return g_fail ? "fail" : "pass";
+}
+
+// GUARD. A height on a judged block is taken.
+static const char *case_server_height_judged_confirmable(void)
+{
+    const DiffRange *r = range("testnet_clamps");
+    BRMerkleBlock **blocks = calloc(r->count, sizeof(*blocks));
+    Fx f;
+    uint8_t hdr[1][80], row[80];
+
+    BRSetNetwork(1);
+    for (size_t i = 0; i < r->count; i++) {
+        rangeRow(r, i, row);
+        blocks[i] = BRMerkleBlockParse(row, 80);
+        blocks[i]->height = r->firstHeight + (uint32_t)i;
+    }
+    fxInit(&f, testnetDeclaringContexts(), 1, 0, blocks, r->count);
+    free(blocks);
+    hexBytes(hdr[0], kJudgedHeader, 80);
+    uint32_t h = r->firstHeight + (uint32_t)r->count;
+    check(deliver(&f, hdr, 0, 1) == 1 && tipHeight(&f) == h, "setup: a judged header is the tip");
+    int got = BRPeerManagerHeightConfirmable(f.m, h);
+    printf("NOTE: server height %" PRIu32 " on a judged block -> %d\n", h, got);
+    check(got == 1, "a height on a judged block is confirmable");
+    fxFree(&f);
+    BRSetNetwork(0);
+    return g_fail ? "fail" : "pass";
+}
 #endif // JUDGED_CONFIRMATION_GEN
 
 #ifdef JUDGED_CONFIRMATION_GEN
@@ -748,6 +848,11 @@ static const Case kCases[] = {
     { "held_block_stays_resident", case_held_block_stays_resident },
     { "judged_receive_confirmed", case_judged_receive_confirmed },
     { "network_without_contexts_unchanged", case_network_without_contexts_unchanged },
+    { "server_height_above_tip_refused", case_server_height_above_tip_refused },
+    { "server_height_unjudged_refused", case_server_height_unjudged_refused },
+    { "server_height_bounds_refused", case_server_height_bounds_refused },
+    { "server_height_pinned_confirmable", case_server_height_pinned_confirmable },
+    { "server_height_judged_confirmable", case_server_height_judged_confirmable },
 #endif
     { NULL, NULL },
 };

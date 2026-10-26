@@ -266,4 +266,24 @@ class RecoveryScanClassifyTest {
         txid = "00", vout = 0, amountSatoshi = sat, address = addr,
         blockHeight = 0L, scriptPubKeyHex = "76a90088ac",
     )
+
+    /**
+     * 4.1.2 row 34: Recover funds scans m/86'/20'/0' (taproot), the addresses Receive hands out. A
+     * zero-value output there is a DigiDollar token output, recovered by the DigiDollar path; it is not a
+     * plain coin, which would make the sweep refuse the whole profile.
+     */
+    @Test
+    fun classify_taprootProfile_findsDgbAndLeavesDollarOutputs() = runBlocking {
+        val taproot = DerivationProfile.BUILT_INS.single { it.prefixPath.contentEquals(intArrayOf(86 or Int.MIN_VALUE, 20 or Int.MIN_VALUE, Int.MIN_VALUE)) }
+        assertEquals(3, taproot.addressFormat)
+        val addr = "dgb1pexampletaprootaddress"
+        val dgb = UtxoEntry("bb".repeat(32), 1, 500_000_000L, addr, 100L, "5120" + "11".repeat(32))
+        val dollars = UtxoEntry("cc".repeat(32), 0, 0L, addr, 100L, "5120" + "11".repeat(32))
+        val source = FakeUtxoSource(mapOf(addr to ReconcileResult(listOf(dgb, dollars), emptyMap(), 200L)))
+        val done = RecoveryScanService(source).classifyDerived(mapOf(taproot to listOf(DerivedAddress(addr, chain = 0, index = 0))))
+        val r = done.results.single()
+        assertEquals("only the DGB coin is a coin here", listOf(dgb), r.utxos)
+        assertEquals(1, done.allWithFunds.size)          // a foreign seed's taproot DGB is swept
+        assertEquals(0, done.nonNativeWithFunds.size)    // this wallet's own m/86' is already its own
+    }
 }

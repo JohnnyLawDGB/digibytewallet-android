@@ -57,10 +57,18 @@ object Bip39Passphrase {
      * Zeroes its own working copy: validation runs on every keystroke in the entry field, and a
      * rejected passphrase is still a passphrase.
      */
+    /**
+     * True when the prepared bytes hold a NUL (4.1.2 row 25). The native derivation reads the passphrase as
+     * a C string, so "abc\u0000evil" derived the wallet of "abc" -- and "\u0000" the wallet of no
+     * passphrase -- while every other BIP39 implementation derives the whole string. Such a passphrase is
+     * refused, never truncated.
+     */
+    fun hasNul(prepared: ByteArray): Boolean = prepared.any { it == 0.toByte() }
+
     fun isValid(raw: String?): Boolean {
         val prepared = prepare(raw) ?: return true
         return try {
-            prepared.size <= MAX_BYTES
+            prepared.size <= MAX_BYTES && !hasNul(prepared)
         } finally {
             prepared.fill(0)
         }

@@ -84,6 +84,40 @@ class DigiDollarScanTest {
 
     // ---- the ordinary case --------------------------------------------------------------------
 
+    /**
+     * 4.1.2 row 11 (N6): a balance of 200 over two transactions, one of which cannot be read. The one
+     * outpoint found carries an unknown part of the 200 (its cents are in its own OP_RETURN), so none of
+     * it is counted movable and nothing is planned from it; the 200 is reported as unlocatable.
+     */
+    @Test fun `one unreadable transaction makes the address unlocatable, not partly movable`() {
+        val readable = "aa".repeat(32)
+        val unread = "bb".repeat(32)
+        val r = scan(
+            addresses = listOf(addr()),
+            holding = { DigiDollarHoldingResult(200, 2, listOf(readable, unread)) },
+            outs = { t -> if (t == unread) null else outputs() },
+        )
+        assertEquals("the balance is still reported", 200L, r.cents)
+        assertTrue("an outpoint was offered to move from a partly read address: ${r.holdings}", r.holdings.isEmpty())
+        assertEquals(200L, r.unlocatableCents)
+        assertEquals("nothing is movable", 0L, r.movableCents)
+    }
+
+    /** 4.1.2 row 20: a transaction paying the key twice holds two outpoints; both are found. */
+    @Test fun `two outputs paying the key in one transaction are both found`() {
+        val twice = listOf(DigiDollarHolding.Output(0, 0L, "5120$xq"), DigiDollarHolding.Output(1, 0L, "5120$xq"))
+        val r = scan(listOf(addr()), { DigiDollarHoldingResult(200, 2, listOf(txid)) }, outs = { twice })
+        assertEquals(2, r.holdings.size)
+        assertEquals(0L, r.unlocatableCents)
+    }
+
+    /** Found outpoints that are not the endpoint's unspent count: the balance is not what was found. */
+    @Test fun `an outpoint count the endpoint disagrees with makes the address unlocatable`() {
+        val r = scan(listOf(addr()), { DigiDollarHoldingResult(200, 2, listOf(txid)) })   // one output found
+        assertTrue(r.holdings.isEmpty())
+        assertEquals(200L, r.unlocatableCents)
+    }
+
     @Test fun `an address with dollars yields a spendable holding`() {
         val r = scan(listOf(addr()), { DigiDollarHoldingResult(100, 1, listOf(txid)) })
         assertEquals(100L, r.cents)

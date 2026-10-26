@@ -58,6 +58,9 @@ class DigiScopeClient(
     // update on rotation, so a stale pin can't linger in one client).
     private val client: OkHttpClient = baseClient.newBuilder()
         .certificatePinner(app.aroundtheblock.wallet.core.network.DigiScopePins.certificatePinner())
+        // A pinned host's 3xx is never followed to a host the pins do not cover (4.1.2 row 30, C18).
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     /**

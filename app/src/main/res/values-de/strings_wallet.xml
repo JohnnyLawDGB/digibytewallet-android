@@ -498,6 +498,12 @@
     <string name="did_insecure">Unsichere Verbindung</string>
     <string name="did_insecure_body">Diese Website verwendet HTTP, nicht HTTPS. Ihre Authentifizierung kann abgefangen werden.</string>
     <string name="did_callback_url">Callback-URL</string>
+    <string name="did_identity_title">Welche Anmeldung kennt diese Website?</string>
+    <string name="did_identity_hint">Wallet wiederhergestellt? Wähle die Identität, die du hier zuvor genutzt hast. Nach einer erfolgreichen Anmeldung merkt sich die Wallet die Wahl.</string>
+    <string name="did_identity_per_site">Eigener Schlüssel für diese Website (ursprüngliche DigiByte-App)</string>
+    <string name="did_identity_shared">Gemeinsamer Schlüssel für alle Websites (DigiByte Wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Auf jeder Website gleich, daher können Websites deine Anmeldungen verknüpfen. Wähle ihn nur, wenn diese Website dich darüber kannte.</string>
+    <string name="did_identity_address">Adresse: %1$s</string>
     <string name="did_approve">Genehmigen</string>
     <string name="did_deny">Ablehnen</string>
     <string name="did_success">Authentifizierung erfolgreich</string>
@@ -601,6 +607,7 @@
     <string name="rf_dd_fee_floor">Benötigt %1$s Netzwerkgebühr: diese Wallet hat %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar gefunden</string>
     <string name="rf_dd_moved">%1$s in DigiDollar in diese Wallet verschoben</string>
+    <string name="rf_dd_sent_unrelayed">%1$s in DigiDollar wurde gesendet, aber das Netzwerk hat es noch nicht bestätigt. Bewahre deine alte Wiederherstellungsphrase auf, bis es in dieser Wallet erscheint.</string>
     <string name="rf_dd_left_behind">%1$s in DigiDollar blieb zurück: es konnte nicht verschoben werden</string>
     <string name="rf_dd_unreachable">DigiDollar konnte nicht geprüft werden; diese Wallet hält möglicherweise welche</string>
     <string name="as_rules_checking">Übertragungsregeln dieses Assets werden geprüft…</string>
@@ -706,4 +713,7 @@
     <string name="seedview_pass_unreadable_body">Die Passphrase dieser Wallet konnte gerade nicht gelesen werden. Ihre Wiederherstellungswörter allein stellen diese Wallet möglicherweise nicht wieder her. Deshalb werden sie erst angezeigt, wenn die Passphrase zusammen mit ihnen angezeigt werden kann. Versuchen Sie es erneut.</string>
     <string name="seedview_pass_retry">Erneut versuchen</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Deine PIN kann gerade nicht geprüft werden</string>
+    <string name="pinstore_body">Der sichere Schlüsselspeicher des Telefons ließ sich nicht öffnen, daher bleibt die Wallet gesperrt. Es wurde nichts gelöscht. Schließe die App und öffne sie erneut. Wenn das wieder passiert, starte das Telefon neu; deine Wiederherstellungsphrase stellt die Wallet weiterhin auf jedem Gerät wieder her.</string>
+    <string name="pinstore_close">App schließen</string>
 </resources>
