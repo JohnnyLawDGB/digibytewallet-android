@@ -23,7 +23,7 @@ export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0
 SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
 RED_CASES=(headers_at_tip_scan_behind_is_not_synced unknown_scan_frontier_is_never_caught_up scan_slack_is_inclusive
-           callback_scan_behind_is_ignored callback_unknown_scan_is_ignored)
+           scan_slack_is_from_the_estimate callback_scan_behind_is_ignored callback_unknown_scan_is_ignored)
 GUARD_CASES=(three_real_tip_polls_mark_synced header_slack_is_inclusive below_the_newest_checkpoint_is_not_the_tip
              one_poll_off_the_tip_starts_again a_failed_checkpoint_counts_again unknown_heights_never_mark
              callback_marks_at_the_scanned_tip callback_below_the_checkpoint_is_ignored

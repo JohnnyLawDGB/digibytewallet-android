@@ -16,7 +16,8 @@ static void result(const char *name, int pass)
     printf("RESULT %s %s\n", name, pass ? "pass" : "fail");
 }
 
-#define CP  24300000LL     // the newest checkpoint in the pinned core's table
+#define CP  24350000LL     // the newest checkpoint in the pinned core's table (BRChainParams.h),
+                           // and SyncService.LATEST_CHECKPOINT_HEIGHT
 #define TIP 24363000LL
 
 static int polls(BRSyncCompletionState *s, int n, int64_t h, int64_t est, int64_t scan)
@@ -44,6 +45,14 @@ int main(void)
         result("scan_slack_is_inclusive",
                polls(&s, 3, TIP, TIP, TIP - BR_SYNC_CF_TIP_SLACK + 1) == 1 &&     // last scanned = TIP - 10
                polls(&t, 3, TIP, TIP, TIP - BR_SYNC_CF_TIP_SLACK) == 0);          // last scanned = TIP - 11
+    }
+    {   BRSyncCompletionState s = { 0 }, t = { 0 };   // the scan is measured against the ESTIMATE, not the headers
+        // Headers 5 behind the peers' estimate (inside the header slack). Last scanned TIP - 8 is
+        // within 10 of the header height but 13 behind the estimate: not caught up (SyncService:
+        // scanFrontier - 1 >= estHeight - CF_TIP_SLACK). TIP - 5 is exactly 10 behind it: caught up.
+        result("scan_slack_is_from_the_estimate",
+               polls(&s, 5, TIP, TIP + 5, TIP - 7) == 0 && s.atTipPolls == 0 &&
+               polls(&t, 3, TIP, TIP + 5, TIP - 4) == 1);
     }
     {   BRSyncCompletionState s = { 0 }, t = { 0 };
         result("header_slack_is_inclusive",
