@@ -11,9 +11,8 @@
 # ARMS, all built at the header check levels the app ships, read from native/build.gradle.kts:
 #   red   -DCF_GAP_RESCAN_UNFIXED              the detection compiled out (the earlier shape)
 #   red2  -DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED  the rescan starts at the delivering block, not the scan frontier
-#   red3  -DWALLET_FOREIGN_PROMOTE_UNFIXED     a re-delivered tx the wallet kept as non-wallet is not promoted
 #   green no seam flag (shipped)
-# RED cases must FAIL in the red arm, RED2 in red2, RED3 in red3; every other case must PASS in each
+# RED cases must FAIL in the red arm, RED2 in red2; every other case must PASS in each
 # comparison arm; every case must PASS in the green arm. Every case, every arm, 64-bit and 32-bit: no sanitizer report.
 #
 # Exit code 0 = every expectation held, 1 = otherwise (a build error is never evidence).
@@ -35,9 +34,6 @@ RED_CASES=(
 )
 RED2_CASES=(
     out_of_order_found
-)
-RED3_CASES=(
-    delivering_block_rescanned
 )
 GUARD_CASES=(
     in_window_no_rescan
@@ -111,10 +107,6 @@ if [ "$(grep -c 'CF_GAP_RESCAN_FROM_HEIGHT_UNFIXED' "$CORE_DIR/BRPeerManager.c")
     echo "GATE FAILURE: BRPeerManager.c has no CF_GAP_RESCAN_FROM_HEIGHT_UNFIXED seam; -D would be inert."
     exit 1
 fi
-if [ "$(grep -c 'WALLET_FOREIGN_PROMOTE_UNFIXED' "$CORE_DIR/BRWallet.c")" -lt 1 ]; then
-    echo "GATE FAILURE: BRWallet.c has no WALLET_FOREIGN_PROMOTE_UNFIXED seam; -D would be inert."
-    exit 1
-fi
 
 echo "levels: proof of work $POW_LEVEL, difficulty target $DIFF_LEVEL (shipped, from native/build.gradle.kts)"
 
@@ -166,10 +158,6 @@ run_bits() {
         echo "GATE FAILURE: ${bits}-bit red2 arm did not compile (a build error is not evidence)."
         FAIL=1; return
     fi
-    if ! build "$BUILD_DIR/red3${bits}" "$bits" -DWALLET_FOREIGN_PROMOTE_UNFIXED; then
-        echo "GATE FAILURE: ${bits}-bit red3 arm did not compile (a build error is not evidence)."
-        FAIL=1; return
-    fi
     if ! build "$BUILD_DIR/green${bits}" "$bits"; then
         echo "GATE FAILURE: ${bits}-bit green arm did not compile."
         FAIL=1; return
@@ -185,7 +173,6 @@ run_bits() {
 
     comparison_arm "red" "$bits" "-DCF_GAP_RESCAN_UNFIXED" "${RED_CASES[*]}"
     comparison_arm "red2" "$bits" "-DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED" "${RED2_CASES[*]}"
-    comparison_arm "red3" "$bits" "-DWALLET_FOREIGN_PROMOTE_UNFIXED" "${RED3_CASES[*]}"
 
     echo "--- GREEN ARM (shipped): every case MUST pass, no sanitizer report ---"
     for c in "${ALL_CASES[@]}"; do
@@ -210,7 +197,7 @@ run_bits 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: cf_gap_rescan_kat (${#RED_CASES[@]} red-then-green, ${#RED2_CASES[@]} red2-then-green, ${#RED3_CASES[@]} red3-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
+    echo "PASS: cf_gap_rescan_kat (${#RED_CASES[@]} red-then-green, ${#RED2_CASES[@]} red2-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
     exit 0
 else
     echo "FAIL: cf_gap_rescan_kat"

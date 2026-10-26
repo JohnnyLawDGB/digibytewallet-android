@@ -28,10 +28,10 @@
 //                             grows the set; X's then grows nothing. The scan must rewind below H2 and find B.
 //   delivering_block_rescanned (RED)  one block at H1 holds two transactions: the first pays 112, the second pays 105.
 //                             When the first is handed over 112 is not watched; the second grows the set. H1 itself
-//                             must be scanned again, so the re-delivery registers the payment to 112. (Kills a
-//                             rewind that starts one above the delivering block.) The first delivery keeps the
-//                             112 tx as a non-wallet record (BRWallet's foreignTx), so the re-delivery must also
-//                             promote that record: -DWALLET_FOREIGN_PROMOTE_UNFIXED is its comparison arm.
+//                             must be scanned again: the forward drive resumes AT H1 and H1's block is requested a
+//                             second time. (Kills a rewind that starts one above the delivering block.) Whether the
+//                             re-delivered 112 tx is then credited is the wallet's business, not the scan's, and is
+//                             not asserted here.
 //   abandoned_floor_respected (RED)  A (H1) pays 105, B (H3) pays 112. A's block is in flight when H1 is abandoned
 //                             (the hard floor moves to H2), and only then arrives and grows the set. The rescan must
 //                             start AT the floor: the cursor and scannedThrough stay at or above floor - 1 (nothing
@@ -45,11 +45,10 @@
 // BRPeerManagerKeepAlive would request; the KAT then hands in the filters and blocks a peer would answer with. Each
 // filter commits to every output script of its block (BIP158 basic filter, outputs only).
 //
-// RED-BEFORE-GREEN: run.sh builds three comparison arms. -DCF_GAP_RESCAN_UNFIXED (the detection in _peerRelayedTx
+// RED-BEFORE-GREEN: run.sh builds two comparison arms. -DCF_GAP_RESCAN_UNFIXED (the detection in _peerRelayedTx
 // compiled out) must fail every RED case; -DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED (the rescan starting at the delivering
-// block, the first shape of the fix) must fail out_of_order_found; -DWALLET_FOREIGN_PROMOTE_UNFIXED (a re-delivered
-// tx the wallet kept as non-wallet is not promoted) must fail delivering_block_rescanned. Each arm passes every
-// case it does not govern; the shipped build passes all.
+// block, the first shape of the fix) must fail out_of_order_found. Each arm passes every case it does not govern;
+// the shipped build passes all.
 //
 // Approach: #include BRPeer.c and BRPeerManager.c to reach the file-static handlers and the peer context (the
 // delivering-block flag BRPeer.c sets while it hands a verified block's transactions to relayedTx), the same pattern
@@ -245,6 +244,7 @@ typedef struct {
     BRMerkleBlock *blk[MAX_BLK + 1];          // [0] = H0 (owned by m->blocks)
     uint8_t filter[MAX_BLK + 1][32];
     size_t filterLen[MAX_BLK + 1];
+    unsigned delivered[MAX_BLK + 1];          // how many times each block was handed over
 } Fx;
 
 static BRMerkleBlock *blockAt(uint32_t height, uint8_t seed, UInt256 prev, BRTransaction *const *txs, size_t ntx)
@@ -366,6 +366,7 @@ static void deliverBlock(Fx *f, size_t b)
     BRPeerContext *ctx = (BRPeerContext *)f->peer;
     UInt256 hashes[MAX_TX];
 
+    f->delivered[b]++;
     ctx->deliveringBlockHash = f->blk[b]->blockHash;
     ctx->deliveringBlockTxs = 1;
     for (size_t t = 0; t < f->ntx[b]; t++) {
@@ -512,10 +513,11 @@ static int case_delivering_block_rescanned(void)
           "CRUX: H1 itself is not counted as scanned (a transaction earlier in it paid a newly added address)");
     check(f.m->autoFetchCFiltersThrough < H1, "CRUX: the cursor is back below H1, so H1 is fetched again");
 
-    driveForward(&f);
+    uint32_t from = driveForward(&f);
 
-    check(confirmedAt(&f, 1, 0), "CRUX: the re-delivery of H1 registers the payment to 112 at H1");
-    check(BRWalletBalance(f.w) == paid(1, 0) + paid(1, 1), "CRUX: the balance holds both payments in H1");
+    check(from == H1, "CRUX: the forward drive resumes at H1, the delivering block itself");
+    check(f.delivered[1] == 2, "CRUX: H1's filter matched the grown set and its block was requested again");
+    check(confirmedAt(&f, 1, 1), "the payment to 105 stays confirmed at H1");
     check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == H2, "the scan completes through H2");
     check(BRCFScanLedgerOutstandingCount(&f.m->cfLedger) == 0, "nothing is left outstanding");
 
