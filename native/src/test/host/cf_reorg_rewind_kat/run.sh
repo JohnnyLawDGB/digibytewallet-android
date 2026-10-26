@@ -67,8 +67,12 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     # -DDEBUG: peer_log is compiled out on the host without it (BRPeer.h); the log lines are evidence.
+    # -DDGB_HEADER_DIFF_CHECK=1, named here: the fixture's headers are synthetic, with no difficulty history, so at
+    # level 2 a fork header among them can never be judged and is refused (INT-2026-10-09-E), and no reorg could be
+    # built. This suite is about the filter chain and the scan ledger, not the target; the level-2 verdicts are
+    # pinned in header_diff_v4_kat and int_2026_10_09_e_kat. Proof of work stays at the shipped level.
     "${CC:-clang}" -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        -DDGB_HEADER_DIFF_CHECK=1 "${m[@]}" "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/cf_reorg_rewind_kat_main.c" "${UNITS[@]}" \
         -lm -lpthread -o "$out"
@@ -89,7 +93,7 @@ FAIL=0
 run_case() {   # run_case <bin> <case> -> OUT, RC
     OUT="$("$1" "$2" 2>&1)"; RC=$?
 }
-san() { echo "$OUT" | grep -Eq "$SAN_RE"; }
+san() { <<<"$OUT" grep -Eq "$SAN_RE"; }
 
 run_bits() {
     local bits="$1"
@@ -110,9 +114,9 @@ run_bits() {
     echo "--- GREEN (fixed): every case PASSES, no sanitizer report ---"
     for c in $known; do
         run_case "$BUILD_DIR/green${bits}" "$c"
-        if san; then echo "  [$bits green $c] GATE FAILURE: sanitizer report"; echo "$OUT" | grep -E "$SAN_RE" | head -3; FAIL=1
-        elif [ $RC -eq 0 ] && echo "$OUT" | grep -q "RESULT $c PASS"; then echo "  [$bits green $c] PASS"
-        else echo "  [$bits green $c] GATE FAILURE: did not pass (rc=$RC)"; echo "$OUT" | grep -E "FAIL|RESULT" | sed 's/^/      /'; FAIL=1; fi
+        if san; then echo "  [$bits green $c] GATE FAILURE: sanitizer report"; <<<"$OUT" grep -E "$SAN_RE" | head -3; FAIL=1
+        elif [ $RC -eq 0 ] && <<<"$OUT" grep -q "RESULT $c PASS"; then echo "  [$bits green $c] PASS"
+        else echo "  [$bits green $c] GATE FAILURE: did not pass (rc=$RC)"; <<<"$OUT" grep -E "FAIL|RESULT" | sed 's/^/      /'; FAIL=1; fi
     done
 
     for a in "${ARMS[@]}"; do
@@ -123,15 +127,15 @@ run_bits() {
         for c in ${RED[$a]}; do
             run_case "$BUILD_DIR/red_${a}_${bits}" "$c"
             if san; then echo "  [$bits $a $c] GATE FAILURE: sanitizer report"; FAIL=1
-            elif [ $RC -ne 0 ] && echo "$OUT" | grep -q "RESULT $c FAIL"; then
-                echo "  [$bits $a $c] failed, as required: $(echo "$OUT" | grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
+            elif [ $RC -ne 0 ] && <<<"$OUT" grep -q "RESULT $c FAIL"; then
+                echo "  [$bits $a $c] failed, as required: $(<<<"$OUT" grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
             else echo "  [$bits $a $c] GATE FAILURE: passed in the earlier shape (rc=$RC) -- the seam is not load-bearing"; FAIL=1; fi
         done
         for c in "${GUARD_CASES[@]}"; do
             run_case "$BUILD_DIR/red_${a}_${bits}" "$c"
             if san; then echo "  [$bits $a $c] GATE FAILURE: sanitizer report"; FAIL=1
-            elif [ $RC -eq 0 ] && echo "$OUT" | grep -q "RESULT $c PASS"; then echo "  [$bits $a $c] guard holds"
-            else echo "  [$bits $a $c] GATE FAILURE: guard failed (rc=$RC)"; echo "$OUT" | grep FAIL | sed 's/^/      /'; FAIL=1; fi
+            elif [ $RC -eq 0 ] && <<<"$OUT" grep -q "RESULT $c PASS"; then echo "  [$bits $a $c] guard holds"
+            else echo "  [$bits $a $c] GATE FAILURE: guard failed (rc=$RC)"; <<<"$OUT" grep FAIL | sed 's/^/      /'; FAIL=1; fi
         done
     done
 }

@@ -11,8 +11,8 @@ detekt {
 }
 
 android {
-    namespace = "io.digibyte.core"
-    compileSdk = 35
+    namespace = "app.aroundtheblock.wallet.core"
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26

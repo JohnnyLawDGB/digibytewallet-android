@@ -1,0 +1,159 @@
+package app.aroundtheblock.wallet.core
+
+import app.aroundtheblock.wallet.core.network.BoundedBody
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class AppUpdate(
+    val versionName: String,
+    val releaseNotes: String,
+    val downloadUrl: String,
+    val htmlUrl: String,
+    /** True when this came from a PRERELEASE. Surface it in the dialog — a beta
+     *  carries knowingly-unverified surface and the user opted in to be offered it. */
+    val isPrerelease: Boolean = false
+)
+
+/**
+ * @param repo the GitHub repository whose releases ARE this app's sideload builds, as "owner/name".
+ *   Deliberately not this source repository: io.digibyte installs already in the wild read ITS
+ *   releases with no tag filter, so a new-app build published there would be offered to them.
+ */
+class UpdateChecker(private val client: OkHttpClient, private val repo: String) {
+
+    /** Stable channel. GitHub's /releases/latest EXCLUDES prereleases by definition —
+     *  which is exactly why tagging `-beta` stops it notifying anyone, and is the
+     *  point of the tag rather than a defect in it. */
+    private val latestUrl = "https://api.github.com/repos/$repo/releases/latest"
+
+    /** Beta channel: the full list, newest first, INCLUDING prereleases. */
+    private val allUrl = "https://api.github.com/repos/$repo/releases?per_page=10"
+
+    /**
+     * Check whether a newer version is available.
+     *
+     * @param includePrereleases opt-in beta channel. Default false, so a prerelease can
+     *   never be pushed to someone who did not ask for it.
+     */
+    suspend fun checkForUpdate(
+        currentVersion: String,
+        includePrereleases: Boolean = false
+    ): AppUpdate? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(if (includePrereleases) allUrl else latestUrl)
+                .header("Accept", "application/vnd.github.v3+json")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = BoundedBody.text(response.body, MAX_RELEASES_BODY_BYTES) ?: return@withContext null
+
+                // /releases returns an ARRAY (newest first); /releases/latest one object.
+                val release: JSONObject = if (includePrereleases) {
+                    val arr = JSONArray(body)
+                    // Skip drafts: visible to maintainers, not installable by anyone.
+                    (0 until arr.length())
+                        .map { arr.getJSONObject(it) }
+                        .firstOrNull { !it.optBoolean("draft", false) }
+                        ?: return@withContext null
+                } else {
+                    JSONObject(body)
+                }
+
+                val tagName = release.getString("tag_name").removePrefix("v")
+                // Flatten markdown BEFORE truncating: the dialog renders these with a plain
+                // Text() that has no markdown support, so the raw body showed asterisks and
+                // backticks to the user. Stripping first also means the 500-char budget is
+                // spent on words rather than on markup. Truncating first would risk cutting
+                // through a marker pair and leaving an unmatched one behind.
+                val releaseNotes = app.aroundtheblock.wallet.core.update.ReleaseNotesPlainText
+                    .render(release.optString("body", ""))
+                    .take(500)
+                val htmlUrl = release.getString("html_url")
+                // A release page that is not this repository's means the answer is not one
+                // GitHub gave for our repository. Offer nothing rather than guess.
+                if (!isReleaseUrl(htmlUrl, repo, RELEASE_PAGE)) return@withContext null
+                val isPre = release.optBoolean("prerelease", false)
+
+                var downloadUrl = htmlUrl // fallback: the release page
+                release.optJSONArray("assets")?.let { assets ->
+                    for (i in 0 until assets.length()) {
+                        val asset = assets.getJSONObject(i)
+                        if (asset.getString("name").endsWith(".apk")) {
+                            // The button opens this link directly, so it must be one of this
+                            // repository's release downloads and nothing else (AND-010).
+                            asset.getString("browser_download_url")
+                                .takeIf { isReleaseUrl(it, repo, RELEASE_DOWNLOAD) }
+                                ?.let { downloadUrl = it }
+                            break
+                        }
+                    }
+                }
+
+                if (isNewer(tagName, currentVersion)) {
+                    AppUpdate(
+                        versionName = tagName,
+                        releaseNotes = releaseNotes,
+                        downloadUrl = downloadUrl,
+                        htmlUrl = htmlUrl,
+                        isPrerelease = isPre
+                    )
+                } else null
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("UpdateChecker", "Update check failed: ${e.message}")
+            null
+        }
+    }
+
+    internal companion object {
+        /**
+         * The most the releases answer may be: 4 MiB. Ten releases with notes at GitHub's own
+         * limit (125,000 characters each) come to about that; this repository's are a few KB.
+         */
+        const val MAX_RELEASES_BODY_BYTES = 4L * 1024 * 1024
+
+        const val RELEASE_PAGE = "releases/"
+        const val RELEASE_DOWNLOAD = "releases/download/"
+
+        /**
+         * True only for `https://github.com/<repo>/<kind>…`: no other scheme, host, port or
+         * user-info. The update dialog launches these links, so this is the whole list of
+         * places an update can send someone.
+         */
+        fun isReleaseUrl(url: String, repo: String, kind: String): Boolean {
+            val u = url.toHttpUrlOrNull() ?: return false
+            if (u.scheme != "https" || u.host != "github.com" || u.port != 443) return false
+            if (u.username.isNotEmpty() || u.password.isNotEmpty()) return false
+            if (repo.isBlank()) return false
+            return u.encodedPath.startsWith("/$repo/$kind", ignoreCase = true)
+        }
+    }
+
+    /**
+     * Numeric compare, with one refinement: at EQUAL numbers a build carrying a
+     * pre-release suffix is OLDER than one without.
+     *
+     * Without it, someone on 4.0.31-beta would never be offered the stable 4.0.31 —
+     * both reduce to [4,0,31] once the suffix is stripped, stranding the tester on the
+     * prerelease at exactly the moment the tested build ships.
+     */
+    internal fun isNewer(remote: String, local: String): Boolean {
+        val r = remote.split(".").mapNotNull { it.replace(Regex("[^0-9]"), "").toIntOrNull() }
+        val l = local.split(".").mapNotNull { it.replace(Regex("[^0-9]"), "").toIntOrNull() }
+        for (i in 0 until maxOf(r.size, l.size)) {
+            val rv = r.getOrElse(i) { 0 }
+            val lv = l.getOrElse(i) { 0 }
+            if (rv > lv) return true
+            if (rv < lv) return false
+        }
+        // Numerically equal: stable (unsuffixed) supersedes a prerelease.
+        return local.contains('-') && !remote.contains('-')
+    }
+}
