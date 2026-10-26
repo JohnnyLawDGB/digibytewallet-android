@@ -130,4 +130,38 @@ class DigiByteUriTest {
         assertNull(u?.assetId)
         assertNull(u?.assetAmount)
     }
+
+    // ── Percent escapes: ASCII hex only, as the core's BRPaymentUri.h ──
+
+    /**
+     * The attack that motivated the rule. `toIntOrNull(16)` accepted full-width digits, so
+     * "%６１" decoded to 'a', the first key became "amount" and the request read 1000 DGB,
+     * while the core (and iOS) saw an unknown key and 1 DGB. First-key-wins made it worse:
+     * the smuggled key also beat the honest one.
+     */
+    @Test fun a_full_width_escape_cannot_smuggle_a_key() {
+        val u = DigiByteUri.parse("digibyte:DA?%\uFF16\uFF11mount=1000&amount=1")
+        assertEquals("DA", u?.address)
+        assertEquals(100_000_000L, u?.amount)
+    }
+
+    @Test fun a_non_ascii_hex_digit_leaves_the_percent_literal() {
+        // Full-width and Arabic-Indic digits are Unicode digits, not hex digits.
+        assertEquals("%\uFF16\uFF11", DigiByteUri.parse("digibyte:DA?label=%\uFF16\uFF11")?.label)
+        assertEquals("%\u0664\u0661x", DigiByteUri.parse("digibyte:DA?label=%\u0664\u0661x")?.label)
+        // Full-width Latin letters are not hex either.
+        assertEquals("%\uFF21\uFF22", DigiByteUri.parse("digibyte:DA?label=%\uFF21\uFF22")?.label)
+    }
+
+    @Test fun a_sign_is_not_a_hex_digit() {
+        // toIntOrNull(16) read "%-1" as byte 0xFF and "%+F" as 0x0F. The '+' after a literal
+        // '%' is a space, as everywhere else in a query.
+        assertEquals("%-1% F%4", DigiByteUri.parse("digibyte:DA?label=%-1%+F%4")?.label)
+        assertEquals("a%zzb%", DigiByteUri.parse("digibyte:DA?label=a%zzb%")?.label)
+    }
+
+    @Test fun ascii_hex_escapes_still_decode_in_either_case() {
+        assertEquals("JJa", DigiByteUri.parse("digibyte:DA?label=%4A%4a%61")?.label)
+        assertEquals(100_000_000L, DigiByteUri.parse("digibyte:DA?%61mount=1")?.amount)
+    }
 }
