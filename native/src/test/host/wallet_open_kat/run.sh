@@ -29,9 +29,13 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
-RED_CASES=(legacy_p2pkh_watched legacy_p2wpkh_watched bip86_watched)
+RED_CASES=(legacy_p2pkh_watched legacy_p2wpkh_watched bip86_watched
+           saved_legacy_p2pkh_credited saved_p2tr_credited saved_balance_all_trees)
 GUARD_CASES=(bip84_vector bip84_watched receive_is_bip84 keys_open_matches_seed_open
-             trees_constant_names_all_three)
+             trees_constant_names_all_three
+             saved_records_built saved_array_untouched saved_bip84_credited
+             saved_duplicate_not_kept saved_unsigned_not_kept saved_out_of_range_not_kept
+             saved_release_clean)
 
 shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
