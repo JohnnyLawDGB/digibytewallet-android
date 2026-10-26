@@ -117,6 +117,12 @@ jobs:
       - name: Native host KATs
         run: ./scripts/run-host-kats.sh
 
+      # The parity tests (core/src/androidTest: Kotlin against the C core through JNI) run only on
+      # a device, so nothing here ran them, and nothing even compiled them: a typo in one merged
+      # unnoticed until someone ran it by hand. Compiling them is cheap and catches that much.
+      - name: Compile instrumented tests
+        run: ./gradlew :core:compileMainnetDebugAndroidTestKotlin
+
       - name: Build Debug APKs (sideload + play)
         run: ./gradlew :app:assembleMainnetSideloadDebug :app:assembleMainnetPlayDebug
 
