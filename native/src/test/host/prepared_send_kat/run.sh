@@ -46,7 +46,8 @@ LIMIT_S=120
 RED_CASES=(quote_never_invents check_needs_wallet_and_tx check_needs_an_approved_payment
            two_change_outputs_refused payment_twice_refused zero_value_change_refused
            change_without_payment_refused payment_raised_change_lowered_refused
-           sibling_of_unspent_coin_refused digidollar_coin_refused refused_after_signing)
+           payment_lowered_change_raised_refused sibling_of_unspent_coin_refused
+           digidollar_coin_refused refused_after_signing)
 GUARD_CASES=(payment_only_passes change_before_payment_passes payment_twice_to_self_passes verdict_values_fixed)
 
 FAIL=0

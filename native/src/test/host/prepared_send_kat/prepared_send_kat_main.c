@@ -399,6 +399,26 @@ static void payment_raised_change_lowered_refused(void)
     release(&p);
 }
 
+// The mirror image: the payment output pays LESS than approved and the change is raised by the same
+// amount. The fee is unchanged, the approved recipient is still paid, but short of the approved
+// amount, and the wallet keeps the difference. Refused: the amount must match exactly
+// (BRPreparedSendPaysAsApproved's `o->amount == payAmount`, never `<=`; the former bridge
+// prepared_send.h compares the amount for equality too).
+static void payment_lowered_change_raised_refused(void)
+{
+    Prepared p;
+    ck(prepare(&p, 3000000), "review prepares a send");
+    const BRTxOutput *change = p.bytes ? changeOf(&p) : NULL;
+    ck(change != NULL && p.payAmount > 100000, "the built send has change and pays over 100,000 sat");
+    if (!change || p.payAmount <= 100000) { release(&p); return; }
+    BRTxOutput outs[2] = { { "", p.payAmount - 100000, p.payScript, p.payScriptLen },
+                           { "", change->amount + 100000, change->script, change->scriptLen } };
+    BRPreparedSendVerdict v = checkShape(&p, outs, 2, p.payAmount,
+                                         "100,000 sat less to the approved recipient, 100,000 sat more change");
+    ck(v == BRPreparedSendNotApproved, "paying the recipient less than approved is refused (%s)", verdictName(v));
+    release(&p);
+}
+
 // A confirmed parent pays the wallet two outputs. Output 1 is then spent by a registered send;
 // output 0 is still unspent. Bytes spending output 1 again are refused: the coin is looked up by
 // hash AND output index (BRPreparedSendHasCoin's `utxos[i].n == n`), not by its parent alone.
@@ -734,6 +754,7 @@ static const Case kCases[] = {
     { "zero_value_change_refused", zero_value_change_refused },
     { "change_without_payment_refused", change_without_payment_refused },
     { "payment_raised_change_lowered_refused", payment_raised_change_lowered_refused },
+    { "payment_lowered_change_raised_refused", payment_lowered_change_raised_refused },
     { "sibling_of_unspent_coin_refused", sibling_of_unspent_coin_refused },
     { "digidollar_coin_refused", digidollar_coin_refused },
     { "refused_after_signing", refused_after_signing },
