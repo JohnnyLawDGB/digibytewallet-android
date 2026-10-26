@@ -9,6 +9,9 @@
 #          case pass.
 #   GREEN  the shipped rule: every case passes, ALL PASS, exit 0. Both arms under ASan + UBSan.
 #
+# The cases use Kotlin's literal constants (StrandedSendSelector.kt: window 100, 3 attempts,
+# 1 h hold), not the header's BR_STRANDED_* macros, so a changed macro fails here.
+#
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
 # Exit code 0 = gate held, 1 = it did not.
 set -uo pipefail
@@ -23,7 +26,7 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
-RED_CASES=(absent_from_full_window_aged_out absent_tried_then_given_up unconfirmed_held_then_retried
+RED_CASES=(absent_from_full_window_aged_out absent_from_full_window_aged_out_after_attempts absent_tried_then_given_up unconfirmed_held_then_retried
            unreadable_height_tried_then_held all_unconfirmed_window_not_full
            one_confirmed_row_anchors_full hold_edges)
 GUARD_CASES=(conflicted_only_when_held_and_invalid heights_classify confirmed_listed_settles sentinel_listed_republishes window_bound)

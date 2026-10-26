@@ -37,6 +37,13 @@ static const char *name(BRStrandedAction a)
 
 #define NOW 1790000000000LL   // the Kotlin tests' clock
 
+// The rule's constants as Kotlin spells them (StrandedSendSelector.kt), NOT the header's macros:
+// a case written against BR_STRANDED_* passes whatever value the header gives them, so a changed
+// constant would drift from Android unseen.
+#define KT_DETAILS_WINDOW 100u          // DETAILS_WINDOW = 100
+#define KT_MAX_ATTEMPTS   3u            // MAX_ATTEMPTS = 3
+#define KT_HOLD_MS        3600000LL     // HOLD_MS = 60 * 60 * 1000L
+
 int main(void)
 {
     char why[200];
@@ -60,57 +67,68 @@ int main(void)
     result("sentinel_listed_republishes", a == BRStrandedRepublish && ! BRStrandedActionSettles(a), why);
 
     // "a send absent from a full window has aged out of it and is settled": zero re-publishes.
-    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(BR_STRANDED_WINDOW, BR_STRANDED_WINDOW), 0, 0, NOW);
+    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(KT_DETAILS_WINDOW, KT_DETAILS_WINDOW), 0, 0, NOW);
     snprintf(why, sizeof(why), "got %s", name(a));
     result("absent_from_full_window_aged_out", a == BRStrandedSettleAgedOut && BRStrandedActionSettles(a), why);
+
+    // An absent send in a full window is aged out whatever its attempt count: Kotlin's decide()
+    // tests `details.full` before `tried.count` (StrandedSendSelector.kt:119-120), so a send tried
+    // once, or up to the cap, is still SETTLE_AGED_OUT, never REPUBLISH or SETTLE_GAVE_UP.
+    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(KT_DETAILS_WINDOW, 1), 1, NOW - 90000, NOW);
+    b = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(KT_DETAILS_WINDOW, 1), KT_MAX_ATTEMPTS, NOW - 90000, NOW);
+    snprintf(why, sizeof(why), "tried once %s, tried %u times %s", name(a), KT_MAX_ATTEMPTS, name(b));
+    result("absent_from_full_window_aged_out_after_attempts",
+           a == BRStrandedSettleAgedOut && b == BRStrandedSettleAgedOut, why);
 
     // "a send absent from a window that is not full is tried a bounded number of times"
     {
         int ok = 1; uint32_t n;
-        for (n = 0; n < BR_STRANDED_MAX_ATTEMPTS; n++)
+        for (n = 0; n < KT_MAX_ATTEMPTS; n++)
             if (BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(10, 10), n, NOW - 90000, NOW) != BRStrandedRepublish) ok = 0;
-        a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(10, 10), BR_STRANDED_MAX_ATTEMPTS, NOW - 90000, NOW);
-        snprintf(why, sizeof(why), "first %u tries %s, then %s", BR_STRANDED_MAX_ATTEMPTS, ok ? "REPUBLISH" : "not all REPUBLISH", name(a));
+        a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(10, 10), KT_MAX_ATTEMPTS, NOW - 90000, NOW);
+        snprintf(why, sizeof(why), "first %u tries %s, then %s", KT_MAX_ATTEMPTS, ok ? "REPUBLISH" : "not all REPUBLISH", name(a));
         result("absent_tried_then_given_up", ok && a == BRStrandedSettleGaveUp && BRStrandedActionSettles(a), why);
     }
 
     // "an unconfirmed send is held after the attempt cap and tried again after the hold"
-    a = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, BR_STRANDED_MAX_ATTEMPTS, NOW - 90000, NOW);
-    b = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, BR_STRANDED_MAX_ATTEMPTS, NOW - BR_STRANDED_HOLD_MS, NOW);
+    a = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, KT_MAX_ATTEMPTS, NOW - 90000, NOW);
+    b = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, KT_MAX_ATTEMPTS, NOW - KT_HOLD_MS, NOW);
     snprintf(why, sizeof(why), "capped %s, hold over %s", name(a), name(b));
     result("unconfirmed_held_then_retried", a == BRStrandedHold && ! BRStrandedActionSettles(a) && b == BRStrandedRepublish, why);
 
     // "a malformed row neither throws nor makes the other rows unconfirmed": a row whose height
     // cannot be read is listed at 0, tried, then held like any unconfirmed send; never given up.
     a = BRStrandedSendDecide(1, 0, 0, 0, 0, NOW);
-    b = BRStrandedSendDecide(1, 0, 0, BR_STRANDED_MAX_ATTEMPTS, NOW, NOW);
+    b = BRStrandedSendDecide(1, 0, 0, KT_MAX_ATTEMPTS, NOW, NOW);
     snprintf(why, sizeof(why), "first %s, capped %s", name(a), name(b));
     result("unreadable_height_tried_then_held", a == BRStrandedRepublish && b == BRStrandedHold, why);
 
     // "a send absent from a full window of unconfirmed rows is re-published, not aged out"
-    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(BR_STRANDED_WINDOW, 0), 0, 0, NOW);
-    b = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(BR_STRANDED_WINDOW, 0), BR_STRANDED_MAX_ATTEMPTS, NOW, NOW);
-    snprintf(why, sizeof(why), "full=%d, first %s, capped %s", BRStrandedListingIsFull(BR_STRANDED_WINDOW, 0), name(a), name(b));
+    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(KT_DETAILS_WINDOW, 0), 0, 0, NOW);
+    b = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(KT_DETAILS_WINDOW, 0), KT_MAX_ATTEMPTS, NOW, NOW);
+    snprintf(why, sizeof(why), "full=%d, first %s, capped %s", BRStrandedListingIsFull(KT_DETAILS_WINDOW, 0), name(a), name(b));
     result("all_unconfirmed_window_not_full",
-           ! BRStrandedListingIsFull(BR_STRANDED_WINDOW, 0) && a == BRStrandedRepublish && b == BRStrandedSettleGaveUp, why);
+           ! BRStrandedListingIsFull(KT_DETAILS_WINDOW, 0) && a == BRStrandedRepublish && b == BRStrandedSettleGaveUp, why);
 
     // "one confirmed row anchors a full window, and an absent send is aged out"
-    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(BR_STRANDED_WINDOW, 1), 0, 0, NOW);
-    snprintf(why, sizeof(why), "full=%d, got %s", BRStrandedListingIsFull(BR_STRANDED_WINDOW, 1), name(a));
-    result("one_confirmed_row_anchors_full", BRStrandedListingIsFull(BR_STRANDED_WINDOW, 1) && a == BRStrandedSettleAgedOut, why);
+    a = BRStrandedSendDecide(0, 0, BRStrandedListingIsFull(KT_DETAILS_WINDOW, 1), 0, 0, NOW);
+    snprintf(why, sizeof(why), "full=%d, got %s", BRStrandedListingIsFull(KT_DETAILS_WINDOW, 1), name(a));
+    result("one_confirmed_row_anchors_full", BRStrandedListingIsFull(KT_DETAILS_WINDOW, 1) && a == BRStrandedSettleAgedOut, why);
 
     // Beyond the Kotlin tests: the window bound itself, and the clock edges.
     result("window_bound",
-           ! BRStrandedListingIsFull(BR_STRANDED_WINDOW - 1, BR_STRANDED_WINDOW - 1) &&
-           BRStrandedListingIsFull(BR_STRANDED_WINDOW + 5, 1), NULL);
-    a = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, BR_STRANDED_MAX_ATTEMPTS, NOW - BR_STRANDED_HOLD_MS + 1, NOW);
-    b = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, BR_STRANDED_MAX_ATTEMPTS, NOW + 5000, NOW);   // clock went back
-    c = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, BR_STRANDED_MAX_ATTEMPTS - 1, NOW, NOW);     // under the cap
+           ! BRStrandedListingIsFull(KT_DETAILS_WINDOW - 1, KT_DETAILS_WINDOW - 1) &&
+           BRStrandedListingIsFull(KT_DETAILS_WINDOW + 5, 1), NULL);
+    a = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, KT_MAX_ATTEMPTS, NOW - KT_HOLD_MS + 1, NOW);
+    b = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, KT_MAX_ATTEMPTS, NOW + 5000, NOW);   // clock went back
+    c = BRStrandedSendDecide(1, TX_UNCONFIRMED, 0, KT_MAX_ATTEMPTS - 1, NOW, NOW);     // under the cap
     snprintf(why, sizeof(why), "1 ms short %s, clock back %s, under cap %s", name(a), name(b), name(c));
     result("hold_edges", a == BRStrandedHold && b == BRStrandedHold && c == BRStrandedRepublish, why);
 
-    // A held send the core marks invalid is conflicted (removed, not re-published); a held valid
-    // one and one the wallet does not hold are not (BRWalletTransactionIsValid reads 1 for those).
+    // A held send the core marks invalid is conflicted: it is not re-published, and since 4.1.2 it
+    // is removed only once that verdict has held through the refusal hold (BRStrandedRefusalHold,
+    // Android InvalidSendRemoval.kt; refusal_hold_kat covers the hold). A held valid one and one
+    // the wallet does not hold are not conflicted (BRWalletTransactionIsValid reads 1 for those).
     result("conflicted_only_when_held_and_invalid",
            BRStrandedSendIsConflicted(1, 0) && ! BRStrandedSendIsConflicted(1, 1) && ! BRStrandedSendIsConflicted(0, 1) &&
            ! BRStrandedSendIsConflicted(0, 0), NULL);
