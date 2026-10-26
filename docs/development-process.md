@@ -1,7 +1,7 @@
 # Development process: Android, iOS and the shared core
 
 The one copy of how work moves through the three repos (`digibytewallet-core`,
-`digibytewallet-android`, `digibytewallet-ios`). Each repo's `CLAUDE.md` points here and does not
+`digibytewallet-android`, `digibytewallet-ios`). Each repo's `CLAUDE.md` points here (core from #41, iOS on its next docs push) and does not
 repeat it. Decided by Mark, 2026-10-26.
 
 ## Merging without Mark
@@ -66,6 +66,6 @@ each with a concrete failure scenario.
 - **Android:** `ci.yml` (Gradle build and unit tests, the native host KATs, the guardrail
   scripts), CodeQL, gitleaks.
 - **Core:** a workflow on Linux that builds the core and runs every host KAT that exercises it,
-  including the 32-bit, sanitizer and leak arms the Mac cannot run (owed; plan §19 in the iOS
-  repo).
+  including the 32-bit, sanitizer and leak arms the Mac cannot run (owed: the first track of the
+  iOS port plan's §19, which lands with the iOS repo's next push).
 - **iOS:** the simulator suite, the pin check, and the string-catalog checks.
