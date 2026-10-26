@@ -6,12 +6,21 @@
 // The height matters: a confirmed transaction restored without it reads as unconfirmed,
 // and the balance changes across a restart.
 //
-// Built twice by run.sh:
-//   -DSAVED_TRANSACTIONS_METADATA_UNFIXED  a reader that drops height and timestamp;
-//                                          every RED case fails
-//   (default)                              the shipped reader; every case passes
+// A saved record is a signed transaction, so it must come back exactly as written even when
+// an input's scriptSig also reads as a scriptPubKey (OP_0 PUSH20 / PUSH32). The inferring
+// BRTransactionParse takes such an input for the wallet's unsigned form and misparses the
+// rest; the Android bridge reader is signed-only since 4.1.2, and the core reader the iOS
+// port uses must load the same bytes the same way. The vector is tx_parse_signed_kat's.
+//
+// Built three times by run.sh:
+//   -DSAVED_TRANSACTIONS_METADATA_UNFIXED        a reader that drops height and timestamp;
+//                                                every METADATA RED case fails
+//   -DSAVED_TRANSACTIONS_UNSIGNED_PARSE_UNFIXED  a reader on the inferring parser;
+//                                                every PARSE RED case fails
+//   (default)                                    the shipped reader; every case passes
 
 #include "BRSavedTransactions.h"
+#include "BRCrypto.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -53,6 +62,59 @@ static void free_all(BRTransaction **txs, size_t n)
     free(txs);
 }
 
+// tx_parse_signed_kat's wire vector: version | 1 input (outpoint, scriptSig = OP_0 PUSH<n>
+// <n bytes>, seq) | 1 output (P2PKH, 123456789) | locktime. Signed, network format.
+static size_t wire_tx(uint8_t *b, uint8_t pushLen, uint8_t fill)
+{
+    static const uint8_t spk[25] = { 0x76, 0xa9, 0x14, 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
+                                     0x88, 0xac };
+    size_t o = 0;
+
+    UInt32SetLE(&b[o], 1); o += 4;
+    b[o++] = 1;
+    memset(&b[o], 0x77, 32); o += 32; UInt32SetLE(&b[o], 3); o += 4;
+    b[o++] = (uint8_t)(2 + pushLen); b[o++] = 0x00; b[o++] = pushLen; memset(&b[o], fill, pushLen); o += pushLen;
+    UInt32SetLE(&b[o], 0xffffffff); o += 4;
+    b[o++] = 1;
+    UInt64SetLE(&b[o], 123456789); o += 8;
+    b[o++] = sizeof(spk); memcpy(&b[o], spk, sizeof(spk)); o += sizeof(spk);
+    UInt32SetLE(&b[o], 0); o += 4;
+    return o;
+}
+
+// One saved record holding the wire transaction; the loaded transaction must have the same
+// txid, the same output, the scriptSig as its signature, and re-serialize to the same bytes.
+static int signed_record_restored(uint8_t pushLen)
+{
+    uint8_t w[256], r[4 + 12 + 256], back[256];
+    size_t wl = wire_tx(w, pushLen, (uint8_t)(0x40 + pushLen)), rl = 0, n;
+    BRTransaction **txs = NULL;
+    UInt256 want;
+    uint8_t *buf;
+    int ok;
+
+    BRSHA256_2(&want, w, wl);
+    putLE32(&r[rl], 1); rl += 4;
+    putLE32(&r[rl], (uint32_t)wl); rl += 4;
+    putLE32(&r[rl], 24000100u); rl += 4;
+    putLE32(&r[rl], 1760000100u); rl += 4;
+    memcpy(&r[rl], w, wl); rl += wl;
+
+    buf = exact(r, rl);
+    n = BRSavedTransactionsDeserialize(buf, rl, &txs);
+    ok = (n == 1);
+    if (ok) {
+        BRTransaction *t = txs[0];
+        size_t bl = BRTransactionSerialize(t, back, sizeof(back));
+        ok = UInt256Eq(t->txHash, want) && bl == wl && memcmp(back, w, wl) == 0 &&
+             t->inCount == 1 && t->inputs[0].sigLen == (size_t)(2 + pushLen) &&
+             t->outCount == 1 && t->outputs[0].amount == 123456789ULL;
+    }
+    if (! ok) printf("  pushLen %u: loaded %zu record(s), not the transaction that was saved\n", pushLen, n);
+    free_all(txs, n); free(buf);
+    return ok;
+}
+
 int main(void)
 {
     BRTransaction *src[3] = { sample_tx(0x21), sample_tx(0x22), sample_tx(0x23) };
@@ -89,6 +151,10 @@ int main(void)
         result("bytes_round_trip", bytes);   // GUARD
     }
     free_all(txs, n); free(buf);
+
+    // ---- PARSE RED: a signed record whose scriptSig reads as a scriptPubKey --------------
+    result("signed_push20_scriptsig_restored", signed_record_restored(20));
+    result("signed_push32_scriptsig_restored", signed_record_restored(32));
 
     // ---- GUARD: bounds ------------------------------------------------------------------
     buf = exact(raw, pos - 1);
