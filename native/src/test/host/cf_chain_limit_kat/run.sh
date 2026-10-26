@@ -67,19 +67,19 @@ fi
 
 FAIL=0
 run_case() { OUT="$("$1" "$2" 2>&1)"; RC=$?; }
-san() { echo "$OUT" | grep -Eq "$SAN_RE"; }
+san() { <<<"$OUT" grep -Eq "$SAN_RE"; }
 expect_pass() {   # expect_pass <label> <bin> <case>
     run_case "$2" "$3"
-    if san; then echo "  [$1 $3] GATE FAILURE: sanitizer report"; echo "$OUT" | grep -E "$SAN_RE" | head -3; FAIL=1
-    elif [ $RC -eq 0 ] && echo "$OUT" | grep -q "RESULT $3 PASS"; then
-        echo "  [$1 $3] PASS $(echo "$OUT" | grep -m1 'after:' | sed 's/^ *//')"
-    else echo "  [$1 $3] GATE FAILURE: did not pass (rc=$RC)"; echo "$OUT" | grep -E "  FAIL|RESULT" | sed 's/^/      /'; FAIL=1; fi
+    if san; then echo "  [$1 $3] GATE FAILURE: sanitizer report"; <<<"$OUT" grep -E "$SAN_RE" | head -3; FAIL=1
+    elif [ $RC -eq 0 ] && <<<"$OUT" grep -q "RESULT $3 PASS"; then
+        echo "  [$1 $3] PASS $(<<<"$OUT" grep -m1 'after:' | sed 's/^ *//')"
+    else echo "  [$1 $3] GATE FAILURE: did not pass (rc=$RC)"; <<<"$OUT" grep -E "  FAIL|RESULT" | sed 's/^/      /'; FAIL=1; fi
 }
 expect_fail() {   # expect_fail <label> <bin> <case>
     run_case "$2" "$3"
     if san; then echo "  [$1 $3] GATE FAILURE: sanitizer report"; FAIL=1
-    elif [ $RC -ne 0 ] && echo "$OUT" | grep -q "RESULT $3 FAIL"; then
-        echo "  [$1 $3] failed, as required: $(echo "$OUT" | grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
+    elif [ $RC -ne 0 ] && <<<"$OUT" grep -q "RESULT $3 FAIL"; then
+        echo "  [$1 $3] failed, as required: $(<<<"$OUT" grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
     else echo "  [$1 $3] GATE FAILURE: passed in the earlier shape (rc=$RC) -- the seam is not load-bearing"; FAIL=1; fi
 }
 

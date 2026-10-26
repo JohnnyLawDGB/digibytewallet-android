@@ -100,20 +100,20 @@ comparison_arm() {
         echo "GATE FAILURE: ${bits}-bit comparison arm -D$flag did not compile."; FAIL=1; return
     fi
     local out; out="$("$BUILD_DIR/red_${tag}${bits}" 2>&1)"; local rc=$?
-    if echo "$out" | grep -Eq 'ERROR: AddressSanitizer|runtime error:'; then
+    if <<<"$out" grep -Eq 'ERROR: AddressSanitizer|runtime error:'; then
         echo "  [$bits -D$flag] GATE FAILURE: sanitizer report in the comparison arm (rc=$rc)"
-        echo "$out" | grep -E 'ERROR: AddressSanitizer|runtime error:' | head -3 | sed 's/^/      /'; FAIL=1; return
+        <<<"$out" grep -E 'ERROR: AddressSanitizer|runtime error:' | head -3 | sed 's/^/      /'; FAIL=1; return
     fi
     local fails tagged untagged passed_tagged
-    fails="$(echo "$out" | grep '^FAIL: ' || true)"
-    tagged="$(echo "$fails" | grep -c "^FAIL: \[$tag\]" || true)"
-    untagged="$(echo "$fails" | grep -vc "^FAIL: \[$tag\]" || true)"
-    passed_tagged="$(echo "$out" | grep -c "^PASS: \[$tag\]" || true)"
+    fails="$(<<<"$out" grep '^FAIL: ' || true)"
+    tagged="$(<<<"$fails" grep -c "^FAIL: \[$tag\]" || true)"
+    untagged="$(<<<"$fails" grep -vc "^FAIL: \[$tag\]" || true)"
+    passed_tagged="$(<<<"$out" grep -c "^PASS: \[$tag\]" || true)"
     if [ "$tagged" -ge 1 ] && [ "$untagged" -eq 0 ] && [ "$passed_tagged" -eq 0 ]; then
         echo "  [$bits -D$flag] fails exactly the $tagged [$tag] check(s) and nothing else (rc=$rc): the arm sees what the seam governs"
     else
         echo "  [$bits -D$flag] GATE FAILURE: [$tag] failed=$tagged still-passing=$passed_tagged, other failures=$untagged (rc=$rc)"
-        echo "$fails" | head -8 | sed 's/^/      /'; FAIL=1
+        <<<"$fails" head -8 | sed 's/^/      /'; FAIL=1
     fi
 }
 
@@ -125,11 +125,11 @@ for bits in 64 32; do
         echo "GATE FAILURE: ${bits}-bit shipped arm did not compile."; FAIL=1; continue
     fi
     out="$("$BUILD_DIR/green${bits}" 2>&1)"; rc=$?
-    if [ $rc -eq 0 ] && echo "$out" | grep -q '^ALL PASS'; then
-        echo "  [$bits shipped] $(echo "$out" | grep -c '^PASS: ') checks passed"
+    if [ $rc -eq 0 ] && <<<"$out" grep -q '^ALL PASS'; then
+        echo "  [$bits shipped] $(<<<"$out" grep -c '^PASS: ') checks passed"
     else
         echo "  [$bits shipped] GATE FAILURE (rc=$rc):"
-        echo "$out" | grep -E '^FAIL: |ERROR: AddressSanitizer|runtime error:|SOME FAILED' | head -12 | sed 's/^/      /'; FAIL=1
+        <<<"$out" grep -E '^FAIL: |ERROR: AddressSanitizer|runtime error:|SOME FAILED' | head -12 | sed 's/^/      /'; FAIL=1
     fi
     comparison_arm "$bits" DD_TYPE_WIDTH_UNFIXED type-width
     comparison_arm "$bits" DD_PUSH_LIST_OPCODE_UNFIXED push-list-opcode

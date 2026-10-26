@@ -17,16 +17,16 @@
     <string name="onb_words_count">%1$d शब्द</string>
     <string name="onb_create">नया वॉलेट बनाएँ</string>
     <string name="onb_recover">मौजूदा वॉलेट पुनर्प्राप्त करें</string>
-    <string name="onb_footer">DigiByte — सुरक्षित, तेज़, विकेंद्रीकृत</string>
-    <string name="app_name_display">DigiByte वॉलेट</string>
+    <string name="onb_footer">DigiByte (DGB) नेटवर्क के लिए स्वतंत्र वॉलेट</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
-    <string name="seed_screenshot_blocked">स्क्रीनशॉट अवरुद्ध हैं। इन शब्दों को लिख लें — इन्हें पुनर्प्राप्त नहीं किया जा सकता।</string>
+    <string name="seed_screenshot_blocked">स्क्रीनशॉट अवरुद्ध हैं। इन शब्दों को लिख लें: इन्हें पुनर्प्राप्त नहीं किया जा सकता।</string>
     <string name="seed_title">आपका रिकवरी वाक्यांश</string>
     <string name="seed_word_count">%1$d शब्दों का रिकवरी वाक्यांश</string>
     <!-- WARNING -->
     <string name="seed_never_share">अपना रिकवरी वाक्यांश कभी साझा न करें</string>
     <!-- WARNING -->
-    <string name="seed_tip_paper">इसे कागज़ पर लिखें — डिजिटल रूप में नहीं</string>
+    <string name="seed_tip_paper">इसे कागज़ पर लिखें: डिजिटल रूप में नहीं</string>
     <!-- WARNING -->
     <string name="seed_tip_safe">इसे किसी सुरक्षित और निजी जगह रखें</string>
     <!-- WARNING -->
@@ -43,9 +43,12 @@
     <string name="pin_backspace">बैकस्पेस</string>
     <string name="unlock_title">PIN दर्ज करें</string>
     <string name="unlock_subtitle">अनलॉक करने के लिए अपना 6-अंकीय PIN दर्ज करें</string>
-    <string name="unlock_locked">लॉक — %1$s में पुनः प्रयास करें</string>
+    <string name="unlock_locked">लॉक: %1$s में पुनः प्रयास करें</string>
     <string name="unlock_unlocking">अनलॉक हो रहा है…</string>
     <string name="unlock_biometrics_cd">बायोमेट्रिक्स से अनलॉक करें</string>
+    <string name="recover_title">वॉलेट पुनर्प्राप्त करें</string>
+    <string name="recover_body">अपना वॉलेट पुनर्स्थापित करने के लिए अपना रिकवरी वाक्यांश दर्ज करें।</string>
+    <string name="recover_continue">जारी रखें</string>
 
     <string name="seed_retry">फिर से कोशिश करें</string>
     <string name="verify_next">आगे</string>
@@ -65,11 +68,11 @@
     <string name="pin_err_wallet">वॉलेट नहीं बनाया जा सका। कृपया फिर से कोशिश करें।</string>
     <string name="unlock_err_failed">अनलॉक विफल रहा। कृपया फिर से कोशिश करें।</string>
     <string name="unlock_device_lock_removed">आपके डिवाइस का स्क्रीन लॉक हटा दिया गया, इसलिए वॉलेट की सुरक्षित कुंजी नष्ट हो गई है। अपने रिकवरी वाक्यांश से वॉलेट को पुनर्स्थापित करें।</string>
-    <string name="unlock_wiping">बहुत अधिक विफल प्रयास — वॉलेट मिटाया जा रहा है</string>
+    <string name="unlock_wiping">बहुत अधिक विफल प्रयास: वॉलेट मिटाया जा रहा है</string>
     <string name="unlock_attempts_left">गलत PIN। शेष प्रयास: %1$d</string>
     <string name="battery_title">पृष्ठभूमि में सिंक चालू रखें</string>
     <string name="battery_body">स्क्रीन बंद होने पर Android इस वॉलेट को स्लीप में डाल सकता है, जिससे DigiByte नेटवर्क से इसका कनेक्शन टूट जाता है और यह तब तक 0 पीयर पर अटका रह सकता है जब तक आप इसे दोबारा न खोलें।\n\nइसे बिना प्रतिबंध चलने दें ताकि सिंक जारी रहे।</string>
-    <string name="battery_body_samsung">\n\nSamsung पर, Device Care → Battery → \"Never sleeping apps\" भी खोलें और DigiByte Wallet जोड़ें।</string>
+    <string name="battery_body_samsung">\n\nSamsung पर, Device Care → Battery → \"Never sleeping apps\" भी खोलें और HoldFast Wallet जोड़ें।</string>
     <string name="battery_open_settings">सेटिंग्स खोलें</string>
     <string name="tor_title">नई गोपनीयता सुविधा</string>
     <string name="tor_body">Tor रूटिंग अब उपलब्ध है। सक्षम होने पर, आपका वॉलेट Tor के माध्यम से DigiByte नेटवर्क से जुड़ता है और पीयर से आपका IP पता छिपाता है।\n\nTor रूटिंग सक्षम करें?</string>
@@ -97,13 +100,13 @@
     <string name="wallet_price_via">स्रोत: %1$s</string>
     <string name="wallet_testnet_active">टेस्टनेट सक्रिय</string>
     <string name="wallet_tor_active">Tor सक्रिय</string>
-    <string name="wallet_tor_hidden">Tor — आपका IP छिपा रहता है</string>
+    <string name="wallet_tor_hidden">Tor: आपका IP छिपा रहता है</string>
     <string name="wallet_disconnected_peers">डिस्कनेक्ट · %1$d पीयर</string>
-    <string name="wallet_history_gap">इतिहास में अंतर — कुछ ब्लॉक सत्यापित नहीं हुए</string>
+    <string name="wallet_history_gap">इतिहास में अंतर: कुछ ब्लॉक सत्यापित नहीं हुए</string>
     <string name="wallet_scan_missing">छूटे हुए लेनदेन खोजें</string>
     <string name="wallet_balance_refresh_failed">बैलेंस रिफ़्रेश विफल</string>
     <string name="wallet_reconcile_unreachable">इस अपग्रेड के बाद हम रिकॉन्साइल नोड तक नहीं पहुँच सके। दिखाया गया बैलेंस पुराना हो सकता है।</string>
-    <string name="wallet_tor_unavailable">Tor उपलब्ध नहीं — सीधे कनेक्शन का उपयोग</string>
+    <string name="wallet_tor_unavailable">Tor उपलब्ध नहीं: सीधे कनेक्शन का उपयोग</string>
     <string name="wallet_tor_timeout">Tor समय पर नेटवर्क तक नहीं पहुँचा, इसलिए इस सत्र में वॉलेट सीधे पीयर से जुड़ रहा है। जब तक आप ऐप पुनः प्रारंभ नहीं करते, आपका IP पीयर को दिखाई देता है।</string>
     <string name="wallet_node_offline">आपका नोड ऑफ़लाइन है</string>
     <string name="wallet_node_offline_body">युग्मित नोड पहुँच योग्य नहीं है या अभी कॉम्पैक्ट फ़िल्टर नहीं दे रहा है। जाँचें कि वह चल रहा है और पहुँच योग्य है, और उसमें peerblockfilters=1 सेट है।</string>
@@ -121,11 +124,15 @@
     <string name="receive_request_amount">विशिष्ट राशि का अनुरोध करें (वैकल्पिक)</string>
     <string name="receive_amount_label">राशि</string>
     <string name="receive_qr_encodes">QR में शामिल: %1$s</string>
-    <string name="receive_dd_note">DigiDollar USD-मूल्यवर्गित टोकन के रूप में प्राप्त होता है। यह DigiDollar पता साझा करें — QR में केवल पता होता है (राशि अनुरोध नहीं)।</string>
+    <string name="receive_dd_note">DigiDollar USD-मूल्यवर्गित टोकन के रूप में प्राप्त होता है। यह DigiDollar पता साझा करें: QR में केवल पता होता है (राशि अनुरोध नहीं)।</string>
     <string name="txd_title">लेनदेन विवरण</string>
     <string name="txd_not_found">लेनदेन नहीं मिला</string>
     <string name="txd_sent">भेजा गया</string>
     <string name="txd_received">प्राप्त हुआ</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">मिंट किया गया</string>
+    <string name="tx_dd_self_transfer">स्वयं को भेजा गया</string>
+    <string name="tx_dd_redeemed">रिडीम किया गया</string>
     <string name="txd_transaction_id">लेनदेन आईडी</string>
     <string name="txd_block_height">ब्लॉक ऊँचाई</string>
     <string name="txd_pending">लंबित</string>
@@ -139,12 +146,12 @@
     <string name="txd_view_explorer">एक्सप्लोरर में देखें</string>
     <string name="txd_back_to_wallet">वॉलेट पर वापस जाएँ</string>
 
-    <string name="wallet_sync_gap_headline">स्कैन पूर्ण — आपके इतिहास का कुछ हिस्सा असत्यापित है</string>
+    <string name="wallet_sync_gap_headline">स्कैन पूर्ण: आपके इतिहास का कुछ हिस्सा असत्यापित है</string>
     <string name="wallet_sync_connecting">DigiByte नेटवर्क से जुड़ रहे हैं</string>
     <string name="wallet_sync_scanning">आपके लेनदेन खोजे जा रहे हैं</string>
     <string name="wallet_sync_uptodate">अद्यतित</string>
     <string name="wallet_sync_failed">सिंक विफल</string>
-    <string name="wallet_sync_finishing">समाप्ति — हाल के ब्लॉक सत्यापित किए जा रहे हैं</string>
+    <string name="wallet_sync_finishing">समाप्ति: हाल के ब्लॉक सत्यापित किए जा रहे हैं</string>
     <string name="wallet_blocks_count">%1$s ब्लॉक</string>
     <string name="wallet_sync_progress_eta">%1$d%% पूर्ण · %2$s · %3$s शेष</string>
     <string name="wallet_sync_progress_no_eta">%1$d%% पूर्ण · %2$s शेष · अनुमान लगाया जा रहा है…</string>
@@ -162,7 +169,7 @@
     <string name="wallet_status_connecting">कनेक्ट हो रहा है…</string>
     <string name="wallet_gap_range_between">ब्लॉक %1$s–%2$s</string>
     <string name="wallet_gap_range_below">%1$s से नीचे के ब्लॉक</string>
-    <string name="wallet_gap_body">आपके इतिहास का एक हिस्सा (%1$s) फ़िल्टर फ़्लीट से सत्यापित नहीं हो सका — छूटे हुए लेनदेन खोजने के लिए टैप करें।</string>
+    <string name="wallet_gap_body">आपके इतिहास का एक हिस्सा (%1$s) फ़िल्टर फ़्लीट से सत्यापित नहीं हो सका: छूटे हुए लेनदेन खोजने के लिए टैप करें।</string>
     <string name="receive_address_unavailable">पता उपलब्ध नहीं</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -210,11 +217,11 @@
     <string name="send_network_fee_row">नेटवर्क शुल्क</string>
     <string name="send_fee_default">डिफ़ॉल्ट</string>
     <string name="send_fee_custom">कस्टम</string>
-    <string name="send_fee_below_min">⚠ न्यूनतम रिले शुल्क से कम — लेनदेन प्रसारित नहीं हो सकता</string>
+    <string name="send_fee_below_min">⚠ न्यूनतम रिले शुल्क से कम: लेनदेन प्रसारित नहीं हो सकता</string>
     <string name="send_fee_required">शुल्क आवश्यक</string>
     <string name="send_confirms_15s">लगभग 15 सेकंड में पुष्टि</string>
-    <string name="send_no_peers">कोई DigiByte पीयर कनेक्ट नहीं — अभी प्रसारित नहीं किया जा सकता। पुनः कनेक्ट हो रहा है…</string>
-    <string name="send_wait_for_sync">भेजने से पहले सिंक पूरा होने की प्रतीक्षा करें — आपका पूरा बैलेंस अभी पुनर्प्राप्त हो रहा है।</string>
+    <string name="send_no_peers">कोई DigiByte पीयर कनेक्ट नहीं: अभी प्रसारित नहीं किया जा सकता। पुनः कनेक्ट हो रहा है…</string>
+    <string name="send_wait_for_sync">भेजने से पहले सिंक पूरा होने की प्रतीक्षा करें: आपका पूरा बैलेंस अभी पुनर्प्राप्त हो रहा है।</string>
     <string name="send_broadcasting">प्रसारित हो रहा है…</string>
     <string name="send_review">समीक्षा करें और भेजें</string>
     <string name="send_dialog_title">लेनदेन की पुष्टि करें</string>
@@ -222,7 +229,7 @@
     <string name="send_to">प्रति</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">यह DigiDollar भेजना तैयार नहीं हो सका। जाँचें कि नेटवर्क शुल्क चुकाने के लिए आपके पास पर्याप्त DGB है।</string>
     <string name="send_verify_warning">ऊपर दिए पूरे पते को ध्यान से जाँचें।\nलेनदेन अपरिवर्तनीय हैं।</string>
     <string name="send_send">भेजें</string>
     <string name="send_success">सफल</string>
@@ -234,7 +241,7 @@
 
     <string name="send_hint_dgb">dgb1q… या D…</string>
     <string name="game_score_submitted">स्कोर भेजा गया!</string>
-    <string name="game_score_failed">स्कोर भेजना विफल — क्या आप लॉग इन हैं?</string>
+    <string name="game_score_failed">स्कोर भेजना विफल: क्या आप लॉग इन हैं?</string>
     <string name="game_close">गेम बंद करें</string>
 
     <string name="set_title">सेटिंग्स</string>
@@ -258,15 +265,15 @@
     <string name="set_recover_other_sub">पुराने/अन्य डेरिवेशन पाथ से सिक्के इस वॉलेट में लाएँ</string>
     <string name="set_cat_info">जानकारी</string>
     <string name="set_beta">बीटा अपडेट</string>
-    <string name="set_beta_on">चालू — परीक्षण के लिए प्री-रिलीज़ बिल्ड दिए जाएँगे</string>
-    <string name="set_beta_off">बंद — केवल स्थिर रिलीज़ दिए जाएँगे</string>
+    <string name="set_beta_on">चालू: परीक्षण के लिए प्री-रिलीज़ बिल्ड दिए जाएँगे</string>
+    <string name="set_beta_off">बंद: केवल स्थिर रिलीज़ दिए जाएँगे</string>
     <string name="set_about">बारे में</string>
     <string name="set_about_sub">संस्करण, लाइसेंस, ओपन सोर्स</string>
     <string name="set_report_bug">बग रिपोर्ट करें / प्रतिक्रिया</string>
-    <string name="set_report_bug_sub">कोई समस्या या सुझाव भेजें — डिवाइस और संस्करण की जानकारी आपके लिए भर दी जाती है</string>
+    <string name="set_report_bug_sub">कोई समस्या या सुझाव भेजें: डिवाइस और संस्करण की जानकारी आपके लिए भर दी जाती है</string>
     <string name="set_cat_advanced">उन्नत / डेवलपर</string>
-    <string name="set_net_testnet">टेस्टनेट — परीक्षण चेन, वही रिकवरी वाक्यांश</string>
-    <string name="set_net_mainnet">मेननेट — उत्पादन चेन</string>
+    <string name="set_net_testnet">टेस्टनेट: परीक्षण चेन, वही रिकवरी वाक्यांश</string>
+    <string name="set_net_mainnet">मेननेट: उत्पादन चेन</string>
     <string name="set_switch_testnet">टेस्टनेट पर स्विच करें?</string>
     <string name="set_switch_mainnet">मेननेट पर स्विच करें?</string>
     <string name="set_switch_testnet_body">ऐप पुनः प्रारंभ होगा और परीक्षण चेन सिंक करेगा। आपका रिकवरी वाक्यांश अपरिवर्तित रहेगा।</string>
@@ -274,7 +281,7 @@
     <string name="set_restart">पुनः प्रारंभ करें</string>
 
     <string name="lang_restart_note">इससे वॉलेट स्क्रीन पुनः प्रारंभ होगी। आपके सिक्के, वाक्यांश और सेटिंग्स अछूती रहेंगी।</string>
-    <string name="lang_unreviewed_note">अनुवाद नए हैं और अभी मूल भाषियों द्वारा जाँचे नहीं गए हैं। यदि कुछ गलत लगे — खासकर आपकी रिकवरी वाक्यांश या सिक्कों से जुड़ी चेतावनी — तो कृपया सेटिंग्स → बग रिपोर्ट करें से हमें बताएँ।</string>
+    <string name="lang_unreviewed_note">अनुवाद नए हैं और अभी मूल भाषियों द्वारा जाँचे नहीं गए हैं। यदि कुछ गलत लगे (खासकर आपकी रिकवरी वाक्यांश या सिक्कों से जुड़ी चेतावनी) तो कृपया सेटिंग्स → बग रिपोर्ट करें से हमें बताएँ।</string>
     <string name="lang_selected">चयनित</string>
 
     <string name="as_send_title">एसेट भेजें</string>
@@ -339,7 +346,7 @@
     <string name="rf_may_take">इसमें कुछ समय लग सकता है</string>
     <string name="rf_couldnt_finish">जाँच पूरी नहीं हो सकी</string>
     <string name="rf_none_found">कोई पुनर्प्राप्त करने योग्य फंड नहीं मिला</string>
-    <string name="rf_partial_body">कुछ डेरिवेशन पाथ जाँचे नहीं जा सके, इसलिए यह अंतिम उत्तर नहीं है — ऐसे फंड हो सकते हैं जो हमने नहीं देखे। थोड़ी देर बाद फिर कोशिश करें।\n\nअनजाँचे: %1$s</string>
+    <string name="rf_partial_body">कुछ डेरिवेशन पाथ जाँचे नहीं जा सके, इसलिए यह अंतिम उत्तर नहीं है: ऐसे फंड हो सकते हैं जो हमने नहीं देखे। थोड़ी देर बाद फिर कोशिश करें।\n\nअनजाँचे: %1$s</string>
     <string name="rf_no_coins">इस सीड के अन्य डेरिवेशन पाथ पर कोई सिक्के नहीं हैं।</string>
     <string name="rf_recoverable_balance">पुनर्प्राप्त करने योग्य बैलेंस</string>
     <string name="rf_found_on">यहाँ मिला</string>
@@ -348,15 +355,15 @@
     <string name="rf_native_addr_note">फंड आपके नेटिव प्राप्ति पते पर दिखाई देंगे</string>
     <string name="rf_advanced_send">उन्नत ▸ किसी अन्य पते पर भेजें</string>
     <string name="rf_address_hint">DigiByte पता (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">यह पता आपके वॉलेट में नहीं है — स्वीप अपरिवर्तनीय हैं</string>
+    <string name="rf_not_in_wallet">यह पता आपके वॉलेट में नहीं है: स्वीप अपरिवर्तनीय हैं</string>
     <string name="rf_sweep">फंड स्वीप करें</string>
     <string name="rf_sweep_submitted">स्वीप सबमिट हुआ</string>
     <string name="rf_will_appear">पुनर्प्राप्त फंड पुष्टि के बाद दिखाई देंगे।</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">नेटवर्क पुष्टि लंबित</string>
-    <string name="rf_held_assets">%1$d पीछे छूटे — DigiAssets</string>
-    <string name="rf_held_assets_body">इन सिक्कों पर DigiAssets हैं और उन्हें भेजना सफल नहीं हुआ — इसलिए उन्हें सामान्य DGB की तरह भेजने के बजाय पुराने वॉलेट में ही छोड़ दिया गया, क्योंकि वैसा करने पर वे नष्ट हो जातीं। पुनः प्रयास के लिए रिकवरी दोबारा चलाएँ।</string>
-    <string name="rf_held_unknown">%1$d पीछे छूटे — जाँच नहीं हो सकी</string>
+    <string name="rf_held_assets">%1$d पीछे छूटे: DigiAssets</string>
+    <string name="rf_held_assets_body">इन सिक्कों पर DigiAssets हैं और उन्हें भेजना सफल नहीं हुआ, इसलिए उन्हें सामान्य DGB की तरह भेजने के बजाय पुराने वॉलेट में ही छोड़ दिया गया, क्योंकि वैसा करने पर वे नष्ट हो जातीं। पुनः प्रयास के लिए रिकवरी दोबारा चलाएँ।</string>
+    <string name="rf_held_unknown">%1$d पीछे छूटे: जाँच नहीं हो सकी</string>
     <string name="rf_held_unknown_body">हम उन लेनदेन को नहीं पढ़ सके जिनसे ये आए, इसलिए यह नहीं बता सके कि उन पर DigiAssets हैं या नहीं। जोखिम लेने के बजाय उन्हें छोड़ दिया गया। बाद में फिर कोशिश करने पर यह ठीक हो सकता है।</string>
     <string name="rf_and_more">…और %1$d अन्य</string>
     <string name="rf_something_wrong">कुछ गड़बड़ हो गई</string>
@@ -364,12 +371,12 @@
     <string name="rf_err_timeout">अनुरोध का समय समाप्त हो गया। बेहतर कनेक्शन होने पर फिर कोशिश करें।</string>
     <string name="rf_err_seed">वॉलेट सीड लोड नहीं हो सका। अपना वॉलेट अनलॉक करें और फिर कोशिश करें।</string>
     <string name="rf_err_lookup">लुकअप सेवा तक नहीं पहुँच सके। बाद में फिर कोशिश करें।</string>
-    <string name="rf_err_generic">कुछ गड़बड़ हो गई — फिर कोशिश करें।</string>
+    <string name="rf_err_generic">कुछ गड़बड़ हो गई: फिर कोशिश करें।</string>
     <string name="rf_fail_unknown">अज्ञात कारण से विफल।</string>
     <string name="rf_fail_no_utxos">कोई खर्च योग्य आउटपुट साइनिंग कुंजियों से मैप नहीं हो सका।</string>
     <string name="rf_fail_derive">इस पाथ के लिए सीड से कुंजियाँ नहीं बनाई जा सकीं।</string>
     <string name="rf_fail_broadcast">लेनदेन प्रसारित नहीं हो सका। पीयर से कनेक्ट होने पर फिर कोशिश करें।</string>
-    <string name="rf_fail_generic">इसे स्वीप नहीं किया जा सका — फिर कोशिश करें।</string>
+    <string name="rf_fail_generic">इसे स्वीप नहीं किया जा सका: फिर कोशिश करें।</string>
     <string name="rf_this_wallet">यह वॉलेट</string>
     <string name="rf_other_phrase">किसी अन्य वॉलेट का वाक्यांश</string>
     <string name="rf_other_phrase_body">किसी अन्य वॉलेट का रिकवरी वाक्यांश दर्ज करें ताकि उसके फंड इस वॉलेट में आ जाएँ। वाक्यांश केवल एक बार ट्रांसफ़र पर हस्ताक्षर के लिए उपयोग होता है और कभी सहेजा नहीं जाता।</string>
@@ -403,7 +410,7 @@
     <string name="ni_save">सहेजें</string>
     <string name="ni_exclusive">केवल मेरा नोड (विशेष)</string>
     <string name="ni_exclusive_sub">केवल अपने नोड से सिंक करें। यदि वह ऑफ़लाइन हो जाए तो जब तक आप सार्वजनिक पीयर पुनः सक्षम नहीं करते, वॉलेट के पास कोई अन्य पीयर नहीं होगा।</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">DigiByte Core 9.26 नोड्स के साथ संगत</string>
     <string name="ab_wallet_info">वॉलेट जानकारी</string>
     <string name="ab_wallet_type">वॉलेट प्रकार</string>
     <string name="ab_hd_path">HD पाथ</string>
@@ -415,8 +422,8 @@
     <string name="ab_open_source">ओपन सोर्स</string>
     <string name="ab_source_code">सोर्स कोड</string>
     <string name="ab_licenses">लाइसेंस</string>
-    <string name="ab_licenses_sub">MIT लाइसेंस — ओपन सोर्स</string>
-    <string name="ab_community">DigiByte समुदाय</string>
+    <string name="ab_licenses_sub">MIT लाइसेंस: ओपन सोर्स</string>
+    <string name="ab_community">DigiByte नेटवर्क की जानकारी</string>
     <string name="ab_report_bug">बग रिपोर्ट करें</string>
 
     <string name="sec_pin_auth">PIN और प्रमाणीकरण</string>
@@ -427,16 +434,16 @@
     <string name="sec_biometric_no">इस डिवाइस पर उपलब्ध नहीं</string>
     <string name="sec_autolock">ऑटो-लॉक टाइमआउट</string>
     <string name="sec_wipe_after">%1$d बार गलत PIN के बाद मिटाएँ</string>
-    <string name="sec_wipe_after_on">सक्षम — %1$d गलत PIN के बाद वॉलेट मिट जाएगा</string>
-    <string name="sec_wipe_after_off">बंद — PIN ब्रूट-फ़ोर्स से अतिरिक्त सुरक्षा</string>
-    <string name="sec_wipe_after_body">सक्षम होने पर, लगातार %1$d बार गलत PIN डालने से यह वॉलेट — सीड, कुंजियाँ और इतिहास — इस डिवाइस से स्थायी रूप से मिट जाएगा।\n\nडिवाइस पर यह अपरिवर्तनीय है। आपके फंड केवल आपकी रिकवरी वाक्यांश से ही पुनर्प्राप्त हो सकते हैं।</string>
+    <string name="sec_wipe_after_on">सक्षम: %1$d गलत PIN के बाद वॉलेट मिट जाएगा</string>
+    <string name="sec_wipe_after_off">बंद: PIN ब्रूट-फ़ोर्स से अतिरिक्त सुरक्षा</string>
+    <string name="sec_wipe_after_body">सक्षम होने पर, लगातार %1$d बार गलत PIN डालने से यह वॉलेट (सीड, कुंजियाँ और इतिहास) इस डिवाइस से स्थायी रूप से मिट जाएगा।\n\nडिवाइस पर यह अपरिवर्तनीय है। आपके फंड केवल आपकी रिकवरी वाक्यांश से ही पुनर्प्राप्त हो सकते हैं।</string>
     <string name="sec_wipe_after_ack">मेरी रिकवरी वाक्यांश का बैकअप है</string>
     <string name="sec_wipe_after_enabled">%1$d के बाद मिटाना सक्षम</string>
     <string name="sec_recovery_phrase">रिकवरी वाक्यांश</string>
     <string name="sec_view_phrase">रिकवरी वाक्यांश देखें</string>
     <string name="sec_view_phrase_sub">PIN + बायोमेट्रिक सत्यापन आवश्यक</string>
     <string name="sec_view_phrase_body">आपकी रिकवरी वाक्यांश आपके वॉलेट तक पूरा एक्सेस देती है।\n\n• इसे कभी किसी से साझा न करें\n• इसे कभी किसी वेबसाइट पर दर्ज न करें\n• इसे ऑफ़लाइन सुरक्षित स्थान पर रखें\n\nआगे बढ़ने के लिए PIN + बायोमेट्रिक प्रमाणीकरण आवश्यक है।</string>
-    <string name="sec_understand">मैं समझ गया — जारी रखें</string>
+    <string name="sec_understand">मैं समझ गया: जारी रखें</string>
     <string name="sec_danger_zone">खतरे का क्षेत्र</string>
     <string name="sec_wipe_wallet">वॉलेट मिटाएँ</string>
     <string name="sec_wipe_wallet_sub">इस डिवाइस से सभी वॉलेट डेटा हटाएँ</string>
@@ -474,11 +481,21 @@
     <string name="did_login">Digi-ID लॉगिन</string>
     <string name="did_auth_title">Digi-ID प्रमाणीकरण</string>
     <string name="did_auth_subtitle">%1$s में लॉग इन करने के लिए प्रमाणित करें</string>
+    <string name="hub_sign_title">हब पोस्ट पर हस्ताक्षर करें</string>
+    <string name="hub_sign_subtitle">अपनी पहचान से इस पोस्ट पर हस्ताक्षर करने के लिए प्रमाणीकरण करें</string>
+    <string name="hub_tip_auth_title">हब टिप भेजें</string>
+    <string name="hub_tip_auth_subtitle">अपने DigiScope टिप बैलेंस से यह टिप भेजने के लिए प्रमाणीकरण करें</string>
     <string name="did_requesting">Digi-ID प्रमाणीकरण का अनुरोध कर रहा है</string>
     <string name="did_warning">चेतावनी</string>
     <string name="did_insecure">असुरक्षित कनेक्शन</string>
     <string name="did_insecure_body">यह साइट HTTPS नहीं, HTTP उपयोग करती है। आपका प्रमाणीकरण इंटरसेप्ट हो सकता है।</string>
     <string name="did_callback_url">कॉलबैक URL</string>
+    <string name="did_identity_title">यह साइट कौन-सा साइन-इन पहचानती है?</string>
+    <string name="did_identity_hint">क्या आपने यह वॉलेट रिस्टोर किया है? वह पहचान चुनें जो आपने पहले इस साइट पर इस्तेमाल की थी। साइन-इन सफल होने के बाद वॉलेट इसे याद रखेगा।</string>
+    <string name="did_identity_per_site">इस साइट के लिए अलग कुंजी (मूल DigiByte ऐप)</string>
+    <string name="did_identity_shared">सभी साइटों के लिए साझा कुंजी (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">यह हर साइट पर एक जैसी है, इसलिए साइटें आपके साइन-इन को जोड़ सकती हैं। इसे तभी चुनें जब यह साइट आपको इसी से पहचानती थी।</string>
+    <string name="did_identity_address">पता: %1$s</string>
     <string name="did_approve">स्वीकृत करें</string>
     <string name="did_deny">अस्वीकार करें</string>
     <string name="did_success">प्रमाणीकरण सफल</string>
@@ -495,7 +512,7 @@
     <string name="ni_state_synced">सिंक हो गया</string>
     <string name="ni_state_error">त्रुटि</string>
     <string name="ni_caught_up">अद्यतित</string>
-    <string name="ni_tor_disabled">अक्षम — सीधे कनेक्ट हो रहा है</string>
+    <string name="ni_tor_disabled">अक्षम: सीधे कनेक्ट हो रहा है</string>
     <string name="ni_tor_starting">शुरू हो रहा है…</string>
     <string name="ni_tor_connecting">Tor नेटवर्क से जुड़ रहा है…</string>
     <string name="ni_tor_connected">पोर्ट %1$d से कनेक्टेड</string>
@@ -503,7 +520,7 @@
     <string name="ni_node_serving">✓ कॉम्पैक्ट फ़िल्टर दे रहा है</string>
     <string name="ni_node_connecting">कनेक्ट हो रहा है…</string>
     <string name="ni_node_unreachable">⚠ पहुँच योग्य नहीं / फ़िल्टर नहीं दे रहा</string>
-    <string name="sec_locked_countdown">लॉक — %1$s में फिर कोशिश करें</string>
+    <string name="sec_locked_countdown">लॉक: %1$s में फिर कोशिश करें</string>
     <string name="sec_autolock_1m">1 मिनट</string>
     <string name="sec_autolock_5m">5 मिनट</string>
     <string name="sec_autolock_15m">15 मिनट</string>
@@ -514,38 +531,40 @@
     <string name="sec_biometric_required">बायोमेट्रिक प्रमाणीकरण आवश्यक</string>
     <string name="did_logged_in">आप अब %1$s में लॉग इन हैं</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">सीड वाक्यांश से बनाया गया हायरार्किकल डिटर्मिनिस्टिक वॉलेट। एक ही बैकअप से कई पते बना सकता है — जैसे एक मास्टर कुंजी से असीमित खाता संख्याएँ।</string>
+    <string name="ab_type_desc">सीड वाक्यांश से बनाया गया हायरार्किकल डिटर्मिनिस्टिक वॉलेट। एक ही बैकअप से कई पते बना सकता है: जैसे एक मास्टर कुंजी से असीमित खाता संख्याएँ।</string>
     <string name="ab_path_desc">आपके पते बनाने के लिए उपयोग किया गया डेरिवेशन पाथ। 84 = BIP84 मानक, 20 = DigiByte कॉइन प्रकार (SLIP44), 0 = पहला खाता। इससे कोई भी BIP84-संगत वॉलेट उसी सीड वाक्यांश से आपके पते पुनर्स्थापित कर सकता है। Ian Coleman के BIP39 टूल के साथ संगत।</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">dgb1 से शुरू होने वाले आधुनिक SegWit पतों का उपयोग करता है। ये D से शुरू होने वाले पुराने Legacy पतों की तुलना में अधिक कुशल हैं और इनका शुल्क कम है।</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">मेननेट असली DigiByte नेटवर्क है जहाँ DGB का वास्तविक मूल्य है। टेस्टनेट डेवलपर्स के लिए है ताकि वे असली पैसे के बिना परीक्षण कर सकें।</string>
     <string name="ab_security_value">स्व-अभिरक्षा</string>
-    <string name="ab_security_desc">आपकी कुंजियाँ कभी इस डिवाइस से बाहर नहीं जातीं। कोई कंपनी या सर्वर आपके फंड नहीं रखता — केवल आप अपने वॉलेट को नियंत्रित करते हैं। यदि आप अपना सीड वाक्यांश खो देते हैं, तो कोई इसे आपके लिए पुनर्प्राप्त नहीं कर सकता।</string>
+    <string name="ab_security_desc">आपकी कुंजियाँ कभी इस डिवाइस से बाहर नहीं जातीं। कोई कंपनी या सर्वर आपके फंड नहीं रखता: केवल आप अपने वॉलेट को नियंत्रित करते हैं। यदि आप अपना सीड वाक्यांश खो देते हैं, तो कोई इसे आपके लिए पुनर्प्राप्त नहीं कर सकता।</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">सरलीकृत भुगतान सत्यापन — पूरी ब्लॉकचेन डाउनलोड किए बिना सीधे DigiByte P2P नेटवर्क से सिंक करता है। BIP157/158 कॉम्पैक्ट ब्लॉक फ़िल्टर उपयोग करता है: आपका वॉलेट फ़िल्टर डाउनलोड कर डिवाइस पर ही जाँचता है, इसलिए आपके पते कभी आपके फ़ोन से बाहर नहीं जाते।</string>
+    <string name="ab_sync_desc">सरलीकृत भुगतान सत्यापन: पूरी ब्लॉकचेन डाउनलोड किए बिना सीधे DigiByte P2P नेटवर्क से सिंक करता है। BIP157/158 कॉम्पैक्ट ब्लॉक फ़िल्टर उपयोग करता है: आपका वॉलेट फ़िल्टर डाउनलोड कर डिवाइस पर ही जाँचता है, इसलिए आपके पते कभी आपके फ़ोन से बाहर नहीं जाते।</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">यह सॉफ़्टवेयर MIT लाइसेंस के तहत प्रदान किया गया है।</string>
     <string name="ab_tagline">DigiByte एक विकेंद्रीकृत ब्लॉकचेन और डिजिटल मुद्रा है।</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC का स्वतंत्र वॉलेट। यह आधिकारिक DigiByte ऐप नहीं है।</string>
 
     <string name="tx_conf_short">%1$d पुष्टि</string>
     <string name="tx_confirmed">पुष्ट</string>
 
     <string name="cur_title">प्रदर्शन मुद्रा</string>
-    <string name="cur_note">आपका DigiByte बैलेंस हमेशा वास्तविक होता है — यह केवल यह बदलता है कि उसकी तुलना किससे की जाए।</string>
+    <string name="cur_note">आपका DigiByte बैलेंस हमेशा वास्तविक होता है: यह केवल यह बदलता है कि उसकी तुलना किससे की जाए।</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s: %2$s</string>
 
-    <string name="pass_advanced">उन्नत — पासफ़्रेज़ जोड़ें</string>
+    <string name="pass_advanced">उन्नत: पासफ़्रेज़ जोड़ें</string>
     <string name="pass_optional">वैकल्पिक</string>
-    <string name="pass_what">पासफ़्रेज़ आपका चुना हुआ एक अतिरिक्त शब्द या वाक्य है। इसके साथ, केवल आपका रिकवरी वाक्यांश इस वॉलेट को खोलने के लिए पर्याप्त नहीं रहता — जो लिखे हुए शब्द पा जाए, वह आपके सिक्के खर्च नहीं कर सकता।</string>
-    <string name="pass_warn">पासफ़्रेज़ को लिखकर रखें, लेकिन उसे अपने रिकवरी वाक्यांश से अलग जगह पर रखें — एक ही जगह रखने पर दोनों फिर से एक ही रहस्य बन जाते हैं और पासफ़्रेज़ कुछ भी सुरक्षित नहीं करता। यदि आप इसे खो देते हैं, तो केवल ये शब्द आपका वॉलेट वापस नहीं ला पाएंगे, और कोई भी इसे आपके लिए पुनर्प्राप्त नहीं कर सकता।</string>
+    <string name="pass_what">पासफ़्रेज़ आपका चुना हुआ एक अतिरिक्त शब्द या वाक्य है। इसके साथ, केवल आपका रिकवरी वाक्यांश इस वॉलेट को खोलने के लिए पर्याप्त नहीं रहता: जो लिखे हुए शब्द पा जाए, वह आपके सिक्के खर्च नहीं कर सकता।</string>
+    <string name="pass_warn">पासफ़्रेज़ को लिखकर रखें, लेकिन उसे अपने रिकवरी वाक्यांश से अलग जगह पर रखें: एक ही जगह रखने पर दोनों फिर से एक ही रहस्य बन जाते हैं और पासफ़्रेज़ कुछ भी सुरक्षित नहीं करता। यदि आप इसे खो देते हैं, तो केवल ये शब्द आपका वॉलेट वापस नहीं ला पाएंगे, और कोई भी इसे आपके लिए पुनर्प्राप्त नहीं कर सकता।</string>
     <string name="pass_scope">यह आपके लिखित बैकअप की रक्षा करता है। इस फ़ोन पर वॉलेट को लॉक रखने वाला अब भी आपका PIN है।</string>
     <string name="pass_enter">पासफ़्रेज़</string>
     <string name="pass_confirm">पासफ़्रेज़ की पुष्टि करें</string>
     <string name="pass_mismatch">पासफ़्रेज़ मेल नहीं खाते</string>
-    <string name="pass_too_long">बहुत लंबा — अधिकतम %1$d वर्ण</string>
+    <string name="pass_too_long">बहुत लंबा: अधिकतम %1$d वर्ण</string>
     <string name="pass_set">पासफ़्रेज़ सेट</string>
     <string name="pass_none">कोई पासफ़्रेज़ नहीं</string>
     <string name="pass_restore_label">पासफ़्रेज़ (यदि आपने उपयोग नहीं किया तो खाली छोड़ें)</string>
@@ -559,9 +578,9 @@
     <string name="rf_move_assets_body">ऊपर रखे गए DGB खर्च करके संपत्तियाँ इस वॉलेट में भेजता है। संपत्ति हस्तांतरण अपरिवर्तनीय हैं।</string>
     <string name="rf_moving_assets">संपत्तियाँ भेजी जा रही हैं…</string>
     <string name="rf_move_result">%2$d में से %1$d संपत्तियाँ भेजी गईं</string>
-    <string name="rf_move_failed">%1$s — नहीं भेजी गई: %2$s</string>
+    <string name="rf_move_failed">%1$s, नहीं भेजी गई: %2$s</string>
     <string name="pass_screen_title">पासफ़्रेज़ जोड़ें?</string>
-    <string name="pass_screen_subtitle">वैकल्पिक — अधिकांश लोगों को इसे छोड़ देना चाहिए। पासफ़्रेज़ आपका अपना एक अतिरिक्त शब्द या वाक्य है, जिसके बिना आपका रिकवरी वाक्यांश अकेले यह वॉलेट नहीं खोल सकता।</string>
+    <string name="pass_screen_subtitle">वैकल्पिक: अधिकांश लोगों को इसे छोड़ देना चाहिए। पासफ़्रेज़ आपका अपना एक अतिरिक्त शब्द या वाक्य है, जिसके बिना आपका रिकवरी वाक्यांश अकेले यह वॉलेट नहीं खोल सकता।</string>
     <string name="pass_screen_continue_with">पासफ़्रेज़ के साथ जारी रखें</string>
     <string name="pass_screen_continue_without">इसके बिना जारी रखें</string>
     <string name="pass_screen_separate_note">इसे उन शब्दों से अलग जगह रखें जो आपने अभी लिखे हैं।</string>
@@ -575,12 +594,13 @@
     <string name="send_fail_amount">शून्य से अधिक राशि दर्ज करें।</string>
     <string name="send_fail_unknown">लेनदेन नहीं भेजा जा सका।</string>
     <string name="send_fail_try_again">पुनः प्रयास करें</string>
-    <string name="rf_splitting_for_assets">%1$d DigiAssets भेजने की तैयारी — आपके DGB को बाँटा जा रहा है ताकि हर एक अपना स्थानांतरण शुल्क चुका सके। एक पुष्टि की प्रतीक्षा, आमतौर पर एक मिनट से कम।</string>
+    <string name="rf_splitting_for_assets">%1$d DigiAssets भेजने की तैयारी: आपके DGB को बाँटा जा रहा है ताकि हर एक अपना स्थानांतरण शुल्क चुका सके। एक पुष्टि की प्रतीक्षा, आमतौर पर एक मिनट से कम।</string>
     <string name="rf_nothing_moved">कुछ भी स्थानांतरित नहीं हुआ</string>
-    <string name="rf_dd_fee_floor">नेटवर्क शुल्क के लिए %1$s चाहिए — इस वॉलेट में %2$s है।</string>
+    <string name="rf_dd_fee_floor">नेटवर्क शुल्क के लिए %1$s चाहिए: इस वॉलेट में %2$s है।</string>
     <string name="rf_dd_found">%1$s DigiDollar मिले</string>
     <string name="rf_dd_moved">%1$s DigiDollar इस वॉलेट में आ गए</string>
-    <string name="rf_dd_left_behind">%1$s DigiDollar पीछे रह गए — उन्हें भेजा नहीं जा सका</string>
+    <string name="rf_dd_sent_unrelayed">DigiDollar में %1$s भेजे गए, लेकिन नेटवर्क ने अभी पुष्टि नहीं की है। जब तक यह इस वॉलेट में न दिखे, अपना पुराना रिकवरी फ़्रेज़ संभालकर रखें।</string>
+    <string name="rf_dd_left_behind">%1$s DigiDollar पीछे रह गए: उन्हें भेजा नहीं जा सका</string>
     <string name="rf_dd_unreachable">DigiDollar की जाँच नहीं हो सकी; इस वॉलेट में कुछ हो सकता है</string>
     <string name="as_rules_checking">इस एसेट के ट्रांसफ़र नियम जाँचे जा रहे हैं…</string>
     <string name="as_rules_bound_title">इस एसेट के ट्रांसफ़र नियम हैं</string>
@@ -610,7 +630,7 @@
     <string name="reconcile_spendable">खर्च योग्य</string>
     <string name="reconcile_wallet_spendable">वॉलेट का खर्च योग्य बैलेंस</string>
     <string name="reconcile_matches_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल खाता है।</string>
-    <string name="reconcile_does_not_match_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल नहीं खाता — नीचे देखें।</string>
+    <string name="reconcile_does_not_match_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल नहीं खाता: नीचे देखें।</string>
     <string name="reconcile_held_asset">DigiAsset के लिए रोका गया</string>
     <string name="reconcile_held_unknown">रोका गया: एसेट की स्थिति अज्ञात</string>
     <string name="reconcile_proven_plain">साधारण DGB, रीस्टार्ट के बाद खर्च योग्य</string>
@@ -626,7 +646,66 @@
     <string name="market_tor_notice_title">मार्केट Tor के ज़रिए रूट नहीं होता</string>
     <string name="market_tor_notice_body">मार्केट Tor के ज़रिए रूट नहीं होता; साइट आपका IP पता देखेगी।</string>
     <string name="market_tor_notice_continue">जारी रखें</string>
-    <string name="move_title">DigiByte Wallet अब DigiByte Mobile है</string>
-    <string name="move_body">इस ऐप को अब कोई अपडेट नहीं मिलेगा। Google Play से DigiByte Mobile इंस्टॉल करें, मौजूदा वॉलेट पुनर्प्राप्त करें चुनें और इस वॉलेट का रिकवरी वाक्यांश डालें — चेन पर कुछ भी नहीं हिलता। जब तक नए ऐप में आपका बैलेंस न दिखे, इस ऐप को रखें।</string>
-    <string name="move_how">कैसे बदलें</string>
+    <string name="restore_pass_toggle">मैंने पासफ़्रेज़ इस्तेमाल किया था</string>
+    <string name="restore_pass_body">सिर्फ़ तभी, जब आपने यह वॉलेट बनाते समय पासफ़्रेज़ जोड़ा था। गलत पासफ़्रेज़ एक अलग, खाली वॉलेट खोलता है: कोई त्रुटि संदेश नहीं दिखता।</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">कृपया सभी %1$d शब्द दर्ज करें।</string>
+    <string name="restore_err_invalid_words">अमान्य शब्द: %1$s</string>
+    <string name="restore_err_checksum">यह रिकवरी वाक्यांश मान्य नहीं है। हर शब्द और उनका क्रम दोबारा जाँचें।</string>
+    <string name="restore_scan_title">निजी रूप से पुनर्स्थापित करें</string>
+    <string name="restore_scan_body">आगे बढ़ने के बाद, यह फ़ोन आपके वॉलेट के लेन-देन खुद ढूँढता है: नेटिव (dgb1q…), legacy (D…), Taproot और DigiDollar पते, आपके पते किसी को भेजे बिना।</string>
+    <string name="restore_other_title">किसी दूसरे वॉलेट ऐप का वाक्यांश?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor और कुछ पुराने वॉलेट सिक्के ऐसे पता फ़ॉर्मैट पर रखते हैं जिनका यह वॉलेट उपयोग नहीं करता, इसलिए सिंक उन्हें नहीं देख सकता। एक जाँच उन्हें ढूँढ सकती है, लेकिन यह आपके वाक्यांश से बने पते DigiScope (api.digiscope.me) को भेजती है, जो उन पर मौजूद किसी भी फंड की जानकारी देता है। HoldFast Wallet या पुराने DigiByte ऐप के वाक्यांश के लिए ज़रूरी नहीं। आप इसे बाद में सेटिंग्स → दूसरे वॉलेट से फंड पुनर्प्राप्त करें से भी चला सकते हैं।</string>
+    <string name="restore_other_check">अन्य फ़ॉर्मैट जाँचें</string>
+    <string name="restore_scan_deriving">पते बनाए जा रहे हैं…</string>
+    <string name="restore_scan_duration">नोड के अनुसार इसमें 30-90 सेकंड लग सकते हैं।</string>
+    <string name="restore_scan_failed">स्कैन विफल</string>
+    <string name="restore_scan_retry">जाँच फिर से करें</string>
+    <string name="restore_found_title">फंड मिले</string>
+    <string name="restore_unreachable_title">DigiScope तक नहीं पहुँच सके</string>
+    <string name="restore_none_title">अभी तक कोई फंड नहीं मिला</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%2$d पाथ पर %1$s DGB</item>
+        <item quantity="other">%2$d पाथ पर %1$s DGB</item>
+    </plurals>
+    <string name="restore_unreachable_body">जाँच नहीं चल सकी। आगे बढ़ने के बाद सिंक फिर भी इस वॉलेट के अपने फ़ॉर्मैट ढूँढ लेगा; फिर से कोशिश करें, या दूसरे ऐप्स के फ़ॉर्मैट के लिए बाद में सेटिंग्स → दूसरे वॉलेट से फंड पुनर्प्राप्त करें का उपयोग करें।</string>
+    <string name="restore_none_body">जाँचे गए फ़ॉर्मैट पर कुछ भी अनखर्चा नहीं है। आगे बढ़ने के बाद सिंक फिर भी इस वॉलेट के अपने लेन-देन ढूँढ लेगा।</string>
+    <string name="restore_nonnative_note">%1$s DGB किसी दूसरे ऐप के पता फ़ॉर्मैट पर है। पुनर्स्थापना के बाद आपको इसे इस वॉलेट में लाने के लिए \"दूसरे वॉलेट से फंड पुनर्प्राप्त करें\" पर ले जाया जाएगा: जब तक आप वहाँ पुष्टि नहीं करते, कुछ भी नहीं ले जाया जाता।</string>
+    <string name="restore_pass_nothing_found">आपके दर्ज किए गए पासफ़्रेज़ से कुछ नहीं मिला। पासफ़्रेज़ में कोई चेकसम नहीं होता: गलत पासफ़्रेज़ बिना किसी त्रुटि के एक अलग, खाली वॉलेट खोलता है। टाइपिंग की गलती जाँचें: या, अगर आपने वॉलेट बनाते समय पासफ़्रेज़ सेट नहीं किया था, तो वापस जाकर पासफ़्रेज़ फ़ील्ड बंद करें।</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d पता स्कैन किया गया</item>
+        <item quantity="other">%1$s · %2$d पते स्कैन किए गए</item>
+    </plurals>
+    <string name="restore_date_title">आपने यह वॉलेट कब बनाया था?</string>
+    <string name="restore_date_body">इससे हम अनावश्यक ब्लॉकचेन स्कैनिंग छोड़कर तेज़ी से सिंक कर पाते हैं।</string>
+    <string name="restore_date_unsure">मुझे याद नहीं</string>
+    <string name="restore_date_unsure_sub">पूरा ब्लॉकचेन स्कैन (सबसे धीमा: संदेह हो तो इसे चुनें)</string>
+    <string name="restore_date_warning">चुने गए वर्ष से पुराने लेन-देन नहीं मिलेंगे। अगर आपके वॉलेट का इतिहास पुराना हो सकता है, तो पहले का वर्ष चुनें: या पूरी कवरेज के लिए \"मुझे याद नहीं\" (धीमा)।</string>
+    <string name="restore_date_start">रिकवरी शुरू करें</string>
+    <string name="restore_date_restoring">वॉलेट पुनर्स्थापित हो रहा है…</string>
+    <string name="restore_date_onwards">जनवरी %1$d से आगे</string>
+    <string name="restore_date_range">जनवरी %1$d – दिसंबर %1$d</string>
+    <string name="restore_date_genesis">DigiByte जनवरी 2014 में लॉन्च हुआ</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, नेटवर्क न्यूनतम। इस लेनदेन का सटीक शुल्क पुष्टि करने से पहले दिखाया जाता है।</string>
+    <string name="send_preparing">तैयार हो रहा है…</string>
+    <string name="send_fee_raised">आपके दर्ज किए गए %1$s DGB से बढ़ाया गया: यह लेनदेन यही शुल्क चुकाता है।</string>
+    <string name="send_err_below_dust">यह राशि उस सबसे छोटे भुगतान से कम है जिसे नेटवर्क इस पते पर रिले करता है (%1$s DGB)। कम से कम इतनी राशि भेजें।</string>
+    <string name="send_not_relayed_title">भेजा गया, अभी रिले नहीं हुआ</string>
+    <string name="send_not_relayed_body">आपके वॉलेट ने यह लेनदेन प्रसारित किया, लेकिन अभी तक किसी पीयर ने इसे नहीं लिया है, इसलिए अभी पता नहीं है कि यह नेटवर्क तक पहुँचा या नहीं। यह आपकी गतिविधि में लंबित दिखता है। दोबारा भेजने से पहले अपनी गतिविधि जाँच लें।</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">पासफ़्रेज़ पढ़ा नहीं जा सका</string>
+    <string name="seedview_pass_unreadable_body">इस वॉलेट का पासफ़्रेज़ अभी पढ़ा नहीं जा सका। केवल आपके रिकवरी शब्द इस वॉलेट को बहाल नहीं कर सकते, इसलिए वे तब तक नहीं दिखाए जाते जब तक पासफ़्रेज़ उनके साथ नहीं दिखाया जा सकता। फिर से कोशिश करें।</string>
+    <string name="seedview_pass_retry">फिर से कोशिश करें</string>
+    <!-- /pkg E2-keys -->
+    <string name="pinstore_title">अभी आपका PIN जाँचा नहीं जा सकता</string>
+    <string name="pinstore_body">फ़ोन का सुरक्षित कुंजी भंडार नहीं खुला, इसलिए वॉलेट लॉक रहेगा। कुछ भी हटाया नहीं गया है। ऐप बंद करें और फिर से खोलें। अगर ऐसा बार-बार हो, तो फ़ोन रीस्टार्ट करें; आपका रिकवरी फ़्रेज़ किसी भी डिवाइस पर वॉलेट को अब भी वापस ला सकता है।</string>
+    <string name="pinstore_close">ऐप बंद करें</string>
 </resources>
