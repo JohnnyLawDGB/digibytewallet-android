@@ -129,6 +129,8 @@ int main(void)
            BROwnNodeHealthFor(2) == BROwnNodeHealthDark && BROwnNodeHealthFor(0) == BROwnNodeHealthDark &&
            BROwnNodeHealthFor(-1) == BROwnNodeHealthDark);
 
+    result("watchdog_pin_yields_to_own_node", BROwnNodeWatchdogMayPin(1) == 0 && BROwnNodeWatchdogMayPin(0) == 1);
+
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
 }
