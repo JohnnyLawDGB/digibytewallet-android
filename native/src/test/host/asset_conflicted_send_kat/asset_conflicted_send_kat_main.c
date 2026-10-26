@@ -88,7 +88,9 @@ int main(void) {
 
     // Attempt #1 — broadcast, then it sticks. Unconfirmed.
     BRTransaction *stuck = assetSend(spk, spkLen, foreign, foreignLen, funding->txHash, 0, 10000);
-    check(BRWalletRegisterTransaction(w, stuck) != 0, "the stuck attempt registered");
+    // The two sends are the wallet's own (placeholder signatures here), so they register the way the
+    // bridge registers a send it signed: BRWalletRegisterTransactionTrusted.
+    check(BRWalletRegisterTransactionTrusted(w, stuck) != 0, "the stuck attempt registered");
     check(stuck->blockHeight == TX_UNCONFIRMED, "the stuck attempt is unconfirmed");
     check(BRWalletTransactionIsValid(w, stuck) == 1,
           "while it is the only spender of the input, the stuck attempt is valid");
@@ -96,7 +98,7 @@ int main(void) {
     // Attempt #2 — the user sends again. Same input, different fee, different txid.
     BRTransaction *resend = assetSend(spk, spkLen, foreign, foreignLen, funding->txHash, 0, 20000);
     check(! UInt256Eq(stuck->txHash, resend->txHash), "the re-send is a distinct transaction");
-    check(BRWalletRegisterTransaction(w, resend) != 0, "the re-send registered");
+    check(BRWalletRegisterTransactionTrusted(w, resend) != 0, "the re-send registered");
     BRWalletUpdateTransactions(w, &resend->txHash, 1, 700001, 1784980100);
 
     // ---- what the old probe sees -----------------------------------------------------

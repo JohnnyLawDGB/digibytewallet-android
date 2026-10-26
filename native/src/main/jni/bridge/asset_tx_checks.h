@@ -36,7 +36,7 @@ static inline int raw_tx_id(const uint8_t *buf, size_t len, UInt256 *txHashOut)
 {
     if (!buf || len == 0 || !txHashOut) return 0;
 
-    BRTransaction *tx = BRTransactionParse(buf, len);
+    BRTransaction *tx = BRTransactionParseSigned(buf, len);
     if (!tx) return 0;
 
     int ok = !UInt256IsZero(tx->txHash);

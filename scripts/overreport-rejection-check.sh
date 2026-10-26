@@ -25,10 +25,10 @@ CLI="digibyte-cli"
 RESULT="$($SSH "$CLI testmempoolaccept '[\"$HEX\"]'")"
 echo "testmempoolaccept => $RESULT"
 
-ALLOWED="$(printf '%s' "$RESULT" | grep -o '"allowed"[[:space:]]*:[[:space:]]*[a-z]*' | head -1 | grep -o '[a-z]*$')"
-REASON="$(printf '%s' "$RESULT" | grep -o '"reject-reason"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1)"
+ALLOWED="$(<<<"$RESULT" grep -o '"allowed"[[:space:]]*:[[:space:]]*[a-z]*' | head -1 | grep -o '[a-z]*$')"
+REASON="$(<<<"$RESULT" grep -o '"reject-reason"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1)"
 
-if [ "$ALLOWED" = "false" ] && printf '%s' "$REASON" | grep -qi 'belowout'; then
+if [ "$ALLOWED" = "false" ] && <<<"$REASON" grep -qi 'belowout'; then
     echo "PASS: over-reported sweep rejected by network ($REASON)"
     exit 0
 fi

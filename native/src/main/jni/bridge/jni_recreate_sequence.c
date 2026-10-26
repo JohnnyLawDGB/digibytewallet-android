@@ -22,15 +22,15 @@
 #include "jni_bridge.h"
 #include "BRRecreateSequence.h"
 
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_recreateStepCount(JNIEnv *env, jobject thiz) {
+jint JNICALL
+NativeBridge_recreateStepCount(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return (jint)BR_RECREATE_STEP_COUNT;
 }
 
 /* The step at an ordinal position, or -1 out of range. */
-JNIEXPORT jint JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_recreateStepAt(JNIEnv *env, jobject thiz,
+jint JNICALL
+NativeBridge_recreateStepAt(JNIEnv *env, jobject thiz,
                                                           jint index) {
     (void)thiz;
     (void)env;
@@ -39,8 +39,8 @@ Java_io_digibyte_core_bridge_NativeBridge_recreateStepAt(JNIEnv *env, jobject th
 
 /* Stable label for a step, or null for an unknown one. Matches the prefixes
  * RecreateSequence.kt writes into its failure list. */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_recreateStepName(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_recreateStepName(JNIEnv *env, jobject thiz,
                                                             jint step) {
     (void)thiz;
     const char *name = BRRecreateStepName((BRRecreateStep)step);
@@ -49,8 +49,8 @@ Java_io_digibyte_core_bridge_NativeBridge_recreateStepName(JNIEnv *env, jobject 
 }
 
 /* Whether the executor must continue after this step fails. */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_recreateContinuesAfterFailure(JNIEnv *env, jobject thiz,
+jboolean JNICALL
+NativeBridge_recreateContinuesAfterFailure(JNIEnv *env, jobject thiz,
                                                                          jint step) {
     (void)env; (void)thiz;
     return BRRecreateContinuesAfterFailure((BRRecreateStep)step) ? JNI_TRUE : JNI_FALSE;

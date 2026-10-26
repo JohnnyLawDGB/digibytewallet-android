@@ -1,4 +1,4 @@
-appId: io.digibyte
+appId: app.aroundtheblock.wallet.debug
 name: "Create wallet — seed generation + display"
 ---
 - launchApp:

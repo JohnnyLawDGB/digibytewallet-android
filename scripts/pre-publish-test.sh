@@ -14,13 +14,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APK_PATH="$PROJECT_DIR/app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk"
+APK_PATH="$PROJECT_DIR/app/build/outputs/apk/mainnetSideload/debug/app-mainnet-sideload-debug.apk"
 PREVIOUS_APK="$PROJECT_DIR/test-fixtures/previous-release.apk"
 RESULTS_DIR="$PROJECT_DIR/test-results"
 TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"
 RESULT_FILE="$RESULTS_DIR/$TIMESTAMP.txt"
-PACKAGE="io.digibyte"
-ACTIVITY="$PACKAGE/.MainActivity"
+# The debug build carries the .debug suffix, but its classes stay in the namespace, so the
+# activity must be named in full ("$PACKAGE/.MainActivity" would look in ...debug.MainActivity).
+PACKAGE="app.aroundtheblock.wallet.debug"
+ACTIVITY="$PACKAGE/app.aroundtheblock.wallet.MainActivity"
 
 # API levels to test
 ALL_API_LEVELS=(28 33 34 35)
@@ -49,7 +51,7 @@ source "$SCRIPT_DIR/test-helpers/report.sh"
 if [[ "$SKIP_BUILD" == false ]]; then
     echo "=== Building APK ==="
     cd "$PROJECT_DIR"
-    ./gradlew :native:assembleMainnetDebug :app:assembleMainnetDebug --quiet
+    ./gradlew :native:assembleMainnetDebug :app:assembleMainnetSideloadDebug --quiet
     echo "APK: $APK_PATH"
 fi
 

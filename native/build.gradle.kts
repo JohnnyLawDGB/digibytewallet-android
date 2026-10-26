@@ -19,8 +19,8 @@ plugins {
 val asanNative = (project.findProperty("asanNative") as String?)?.toBoolean() ?: false
 
 android {
-    namespace = "io.digibyte.native_core"
-    compileSdk = 35
+    namespace = "app.aroundtheblock.wallet.native_core"
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
@@ -42,8 +42,9 @@ android {
                     // 2 = a header whose target is not the one MultiShield V4 computes from its resident
                     //     ancestors is rejected and the peer treated as misbehaving.
                     // (1 = compute, log "diff-mismatch" / "diff-skip" and count, never reject: v4.0.86's
-                    //  audit level. Raised to 2 after full syncs on arm64 and x86_64 judged every header
-                    //  with zero mismatches, as v4.0.86's notes announced.)
+                    //  audit level. At 1, a peer could serve a header mined at the easiest target, have it
+                    //  taken as the tip, and get a fabricated receive confirmed — internal D0-F2, reported
+                    //  independently 2026-10-07. Raised to 2 after zero mismatches on real syncs.)
                     "-DDGB_HEADER_DIFF_CHECK=2"
                 )
                 if (asanNative) {
