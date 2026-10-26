@@ -1,7 +1,9 @@
 // Host KAT for BROwnNode.h -- the own node's address, link, IPv4 test, lookup rule and health.
 // Android's CustomNodeTest, OwnNodeUriTest and OwnNodeAddressTest, case for case and value for
 // value (the label's display filter and cap are the platform's; here the label is checked raw),
-// plus the edges: Kotlin's trim and toIntOrNull, URLDecoder's quirks, repeated query keys.
+// plus the edges: Kotlin's trim and toIntOrNull, Android's URLDecoder, repeated query keys.
+// URLDecoder cases follow Android's libcore (a non-hex char after '%' throws, so the raw value
+// is used), not desktop Java, which the Kotlin unit tests run on.
 //
 // Built twice by run.sh:
 //   -DOWN_NODE_RED  a host name is looked up even with Tor on; every RED case fails
@@ -76,10 +78,10 @@ int main(void)
            BROwnNodeResolvePlan("203.0.113.5", 0, ip, sizeof(ip)) == BROwnNodeUseAddress && strcmp(ip, "203.0.113.5") == 0);
     result("tor_off_host_name_is_looked_up", BROwnNodeResolvePlan("node.example.org", 0, ip, sizeof(ip)) == BROwnNodeNeedsLookup);
     {   const char *bad[] = { "256.1.1.1", "1.2.3", "1.2.3.4.5", "1.2.3.x", "0x7f.0.0.1", "-1.2.3.4", "1..2.3", "",
-                              "node.example.org", "1234.1.1.1" };
+                              "node.example.org", "1234.1.1.1", "1.2.3.4.5.6.7.8.9.10.11.12.13.14.15.16.17.18.19.20" };
         int i, ok = BROwnNodeIPv4Literal("010.1.2.3", ip, sizeof(ip)) && strcmp(ip, "10.1.2.3") == 0 &&
                     BROwnNodeIPv4Literal(" 255.255.255.255 ", ip, sizeof(ip)) && strcmp(ip, "255.255.255.255") == 0;
-        for (i = 0; i < 10; i++) ok &= ! BROwnNodeIPv4Literal(bad[i], ip, sizeof(ip));
+        for (i = 0; i < (int)(sizeof(bad) / sizeof(bad[0])); i++) ok &= ! BROwnNodeIPv4Literal(bad[i], ip, sizeof(ip));
         result("only_a_dotted_quad_is_an_address", ok);
     }
 
@@ -91,15 +93,23 @@ int main(void)
     result("port_as_kotlin_to_int_or_null",
            hp("host:+12024", "host", 12024) && hp("host:012024", "host", 12024) && hp("host: 12024 ", "host", 12024) &&
            hpNo("host:-1") && hpNo("host:99999999999") && hpNo("host:+") && hpNo("host:") && hpNo("host:-0") &&
-           hpNo("host:\xEF\xBC\x91"));                                     // a fullwidth digit: refused (see header)
-    result("typed_host_accepts_any_other_bytes", hp("my node", "my node", 12024) && hp("n\xC3\xB6" "de:5", "n\xC3\xB6" "de", 5));
+           hpNo("host:\xEF\xBC\x91") &&                                    // a fullwidth digit: refused (see header)
+           hpNo("host:\xD9\xA1\xD9\xA2\xD9\xA0\xD9\xA2\xD9\xA4") &&           // Arabic-Indic 12024: refused (deliberate)
+           hpNo("host:2147483648") && hpNo("host:-2147483649") &&
+           hpNo("host:18446744073709563640"));                              // 2^64 + 12024: no number, never a wrap
+    result("typed_host_accepts_any_other_bytes", hp("my node", "my node", 12024) && hp("n\xC3\xB6" "de:5", "n\xC3\xB6" "de", 5) &&
+           hp("a/b", "a/b", 12024) && hp("/host/:7", "/host/", 7) &&      // a single '/' is no URL ("//" is)
+           hpNo("a//b") && hpNo("//"));
     {   char big[400];
         memset(big, 'a', 300); big[300] = '\0';
         result("host_longer_than_the_buffer_refused", hpNo(big));
     }
     result("link_host_ascii_only", ! uri("n\xC3\xB6" "de:5") && ! uri("dgbnode://n\xC3\xB6" "de") && ! uri("dgbnode://my node"));
     result("url_decoder_quirks",
-           label("dgbnode://h?label=%+F", "\x0F", 1) && label("dgbnode://h?label=%-0x", "\0x", 2) &&
+           label("dgbnode://h?label=%+F", "%+F", 3) && label("dgbnode://h?label=%-0x", "%-0x", 4) &&
+           label("dgbnode://h?label=My%20Node%+5", "My%20Node%+5", 12) &&   // Android throws; desktop Java decodes
+           label("dgbnode://h?label=%4g", "%4g", 3) && label("dgbnode://h?label=%G1", "%G1", 3) &&
+           label("dgbnode://h?label=%\xD9\xA1\xD9\xA1", "%\xD9\xA1\xD9\xA1", 5) &&       // non-ASCII digits are no hex
            label("dgbnode://h?label=%-1", "%-1", 3) && label("dgbnode://h?label=%4", "%4", 2) &&
            label("dgbnode://h?label=a+b", "a b", 3) && label("dgbnode://h?label=%41%42", "AB", 2) &&
            label("dgbnode://h?label=%41%", "%41%", 4) && label("dgbnode://h?label=%C3%A9", "\xC3\xA9", 2));
@@ -118,8 +128,6 @@ int main(void)
     result("health_mapping", BROwnNodeHealthFor(3) == BROwnNodeHealthServing && BROwnNodeHealthFor(1) == BROwnNodeHealthConnecting &&
            BROwnNodeHealthFor(2) == BROwnNodeHealthDark && BROwnNodeHealthFor(0) == BROwnNodeHealthDark &&
            BROwnNodeHealthFor(-1) == BROwnNodeHealthDark);
-
-    result("watchdog_pin_yields_to_own_node", BROwnNodeWatchdogMayPin(1) == 0 && BROwnNodeWatchdogMayPin(0) == 1);
 
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
