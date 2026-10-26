@@ -66,12 +66,14 @@ NativeBridge_strandedRefusalHoldRun(JNIEnv *env, jobject thiz, jlong holdMs, jlo
     if ((*env)->GetArrayLength(env, managerBefore) != n || (*env)->GetArrayLength(env, managerAfter) != n ||
         (*env)->GetArrayLength(env, flags) != n) return NULL;
 
-    now = (*env)->GetLongArrayElements(env, nowMs, NULL);
-    before = (*env)->GetLongArrayElements(env, managerBefore, NULL);
-    after = (*env)->GetLongArrayElements(env, managerAfter, NULL);
-    fl = (*env)->GetIntArrayElements(env, flags, NULL);
+    // Stop at the first failed fetch: it leaves an OutOfMemoryError pending, and no further
+    // Get*ArrayElements call may be made with an exception pending.
+    if (! (now = (*env)->GetLongArrayElements(env, nowMs, NULL))) goto done;
+    if (! (before = (*env)->GetLongArrayElements(env, managerBefore, NULL))) goto done;
+    if (! (after = (*env)->GetLongArrayElements(env, managerAfter, NULL))) goto done;
+    if (! (fl = (*env)->GetIntArrayElements(env, flags, NULL))) goto done;
     answers = (n > 0) ? (jint *)calloc((size_t)n, sizeof(jint)) : NULL;
-    if (now && before && after && fl && (n == 0 || answers)) {
+    if (n == 0 || answers) {
         for (i = 0; i < n; i++) {
             if (fl[i] & REFUSAL_FLAG_FORGET) BRStrandedRefusalHoldForget(&hold);
             answers[i] = (jint)BRStrandedRefusalHoldObserve(&hold, (fl[i] & REFUSAL_FLAG_REFUSED) != 0,
@@ -82,6 +84,7 @@ NativeBridge_strandedRefusalHoldRun(JNIEnv *env, jobject thiz, jlong holdMs, jlo
         out = (*env)->NewIntArray(env, n);
         if (out && n > 0) (*env)->SetIntArrayRegion(env, out, 0, n, answers);
     }
+done:
     if (now) (*env)->ReleaseLongArrayElements(env, nowMs, now, JNI_ABORT);
     if (before) (*env)->ReleaseLongArrayElements(env, managerBefore, before, JNI_ABORT);
     if (after) (*env)->ReleaseLongArrayElements(env, managerAfter, after, JNI_ABORT);
