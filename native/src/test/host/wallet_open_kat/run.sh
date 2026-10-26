@@ -98,41 +98,41 @@ fi
 
 echo "--- COMPARISON ARM (-DWALLET_OPEN_SINGLE_TREE_UNFIXED): every RED case MUST fail, every GUARD case pass ---"
 out="$("$BUILD_DIR/red" 2>&1)"; rc=$?
-if echo "$out" | grep -Eq "$SAN_RE"; then
+if <<<"$out" grep -Eq "$SAN_RE"; then
     echo "  [red] GATE FAILURE: sanitizer report in the comparison arm (rc=$rc)"
-    echo "$out" | grep -E "$SAN_RE" | head -3 | sed 's/^/      /'; FAIL=1
+    <<<"$out" grep -E "$SAN_RE" | head -3 | sed 's/^/      /'; FAIL=1
 fi
 if [ $rc -eq 0 ]; then
     echo "  [red] GATE FAILURE: the comparison arm exited 0; it proves nothing"; FAIL=1
 fi
 for c in "${RED_CASES[@]}"; do
-    if echo "$out" | grep -q "^RESULT $c fail$"; then
-        echo "  [red $c] failed, as it must: $(echo "$out" | grep "^FAIL: $c" | head -1)"
+    if <<<"$out" grep -q "^RESULT $c fail$"; then
+        echo "  [red $c] failed, as it must: $(<<<"$out" grep "^FAIL: $c" | head -1)"
     else
         echo "  [red $c] GATE FAILURE: did not fail in the comparison arm"; FAIL=1
     fi
 done
 for c in "${GUARD_CASES[@]}"; do
-    if echo "$out" | grep -q "^RESULT $c pass$"; then
+    if <<<"$out" grep -q "^RESULT $c pass$"; then
         echo "  [red $c] GUARD held in the comparison arm"
     else
         echo "  [red $c] GATE FAILURE: GUARD case did not hold in the comparison arm"
-        echo "$out" | grep "^FAIL: $c" | sed 's/^/      /'; FAIL=1
+        <<<"$out" grep "^FAIL: $c" | sed 's/^/      /'; FAIL=1
     fi
 done
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 out="$("$BUILD_DIR/green" 2>&1)"; rc=$?
-if echo "$out" | grep -Eq "$SAN_RE"; then
+if <<<"$out" grep -Eq "$SAN_RE"; then
     echo "  [green] GATE FAILURE: sanitizer report in the shipped arm (rc=$rc)"
-    echo "$out" | grep -E "$SAN_RE" | head -3 | sed 's/^/      /'; FAIL=1
+    <<<"$out" grep -E "$SAN_RE" | head -3 | sed 's/^/      /'; FAIL=1
 fi
-if [ $rc -ne 0 ] || ! echo "$out" | grep -q "^ALL PASS$"; then
+if [ $rc -ne 0 ] || ! <<<"$out" grep -q "^ALL PASS$"; then
     echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"
-    echo "$out" | grep "^FAIL:" | sed 's/^/      /'; FAIL=1
+    <<<"$out" grep "^FAIL:" | sed 's/^/      /'; FAIL=1
 fi
 for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
-    if echo "$out" | grep -q "^RESULT $c pass$"; then
+    if <<<"$out" grep -q "^RESULT $c pass$"; then
         echo "  [green $c] passed"
     else
         echo "  [green $c] GATE FAILURE: not passed in the shipped arm"; FAIL=1
