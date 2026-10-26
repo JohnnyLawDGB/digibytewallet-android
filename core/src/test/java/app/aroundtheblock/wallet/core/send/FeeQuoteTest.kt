@@ -99,6 +99,12 @@ class FeeQuoteTest {
         assertEquals(100_000L, FeeQuote.rateForTotal(20_800, 208))
         assertEquals("no rate is derived from a size of zero", 0L, FeeQuote.rateForTotal(50_000, 0))
         assertEquals("an absurd total saturates instead of wrapping", Long.MAX_VALUE, FeeQuote.rateForTotal(Long.MAX_VALUE, 1))
+        // The rows fee_policy_quote_kat added to kill mutants of the core's BRFeeRateForTotal.
+        assertEquals(48L, FeeQuote.rateForTotal(36, 750))
+        assertEquals(80L, FeeQuote.rateForTotal(8, 100))
+        assertEquals("exact 9223372036854775900 saturates", Long.MAX_VALUE, FeeQuote.rateForTotal(4_611_686_018_427_387_950L, 500))
+        assertEquals("2^62 over 1 vB saturates", Long.MAX_VALUE, FeeQuote.rateForTotal(4_611_686_018_427_387_904L, 1))
+        assertEquals("Long.MAX_VALUE / 1000 x 1000 is exact", 9_223_372_036_854_775_000L, FeeQuote.rateForTotal(9_223_372_036_854_775_000L, 1000))
     }
 
     @Test fun `a custom fee that is not a positive amount quotes nothing`() {

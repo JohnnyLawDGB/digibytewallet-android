@@ -80,14 +80,11 @@ in §1 of the triage has no such constraint and moves outright.
 - **Never hardcode platform constants; include the platform header.**
 - **Do not run git inside a Claude-bridged folder.** Even read-only `git status` leaves an
   `index.lock` it cannot unlink, blocking native git.
-- **Core `develop`'s tip must EQUAL the android pin.** CI's "Submodule pin is durable" step
-  clones the submodule `--depth=1`, so a pin that is merely an *ancestor* of the tip fails the
-  check even though it is durable. Pushing a core commit to core `develop` without bumping
-  android's pin in the same push turns every android branch red (bit twice: 2026-08-31 and
-  2026-09-03, the `__OBJC__` guard). Push core, then immediately commit the pin bump on
-  android; never push core ahead and leave it. `./scripts/check-submodule-pin.sh` now
-  requires equality too (it used to pass on a full clone in exactly this case), so run it
-  locally before pushing — a "BEHIND" failure means bump the pin, not fix core.
+- **The pin must be reachable from core `develop`: its tip or behind it** (containment, since
+  2026-10-10; `scripts/check-submodule-pin.sh` explains why equality was retired). Until then the
+  rule was equality, which turned every Android branch red whenever core moved ahead of the pin
+  (2026-08-31, 2026-09-03). Run `./scripts/check-submodule-pin.sh` before pushing; a pin found
+  only on a feature branch fails it.
 
 ## The four pilots
 

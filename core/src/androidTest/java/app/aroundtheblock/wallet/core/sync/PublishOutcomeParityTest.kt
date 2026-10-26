@@ -2,8 +2,11 @@ package app.aroundtheblock.wallet.core.sync
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
+import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -164,5 +167,33 @@ class PublishOutcomeParityTest {
         assertTrue(cOutcome(0).userVisiblySent)
         listOf(PublishOutcome.EINVAL, PublishOutcome.ENOTCONN, PublishOutcome.ETIMEDOUT, 999)
             .forEach { assertFalse("errno $it must not read as sent", cOutcome(it).userVisiblySent) }
+    }
+
+    /**
+     * The send screen's wait is the header's: [PublishOutcome.await], on its defaults and virtual
+     * time, reads the ring every `BR_PUBLISH_AWAIT_POLL_MS` and gives up after
+     * `BR_PUBLISH_AWAIT_TIMEOUT_MS`. iOS waits by those two numbers, so a wait that drifted here
+     * would say "sent, not yet relayed" on one platform where the other still waits.
+     */
+    @Test
+    fun awaitWaitsAsTheHeaderSays() = runTest {
+        val poll = NativeBridge.publishAwaitPollMs().toLong()
+        val timeout = NativeBridge.publishAwaitTimeoutMs().toLong()
+        // The counts below hold only for a timeout that is a whole number of polls; a header that
+        // breaks that fails here, by name, rather than on a count that looks like a divergence.
+        assertEquals("BR_PUBLISH_AWAIT_TIMEOUT_MS is not a multiple of BR_PUBLISH_AWAIT_POLL_MS", 0L, timeout % poll)
+        var reads = 0
+        assertNull(PublishOutcome.await(read = { reads++; PublishOutcome.PENDING }))
+        assertEquals("the wait is not BR_PUBLISH_AWAIT_TIMEOUT_MS long", timeout, currentTime)
+        assertEquals("the ring is not read every BR_PUBLISH_AWAIT_POLL_MS", timeout / poll + 1, reads.toLong())
+    }
+
+    @Test
+    fun aVerdictOnTheThirdReadArrivesAfterTwoPolls() = runTest {
+        val poll = NativeBridge.publishAwaitPollMs().toLong()
+        var reads = 0
+        val o = PublishOutcome.await(read = { if (++reads < 3) PublishOutcome.PENDING else 0 })
+        assertEquals(PublishOutcome.Kind.ACCEPTED, o?.kind)
+        assertEquals(2 * poll, currentTime)
     }
 }

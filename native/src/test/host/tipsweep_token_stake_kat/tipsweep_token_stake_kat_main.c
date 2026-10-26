@@ -27,7 +27,7 @@
  *   session 1  the wallet holds the receive at TX_UNCONFIRMED and is saved by
  *              BRWalletSerializeTransactions -- what getSerializedTransactions persists, height included.
  *   relaunch   the bridge's own JNI-free loader (deserialize_saved_transactions_guarded), then
- *              BRWalletNewDual and BRWalletSetTaprootKey in restoreWalletFromBytes' order.
+ *              BRWalletOpenWithKeys (BRWalletOpen.h), as restoreWalletFromBytes builds it.
  *   the tip    the sync completes in compact-filter mode with the app's synced peer count (three):
  *              _BRPeerManagerLoadMempools pings every peer; each pong runs _postSyncDone, which runs
  *              _BRPeerManagerRequestUnrelayedTx (getdata for every unconfirmed record, then a ping);
@@ -63,6 +63,7 @@
 #include <time.h>
 
 #include "BRWallet.h"
+#include "BRWalletOpen.h"
 #include "BRTransaction.h"
 #include "BRBIP32Sequence.h"
 #include "BRBIP39Mnemonic.h"
@@ -94,17 +95,14 @@ static const uint8_t kEmpty[1] = { 0 };
 #define DGB_TO_US          100000000ULL
 #define SYNCED_PEERS       3       /* SyncService SYNCED_PEER_COUNT: the app's target once synced */
 
-/* The wallet as restoreWalletFromBytes builds it: BRWalletNewDual over the saved records (BIP84 and
- * legacy keys), then the BIP86 taproot key. */
+/* The wallet as restoreWalletFromBytes builds it: the shared recipe (BRWalletOpen.h -- BRWalletNewDual
+ * over the saved records with the BIP84 and legacy keys, then the BIP86 taproot key). */
 static BRWallet *openWallet(BRTransaction *saved[], size_t savedCount)
 {
     uint8_t seed[64];
     BRBIP39DeriveKey(seed, kMnemonic, NULL);
-    BRMasterPubKey mpk84 = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
-    BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
-    BRMasterPubKey mpk86 = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
-    BRWallet *w = BRWalletNewDual(savedCount > 0 ? saved : NULL, savedCount, mpk84, mpkLegacy);
-    if (w) BRWalletSetTaprootKey(w, mpk86);
+    BRWalletMasterKeys keys = BRWalletMasterKeysFromSeed(seed, sizeof(seed));
+    BRWallet *w = BRWalletOpenWithKeys(savedCount > 0 ? saved : NULL, savedCount, keys);
     memset(seed, 0, sizeof(seed));
     return w;
 }

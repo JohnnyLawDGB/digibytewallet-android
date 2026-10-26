@@ -367,6 +367,45 @@ object NativeBridge {
      */
     external fun publishErrnoValue(index: Int): Int
 
+    /**
+     * `BR_PUBLISH_AWAIT_POLL_MS` and `BR_PUBLISH_AWAIT_TIMEOUT_MS`: the verdict wait a send screen
+     * gives a send it just published ([app.aroundtheblock.wallet.core.sync.PublishOutcome.await]'s
+     * defaults). Exist so `PublishOutcomeParityTest` holds that wait to the header iOS imports.
+     */
+    external fun publishAwaitPollMs(): Int
+
+    external fun publishAwaitTimeoutMs(): Int
+
+    // === Stranded-send refusal hold (test-support only) ===
+    /**
+     * The C action for a recorded send ([BRStrandedSend.h]'s `BRStrandedRefusalActionFor`): 0 = keep,
+     * 1 = remove and unlock.
+     *
+     * **Not for production use — call [app.aroundtheblock.wallet.core.sync.PublishOutcome.actionFor] instead.**
+     * This exists so `StrandedRefusalParityTest` can bind the Kotlin mirror to the C header, which is
+     * the source of truth (iOS imports it). Pure function: no wallet state, no lock.
+     */
+    external fun strandedRefusalActionFor(publishError: Int, plainDgb: Boolean, refusedByPeers: Boolean): Int
+
+    /** The C plain-DGB gate (`BRStrandedSendIsPlainDgb`), for [app.aroundtheblock.wallet.core.sync.PublishOutcome.isPlainDgb]. */
+    external fun strandedSendIsPlainDgb(held: Boolean, containsAsset: Boolean, digiDollarType: Int): Boolean
+
+    /** `BR_STRANDED_REFUSAL_HOLD_MS`, so [app.aroundtheblock.wallet.core.sync.RefusalHold.HOLD_MS] is asserted against the header. */
+    external fun strandedRefusalHoldMs(): Long
+
+    /**
+     * One send's observations replayed through the C refusal hold (`BRStrandedRefusalHoldObserve`),
+     * each answer 0 or 1. Per step, [flags]: bit 0 refused, bit 1 [managerBefore] known, bit 2
+     * [managerAfter] known, bit 3 forget the send first. Null for arrays of unequal length.
+     */
+    external fun strandedRefusalHoldRun(
+        holdMs: Long,
+        nowMs: LongArray,
+        managerBefore: LongArray,
+        managerAfter: LongArray,
+        flags: IntArray,
+    ): IntArray?
+
     // === CF recovery policy (test-support only) ===
     /**
      * The C compact-filter recovery table ([BRCFRecoveryPolicy.h]) as a bitmask:
@@ -404,6 +443,31 @@ object NativeBridge {
 
     /** `BR_DUST_RELAY_FEE_PER_KB`, so `DustPolicy.DUST_RELAY_FEE_PER_KB` is asserted against the header. */
     external fun dustRelayFeePerKb(): Long
+
+    // === Fee quote (test-support only) ===
+    /**
+     * The C fee request ([BRFeePolicy.h]'s `BRFeeRequestFor`) for the fee field as UTF-8 bytes:
+     * `[request, totalSats]`, request 0 = none, 1 = the default rate, 2 = a custom total;
+     * `[-1, 0]` if the bytes could not be read.
+     *
+     * **Not for production use — call [app.aroundtheblock.wallet.core.send.FeeRequest] and
+     * [app.aroundtheblock.wallet.core.send.FeeQuote] instead.** These exist so
+     * `FeeQuoteParityTest` can bind the Kotlin mirror to the C header, which is the source of
+     * truth (iOS imports it). Pure functions: no wallet state, no lock.
+     */
+    external fun feeRequestFor(custom: Boolean, utf8: ByteArray?): LongArray?
+
+    /** `BRFeeRateForTotal`: floor(total × 1000 / vsize) in sat/kB, 0 without a size or a total. */
+    external fun feeRateForTotal(totalSats: Long, vsize: Long): Long
+
+    /** `BRFeeRateForCustomTotal`: the rate a custom total is built at, never below 1. */
+    external fun feeRateForCustomTotal(totalSats: Long, builtVsize: Long): Long
+
+    /** `BRFeeQuoteRaised`: the built transaction pays more than the custom total typed. */
+    external fun feeQuoteRaised(custom: Boolean, typedTotalSats: Long, feeSats: Long): Boolean
+
+    /** The core's `DEFAULT_FEE_PER_KB`, so `FeeQuote.DEFAULT_FEE_PER_KB` is asserted against it. */
+    external fun feeDefaultPerKb(): Long
 
     // === Message signing ===
     /**
