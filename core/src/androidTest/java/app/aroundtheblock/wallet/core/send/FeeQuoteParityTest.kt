@@ -43,10 +43,14 @@ class FeeQuoteParityTest {
             "0.0005\u0000", "0..5", "..", ".",
         )
 
-        val TOTALS = listOf(Long.MIN_VALUE, -1L, 0L, 1L, 99L, 100L, 999L, 1_000L, 20_800L, 23_200L, 50_000L,
-            1_000_000L, 9_223_372_036_854_775L, 9_223_372_036_854_776L, Long.MAX_VALUE / 1000, Long.MAX_VALUE - 1, Long.MAX_VALUE)
+        // 8, 36, 2^62, 4_611_686_018_427_387_950 and 9_223_372_036_854_775_000 are the KAT's mutant-killing
+        // rows (fee_policy_quote_kat rate_exact_then_saturated): a remainder landing exactly on the size,
+        // the first and last clamps, and q = Long.MAX_VALUE / 1000 exactly.
+        val TOTALS = listOf(Long.MIN_VALUE, -1L, 0L, 1L, 8L, 36L, 99L, 100L, 999L, 1_000L, 20_800L, 23_200L, 50_000L,
+            1_000_000L, 9_223_372_036_854_775L, 9_223_372_036_854_776L, Long.MAX_VALUE / 1000, 4_611_686_018_427_387_904L,
+            4_611_686_018_427_387_950L, 9_223_372_036_854_775_000L, Long.MAX_VALUE - 1, Long.MAX_VALUE)
 
-        val SIZES = listOf(Long.MIN_VALUE, -1L, 0L, 1L, 2L, 7L, 141L, 208L, 750L, 999L, 1_000L, 1_001L,
+        val SIZES = listOf(Long.MIN_VALUE, -1L, 0L, 1L, 2L, 7L, 100L, 141L, 208L, 500L, 750L, 999L, 1_000L, 1_001L,
             100_000L, Long.MAX_VALUE / 1000, Long.MAX_VALUE - 1, Long.MAX_VALUE)
     }
 

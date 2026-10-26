@@ -237,6 +237,16 @@ static void rate_exact_then_saturated(void)
         { 123456789012345678LL, 98765432109876543LL, 1249 },
         { 23200, 208, 111538 },
         { 75000, 750, 100000 },
+        // Each row below kills a mutant of BRFeeRateForTotal / _BRFeeMulDiv1000 that every row
+        // above survives (checked against a scratch-patched header).
+        { 36, 750, 48 },                                               // the remainder lands EXACTLY on vsize after
+        { 8, 100, 80 },                                                //   `rem += r`: `rem >= v` there, not `>`
+        { 4611686018427387950LL, 500, 9223372036854775807ULL },        // exact 9223372036854775900, q = INT64_MAX/1000:
+                                                                       //   only the final clamp saturates it
+        { 4611686018427387904LL, 1, 9223372036854775807ULL },          // 2^62 over 1 vB: q x 1000 wraps to 0 without
+                                                                       //   the first clamp
+        { 9223372036854775000LL, 1000, 9223372036854775000ULL },       // q = INT64_MAX/1000 exactly: exact, not
+                                                                       //   saturated (`q >`, never `q >=`)
     };
     char b[200];
     size_t i;
