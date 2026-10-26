@@ -55,9 +55,13 @@ class DustPolicyParityTest {
         "v16/40" to script("6028", 0x77, 40),
         "v16/41" to script("6029", 0x77, 41),
         "push not the rest" to script("0015", 0x44, 20),
+        "push shorter than the rest" to script("0014", 0x44, 21),
         "OP_1 33 bytes" to script("511f", 0x66, 31),
         "OP_1 34 bytes, not a program" to script("5121", 0x66, 32),
         "OP_1 35 bytes" to script("5121", 0x66, 33),
+        "OP_2 34 bytes" to script("5220", 0x66, 32),
+        "OP_16 34 bytes" to script("6020", 0x66, 32),
+        "OP_RETURN 34 bytes" to script("6a20", 0x66, 32),
     ) + (listOf(0x01, 0x4f, 0x50, 0x61, 0xff) + (0x51..0x60)).associate { v ->
         "version 0x%02x".format(v) to script("%02x14".format(v), 0x44, 20)
     }

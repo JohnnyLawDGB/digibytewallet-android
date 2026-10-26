@@ -279,6 +279,13 @@ int main(void)
             Script s = S("0015", 0x44, 20, NULL);           // declares 21 bytes, carries 20
             ck(line(&s) == 5370, "a push that is not the whole rest: line %" PRId64 ", not 5,370", line(&s));
         }
+        {
+            // Declares 20 bytes, carries 21: a push SHORTER than the rest is no witness program either
+            // (Core: script[1] + 2 == size, never <=).
+            Script s = S("0014", 0x44, 21, NULL);
+            ck(! BRDustScriptIsWitnessProgram(s.b, s.n), "a 20-byte push followed by one more byte is a witness program");
+            ck(line(&s) == 5400, "a push shorter than the rest: line %" PRId64 ", not 30 x (8 + 1 + 23 + 148) = 5,400", line(&s));
+        }
     }
     end();
 
@@ -293,6 +300,14 @@ int main(void)
         ck(! exempt(0, &op1_35, 1) && dust(0, &op1_35, 1), "a 35-byte OP_1 script is exempt");
         ck(! exempt(0, &op1_34, 0) && dust(0, &op1_34, 0), "a 34-byte OP_1 script outside a DigiDollar transaction is exempt");
         ck(! BRDustIsDigiDollarExempt(0, NULL, 34, 1) && BRDustIsDust(0, NULL, 34, 1), "a NULL script is exempt");
+        // OP_1 exactly: a 34-byte zero-value output whose first opcode is above OP_1 is not a token.
+        {
+            Script op2_34 = S("5220", 0x66, 32, NULL), op16_34 = S("6020", 0x66, 32, NULL);
+            Script ret_34 = S("6a20", 0x66, 32, NULL);
+            ck(! exempt(0, &op2_34, 1) && dust(0, &op2_34, 1), "a 34-byte OP_2 script in a DigiDollar transaction is exempt");
+            ck(! exempt(0, &op16_34, 1) && dust(0, &op16_34, 1), "a 34-byte OP_16 script in a DigiDollar transaction is exempt");
+            ck(! exempt(0, &ret_34, 1), "a 34-byte OP_RETURN script in a DigiDollar transaction is exempt");
+        }
     }
     end();
 
