@@ -3,8 +3,8 @@
   Spanish (es).
 
   STATUS: machine-assisted, NOT yet reviewed by a native speaker. The strings marked WARNING in
-  values/strings_wallet.xml carry real financial consequence — "no se pueden recuperar",
-  "cualquiera que tenga estas palabras" — and must be checked by someone fluent before this
+  values/strings_wallet.xml carry real financial consequence - "no se pueden recuperar",
+  "cualquiera que tenga estas palabras" - and must be checked by someone fluent before this
   ships to users. Everything else is ordinary UI text and is safe to iterate on.
 
   Brand names (DigiByte, DGB) are left untranslated on purpose.
@@ -17,8 +17,8 @@
     <string name="onb_words_count">%1$d palabras</string>
     <string name="onb_create">Crear billetera nueva</string>
     <string name="onb_recover">Recuperar billetera existente</string>
-    <string name="onb_footer">DigiByte — Segura, rápida, descentralizada</string>
-    <string name="app_name_display">Billetera DigiByte</string>
+    <string name="onb_footer">Billetera independiente para la red DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
 
     <!-- WARNING: "no se pueden recuperar" must stay as absolute as the English. -->
     <string name="seed_screenshot_blocked">Las capturas de pantalla están bloqueadas. Anota estas palabras: no se pueden recuperar.</string>
@@ -48,6 +48,9 @@
     <string name="unlock_unlocking">Desbloqueando…</string>
     <string name="unlock_biometrics_cd">Desbloquear con biometría</string>
 
+    <string name="recover_title">Recuperar billetera</string>
+    <string name="recover_body">Introduce tu frase de recuperación para restaurar tu billetera.</string>
+    <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Reintentar</string>
     <string name="verify_next">Siguiente</string>
@@ -67,11 +70,11 @@
     <string name="pin_err_wallet">No se pudo crear la billetera. Inténtalo de nuevo.</string>
     <string name="unlock_err_failed">No se pudo desbloquear. Inténtalo de nuevo.</string>
     <string name="unlock_device_lock_removed">Se quitó el bloqueo de pantalla del dispositivo, por lo que la clave protegida de la billetera se perdió. Restaura la billetera con tu frase de recuperación.</string>
-    <string name="unlock_wiping">Demasiados intentos fallidos — borrando la billetera</string>
+    <string name="unlock_wiping">Demasiados intentos fallidos: borrando la billetera</string>
     <string name="unlock_attempts_left">PIN incorrecto. Intentos restantes: %1$d</string>
     <string name="battery_title">Mantener la sincronización en segundo plano</string>
     <string name="battery_body">Android puede suspender esta billetera cuando la pantalla está apagada, lo que corta su conexión con la red DigiByte y puede dejarla en 0 pares hasta que la vuelvas a abrir.\n\nPermite que se ejecute sin restricciones para que siga sincronizando.</string>
-    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nEn Samsung, abre también Mantenimiento del dispositivo → Batería → \"Apps que nunca se suspenden\" y añade HoldFast Wallet.</string>
     <string name="battery_open_settings">Abrir ajustes</string>
     <string name="tor_title">Nueva función de privacidad</string>
     <string name="tor_body">El enrutamiento Tor ya está disponible. Cuando se activa, tu billetera se conecta a la red DigiByte a través de Tor, ocultando tu dirección IP a los pares.\n\n¿Activar el enrutamiento Tor?</string>
@@ -99,13 +102,13 @@
     <string name="wallet_price_via">vía %1$s</string>
     <string name="wallet_testnet_active">Testnet activa</string>
     <string name="wallet_tor_active">Tor activo</string>
-    <string name="wallet_tor_hidden">Tor — tu IP permanece oculta</string>
+    <string name="wallet_tor_hidden">Tor: tu IP permanece oculta</string>
     <string name="wallet_disconnected_peers">Desconectado · %1$d pares</string>
-    <string name="wallet_history_gap">Hueco en el historial — algunos bloques no se verificaron</string>
+    <string name="wallet_history_gap">Hueco en el historial: algunos bloques no se verificaron</string>
     <string name="wallet_scan_missing">Buscar transacciones faltantes</string>
     <string name="wallet_balance_refresh_failed">No se pudo actualizar el saldo</string>
     <string name="wallet_reconcile_unreachable">No pudimos contactar con el nodo de conciliación tras esta actualización. El saldo mostrado puede estar desactualizado.</string>
-    <string name="wallet_tor_unavailable">Tor no disponible — usando conexiones directas</string>
+    <string name="wallet_tor_unavailable">Tor no disponible: usando conexiones directas</string>
     <string name="wallet_tor_timeout">Tor no alcanzó la red a tiempo, así que la billetera se conecta directamente a los pares en esta sesión. Tu IP es visible para los pares hasta que reinicies la app.</string>
     <string name="wallet_node_offline">Tu nodo está desconectado</string>
     <string name="wallet_node_offline_body">El nodo emparejado no está accesible o no está sirviendo filtros compactos ahora mismo. Comprueba que esté en marcha y accesible, y que tenga peerblockfilters=1 configurado.</string>
@@ -123,11 +126,15 @@
     <string name="receive_request_amount">Solicitar una cantidad específica (opcional)</string>
     <string name="receive_amount_label">Cantidad</string>
     <string name="receive_qr_encodes">El QR codifica: %1$s</string>
-    <string name="receive_dd_note">DigiDollar se recibe como tokens denominados en USD. Comparte esta dirección DigiDollar — el QR contiene solo la dirección (sin solicitud de cantidad).</string>
+    <string name="receive_dd_note">DigiDollar se recibe como tokens denominados en USD. Comparte esta dirección DigiDollar: el QR contiene solo la dirección (sin solicitud de cantidad).</string>
     <string name="txd_title">Detalles de la transacción</string>
     <string name="txd_not_found">Transacción no encontrada</string>
     <string name="txd_sent">Enviado</string>
     <string name="txd_received">Recibido</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Acuñado</string>
+    <string name="tx_dd_self_transfer">Movido a ti mismo</string>
+    <string name="tx_dd_redeemed">Canjeado</string>
     <string name="txd_transaction_id">ID de transacción</string>
     <string name="txd_block_height">Altura de bloque</string>
     <string name="txd_pending">Pendiente</string>
@@ -141,12 +148,12 @@
     <string name="txd_view_explorer">Ver en el explorador</string>
     <string name="txd_back_to_wallet">Volver a la billetera</string>
 
-    <string name="wallet_sync_gap_headline">Escaneo completado — parte de tu historial no está verificado</string>
+    <string name="wallet_sync_gap_headline">Escaneo completado: parte de tu historial no está verificado</string>
     <string name="wallet_sync_connecting">Conectando a la red DigiByte</string>
     <string name="wallet_sync_scanning">Buscando tus transacciones</string>
     <string name="wallet_sync_uptodate">Al día</string>
     <string name="wallet_sync_failed">Error de sincronización</string>
-    <string name="wallet_sync_finishing">Finalizando — verificando bloques recientes</string>
+    <string name="wallet_sync_finishing">Finalizando: verificando bloques recientes</string>
     <string name="wallet_blocks_count">%1$s bloques</string>
     <string name="wallet_sync_progress_eta">%1$d%% completado · %2$s · %3$s restante</string>
     <string name="wallet_sync_progress_no_eta">%1$d%% completado · %2$s restantes · estimando…</string>
@@ -164,7 +171,7 @@
     <string name="wallet_status_connecting">Conectando…</string>
     <string name="wallet_gap_range_between">bloques %1$s–%2$s</string>
     <string name="wallet_gap_range_below">bloques por debajo de %1$s</string>
-    <string name="wallet_gap_body">Parte de tu historial (%1$s) no se pudo verificar desde la red de filtros — toca para buscar transacciones faltantes.</string>
+    <string name="wallet_gap_body">Parte de tu historial (%1$s) no se pudo verificar desde la red de filtros: toca para buscar transacciones faltantes.</string>
     <string name="receive_address_unavailable">Dirección no disponible</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -212,11 +219,11 @@
     <string name="send_network_fee_row">Comisión de red</string>
     <string name="send_fee_default">Predeterminada</string>
     <string name="send_fee_custom">Personalizada</string>
-    <string name="send_fee_below_min">⚠ Por debajo de la comisión mínima de retransmisión — puede que la transacción no se difunda</string>
+    <string name="send_fee_below_min">⚠ Por debajo de la comisión mínima de retransmisión: puede que la transacción no se difunda</string>
     <string name="send_fee_required">Comisión obligatoria</string>
     <string name="send_confirms_15s">Se confirma en ~15 segundos</string>
-    <string name="send_no_peers">No hay pares DigiByte conectados — no se puede difundir ahora mismo. Reconectando…</string>
-    <string name="send_wait_for_sync">Espera a que termine la sincronización antes de enviar — tu saldo completo aún se está recuperando.</string>
+    <string name="send_no_peers">No hay pares DigiByte conectados: no se puede difundir ahora mismo. Reconectando…</string>
+    <string name="send_wait_for_sync">Espera a que termine la sincronización antes de enviar: tu saldo completo aún se está recuperando.</string>
     <string name="send_broadcasting">Difundiendo…</string>
     <string name="send_review">Revisar y enviar</string>
     <string name="send_dialog_title">Confirmar transacción</string>
@@ -224,7 +231,7 @@
     <string name="send_to">Para</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">No se pudo preparar este envío de DigiDollar. Comprueba que tienes suficiente DGB para pagar la comisión de red.</string>
     <string name="send_verify_warning">Verifica cuidadosamente la dirección completa de arriba.\nLas transacciones son irreversibles.</string>
     <string name="send_send">Enviar</string>
     <string name="send_success">Éxito</string>
@@ -236,7 +243,7 @@
 
     <string name="send_hint_dgb">dgb1q… o D…</string>
     <string name="game_score_submitted">¡Puntuación enviada!</string>
-    <string name="game_score_failed">No se pudo enviar la puntuación — ¿has iniciado sesión?</string>
+    <string name="game_score_failed">No se pudo enviar la puntuación: ¿has iniciado sesión?</string>
     <string name="game_close">Cerrar juego</string>
 
     <string name="set_title">Ajustes</string>
@@ -260,15 +267,15 @@
     <string name="set_recover_other_sub">Barrer monedas de rutas de derivación antiguas u otras a esta billetera</string>
     <string name="set_cat_info">Información</string>
     <string name="set_beta">Actualizaciones beta</string>
-    <string name="set_beta_on">Activado — se te ofrecerán versiones preliminares para probar</string>
-    <string name="set_beta_off">Desactivado — solo se ofrecen versiones estables</string>
+    <string name="set_beta_on">Activado: se te ofrecerán versiones preliminares para probar</string>
+    <string name="set_beta_off">Desactivado: solo se ofrecen versiones estables</string>
     <string name="set_about">Acerca de</string>
     <string name="set_about_sub">Versión, licencias, código abierto</string>
     <string name="set_report_bug">Informar de un error / comentarios</string>
-    <string name="set_report_bug_sub">Envía un problema o una idea — la información del dispositivo y la versión se rellenan por ti</string>
+    <string name="set_report_bug_sub">Envía un problema o una idea: la información del dispositivo y la versión se rellenan por ti</string>
     <string name="set_cat_advanced">Avanzado / Desarrollador</string>
-    <string name="set_net_testnet">Testnet — cadena de pruebas, misma frase de recuperación</string>
-    <string name="set_net_mainnet">Mainnet — cadena de producción</string>
+    <string name="set_net_testnet">Testnet: cadena de pruebas, misma frase de recuperación</string>
+    <string name="set_net_mainnet">Mainnet: cadena de producción</string>
     <string name="set_switch_testnet">¿Cambiar a Testnet?</string>
     <string name="set_switch_mainnet">¿Cambiar a Mainnet?</string>
     <string name="set_switch_testnet_body">La app se reiniciará y sincronizará la cadena de pruebas. Tu frase de recuperación no cambia.</string>
@@ -276,7 +283,7 @@
     <string name="set_restart">Reiniciar</string>
 
     <string name="lang_restart_note">Esto reinicia la pantalla de la billetera. Tus monedas, tu frase y tus ajustes no se tocan.</string>
-    <string name="lang_unreviewed_note">Las traducciones son nuevas y aún no han sido revisadas por hablantes nativos. Si algo se lee mal — sobre todo una advertencia sobre tu frase de recuperación o tus monedas — dínoslo en Ajustes → Informar de un error.</string>
+    <string name="lang_unreviewed_note">Las traducciones son nuevas y aún no han sido revisadas por hablantes nativos. Si algo se lee mal (sobre todo una advertencia sobre tu frase de recuperación o tus monedas), dínoslo en Ajustes → Informar de un error.</string>
     <string name="lang_selected">Seleccionado</string>
 
     <string name="as_send_title">Enviar activo</string>
@@ -344,7 +351,7 @@
     <string name="rf_may_take">Esto puede tardar un momento</string>
     <string name="rf_couldnt_finish">No se pudo terminar la comprobación</string>
     <string name="rf_none_found">No se encontraron fondos recuperables</string>
-    <string name="rf_partial_body">No se pudieron comprobar algunas rutas de derivación, así que esta no es una respuesta definitiva — puede haber fondos que no hemos visto. Inténtalo de nuevo en un momento.\n\nSin comprobar: %1$s</string>
+    <string name="rf_partial_body">No se pudieron comprobar algunas rutas de derivación, así que esta no es una respuesta definitiva: puede haber fondos que no hemos visto. Inténtalo de nuevo en un momento.\n\nSin comprobar: %1$s</string>
     <string name="rf_no_coins">Esta semilla no tiene monedas en otras rutas de derivación.</string>
     <string name="rf_recoverable_balance">Saldo recuperable</string>
     <string name="rf_found_on">ENCONTRADO EN</string>
@@ -353,15 +360,15 @@
     <string name="rf_native_addr_note">Los fondos aparecerán en tu dirección de recepción nativa</string>
     <string name="rf_advanced_send">Avanzado ▸ Enviar a otra dirección</string>
     <string name="rf_address_hint">Dirección DigiByte (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">Esta dirección NO está en tu billetera — los barridos son irreversibles</string>
+    <string name="rf_not_in_wallet">Esta dirección NO está en tu billetera: los barridos son irreversibles</string>
     <string name="rf_sweep">Barrer fondos</string>
     <string name="rf_sweep_submitted">Barrido enviado</string>
     <string name="rf_will_appear">Los fondos recuperados aparecerán una vez confirmados.</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Pendiente de confirmación de la red</string>
-    <string name="rf_held_assets">%1$d dejadas atrás — DigiAssets</string>
+    <string name="rf_held_assets">%1$d dejadas atrás: DigiAssets</string>
     <string name="rf_held_assets_body">Estas monedas llevan DigiAssets y su traslado no se completó, así que se quedaron en la billetera antigua en lugar de barrerse como DGB normales, lo que las habría destruido. Vuelve a ejecutar la recuperación para reintentarlo.</string>
-    <string name="rf_held_unknown">%1$d dejadas atrás — no se pudieron comprobar</string>
+    <string name="rf_held_unknown">%1$d dejadas atrás: no se pudieron comprobar</string>
     <string name="rf_held_unknown_body">No pudimos leer las transacciones de las que provienen, así que no pudimos saber si llevan DigiAssets. Se dejaron intactas en lugar de arriesgarlas. Volver a intentarlo más tarde puede resolverlo.</string>
     <string name="rf_and_more">…y %1$d más</string>
     <string name="rf_something_wrong">Algo salió mal</string>
@@ -369,12 +376,12 @@
     <string name="rf_err_timeout">La solicitud caducó. Inténtalo de nuevo con una conexión más estable.</string>
     <string name="rf_err_seed">No se pudo cargar la semilla de la billetera. Desbloquea tu billetera e inténtalo de nuevo.</string>
     <string name="rf_err_lookup">No se pudo contactar con el servicio de consulta. Inténtalo más tarde.</string>
-    <string name="rf_err_generic">Algo salió mal — inténtalo de nuevo.</string>
+    <string name="rf_err_generic">Algo salió mal: inténtalo de nuevo.</string>
     <string name="rf_fail_unknown">Falló por un motivo desconocido.</string>
     <string name="rf_fail_no_utxos">No se pudo asociar ninguna salida gastable con claves de firma.</string>
     <string name="rf_fail_derive">No se pudieron derivar claves de la semilla para esta ruta.</string>
     <string name="rf_fail_broadcast">Falló la difusión de la transacción. Inténtalo de nuevo cuando estés conectado a pares.</string>
-    <string name="rf_fail_generic">No se pudo barrer esta — inténtalo de nuevo.</string>
+    <string name="rf_fail_generic">No se pudo barrer esta: inténtalo de nuevo.</string>
     <string name="rf_this_wallet">Esta billetera</string>
     <string name="rf_other_phrase">Frase de otra billetera</string>
     <string name="rf_other_phrase_body">Introduce la frase de recuperación de otra billetera para mover sus fondos a esta. La frase se usa una sola vez para firmar la transferencia y nunca se guarda.</string>
@@ -408,7 +415,7 @@
     <string name="ni_save">Guardar</string>
     <string name="ni_exclusive">Solo mi nodo (exclusivo)</string>
     <string name="ni_exclusive_sub">Sincronizar únicamente a través de tu nodo. Si se desconecta, la billetera no tendrá otros pares hasta que vuelvas a habilitar los pares públicos.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Compatible con nodos DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Información de la billetera</string>
     <string name="ab_wallet_type">Tipo de billetera</string>
     <string name="ab_hd_path">Ruta HD</string>
@@ -420,8 +427,8 @@
     <string name="ab_open_source">Código abierto</string>
     <string name="ab_source_code">Código fuente</string>
     <string name="ab_licenses">Licencias</string>
-    <string name="ab_licenses_sub">Licencia MIT — código abierto</string>
-    <string name="ab_community">Comunidad DigiByte</string>
+    <string name="ab_licenses_sub">Licencia MIT: código abierto</string>
+    <string name="ab_community">Información sobre la red DigiByte</string>
     <string name="ab_report_bug">Informar de un error</string>
 
     <string name="sec_pin_auth">PIN y autenticación</string>
@@ -432,16 +439,16 @@
     <string name="sec_biometric_no">No disponible en este dispositivo</string>
     <string name="sec_autolock">Tiempo de bloqueo automático</string>
     <string name="sec_wipe_after">Borrar tras %1$d PIN fallidos</string>
-    <string name="sec_wipe_after_on">Activado — la billetera se borra tras %1$d PIN incorrectos</string>
-    <string name="sec_wipe_after_off">Desactivado — protección adicional contra fuerza bruta del PIN</string>
-    <string name="sec_wipe_after_body">Cuando está activado, %1$d entradas de PIN incorrectas consecutivas borrarán PERMANENTEMENTE esta billetera — semilla, claves e historial — de este dispositivo.\n\nEs irreversible en el dispositivo. Tus fondos solo se pueden recuperar con tu frase de recuperación.</string>
+    <string name="sec_wipe_after_on">Activado: la billetera se borra tras %1$d PIN incorrectos</string>
+    <string name="sec_wipe_after_off">Desactivado: protección adicional contra fuerza bruta del PIN</string>
+    <string name="sec_wipe_after_body">Cuando está activado, %1$d entradas de PIN incorrectas consecutivas borrarán PERMANENTEMENTE esta billetera (semilla, claves e historial) de este dispositivo.\n\nEs irreversible en el dispositivo. Tus fondos solo se pueden recuperar con tu frase de recuperación.</string>
     <string name="sec_wipe_after_ack">Mi frase de recuperación está respaldada</string>
     <string name="sec_wipe_after_enabled">Borrado tras %1$d activado</string>
     <string name="sec_recovery_phrase">Frase de recuperación</string>
     <string name="sec_view_phrase">Ver frase de recuperación</string>
     <string name="sec_view_phrase_sub">Requiere PIN + verificación biométrica</string>
     <string name="sec_view_phrase_body">Tu frase de recuperación da acceso completo a tu billetera.\n\n• Nunca la compartas con nadie\n• Nunca la introduzcas en ningún sitio web\n• Guárdala sin conexión en un lugar seguro\n\nPara continuar se requiere PIN + autenticación biométrica.</string>
-    <string name="sec_understand">Lo entiendo — continuar</string>
+    <string name="sec_understand">Lo entiendo: continuar</string>
     <string name="sec_danger_zone">Zona de peligro</string>
     <string name="sec_wipe_wallet">Borrar billetera</string>
     <string name="sec_wipe_wallet_sub">Eliminar todos los datos de la billetera de este dispositivo</string>
@@ -479,11 +486,21 @@
     <string name="did_login">Inicio de sesión Digi-ID</string>
     <string name="did_auth_title">Autenticación Digi-ID</string>
     <string name="did_auth_subtitle">Autentícate para iniciar sesión en %1$s</string>
+    <string name="hub_sign_title">Firmar publicación del Hub</string>
+    <string name="hub_sign_subtitle">Autentícate para firmar esta publicación con tu identidad</string>
+    <string name="hub_tip_auth_title">Enviar propina del Hub</string>
+    <string name="hub_tip_auth_subtitle">Autentícate para enviar esta propina desde tu saldo de propinas de DigiScope</string>
     <string name="did_requesting">solicita autenticación Digi-ID</string>
     <string name="did_warning">Advertencia</string>
     <string name="did_insecure">Conexión insegura</string>
     <string name="did_insecure_body">Este sitio usa HTTP, no HTTPS. Tu autenticación podría ser interceptada.</string>
     <string name="did_callback_url">URL de retorno</string>
+    <string name="did_identity_title">¿Qué inicio de sesión conoce este sitio?</string>
+    <string name="did_identity_hint">¿Restauraste esta billetera? Elige la identidad que usabas antes en este sitio. Cuando un inicio de sesión funcione, la billetera lo recordará.</string>
+    <string name="did_identity_per_site">Clave propia para este sitio (app original de DigiByte)</string>
+    <string name="did_identity_shared">Clave compartida para todos los sitios (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Es el mismo en todos los sitios, así que los sitios pueden vincular tus inicios de sesión. Elígelo solo si este sitio te conocía con él.</string>
+    <string name="did_identity_address">Dirección: %1$s</string>
     <string name="did_approve">Aprobar</string>
     <string name="did_deny">Denegar</string>
     <string name="did_success">Autenticación correcta</string>
@@ -500,7 +517,7 @@
     <string name="ni_state_synced">Sincronizado</string>
     <string name="ni_state_error">Error</string>
     <string name="ni_caught_up">Al día</string>
-    <string name="ni_tor_disabled">Desactivado — conectando directamente</string>
+    <string name="ni_tor_disabled">Desactivado: conectando directamente</string>
     <string name="ni_tor_starting">Iniciando…</string>
     <string name="ni_tor_connecting">Conectando a la red Tor…</string>
     <string name="ni_tor_connected">Conectado por el puerto %1$d</string>
@@ -508,7 +525,7 @@
     <string name="ni_node_serving">✓ Sirviendo filtros compactos</string>
     <string name="ni_node_connecting">Conectando…</string>
     <string name="ni_node_unreachable">⚠ No accesible / no sirve filtros</string>
-    <string name="sec_locked_countdown">Bloqueado — inténtalo de nuevo en %1$s</string>
+    <string name="sec_locked_countdown">Bloqueado: inténtalo de nuevo en %1$s</string>
     <string name="sec_autolock_1m">1 minuto</string>
     <string name="sec_autolock_5m">5 minutos</string>
     <string name="sec_autolock_15m">15 minutos</string>
@@ -519,38 +536,40 @@
     <string name="sec_biometric_required">Se requiere autenticación biométrica</string>
     <string name="did_logged_in">Ahora has iniciado sesión en %1$s</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">Billetera jerárquica determinista creada a partir de una frase semilla. Puede generar muchas direcciones desde una sola copia de seguridad — como tener números de cuenta ilimitados a partir de una clave maestra.</string>
+    <string name="ab_type_desc">Billetera jerárquica determinista creada a partir de una frase semilla. Puede generar muchas direcciones desde una sola copia de seguridad: como tener números de cuenta ilimitados a partir de una clave maestra.</string>
     <string name="ab_path_desc">La ruta de derivación usada para generar tus direcciones. 84 = estándar BIP84, 20 = tipo de moneda DigiByte (SLIP44), 0 = primera cuenta. Esto garantiza que cualquier billetera compatible con BIP84 pueda restaurar tus direcciones desde la misma frase semilla. Compatible con la herramienta BIP39 de Ian Coleman.</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">Usa direcciones SegWit modernas que empiezan por dgb1. Son más eficientes y tienen comisiones más bajas que las antiguas direcciones Legacy que empiezan por D.</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">Mainnet es la red DigiByte real donde DGB tiene valor real. Testnet es para que los desarrolladores prueben sin dinero real.</string>
     <string name="ab_security_value">Autocustodia</string>
-    <string name="ab_security_desc">Tus claves nunca salen de este dispositivo. Ninguna empresa ni servidor guarda tus fondos — solo tú controlas tu billetera. Si pierdes tu frase semilla, nadie puede recuperarla por ti.</string>
+    <string name="ab_security_desc">Tus claves nunca salen de este dispositivo. Ninguna empresa ni servidor guarda tus fondos: solo tú controlas tu billetera. Si pierdes tu frase semilla, nadie puede recuperarla por ti.</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">Verificación de Pago Simplificada — se sincroniza directamente con la red P2P de DigiByte sin descargar toda la cadena de bloques. Usa filtros de bloque compactos BIP157/158: tu billetera descarga los filtros y los comprueba en el dispositivo, así las direcciones que posees nunca salen de tu teléfono.</string>
+    <string name="ab_sync_desc">Verificación de Pago Simplificada: se sincroniza directamente con la red P2P de DigiByte sin descargar toda la cadena de bloques. Usa filtros de bloque compactos BIP157/158: tu billetera descarga los filtros y los comprueba en el dispositivo, así las direcciones que posees nunca salen de tu teléfono.</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Este software se proporciona bajo la Licencia MIT.</string>
     <string name="ab_tagline">DigiByte es una cadena de bloques descentralizada y una moneda digital.</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Billetera independiente de Around The Block LLC. No es una app oficial de DigiByte.</string>
 
     <string name="tx_conf_short">%1$d conf.</string>
     <string name="tx_confirmed">Confirmada</string>
 
     <string name="cur_title">Moneda de visualización</string>
-    <string name="cur_note">Tu saldo de DigiByte es siempre el real — esto solo cambia con qué se compara.</string>
+    <string name="cur_note">Tu saldo de DigiByte es siempre el real: esto solo cambia con qué se compara.</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s: %2$s</string>
 
-    <string name="pass_advanced">Avanzado — añadir una frase de contraseña</string>
+    <string name="pass_advanced">Avanzado: añadir una frase de contraseña</string>
     <string name="pass_optional">Opcional</string>
-    <string name="pass_what">Una frase de contraseña es una palabra o frase adicional tuya. Con ella, tu frase de recuperación por sí sola ya no basta para abrir esta billetera — quien encuentre las palabras escritas no podrá gastar tus monedas.</string>
+    <string name="pass_what">Una frase de contraseña es una palabra o frase adicional tuya. Con ella, tu frase de recuperación por sí sola ya no basta para abrir esta billetera: quien encuentre las palabras escritas no podrá gastar tus monedas.</string>
     <string name="pass_warn">Anota la frase de contraseña, pero guárdala en un lugar SEPARADO de tu frase de recuperación: juntas en el mismo sitio vuelven a ser un único secreto y la frase de contraseña ya no protege nada. Si la pierdes, esas palabras por sí solas NO restaurarán tu billetera, y nadie podrá recuperarla por ti.</string>
     <string name="pass_scope">Esto protege tu copia escrita. En este teléfono tu PIN sigue siendo lo que mantiene bloqueada la billetera.</string>
     <string name="pass_enter">Frase de contraseña</string>
     <string name="pass_confirm">Confirma la frase de contraseña</string>
     <string name="pass_mismatch">Las frases de contraseña no coinciden</string>
-    <string name="pass_too_long">Demasiado larga — máximo %1$d caracteres</string>
+    <string name="pass_too_long">Demasiado larga: máximo %1$d caracteres</string>
     <string name="pass_set">Frase de contraseña establecida</string>
     <string name="pass_none">Sin frase de contraseña</string>
     <string name="pass_restore_label">Frase de contraseña (déjala en blanco si no usaste una)</string>
@@ -564,7 +583,7 @@
     <string name="rf_move_assets_body">Usa los DGB reservados arriba para enviar los activos a esta billetera. Las transferencias de activos son irreversibles.</string>
     <string name="rf_moving_assets">Moviendo activos…</string>
     <string name="rf_move_result">%1$d de %2$d activos movidos</string>
-    <string name="rf_move_failed">%1$s: no se movió — %2$s</string>
+    <string name="rf_move_failed">%1$s, no se movió: %2$s</string>
     <string name="pass_screen_title">¿Añadir una frase de contraseña?</string>
     <string name="pass_screen_subtitle">Opcional, y la mayoría debería omitirlo. Una frase de contraseña es una palabra o frase adicional tuya sin la cual tu frase de recuperación ya no puede abrir esta billetera.</string>
     <string name="pass_screen_continue_with">Continuar con frase de contraseña</string>
@@ -582,9 +601,10 @@
     <string name="send_fail_try_again">Reintentar</string>
     <string name="rf_splitting_for_assets">Preparando el traslado de %1$d DigiAssets: se dividen tus DGB para que cada uno pueda pagar su propia comisión de transferencia. Espera una confirmación, normalmente menos de un minuto.</string>
     <string name="rf_nothing_moved">No se movió nada</string>
-    <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red — esta cartera tiene %2$s.</string>
+    <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red: esta cartera tiene %2$s.</string>
     <string name="rf_dd_found">Se encontraron %1$s en DigiDollar</string>
     <string name="rf_dd_moved">%1$s en DigiDollar movidos a esta billetera</string>
+    <string name="rf_dd_sent_unrelayed">Se enviaron %1$s en DigiDollar, pero la red aún no lo ha confirmado. Guarda tu frase de recuperación anterior hasta que aparezca en esta billetera.</string>
     <string name="rf_dd_left_behind">%1$s en DigiDollar se quedaron: no se pudieron mover</string>
     <string name="rf_dd_unreachable">No se pudo comprobar DigiDollar; esta billetera podría tener algo</string>
     <string name="as_rules_checking">Comprobando las reglas de transferencia de este activo…</string>
@@ -615,7 +635,7 @@
     <string name="reconcile_spendable">Gastable</string>
     <string name="reconcile_wallet_spendable">Saldo gastable de la billetera</string>
     <string name="reconcile_matches_wallet">Coincide con el saldo gastable de la billetera.</string>
-    <string name="reconcile_does_not_match_wallet">No coincide con el saldo gastable de la billetera — ver abajo.</string>
+    <string name="reconcile_does_not_match_wallet">No coincide con el saldo gastable de la billetera: ver abajo.</string>
     <string name="reconcile_held_asset">Retenido para un DigiAsset</string>
     <string name="reconcile_held_unknown">Retenido: estado del activo desconocido</string>
     <string name="reconcile_proven_plain">DGB normal, gastable tras reiniciar</string>
@@ -631,7 +651,68 @@
     <string name="market_tor_notice_title">El Mercado no pasa por Tor</string>
     <string name="market_tor_notice_body">El Mercado no pasa por Tor; el sitio verá tu dirección IP.</string>
     <string name="market_tor_notice_continue">Continuar</string>
-    <string name="move_title">DigiByte Wallet ahora es DigiByte Mobile</string>
-    <string name="move_body">Esta app ya no recibirá actualizaciones. Instala DigiByte Mobile desde Google Play, elige Recuperar billetera existente e introduce la frase de recuperación de esta billetera: nada se mueve en la cadena. Conserva esta app hasta que tu saldo aparezca en la nueva.</string>
-    <string name="move_how">Cómo cambiar</string>
+    <string name="restore_pass_toggle">Usé una frase de contraseña</string>
+    <string name="restore_pass_body">Solo si añadiste una al crear esta billetera. Una frase de contraseña incorrecta abre otra billetera, vacía, sin ningún aviso de error.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Introduce las %1$d palabras.</string>
+    <string name="restore_err_invalid_words">Palabra(s) no válida(s): %1$s</string>
+    <string name="restore_err_checksum">Esta frase de recuperación no es válida. Revisa cada palabra y su orden.</string>
+    <string name="restore_scan_title">Restaurar de forma privada</string>
+    <string name="restore_scan_body">Cuando continúes, este teléfono encontrará por sí mismo las transacciones de tu billetera: direcciones nativas (dgb1q…), legacy (D…), Taproot y DigiDollar, sin enviar tus direcciones a nadie.</string>
+    <string name="restore_other_title">¿Frase de otra app de billetera?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor y algunas billeteras antiguas guardan monedas en formatos de dirección que esta billetera no usa, así que la sincronización no puede verlas. Una comprobación puede encontrarlas, pero envía las direcciones que derivan de tu frase a DigiScope (api.digiscope.me), que informa de los fondos que tengan. No es necesaria para una frase de HoldFast Wallet o de la antigua app DigiByte. También puedes ejecutarla más tarde desde Ajustes → Recuperar fondos de otra billetera.</string>
+    <string name="restore_other_check">Comprobar otros formatos</string>
+    <string name="restore_scan_deriving">Derivando direcciones…</string>
+    <string name="restore_scan_duration">Esto puede tardar entre 30 y 90 segundos según el nodo.</string>
+    <string name="restore_scan_failed">Falló el escaneo</string>
+    <string name="restore_scan_retry">Reintentar la comprobación</string>
+    <string name="restore_found_title">Fondos encontrados</string>
+    <string name="restore_unreachable_title">No se pudo conectar con DigiScope</string>
+    <string name="restore_none_title">Aún no se detectaron fondos</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB en %2$d ruta</item>
+        <item quantity="many">%1$s DGB en %2$d rutas</item>
+        <item quantity="other">%1$s DGB en %2$d rutas</item>
+    </plurals>
+    <string name="restore_unreachable_body">No se pudo realizar la comprobación. La sincronización seguirá encontrando los formatos propios de esta billetera cuando continúes; reinténtalo, o usa más tarde Ajustes → Recuperar fondos de otra billetera para los formatos de otras apps.</string>
+    <string name="restore_none_body">No hay nada sin gastar en los formatos comprobados. La sincronización seguirá encontrando las transacciones propias de esta billetera cuando continúes.</string>
+    <string name="restore_nonnative_note">%1$s DGB están en el formato de dirección de otra app. Tras la restauración irás a Recuperar fondos de otra billetera para moverlos a esta billetera: no se mueve nada hasta que lo confirmes allí.</string>
+    <string name="restore_pass_nothing_found">No se encontró nada con la frase de contraseña que introdujiste. Una frase de contraseña no tiene suma de verificación: una incorrecta abre otra billetera, vacía, sin ningún error. Revisa si tiene un error de escritura o, si no la configuraste al crear la billetera, vuelve atrás y cierra el campo de la frase de contraseña.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · %2$d dirección comprobada</item>
+        <item quantity="many">%1$s · %2$d direcciones comprobadas</item>
+        <item quantity="other">%1$s · %2$d direcciones comprobadas</item>
+    </plurals>
+    <string name="restore_date_title">¿Cuándo creaste esta billetera?</string>
+    <string name="restore_date_body">Así podemos omitir el escaneo innecesario de la blockchain y sincronizar más rápido.</string>
+    <string name="restore_date_unsure">No lo recuerdo</string>
+    <string name="restore_date_unsure_sub">Escaneo completo de la blockchain (el más lento: úsalo si no estás seguro)</string>
+    <string name="restore_date_warning">No se detectarán las transacciones anteriores al año seleccionado. Si tu billetera puede tener un historial más antiguo, elige un año anterior, o «No lo recuerdo» para una cobertura completa (más lento).</string>
+    <string name="restore_date_start">Iniciar recuperación</string>
+    <string name="restore_date_restoring">Restaurando billetera…</string>
+    <string name="restore_date_onwards">Desde ene. %1$d</string>
+    <string name="restore_date_range">ene. %1$d – dic. %1$d</string>
+    <string name="restore_date_genesis">DigiByte se lanzó en enero de 2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, el mínimo de la red. La comisión exacta de esta transacción se muestra antes de que confirmes.</string>
+    <string name="send_preparing">Preparando…</string>
+    <string name="send_fee_raised">Aumentada desde los %1$s DGB que introdujiste: esta es la comisión que paga esta transacción.</string>
+    <string name="send_err_below_dust">Este importe está por debajo del pago más pequeño que la red retransmite a esta dirección (%1$s DGB). Envía al menos esa cantidad.</string>
+    <string name="send_not_relayed_title">Enviada, aún sin retransmitir</string>
+    <string name="send_not_relayed_body">Tu billetera difundió esta transacción, pero ningún nodo la ha recibido todavía, así que aún no se sabe si llegó a la red. Aparece como pendiente en tu actividad. Revisa tu actividad antes de volver a enviarla.</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">No se pudo leer la frase de contraseña</string>
+    <string name="seedview_pass_unreadable_body">La frase de contraseña de esta billetera no se pudo leer en este momento. Es posible que tus palabras de recuperación por sí solas no restauren esta billetera, así que no se muestran hasta que la frase de contraseña pueda mostrarse con ellas. Inténtalo de nuevo.</string>
+    <string name="seedview_pass_retry">Reintentar</string>
+    <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Ahora no se puede comprobar tu PIN</string>
+    <string name="pinstore_body">El almacén seguro de claves del teléfono no se abrió, así que la billetera sigue bloqueada. No se ha borrado nada. Cierra la app y vuelve a abrirla. Si sigue pasando, reinicia el teléfono; tu frase de recuperación sigue restaurando la billetera en cualquier dispositivo.</string>
+    <string name="pinstore_close">Cerrar la app</string>
 </resources>

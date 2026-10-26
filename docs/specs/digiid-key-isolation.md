@@ -48,7 +48,7 @@ account (sites bind accounts to the address they saw at signup; api.digiscope.me
 
 | Case | Key |
 |---|---|
-| DigiScope domains (`digiscope.me`, `api.digiscope.me`, `*.digiscope.me`) | **Legacy `m/0'/0/0`** — the Hub identity. `DigiScopeClient.quickLogin` and Hub content signing are untouched; the wallet's own backend account keeps its address. |
+| DigiScope hosts — exactly `digiscope.me` and `api.digiscope.me` (`IdentityKeyPolicy.DIGISCOPE_HOSTS`; no suffix match, so no other `*.digiscope.me` name is included) | **Legacy `m/0'/0/0`** — the Hub identity. `DigiScopeClient.quickLogin` and Hub content signing are untouched; the wallet's own backend account keeps its address. |
 | Domain has a **successful legacy login in Digi-ID history** | **Legacy** — grandfathered so existing site accounts keep working. History is never pruned in production (`pruneOlderThan` has no production caller), so the grandfather list is stable. |
 | Everything else (any new domain) | **Per-site SLIP-0013** — unlinkable across sites. |
 

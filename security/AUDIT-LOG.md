@@ -3,7 +3,7 @@
 Machine-read by `scripts/check-security-cycle.sh`. **Keep the marker line's format exactly** —
 the gate parses it, and a reformatted line reads as "never audited".
 
-<!-- LAST_AUDITED_VERSION_CODE: 40086 -->
+<!-- LAST_AUDITED_VERSION_CODE: 40100 -->
 
 The cycle runs **every 10 releases**. The gate fails a release build when the current
 `versionCode` is 10 or more beyond the marker above.
@@ -428,7 +428,7 @@ CameraX CBC usage — it entered with a dependency, not with our code, which is 
 comparison shows: across 52 releases the score moved two points and neither point came from
 wallet logic. The new SECURE is the `assets.digistamp.co` domain pin added in v4.0.51.
 
-Reports for both were produced by MobSF (raw dumps not kept in-repo; scorecard: `security/reports/mobsf-scorecard-v4.0.58.json`). MobSF reports are produced by the MobSF CI workflow.
+Reports for both are in `security/reports/` (`mobsf-report-v4.0.58.json`, scorecard alongside).
 
 ---
 
@@ -609,7 +609,8 @@ ROADMAP Phase 2); the mnemonic as an immutable String outside the load/restore/s
 
 Scanned the **shipped GitHub release asset** `digibyte-wallet-v4.0.76.apk`
 (SHA256 `457d451bc63e34a2213fee8aee802dab9d91d30991cefd56fa3829f13d349d7d`, 75,002,954 bytes) with
-MobSF v4.5.2 static analyzer. Scorecard: `reports/mobsf-scorecard-v4.0.76.json` (raw MobSF JSON dumps are produced by the MobSF CI workflow and not kept in-repo).
+MobSF v4.5.2 static analyzer. Reports: `reports/mobsf-report-v4.0.76.json`,
+`reports/mobsf-scorecard-v4.0.76.json`.
 
 **Score 66/100 — identical finding set to the v4.0.58 baseline. Zero new signal.**
 Set-diff of scorecard titles v4.0.58 → v4.0.76: nothing added, nothing removed. Against v3.6.6 (68)
@@ -787,3 +788,41 @@ Verified for v4.0.86:
 ### Still owed
 
 MobSF re-scan and the R8 keep-rule pass on the shipped v4.0.86 release asset.
+
+## Cycle at v4.1.0 (40100) — 2026-10-15
+
+### Automated half (`scripts/security-cycle.sh`, source only)
+
+- Dependencies: OSV over 227 packages of the mainnetPlay release classpath, no known vulnerabilities.
+- Native hardening, embedded secrets and manifest posture need the release APK; they are run against
+  the shipped v4.1.0 asset and recorded under "Still owed" until then.
+
+### Manual half: changed surface since v4.0.86
+
+The changed surface since 40086 was reviewed package by package in a private security train (the
+2026-09 independent review's remaining items, the 2026-10 bug-bounty waves and internal findings).
+Every package carried a test that reproduces its defect on the old code (a comparison arm) and passes
+on the fix, an independent review, and an automated commit review. Areas covered, at the level of what
+the wallet now guarantees:
+
+- **Sending:** the fee shown is the fee of the transaction signed; the signer accepts only the approved
+  recipient, amount and change; a payment is never smaller than approved; a send too large for one
+  transaction is refused; a send reads as sent only once a peer accepts it.
+- **Chain and confirmations:** a receive in a block the wallet cannot vouch for waits unconfirmed until
+  the next checkpoint; native readers take copies under the wallet lock; bounded memory for other
+  parties' unconfirmed transactions; peer dial and penalty bookkeeping.
+- **Recovery and keys:** recovery pays only addresses the recovered phrase derives; the database key
+  survives a change in how the seed is protected; PIN lockout runs on a clock the user cannot move.
+- **Screens and identity:** send confirmations and the PIN dialog are protected from capture and
+  overlays; Digi-ID quick login and Hub signing are strictly scoped; Hub logout ends the server session.
+- **Network and input:** response size limits on every client, one pin set, strict base58, visible-text
+  asset names, the Market web view stays on its site.
+- **Code scanning:** the open alerts were fixed or dismissed with a written reason.
+
+Verified at the release commit (1eb9955c, landed as bc415d109): host KATs 148/148 (64- and 32-bit,
+sanitizers), unit tests core 1768 x2 and app 722 x3, JNI registry current, debug and play builds.
+
+### Still owed
+
+- `scripts/security-cycle.sh` against the shipped v4.1.0 APK (native hardening, secrets, manifest).
+- MobSF re-scan and the R8 keep-rule pass on the shipped v4.1.0 asset.

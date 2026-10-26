@@ -58,8 +58,11 @@ add_library(
         src/main/jni/digibytewallet-core/BRKey.h
         src/main/jni/digibytewallet-core/BRMerkleBlock.c
         src/main/jni/digibytewallet-core/BRMerkleBlock.h
-        src/main/jni/digibytewallet-core/BRPaymentProtocol.c
-        src/main/jni/digibytewallet-core/BRPaymentProtocol.h
+        # BRPaymentProtocol.c/.h (BIP70/BIP75 messages) are deliberately NOT built: nothing in the app calls
+        # them -- no core or bridge source, no JNI function, no Kotlin declaration. Code with no caller is kept
+        # out of the library rather than maintained in it. The file stays in the core tree (upstream test.c and
+        # the iOS module map name it). native/src/test/host/payment_protocol_unbuilt_kat fails the sweep if it
+        # is listed here again, or if a compiled source starts calling it.
         src/main/jni/digibytewallet-core/BRPeer.c
         src/main/jni/digibytewallet-core/BRPeer.h
         src/main/jni/digibytewallet-core/BRPeerManager.c
@@ -122,6 +125,7 @@ add_library(
         src/main/jni/bridge/jni_asset.c
         src/main/jni/bridge/jni_wallet_sign.c
         src/main/jni/bridge/slip13.c
+        src/main/jni/bridge/coin_reservation.c
         src/main/jni/bridge/jni_transaction_persist.c
         src/main/jni/bridge/jni_derive.c
         src/main/jni/bridge/jni_asset_send.c
@@ -129,13 +133,17 @@ add_library(
         src/main/jni/bridge/jni_publish_outcome.c
         src/main/jni/bridge/jni_recreate_sequence.c
         src/main/jni/bridge/jni_peer_penalty_persist.c
+        src/main/jni/bridge/jni_class_paths.h
+        src/main/jni/bridge/jni_registry_gen.h
+        src/main/jni/bridge/jni_registry.c
 )
 
 # ── Test-only JNI, Debug builds ONLY ────────────────────────────────────────
-# jni_test.c exports Java_io_digibyte_native_1core_PeerTest_testPeerDiscovery, whose
-# only caller is native/src/androidTest/.../PeerTest.kt. That Java class is not in a
-# shipped APK, so in a release build the symbol was an exported entry point nothing
-# could reach — test code in a production binary. Found in the v4.0.58 security cycle
+# jni_test.c implements PeerTest.testPeerDiscovery (registered from JNI_OnLoad via
+# DGB_JNI_WITH_PEER_TEST, see jni_registry.c), whose only caller is
+# native/src/androidTest/.../PeerTest.kt. That Java class is not in a shipped APK, so in
+# a release build it was an exported entry point nothing could reach — test code in a
+# production binary. Found in the v4.0.58 security cycle
 # (finding 5). It reads compiled-in constants only and touches no wallet state, so this
 # is hygiene rather than a vulnerability, but shipping it buys nothing.
 #
@@ -145,10 +153,13 @@ add_library(
 #
 # Verify BOTH directions after changing this — a guard that silently excludes the file
 # from every build looks identical to one that works:
-#   debug   .so MUST export testPeerDiscovery (or PeerTest dies on UnsatisfiedLinkError)
+#   debug   .so MUST contain the string "testPeerDiscovery" (or PeerTest dies on
+#           UnsatisfiedLinkError)
 #   release .so MUST NOT
+# Natives are bound with RegisterNatives, so `nm -D` shows only JNI_OnLoad either way.
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_sources(core-lib PRIVATE src/main/jni/bridge/jni_test.c)
+    target_compile_definitions(core-lib PRIVATE DGB_JNI_WITH_PEER_TEST=1)
     message(STATUS "core-lib: including test-only jni_test.c (CMAKE_BUILD_TYPE=Debug)")
 else()
     message(STATUS "core-lib: EXCLUDING test-only jni_test.c (CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})")

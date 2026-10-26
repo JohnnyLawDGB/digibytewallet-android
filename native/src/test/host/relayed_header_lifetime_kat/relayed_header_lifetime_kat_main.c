@@ -146,7 +146,16 @@ int main(void)
     BRWallet *wallet = BRWalletNew(NULL, 0, mpk);
     if (! wallet) { printf("relayed_header_lifetime_kat: FAIL (setup: no wallet)\n"); return 1; }
 
-    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, wallet, 0, NULL, 0, NULL, 0);
+    // The relayed headers sit on a hand-built tip with no history under it, so none can be judged, and a chain
+    // whose tip has no difficulty verdict the wallet can vouch for is not persisted (judged_confirmation_kat). This
+    // suite needs the save dispatch to run on each header, so it runs on mainnet parameters that declare no
+    // checkpoint context, where that rule does not apply; what it proves (the header's lifetime across the unlock)
+    // is the same on either.
+    static BRChainParams params;
+    params = BRMainNetParams;
+    params.checkpointContexts = NULL;
+    params.checkpointContextsCount = 0;
+    BRPeerManager *m = BRPeerManagerNew(&params, wallet, 0, NULL, 0, NULL, 0);
     if (! m) { printf("relayed_header_lifetime_kat: FAIL (setup: no manager)\n"); return 1; }
     m->syncMode = BR_SYNC_MODE_COMPACT_FILTERS_ONLY;
     BRPeerManagerSetCallbacks(m, NULL, NULL, NULL, on_tx_status, on_save_blocks, NULL, NULL, NULL);

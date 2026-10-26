@@ -38,6 +38,7 @@
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"
 #include "digidollar_transfer_layout.h"
+#include "digidollar_fee_keys.h"   /* each fee input's key, from its own derivation (dd_fee_profiles_kat) */
 
 #define LOG_TAG "DGB-Derive"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -139,8 +140,8 @@ static int pubkey_to_address(BRKey *key, int addressFormat, char *out, size_t ou
  *
  * Caller should zero the returned ByteArray via fill(0) once done scanning.
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
+jbyteArray JNICALL
+NativeBridge_mnemonicToSeed(
     JNIEnv *env, jobject thiz,
     jbyteArray phraseBytes,
     jbyteArray passphrase)
@@ -176,6 +177,14 @@ Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
         }
         if (passLen > 0) (*env)->GetByteArrayRegion(env, passphrase, 0, passLen, (jbyte *)passCopy);
         passCopy[passLen] = '\0';
+#ifndef BIP39_NUL_UNFIXED
+        /* As in jni_wallet.c's passphrase_copy: an embedded NUL is refused, never truncated (4.1.2 row 25). */
+        if (passLen > 0 && memchr(passCopy, 0, (size_t)passLen) != NULL) {
+            secure_zero(phraseCopy, sizeof(phraseCopy));
+            secure_zero(passCopy, sizeof(passCopy));
+            return NULL;
+        }
+#endif
     }
 
     uint8_t seed[64];
@@ -203,15 +212,15 @@ Java_io_digibyte_core_bridge_NativeBridge_mnemonicToSeed(
  *       prefixPath: IntArray,        // [44|HARD, 20|HARD, 0|HARD] for BIP44 DGB
  *       gapExternal: Int,            // count of 0/i addresses to return
  *       gapInternal: Int,            // count of 1/i addresses to return
- *       addressFormat: Int           // 0=P2PKH, 1=P2WPKH, 2=P2SH-P2WPKH
+ *       addressFormat: Int           // 0=P2PKH, 1=P2WPKH, 2=P2SH-P2WPKH, 3=P2TR (BIP86)
  *   ): Array<String>
  *
  * Returns external[0..gapExternal-1] followed by internal[0..gapInternal-1].
  * Empty strings mark positions where derivation failed (should be rare —
  * the pubkey curve can reject an index, advance and skip in that case).
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
+jobjectArray JNICALL
+NativeBridge_deriveAddresses(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -223,7 +232,9 @@ Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
     (void)thiz;
     if (!seedBytes || !hmacKey || !prefixPath) return NULL;
     if (gapExternal < 0 || gapInternal < 0) return NULL;
-    if (addressFormat < 0 || addressFormat > 2) return NULL;
+    /* 3 (P2TR) since 4.1.2 row 34: Recover funds scans m/86'/20'/0', the taproot addresses Receive hands
+     * out; pubkey_to_address writes the BIP86 key-path address from the public key alone. */
+    if (addressFormat < 0 || addressFormat > 3) return NULL;
 
     const jsize seedLen = (*env)->GetArrayLength(env, seedBytes);
     jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);
@@ -315,8 +326,8 @@ Java_io_digibyte_core_bridge_NativeBridge_deriveAddresses(
  *       fullPath: IntArray           // e.g. [44|HARD, 20|HARD, 0|HARD, 0, 5]
  *   ): String?
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_derivePrivateKeyWIF(
+jstring JNICALL
+NativeBridge_derivePrivateKeyWIF(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -415,8 +426,8 @@ Java_io_digibyte_core_bridge_NativeBridge_derivePrivateKeyWIF(
  *       feePerKb: Long
  *   ): String?
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
+jstring JNICALL
+NativeBridge_buildAndSignLegacySweep(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -664,8 +675,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignLegacySweep(
  * Kotlin signature:
  *   external fun isRawTransactionSigned(rawTxHex: String): Boolean
  */
-JNIEXPORT jboolean JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
+jboolean JNICALL
+NativeBridge_isRawTransactionSigned(
     JNIEnv *env, jobject thiz, jstring rawTxHex)
 {
     (void)thiz;
@@ -731,8 +742,8 @@ Java_io_digibyte_core_bridge_NativeBridge_isRawTransactionSigned(
  *
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignAssetTransfer(
+jstring JNICALL
+NativeBridge_buildAndSignForeignAssetTransfer(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jstring hmacKey,
@@ -1004,22 +1015,24 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignAssetTransfer(
  * the foreign seed's taproot chain, and leaving dollars behind is the thing recovery exists to
  * avoid.
  *
- * ## Two derivation prefixes, on purpose
+ * ## A derivation per fee input, on purpose
  *
  * The dollars sit at m/86'/20'/0'; the DGB paying their fee sits wherever the scan found it —
- * BIP84, BIP44, the bread path. So the DD inputs and the fee inputs carry separate prefixes and
- * separate HMAC keys. Assuming one prefix for both would sign the fee inputs with the wrong keys
- * and produce a transaction no peer accepts.
+ * BIP84, BIP44, the bread path — and the fee one transfer needs may only be covered by coins found
+ * under two of them. So the DD inputs carry the m/86' prefix, and EVERY fee input carries its own
+ * HMAC key and prefix (feeHmacKeys[i], feePrefixPaths[i]) besides its chain and index; the keys are
+ * derived in digidollar_fee_keys.h. One derivation for all of them would sign a coin of another
+ * profile with the wrong key and produce a transaction that is not signed in full.
  *
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
+jstring JNICALL
+NativeBridge_buildAndSignForeignDigiDollarTransfer(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jobjectArray ddTxidsHex, jintArray ddVouts, jobjectArray ddScriptsHex,
     jintArray ddChains, jintArray ddIndices,
-    jstring feeHmacKey, jintArray feePrefixPath,
+    jobjectArray feeHmacKeys, jobjectArray feePrefixPaths,
     jobjectArray feeTxidsHex, jintArray feeVouts, jlongArray feeAmounts,
     jobjectArray feeScriptsHex, jintArray feeChains, jintArray feeIndices,
     jstring recipientKeyHex,
@@ -1028,13 +1041,22 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
 {
     (void)thiz;
     if (!seedBytes || !ddTxidsHex || !ddVouts || !ddScriptsHex || !ddChains || !ddIndices ||
-        !feeHmacKey || !feePrefixPath || !feeTxidsHex || !feeVouts || !feeAmounts ||
+        !feeHmacKeys || !feePrefixPaths || !feeTxidsHex || !feeVouts || !feeAmounts ||
         !feeScriptsHex || !feeChains || !feeIndices || !recipientKeyHex) return NULL;
 
     const jsize ddCount  = (*env)->GetArrayLength(env, ddTxidsHex);
     const jsize feeCount = (*env)->GetArrayLength(env, feeTxidsHex);
     if (ddCount <= 0 || feeCount <= 0) {
         LOGW("foreignDD: need at least one DD input and one fee input");
+        return NULL;
+    }
+    /* Each fee input carries its own derivation: the profile the scan found its coin under. */
+    if ((*env)->GetArrayLength(env, feeHmacKeys) != feeCount ||
+        (*env)->GetArrayLength(env, feePrefixPaths) != feeCount ||
+        (*env)->GetArrayLength(env, feeVouts) != feeCount || (*env)->GetArrayLength(env, feeAmounts) != feeCount ||
+        (*env)->GetArrayLength(env, feeScriptsHex) != feeCount ||
+        (*env)->GetArrayLength(env, feeChains) != feeCount || (*env)->GetArrayLength(env, feeIndices) != feeCount) {
+        LOGW("foreignDD: the fee inputs' arrays disagree on how many there are");
         return NULL;
     }
     if (!dd_cents_in_range((int64_t)cents)) {
@@ -1125,50 +1147,79 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
     (*env)->ReleaseIntArrayElements(env, ddChains, ddC, JNI_ABORT);
     (*env)->ReleaseIntArrayElements(env, ddIndices, ddI, JNI_ABORT);
 
-    const char *feeHmac = (*env)->GetStringUTFChars(env, feeHmacKey, NULL);
-    const jsize fpLen = (*env)->GetArrayLength(env, feePrefixPath);
-    jint *fp = (*env)->GetIntArrayElements(env, feePrefixPath, NULL);
     jint *fV = (*env)->GetIntArrayElements(env, feeVouts, NULL);
     jlong *fA = (*env)->GetLongArrayElements(env, feeAmounts, NULL);
     jint *fC = (*env)->GetIntArrayElements(env, feeChains, NULL);
     jint *fI = (*env)->GetIntArrayElements(env, feeIndices, NULL);
-    uint32_t *fullPath = (uint32_t *)calloc((size_t)fpLen + 2, sizeof(uint32_t));
-    if (!fullPath) ok = 0;
+    /* Each fee input's derivation, held here as plain values: its HMAC key (copied), its prefix, and the
+     * chain and index of its address. The keys are derived from these in one place, dd_fee_input_keys. */
+    DdFeeInputPath *feePaths = (DdFeeInputPath *)calloc((size_t)feeCount, sizeof(DdFeeInputPath));
+    char (*feeHmacs)[DD_FEE_HMAC_MAX] = calloc((size_t)feeCount, DD_FEE_HMAC_MAX);
+    if (!feePaths || !feeHmacs || !fV || !fA || !fC || !fI) ok = 0;
 
     for (jsize i = 0; ok && i < feeCount; i++) {
         jstring tj = (jstring)(*env)->GetObjectArrayElement(env, feeTxidsHex, i);
         jstring sj = (jstring)(*env)->GetObjectArrayElement(env, feeScriptsHex, i);
-        if (!tj || !sj) { ok = 0; break; }
-        const char *ts = (*env)->GetStringUTFChars(env, tj, NULL);
-        const char *ss = (*env)->GetStringUTFChars(env, sj, NULL);
+        jstring hj = (jstring)(*env)->GetObjectArrayElement(env, feeHmacKeys, i);
+        jintArray pj = (jintArray)(*env)->GetObjectArrayElement(env, feePrefixPaths, i);
+        int got = tj && sj && hj && pj;
         uint8_t txid[32], spk[42];
-        size_t tl = ts ? hex_to_bytes(ts, txid, sizeof(txid)) : 0;
-        size_t sl = ss ? hex_to_bytes(ss, spk, sizeof(spk)) : 0;
-        if (ts) (*env)->ReleaseStringUTFChars(env, tj, ts);
-        if (ss) (*env)->ReleaseStringUTFChars(env, sj, ss);
-        (*env)->DeleteLocalRef(env, tj); (*env)->DeleteLocalRef(env, sj);
-        if (tl != 32 || sl == 0 || fA[i] <= 0) { LOGW("foreignDD: bad fee input at %d", (int)i); ok = 0; break; }
+        size_t tl = 0, sl = 0;
+        if (got) {
+            const char *ts = (*env)->GetStringUTFChars(env, tj, NULL);
+            const char *ss = (*env)->GetStringUTFChars(env, sj, NULL);
+            const char *hs = (*env)->GetStringUTFChars(env, hj, NULL);
+            tl = ts ? hex_to_bytes(ts, txid, sizeof(txid)) : 0;
+            sl = ss ? hex_to_bytes(ss, spk, sizeof(spk)) : 0;
+            if (hs && strlen(hs) > 0 && strlen(hs) < DD_FEE_HMAC_MAX) {
+                memcpy(feeHmacs[i], hs, strlen(hs) + 1);
+                feePaths[i].hmacKey = feeHmacs[i];
+            }
+            if (ts) (*env)->ReleaseStringUTFChars(env, tj, ts);
+            if (ss) (*env)->ReleaseStringUTFChars(env, sj, ss);
+            if (hs) (*env)->ReleaseStringUTFChars(env, hj, hs);
+            const jsize pl = (*env)->GetArrayLength(env, pj);
+            if (pl >= 0 && pl <= DD_FEE_PATH_MAX) {
+                jint prefix[DD_FEE_PATH_MAX];
+                (*env)->GetIntArrayRegion(env, pj, 0, pl, prefix);
+                for (jsize p = 0; p < pl; p++) feePaths[i].prefix[p] = (uint32_t)prefix[p];
+                feePaths[i].prefixLen = (size_t)pl;
+            } else {
+                feePaths[i].prefixLen = DD_FEE_PATH_MAX + 1;   /* refused by dd_fee_input_keys */
+            }
+            feePaths[i].chain = (uint32_t)fC[i];
+            feePaths[i].index = (uint32_t)fI[i];
+        }
+        if (tj) (*env)->DeleteLocalRef(env, tj);
+        if (sj) (*env)->DeleteLocalRef(env, sj);
+        if (hj) (*env)->DeleteLocalRef(env, hj);
+        if (pj) (*env)->DeleteLocalRef(env, pj);
+        if (!got || tl != 32 || sl == 0 || fA[i] <= 0 || !feePaths[i].hmacKey) {
+            LOGW("foreignDD: bad fee input at %d", (int)i); ok = 0; break;
+        }
 
         UInt256 h; for (int b = 0; b < 32; b++) h.u8[b] = txid[31 - b];
-        for (jsize p = 0; p < fpLen; p++) fullPath[p] = (uint32_t)fp[p];
-        fullPath[fpLen] = (uint32_t)fC[i]; fullPath[fpLen + 1] = (uint32_t)fI[i];
-        BRBIP32PrivKeyArrayPath(&keys[ddCount + i], seed.bytes, seed.len, feeHmac,
-                                fullPath, (size_t)fpLen + 2);
         BRTransactionAddInput(tx, h, (uint32_t)fV[i], (uint64_t)fA[i], spk, sl,
                               NULL, 0, NULL, 0, TXIN_SEQUENCE);
         totalIn += (uint64_t)fA[i];
     }
 
-    if (fullPath) { secure_zero(fullPath, ((size_t)fpLen + 2) * sizeof(uint32_t)); free(fullPath); }
-    (*env)->ReleaseIntArrayElements(env, feePrefixPath, fp, JNI_ABORT);
-    (*env)->ReleaseIntArrayElements(env, feeVouts, fV, JNI_ABORT);
-    (*env)->ReleaseLongArrayElements(env, feeAmounts, fA, JNI_ABORT);
-    (*env)->ReleaseIntArrayElements(env, feeChains, fC, JNI_ABORT);
-    (*env)->ReleaseIntArrayElements(env, feeIndices, fI, JNI_ABORT);
-    (*env)->ReleaseStringUTFChars(env, feeHmacKey, feeHmac);
+    /* Every fee input's key, each from its own derivation, so coins found under two profiles can pay
+     * one transfer's fee (dd_fee_profiles_kat signs such a transfer on the host). */
+    if (ok && !dd_fee_input_keys(&keys[ddCount], feePaths, (size_t)feeCount, seed.bytes, seed.len)) {
+        LOGW("foreignDD: a fee input's derivation cannot be used");
+        ok = 0;
+    }
 
-    /* The DD fee floor is a consensus rule, not an estimate: DigiByte Core's own builder uses the
-     * same 0.1 DGB minimum. Below it the transfer will not be accepted however well-formed. */
+    if (feePaths) { secure_zero(feePaths, (size_t)feeCount * sizeof(DdFeeInputPath)); free(feePaths); }
+    free(feeHmacs);
+    if (fV) (*env)->ReleaseIntArrayElements(env, feeVouts, fV, JNI_ABORT);
+    if (fA) (*env)->ReleaseLongArrayElements(env, feeAmounts, fA, JNI_ABORT);
+    if (fC) (*env)->ReleaseIntArrayElements(env, feeChains, fC, JNI_ABORT);
+    if (fI) (*env)->ReleaseIntArrayElements(env, feeIndices, fI, JNI_ABORT);
+
+    /* The 0.1 DGB DigiDollar fee floor is this wallet's policy, copied from DigiByte Core's own
+     * DigiDollar builder (it is not a consensus rule): below it the transfer is refused here. */
     if (ok && totalOut > totalIn) {
         LOGW("foreignDD: change %llu exceeds fee inputs %llu",
              (unsigned long long)totalOut, (unsigned long long)totalIn);
@@ -1226,8 +1277,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignForeignDigiDollarTransfer(
  *
  * External chain first (chain 0), then internal (chain 1), matching deriveAddresses.
  */
-JNIEXPORT jobjectArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_deriveDigiDollarAddresses(
+jobjectArray JNICALL
+NativeBridge_deriveDigiDollarAddresses(
     JNIEnv *env, jobject thiz,
     jbyteArray seedBytes,
     jint gapExternal,

@@ -101,7 +101,7 @@ static BRMerkleBlock *mkBlock(uint32_t h, UInt256 prev, uint8_t tag)
 // CF_START with anchor g_anchor (the honest header at CF_START - 1); the ledger has scanned
 // [CF_START .. T]. g_best[h - LOW] is the block the best chain holds at h; refHeader(h) is the
 // honest filter header at h on it.
-#define CF_START 24317280u           // above the top compiled CF checkpoint (24,250,000)
+#define CF_START 24467280u           // above the top compiled CF checkpoint (24,400,000); move it with each CF refresh
 #define LOW      (CF_START - 20u)
 #define MAXH     160
 typedef struct {

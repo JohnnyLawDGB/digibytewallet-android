@@ -9,9 +9,10 @@
 # Plus the structural invariants the C core relies on (checkpoints[0] == genesis,
 # ascending heights, non-zero targets).
 #
-# BRChainParams.h is self-contained on the host: it needs only -I on the submodule
-# dir and links no submodule .c sources (verified — it pulls BRMerkleBlock.h/BRSet.h
-# for types only). Same header-only shape as status_staleness_kat / cf_peer_status_kat.
+# BRChainParams.h is header-only for the table itself. The difficulty-context check
+# (BRCheckPointContextVerify, a static inline in BRChainParams.h) hashes headers, so
+# this suite also links BRCrypto.c and the vendored hash code it references; nothing
+# else from the submodule.
 #
 # THIS KAT IS INTENTIONALLY TIME-DEPENDENT. It goes red as the checkpoint table ages,
 # with no code change, which is the entire point: a stale constant table is invisible
@@ -28,9 +29,14 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-clang -w \
+shopt -s nullglob
+SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
+shopt -u nullglob
+clang -w -include stdint.h \
     -I "$CORE_DIR" \
     "$SCRIPT_DIR/checkpoint_staleness_kat_main.c" \
+    "$CORE_DIR/BRCrypto.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
+    "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" \
     -o "$BUILD_DIR/checkpoint_staleness_kat"
 
 # Run the C gate WITHOUT `set -e` aborting on a non-zero exit: both this and the
@@ -56,7 +62,7 @@ set -e
 # A stale-LOW mirror does not crash; it silently WEAKENS the eclipse guard. That is
 # exactly the kind of degradation nothing else would ever surface, so assert it here
 # rather than leave another reminder.
-SYNC_KT="$REPO_ROOT/app/src/main/java/io/digibyte/service/SyncService.kt"
+SYNC_KT="$REPO_ROOT/app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt"
 [ -f "$SYNC_KT" ] || { echo "FAIL: cannot find $SYNC_KT to cross-check LATEST_CHECKPOINT_HEIGHT" >&2; exit 1; }
 
 kt_h="$( { grep -oE 'LATEST_CHECKPOINT_HEIGHT[[:space:]]*=[[:space:]]*[0-9_]+' "$SYNC_KT" || true; } \
@@ -76,7 +82,7 @@ fi
 if [ "$kt_h" != "$c_h" ]; then
     echo "FAIL: SyncService.kt LATEST_CHECKPOINT_HEIGHT ($kt_h) != newest BRMainNetCheckpoints ($c_h)"
     echo "      The Kotlin anti-eclipse floor is a hand-copied mirror of the C table and has drifted."
-    echo "      Set LATEST_CHECKPOINT_HEIGHT = ${c_h} in app/src/main/java/io/digibyte/service/SyncService.kt"
+    echo "      Set LATEST_CHECKPOINT_HEIGHT = ${c_h} in app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt"
     exit 1
 fi
 echo "PASS: SyncService.kt LATEST_CHECKPOINT_HEIGHT ($kt_h) matches newest BRMainNetCheckpoints"

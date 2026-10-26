@@ -78,12 +78,12 @@ FAIL=0
 expect() {
     local bin="$1" c="$2" want="$3" label="$4" out rc
     out="$("$bin" "$c" 2>&1)"; rc=$?
-    if echo "$out" | grep -Eq "$SAN_RE"; then
+    if <<<"$out" grep -Eq "$SAN_RE"; then
         echo "  [$label $c] GATE FAILURE: sanitizer report (rc=$rc)"
         echo "$out" | sed 's/^/      /' | head -8; FAIL=1
-    elif echo "$out" | grep -q "RESULT $c $want"; then
+    elif <<<"$out" grep -q "RESULT $c $want"; then
         echo "  [$label $c] $want, as required (rc=$rc)"
-        [ "$want" = "broken" ] && echo "$out" | grep 'FAIL:' | sed 's/^/      /'
+        [ "$want" = "broken" ] && <<<"$out" grep 'FAIL:' | sed 's/^/      /'
     else
         echo "  [$label $c] GATE FAILURE: expected $want (rc=$rc)"
         echo "$out" | sed 's/^/      /' | head -12; FAIL=1
