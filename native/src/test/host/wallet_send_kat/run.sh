@@ -3,7 +3,11 @@
 # object: the wallet holds a COPY) and the publish verdict ring (EALREADY never recorded).
 #
 #   RED    -DWALLET_SEND_SAME_OBJECT_UNFIXED -DPUBLISH_RING_RECORDS_EALREADY_UNFIXED: every RED
-#          case MUST fail and every GUARD case pass.
+#          case MUST fail and every GUARD case pass. (nonwallet_copy_released is RED because in
+#          that arm the wallet takes the caller's object, so there is no copy to release.)
+#   GUARD  cases pin what the seams do not reach, each checked against a scratch-patched
+#          header: the record's timestamp, Trusted registration of a wallet-coin spend,
+#          ECANCELED recorded, and retention at Android's literal 32 entries.
 #   GREEN  the shipped rules: every case passes, ALL PASS, exit 0. Both arms under ASan.
 #
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
@@ -20,10 +24,12 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
-RED_CASES=(copy_not_same_object ealready_never_overwrites)
+RED_CASES=(copy_not_same_object ealready_never_overwrites nonwallet_copy_released)
 GUARD_CASES=(copy_registered timestamp_set_before_register original_free_is_safe
              republish_keeps_the_record unknown_reads_pending verdict_recorded
-             republish_replaces_its_verdict other_hash_still_pending oldest_ages_out_to_pending)
+             republish_replaces_its_verdict other_hash_still_pending oldest_ages_out_to_pending
+             record_timestamp_set wallet_spend_registers_trusted ecanceled_recorded
+             ring_keeps_32 ring_drops_after_32)
 
 shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
