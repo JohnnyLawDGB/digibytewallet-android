@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <resources>
-  <string name="app_name" translatable="false">DigiByte (old)</string>
+  <string name="app_name" translatable="false">HoldFast</string>
   <string name="tab_wallet">Wallet</string>
   <string name="tab_hub">Hub</string>
   <string name="tab_digi_id">Digi-ID</string>
   <string name="tab_settings">Settings</string>
 
   <!-- About screen blog label -->
-  <string name="About.blog">https://digibyte.io/</string>
+  <string name="About.blog">https://www.aroundtheblock.us/</string>
   <!-- About screen footer -->
-  <string name="About.footer">Made by the global DigiWallet team. Version %1$s</string>
+  <string name="About.footer">Made by Around The Block LLC. Version %1$s</string>
   <!-- Privay Policy button label -->
   <string name="About.privacy">Privacy Policy</string>
   <!-- About screen reddit label -->
   <string name="About.reddit">https://www.reddit.com/r/Digibyte/</string>
   <!-- Terms of Use button label -->
   <!-- About screen title -->
-  <string name="About.title">Fast, simple and safe!: DigiWallet for Android is the easiest way to get started sending and receiving DigiByte. Designed with both new and experienced users in-mind, DigiWallet for Android is simple enough for a first-time novice to use, yet powerful enough for regular power-users.</string>
+  <string name="About.title">HoldFast Wallet is an independent, open-source wallet for the DigiByte (DGB) network, built by Around The Block LLC. It is simple enough for a first-time user, yet powerful enough for regular power-users.</string>
   <!-- About screen twitter label -->
   <string name="About.twitter">https://twitter.com/digibytecoin</string>
   <!-- Close modal button accessibility label -->
@@ -26,9 +26,9 @@
   <!-- Error alert title -->
   <string name="Alert.error">Error</string>
   <!-- Keystore error -->
-  <string name="Alert.keystore.generic.android">There is a problem with your Android OS keystore, please contact support@digibyte.io</string>
+  <string name="Alert.keystore.generic.android">There is a problem with your Android OS keystore, please contact us at https://www.aroundtheblock.us/contact/</string>
   <!-- KeyStore error, keys are invalidated -->
-  <string name="Alert.keystore.invalidated.android">Your DigiWallet encrypted data was recently invalidated because your Android lock screen was disabled.</string>
+  <string name="Alert.keystore.invalidated.android">Your HoldFast Wallet encrypted data was recently invalidated because your Android lock screen was disabled.</string>
   <!-- Keystore error title -->
   <string name="Alert.keystore.title.android">Android KeyStore Error</string>
   <!-- Alert Header Label (the paper key was set) -->
@@ -63,7 +63,7 @@
   <!-- Exchange rate label -->
   <string name="DefaultCurrency.rateLabel">Exchange Rate</string>
   <!-- Message that gets shown when we've detected the user has encountered the looping lock-screen bug. (preserve [ ] characters) -->
-  <string name="ErrorMessages.loopingLockScreen.android">DigiWallet can not be authenticated due to a bug in your version of Android. [Please tap here for more information.]</string>
+  <string name="ErrorMessages.loopingLockScreen.android">HoldFast Wallet can not be authenticated due to a bug in your version of Android. [Please tap here for more information.]</string>
   <!-- Fingerprint was not recognized by the scanner, please try scanning again -->
   <string name="ErrorMessages.touchIdFailed.android">Fingerprint not recognized. Please try again.</string>
   <!-- Checking private key balance progress view text -->
@@ -77,7 +77,7 @@
   <!-- Import signing error message -->
   <string name="Import.Error.signing">Error signing transaction</string>
   <!-- Import wallet intro screen message -->
-  <string name="Import.message">Importing a wallet transfers all the DigiByte from your other wallet into your DigiWallet using a single transaction.</string>
+  <string name="Import.message">Importing a wallet transfers all the DigiByte from your other wallet into your HoldFast Wallet using a single transaction.</string>
   <!-- Enter password alert view title -->
   <string name="Import.password">This private key is password protected.</string>
   <!-- Scan Private key button label -->
@@ -89,8 +89,8 @@
   <!-- Ignore jailbreak warning button -->
   <!-- Jailbreak warning message -->
   <string name="JailbreakWarnings.messageWithoutBalance">DEVICE SECURITY COMPROMISED\n Any
-    \'jailbreak\' app can access DigiWallet\'s keychain data and steal your DigiByte. Please only
-    use DigiWallet on a non-jailbroken device.
+    \'jailbreak\' app can access HoldFast Wallet\'s keychain data and steal your DigiByte. Please only
+    use HoldFast Wallet on a non-jailbroken device.
   </string>
   <!-- Jailbreak warning title -->
   <string name="JailbreakWarnings.title">WARNING</string>
@@ -143,11 +143,11 @@
   <!-- Button on fingerprint prompt so the user can enter their PIN instead -->
   <string name="Prompts.TouchId.usePin.android">PIN</string>
   <!-- Upgrade PIN prompt body. -->
-  <string name="Prompts.UpgradePin.body">DigiWallet has upgraded to using a 6-digit PIN. Tap here to upgrade.</string>
+  <string name="Prompts.UpgradePin.body">HoldFast Wallet has upgraded to using a 6-digit PIN. Tap here to upgrade.</string>
   <!-- Upgrade PIN prompt title. -->
   <string name="Prompts.UpgradePin.title">Upgrade PIN</string>
   <!-- Notifications will be added later but users can set their preferences now, which is why we specify "in the future". -->
-  <string name="PushNotifications.body">Turn on notifications to receive special messages from DigiWallet in the future.</string>
+  <string name="PushNotifications.body">Turn on notifications to receive special messages from HoldFast Wallet in the future.</string>
   <!-- Push notifications toggle switch label -->
   <string name="PushNotifications.label">Push Notifications</string>
   <!-- Push notifications settings view title label -->
@@ -169,13 +169,13 @@
   <!-- Enter paper key instruction -->
   <string name="RecoverWallet.instruction">Enter Personal Recovery Key</string>
   <!-- Recover wallet intro -->
-  <string name="RecoverWallet.intro">Recover your DigiWallet with your Personal Recovery Key.</string>
+  <string name="RecoverWallet.intro">Recover your wallet with your Personal Recovery Key.</string>
   <!-- Invalid paper key message -->
   <string name="RecoverWallet.invalid">The Personal Recovery Key you entered is invalid. Please double-check each word and try again.</string>
   <!-- Next button label -->
   <string name="RecoverWallet.next">Next</string>
   <!-- Recover wallet sub-header -->
-  <string name="RecoverWallet.subheader">Enter the Personal Recovery Key for the DigiWallet you want to recover.</string>
+  <string name="RecoverWallet.subheader">Enter the Personal Recovery Key for the wallet you want to recover.</string>
   <!-- Reset PIN with paper key: sub-header -->
   <string name="RecoverWallet.subheader_reset_pin">To reset your PIN, enter the words from your Personal Recovery Key into the boxes below.</string>
   <!-- Alert action button label -->
@@ -185,7 +185,7 @@
   <!-- extimated time -->
   <string name="ReScan.body1">20-45 minutes</string>
   <!-- Syncing explanation -->
-  <string name="ReScan.body2">If a transaction shows as completed on the DigiByte network but not in your DigiWallet.</string>
+  <string name="ReScan.body2">If a transaction shows as completed on the DigiByte network but not in your wallet.</string>
   <!-- Syncing explanation -->
   <string name="ReScan.body3">You repeatedly get an error saying your transaction was rejected.</string>
   <!-- Start Sync button label -->
@@ -205,19 +205,19 @@
   <!-- Paper Key button title -->
   <string name="SecurityCenter.paperKeyTitle">Personal Recovery Key</string>
   <!-- PIN button description -->
-  <string name="SecurityCenter.pinDescription">Protects your DigiWallet from unauthorized users.</string>
+  <string name="SecurityCenter.pinDescription">Protects your wallet from unauthorized users.</string>
   <!-- PIN button title -->
   <string name="SecurityCenter.pinTitle">6-Digit PIN</string>
   <!-- Security Center Title -->
   <string name="SecurityCenter.title">Security Center</string>
   <!-- Touch ID button description -->
-  <string name="SecurityCenter.touchIdDescription">Conveniently unlock your DigiWallet and send DigiByte up to a set limit.</string>
+  <string name="SecurityCenter.touchIdDescription">Conveniently unlock your wallet and send DigiByte up to a set limit.</string>
   <!-- Security center fingerprint authentication button -->
   <string name="SecurityCenter.touchIdTitle.android">Fingerprint Authentication</string>
   <!-- Instructions how to allow the camera access for the app -->
-  <string name="Send.cameraUnavailabeMessage.android">Allow camera access in \"Settings\" &gt; \"Apps\" &gt; \"DigiWallet\" &gt; \"Permissions\"</string>
+  <string name="Send.cameraUnavailabeMessage.android">Allow camera access in \"Settings\" &gt; \"Apps\" &gt; \"HoldFast Wallet\" &gt; \"Permissions\"</string>
   <!-- Permission required to access camera -->
-  <string name="Send.cameraUnavailabeTitle.android">DigiWallet is not allowed to access the camera</string>
+  <string name="Send.cameraUnavailabeTitle.android">HoldFast Wallet is not allowed to access the camera</string>
   <!-- Warning when sending to self. -->
   <string name="Send.containsAddress">The destination is your own address. You cannot send to yourself.</string>
   <!-- Description for sending money label -->
@@ -255,13 +255,13 @@
   <!-- Import wallet left message -->
   <string name="Settings.importLeftMessage">Wallet to be Imported</string>
   <!-- Import wallet right message -->
-  <string name="Settings.importRightMessage">Your DigiWallet</string>
+  <string name="Settings.importRightMessage">Your HoldFast Wallet</string>
   <!-- Import wallet label -->
   <string name="Settings.importTitle">Import Wallet</string>
   <!-- Manage settings section header -->
   <string name="Settings.manage">Manage</string>
   <!-- Restore screen lower label. -->
-  <string name="Settings.restore_label">Your DigiWallet on this Device</string>
+  <string name="Settings.restore_label">Your HoldFast Wallet on this Device</string>
   <!-- Sync blockchain label -->
   <string name="Settings.sync">Sync Blockchain</string>
   <!-- The fingerprint spending limit -->
@@ -271,7 +271,7 @@
   <!-- Start or recover another wallet menu label. -->
   <string name="Settings.wipe">Start/Recover Another Wallet</string>
   <!-- Paper key explanation text. -->
-  <string name="StartPaperPhrase.body">Your Personal Recovery Key is the only way to restore your DigiWallet if your phone is lost, stolen, broken, or upgraded.\n\nWe will show you a list of words to write down on a piece of paper and keep safe.</string>
+  <string name="StartPaperPhrase.body">Your Personal Recovery Key is the only way to restore your wallet if your phone is lost, stolen, broken, or upgraded.\n\nWe will show you a list of words to write down on a piece of paper and keep safe.</string>
   <!-- button label -->
   <string name="StartPaperPhrase.buttonTitle">Write Down Personal Recovery Key</string>
   <!-- Syncing view connectiong state header text -->
@@ -285,7 +285,7 @@
   <!-- Fingerprint Is Not Setup -->
   <string name="TouchIdSettings.disabledWarning.title.android">Fingerprint Authentication Not Enabled</string>
   <!-- Touch Id screen label -->
-  <string name="TouchIdSettings.label">Use your fingerprint to unlock your DigiWallet and send DigiByte up to a set limit.</string>
+  <string name="TouchIdSettings.label">Use your fingerprint to unlock your wallet and send DigiByte up to a set limit.</string>
   <!-- Spending Limit: b100,000 ($100) -->
   <string name="TouchIdSettings.spendingLimit">Spending limit: %1$s (%2$s)</string>
   <!-- Enable fingerprint for this wallet called Bread -->
@@ -314,7 +314,7 @@
   <!-- Update PIN caption text -->
   <string name="UpdatePin.caption">Remember this PIN. If you forget it, you won\'t be able to access your DigiByte.</string>
   <!-- PIN creation info. -->
-  <string name="UpdatePin.createInstruction">Your PIN will be used to unlock your DigiWallet and send DigiByte.</string>
+  <string name="UpdatePin.createInstruction">Your PIN will be used to unlock your wallet and send DigiByte.</string>
   <!-- Update PIN title -->
   <string name="UpdatePin.createTitle">Set PIN</string>
   <!-- Update PIN title -->
@@ -330,9 +330,9 @@
   <!-- Updating webview message -->
   <string name="Webview.updating">Updating...</string>
   <!-- Welcome screen text. (?) will be replaced with the help icon users should look for. -->
-  <string name="Welcome.body">DigiWallet has a brand new look and some new features.\n\nIf you need help, look for the (?) in the top right of most screens.</string>
+  <string name="Welcome.body">HoldFast Wallet has a brand new look and some new features.\n\nIf you need help, look for the (?) in the top right of most screens.</string>
   <!-- Top title of welcome screen -->
-  <string name="Welcome.title">Welcome to DigiWallet!</string>
+  <string name="Welcome.title">Welcome to HoldFast Wallet!</string>
   <!-- Wipe wallet alert message -->
   <string name="WipeWallet.alertMessage">Are you sure you want to delete this wallet?</string>
   <!-- Wipe wallet alert title -->
@@ -340,7 +340,7 @@
   <!-- Enter phrase to wipe wallet instruction. -->
   <string name="WipeWallet.instruction">To start a new wallet or restore an existing wallet, you must first erase the wallet that is currently installed. To continue, enter the current wallet\'s Personal Recovery Key.</string>
   <!-- Start wipe wallet view message -->
-  <string name="WipeWallet.startMessage">Starting or recovering another wallet allows you to access and manage a different DigiWallet on this device.</string>
+  <string name="WipeWallet.startMessage">Starting or recovering another wallet allows you to access and manage a different wallet on this device.</string>
   <!-- Start wipe wallet view warning -->
   <string name="WipeWallet.startWarning">Your current wallet will be removed from this device. If you wish to restore it in the future, you will need to enter your Personal Recovery Key.</string>
   <!-- Wipe wallet button title -->

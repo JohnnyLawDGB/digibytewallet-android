@@ -132,14 +132,14 @@ run_case() { OUT="$("$1" "$2" 2>&1)"; RC=$?; }
 expect() {
     local bin="$1" label="$2" c="$3" want="$4"
     run_case "$bin" "$c"
-    if echo "$OUT" | grep -Eq "$SAN_RE"; then
-        echo "  [$label $c] GATE FAILURE: sanitizer report (rc=$RC)"; echo "$OUT" | grep -Em4 "$SAN_RE" | sed 's/^/      /'
+    if <<<"$OUT" grep -Eq "$SAN_RE"; then
+        echo "  [$label $c] GATE FAILURE: sanitizer report (rc=$RC)"; <<<"$OUT" grep -Em4 "$SAN_RE" | sed 's/^/      /'
         FAIL=1
-    elif echo "$OUT" | grep -q "RESULT $c $want\$"; then
-        echo "  [$label $c] $want: $(echo "$OUT" | grep -E '^(PASS|NOTE)' | tail -1 | cut -c1-150)"
+    elif <<<"$OUT" grep -q "RESULT $c $want\$"; then
+        echo "  [$label $c] $want: $(<<<"$OUT" grep -E '^(PASS|NOTE)' | tail -1 | cut -c1-150)"
     else
-        echo "  [$label $c] GATE FAILURE: expected '$want', got: $(echo "$OUT" | grep -o "RESULT $c [a-z_]*" | head -1) (rc=$RC)"
-        echo "$OUT" | grep -E '^(FAIL|NOTE)|diff-mismatch' | head -8 | sed 's/^/      /'; FAIL=1
+        echo "  [$label $c] GATE FAILURE: expected '$want', got: $(<<<"$OUT" grep -o "RESULT $c [a-z_]*" | head -1) (rc=$RC)"
+        <<<"$OUT" grep -E '^(FAIL|NOTE)|diff-mismatch' | head -8 | sed 's/^/      /'; FAIL=1
     fi
 }
 
@@ -147,11 +147,11 @@ expect() {
 expect_red() {
     local bin="$1" label="$2" c="$3"
     run_case "$bin" "$c"
-    if echo "$OUT" | grep -Eq "$SAN_RE"; then
+    if <<<"$OUT" grep -Eq "$SAN_RE"; then
         echo "  [$label $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
-        echo "$OUT" | grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
-    elif echo "$OUT" | grep -q "RESULT $c fail"; then
-        echo "  [$label $c] failed, as required: $(echo "$OUT" | grep -m1 '^FAIL:' | cut -c1-150)"
+        <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
+    elif <<<"$OUT" grep -q "RESULT $c fail"; then
+        echo "  [$label $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:' | cut -c1-150)"
     else
         echo "  [$label $c] GATE FAILURE: did not fail (rc=$RC); this case cannot see the computation"; FAIL=1
     fi
@@ -202,15 +202,15 @@ run_bits() {
 
     # the log lines the device check greps for
     run_case "$BUILD_DIR/l1_$bits" level_easiest_target
-    echo "$OUT" | grep -q 'diff-mismatch v=20000202' \
-        && echo "  [$bits L1] log: '$(echo "$OUT" | grep -m1 -o 'diff-mismatch.*' | cut -c1-140)'" \
+    <<<"$OUT" grep -q 'diff-mismatch v=20000202' \
+        && echo "  [$bits L1] log: '$(<<<"$OUT" grep -m1 -o 'diff-mismatch.*' | cut -c1-140)'" \
         || { echo "  [$bits L1] GATE FAILURE: the diff-mismatch log line is missing"; FAIL=1; }
-    echo "$OUT" | grep -q 'diff-batch n=1 judged=1 skip=0 mismatch=1' \
-        && echo "  [$bits L1] log: '$(echo "$OUT" | grep -m1 -o 'diff-batch n=1 .*')'" \
+    <<<"$OUT" grep -q 'diff-batch n=1 judged=1 skip=0 mismatch=1' \
+        && echo "  [$bits L1] log: '$(<<<"$OUT" grep -m1 -o 'diff-batch n=1 .*')'" \
         || { echo "  [$bits L1] GATE FAILURE: the diff-batch summary line is missing"; FAIL=1; }
     run_case "$BUILD_DIR/l1_$bits" skip_without_history
-    echo "$OUT" | grep -q 'diff-skip h=' \
-        && echo "  [$bits L1] log: '$(echo "$OUT" | grep -m1 -o 'diff-skip.*' | cut -c1-140)'" \
+    <<<"$OUT" grep -q 'diff-skip h=' \
+        && echo "  [$bits L1] log: '$(<<<"$OUT" grep -m1 -o 'diff-skip.*' | cut -c1-140)'" \
         || { echo "  [$bits L1] GATE FAILURE: the diff-skip log line is missing"; FAIL=1; }
 }
 
@@ -225,9 +225,9 @@ if [ "${1:-}" = "--live" ]; then
     if python3 "$SCRIPT_DIR/gen_vectors.py" --live 2000 "$LIVE"; then
         for bits in 64 32; do
             out="$("$BUILD_DIR/l1_$bits" judge_file "$LIVE" 2>&1)"
-            echo "$out" | grep -E '^live:' | sed "s/^/  [$bits] /"
-            echo "$out" | grep -E 'diff-mismatch' | head -5 | sed "s/^/  [$bits] /"
-            if echo "$out" | grep -Eq "$SAN_RE" || ! echo "$out" | grep -q 'RESULT judge_file pass'; then
+            <<<"$out" grep -E '^live:' | sed "s/^/  [$bits] /"
+            <<<"$out" grep -E 'diff-mismatch' | head -5 | sed "s/^/  [$bits] /"
+            if <<<"$out" grep -Eq "$SAN_RE" || ! <<<"$out" grep -q 'RESULT judge_file pass'; then
                 echo "  [$bits] GATE FAILURE: live check"; FAIL=1
             fi
         done

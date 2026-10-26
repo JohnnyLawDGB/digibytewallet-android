@@ -70,7 +70,6 @@ crash.txt
 .idea/copyright/
 /app/google-services.json
 /.idea/markdown-navigator/
-/app/src/main/java/io/digibyte/presenter/fragments/FragmentBreadSignal.java
 /fastlane/
 fastlane/
 .superpowers/
@@ -80,3 +79,12 @@ test-fixtures/*.apk
 test-results/
 dgb-wallet-release.jks
 *.jks
+
+# Signing material never enters the repo (scripts/create-signing-key.sh writes outside it).
+*.p12
+*.pfx
+*.pepk
+keystore.properties
+
+# scripts/build-release.sh output: signed artifacts and R8 mappings, never committed.
+/dist/

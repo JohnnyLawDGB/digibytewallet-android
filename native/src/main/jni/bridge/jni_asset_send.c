@@ -61,8 +61,8 @@ static void bytes_to_hex_local(const uint8_t *bytes, size_t n, char *out) {
  * the scriptPubKey is needed to spend the UTXO later via
  * buildAndSignAssetTransferTx. Returns null for invalid addresses.
  */
-JNIEXPORT jbyteArray JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_addressToScriptPubKey(
+jbyteArray JNICALL
+NativeBridge_addressToScriptPubKey(
     JNIEnv *env, jobject thiz, jstring address)
 {
     (void)thiz;
@@ -99,8 +99,8 @@ Java_io_digibyte_core_bridge_NativeBridge_addressToScriptPubKey(
  *
  * Returns: signed tx as hex string, or NULL on any failure.
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(
+jstring JNICALL
+NativeBridge_buildAndSignAssetTransferTx(
     JNIEnv *env, jobject thiz,
     jobjectArray inputTxidsHex,
     jintArray inputVouts,
@@ -110,6 +110,7 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(
     jlongArray outputAmounts,
     jobjectArray outputScriptsHex)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -267,8 +268,8 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(
 }
 
 /**
- * The wallet's spendable NATIVE DigiByte UTXOs (BRWalletUTXOs = wallet->utxos,
- * which excludes asset/DD dust) as newline-separated
+ * The wallet's spendable NATIVE DigiByte UTXOs (BRWalletSelectableUTXOs: the subset of
+ * wallet->utxos that coin selection spends, in its order) as newline-separated
  * "txidHex|vout|amountSats|scriptPubKeyHex" lines, or "" if none / not loaded.
  *
  * Sovereign source for the DigiAsset-send DGB fee. The Room `is_asset=0`
@@ -279,17 +280,21 @@ Java_io_digibyte_core_bridge_NativeBridge_buildAndSignAssetTransferTx(
  * input format; scripts longer than the builder's 256-byte input cap are skipped
  * (unspendable by it anyway).
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env, jobject thiz)
+jstring JNICALL
+NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env, jobject thiz)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet) return (*env)->NewStringUTF(env, "");
 
-    size_t n = BRWalletUTXOs(g_wallet, NULL, 0);
+    /* The coins DGB coin selection itself would spend, in its order (BRWalletSelectableUTXOs):
+     * confirmed first, then the wallet's own unconfirmed change; never an unconfirmed coin someone
+     * else sent, an asset-held output or one the wallet cannot sign. */
+    size_t n = BRWalletSelectableUTXOs(g_wallet, NULL, 0);
     if (n == 0) return (*env)->NewStringUTF(env, "");
     BRUTXO *utxos = (BRUTXO *)malloc(n * sizeof(BRUTXO));
     if (!utxos) return (*env)->NewStringUTF(env, "");
-    n = BRWalletUTXOs(g_wallet, utxos, n);
+    n = BRWalletSelectableUTXOs(g_wallet, utxos, n);
 
     size_t cap = n * 640 + 1; /* 64 txid + vout + amount + up to 512 script + seps */
     char *buf = (char *)malloc(cap);
@@ -297,10 +302,13 @@ Java_io_digibyte_core_bridge_NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env,
     size_t off = 0;
 
     for (size_t i = 0; i < n; i++) {
-        BRTransaction *tx = BRWalletTransactionForHash(g_wallet, utxos[i].hash);
-        if (!tx || utxos[i].n >= tx->outCount) continue;
+        /* A copy taken under the wallet lock: a wallet transaction pointer is not kept past it
+         * (tx_read_snapshot_kat). Freed at the end of every pass. */
+        BRTransaction *tx = BRWalletCopyTransactionForHash(g_wallet, utxos[i].hash);
+        if (!tx) continue;
+        if (utxos[i].n >= tx->outCount) { BRTransactionFree(tx); continue; }
         BRTxOutput *o = &tx->outputs[utxos[i].n];
-        if (o->scriptLen == 0 || o->scriptLen > 256) continue;
+        if (o->scriptLen == 0 || o->scriptLen > 256) { BRTransactionFree(tx); continue; }
 
         char txidHex[65];
         for (int k = 0; k < 32; k++) sprintf(txidHex + k * 2, "%02x", utxos[i].hash.u8[31 - k]);
@@ -312,6 +320,7 @@ Java_io_digibyte_core_bridge_NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env,
 
         int written = snprintf(buf + off, cap - off, "%s|%u|%llu|%s\n",
                                txidHex, utxos[i].n, (unsigned long long)o->amount, scriptHex);
+        BRTransactionFree(tx);
         if (written < 0 || (size_t)written >= cap - off) break;
         off += (size_t)written;
     }
@@ -333,8 +342,8 @@ Java_io_digibyte_core_bridge_NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env,
  * which is what a txid names; see raw_tx_id in asset_tx_checks.h. A parent transaction
  * fetched by id is accepted only when this returns the id it was requested by.
  */
-JNIEXPORT jstring JNICALL
-Java_io_digibyte_core_bridge_NativeBridge_rawTransactionId(JNIEnv *env, jobject thiz,
+jstring JNICALL
+NativeBridge_rawTransactionId(JNIEnv *env, jobject thiz,
                                                             jbyteArray rawTx)
 {
     (void)thiz;

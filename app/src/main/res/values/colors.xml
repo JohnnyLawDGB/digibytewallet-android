@@ -45,4 +45,6 @@
     //Keyboard
     <color name="keyboard_text_color">#9c9eb9</color>
 
+    <!-- Adaptive launcher icon background: HoldFast navy, behind the fist-and-key badge. -->
+    <color name="ic_launcher_background">#1B1F5E</color>
 </resources>

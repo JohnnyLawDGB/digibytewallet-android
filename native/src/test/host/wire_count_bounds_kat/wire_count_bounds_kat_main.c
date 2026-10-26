@@ -87,6 +87,16 @@
 // signs a two-input transaction with every grow declined, so the re-parse that
 // produces the hashes cannot size its input store: the bounded tail answers "not
 // signed" (0); the comparison arm answers 1 with the hash as it was.
+//
+// SIXTH INVARIANT -- A MERKLE BLOCK'S FLAGS LENGTH IS BOUNDED BY THE BYTES THAT REMAIN,
+// as its hash count is. BRMerkleBlockParse reads both from each record of the wallet's
+// saved blocks; the hash count already had the bound, the flags length did not, and its
+// guard added the length to the offset before comparing. The merkle_flags_* cases each
+// carry one hash and differ in the flags length: merkle_flags_wrap declares a length that
+// wraps that sum to 0, merkle_flags_over one byte more than is present, and
+// merkle_flags_ctl the honest one byte, present. A parsed block's flags length is then 0
+// or its bytes are there; the comparison arm keeps a non-zero length with no bytes behind
+// it, and the walk over the partial tree reads a flag byte that is not there.
 
 #include <stdio.h>
 #include <string.h>
@@ -628,6 +638,206 @@ static int case_inv_hash_stack(void)
     return (started && job.r == 1) ? 1 : 0;       // green: handled cleanly on the small stack
 }
 
+// ---- cases: a script length cannot carry the running offset past the message ------
+//
+// Each transaction below declares a per-input or per-output script length near the
+// 64-bit maximum. The parser accumulates that length into the running offset; the
+// comparison arm (-DWIRE_OFF_WRAP_UNFIXED) does so with an "off + sLen <= bufLen"
+// gate that WRAPS, so a wrapped offset slips past the end-of-buffer gate and the
+// parser then reads or writes outside the exact-length message. The bounded parser
+// compares the declared length against the bytes that remain, with no addition on
+// the side that could wrap, and rejects before acting on it.
+//
+// These are the reproductions carried over from the offline parser harness, as
+// exact-length buffers so AddressSanitizer brackets them:
+//
+//   tx_offwrap     -- a segwit signed tx whose input-script length wraps the offset
+//                     so the end-of-buffer gate passes; the sign-tail then sizes a
+//                     tiny allocation from the wrapped witness offset and writes the
+//                     version field past it (a heap WRITE, deterministic).
+//   tx_offwrap_out -- a tx whose output-script length wraps the offset to land back
+//                     inside the buffer, so the script copy reads from one byte past
+//                     the message (a heap READ, deterministic).
+//
+// Exact wire bytes (62 and 64 bytes); the only attacker-chosen field is the
+// 8-byte script-length varint (0xff ...).
+static const uint8_t k_offwrap_write[] = { // 62 bytes
+    0x01,0x00,0x00,0x00,0x00,0x01,0x01,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x00,0x00,0x00,0x00,0xff,0xc7,0xff,0xff,0xff,
+    0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,
+    0x00,0x00
+};
+static const uint8_t k_offwrap_out[] = { // 64 bytes
+    0x01,0x00,0x00,0x00,0x01,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+    0x11,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0x01,0x00,
+    0xe1,0xf5,0x05,0x00,0x00,0x00,0x00,0xff,0xc0,0xff,0xff,0xff,
+    0xff,0xff,0xff,0xff
+};
+// An honest signed segwit transaction: empty scriptSig (so isSigned stays set), a
+// p2wpkh output and a one-item witness. It reaches the very sign-tail the write
+// case abuses, and must be ACCEPTED in BOTH arms -- the bound changes behaviour only
+// for a malformed length, never for a well-formed one.
+static const uint8_t k_offwrap_ctl[] = { // 91 bytes
+    0x02,0x00,0x00,0x00,0x00,0x01,0x01,0x22,0x22,0x22,0x22,0x22,
+    0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,
+    0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,
+    0x22,0x22,0x22,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,
+    0x01,0x80,0x4a,0x5d,0x05,0x00,0x00,0x00,0x00,0x16,0x00,0x14,
+    0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,
+    0x0d,0x0e,0x0f,0x10,0x11,0x12,0x13,0x14,0x01,0x05,0xaa,0xbb,
+    0xcc,0xdd,0xee,0x00,0x00,0x00,0x00
+};
+
+static int parse_bytes(const uint8_t *bytes, size_t len)
+{
+    uint8_t *buf = dup_exact(bytes, len);
+    BRTransaction *tx = BRTransactionParse(buf, len);
+    int accepted = (tx != NULL);
+    if (tx) BRTransactionFree(tx);
+    free(buf);
+    return accepted;
+}
+
+static int case_tx_offwrap(void)     { return parse_bytes(k_offwrap_write, sizeof(k_offwrap_write)); }
+static int case_tx_offwrap_out(void) { return parse_bytes(k_offwrap_out,   sizeof(k_offwrap_out));   }
+static int case_tx_offwrap_ctl(void) { return parse_bytes(k_offwrap_ctl,   sizeof(k_offwrap_ctl));   }
+
+// Fuzz-ish arm: every truncation of the two attack messages and the honest control,
+// plus a non-wrapping overlong length (a script that claims one more byte than the
+// message holds) and a maximal varint with no bytes behind it. Each is parsed in an
+// exact-length buffer. The bound must keep every one inside the message: if any
+// prefix drove a read or write past the buffer the sanitizer would abort this
+// process, so simply returning is the clean result. No malformed prefix is accepted,
+// so the oracle is "rejected".
+static int case_tx_offwrap_fuzz(void)
+{
+    const uint8_t *msgs[] = { k_offwrap_write, k_offwrap_out, k_offwrap_ctl };
+    const size_t   lens[] = { sizeof(k_offwrap_write), sizeof(k_offwrap_out), sizeof(k_offwrap_ctl) };
+    for (size_t m = 0; m < 3; m++) {
+        for (size_t n = 0; n <= lens[m]; n++) (void)parse_bytes(msgs[m], n);
+    }
+    // Non-wrapping overlong input-script length: a one-input tx that claims a script
+    // one byte longer than the bytes present. No wrap, but the length still exceeds
+    // the message and must be rejected, not read past.
+    uint8_t over[64];
+    size_t o = 0;
+    put_u32le(&over[o], 1); o += 4;              // version
+    over[o++] = 0x01;                            // input count 1
+    memset(&over[o], 0x33, 32); o += 32;         // outpoint hash
+    put_u32le(&over[o], 0); o += 4;              // outpoint index
+    over[o++] = 0x20;                            // script length 32 (more than remains)
+    over[o++] = 0x00;                            // only one byte of "script" present
+    (void)parse_bytes(over, o);
+    // A maximal 8-byte varint length with nothing behind it.
+    uint8_t vmax[64];
+    size_t v = put_segwit_prefix(vmax);          // a valid one-in one-out prefix
+    (void)parse_bytes(vmax, v);                  // whole, honest (accepted elsewhere)
+    uint8_t trunc[64];
+    memcpy(trunc, vmax, v);
+    trunc[v - 1] = 0xff;                         // turn the trailing empty scriptPubKey len into 0xff
+    (void)parse_bytes(trunc, v);                 // 0xff with no 8 bytes behind it
+    return 0;                                     // nothing malformed was accepted
+}
+
+// ---- cases: a merkle block's flags length is bounded by the bytes that remain ------
+//
+// A serialized merkle block is the 80-byte header, a 4-byte transaction count, a
+// CompactSize hash count and that many 32-byte hashes, then a CompactSize flags length
+// and that many flag bytes. Every block below carries one hash (also its merkle root, a
+// one-transaction tree); what differs is the flags length:
+//
+//   merkle_flags_wrap  2^64 - 126 (low word 2^32 - 126). The flag bytes would start at
+//                      offset 126, so offset plus length is a multiple of the word in
+//                      either word size: a guard that adds before it compares sees 0,
+//                      and is satisfied. No flag bytes follow.
+//   merkle_flags_over  2, with one flag byte behind it: one byte short, the nearest
+//                      length the bound must refuse. Nothing wraps.
+//   merkle_flags_ctl   1, and the one flag byte is present: the honest block.
+//
+// Each case prints a STATE line -- flags present or absent, and the length kept --
+// before it walks the partial tree (BRMerkleBlockTxHashes; BRMerkleBlockIsValid walks
+// the same way), because the walk reads a flag byte whenever the length says one is
+// there and in the comparison arm that read faults. For the first two the oracle is
+// the length: kept with no bytes behind it is "accepted", bounded to 0 (or its bytes
+// present) is "rejected". The control must be accepted in every arm: its flag byte is
+// kept, the walk reaches its one hash, and it serializes back to the same bytes.
+#define MERKLE_ONE_HASH_LEN 117   // 80 header + 4 tx count + 1 hash count + 32 hash
+
+static size_t put_merkle_one_hash(uint8_t *p)
+{
+    size_t o = 0;
+    memset(p, 0, 80);                     // version, previous block, root, time, target, nonce
+    memset(&p[36], 0x5a, 32);             // merkle root = the one hash
+    o = 80;
+    put_u32le(&p[o], 1); o += 4;          // total transactions: 1
+    p[o++] = 0x01;                        // hash count: 1
+    memset(&p[o], 0x5a, 32); o += 32;     // the hash
+    return o;                             // MERKLE_ONE_HASH_LEN
+}
+
+static int merkle_flags_case(const char *name, const uint8_t *bytes, size_t len, int honest)
+{
+    uint8_t *buf = dup_exact(bytes, len);
+    BRMerkleBlock *b = BRMerkleBlockParse(buf, len);
+    int r = 0;
+
+    if (! b) { printf("STATE %s no block\n", name); free(buf); return 0; }
+    printf("STATE %s flags=%s flagsLen=%zu\n", name, b->flags ? "present" : "absent", b->flagsLen);
+    fflush(stdout);                       // on record before the walk, which may fault
+
+    size_t n = BRMerkleBlockTxHashes(b, NULL, 0);
+
+    if (! honest) {
+        r = (b->flagsLen != 0 && b->flags == NULL); // the declared length kept, no bytes behind it
+    }
+    else {
+        UInt256 got = UINT256_ZERO;
+        size_t m = BRMerkleBlockTxHashes(b, &got, 1);
+        size_t slen = BRMerkleBlockSerialize(b, NULL, 0);
+        uint8_t *ser = (slen == len) ? malloc(slen) : NULL;
+        int same = (ser && BRMerkleBlockSerialize(b, ser, slen) == len && memcmp(ser, bytes, len) == 0);
+
+        r = (b->flags != NULL && b->flagsLen == 1 && b->flags[0] == bytes[len - 1] && n == 1 && m == 1 &&
+             memcmp(&got, &bytes[85], sizeof(got)) == 0 && same);
+        free(ser);
+    }
+
+    BRMerkleBlockFree(b);
+    free(buf);
+    return r;
+}
+
+static int case_merkle_flags_wrap(void)
+{
+    uint8_t raw[MERKLE_ONE_HASH_LEN + 9];
+    size_t o = put_merkle_one_hash(raw);
+    raw[o++] = 0xff;                                    // CompactSize: 8-byte length follows
+    put_u64le(&raw[o], (uint64_t)0 - (o + 8)); o += 8;  // 2^64 - 126: offset + length == 0 mod the word
+    return merkle_flags_case("merkle_flags_wrap", raw, o, 0);
+}
+
+static int case_merkle_flags_over(void)
+{
+    uint8_t raw[MERKLE_ONE_HASH_LEN + 2];
+    size_t o = put_merkle_one_hash(raw);
+    raw[o++] = 0x02;                                    // 2 flag bytes declared
+    raw[o++] = 0x01;                                    // 1 present
+    return merkle_flags_case("merkle_flags_over", raw, o, 0);
+}
+
+static int case_merkle_flags_ctl(void)
+{
+    uint8_t raw[MERKLE_ONE_HASH_LEN + 2];
+    size_t o = put_merkle_one_hash(raw);
+    raw[o++] = 0x01;                                    // 1 flag byte declared
+    raw[o++] = 0x01;                                    // and present: the one leaf is matched
+    return merkle_flags_case("merkle_flags_ctl", raw, o, 1);
+}
+
 // ---- cases: a store the parser asked for exists before the object is used --------
 //
 // Honest one-input, one-output transactions. What differs is the allocator: run.sh
@@ -811,6 +1021,13 @@ int main(int argc, char **argv)
     else if (strcmp(c, "notfound_wrap") == 0)  accepted = case_notfound_wrap();
     else if (strcmp(c, "tx_count_trunc") == 0) accepted = case_tx_count_trunc();
     else if (strcmp(c, "inv_hash_stack") == 0) accepted = case_inv_hash_stack();
+    else if (strcmp(c, "tx_offwrap") == 0)     accepted = case_tx_offwrap();
+    else if (strcmp(c, "tx_offwrap_out") == 0) accepted = case_tx_offwrap_out();
+    else if (strcmp(c, "tx_offwrap_ctl") == 0) accepted = case_tx_offwrap_ctl();
+    else if (strcmp(c, "tx_offwrap_fuzz") == 0) accepted = case_tx_offwrap_fuzz();
+    else if (strcmp(c, "merkle_flags_wrap") == 0) accepted = case_merkle_flags_wrap();
+    else if (strcmp(c, "merkle_flags_over") == 0) accepted = case_merkle_flags_over();
+    else if (strcmp(c, "merkle_flags_ctl") == 0)  accepted = case_merkle_flags_ctl();
 #ifdef KAT_GROW_HOOK
     else if (strcmp(c, "tx_store_in") == 0)  accepted = case_tx_store_in();
     else if (strcmp(c, "tx_store_out") == 0) accepted = case_tx_store_out();
@@ -832,7 +1049,7 @@ int main(int argc, char **argv)
 #endif
     // If we reach here the parser returned rather than faulting. The bounded
     // (green) parser must REJECT each of these messages -- except the controls
-    // (tx_store_ctl, tx_witness_ctl, sign_reparse_ctl) and array_insert_known, which
+    // (tx_store_ctl, tx_witness_ctl, sign_reparse_ctl, merkle_flags_ctl) and array_insert_known, which
     // run.sh requires to be ACCEPTED.
     printf("RESULT %s %s\n", c, accepted ? "accepted" : "rejected");
     return accepted ? 1 : 0;
