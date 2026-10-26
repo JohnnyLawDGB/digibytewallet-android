@@ -2,9 +2,9 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **HoldFast Wallet 4.1.1** (`app.aroundtheblock.wallet`), from its release date.
-4.1.0 (published as ATB Wallet for DigiByte (DGB)) stays in scope for **14 days** after that date
-under the overlap rule below. Before you start, read "Known issues being addressed for 4.1.2"
+**Bounty target:** **HoldFast Wallet 4.1.2** (`app.aroundtheblock.wallet`), from its release date.
+4.1.1 stays in scope for **14 days** after that date under the overlap rule below. Before you
+start, read "Known issues being addressed for 4.1.3"
 below: those are already on our list.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
@@ -35,7 +35,7 @@ HoldFast Wallet release and name its exact version.
 | Asset | Where to get it |
 |-------|-----------------|
 | HoldFast Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-v4.1.1.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.1 |
+| `aroundtheblock-wallet-v4.1.2.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.2 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
@@ -221,7 +221,7 @@ _The half-tier rule was applied from the 2026-10 waves but was not written here 
 after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
 2026-10-13 as above._
 
-### Known issues being addressed for 4.1.2
+### Known issues being addressed for 4.1.3
 
 These are on our list for the next release. A report that only restates one of them is a
 duplicate: credit, no payment. A report that shows one of them reaching **DGB, DigiDollar or the
@@ -246,8 +246,6 @@ seed** in a way not described here is new, and is assessed as new.
 - **Tor coverage.** Some connections made while Tor is enabled or starting are not yet routed
   through Tor.
 - **Release-build logging.** Some transaction details still reach the device log in release builds.
-- **DigiDollar recovery from another wallet.** Fee coins, the range of addresses scanned, and the
-  status shown after a move that does not confirm.
 - **Confirmations and recovery screens.** A user-initiated way to cancel a send stuck
   unconfirmed; protected-screen and confirmation treatment for wallet wipe, Digi-ID and node
   pairing prompts; recovery of every DigiDollar and asset case from another wallet.
@@ -294,7 +292,7 @@ Reports without these elements are returned for missing information:
 
 - **Title** — one-line summary
 - **Severity claim** — your initial Critical/High/Medium/Low assessment
-- **Affected version** — the exact tag (e.g. `v4.1.1`) you tested against
+- **Affected version** — the exact tag (e.g. `v4.1.2`) you tested against
 - **Affected platform** — Android version, device model, ROM
 - **Repro steps** — numbered, deterministic; copy-pasteable commands where possible
 - **PoC** — minimal artifact that triggers the bug. For network bugs: a `curl` or
@@ -411,6 +409,8 @@ not listed. Anonymity, or no answer, never affects payment.*
   and every scope rule are unchanged, and an installed copy updates in place.
 - **4.1.1 — target moved.** Bounty target HoldFast Wallet 4.1.1 (4.1.0 overlaps for 14 days). The
   known-issues list now names what is being addressed for 4.1.2.
+- **4.1.2 — target moved.** Bounty target HoldFast Wallet 4.1.2 (4.1.1 overlaps for 14 days). What
+  4.1.2 fixed is off the known-issues list, which now names what is being addressed for 4.1.3.
 - **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses
   counts as one reporter for the per-wave cap and duplicate decisions. Applied from the 2026-10-24
   intake on.
