@@ -147,8 +147,9 @@ data class DigiByteUri(
                 when {
                     c == '+' -> { bytes.write(' '.code); i++ }
                     c == '%' && i + 2 < s.length -> {
-                        val hex = s.substring(i + 1, i + 3).toIntOrNull(16)
-                        if (hex == null) { bytes.write(c.code); i++ } else { bytes.write(hex); i += 3 }
+                        val hi = hexDigit(s[i + 1])
+                        val lo = hexDigit(s[i + 2])
+                        if (hi < 0 || lo < 0) { bytes.write(c.code); i++ } else { bytes.write(hi shl 4 or lo); i += 3 }
                     }
                     else -> {
                         // Write the character's UTF-8 bytes so non-ASCII survives intact.
@@ -158,6 +159,21 @@ data class DigiByteUri(
                 }
             }
             return String(bytes.toByteArray(), Charsets.UTF_8)
+        }
+
+        /**
+         * One ASCII hex digit, or -1. Matches the core's `_BRUriHex` (BRPaymentUri.h) exactly.
+         * Not `toIntOrNull(16)`: on the JVM that goes through `Character.digit`, which accepts
+         * any Unicode decimal digit (full-width "６１" read as 0x61, 'a') and a leading sign
+         * ("%-1" read as 0xFF). `digibyte:DA?%６１mount=1000&amount=1` then decoded its first key
+         * to "amount" and asked for 1000 DGB, where the core sees an unknown key and 1 DGB.
+         * Anything that is not two ASCII hex digits leaves the '%' as a literal character.
+         */
+        private fun hexDigit(c: Char): Int = when (c) {
+            in '0'..'9' -> c - '0'
+            in 'a'..'f' -> c - 'a' + 10
+            in 'A'..'F' -> c - 'A' + 10
+            else -> -1
         }
 
         private val SAFE = (('a'..'z') + ('A'..'Z') + ('0'..'9')).toSet() + setOf('-', '_', '.', '~')
