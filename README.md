@@ -78,7 +78,7 @@ Removing trusted third parties from the wallet's data path comes before feature 
 
 ### Community Hub
 - **Real-time chat** — channel-based WebSocket messaging (General, Trading, Development, Assets).
-- **Forum threads** — longer-form discussion with replies and upvotes.
+- **DigiRunner** — the built-in arcade game, with a leaderboard.
 - **Enigma AI bot**, **inline DGB tipping**, and **pseudonymous handles** linked to a DGB address — no email, no phone.
 
 ### Privacy (opt-in)

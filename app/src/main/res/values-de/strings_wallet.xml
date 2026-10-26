@@ -493,6 +493,17 @@
     <string name="hub_sign_subtitle">Authentifiziere dich, um diesen Beitrag mit deiner Identität zu signieren</string>
     <string name="hub_tip_auth_title">Hub-Trinkgeld senden</string>
     <string name="hub_tip_auth_subtitle">Authentifiziere dich, um dieses Trinkgeld von deinem DigiScope-Trinkgeldguthaben zu senden</string>
+    <string name="hub_tab_chat">Chat</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">Melde dich mit Digi-ID an, um mitzuschreiben.</string>
+    <string name="hub_signin_button">Mit Digi-ID anmelden</string>
+    <string name="hub_handle_prompt">Wähle einen Handle, damit andere dich erwähnen und dir Trinkgeld geben können.</string>
+    <string name="hub_handle_button">Handle wählen</string>
+    <string name="hub_menu_more">Weitere Optionen</string>
+    <string name="hub_menu_logout">Abmelden</string>
+    <string name="hub_logout_title">Vom Hub abmelden?</string>
+    <string name="hub_logout_body">Damit wird deine DigiScope-Sitzung von diesem Gerät entfernt. Dein Handle bleibt auf dem Server, und du kannst dich jederzeit wieder mit Digi-ID anmelden. Deine Wallet ist davon nicht betroffen.</string>
+    <string name="hub_menu_delete_account">Mein DigiScope-Konto löschen</string>
     <string name="did_requesting">fordert eine Digi-ID-Authentifizierung an</string>
     <string name="did_warning">Warnung</string>
     <string name="did_insecure">Unsichere Verbindung</string>

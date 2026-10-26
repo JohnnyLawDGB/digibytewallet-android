@@ -587,6 +587,17 @@
     <string name="hub_sign_subtitle">Authenticate to sign this post with your identity</string>
     <string name="hub_tip_auth_title">Send Hub Tip</string>
     <string name="hub_tip_auth_subtitle">Authenticate to send this tip from your DigiScope tip balance</string>
+    <string name="hub_tab_chat">Chat</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">Sign in with Digi-ID to join the conversation.</string>
+    <string name="hub_signin_button">Sign in with Digi-ID</string>
+    <string name="hub_handle_prompt">Choose a handle so others can mention and tip you.</string>
+    <string name="hub_handle_button">Choose a handle</string>
+    <string name="hub_menu_more">More options</string>
+    <string name="hub_menu_logout">Log out</string>
+    <string name="hub_logout_title">Log out of the Hub?</string>
+    <string name="hub_logout_body">This removes your DigiScope session from this device. Your handle stays on the server, and you can sign in again with Digi-ID. Your wallet is not affected.</string>
+    <string name="hub_menu_delete_account">Delete my DigiScope account</string>
     <string name="did_requesting">is requesting Digi-ID authentication</string>
     <string name="did_warning">Warning</string>
     <string name="did_insecure">Insecure Connection</string>

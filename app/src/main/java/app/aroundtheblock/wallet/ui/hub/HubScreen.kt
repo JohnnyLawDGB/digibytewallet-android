@@ -15,6 +15,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.stringResource
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
@@ -24,29 +30,24 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
 
 // ── Tab definitions ────────────────────────────────────────────────────────
 
-private enum class HubTab(val label: String, val icon: ImageVector) {
-    CHAT("Chat", Icons.AutoMirrored.Filled.Chat),
-    FORUM("Forum", Icons.Default.Forum),
-    GAMES("Games", Icons.Default.SportsEsports),
-    PROFILE("Profile", Icons.Default.Person)
+private enum class HubTab(@StringRes val labelRes: Int, val icon: ImageVector) {
+    CHAT(R.string.hub_tab_chat, Icons.AutoMirrored.Filled.Chat),
+    DIGIRUNNER(R.string.hub_tab_digirunner, Icons.Default.SportsEsports)
 }
 
 /**
- * Top-level Hub screen with Chat / Forum / Games / Profile tabs.
- *
- * [onNavigateToThread] and [onNavigateCreateThread] are forwarded from the host
- * NavGraph so that thread detail and create screens can be pushed as top-level
- * destinations (full-screen, with their own back stack entries).
+ * Top-level Hub screen: the running chat, and DigiRunner. The Hub account (Digi-ID sign-in,
+ * choosing a handle, logging out, deleting the account) lives inside the Chat tab; the Forum and
+ * Profile tabs were removed.
  */
 @Composable
 fun HubScreen(
-    onNavigateToThread: (threadId: Int) -> Unit,
-    onNavigateCreateThread: () -> Unit,
     onPlayDigiRunner: () -> Unit = {},
     onViewLeaderboard: () -> Unit = {},
     digiScopeClient: DigiScopeClient? = null
 ) {
-    var selectedTab by remember { mutableStateOf(HubTab.CHAT) }
+    // Saveable: coming back from the game lands on the DigiRunner tab it was started from.
+    var selectedTab by rememberSaveable { mutableStateOf(HubTab.CHAT) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // ── Tab row ───────────────────────────────────────────────────────
@@ -62,19 +63,20 @@ fun HubScreen(
             }
         ) {
             HubTab.entries.forEach { tab ->
+                val label = stringResource(tab.labelRes)
                 Tab(
                     selected = selectedTab == tab,
                     onClick = { selectedTab = tab },
                     icon = {
                         Icon(
                             imageVector = tab.icon,
-                            contentDescription = tab.label,
+                            contentDescription = label,
                             modifier = Modifier.size(20.dp)
                         )
                     },
                     text = {
                         Text(
-                            text = tab.label,
+                            text = label,
                             style = MaterialTheme.typography.labelMedium
                         )
                     },
@@ -87,23 +89,33 @@ fun HubScreen(
         // ── Tab content ───────────────────────────────────────────────────
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
-                HubTab.CHAT -> ChatScreen()
-                HubTab.FORUM -> ForumScreen(
-                    onNavigateToThread = onNavigateToThread,
-                    onNavigateCreateThread = onNavigateCreateThread
-                )
-                HubTab.GAMES -> DigiRunnerSection(
+                HubTab.CHAT -> HubChatTab()
+                HubTab.DIGIRUNNER -> DigiRunnerSection(
                     onPlayDigiRunner = onPlayDigiRunner,
                     onViewLeaderboard = onViewLeaderboard,
                     digiScopeClient = digiScopeClient
                 )
-                HubTab.PROFILE -> ProfileScreen()
             }
         }
     }
 }
 
-// ── DigiRunner section inside the Games tab ──────────────────────────────
+// ── Chat tab: the chat, with the Hub account controls folded in ─────────
+
+@Composable
+private fun HubChatTab(profileViewModel: ProfileViewModel = hiltViewModel()) {
+    // Refresh the account every time the tab is shown: a session can end on the server.
+    LaunchedEffect(Unit) { profileViewModel.loadProfile() }
+    val profileState by profileViewModel.profileState.collectAsStateWithLifecycle()
+    val signedIn = profileState is ProfileState.HasProfile || profileState is ProfileState.NoHandle
+
+    ChatScreen(
+        accountStrip = { HubAccountStrip(profileViewModel) },
+        headerActions = { if (signedIn) HubAccountMenu(onLogout = { profileViewModel.logout() }) }
+    )
+}
+
+// ── DigiRunner tab ────────────────────────────────────────────────────────
 
 @Composable
 private fun DigiRunnerSection(

@@ -108,12 +108,12 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 ### Community Hub
 - Backend: `/opt/digiscope-backend/` on `digiscope.me` (PM2 id=5, port 3001)
 - REST at `/api/hub/*`, WebSocket at `/api/hub/ws`
-- Forum timestamps parsed from SQLite DATETIME strings (snake_case field names)
+- Hub tabs: Chat and DigiRunner only (Forum and Profile removed; Hub sign-in, handle, logout and the Play-required delete-account link live in the Chat tab: `HubAccountStrip` / `HubAccountMenu` in `ProfileView.kt`)
 
 ### DigiRunner Game
 - 4 files: GameState.kt, GamePhysics.kt, GameRenderer.kt, DigiRunnerGame.kt
 - Game module has ZERO dependency on `:core` or `:native`
-- Launches from the Hub → Games tab (v3.10.28+). Removed from the sync overlay: rendering it during a fresh full sync could exhaust process memory on long-history wallets.
+- Launches from the Hub → DigiRunner tab (v3.10.28+). Removed from the sync overlay: rendering it during a fresh full sync could exhaust process memory on long-history wallets.
 
 ### DigiAsset balance accounting (settled v4.0.39 — do NOT re-derive)
 The counting rule is one line: **a row counts if and only if the native wallet still holds

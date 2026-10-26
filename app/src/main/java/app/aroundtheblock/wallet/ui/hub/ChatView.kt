@@ -57,7 +57,11 @@ private const val MAX_MESSAGE_LENGTH = 2000
 
 @Composable
 fun ChatScreen(
-    viewModel: ChatViewModel = hiltViewModel()
+    viewModel: ChatViewModel = hiltViewModel(),
+    /** The Hub account controls above the input bar: sign in, or choose a handle (HubAccountStrip). */
+    accountStrip: @Composable () -> Unit = {},
+    /** Actions in the header while signed in: the account menu (HubAccountMenu). */
+    headerActions: @Composable () -> Unit = {},
 ) {
     val channels by viewModel.channels.collectAsStateWithLifecycle()
     val messages by viewModel.currentMessages.collectAsStateWithLifecycle()
@@ -91,7 +95,8 @@ fun ChatScreen(
             connectionState = connectionState,
             onlineCount = onlineCount,
             selectedChannelId = selectedChannelId,
-            channels = channels
+            channels = channels,
+            actions = headerActions
         )
 
         // ── Channel chips ─────────────────────────────────────────────────
@@ -114,26 +119,6 @@ fun ChatScreen(
                 onLoadMore = { viewModel.loadMoreHistory() },
                 onTapHandle = { userInfo -> tipTarget = userInfo }
             )
-
-            // Not logged in overlay
-            if (!isLoggedIn) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.medium,
-                    tonalElevation = 2.dp
-                ) {
-                    Text(
-                        text = "Log in with Digi-ID to join the conversation",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
-                }
-            }
         }
 
         // ── Typing indicator ──────────────────────────────────────────────
@@ -165,6 +150,9 @@ fun ChatScreen(
                 )
             }
         }
+
+        // ── Account: sign in, or choose a handle ──────────────────────────
+        accountStrip()
 
         // ── Input bar ─────────────────────────────────────────────────────
         MessageInputBar(
@@ -205,7 +193,8 @@ private fun ChatHeader(
     connectionState: ConnectionState,
     onlineCount: Int,
     selectedChannelId: Int,
-    channels: List<Channel>
+    channels: List<Channel>,
+    actions: @Composable () -> Unit = {}
 ) {
     val channelName = channels.find { it.id == selectedChannelId }?.name ?: "Chat"
 
@@ -242,8 +231,11 @@ private fun ChatHeader(
                 }
             }
 
-            // Connection indicator dot
-            ConnectionDot(state = connectionState)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Connection indicator dot
+                ConnectionDot(state = connectionState)
+                actions()
+            }
         }
     }
 }

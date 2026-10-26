@@ -103,16 +103,12 @@ class BoundedEndpointsTest {
         Case("hub login callback", HUB_SMALL, null) { hub(it).login("D", "sig", "digiid://api.digiscope.me/x") },
         Case("hub profile", HUB_SMALL, null) { hub(it).getProfile() },
         Case("hub handle availability", HUB_SMALL, false) { hub(it).checkHandleAvailable("handle") },
-        Case("hub new thread", HUB_SMALL, null) { hub(it).createThread(1, "t", "c", "s") },
-        Case("hub reply", HUB_SMALL, null) { hub(it).replyToThread(1, "c", "s") },
         Case("hub game stats", HUB_SMALL, null) { hub(it).getDigiRunnerStats() },
         Case("hub game leaderboard", HUB_SMALL, emptyList<Any>()) { hub(it).getDigiRunnerLeaderboard() },
         // The score is accepted on the status; its answer is read only for the log.
         Case("hub game score answer", HUB_SMALL, true) { hub(it).submitDigiRunnerScore(1, 1, 1, 1) },
         Case("hub channels", HUB_LIST, emptyList<Any>()) { hub(it).getChannels() },
         Case("hub messages", HUB_LIST, emptyList<Any>()) { hub(it).getMessages(1) },
-        Case("hub threads", HUB_LIST, emptyList<Any>()) { hub(it).getThreads(1) },
-        Case("hub thread", HUB_LIST, null) { hub(it).getThread(1) },
         // Releases (sideload builds)
         Case("update check, latest release", RELEASES, null) { UpdateChecker(it, REPO).checkForUpdate("0.0.1") },
         Case("update check, release list", RELEASES, null) {

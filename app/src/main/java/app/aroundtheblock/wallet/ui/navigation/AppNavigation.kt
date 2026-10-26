@@ -45,10 +45,8 @@ import app.aroundtheblock.wallet.ui.onboarding.*
 import app.aroundtheblock.wallet.ui.settings.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import app.aroundtheblock.wallet.ui.hub.ChatScreen
-import app.aroundtheblock.wallet.ui.hub.CreateThreadScreen
 import app.aroundtheblock.wallet.ui.hub.HubScreen
 import androidx.compose.material.icons.filled.Storefront
-import app.aroundtheblock.wallet.ui.hub.ThreadDetailScreen
 import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.wallet.*
@@ -98,8 +96,6 @@ private val fullScreenRoutes = setOf(
     "qr_scanner",
     "digiid_confirm/{uri}",
     "node_pair_confirm/{uri}",
-    "thread_detail/{threadId}",
-    "create_thread",
     "digirunner",
     "digirunner_leaderboard",
     "recover_funds"
@@ -458,36 +454,9 @@ fun AppNavigation(
 
             composable(Screen.Hub.route) {
                 HubScreen(
-                    onNavigateToThread = { threadId ->
-                        navController.navigate("thread_detail/$threadId")
-                    },
-                    onNavigateCreateThread = {
-                        navController.navigate("create_thread")
-                    },
                     onPlayDigiRunner = { navController.navigate("digirunner") },
                     onViewLeaderboard = { navController.navigate("digirunner_leaderboard") },
                     digiScopeClient = digiScopeClient
-                )
-            }
-
-            // ── Forum: thread detail ───────────────────────────────────────
-            composable("thread_detail/{threadId}") { backStackEntry ->
-                val threadId = backStackEntry.arguments?.getString("threadId")?.toIntOrNull() ?: 0
-                ThreadDetailScreen(
-                    threadId = threadId,
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            }
-
-            // ── Forum: create thread ───────────────────────────────────────
-            composable("create_thread") {
-                CreateThreadScreen(
-                    onNavigateBack = { navController.popBackStack() },
-                    onThreadCreated = { threadId ->
-                        navController.navigate("thread_detail/$threadId") {
-                            popUpTo("create_thread") { inclusive = true }
-                        }
-                    }
                 )
             }
 
