@@ -154,6 +154,10 @@ jlong JNICALL NativeBridge_snapAutoFetchThroughToScanFrontier(JNIEnv *env, jobje
 jlongArray JNICALL NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz, jobjectArray outpoints);  /* jni_wallet.c */
 void JNICALL NativeBridge_startSync(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_stopSync(JNIEnv *env, jobject thiz);  /* jni_peer.c */
+jint JNICALL NativeBridge_strandedRefusalActionFor(JNIEnv *env, jobject thiz, jint publishError, jboolean plainDgb, jboolean refusedByPeers);  /* jni_stranded_refusal.c */
+jlong JNICALL NativeBridge_strandedRefusalHoldMs(JNIEnv *env, jobject thiz);  /* jni_stranded_refusal.c */
+jintArray JNICALL NativeBridge_strandedRefusalHoldRun(JNIEnv *env, jobject thiz, jlong holdMs, jlongArray nowMs, jlongArray managerBefore, jlongArray managerAfter, jintArray flags);  /* jni_stranded_refusal.c */
+jboolean JNICALL NativeBridge_strandedSendIsPlainDgb(JNIEnv *env, jobject thiz, jboolean held, jboolean containsAsset, jint digiDollarType);  /* jni_stranded_refusal.c */
 jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, jstring address);  /* jni_wallet.c */
 
 #define DGB_JNI_NATIVEBRIDGE_METHODS \
@@ -304,8 +308,12 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "spendableNotListed", "([Ljava/lang/String;)[J", (void *) NativeBridge_spendableNotListed }, \
     { "startSync", "()V", (void *) NativeBridge_startSync }, \
     { "stopSync", "()V", (void *) NativeBridge_stopSync }, \
+    { "strandedRefusalActionFor", "(IZZ)I", (void *) NativeBridge_strandedRefusalActionFor }, \
+    { "strandedRefusalHoldMs", "()J", (void *) NativeBridge_strandedRefusalHoldMs }, \
+    { "strandedRefusalHoldRun", "(J[J[J[J[I)[I", (void *) NativeBridge_strandedRefusalHoldRun }, \
+    { "strandedSendIsPlainDgb", "(ZZI)Z", (void *) NativeBridge_strandedSendIsPlainDgb }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 148
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 152
 
 #endif
