@@ -8,11 +8,13 @@
 # and BRPeerManager.c (for their file-statics), so neither is a separate unit. CORE_DIR may be set in the
 # environment to run the suite against another checkout of the core (a worktree of a core branch under review).
 #
-# ARMS. Red is -DCF_GAP_RESCAN_UNFIXED (the detection compiled out: the earlier shape); green has no seam flag. Both
-# are built at the header check levels the app ships, read from native/build.gradle.kts.
-#   RED cases   must FAIL in the red arm and PASS in the green arm.
-#   GUARD cases must PASS in both arms.
-# Every case, both arms, 64-bit and 32-bit: no sanitizer report.
+# ARMS, all built at the header check levels the app ships, read from native/build.gradle.kts:
+#   red   -DCF_GAP_RESCAN_UNFIXED              the detection compiled out (the earlier shape)
+#   red2  -DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED  the rescan starts at the delivering block, not the scan frontier
+#   red3  -DWALLET_FOREIGN_PROMOTE_UNFIXED     a re-delivered tx the wallet kept as non-wallet is not promoted
+#   green no seam flag (shipped)
+# RED cases must FAIL in the red arm, RED2 in red2, RED3 in red3; every other case must PASS in each
+# comparison arm; every case must PASS in the green arm. Every case, every arm, 64-bit and 32-bit: no sanitizer report.
 #
 # Exit code 0 = every expectation held, 1 = otherwise (a build error is never evidence).
 set -uo pipefail   # not -e: the red arm's nonzero exits must be captured
@@ -27,10 +29,20 @@ SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 RED_CASES=(
     beyond_window_found
+    out_of_order_found
+    delivering_block_rescanned
+    abandoned_floor_respected
+)
+RED2_CASES=(
+    out_of_order_found
+)
+RED3_CASES=(
+    delivering_block_rescanned
 )
 GUARD_CASES=(
     in_window_no_rescan
 )
+ALL_CASES=("${RED_CASES[@]}" "${GUARD_CASES[@]}")
 
 # the one level the app build sets for a header check macro
 shipped_level() {
@@ -95,6 +107,14 @@ if [ "$(grep -c 'CF_GAP_RESCAN_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 3 ]; t
     echo "GATE FAILURE: BRPeerManager.c has fewer than three CF_GAP_RESCAN_UNFIXED seams; -D would be inert."
     exit 1
 fi
+if [ "$(grep -c 'CF_GAP_RESCAN_FROM_HEIGHT_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 1 ]; then
+    echo "GATE FAILURE: BRPeerManager.c has no CF_GAP_RESCAN_FROM_HEIGHT_UNFIXED seam; -D would be inert."
+    exit 1
+fi
+if [ "$(grep -c 'WALLET_FOREIGN_PROMOTE_UNFIXED' "$CORE_DIR/BRWallet.c")" -lt 1 ]; then
+    echo "GATE FAILURE: BRWallet.c has no WALLET_FOREIGN_PROMOTE_UNFIXED seam; -D would be inert."
+    exit 1
+fi
 
 echo "levels: proof of work $POW_LEVEL, difficulty target $DIFF_LEVEL (shipped, from native/build.gradle.kts)"
 
@@ -104,6 +124,32 @@ FAIL=0
 run_case() {
     OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0" "$1" "$2" 2>&1)"
     RC=$?
+}
+
+# comparison_arm <arm> <bits> <flag> <space-separated cases that must fail>: the listed cases must fail, every other
+# case must pass
+comparison_arm() {
+    local arm="$1" bits="$2" flag="$3" mustFail=" $4 " c
+    echo "--- ${arm} ARM (${flag}): each of [${4}] MUST fail, every other case MUST pass ---"
+    for c in "${ALL_CASES[@]}"; do
+        run_case "$BUILD_DIR/${arm}${bits}" "$c"
+        if <<<"$OUT" grep -Eq "$SAN_RE"; then
+            echo "  [$bits $arm $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
+            <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
+        elif [ "${mustFail/ $c /}" != "$mustFail" ]; then
+            if <<<"$OUT" grep -q "RESULT $c fail"; then
+                echo "  [$bits $arm $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:')"
+            else
+                echo "  [$bits $arm $c] GATE FAILURE: did not fail (rc=$RC); this case cannot see what the fix governs"
+                <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
+            fi
+        elif <<<"$OUT" grep -q "RESULT $c pass"; then
+            echo "  [$bits $arm $c] passed (not governed by this arm)"
+        else
+            echo "  [$bits $arm $c] GATE FAILURE: did not pass in the ${arm} arm (rc=$RC)"
+            <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
+        fi
+    done
 }
 
 run_bits() {
@@ -116,6 +162,14 @@ run_bits() {
         echo "GATE FAILURE: ${bits}-bit red arm did not compile (a build error is not evidence)."
         FAIL=1; return
     fi
+    if ! build "$BUILD_DIR/red2${bits}" "$bits" -DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED; then
+        echo "GATE FAILURE: ${bits}-bit red2 arm did not compile (a build error is not evidence)."
+        FAIL=1; return
+    fi
+    if ! build "$BUILD_DIR/red3${bits}" "$bits" -DWALLET_FOREIGN_PROMOTE_UNFIXED; then
+        echo "GATE FAILURE: ${bits}-bit red3 arm did not compile (a build error is not evidence)."
+        FAIL=1; return
+    fi
     if ! build "$BUILD_DIR/green${bits}" "$bits"; then
         echo "GATE FAILURE: ${bits}-bit green arm did not compile."
         FAIL=1; return
@@ -123,39 +177,18 @@ run_bits() {
 
     local known listed
     known="$("$BUILD_DIR/green${bits}" list | sort | tr '\n' ' ')"
-    listed="$(printf '%s\n' "${RED_CASES[@]}" "${GUARD_CASES[@]}" | sort | tr '\n' ' ')"
+    listed="$(printf '%s\n' "${ALL_CASES[@]}" | sort | tr '\n' ' ')"
     if [ "$known" != "$listed" ]; then
         echo "GATE FAILURE: case lists disagree"; echo "  binary: $known"; echo "  run.sh: $listed"
         FAIL=1; return
     fi
 
-    echo "--- RED ARM (-DCF_GAP_RESCAN_UNFIXED): each RED case MUST fail ---"
-    for c in "${RED_CASES[@]}"; do
-        run_case "$BUILD_DIR/red${bits}" "$c"
-        if <<<"$OUT" grep -Eq "$SAN_RE"; then
-            echo "  [$bits red $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
-            <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
-        elif <<<"$OUT" grep -q "RESULT $c fail"; then
-            echo "  [$bits red $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:') | $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-120)"
-        else
-            echo "  [$bits red $c] GATE FAILURE: did not fail (rc=$RC); this case cannot see what the fix governs"
-            <<<"$OUT" grep -E '^(NOTE|FAIL|RESULT)' | sed 's/^/      /' | head -8; FAIL=1
-        fi
-    done
-
-    echo "--- RED ARM: each GUARD case MUST pass ---"
-    for c in "${GUARD_CASES[@]}"; do
-        run_case "$BUILD_DIR/red${bits}" "$c"
-        if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
-            echo "  [$bits red $c] passed (guard)"
-        else
-            echo "  [$bits red $c] GATE FAILURE: guard did not pass in the comparison arm (rc=$RC)"
-            <<<"$OUT" grep -E "^(NOTE|FAIL|RESULT)|$SAN_RE" | sed 's/^/      /' | head -8; FAIL=1
-        fi
-    done
+    comparison_arm "red" "$bits" "-DCF_GAP_RESCAN_UNFIXED" "${RED_CASES[*]}"
+    comparison_arm "red2" "$bits" "-DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED" "${RED2_CASES[*]}"
+    comparison_arm "red3" "$bits" "-DWALLET_FOREIGN_PROMOTE_UNFIXED" "${RED3_CASES[*]}"
 
     echo "--- GREEN ARM (shipped): every case MUST pass, no sanitizer report ---"
-    for c in "${RED_CASES[@]}" "${GUARD_CASES[@]}"; do
+    for c in "${ALL_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c"
         if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits green $c] passed: $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-140)"
@@ -177,7 +210,7 @@ run_bits 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: cf_gap_rescan_kat (${#RED_CASES[@]} red-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
+    echo "PASS: cf_gap_rescan_kat (${#RED_CASES[@]} red-then-green, ${#RED2_CASES[@]} red2-then-green, ${#RED3_CASES[@]} red3-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
     exit 0
 else
     echo "FAIL: cf_gap_rescan_kat"

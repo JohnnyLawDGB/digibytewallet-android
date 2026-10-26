@@ -12,23 +12,44 @@
 // looks at it again. Silent, permanent, and it is money: the merchant / exchange pattern, many addresses handed
 // out and paid within one scan pass.
 //
+// Full blocks are also not delivered in height order. The block that grows the set first may be the HIGHEST of the
+// matched blocks in flight, and a lower one delivered later then grows nothing (the set already covers it), so it
+// never asks for a rescan of its own. The rescan therefore has to start at the scan frontier (scannedThrough + 1),
+// not at the delivering block.
+//
 // WHAT THIS KAT ASSERTS
 // ---------------------
-//   beyond_window_found   (RED, then GREEN)  B pays receive index 112 of a fresh wallet (window 0..109); A pays index
-//                         105. Filters for A and B are both judged before A's block arrives, so B misses. After A's
-//                         block is delivered the scan must NOT count B's height as scanned, the forward-fetch cursor
-//                         must be back at or below it, and when the drive re-fetches from that cursor the payment at B
-//                         is found and confirmed at B's height.
-//   in_window_no_rescan   (GUARD, both builds)  the same flow paying indices 5 and 8, well inside the window: the set
-//                         does not grow, nothing is rewound, the cursor and the scanned height are exactly where they
-//                         were, and both payments are confirmed. A wallet that never exceeds its window is untouched.
+// A fresh wallet's receive window is indices 0..109; paying index 104 or 105 extends it past 112.
+//   beyond_window_found       (RED)  B (HB) pays index 112, A (HA < HB) pays 105. Filters for A and B are both
+//                             judged before A's block arrives, so B misses. After A's block the scan must not count
+//                             HB as scanned, the cursor must be back below it, and the re-fetch finds B's payment.
+//   out_of_order_found        (RED, and RED for the from-height shape)  X (H1) pays 104, B (H2) pays 112, A (H3) pays
+//                             105. All three filters are judged first (B misses); A's block arrives BEFORE X's and
+//                             grows the set; X's then grows nothing. The scan must rewind below H2 and find B.
+//   delivering_block_rescanned (RED)  one block at H1 holds two transactions: the first pays 112, the second pays 105.
+//                             When the first is handed over 112 is not watched; the second grows the set. H1 itself
+//                             must be scanned again, so the re-delivery registers the payment to 112. (Kills a
+//                             rewind that starts one above the delivering block.) The first delivery keeps the
+//                             112 tx as a non-wallet record (BRWallet's foreignTx), so the re-delivery must also
+//                             promote that record: -DWALLET_FOREIGN_PROMOTE_UNFIXED is its comparison arm.
+//   abandoned_floor_respected (RED)  A (H1) pays 105, B (H3) pays 112. A's block is in flight when H1 is abandoned
+//                             (the hard floor moves to H2), and only then arrives and grows the set. The rescan must
+//                             start AT the floor: the cursor and scannedThrough stay at or above floor - 1 (nothing
+//                             below the floor is re-requested), and B is found.
+//   in_window_no_rescan       (GUARD, every build)  the same flow paying indices 5 and 8: the set does not grow,
+//                             nothing is rewound, the cursor and the scanned height are where they were, and both
+//                             payments are confirmed. A wallet that never exceeds its window is untouched.
 //
-// The "re-fetch" is computed from the manager's own cursor (autoFetchCFiltersThrough + 1 .. the top height), the
-// range the forward drive in _peerRelayedCFHeaders / BRPeerManagerKeepAlive would request; the KAT then hands in
-// the filters and blocks a peer would answer with. In the unfixed build that range is empty.
+// The "re-fetch" is computed from the manager's own cursor (autoFetchCFiltersThrough + 1, clamped up to
+// autoFetchCFiltersStart, .. the top height), the range the forward drive in _peerRelayedCFHeaders /
+// BRPeerManagerKeepAlive would request; the KAT then hands in the filters and blocks a peer would answer with. Each
+// filter commits to every output script of its block (BIP158 basic filter, outputs only).
 //
-// RED-BEFORE-GREEN: run.sh builds -DCF_GAP_RESCAN_UNFIXED (the detection in _peerRelayedTx compiled out) and that
-// build MUST fail beyond_window_found at its crux lines and pass the guard; the shipped build must pass both.
+// RED-BEFORE-GREEN: run.sh builds three comparison arms. -DCF_GAP_RESCAN_UNFIXED (the detection in _peerRelayedTx
+// compiled out) must fail every RED case; -DCF_GAP_RESCAN_FROM_HEIGHT_UNFIXED (the rescan starting at the delivering
+// block, the first shape of the fix) must fail out_of_order_found; -DWALLET_FOREIGN_PROMOTE_UNFIXED (a re-delivered
+// tx the wallet kept as non-wallet is not promoted) must fail delivering_block_rescanned. Each arm passes every
+// case it does not govern; the shipped build passes all.
 //
 // Approach: #include BRPeer.c and BRPeerManager.c to reach the file-static handlers and the peer context (the
 // delivering-block flag BRPeer.c sets while it hands a verified block's transactions to relayedTx), the same pattern
@@ -57,7 +78,7 @@ static void check(int c, const char *d) { printf(c ? "PASS: %s\n" : "FAIL: %s\n"
 static const char *kMnemonic =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-// ---- BIP158 single-element filter (as in ../cf_block_completion_gate_kat) ---
+// ---- BIP158 filter (SipHash and bit writer as in ../cf_block_completion_gate_kat) ---
 #define TEST_ROTL64(x, b) (((x) << (b)) | ((x) >> (64 - (b))))
 #define TEST_SIP_ROUND(v0, v1, v2, v3) \
     do { v0 += v1; v1 = TEST_ROTL64(v1, 13); v1 ^= v0; v0 = TEST_ROTL64(v0, 32); \
@@ -112,24 +133,41 @@ static void test_gcsWriteBit(uint8_t *out, size_t off, size_t *bitPos, unsigned 
     (*bitPos)++;
 }
 
-static size_t buildSingleElementFilter(UInt256 blockHash, const uint8_t *elem, size_t elemLen, uint8_t *out,
-                                       size_t outCap)
+// A BIP158 basic filter over `n` elements: hash each into [0, n*M), sort, Golomb-Rice code the deltas.
+static int cmpU64(const void *a, const void *b)
+{
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return (x > y) - (x < y);
+}
+
+static size_t buildFilter(UInt256 blockHash, const uint8_t *const *elems, const size_t *elemLens, size_t n,
+                          uint8_t *out, size_t outCap)
 {
     uint64_t k0 = UInt64GetLE(&blockHash.u8[0]);
     uint64_t k1 = UInt64GetLE(&blockHash.u8[8]);
-    uint64_t F  = (uint64_t)BR_GCS_BASIC_FILTER_M; // N=1 -> F = N*M = M
-    uint64_t val = test_fastrange64(test_siphash24(k0, k1, elem, elemLen), F);
+    uint64_t F  = (uint64_t)n*BR_GCS_BASIC_FILTER_M;
     const uint8_t P = BR_GCS_BASIC_FILTER_P;
-    uint64_t q = val >> P, r = val & ((((uint64_t)1) << P) - 1);
+    uint64_t vals[4];
     size_t off = 1, bitPos = 0;
 
+    assert(n >= 1 && n <= 4);
+    for (size_t i = 0; i < n; i++) vals[i] = test_fastrange64(test_siphash24(k0, k1, elems[i], elemLens[i]), F);
+    qsort(vals, n, sizeof(vals[0]), cmpU64);
+
     memset(out, 0, outCap);
-    out[0] = 0x01; // CompactSize N=1
-    for (uint64_t i = 0; i < q; i++) test_gcsWriteBit(out, off, &bitPos, 1);
-    test_gcsWriteBit(out, off, &bitPos, 0);
-    for (int i = (int)P - 1; i >= 0; i--) test_gcsWriteBit(out, off, &bitPos, (unsigned)((r >> i) & 1));
+    out[0] = (uint8_t)n; // CompactSize N
+    uint64_t last = 0;
+    for (size_t k = 0; k < n; k++) {
+        uint64_t d = vals[k] - last, q = d >> P, r = d & ((((uint64_t)1) << P) - 1);
+        last = vals[k];
+        assert(off + (bitPos + q + 1 + P + 7)/8 <= outCap);
+        for (uint64_t i = 0; i < q; i++) test_gcsWriteBit(out, off, &bitPos, 1);
+        test_gcsWriteBit(out, off, &bitPos, 0);
+        for (int i = (int)P - 1; i >= 0; i--) test_gcsWriteBit(out, off, &bitPos, (unsigned)((r >> i) & 1));
+    }
     return off + (bitPos + 7)/8;
 }
+
 
 // ---- transactions -----------------------------------------------------------
 static const uint8_t kSig[8] = { 0x51,0x52,0x53,0x54,0x55,0x56,0x57,0x58 };   // not a signature
@@ -181,13 +219,17 @@ static void receiveAddrAt(BRMasterPubKey mpk, uint32_t index, BRAddress *out, ui
     assert(*spkLen > 0);
 }
 
+
 // ---- fixture ----------------------------------------------------------------
-// Three resident headers on one chain: H0 (empty), HA committing to {payA}, HB committing to {payB}; a filter-header
-// chain whose cfheaders commit to a filter for HA holding payA's script and one for HB holding payB's; and a scan
-// armed at HA with [HA..HB] requested.
+// Resident headers on one chain: H0 (empty) and blocks at H0+1 .. H0+nblk, each committing to one or two payments; a
+// filter-header chain whose cfheaders commit to each block's filter (every output script it pays); and a scan armed
+// at H0+1 with [H0+1 .. top] requested, as the forward drive leaves it.
 #define H0 5300000u
-#define HA (H0 + 1)
-#define HB (H0 + 2)
+#define MAX_BLK 3
+#define MAX_TX  2
+#define FOREIGN 0xFFFFFFFFu   // pays a script that is not the wallet's
+
+typedef struct { size_t ntx; uint32_t idx[MAX_TX]; } BlkSpec;
 
 typedef struct {
     BRMasterPubKey mpk;
@@ -195,28 +237,36 @@ typedef struct {
     BRPeerManager *m;
     BRPeer *peer;
     BRPeerCallbackInfo info;
-    BRAddress addrA, addrB;
-    BRTransaction *payA, *payB;      // fixture copies; the wallet gets parsed copies
-    BRMerkleBlock *blk[3];           // H0, HA, HB (owned by m->blocks)
-    uint8_t filter[3][16];
-    size_t filterLen[3];
+    size_t nblk;
+    uint32_t top;
+    BRAddress addr[MAX_BLK + 1][MAX_TX];
+    BRTransaction *tx[MAX_BLK + 1][MAX_TX];   // fixture copies; the wallet gets parsed copies
+    size_t ntx[MAX_BLK + 1];
+    BRMerkleBlock *blk[MAX_BLK + 1];          // [0] = H0 (owned by m->blocks)
+    uint8_t filter[MAX_BLK + 1][32];
+    size_t filterLen[MAX_BLK + 1];
 } Fx;
 
-static BRMerkleBlock *blockAt(uint32_t height, uint8_t seed, UInt256 prev, const BRTransaction *tx)
+static BRMerkleBlock *blockAt(uint32_t height, uint8_t seed, UInt256 prev, BRTransaction *const *txs, size_t ntx)
 {
     BRMerkleBlock *b = BRMerkleBlockNew();
+    UInt256 hashes[MAX_TX];
 
     memset(b->blockHash.u8, seed, sizeof(b->blockHash.u8));
     b->height = height;
     b->timestamp = 1700300000u + (height - H0)*15u;
     b->prevBlock = prev;
-    if (tx) assert(BRMerkleRootFromTxHashes(&b->merkleRoot, &tx->txHash, 1));
+    for (size_t i = 0; i < ntx; i++) hashes[i] = txs[i]->txHash;
+    if (ntx > 0) assert(BRMerkleRootFromTxHashes(&b->merkleRoot, hashes, ntx));
     return b;
 }
 
-static void fxInit(Fx *f, uint32_t idxA, uint32_t idxB)
+static void fxInit(Fx *f, const BlkSpec *spec, size_t nblk)
 {
     memset(f, 0, sizeof(*f));
+    assert(nblk >= 1 && nblk <= MAX_BLK);
+    f->nblk = nblk;
+    f->top = H0 + (uint32_t)nblk;
 
     uint8_t seed[64];
     BRBIP39DeriveKey(seed, kMnemonic, NULL);
@@ -224,45 +274,56 @@ static void fxInit(Fx *f, uint32_t idxA, uint32_t idxB)
     f->w = BRWalletNew(NULL, 0, f->mpk);   // fresh wallet: receive window is indices 0 .. gap + 100 - 1
     assert(f->w != NULL);
 
-    uint8_t spkA[64], spkB[64];
-    size_t spkALen, spkBLen;
-    receiveAddrAt(f->mpk, idxA, &f->addrA, spkA, &spkALen);
-    receiveAddrAt(f->mpk, idxB, &f->addrB, spkB, &spkBLen);
-    f->payA = payTx(spkA, spkALen, 100000000ULL, 0x41);
-    f->payB = payTx(spkB, spkBLen, 250000000ULL, 0x42);
+    uint8_t spk[MAX_BLK + 1][MAX_TX][64];
+    size_t spkLen[MAX_BLK + 1][MAX_TX];
+    for (size_t b = 1; b <= nblk; b++) {
+        f->ntx[b] = spec[b - 1].ntx;
+        assert(f->ntx[b] >= 1 && f->ntx[b] <= MAX_TX);
+        for (size_t t = 0; t < f->ntx[b]; t++) {
+            uint32_t idx = spec[b - 1].idx[t];
+            if (idx == FOREIGN) {
+                spkLen[b][t] = 22;   // P2WPKH to a hash no wallet key has
+                spk[b][t][0] = 0x00; spk[b][t][1] = 0x14;
+                memset(&spk[b][t][2], (int)(0xA0 + b*2 + t), 20);
+                f->addr[b][t] = BR_ADDRESS_NONE;
+            }
+            else receiveAddrAt(f->mpk, idx, &f->addr[b][t], spk[b][t], &spkLen[b][t]);
+            f->tx[b][t] = payTx(spk[b][t], spkLen[b][t], 100000000ULL*(b*MAX_TX + t), (uint8_t)(0x40 + b*MAX_TX + t));
+        }
+    }
 
     f->m = BRPeerManagerNew(&BRMainNetParams, f->w, 0, NULL, 0, NULL, 0);
     BRPeerManagerSetSyncMode(f->m, BR_SYNC_MODE_COMPACT_FILTERS_ONLY);
 
-    f->blk[0] = blockAt(H0, 0xD0, UINT256_ZERO, NULL);
-    f->blk[1] = blockAt(HA, 0xD1, f->blk[0]->blockHash, f->payA);
-    f->blk[2] = blockAt(HB, 0xD2, f->blk[1]->blockHash, f->payB);
-    for (int i = 0; i < 3; i++) BRSetAdd(f->m->blocks, f->blk[i]);
-    f->m->lastBlock = f->blk[2];
+    f->blk[0] = blockAt(H0, 0xD0, UINT256_ZERO, NULL, 0);
+    for (size_t b = 1; b <= nblk; b++)
+        f->blk[b] = blockAt(H0 + (uint32_t)b, (uint8_t)(0xD0 + b), f->blk[b - 1]->blockHash, f->tx[b], f->ntx[b]);
+    for (size_t b = 0; b <= nblk; b++) BRSetAdd(f->m->blocks, f->blk[b]);
+    f->m->lastBlock = f->blk[nblk];
 
     f->m->compactFilterChain = BRCompactFilterChainNew(FILTER_TYPE_BASIC, H0, UINT256_ZERO);
     UInt256 fh;
     memset(fh.u8, 0x77, sizeof(fh.u8));   // H0's filter is never fetched; any header will do
     assert(BRCompactFilterChainAppend(f->m->compactFilterChain, BRCompactFilterChainTipHeader(f->m->compactFilterChain),
                                       &fh, 1) == 1);
-    const uint8_t *spks[3] = { NULL, spkA, spkB };
-    size_t spkLens[3] = { 0, spkALen, spkBLen };
-    for (int i = 1; i < 3; i++) {
-        f->filterLen[i] = buildSingleElementFilter(f->blk[i]->blockHash, spks[i], spkLens[i], f->filter[i],
-                                                   sizeof(f->filter[i]));
-        BRSHA256_2(fh.u8, f->filter[i], f->filterLen[i]);
+    for (size_t b = 1; b <= nblk; b++) {
+        const uint8_t *elems[MAX_TX];
+        for (size_t t = 0; t < f->ntx[b]; t++) elems[t] = spk[b][t];
+        f->filterLen[b] = buildFilter(f->blk[b]->blockHash, elems, spkLen[b], f->ntx[b], f->filter[b],
+                                      sizeof(f->filter[b]));
+        BRSHA256_2(fh.u8, f->filter[b], f->filterLen[b]);
         assert(BRCompactFilterChainAppend(f->m->compactFilterChain,
                                           BRCompactFilterChainTipHeader(f->m->compactFilterChain), &fh, 1) == 1);
-        assert(BRCompactFilterChainVerifyFilter(f->m->compactFilterChain, f->blk[i]->height, f->filter[i],
-                                                f->filterLen[i]) == 1);
+        assert(BRCompactFilterChainVerifyFilter(f->m->compactFilterChain, f->blk[b]->height, f->filter[b],
+                                                f->filterLen[b]) == 1);
     }
 
-    // the scan, armed at HA and with [HA..HB] requested, as the forward drive leaves it
+    // the scan, armed at H0+1 and with [H0+1 .. top] requested, as the forward drive leaves it
     f->m->autoFetchCFiltersEnabled = 1;
-    f->m->autoFetchCFiltersStart = HA;
-    f->m->autoFetchCFiltersThrough = HB;
-    BRCFScanLedgerInit(&f->m->cfLedger, HA);
-    BRCFScanLedgerRecordRequested(&f->m->cfLedger, HA, HB, UINT128_ZERO, 0, 1);
+    f->m->autoFetchCFiltersStart = H0 + 1;
+    f->m->autoFetchCFiltersThrough = f->top;
+    BRCFScanLedgerInit(&f->m->cfLedger, H0 + 1);
+    BRCFScanLedgerRecordRequested(&f->m->cfLedger, H0 + 1, f->top, UINT128_ZERO, 0, 1);
 
     f->peer = BRPeerNew(BRMainNetParams.magicNumber);
     f->peer->address.u8[15] = 0x01;
@@ -281,70 +342,86 @@ static void fxFree(Fx *f)
     BRPeerFree(f->peer);
     BRPeerManagerFree(f->m);
     BRWalletFree(f->w);
-    BRTransactionFree(f->payA);
-    BRTransactionFree(f->payB);
+    for (size_t b = 1; b <= f->nblk; b++)
+        for (size_t t = 0; t < f->ntx[b]; t++) BRTransactionFree(f->tx[b][t]);
 }
 
-static int solicited(Fx *f, int i)
+static int solicited(Fx *f, size_t b)
 {
     MGR_LOCK(f->m);
-    int r = _BRPeerManagerFindSolicitedBlockLocked(f->m, f->blk[i]->blockHash, f->blk[i]->height);
+    int r = _BRPeerManagerFindSolicitedBlockLocked(f->m, f->blk[b]->blockHash, f->blk[b]->height);
     MGR_UNLOCK(f->m);
     return r >= 0;
 }
 
-static void deliverFilter(Fx *f, int i)
+static void deliverFilter(Fx *f, size_t b)
 {
-    _peerRelayedCFilter(&f->info, FILTER_TYPE_BASIC, f->blk[i]->blockHash, f->filter[i], f->filterLen[i]);
+    _peerRelayedCFilter(&f->info, FILTER_TYPE_BASIC, f->blk[b]->blockHash, f->filter[b], f->filterLen[b]);
 }
 
-// what BRPeer.c does with a requested, merkle-verified block: hand each tx to relayedTx with the delivering flag set,
-// then the tx list to relayedBlockTxns
-static void deliverBlock(Fx *f, int i)
+// what BRPeer.c does with a requested, merkle-verified block: hand each tx, in block order, to relayedTx with the
+// delivering flag set, then the tx list to relayedBlockTxns
+static void deliverBlock(Fx *f, size_t b)
 {
     BRPeerContext *ctx = (BRPeerContext *)f->peer;
-    BRTransaction *tx = (i == 1) ? f->payA : f->payB;
+    UInt256 hashes[MAX_TX];
 
-    ctx->deliveringBlockHash = f->blk[i]->blockHash;
+    ctx->deliveringBlockHash = f->blk[b]->blockHash;
     ctx->deliveringBlockTxs = 1;
-    _peerRelayedTx(&f->info, copyTx(tx));   // takes ownership
+    for (size_t t = 0; t < f->ntx[b]; t++) {
+        hashes[t] = f->tx[b][t]->txHash;
+        _peerRelayedTx(&f->info, copyTx(f->tx[b][t]));   // takes ownership
+    }
     ctx->deliveringBlockTxs = 0;
     ctx->deliveringBlockHash = UINT256_ZERO;
-    _peerRelayedBlockTxns(&f->info, f->blk[i]->blockHash, f->blk[i]->merkleRoot, &tx->txHash, 1);
+    _peerRelayedBlockTxns(&f->info, f->blk[b]->blockHash, f->blk[b]->merkleRoot, hashes, f->ntx[b]);
 }
 
-static int confirmedAt(Fx *f, const BRTransaction *tx, uint32_t height)
+static int confirmedAt(Fx *f, size_t b, size_t t)
 {
-    BRTransaction *t = BRWalletTransactionForHash(f->w, tx->txHash);
-    return t != NULL && t->blockHeight == height;
+    BRTransaction *x = BRWalletTransactionForHash(f->w, f->tx[b][t]->txHash);
+    return x != NULL && x->blockHeight == f->blk[b]->height;
 }
 
-// The forward drive: request from the cursor up to the top of the filter-header chain, then answer each request the
-// way a peer would (the filter, and the full block for any filter that asked for one).
-static void driveForward(Fx *f)
+static uint64_t paid(size_t b, size_t t) { return 100000000ULL*(b*MAX_TX + t); }
+
+static void noteState(Fx *f, const char *when)
+{
+    printf("NOTE: %s: scannedThrough=%u cursor=%u requestedThrough=%u abandonedBelow=%u\n", when,
+           BRCFScanLedgerScannedThrough(&f->m->cfLedger), f->m->autoFetchCFiltersThrough,
+           f->m->cfLedger.requestedThrough, BRCFScanLedgerAbandonedBelow(&f->m->cfLedger));
+}
+
+// The forward drive: request from the cursor (clamped up to the scan's start, as every production request site does)
+// up to the top of the filter-header chain, then answer each request the way a peer would (the filter, and the full
+// block for any filter that asked for one). Returns the first height requested (top + 1 if nothing).
+static uint32_t driveForward(Fx *f)
 {
     uint32_t from = f->m->autoFetchCFiltersThrough + 1;
     if (from < f->m->autoFetchCFiltersStart) from = f->m->autoFetchCFiltersStart;
-    printf("NOTE: forward drive re-requests [%u..%u]%s\n", from, HB, from > HB ? " (nothing)" : "");
-    if (from > HB) return;
+    printf("NOTE: forward drive re-requests [%u..%u]%s\n", from, f->top, from > f->top ? " (nothing)" : "");
+    if (from > f->top) return from;
 
-    BRCFScanLedgerRecordRequested(&f->m->cfLedger, from, HB, f->peer->address, f->peer->port, 2);
-    f->m->autoFetchCFiltersThrough = HB;
-    for (uint32_t h = from; h <= HB; h++) {
-        int i = (int)(h - H0);
-        deliverFilter(f, i);
-        if (solicited(f, i)) deliverBlock(f, i);
+    BRCFScanLedgerRecordRequested(&f->m->cfLedger, from, f->top, f->peer->address, f->peer->port, 2);
+    f->m->autoFetchCFiltersThrough = f->top;
+    for (uint32_t h = from; h <= f->top; h++) {
+        size_t b = (size_t)(h - H0);
+        deliverFilter(f, b);
+        if (solicited(f, b)) deliverBlock(f, b);
     }
+    return from;
 }
 
 // ---- cases ------------------------------------------------------------------
 static int case_beyond_window_found(void)
 {
     Fx f;
-    fxInit(&f, 105, 112);
+    const BlkSpec spec[] = { { 1, { 105 } }, { 1, { 112 } } };   // A at H0+1, B at H0+2
+    fxInit(&f, spec, 2);
+    const uint32_t HB = H0 + 2;
 
-    check(BRWalletContainsAddress(f.w, f.addrA.s), "setup: index 105 is inside the fresh wallet's window");
-    check(! BRWalletContainsAddress(f.w, f.addrB.s), "setup: index 112 is beyond the fresh wallet's window");
+    check(BRWalletContainsAddress(f.w, f.addr[1][0].s), "setup: index 105 is inside the fresh wallet's window");
+    check(! BRWalletContainsAddress(f.w, f.addr[2][0].s), "setup: index 112 is beyond the fresh wallet's window");
 
     deliverFilter(&f, 1);
     check(solicited(&f, 1), "setup: the filter for HA matched and asked for HA's block");
@@ -352,11 +429,9 @@ static int case_beyond_window_found(void)
     check(! solicited(&f, 2), "setup: the filter for HB was judged against the old set and missed (the defect's shape)");
 
     deliverBlock(&f, 1);
-    check(confirmedAt(&f, f.payA, HA), "payment A is confirmed at HA");
-    check(BRWalletContainsAddress(f.w, f.addrB.s), "A's registration brought index 112 into the set");
-    printf("NOTE: after A's block: scannedThrough=%u cursor=%u requestedThrough=%u\n",
-           BRCFScanLedgerScannedThrough(&f.m->cfLedger), f.m->autoFetchCFiltersThrough,
-           f.m->cfLedger.requestedThrough);
+    check(confirmedAt(&f, 1, 0), "payment A is confirmed at HA");
+    check(BRWalletContainsAddress(f.w, f.addr[2][0].s), "A's registration brought index 112 into the set");
+    noteState(&f, "after A's block");
 
     check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) < HB,
           "CRUX: HB, judged against the set before it grew, is not counted as scanned");
@@ -365,11 +440,122 @@ static int case_beyond_window_found(void)
 
     driveForward(&f);
 
-    check(confirmedAt(&f, f.payB, HB), "CRUX: the payment beyond the original window is found and confirmed at HB");
-    check(BRWalletBalance(f.w) == 350000000ULL, "CRUX: the balance holds both payments");
+    check(confirmedAt(&f, 2, 0), "CRUX: the payment beyond the original window is found and confirmed at HB");
+    check(BRWalletBalance(f.w) == paid(1, 0) + paid(2, 0), "CRUX: the balance holds both payments");
     check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == HB, "the scan completes through HB");
     check(BRCFScanLedgerOutstandingCount(&f.m->cfLedger) == 0, "nothing is left outstanding");
-    check(confirmedAt(&f, f.payA, HA), "payment A is still confirmed at HA after the re-scan");
+    check(confirmedAt(&f, 1, 0), "payment A is still confirmed at HA after the re-scan");
+
+    fxFree(&f);
+    return g_fail == 0;
+}
+
+static int case_out_of_order_found(void)
+{
+    Fx f;
+    const BlkSpec spec[] = { { 1, { 104 } }, { 1, { 112 } }, { 1, { 105 } } };   // X at H1, B at H2, A at H3
+    fxInit(&f, spec, 3);
+    const uint32_t H2 = H0 + 2, H3 = H0 + 3;
+
+    check(! BRWalletContainsAddress(f.w, f.addr[2][0].s), "setup: index 112 is beyond the fresh wallet's window");
+    for (size_t b = 1; b <= 3; b++) deliverFilter(&f, b);
+    check(solicited(&f, 1) && ! solicited(&f, 2) && solicited(&f, 3),
+          "setup: X's and A's filters matched; B's was judged against the old set and missed");
+
+    deliverBlock(&f, 3);   // A, the HIGHER block, arrives first and grows the set
+    check(BRWalletContainsAddress(f.w, f.addr[2][0].s), "A's registration brought index 112 into the set");
+    noteState(&f, "after A's block (H3)");
+    size_t before = 0, after = 0;
+    BRWalletAddrSetKey(f.w, NULL, &before);
+    deliverBlock(&f, 1);   // X arrives second: its payment is inside the grown set, so it grows nothing
+    BRWalletAddrSetKey(f.w, NULL, &after);
+    check(after == before, "setup: X's block grows nothing (so X cannot ask for a rescan of its own)");
+    noteState(&f, "after X's block (H1)");
+
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) < H2,
+          "CRUX: H2, judged against the set before A grew it, is not counted as scanned");
+    check(f.m->autoFetchCFiltersThrough < H2, "CRUX: the cursor is back below H2, so its filter is fetched again");
+
+    driveForward(&f);
+
+    check(confirmedAt(&f, 2, 0), "CRUX: the payment to index 112 at H2 is found");
+    check(confirmedAt(&f, 1, 0) && confirmedAt(&f, 3, 0), "X and A stay confirmed at their heights");
+    check(BRWalletBalance(f.w) == paid(1, 0) + paid(2, 0) + paid(3, 0), "CRUX: the balance holds all three payments");
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == H3, "the scan completes through H3");
+    check(BRCFScanLedgerOutstandingCount(&f.m->cfLedger) == 0, "nothing is left outstanding");
+
+    fxFree(&f);
+    return g_fail == 0;
+}
+
+static int case_delivering_block_rescanned(void)
+{
+    Fx f;
+    // one block at H1: tx 0 pays index 112 (not watched when it is handed over), tx 1 pays 105 (grows the set);
+    // H2 pays a foreign script
+    const BlkSpec spec[] = { { 2, { 112, 105 } }, { 1, { FOREIGN } } };
+    fxInit(&f, spec, 2);
+    const uint32_t H1 = H0 + 1, H2 = H0 + 2;
+
+    check(! BRWalletContainsAddress(f.w, f.addr[1][0].s), "setup: index 112 is beyond the fresh wallet's window");
+    deliverFilter(&f, 1);
+    deliverFilter(&f, 2);
+    check(solicited(&f, 1) && ! solicited(&f, 2), "setup: H1's filter matched (on 105) and H2's missed");
+
+    deliverBlock(&f, 1);
+    check(confirmedAt(&f, 1, 1), "the payment to 105 is confirmed at H1");
+    check(BRWalletBalance(f.w) == paid(1, 1),
+          "setup: the payment to 112, handed over before the set grew, is not counted after the first delivery");
+    noteState(&f, "after H1's block");
+
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) < H1,
+          "CRUX: H1 itself is not counted as scanned (a transaction earlier in it paid a newly added address)");
+    check(f.m->autoFetchCFiltersThrough < H1, "CRUX: the cursor is back below H1, so H1 is fetched again");
+
+    driveForward(&f);
+
+    check(confirmedAt(&f, 1, 0), "CRUX: the re-delivery of H1 registers the payment to 112 at H1");
+    check(BRWalletBalance(f.w) == paid(1, 0) + paid(1, 1), "CRUX: the balance holds both payments in H1");
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == H2, "the scan completes through H2");
+    check(BRCFScanLedgerOutstandingCount(&f.m->cfLedger) == 0, "nothing is left outstanding");
+
+    fxFree(&f);
+    return g_fail == 0;
+}
+
+static int case_abandoned_floor_respected(void)
+{
+    Fx f;
+    const BlkSpec spec[] = { { 1, { 105 } }, { 1, { FOREIGN } }, { 1, { 112 } } };   // A at H1, B at H3
+    fxInit(&f, spec, 3);
+    const uint32_t H1 = H0 + 1, H2 = H0 + 2, H3 = H0 + 3;
+
+    for (size_t b = 1; b <= 3; b++) deliverFilter(&f, b);
+    check(solicited(&f, 1) && ! solicited(&f, 3), "setup: A's filter matched; B's was judged against the old set");
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == H1 - 1, "setup: H1 (A's block in flight) pins the frontier");
+
+    // H1 is abandoned while A's block is in flight (the B2 valve's capped-outstanding path, or a retention floor
+    // that moved above it): the hard floor rises to H2 and the frontier moves past the evaluated misses
+    uint32_t cnt = 0;
+    MGR_LOCK(f.m);
+    BRCFScanLedgerAbandonUnscannableBelow(&f.m->cfLedger, H1, H2, &cnt);
+    MGR_UNLOCK(f.m);
+    check(cnt == 1 && BRCFScanLedgerAbandonedBelow(&f.m->cfLedger) == H2, "setup: H1 is abandoned, the floor is H2");
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == H3, "setup: the frontier sits at H3 (B counted as scanned)");
+
+    deliverBlock(&f, 1);   // A's block arrives late, below the floor, and grows the set
+    check(BRWalletContainsAddress(f.w, f.addr[3][0].s), "A's registration brought index 112 into the set");
+    noteState(&f, "after A's late block");
+
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) < H3, "CRUX: H3 is no longer counted as scanned");
+    check(f.m->autoFetchCFiltersThrough + 1 >= H2 && BRCFScanLedgerScannedThrough(&f.m->cfLedger) + 1 >= H2,
+          "CRUX: the rescan starts at the hard floor: nothing below abandonedBelow is re-requested or un-scanned");
+    check(BRCFScanLedgerAbandonedBelow(&f.m->cfLedger) == H2, "the floor itself is unchanged");
+
+    uint32_t from = driveForward(&f);
+    check(from == H2, "CRUX: the forward drive resumes exactly at the floor");
+    check(confirmedAt(&f, 3, 0), "CRUX: the payment to index 112 at H3 is found");
+    check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == H3, "the scan completes through H3");
 
     fxFree(&f);
     return g_fail == 0;
@@ -378,11 +564,13 @@ static int case_beyond_window_found(void)
 static int case_in_window_no_rescan(void)
 {
     Fx f;
-    fxInit(&f, 5, 8);
+    const BlkSpec spec[] = { { 1, { 5 } }, { 1, { 8 } } };
+    fxInit(&f, spec, 2);
+    const uint32_t HB = H0 + 2;
 
     size_t countBefore = 0, countAfter = 0;
     BRWalletAddrSetKey(f.w, NULL, &countBefore);
-    check(BRWalletContainsAddress(f.w, f.addrB.s), "setup: index 8 is inside the window");
+    check(BRWalletContainsAddress(f.w, f.addr[2][0].s), "setup: index 8 is inside the window");
 
     deliverFilter(&f, 1);
     deliverFilter(&f, 2);
@@ -397,8 +585,8 @@ static int case_in_window_no_rescan(void)
 
     deliverBlock(&f, 2);
     check(BRCFScanLedgerScannedThrough(&f.m->cfLedger) == HB, "GUARD: the scan completes through HB with no re-scan");
-    check(confirmedAt(&f, f.payA, HA) && confirmedAt(&f, f.payB, HB), "GUARD: both payments are confirmed");
-    check(BRWalletBalance(f.w) == 350000000ULL, "GUARD: the balance holds both payments");
+    check(confirmedAt(&f, 1, 0) && confirmedAt(&f, 2, 0), "GUARD: both payments are confirmed");
+    check(BRWalletBalance(f.w) == paid(1, 0) + paid(2, 0), "GUARD: the balance holds both payments");
 
     fxFree(&f);
     return g_fail == 0;
@@ -407,12 +595,15 @@ static int case_in_window_no_rescan(void)
 int main(int argc, char *argv[])
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
-    const char *cases[] = { "beyond_window_found", "in_window_no_rescan" };
-    int (*fns[])(void) = { case_beyond_window_found, case_in_window_no_rescan };
+    const char *cases[] = { "beyond_window_found", "out_of_order_found", "delivering_block_rescanned",
+                            "abandoned_floor_respected", "in_window_no_rescan" };
+    int (*fns[])(void) = { case_beyond_window_found, case_out_of_order_found, case_delivering_block_rescanned,
+                           case_abandoned_floor_respected, case_in_window_no_rescan };
+    const size_t n = sizeof(cases)/sizeof(cases[0]);
 
     if (argc < 2) { fprintf(stderr, "usage: %s <case>|list\n", argv[0]); return 2; }
-    if (strcmp(argv[1], "list") == 0) { for (size_t i = 0; i < 2; i++) printf("%s\n", cases[i]); return 0; }
-    for (size_t i = 0; i < 2; i++) {
+    if (strcmp(argv[1], "list") == 0) { for (size_t i = 0; i < n; i++) printf("%s\n", cases[i]); return 0; }
+    for (size_t i = 0; i < n; i++) {
         if (strcmp(argv[1], cases[i]) != 0) continue;
         int ok = fns[i]();
         printf("RESULT %s %s\n", cases[i], ok ? "pass" : "fail");
