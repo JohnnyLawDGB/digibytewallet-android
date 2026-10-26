@@ -17,10 +17,10 @@
     <string name="onb_words_count">%1$d слов</string>
     <string name="onb_create">Создать новый кошелёк</string>
     <string name="onb_recover">Восстановить существующий кошелёк</string>
-    <string name="onb_footer">DigiByte — безопасно, быстро, децентрализованно</string>
-    <string name="app_name_display">Кошелёк DigiByte</string>
+    <string name="onb_footer">Независимый кошелёк для сети DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
-    <string name="seed_screenshot_blocked">Снимки экрана заблокированы. Запишите эти слова — восстановить их невозможно.</string>
+    <string name="seed_screenshot_blocked">Снимки экрана заблокированы. Запишите эти слова: восстановить их невозможно.</string>
     <string name="seed_title">Ваша фраза восстановления</string>
     <string name="seed_word_count">Фраза восстановления из %1$d слов</string>
     <!-- WARNING -->
@@ -43,9 +43,12 @@
     <string name="pin_backspace">Backspace</string>
     <string name="unlock_title">Введите PIN-код</string>
     <string name="unlock_subtitle">Введите 6-значный PIN-код для разблокировки</string>
-    <string name="unlock_locked">Заблокировано — повторите через %1$s</string>
+    <string name="unlock_locked">Заблокировано: повторите через %1$s</string>
     <string name="unlock_unlocking">Разблокировка…</string>
     <string name="unlock_biometrics_cd">Разблокировать по биометрии</string>
+    <string name="recover_title">Восстановить кошелёк</string>
+    <string name="recover_body">Введите фразу восстановления, чтобы восстановить кошелёк.</string>
+    <string name="recover_continue">Продолжить</string>
 
     <string name="seed_retry">Повторить</string>
     <string name="verify_next">Далее</string>
@@ -65,11 +68,11 @@
     <string name="pin_err_wallet">Не удалось создать кошелёк. Попробуйте снова.</string>
     <string name="unlock_err_failed">Не удалось разблокировать. Попробуйте снова.</string>
     <string name="unlock_device_lock_removed">Блокировка экрана устройства была удалена, поэтому защищённый ключ кошелька утерян. Восстановите кошелёк с помощью фразы восстановления.</string>
-    <string name="unlock_wiping">Слишком много неудачных попыток — кошелёк удаляется</string>
+    <string name="unlock_wiping">Слишком много неудачных попыток: кошелёк удаляется</string>
     <string name="unlock_attempts_left">Неверный PIN-код. Осталось попыток: %1$d</string>
     <string name="battery_title">Продолжать синхронизацию в фоне</string>
     <string name="battery_body">Когда экран выключен, Android может перевести кошелёк в спящий режим. Это разрывает соединение с сетью DigiByte, и кошелёк может остаться с 0 узлов, пока вы не откроете приложение снова.\n\nРазрешите работу без ограничений, чтобы синхронизация продолжалась.</string>
-    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nНа Samsung также откройте Обслуживание устройства → Батарея → \"Приложения, которые никогда не спят\" и добавьте HoldFast Wallet.</string>
     <string name="battery_open_settings">Открыть настройки</string>
     <string name="tor_title">Новая функция приватности</string>
     <string name="tor_body">Маршрутизация через Tor теперь доступна. При включении кошелёк подключается к сети DigiByte через Tor, скрывая ваш IP-адрес от узлов.\n\nВключить маршрутизацию Tor?</string>
@@ -97,13 +100,13 @@
     <string name="wallet_price_via">источник: %1$s</string>
     <string name="wallet_testnet_active">Testnet активна</string>
     <string name="wallet_tor_active">Tor активен</string>
-    <string name="wallet_tor_hidden">Tor — ваш IP скрыт</string>
+    <string name="wallet_tor_hidden">Tor: ваш IP скрыт</string>
     <string name="wallet_disconnected_peers">Отключено · узлов: %1$d</string>
-    <string name="wallet_history_gap">Пробел в истории — некоторые блоки не проверены</string>
+    <string name="wallet_history_gap">Пробел в истории: некоторые блоки не проверены</string>
     <string name="wallet_scan_missing">Найти пропущенные транзакции</string>
     <string name="wallet_balance_refresh_failed">Не удалось обновить баланс</string>
     <string name="wallet_reconcile_unreachable">После этого обновления не удалось связаться с узлом сверки. Показанный баланс может быть неактуальным.</string>
-    <string name="wallet_tor_unavailable">Tor недоступен — используются прямые подключения</string>
+    <string name="wallet_tor_unavailable">Tor недоступен: используются прямые подключения</string>
     <string name="wallet_tor_timeout">Tor не подключился к сети вовремя, поэтому в этой сессии кошелёк соединяется с узлами напрямую. Ваш IP виден узлам, пока вы не перезапустите приложение.</string>
     <string name="wallet_node_offline">Ваш узел офлайн</string>
     <string name="wallet_node_offline_body">Связанный узел недоступен или сейчас не отдаёт compact filters. Проверьте, что он запущен и доступен и что задан параметр peerblockfilters=1.</string>
@@ -121,11 +124,15 @@
     <string name="receive_request_amount">Запросить определённую сумму (необязательно)</string>
     <string name="receive_amount_label">Сумма</string>
     <string name="receive_qr_encodes">QR содержит: %1$s</string>
-    <string name="receive_dd_note">DigiDollar поступает в виде токенов, номинированных в USD. Поделитесь этим адресом DigiDollar — QR содержит только адрес (без запроса суммы).</string>
+    <string name="receive_dd_note">DigiDollar поступает в виде токенов, номинированных в USD. Поделитесь этим адресом DigiDollar: QR содержит только адрес (без запроса суммы).</string>
     <string name="txd_title">Детали транзакции</string>
     <string name="txd_not_found">Транзакция не найдена</string>
     <string name="txd_sent">Отправлено</string>
     <string name="txd_received">Получено</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Выпущено</string>
+    <string name="tx_dd_self_transfer">Перемещено себе</string>
+    <string name="tx_dd_redeemed">Погашено</string>
     <string name="txd_transaction_id">ID транзакции</string>
     <string name="txd_block_height">Высота блока</string>
     <string name="txd_pending">В ожидании</string>
@@ -139,12 +146,12 @@
     <string name="txd_view_explorer">Открыть в обозревателе</string>
     <string name="txd_back_to_wallet">Назад в кошелёк</string>
 
-    <string name="wallet_sync_gap_headline">Сканирование завершено — часть истории не проверена</string>
+    <string name="wallet_sync_gap_headline">Сканирование завершено: часть истории не проверена</string>
     <string name="wallet_sync_connecting">Подключение к сети DigiByte</string>
     <string name="wallet_sync_scanning">Поиск ваших транзакций</string>
     <string name="wallet_sync_uptodate">Актуально</string>
     <string name="wallet_sync_failed">Сбой синхронизации</string>
-    <string name="wallet_sync_finishing">Завершение — проверка последних блоков</string>
+    <string name="wallet_sync_finishing">Завершение: проверка последних блоков</string>
     <string name="wallet_blocks_count">блоков: %1$s</string>
     <string name="wallet_sync_progress_eta">%1$d%% завершено · %2$s · осталось %3$s</string>
     <string name="wallet_sync_progress_no_eta">%1$d%% завершено · осталось %2$s · оценка…</string>
@@ -162,7 +169,7 @@
     <string name="wallet_status_connecting">Подключение…</string>
     <string name="wallet_gap_range_between">блоки %1$s–%2$s</string>
     <string name="wallet_gap_range_below">блоки ниже %1$s</string>
-    <string name="wallet_gap_body">Часть вашей истории (%1$s) не удалось проверить через фильтр-узлы — нажмите, чтобы найти пропущенные транзакции.</string>
+    <string name="wallet_gap_body">Часть вашей истории (%1$s) не удалось проверить через фильтр-узлы: нажмите, чтобы найти пропущенные транзакции.</string>
     <string name="receive_address_unavailable">Адрес недоступен</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -198,7 +205,7 @@
     <string name="send_available_dd">Доступно: %1$s DigiDollar</string>
     <string name="send_err_invalid_amount">Введите корректную сумму</string>
     <string name="send_err_no_dd">У вас нет DigiDollar для отправки</string>
-    <string name="send_err_min_usd">Минимум — $1.00</string>
+    <string name="send_err_min_usd">Минимум: $1.00</string>
     <string name="send_err_exceeds_dd">Превышает доступные DigiDollar</string>
     <string name="send_err_exceeds_max">Превышает максимум на транзакцию</string>
     <string name="send_fee_in_dgb">Комиссия сети оплачивается в DGB</string>
@@ -210,11 +217,11 @@
     <string name="send_network_fee_row">Комиссия сети</string>
     <string name="send_fee_default">По умолчанию</string>
     <string name="send_fee_custom">Своя</string>
-    <string name="send_fee_below_min">⚠ Ниже минимальной комиссии ретрансляции — транзакция может не разойтись по сети</string>
+    <string name="send_fee_below_min">⚠ Ниже минимальной комиссии ретрансляции: транзакция может не разойтись по сети</string>
     <string name="send_fee_required">Требуется комиссия</string>
     <string name="send_confirms_15s">Подтверждение примерно за 15 секунд</string>
-    <string name="send_no_peers">Нет подключённых узлов DigiByte — сейчас отправка невозможна. Переподключение…</string>
-    <string name="send_wait_for_sync">Дождитесь окончания синхронизации перед отправкой — ваш полный баланс ещё восстанавливается.</string>
+    <string name="send_no_peers">Нет подключённых узлов DigiByte: сейчас отправка невозможна. Переподключение…</string>
+    <string name="send_wait_for_sync">Дождитесь окончания синхронизации перед отправкой: ваш полный баланс ещё восстанавливается.</string>
     <string name="send_broadcasting">Отправка в сеть…</string>
     <string name="send_review">Проверить и отправить</string>
     <string name="send_dialog_title">Подтвердите транзакцию</string>
@@ -222,7 +229,7 @@
     <string name="send_to">Кому</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Не удалось подготовить эту отправку DigiDollar. Убедитесь, что у вас достаточно DGB для оплаты комиссии сети.</string>
     <string name="send_verify_warning">Внимательно проверьте полный адрес выше.\nТранзакции необратимы.</string>
     <string name="send_send">Отправить</string>
     <string name="send_success">Успешно</string>
@@ -234,7 +241,7 @@
 
     <string name="send_hint_dgb">dgb1q… или D…</string>
     <string name="game_score_submitted">Результат отправлен!</string>
-    <string name="game_score_failed">Не удалось отправить результат — вы вошли в аккаунт?</string>
+    <string name="game_score_failed">Не удалось отправить результат: вы вошли в аккаунт?</string>
     <string name="game_close">Закрыть игру</string>
 
     <string name="set_title">Настройки</string>
@@ -258,15 +265,15 @@
     <string name="set_recover_other_sub">Перевести монеты со старых или других путей деривации в этот кошелёк</string>
     <string name="set_cat_info">Информация</string>
     <string name="set_beta">Бета-обновления</string>
-    <string name="set_beta_on">Вкл. — вам будут предлагаться предварительные сборки для тестирования</string>
-    <string name="set_beta_off">Выкл. — предлагаются только стабильные версии</string>
+    <string name="set_beta_on">Вкл.: вам будут предлагаться предварительные сборки для тестирования</string>
+    <string name="set_beta_off">Выкл.: предлагаются только стабильные версии</string>
     <string name="set_about">О приложении</string>
     <string name="set_about_sub">Версия, лицензии, открытый код</string>
     <string name="set_report_bug">Сообщить об ошибке / отзыв</string>
-    <string name="set_report_bug_sub">Отправьте проблему или идею — сведения об устройстве и версии подставляются автоматически</string>
+    <string name="set_report_bug_sub">Отправьте проблему или идею: сведения об устройстве и версии подставляются автоматически</string>
     <string name="set_cat_advanced">Расширенные / Для разработчиков</string>
-    <string name="set_net_testnet">Testnet — тестовая сеть, та же фраза восстановления</string>
-    <string name="set_net_mainnet">Mainnet — основная сеть</string>
+    <string name="set_net_testnet">Testnet: тестовая сеть, та же фраза восстановления</string>
+    <string name="set_net_mainnet">Mainnet: основная сеть</string>
     <string name="set_switch_testnet">Переключиться на Testnet?</string>
     <string name="set_switch_mainnet">Переключиться на Mainnet?</string>
     <string name="set_switch_testnet_body">Приложение перезапустится и синхронизирует тестовую сеть. Ваша фраза восстановления не изменится.</string>
@@ -274,7 +281,7 @@
     <string name="set_restart">Перезапустить</string>
 
     <string name="lang_restart_note">Это перезапустит экран кошелька. Ваши монеты, фраза и настройки не изменятся.</string>
-    <string name="lang_unreviewed_note">Переводы новые и ещё не проверены носителями языка. Если что-то читается неправильно — особенно предупреждение о фразе восстановления или ваших монетах — сообщите нам через Настройки → Сообщить об ошибке.</string>
+    <string name="lang_unreviewed_note">Переводы новые и ещё не проверены носителями языка. Если что-то читается неправильно (особенно предупреждение о фразе восстановления или ваших монетах), сообщите нам через Настройки → Сообщить об ошибке.</string>
     <string name="lang_selected">Выбрано</string>
 
     <string name="as_send_title">Отправить актив</string>
@@ -333,7 +340,7 @@
     <string name="ad_copy_asset_id">Копировать ID актива</string>
     <string name="al_title">DigiAssets</string>
     <string name="al_none">DigiAssets не найдены</string>
-    <string name="al_none_body">DigiAssets — это токены, выпущенные в блокчейне DigiByte. Полученные активы появятся здесь автоматически, когда кошелёк завершит синхронизацию.</string>
+    <string name="al_none_body">DigiAssets: это токены, выпущенные в блокчейне DigiByte. Полученные активы появятся здесь автоматически, когда кошелёк завершит синхронизацию.</string>
     <string name="al_create">Создать DigiAsset на digiscope.me</string>
     <string name="al_count">Найдено активов: %1$d</string>
     <string name="al_artifacts"> · артефактов: %1$d</string>
@@ -345,7 +352,7 @@
     <string name="rf_may_take">Это может занять некоторое время</string>
     <string name="rf_couldnt_finish">Не удалось завершить проверку</string>
     <string name="rf_none_found">Средства для восстановления не найдены</string>
-    <string name="rf_partial_body">Некоторые пути деривации проверить не удалось, поэтому это не окончательный ответ — могут быть средства, которых мы не увидели. Повторите попытку через момент.\n\nНе проверено: %1$s</string>
+    <string name="rf_partial_body">Некоторые пути деривации проверить не удалось, поэтому это не окончательный ответ: могут быть средства, которых мы не увидели. Повторите попытку через момент.\n\nНе проверено: %1$s</string>
     <string name="rf_no_coins">На других путях деривации у этого сида нет монет.</string>
     <string name="rf_recoverable_balance">Доступно к восстановлению</string>
     <string name="rf_found_on">НАЙДЕНО НА</string>
@@ -354,15 +361,15 @@
     <string name="rf_native_addr_note">Средства появятся на вашем нативном адресе получения</string>
     <string name="rf_advanced_send">Дополнительно ▸ Отправить на другой адрес</string>
     <string name="rf_address_hint">Адрес DigiByte (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">Этого адреса НЕТ в вашем кошельке — перевод необратим</string>
+    <string name="rf_not_in_wallet">Этого адреса НЕТ в вашем кошельке: перевод необратим</string>
     <string name="rf_sweep">Перевести средства</string>
     <string name="rf_sweep_submitted">Перевод отправлен</string>
     <string name="rf_will_appear">Восстановленные средства появятся после подтверждения.</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Ожидание подтверждения сетью</string>
-    <string name="rf_held_assets">Оставлено: %1$d — DigiAssets</string>
-    <string name="rf_held_assets_body">Эти монеты несут DigiAssets, и переместить их не удалось — поэтому они остались в старом кошельке, а не были выметены как обычные DGB, что уничтожило бы их. Запустите восстановление ещё раз, чтобы повторить попытку.</string>
-    <string name="rf_held_unknown">Оставлено: %1$d — не удалось проверить</string>
+    <string name="rf_held_assets">Оставлено: %1$d: DigiAssets</string>
+    <string name="rf_held_assets_body">Эти монеты несут DigiAssets, и переместить их не удалось, поэтому они остались в старом кошельке, а не были выметены как обычные DGB, что уничтожило бы их. Запустите восстановление ещё раз, чтобы повторить попытку.</string>
+    <string name="rf_held_unknown">Оставлено: %1$d: не удалось проверить</string>
     <string name="rf_held_unknown_body">Мы не смогли прочитать транзакции, из которых они получены, и поэтому не смогли определить, несут ли они DigiAssets. Их оставили нетронутыми, а не стали рисковать. Повторная попытка позже может это прояснить.</string>
     <string name="rf_and_more">…и ещё %1$d</string>
     <string name="rf_something_wrong">Что-то пошло не так</string>
@@ -370,12 +377,12 @@
     <string name="rf_err_timeout">Время ожидания запроса истекло. Повторите попытку при более устойчивом соединении.</string>
     <string name="rf_err_seed">Не удалось загрузить сид кошелька. Разблокируйте кошелёк и повторите попытку.</string>
     <string name="rf_err_lookup">Не удалось связаться со службой поиска. Повторите попытку позже.</string>
-    <string name="rf_err_generic">Что-то пошло не так — повторите попытку.</string>
+    <string name="rf_err_generic">Что-то пошло не так: повторите попытку.</string>
     <string name="rf_fail_unknown">Сбой по неизвестной причине.</string>
     <string name="rf_fail_no_utxos">Не удалось сопоставить ни один расходуемый выход с ключами подписи.</string>
     <string name="rf_fail_derive">Не удалось получить ключи из сида для этого пути.</string>
     <string name="rf_fail_broadcast">Не удалось передать транзакцию в сеть. Повторите попытку при подключении к узлам.</string>
-    <string name="rf_fail_generic">Этот перевести не удалось — повторите попытку.</string>
+    <string name="rf_fail_generic">Этот перевести не удалось: повторите попытку.</string>
     <string name="rf_this_wallet">Этот кошелёк</string>
     <string name="rf_other_phrase">Фраза другого кошелька</string>
     <string name="rf_other_phrase_body">Введите фразу восстановления другого кошелька, чтобы перевести его средства в этот. Фраза используется один раз для подписи перевода и никогда не сохраняется.</string>
@@ -409,7 +416,7 @@
     <string name="ni_save">Сохранить</string>
     <string name="ni_exclusive">Только мой узел (эксклюзивно)</string>
     <string name="ni_exclusive_sub">Синхронизироваться исключительно через ваш узел. Если он отключится, у кошелька не будет других узлов, пока вы снова не включите публичные.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Совместим с узлами DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Сведения о кошельке</string>
     <string name="ab_wallet_type">Тип кошелька</string>
     <string name="ab_hd_path">HD-путь</string>
@@ -421,8 +428,8 @@
     <string name="ab_open_source">Открытый код</string>
     <string name="ab_source_code">Исходный код</string>
     <string name="ab_licenses">Лицензии</string>
-    <string name="ab_licenses_sub">Лицензия MIT — открытый код</string>
-    <string name="ab_community">Сообщество DigiByte</string>
+    <string name="ab_licenses_sub">Лицензия MIT: открытый код</string>
+    <string name="ab_community">О сети DigiByte</string>
     <string name="ab_report_bug">Сообщить об ошибке</string>
 
     <string name="sec_pin_auth">PIN-код и аутентификация</string>
@@ -433,16 +440,16 @@
     <string name="sec_biometric_no">Недоступно на этом устройстве</string>
     <string name="sec_autolock">Тайм-аут автоблокировки</string>
     <string name="sec_wipe_after">Удалить после %1$d неверных PIN-кодов</string>
-    <string name="sec_wipe_after_on">Включено — кошелёк удаляется после %1$d неверных PIN-кодов</string>
-    <string name="sec_wipe_after_off">Выключено — дополнительная защита от перебора PIN-кода</string>
-    <string name="sec_wipe_after_body">Если включено, %1$d неверных ввода PIN-кода подряд НАВСЕГДА удалят этот кошелёк — сид, ключи и историю — с этого устройства.\n\nНа устройстве это необратимо. Средства можно вернуть только по фразе восстановления.</string>
+    <string name="sec_wipe_after_on">Включено: кошелёк удаляется после %1$d неверных PIN-кодов</string>
+    <string name="sec_wipe_after_off">Выключено: дополнительная защита от перебора PIN-кода</string>
+    <string name="sec_wipe_after_body">Если включено, %1$d неверных ввода PIN-кода подряд НАВСЕГДА удалят этот кошелёк (сид, ключи и историю) с этого устройства.\n\nНа устройстве это необратимо. Средства можно вернуть только по фразе восстановления.</string>
     <string name="sec_wipe_after_ack">Моя фраза восстановления сохранена</string>
     <string name="sec_wipe_after_enabled">Удаление после %1$d включено</string>
     <string name="sec_recovery_phrase">Фраза восстановления</string>
     <string name="sec_view_phrase">Показать фразу восстановления</string>
     <string name="sec_view_phrase_sub">Требуется PIN-код и биометрическая проверка</string>
     <string name="sec_view_phrase_body">Фраза восстановления даёт полный доступ к вашему кошельку.\n\n• Никогда никому её не сообщайте\n• Никогда не вводите её ни на одном сайте\n• Храните её офлайн в надёжном месте\n\nДля продолжения нужны PIN-код и биометрическая аутентификация.</string>
-    <string name="sec_understand">Я понимаю — продолжить</string>
+    <string name="sec_understand">Я понимаю: продолжить</string>
     <string name="sec_danger_zone">Опасная зона</string>
     <string name="sec_wipe_wallet">Удалить кошелёк</string>
     <string name="sec_wipe_wallet_sub">Удалить все данные кошелька с этого устройства</string>
@@ -480,11 +487,21 @@
     <string name="did_login">Вход через Digi-ID</string>
     <string name="did_auth_title">Аутентификация Digi-ID</string>
     <string name="did_auth_subtitle">Подтвердите личность для входа на %1$s</string>
+    <string name="hub_sign_title">Подписать публикацию в Hub</string>
+    <string name="hub_sign_subtitle">Подтвердите личность, чтобы подписать эту публикацию своим идентификатором</string>
+    <string name="hub_tip_auth_title">Отправить чаевые в Hub</string>
+    <string name="hub_tip_auth_subtitle">Подтвердите личность, чтобы отправить эти чаевые с вашего баланса чаевых DigiScope</string>
     <string name="did_requesting">запрашивает аутентификацию Digi-ID</string>
     <string name="did_warning">Предупреждение</string>
     <string name="did_insecure">Небезопасное соединение</string>
     <string name="did_insecure_body">Этот сайт использует HTTP, а не HTTPS. Вашу аутентификацию могут перехватить.</string>
     <string name="did_callback_url">URL обратного вызова</string>
+    <string name="did_identity_title">Какой вход знает этот сайт?</string>
+    <string name="did_identity_hint">Восстановили кошелёк? Выберите личность, которую вы раньше использовали на этом сайте. После успешного входа кошелёк запомнит выбор.</string>
+    <string name="did_identity_per_site">Отдельный ключ для этого сайта (оригинальное приложение DigiByte)</string>
+    <string name="did_identity_shared">Общий ключ для всех сайтов (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Он одинаков на всех сайтах, поэтому сайты могут связать ваши входы. Выбирайте его, только если этот сайт знал вас по нему.</string>
+    <string name="did_identity_address">Адрес: %1$s</string>
     <string name="did_approve">Одобрить</string>
     <string name="did_deny">Отклонить</string>
     <string name="did_success">Аутентификация выполнена</string>
@@ -501,7 +518,7 @@
     <string name="ni_state_synced">Синхронизировано</string>
     <string name="ni_state_error">Ошибка</string>
     <string name="ni_caught_up">Актуально</string>
-    <string name="ni_tor_disabled">Отключено — прямое подключение</string>
+    <string name="ni_tor_disabled">Отключено: прямое подключение</string>
     <string name="ni_tor_starting">Запуск…</string>
     <string name="ni_tor_connecting">Подключение к сети Tor…</string>
     <string name="ni_tor_connected">Подключено через порт %1$d</string>
@@ -509,7 +526,7 @@
     <string name="ni_node_serving">✓ Отдаёт compact filters</string>
     <string name="ni_node_connecting">Подключение…</string>
     <string name="ni_node_unreachable">⚠ Недоступен / не отдаёт фильтры</string>
-    <string name="sec_locked_countdown">Заблокировано — повторите через %1$s</string>
+    <string name="sec_locked_countdown">Заблокировано: повторите через %1$s</string>
     <string name="sec_autolock_1m">1 минута</string>
     <string name="sec_autolock_5m">5 минут</string>
     <string name="sec_autolock_15m">15 минут</string>
@@ -520,38 +537,40 @@
     <string name="sec_biometric_required">Требуется биометрическая аутентификация</string>
     <string name="did_logged_in">Вы вошли на %1$s</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">Иерархический детерминированный кошелёк, созданный из сид-фразы. Может генерировать множество адресов из одной резервной копии — как неограниченное число номеров счетов из одного мастер-ключа.</string>
+    <string name="ab_type_desc">Иерархический детерминированный кошелёк, созданный из сид-фразы. Может генерировать множество адресов из одной резервной копии: как неограниченное число номеров счетов из одного мастер-ключа.</string>
     <string name="ab_path_desc">Путь деривации, по которому создаются ваши адреса. 84 = стандарт BIP84, 20 = тип монеты DigiByte (SLIP44), 0 = первый аккаунт. Благодаря этому любой BIP84-совместимый кошелёк восстановит ваши адреса из той же сид-фразы. Совместимо с инструментом BIP39 Иана Коулмана.</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">Использует современные SegWit-адреса, начинающиеся с dgb1. Они эффективнее и дешевле старых Legacy-адресов, начинающихся с D.</string>
     <string name="ab_network_value">Mainnet</string>
-    <string name="ab_network_desc">Mainnet — это настоящая сеть DigiByte, где DGB имеет реальную ценность. Testnet нужна разработчикам для тестов без настоящих денег.</string>
+    <string name="ab_network_desc">Mainnet: это настоящая сеть DigiByte, где DGB имеет реальную ценность. Testnet нужна разработчикам для тестов без настоящих денег.</string>
     <string name="ab_security_value">Самостоятельное хранение</string>
-    <string name="ab_security_desc">Ваши ключи никогда не покидают это устройство. Ни компания, ни сервер не хранят ваши средства — кошельком управляете только вы. Если вы потеряете сид-фразу, никто не сможет восстановить её за вас.</string>
+    <string name="ab_security_desc">Ваши ключи никогда не покидают это устройство. Ни компания, ни сервер не хранят ваши средства: кошельком управляете только вы. Если вы потеряете сид-фразу, никто не сможет восстановить её за вас.</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">Упрощённая проверка платежей — синхронизация напрямую с P2P-сетью DigiByte без загрузки всего блокчейна. Используются компактные блок-фильтры BIP157/158: кошелёк скачивает фильтры и проверяет их на устройстве, поэтому ваши адреса никогда не покидают телефон.</string>
+    <string name="ab_sync_desc">Упрощённая проверка платежей: синхронизация напрямую с P2P-сетью DigiByte без загрузки всего блокчейна. Используются компактные блок-фильтры BIP157/158: кошелёк скачивает фильтры и проверяет их на устройстве, поэтому ваши адреса никогда не покидают телефон.</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Это программное обеспечение распространяется по лицензии MIT.</string>
-    <string name="ab_tagline">DigiByte — децентрализованный блокчейн и цифровая валюта.</string>
+    <string name="ab_tagline">DigiByte: децентрализованный блокчейн и цифровая валюта.</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Независимый кошелёк от Around The Block LLC. Не является официальным приложением DigiByte.</string>
 
     <string name="tx_conf_short">подтв.: %1$d</string>
     <string name="tx_confirmed">Подтверждена</string>
 
     <string name="cur_title">Валюта отображения</string>
-    <string name="cur_note">Ваш баланс DigiByte всегда настоящий — это меняет только то, с чем он сравнивается.</string>
+    <string name="cur_note">Ваш баланс DigiByte всегда настоящий: это меняет только то, с чем он сравнивается.</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s: %2$s</string>
 
-    <string name="pass_advanced">Дополнительно — добавить парольную фразу</string>
+    <string name="pass_advanced">Дополнительно: добавить парольную фразу</string>
     <string name="pass_optional">Необязательно</string>
-    <string name="pass_what">Парольная фраза — это дополнительное слово или предложение, которое выбираете вы. С ней одной только фразы восстановления уже недостаточно, чтобы открыть этот кошелёк: тот, кто найдёт записанные слова, не сможет потратить ваши монеты.</string>
-    <string name="pass_warn">Запишите парольную фразу, но храните её ОТДЕЛЬНО от секретной фразы восстановления — в одном месте они снова становятся единым секретом, и парольная фраза уже ничего не защищает. Если вы её потеряете, одни эти слова НЕ восстановят ваш кошелёк, и никто не сможет восстановить его за вас.</string>
+    <string name="pass_what">Парольная фраза: это дополнительное слово или предложение, которое выбираете вы. С ней одной только фразы восстановления уже недостаточно, чтобы открыть этот кошелёк: тот, кто найдёт записанные слова, не сможет потратить ваши монеты.</string>
+    <string name="pass_warn">Запишите парольную фразу, но храните её ОТДЕЛЬНО от секретной фразы восстановления: в одном месте они снова становятся единым секретом, и парольная фраза уже ничего не защищает. Если вы её потеряете, одни эти слова НЕ восстановят ваш кошелёк, и никто не сможет восстановить его за вас.</string>
     <string name="pass_scope">Это защищает вашу записанную резервную копию. На этом телефоне кошелёк по-прежнему запирает PIN-код.</string>
     <string name="pass_enter">Парольная фраза</string>
     <string name="pass_confirm">Подтвердите парольную фразу</string>
     <string name="pass_mismatch">Парольные фразы не совпадают</string>
-    <string name="pass_too_long">Слишком длинная — не более %1$d символов</string>
+    <string name="pass_too_long">Слишком длинная: не более %1$d символов</string>
     <string name="pass_set">Парольная фраза задана</string>
     <string name="pass_none">Без парольной фразы</string>
     <string name="pass_restore_label">Парольная фраза (оставьте пустым, если не использовали)</string>
@@ -565,9 +584,9 @@
     <string name="rf_move_assets_body">Использует оставленные выше DGB, чтобы отправить активы в этот кошелёк. Переводы активов необратимы.</string>
     <string name="rf_moving_assets">Перемещение активов…</string>
     <string name="rf_move_result">Перемещено %1$d из %2$d активов</string>
-    <string name="rf_move_failed">%1$s — не перемещён: %2$s</string>
+    <string name="rf_move_failed">%1$s, не перемещён: %2$s</string>
     <string name="pass_screen_title">Добавить парольную фразу?</string>
-    <string name="pass_screen_subtitle">Необязательно, и большинству стоит пропустить этот шаг. Парольная фраза — это дополнительное слово или предложение на ваш выбор; без неё одна лишь секретная фраза больше не откроет этот кошелёк.</string>
+    <string name="pass_screen_subtitle">Необязательно, и большинству стоит пропустить этот шаг. Парольная фраза: это дополнительное слово или предложение на ваш выбор; без неё одна лишь секретная фраза больше не откроет этот кошелёк.</string>
     <string name="pass_screen_continue_with">Продолжить с парольной фразой</string>
     <string name="pass_screen_continue_without">Продолжить без неё</string>
     <string name="pass_screen_separate_note">Храните её отдельно от слов, которые вы только что записали.</string>
@@ -581,12 +600,13 @@
     <string name="send_fail_amount">Введите сумму больше нуля.</string>
     <string name="send_fail_unknown">Не удалось отправить транзакцию.</string>
     <string name="send_fail_try_again">Повторить</string>
-    <string name="rf_splitting_for_assets">Подготовка к перемещению %1$d DigiAssets — ваши DGB делятся, чтобы каждый актив мог оплатить свой перевод. Ожидание одного подтверждения, обычно меньше минуты.</string>
+    <string name="rf_splitting_for_assets">Подготовка к перемещению %1$d DigiAssets: ваши DGB делятся, чтобы каждый актив мог оплатить свой перевод. Ожидание одного подтверждения, обычно меньше минуты.</string>
     <string name="rf_nothing_moved">Ничего не перемещено</string>
-    <string name="rf_dd_fee_floor">Требуется %1$s на комиссию сети — в этом кошельке %2$s.</string>
+    <string name="rf_dd_fee_floor">Требуется %1$s на комиссию сети: в этом кошельке %2$s.</string>
     <string name="rf_dd_found">Найдено %1$s в DigiDollar</string>
     <string name="rf_dd_moved">%1$s в DigiDollar перемещено в этот кошелёк</string>
-    <string name="rf_dd_left_behind">%1$s в DigiDollar осталось — переместить не удалось</string>
+    <string name="rf_dd_sent_unrelayed">%1$s в DigiDollar отправлено, но сеть ещё не подтвердила. Сохраните старую фразу восстановления, пока сумма не появится в этом кошельке.</string>
+    <string name="rf_dd_left_behind">%1$s в DigiDollar осталось: переместить не удалось</string>
     <string name="rf_dd_unreachable">Не удалось проверить DigiDollar; в этом кошельке они могут быть</string>
     <string name="as_rules_checking">Проверяем правила передачи этого актива…</string>
     <string name="as_rules_bound_title">У этого актива есть правила передачи</string>
@@ -616,7 +636,7 @@
     <string name="reconcile_spendable">Расходуемые</string>
     <string name="reconcile_wallet_spendable">Расходуемый баланс кошелька</string>
     <string name="reconcile_matches_wallet">Совпадает с расходуемым балансом кошелька.</string>
-    <string name="reconcile_does_not_match_wallet">Не совпадает с расходуемым балансом кошелька — см. ниже.</string>
+    <string name="reconcile_does_not_match_wallet">Не совпадает с расходуемым балансом кошелька: см. ниже.</string>
     <string name="reconcile_held_asset">Удерживается для DigiAsset</string>
     <string name="reconcile_held_unknown">Удерживается: состояние актива неизвестно</string>
     <string name="reconcile_proven_plain">Обычные DGB, станут расходуемыми после перезапуска</string>
@@ -632,7 +652,70 @@
     <string name="market_tor_notice_title">Маркет не проходит через Tor</string>
     <string name="market_tor_notice_body">Маркет не проходит через Tor; сайт увидит ваш IP-адрес.</string>
     <string name="market_tor_notice_continue">Продолжить</string>
-    <string name="move_title">DigiByte Wallet теперь DigiByte Mobile</string>
-    <string name="move_body">Это приложение больше не будет обновляться. Установите DigiByte Mobile из Google Play, выберите «Восстановить существующий кошелёк» и введите фразу восстановления этого кошелька — в блокчейне ничего не перемещается. Не удаляйте это приложение, пока баланс не появится в новом.</string>
-    <string name="move_how">Как перейти</string>
+    <string name="restore_pass_toggle">Я использовал(а) парольную фразу</string>
+    <string name="restore_pass_body">Только если вы добавили её при создании этого кошелька. Неверная парольная фраза открывает другой, пустой кошелёк: без сообщения об ошибке.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Введите все слова (%1$d).</string>
+    <string name="restore_err_invalid_words">Недопустимые слова: %1$s</string>
+    <string name="restore_err_checksum">Эта фраза восстановления недействительна. Проверьте каждое слово и их порядок.</string>
+    <string name="restore_scan_title">Приватное восстановление</string>
+    <string name="restore_scan_body">После продолжения этот телефон сам найдёт транзакции вашего кошелька: нативные (dgb1q…), legacy (D…), Taproot- и DigiDollar-адреса, никому не отправляя ваши адреса.</string>
+    <string name="restore_other_title">Фраза из другого приложения-кошелька?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor и некоторые старые кошельки хранят монеты на форматах адресов, которые этот кошелёк не использует, поэтому синхронизация их не видит. Проверка может их найти, но она отправляет адреса, производные от вашей фразы, в DigiScope (api.digiscope.me), который сообщает о средствах на них. Для фразы из HoldFast Wallet или из старого приложения DigiByte не требуется. Её также можно запустить позже: Настройки → Восстановить средства из другого кошелька.</string>
+    <string name="restore_other_check">Проверить другие форматы</string>
+    <string name="restore_scan_deriving">Деривация адресов…</string>
+    <string name="restore_scan_duration">Это может занять 30–90 секунд в зависимости от узла.</string>
+    <string name="restore_scan_failed">Сбой сканирования</string>
+    <string name="restore_scan_retry">Повторить проверку</string>
+    <string name="restore_found_title">Средства найдены</string>
+    <string name="restore_unreachable_title">Не удалось связаться с DigiScope</string>
+    <string name="restore_none_title">Средства пока не обнаружены</string>
+    <plurals name="restore_found_body">
+        <item quantity="one">%1$s DGB на %2$d пути</item>
+        <item quantity="few">%1$s DGB на %2$d путях</item>
+        <item quantity="many">%1$s DGB на %2$d путях</item>
+        <item quantity="other">%1$s DGB на %2$d путях</item>
+    </plurals>
+    <string name="restore_unreachable_body">Проверку не удалось выполнить. После продолжения синхронизация всё равно найдёт собственные форматы этого кошелька; повторите попытку или позже воспользуйтесь разделом Настройки → Восстановить средства из другого кошелька для форматов других приложений.</string>
+    <string name="restore_none_body">На проверенных форматах нет неизрасходованных средств. После продолжения синхронизация всё равно найдёт собственные транзакции этого кошелька.</string>
+    <string name="restore_nonnative_note">%1$s DGB находятся на формате адресов другого приложения. После восстановления вы перейдёте в «Восстановить средства из другого кошелька», чтобы перевести их в этот кошелёк: ничего не будет перемещено, пока вы не подтвердите там.</string>
+    <string name="restore_pass_nothing_found">С введённой парольной фразой ничего не найдено. У парольной фразы нет контрольной суммы: неверная фраза без всякой ошибки открывает другой, пустой кошелёк. Проверьте её на опечатки, или, если вы не задавали её при создании кошелька, вернитесь назад и закройте поле парольной фразы.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="one">%1$s · проверен %2$d адрес</item>
+        <item quantity="few">%1$s · проверено %2$d адреса</item>
+        <item quantity="many">%1$s · проверено %2$d адресов</item>
+        <item quantity="other">%1$s · проверено %2$d адреса</item>
+    </plurals>
+    <string name="restore_date_title">Когда вы создали этот кошелёк?</string>
+    <string name="restore_date_body">Это поможет пропустить лишнее сканирование блокчейна и синхронизироваться быстрее.</string>
+    <string name="restore_date_unsure">Не помню</string>
+    <string name="restore_date_unsure_sub">Полное сканирование блокчейна (самое медленное: выберите, если не уверены)</string>
+    <string name="restore_date_warning">Транзакции старше выбранного года не будут обнаружены. Если у кошелька может быть более ранняя история, выберите более ранний год, или «Не помню» для полного охвата (медленнее).</string>
+    <string name="restore_date_start">Начать восстановление</string>
+    <string name="restore_date_restoring">Восстановление кошелька…</string>
+    <string name="restore_date_onwards">С января %1$d</string>
+    <string name="restore_date_range">янв. %1$d – дек. %1$d</string>
+    <string name="restore_date_genesis">DigiByte запущен в январе 2014 г.</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB: минимум сети. Точная комиссия этой транзакции показывается перед подтверждением.</string>
+    <string name="send_preparing">Подготовка…</string>
+    <string name="send_fee_raised">Повышена с введённых вами %1$s DGB: это комиссия, которую платит эта транзакция.</string>
+    <string name="send_err_below_dust">Эта сумма меньше минимального платежа, который сеть ретранслирует на этот адрес (%1$s DGB). Отправьте не меньше этой суммы.</string>
+    <string name="send_not_relayed_title">Отправлено, ещё не ретранслировано</string>
+    <string name="send_not_relayed_body">Ваш кошелёк разослал эту транзакцию, но ни один узел её ещё не принял, поэтому пока неизвестно, дошла ли она до сети. В вашей активности она отображается как ожидающая. Проверьте активность, прежде чем отправлять её снова.</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Не удалось прочитать парольную фразу</string>
+    <string name="seedview_pass_unreadable_body">Парольную фразу этого кошелька сейчас не удалось прочитать. Одних слов восстановления может быть недостаточно, чтобы восстановить этот кошелёк, поэтому они не показываются, пока парольную фразу нельзя показать вместе с ними. Попробуйте ещё раз.</string>
+    <string name="seedview_pass_retry">Повторить</string>
+    <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Сейчас не удаётся проверить PIN-код</string>
+    <string name="pinstore_body">Защищённое хранилище ключей телефона не открылось, поэтому кошелёк остаётся заблокированным. Ничего не удалено. Закройте приложение и откройте снова. Если это повторяется, перезагрузите телефон; фраза восстановления по-прежнему восстанавливает кошелёк на любом устройстве.</string>
+    <string name="pinstore_close">Закрыть приложение</string>
 </resources>

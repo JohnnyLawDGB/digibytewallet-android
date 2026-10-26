@@ -17,10 +17,10 @@
     <string name="onb_words_count">%1$d từ</string>
     <string name="onb_create">Tạo ví mới</string>
     <string name="onb_recover">Khôi phục ví hiện có</string>
-    <string name="onb_footer">DigiByte — An toàn, Nhanh chóng, Phi tập trung</string>
-    <string name="app_name_display">Ví DigiByte</string>
+    <string name="onb_footer">Ví độc lập cho mạng DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
-    <string name="seed_screenshot_blocked">Ảnh chụp màn hình đã bị chặn. Hãy ghi lại những từ này — chúng không thể khôi phục được.</string>
+    <string name="seed_screenshot_blocked">Ảnh chụp màn hình đã bị chặn. Hãy ghi lại những từ này: chúng không thể khôi phục được.</string>
     <string name="seed_title">Cụm từ khôi phục của bạn</string>
     <string name="seed_word_count">Cụm từ khôi phục %1$d từ</string>
     <!-- WARNING -->
@@ -43,9 +43,12 @@
     <string name="pin_backspace">Xóa</string>
     <string name="unlock_title">Nhập mã PIN</string>
     <string name="unlock_subtitle">Nhập mã PIN 6 chữ số để mở khóa</string>
-    <string name="unlock_locked">Đã khóa — thử lại sau %1$s</string>
+    <string name="unlock_locked">Đã khóa: thử lại sau %1$s</string>
     <string name="unlock_unlocking">Đang mở khóa…</string>
     <string name="unlock_biometrics_cd">Mở khóa bằng sinh trắc học</string>
+    <string name="recover_title">Khôi phục ví</string>
+    <string name="recover_body">Nhập cụm từ khôi phục để khôi phục ví của bạn.</string>
+    <string name="recover_continue">Tiếp tục</string>
 
     <string name="seed_retry">Thử lại</string>
     <string name="verify_next">Tiếp theo</string>
@@ -65,11 +68,11 @@
     <string name="pin_err_wallet">Không tạo được ví. Vui lòng thử lại.</string>
     <string name="unlock_err_failed">Mở khóa không thành công. Vui lòng thử lại.</string>
     <string name="unlock_device_lock_removed">Khóa màn hình của thiết bị đã bị gỡ, nên khóa bảo vệ của ví đã mất. Hãy khôi phục ví bằng cụm từ khôi phục của bạn.</string>
-    <string name="unlock_wiping">Quá nhiều lần thử sai — đang xóa ví</string>
+    <string name="unlock_wiping">Quá nhiều lần thử sai: đang xóa ví</string>
     <string name="unlock_attempts_left">Mã PIN không đúng. Số lần thử còn lại: %1$d</string>
     <string name="battery_title">Giữ đồng bộ chạy ở nền</string>
     <string name="battery_body">Android có thể đưa ví này vào chế độ ngủ khi tắt màn hình, làm mất kết nối với mạng DigiByte và có thể khiến ví dừng ở 0 peer cho đến khi bạn mở lại.\n\nHãy cho phép ví chạy không giới hạn để tiếp tục đồng bộ.</string>
-    <string name="battery_body_samsung">\n\nTrên Samsung, hãy mở thêm Chăm sóc thiết bị → Pin → \"Ứng dụng không bao giờ ngủ\" và thêm DigiByte Wallet.</string>
+    <string name="battery_body_samsung">\n\nTrên Samsung, hãy mở thêm Chăm sóc thiết bị → Pin → \"Ứng dụng không bao giờ ngủ\" và thêm HoldFast Wallet.</string>
     <string name="battery_open_settings">Mở cài đặt</string>
     <string name="tor_title">Tính năng riêng tư mới</string>
     <string name="tor_body">Đã có định tuyến Tor. Khi bật, ví của bạn kết nối tới mạng DigiByte qua Tor, ẩn địa chỉ IP của bạn khỏi các peer.\n\nBật định tuyến Tor?</string>
@@ -97,13 +100,13 @@
     <string name="wallet_price_via">qua %1$s</string>
     <string name="wallet_testnet_active">Testnet đang bật</string>
     <string name="wallet_tor_active">Tor đang bật</string>
-    <string name="wallet_tor_hidden">Tor — IP của bạn được ẩn</string>
+    <string name="wallet_tor_hidden">Tor: IP của bạn được ẩn</string>
     <string name="wallet_disconnected_peers">Đã ngắt kết nối · %1$d peer</string>
-    <string name="wallet_history_gap">Thiếu lịch sử — một số khối chưa được xác minh</string>
+    <string name="wallet_history_gap">Thiếu lịch sử: một số khối chưa được xác minh</string>
     <string name="wallet_scan_missing">Quét các giao dịch bị thiếu</string>
     <string name="wallet_balance_refresh_failed">Không làm mới được số dư</string>
     <string name="wallet_reconcile_unreachable">Không thể liên hệ nút đối soát sau bản cập nhật này. Số dư hiển thị có thể đã cũ.</string>
-    <string name="wallet_tor_unavailable">Tor không khả dụng — đang dùng kết nối trực tiếp</string>
+    <string name="wallet_tor_unavailable">Tor không khả dụng: đang dùng kết nối trực tiếp</string>
     <string name="wallet_tor_timeout">Tor không kết nối được tới mạng kịp thời, nên ví sẽ kết nối trực tiếp tới các peer trong phiên này. IP của bạn hiển thị với các peer cho đến khi bạn khởi động lại ứng dụng.</string>
     <string name="wallet_node_offline">Nút của bạn đang ngoại tuyến</string>
     <string name="wallet_node_offline_body">Không tiếp cận được nút đã ghép nối hoặc nút hiện không phục vụ compact filters. Hãy kiểm tra nút đang chạy, có thể tiếp cận và đã đặt peerblockfilters=1.</string>
@@ -121,11 +124,15 @@
     <string name="receive_request_amount">Yêu cầu số tiền cụ thể (tùy chọn)</string>
     <string name="receive_amount_label">Số tiền</string>
     <string name="receive_qr_encodes">Mã QR chứa: %1$s</string>
-    <string name="receive_dd_note">DigiDollar được nhận dưới dạng token định giá bằng USD. Hãy chia sẻ địa chỉ DigiDollar này — mã QR chỉ chứa địa chỉ (không kèm yêu cầu số tiền).</string>
+    <string name="receive_dd_note">DigiDollar được nhận dưới dạng token định giá bằng USD. Hãy chia sẻ địa chỉ DigiDollar này: mã QR chỉ chứa địa chỉ (không kèm yêu cầu số tiền).</string>
     <string name="txd_title">Chi tiết giao dịch</string>
     <string name="txd_not_found">Không tìm thấy giao dịch</string>
     <string name="txd_sent">Đã gửi</string>
     <string name="txd_received">Đã nhận</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">Đã đúc</string>
+    <string name="tx_dd_self_transfer">Chuyển cho chính bạn</string>
+    <string name="tx_dd_redeemed">Đã quy đổi</string>
     <string name="txd_transaction_id">ID giao dịch</string>
     <string name="txd_block_height">Độ cao khối</string>
     <string name="txd_pending">Đang chờ</string>
@@ -139,12 +146,12 @@
     <string name="txd_view_explorer">Xem trên Explorer</string>
     <string name="txd_back_to_wallet">Quay lại ví</string>
 
-    <string name="wallet_sync_gap_headline">Quét xong — một phần lịch sử của bạn chưa được xác minh</string>
+    <string name="wallet_sync_gap_headline">Quét xong: một phần lịch sử của bạn chưa được xác minh</string>
     <string name="wallet_sync_connecting">Đang kết nối tới mạng DigiByte</string>
     <string name="wallet_sync_scanning">Đang tìm giao dịch của bạn</string>
     <string name="wallet_sync_uptodate">Đã cập nhật</string>
     <string name="wallet_sync_failed">Đồng bộ thất bại</string>
-    <string name="wallet_sync_finishing">Đang hoàn tất — xác minh các khối gần đây</string>
+    <string name="wallet_sync_finishing">Đang hoàn tất: xác minh các khối gần đây</string>
     <string name="wallet_blocks_count">%1$s khối</string>
     <string name="wallet_sync_progress_eta">Hoàn thành %1$d%% · %2$s · còn %3$s</string>
     <string name="wallet_sync_progress_no_eta">Hoàn thành %1$d%% · còn %2$s · đang ước tính…</string>
@@ -162,7 +169,7 @@
     <string name="wallet_status_connecting">Đang kết nối…</string>
     <string name="wallet_gap_range_between">khối %1$s–%2$s</string>
     <string name="wallet_gap_range_below">khối dưới %1$s</string>
-    <string name="wallet_gap_body">Một phần lịch sử của bạn (%1$s) không thể xác minh từ nhóm filter — chạm để quét các giao dịch bị thiếu.</string>
+    <string name="wallet_gap_body">Một phần lịch sử của bạn (%1$s) không thể xác minh từ nhóm filter: chạm để quét các giao dịch bị thiếu.</string>
     <string name="receive_address_unavailable">Không có địa chỉ</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -210,11 +217,11 @@
     <string name="send_network_fee_row">Phí mạng</string>
     <string name="send_fee_default">Mặc định</string>
     <string name="send_fee_custom">Tùy chỉnh</string>
-    <string name="send_fee_below_min">⚠ Thấp hơn phí chuyển tiếp tối thiểu — giao dịch có thể không được phát</string>
+    <string name="send_fee_below_min">⚠ Thấp hơn phí chuyển tiếp tối thiểu: giao dịch có thể không được phát</string>
     <string name="send_fee_required">Cần có phí</string>
     <string name="send_confirms_15s">Xác nhận trong ~15 giây</string>
-    <string name="send_no_peers">Không có peer DigiByte nào kết nối — chưa thể phát giao dịch. Đang kết nối lại…</string>
-    <string name="send_wait_for_sync">Hãy đợi đồng bộ xong rồi mới gửi — số dư đầy đủ của bạn vẫn đang được khôi phục.</string>
+    <string name="send_no_peers">Không có peer DigiByte nào kết nối: chưa thể phát giao dịch. Đang kết nối lại…</string>
+    <string name="send_wait_for_sync">Hãy đợi đồng bộ xong rồi mới gửi: số dư đầy đủ của bạn vẫn đang được khôi phục.</string>
     <string name="send_broadcasting">Đang phát…</string>
     <string name="send_review">Xem lại &amp; Gửi</string>
     <string name="send_dialog_title">Xác nhận giao dịch</string>
@@ -222,7 +229,7 @@
     <string name="send_to">Đến</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">Không thể chuẩn bị lần gửi DigiDollar này. Hãy kiểm tra bạn có đủ DGB để trả phí mạng.</string>
     <string name="send_verify_warning">Hãy kiểm tra kỹ địa chỉ đầy đủ ở trên.\nGiao dịch không thể hoàn tác.</string>
     <string name="send_send">Gửi</string>
     <string name="send_success">Thành công</string>
@@ -234,7 +241,7 @@
 
     <string name="send_hint_dgb">dgb1q… hoặc D…</string>
     <string name="game_score_submitted">Đã gửi điểm!</string>
-    <string name="game_score_failed">Gửi điểm thất bại — bạn đã đăng nhập chưa?</string>
+    <string name="game_score_failed">Gửi điểm thất bại: bạn đã đăng nhập chưa?</string>
     <string name="game_close">Đóng trò chơi</string>
 
     <string name="set_title">Cài đặt</string>
@@ -258,15 +265,15 @@
     <string name="set_recover_other_sub">Gom tiền từ các đường dẫn dẫn xuất cũ/khác về ví này</string>
     <string name="set_cat_info">Thông tin</string>
     <string name="set_beta">Bản cập nhật beta</string>
-    <string name="set_beta_on">Bật — bạn sẽ nhận bản dựng thử nghiệm</string>
-    <string name="set_beta_off">Tắt — chỉ nhận bản phát hành ổn định</string>
+    <string name="set_beta_on">Bật: bạn sẽ nhận bản dựng thử nghiệm</string>
+    <string name="set_beta_off">Tắt: chỉ nhận bản phát hành ổn định</string>
     <string name="set_about">Giới thiệu</string>
     <string name="set_about_sub">Phiên bản, giấy phép, mã nguồn mở</string>
     <string name="set_report_bug">Báo lỗi / góp ý</string>
-    <string name="set_report_bug_sub">Gửi sự cố hoặc ý tưởng — thông tin thiết bị &amp; phiên bản được điền sẵn cho bạn</string>
+    <string name="set_report_bug_sub">Gửi sự cố hoặc ý tưởng: thông tin thiết bị &amp; phiên bản được điền sẵn cho bạn</string>
     <string name="set_cat_advanced">Nâng cao / Nhà phát triển</string>
-    <string name="set_net_testnet">Testnet — chuỗi thử nghiệm, cùng cụm từ khôi phục</string>
-    <string name="set_net_mainnet">Mainnet — chuỗi chính thức</string>
+    <string name="set_net_testnet">Testnet: chuỗi thử nghiệm, cùng cụm từ khôi phục</string>
+    <string name="set_net_mainnet">Mainnet: chuỗi chính thức</string>
     <string name="set_switch_testnet">Chuyển sang Testnet?</string>
     <string name="set_switch_mainnet">Chuyển sang Mainnet?</string>
     <string name="set_switch_testnet_body">Ứng dụng sẽ khởi động lại và đồng bộ chuỗi thử nghiệm. Cụm từ khôi phục của bạn không thay đổi.</string>
@@ -274,7 +281,7 @@
     <string name="set_restart">Khởi động lại</string>
 
     <string name="lang_restart_note">Thay đổi này sẽ khởi động lại màn hình ví. Tiền, cụm từ khôi phục và cài đặt của bạn không bị ảnh hưởng.</string>
-    <string name="lang_unreviewed_note">Bản dịch còn mới và chưa được người bản ngữ kiểm tra. Nếu có chỗ nào đọc thấy sai — nhất là cảnh báo về cụm từ khôi phục hoặc tiền của bạn — hãy báo cho chúng tôi qua Cài đặt → Báo lỗi.</string>
+    <string name="lang_unreviewed_note">Bản dịch còn mới và chưa được người bản ngữ kiểm tra. Nếu có chỗ nào đọc thấy sai (nhất là cảnh báo về cụm từ khôi phục hoặc tiền của bạn), hãy báo cho chúng tôi qua Cài đặt → Báo lỗi.</string>
     <string name="lang_selected">Đã chọn</string>
 
     <string name="as_send_title">Gửi tài sản</string>
@@ -336,7 +343,7 @@
     <string name="rf_may_take">Việc này có thể mất một lúc</string>
     <string name="rf_couldnt_finish">Không thể hoàn tất việc kiểm tra</string>
     <string name="rf_none_found">Không tìm thấy tiền có thể khôi phục</string>
-    <string name="rf_partial_body">Một số đường dẫn dẫn xuất không kiểm tra được, nên đây chưa phải kết quả cuối cùng — có thể còn tiền chúng tôi chưa thấy. Hãy thử lại sau giây lát.\n\nChưa kiểm tra: %1$s</string>
+    <string name="rf_partial_body">Một số đường dẫn dẫn xuất không kiểm tra được, nên đây chưa phải kết quả cuối cùng: có thể còn tiền chúng tôi chưa thấy. Hãy thử lại sau giây lát.\n\nChưa kiểm tra: %1$s</string>
     <string name="rf_no_coins">Cụm từ này không có đồng nào trên các đường dẫn dẫn xuất khác.</string>
     <string name="rf_recoverable_balance">Số dư có thể khôi phục</string>
     <string name="rf_found_on">TÌM THẤY Ở</string>
@@ -345,15 +352,15 @@
     <string name="rf_native_addr_note">Tiền sẽ xuất hiện tại địa chỉ nhận gốc của bạn</string>
     <string name="rf_advanced_send">Nâng cao ▸ Gửi tới địa chỉ khác</string>
     <string name="rf_address_hint">Địa chỉ DigiByte (D…, S…, dgb1q…)</string>
-    <string name="rf_not_in_wallet">Địa chỉ này KHÔNG thuộc ví của bạn — thao tác gom không thể hoàn tác</string>
+    <string name="rf_not_in_wallet">Địa chỉ này KHÔNG thuộc ví của bạn: thao tác gom không thể hoàn tác</string>
     <string name="rf_sweep">Gom tiền</string>
     <string name="rf_sweep_submitted">Đã gửi lệnh gom</string>
     <string name="rf_will_appear">Tiền khôi phục sẽ xuất hiện sau khi được xác nhận.</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">Chờ mạng xác nhận</string>
-    <string name="rf_held_assets">%1$d khoản để lại — DigiAssets</string>
-    <string name="rf_held_assets_body">Những đồng này mang DigiAssets và việc chuyển đã không thành công — nên chúng được giữ lại trong ví cũ thay vì bị quét như DGB thường, điều sẽ phá hủy chúng. Hãy chạy lại quá trình khôi phục để thử lại.</string>
-    <string name="rf_held_unknown">%1$d khoản để lại — không kiểm tra được</string>
+    <string name="rf_held_assets">%1$d khoản để lại: DigiAssets</string>
+    <string name="rf_held_assets_body">Những đồng này mang DigiAssets và việc chuyển đã không thành công, nên chúng được giữ lại trong ví cũ thay vì bị quét như DGB thường, điều sẽ phá hủy chúng. Hãy chạy lại quá trình khôi phục để thử lại.</string>
+    <string name="rf_held_unknown">%1$d khoản để lại: không kiểm tra được</string>
     <string name="rf_held_unknown_body">Chúng tôi không đọc được các giao dịch nguồn của chúng, nên không biết chúng có mang DigiAssets hay không. Chúng được để nguyên thay vì mạo hiểm. Thử lại sau có thể xử lý được.</string>
     <string name="rf_and_more">…và %1$d khoản nữa</string>
     <string name="rf_something_wrong">Đã xảy ra lỗi</string>
@@ -361,12 +368,12 @@
     <string name="rf_err_timeout">Yêu cầu đã hết thời gian chờ. Hãy thử lại khi mạng ổn định hơn.</string>
     <string name="rf_err_seed">Không tải được cụm từ gốc của ví. Hãy mở khóa ví rồi thử lại.</string>
     <string name="rf_err_lookup">Không kết nối được dịch vụ tra cứu. Hãy thử lại sau.</string>
-    <string name="rf_err_generic">Đã xảy ra lỗi — hãy thử lại.</string>
+    <string name="rf_err_generic">Đã xảy ra lỗi: hãy thử lại.</string>
     <string name="rf_fail_unknown">Thất bại vì lý do không xác định.</string>
     <string name="rf_fail_no_utxos">Không có đầu ra nào có thể chi tiêu khớp với khóa ký.</string>
     <string name="rf_fail_derive">Không thể dẫn xuất khóa từ cụm từ gốc cho đường dẫn này.</string>
     <string name="rf_fail_broadcast">Phát giao dịch thất bại. Hãy thử lại khi đã kết nối với các peer.</string>
-    <string name="rf_fail_generic">Không gom được khoản này — hãy thử lại.</string>
+    <string name="rf_fail_generic">Không gom được khoản này: hãy thử lại.</string>
     <string name="rf_this_wallet">Ví này</string>
     <string name="rf_other_phrase">Cụm từ của ví khác</string>
     <string name="rf_other_phrase_body">Nhập cụm từ khôi phục của ví khác để chuyển tiền của ví đó vào ví này. Cụm từ chỉ được dùng một lần để ký giao dịch và không bao giờ được lưu.</string>
@@ -400,7 +407,7 @@
     <string name="ni_save">Lưu</string>
     <string name="ni_exclusive">Chỉ nút của tôi (độc quyền)</string>
     <string name="ni_exclusive_sub">Chỉ đồng bộ qua nút của bạn. Nếu nút ngoại tuyến, ví sẽ không có peer nào khác cho đến khi bạn bật lại peer công khai.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Tương thích với nút DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Thông tin ví</string>
     <string name="ab_wallet_type">Loại ví</string>
     <string name="ab_hd_path">Đường dẫn HD</string>
@@ -412,8 +419,8 @@
     <string name="ab_open_source">Mã nguồn mở</string>
     <string name="ab_source_code">Mã nguồn</string>
     <string name="ab_licenses">Giấy phép</string>
-    <string name="ab_licenses_sub">Giấy phép MIT — mã nguồn mở</string>
-    <string name="ab_community">Cộng đồng DigiByte</string>
+    <string name="ab_licenses_sub">Giấy phép MIT: mã nguồn mở</string>
+    <string name="ab_community">Thông tin về mạng DigiByte</string>
     <string name="ab_report_bug">Báo lỗi</string>
 
     <string name="sec_pin_auth">PIN &amp; Xác thực</string>
@@ -424,16 +431,16 @@
     <string name="sec_biometric_no">Không khả dụng trên thiết bị này</string>
     <string name="sec_autolock">Thời gian tự khóa</string>
     <string name="sec_wipe_after">Xóa sau %1$d lần sai PIN</string>
-    <string name="sec_wipe_after_on">Bật — ví sẽ bị xóa sau %1$d lần nhập sai PIN</string>
-    <string name="sec_wipe_after_off">Tắt — thêm lớp bảo vệ chống dò PIN</string>
-    <string name="sec_wipe_after_body">Khi bật, %1$d lần nhập sai PIN liên tiếp sẽ XÓA VĨNH VIỄN ví này — cụm từ gốc, khóa và lịch sử — khỏi thiết bị.\n\nTrên thiết bị, điều này không thể hoàn tác. Tiền của bạn chỉ có thể khôi phục từ cụm từ khôi phục.</string>
+    <string name="sec_wipe_after_on">Bật: ví sẽ bị xóa sau %1$d lần nhập sai PIN</string>
+    <string name="sec_wipe_after_off">Tắt: thêm lớp bảo vệ chống dò PIN</string>
+    <string name="sec_wipe_after_body">Khi bật, %1$d lần nhập sai PIN liên tiếp sẽ XÓA VĨNH VIỄN ví này (cụm từ gốc, khóa và lịch sử) khỏi thiết bị.\n\nTrên thiết bị, điều này không thể hoàn tác. Tiền của bạn chỉ có thể khôi phục từ cụm từ khôi phục.</string>
     <string name="sec_wipe_after_ack">Tôi đã sao lưu cụm từ khôi phục</string>
     <string name="sec_wipe_after_enabled">Đã bật xóa sau %1$d lần</string>
     <string name="sec_recovery_phrase">Cụm từ khôi phục</string>
     <string name="sec_view_phrase">Xem cụm từ khôi phục</string>
     <string name="sec_view_phrase_sub">Cần mã PIN + xác thực sinh trắc học</string>
     <string name="sec_view_phrase_body">Cụm từ khôi phục cho phép truy cập toàn bộ ví của bạn.\n\n• Đừng bao giờ chia sẻ với ai\n• Đừng bao giờ nhập vào bất kỳ trang web nào\n• Lưu ngoại tuyến ở nơi an toàn\n\nĐể tiếp tục cần mã PIN + xác thực sinh trắc học.</string>
-    <string name="sec_understand">Tôi đã hiểu — Tiếp tục</string>
+    <string name="sec_understand">Tôi đã hiểu: Tiếp tục</string>
     <string name="sec_danger_zone">Vùng nguy hiểm</string>
     <string name="sec_wipe_wallet">Xóa ví</string>
     <string name="sec_wipe_wallet_sub">Xóa toàn bộ dữ liệu ví khỏi thiết bị này</string>
@@ -471,11 +478,21 @@
     <string name="did_login">Đăng nhập Digi-ID</string>
     <string name="did_auth_title">Xác thực Digi-ID</string>
     <string name="did_auth_subtitle">Xác thực để đăng nhập vào %1$s</string>
+    <string name="hub_sign_title">Ký bài đăng Hub</string>
+    <string name="hub_sign_subtitle">Xác thực để ký bài đăng này bằng danh tính của bạn</string>
+    <string name="hub_tip_auth_title">Gửi tiền tip Hub</string>
+    <string name="hub_tip_auth_subtitle">Xác thực để gửi tiền tip này từ số dư tip DigiScope của bạn</string>
     <string name="did_requesting">đang yêu cầu xác thực Digi-ID</string>
     <string name="did_warning">Cảnh báo</string>
     <string name="did_insecure">Kết nối không an toàn</string>
     <string name="did_insecure_body">Trang này dùng HTTP, không phải HTTPS. Thông tin xác thực của bạn có thể bị chặn bắt.</string>
     <string name="did_callback_url">URL callback</string>
+    <string name="did_identity_title">Trang web này nhận ra danh tính đăng nhập nào?</string>
+    <string name="did_identity_hint">Bạn đã khôi phục ví này? Hãy chọn danh tính bạn từng dùng trên trang này. Sau khi đăng nhập thành công, ví sẽ ghi nhớ lựa chọn.</string>
+    <string name="did_identity_per_site">Khóa riêng cho trang này (ứng dụng DigiByte gốc)</string>
+    <string name="did_identity_shared">Khóa dùng chung cho mọi trang (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Giống nhau trên mọi trang, nên các trang có thể liên kết các lần đăng nhập của bạn. Chỉ chọn nếu trang này từng nhận ra bạn bằng khóa này.</string>
+    <string name="did_identity_address">Địa chỉ: %1$s</string>
     <string name="did_approve">Chấp thuận</string>
     <string name="did_deny">Từ chối</string>
     <string name="did_success">Xác thực thành công</string>
@@ -492,7 +509,7 @@
     <string name="ni_state_synced">Đã đồng bộ</string>
     <string name="ni_state_error">Lỗi</string>
     <string name="ni_caught_up">Đã cập nhật</string>
-    <string name="ni_tor_disabled">Đã tắt — kết nối trực tiếp</string>
+    <string name="ni_tor_disabled">Đã tắt: kết nối trực tiếp</string>
     <string name="ni_tor_starting">Đang khởi động…</string>
     <string name="ni_tor_connecting">Đang kết nối tới mạng Tor…</string>
     <string name="ni_tor_connected">Đã kết nối qua cổng %1$d</string>
@@ -500,7 +517,7 @@
     <string name="ni_node_serving">✓ Đang phục vụ compact filters</string>
     <string name="ni_node_connecting">Đang kết nối…</string>
     <string name="ni_node_unreachable">⚠ Không tiếp cận được / không phục vụ bộ lọc</string>
-    <string name="sec_locked_countdown">Đã khóa — thử lại sau %1$s</string>
+    <string name="sec_locked_countdown">Đã khóa: thử lại sau %1$s</string>
     <string name="sec_autolock_1m">1 phút</string>
     <string name="sec_autolock_5m">5 phút</string>
     <string name="sec_autolock_15m">15 phút</string>
@@ -511,38 +528,40 @@
     <string name="sec_biometric_required">Cần xác thực sinh trắc học</string>
     <string name="did_logged_in">Bạn đã đăng nhập vào %1$s</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">Ví Hierarchical Deterministic được tạo từ cụm từ gốc. Có thể tạo nhiều địa chỉ từ một bản sao lưu — như có vô số số tài khoản từ một khóa chính.</string>
+    <string name="ab_type_desc">Ví Hierarchical Deterministic được tạo từ cụm từ gốc. Có thể tạo nhiều địa chỉ từ một bản sao lưu: như có vô số số tài khoản từ một khóa chính.</string>
     <string name="ab_path_desc">Đường dẫn dẫn xuất dùng để tạo địa chỉ của bạn. 84 = chuẩn BIP84, 20 = loại tiền DigiByte (SLIP44), 0 = tài khoản đầu tiên. Điều này đảm bảo mọi ví tương thích BIP84 đều khôi phục được địa chỉ của bạn từ cùng cụm từ gốc. Tương thích với công cụ BIP39 của Ian Coleman.</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">Dùng địa chỉ SegWit hiện đại bắt đầu bằng dgb1. Chúng hiệu quả hơn và phí thấp hơn địa chỉ Legacy cũ bắt đầu bằng D.</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">Mainnet là mạng DigiByte thật, nơi DGB có giá trị thực. Testnet dành cho nhà phát triển thử nghiệm mà không dùng tiền thật.</string>
     <string name="ab_security_value">Tự quản lý</string>
-    <string name="ab_security_desc">Khóa của bạn không bao giờ rời khỏi thiết bị này. Không công ty hay máy chủ nào giữ tiền của bạn — chỉ bạn kiểm soát ví của mình. Nếu mất cụm từ gốc, không ai có thể khôi phục hộ bạn.</string>
+    <string name="ab_security_desc">Khóa của bạn không bao giờ rời khỏi thiết bị này. Không công ty hay máy chủ nào giữ tiền của bạn: chỉ bạn kiểm soát ví của mình. Nếu mất cụm từ gốc, không ai có thể khôi phục hộ bạn.</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">Simplified Payment Verification — đồng bộ trực tiếp với mạng P2P DigiByte mà không cần tải toàn bộ blockchain. Dùng compact block filters BIP157/158: ví tải bộ lọc về và kiểm tra ngay trên máy, nên các địa chỉ bạn sở hữu không bao giờ rời khỏi điện thoại.</string>
+    <string name="ab_sync_desc">Simplified Payment Verification: đồng bộ trực tiếp với mạng P2P DigiByte mà không cần tải toàn bộ blockchain. Dùng compact block filters BIP157/158: ví tải bộ lọc về và kiểm tra ngay trên máy, nên các địa chỉ bạn sở hữu không bao giờ rời khỏi điện thoại.</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Phần mềm này được cung cấp theo Giấy phép MIT.</string>
     <string name="ab_tagline">DigiByte là một blockchain phi tập trung và một loại tiền kỹ thuật số.</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Ví độc lập của Around The Block LLC. Không phải ứng dụng DigiByte chính thức.</string>
 
     <string name="tx_conf_short">%1$d xác nhận</string>
     <string name="tx_confirmed">Đã xác nhận</string>
 
     <string name="cur_title">Tiền tệ hiển thị</string>
-    <string name="cur_note">Số dư DigiByte của bạn luôn là số thật — mục này chỉ đổi thứ dùng để quy đổi.</string>
+    <string name="cur_note">Số dư DigiByte của bạn luôn là số thật: mục này chỉ đổi thứ dùng để quy đổi.</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s: %2$s</string>
 
-    <string name="pass_advanced">Nâng cao — thêm cụm mật khẩu</string>
+    <string name="pass_advanced">Nâng cao: thêm cụm mật khẩu</string>
     <string name="pass_optional">Tùy chọn</string>
-    <string name="pass_what">Cụm mật khẩu là một từ hoặc câu bổ sung do bạn chọn. Khi có nó, chỉ riêng cụm từ khôi phục không còn đủ để mở ví này — người nhặt được các từ bạn ghi ra cũng không tiêu được tiền của bạn.</string>
-    <string name="pass_warn">Hãy ghi lại cụm mật khẩu, nhưng cất giữ TÁCH RIÊNG khỏi cụm từ khôi phục của bạn — để chung một chỗ, cả hai lại trở thành một bí mật duy nhất và cụm mật khẩu không còn bảo vệ được gì. Nếu bạn làm mất nó, chỉ riêng những từ này sẽ KHÔNG khôi phục được ví của bạn, và không ai có thể khôi phục hộ bạn.</string>
+    <string name="pass_what">Cụm mật khẩu là một từ hoặc câu bổ sung do bạn chọn. Khi có nó, chỉ riêng cụm từ khôi phục không còn đủ để mở ví này: người nhặt được các từ bạn ghi ra cũng không tiêu được tiền của bạn.</string>
+    <string name="pass_warn">Hãy ghi lại cụm mật khẩu, nhưng cất giữ TÁCH RIÊNG khỏi cụm từ khôi phục của bạn: để chung một chỗ, cả hai lại trở thành một bí mật duy nhất và cụm mật khẩu không còn bảo vệ được gì. Nếu bạn làm mất nó, chỉ riêng những từ này sẽ KHÔNG khôi phục được ví của bạn, và không ai có thể khôi phục hộ bạn.</string>
     <string name="pass_scope">Điều này bảo vệ bản sao lưu bạn ghi ra giấy. Trên điện thoại này, mã PIN vẫn là thứ khóa ví.</string>
     <string name="pass_enter">Cụm mật khẩu</string>
     <string name="pass_confirm">Xác nhận cụm mật khẩu</string>
     <string name="pass_mismatch">Cụm mật khẩu không khớp</string>
-    <string name="pass_too_long">Quá dài — tối đa %1$d ký tự</string>
+    <string name="pass_too_long">Quá dài: tối đa %1$d ký tự</string>
     <string name="pass_set">Đã đặt cụm mật khẩu</string>
     <string name="pass_none">Không có cụm mật khẩu</string>
     <string name="pass_restore_label">Cụm mật khẩu (để trống nếu bạn không dùng)</string>
@@ -556,7 +575,7 @@
     <string name="rf_move_assets_body">Dùng số DGB được giữ lại ở trên để gửi tài sản về ví này. Chuyển tài sản là không thể hoàn tác.</string>
     <string name="rf_moving_assets">Đang chuyển tài sản…</string>
     <string name="rf_move_result">Đã chuyển %1$d trên %2$d tài sản</string>
-    <string name="rf_move_failed">%1$s — chưa chuyển: %2$s</string>
+    <string name="rf_move_failed">%1$s, chưa chuyển: %2$s</string>
     <string name="pass_screen_title">Thêm cụm mật khẩu?</string>
     <string name="pass_screen_subtitle">Không bắt buộc, và hầu hết mọi người nên bỏ qua. Cụm mật khẩu là một từ hoặc câu bổ sung do bạn chọn; nếu không có nó, riêng cụm từ khôi phục sẽ không còn mở được ví này.</string>
     <string name="pass_screen_continue_with">Tiếp tục với cụm mật khẩu</string>
@@ -572,12 +591,13 @@
     <string name="send_fail_amount">Hãy nhập số tiền lớn hơn không.</string>
     <string name="send_fail_unknown">Không thể gửi giao dịch.</string>
     <string name="send_fail_try_again">Thử lại</string>
-    <string name="rf_splitting_for_assets">Đang chuẩn bị chuyển %1$d DigiAssets — chia nhỏ số DGB của bạn để mỗi tài sản tự trả phí chuyển. Chờ một xác nhận, thường dưới một phút.</string>
+    <string name="rf_splitting_for_assets">Đang chuẩn bị chuyển %1$d DigiAssets: chia nhỏ số DGB của bạn để mỗi tài sản tự trả phí chuyển. Chờ một xác nhận, thường dưới một phút.</string>
     <string name="rf_nothing_moved">Không có gì được chuyển</string>
-    <string name="rf_dd_fee_floor">Cần %1$s phí mạng — ví này có %2$s.</string>
+    <string name="rf_dd_fee_floor">Cần %1$s phí mạng: ví này có %2$s.</string>
     <string name="rf_dd_found">Đã tìm thấy %1$s DigiDollar</string>
     <string name="rf_dd_moved">Đã chuyển %1$s DigiDollar về ví này</string>
-    <string name="rf_dd_left_behind">Còn lại %1$s DigiDollar — không thể chuyển</string>
+    <string name="rf_dd_sent_unrelayed">Đã gửi %1$s DigiDollar, nhưng mạng chưa xác nhận. Hãy giữ cụm từ khôi phục cũ cho đến khi khoản này hiện trong ví này.</string>
+    <string name="rf_dd_left_behind">Còn lại %1$s DigiDollar: không thể chuyển</string>
     <string name="rf_dd_unreachable">Không thể kiểm tra DigiDollar; ví này có thể đang giữ một ít</string>
     <string name="as_rules_checking">Đang kiểm tra quy tắc chuyển của tài sản này…</string>
     <string name="as_rules_bound_title">Tài sản này có quy tắc chuyển</string>
@@ -607,7 +627,7 @@
     <string name="reconcile_spendable">Có thể chi tiêu</string>
     <string name="reconcile_wallet_spendable">Số dư có thể chi tiêu của ví</string>
     <string name="reconcile_matches_wallet">Khớp với số dư có thể chi tiêu của ví.</string>
-    <string name="reconcile_does_not_match_wallet">Không khớp với số dư có thể chi tiêu của ví — xem bên dưới.</string>
+    <string name="reconcile_does_not_match_wallet">Không khớp với số dư có thể chi tiêu của ví: xem bên dưới.</string>
     <string name="reconcile_held_asset">Được giữ cho một DigiAsset</string>
     <string name="reconcile_held_unknown">Được giữ: trạng thái tài sản không rõ</string>
     <string name="reconcile_proven_plain">DGB thông thường, có thể chi tiêu sau khi khởi động lại</string>
@@ -623,7 +643,64 @@
     <string name="market_tor_notice_title">Chợ không đi qua Tor</string>
     <string name="market_tor_notice_body">Chợ không đi qua Tor; trang web sẽ thấy địa chỉ IP của bạn.</string>
     <string name="market_tor_notice_continue">Tiếp tục</string>
-    <string name="move_title">DigiByte Wallet nay là DigiByte Mobile</string>
-    <string name="move_body">Ứng dụng này sẽ không còn được cập nhật. Hãy cài DigiByte Mobile từ Google Play, chọn Khôi phục ví hiện có và nhập cụm từ khôi phục của ví này — không có gì bị di chuyển trên chuỗi. Giữ ứng dụng này cho đến khi số dư hiện trong ứng dụng mới.</string>
-    <string name="move_how">Cách chuyển</string>
+    <string name="restore_pass_toggle">Tôi đã dùng cụm mật khẩu</string>
+    <string name="restore_pass_body">Chỉ khi bạn đã thêm nó lúc tạo ví này. Cụm mật khẩu sai sẽ mở một ví khác, trống: không có thông báo lỗi nào.</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">Vui lòng nhập đủ %1$d từ.</string>
+    <string name="restore_err_invalid_words">Từ không hợp lệ: %1$s</string>
+    <string name="restore_err_checksum">Cụm từ khôi phục này không hợp lệ. Hãy kiểm tra lại từng từ và thứ tự của chúng.</string>
+    <string name="restore_scan_title">Khôi phục riêng tư</string>
+    <string name="restore_scan_body">Sau khi bạn tiếp tục, điện thoại này tự tìm các giao dịch của ví: địa chỉ native (dgb1q…), legacy (D…), Taproot và DigiDollar, mà không gửi địa chỉ của bạn cho bất kỳ ai.</string>
+    <string name="restore_other_title">Cụm từ từ một ứng dụng ví khác?</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor và một số ví cũ giữ coin trên các định dạng địa chỉ mà ví này không dùng, nên đồng bộ không thấy được. Một lần kiểm tra có thể tìm ra chúng, nhưng nó gửi các địa chỉ được dẫn xuất từ cụm từ của bạn đến DigiScope (api.digiscope.me), nơi sẽ báo cáo số tiền trên các địa chỉ đó. Không cần thiết cho cụm từ từ HoldFast Wallet hoặc ứng dụng DigiByte cũ. Bạn cũng có thể chạy sau trong Cài đặt → Khôi phục tiền từ ví khác.</string>
+    <string name="restore_other_check">Kiểm tra các định dạng khác</string>
+    <string name="restore_scan_deriving">Đang dẫn xuất địa chỉ…</string>
+    <string name="restore_scan_duration">Việc này có thể mất 30-90 giây tùy vào node.</string>
+    <string name="restore_scan_failed">Quét thất bại</string>
+    <string name="restore_scan_retry">Thử kiểm tra lại</string>
+    <string name="restore_found_title">Đã tìm thấy tiền</string>
+    <string name="restore_unreachable_title">Không thể kết nối DigiScope</string>
+    <string name="restore_none_title">Chưa phát hiện tiền</string>
+    <plurals name="restore_found_body">
+        <item quantity="other">%1$s DGB trên %2$d đường dẫn</item>
+    </plurals>
+    <string name="restore_unreachable_body">Không thể chạy kiểm tra. Sau khi bạn tiếp tục, đồng bộ vẫn sẽ tìm thấy các định dạng riêng của ví này; hãy thử lại, hoặc sau này dùng Cài đặt → Khôi phục tiền từ ví khác cho định dạng của các ứng dụng khác.</string>
+    <string name="restore_none_body">Không có khoản chưa chi tiêu nào trên các định dạng đã kiểm tra. Sau khi bạn tiếp tục, đồng bộ vẫn sẽ tìm thấy các giao dịch riêng của ví này.</string>
+    <string name="restore_nonnative_note">%1$s DGB đang nằm trên định dạng địa chỉ của một ứng dụng khác. Sau khi khôi phục, bạn sẽ được đưa đến Khôi phục tiền từ ví khác để chuyển số tiền này vào ví này: không có gì được chuyển cho đến khi bạn xác nhận ở đó.</string>
+    <string name="restore_pass_nothing_found">Không tìm thấy gì với cụm mật khẩu bạn đã nhập. Cụm mật khẩu không có mã kiểm tra: nhập sai sẽ mở một ví khác, trống, mà không báo lỗi. Hãy kiểm tra lỗi gõ, hoặc, nếu bạn không đặt cụm mật khẩu khi tạo ví, hãy quay lại và đóng ô cụm mật khẩu.</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="other">%1$s · đã quét %2$d địa chỉ</item>
+    </plurals>
+    <string name="restore_date_title">Bạn tạo ví này khi nào?</string>
+    <string name="restore_date_body">Điều này giúp bỏ qua việc quét blockchain không cần thiết và đồng bộ nhanh hơn.</string>
+    <string name="restore_date_unsure">Tôi không nhớ</string>
+    <string name="restore_date_unsure_sub">Quét toàn bộ blockchain (chậm nhất: dùng nếu không chắc)</string>
+    <string name="restore_date_warning">Các giao dịch cũ hơn năm đã chọn sẽ không được phát hiện. Nếu ví của bạn có thể có lịch sử cũ hơn, hãy chọn năm sớm hơn, hoặc \"Tôi không nhớ\" để quét đầy đủ (chậm hơn).</string>
+    <string name="restore_date_start">Bắt đầu khôi phục</string>
+    <string name="restore_date_restoring">Đang khôi phục ví…</string>
+    <string name="restore_date_onwards">Từ tháng 1/%1$d trở đi</string>
+    <string name="restore_date_range">Tháng 1/%1$d – Tháng 12/%1$d</string>
+    <string name="restore_date_genesis">DigiByte ra mắt tháng 1/2014</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB, mức tối thiểu của mạng. Phí chính xác của giao dịch này được hiển thị trước khi bạn xác nhận.</string>
+    <string name="send_preparing">Đang chuẩn bị…</string>
+    <string name="send_fee_raised">Đã tăng từ %1$s DGB bạn nhập: đây là phí mà giao dịch này phải trả.</string>
+    <string name="send_err_below_dust">Số tiền này thấp hơn khoản thanh toán nhỏ nhất mà mạng chuyển tiếp đến địa chỉ này (%1$s DGB). Hãy gửi ít nhất số đó.</string>
+    <string name="send_not_relayed_title">Đã gửi, chưa được chuyển tiếp</string>
+    <string name="send_not_relayed_body">Ví của bạn đã phát giao dịch này, nhưng chưa có nút nào nhận nó, nên chưa biết nó đã đến được mạng hay chưa. Giao dịch hiển thị là đang chờ trong hoạt động của bạn. Hãy kiểm tra hoạt động trước khi gửi lại.</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">Không thể đọc cụm mật khẩu</string>
+    <string name="seedview_pass_unreadable_body">Hiện không thể đọc cụm mật khẩu của ví này. Chỉ riêng các từ khôi phục có thể không khôi phục được ví này, vì vậy chúng sẽ không được hiển thị cho đến khi cụm mật khẩu có thể được hiển thị cùng với chúng. Hãy thử lại.</string>
+    <string name="seedview_pass_retry">Thử lại</string>
+    <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Hiện không thể kiểm tra mã PIN của bạn</string>
+    <string name="pinstore_body">Kho khóa an toàn của điện thoại không mở được, nên ví vẫn bị khóa. Không có gì bị xóa. Hãy đóng ứng dụng rồi mở lại. Nếu vẫn xảy ra, hãy khởi động lại điện thoại; cụm từ khôi phục vẫn khôi phục được ví trên mọi thiết bị.</string>
+    <string name="pinstore_close">Đóng ứng dụng</string>
 </resources>

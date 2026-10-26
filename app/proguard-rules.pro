@@ -20,28 +20,25 @@
 # Annotations drive Room, Hilt and serialization; signatures drive generics.
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,Exceptions
 
-# ---- JNI: the C core resolves these by name --------------------------------
-# Native functions are exported as Java_io_digibyte_core_bridge_NativeBridge_<m>.
-# Rename the class or a method and the link fails at runtime with
-# UnsatisfiedLinkError — on the very first wallet operation.
--keep class io.digibyte.core.bridge.NativeBridge { *; }
+# ---- JNI: the C core binds these by name -----------------------------------
+# JNI_OnLoad registers every native with RegisterNatives against the class path in
+# native/src/main/jni/bridge/jni_class_paths.h, by method NAME and DESCRIPTOR.
+# Rename the class or a method and System.loadLibrary fails at startup.
+-keep class app.aroundtheblock.wallet.core.bridge.NativeBridge { *; }
 
 # jni_peer.c takes GetObjectClass(handler) then GetMethodID by NAME and
-# SIGNATURE (onSyncProgress, onSaveBlocks, onSaveCfLedger, …). The class itself
-# comes from the object so it may be renamed; the METHOD names may not.
--keep class io.digibyte.core.bridge.NativeCallback { *; }
--keep class * implements io.digibyte.core.bridge.NativeCallback { *; }
+# SIGNATURE (onSyncProgress, onSaveBlocks, onSaveCfLedger, …), so the METHOD
+# names may not be renamed. The interface's own NAME is part of
+# setCallbackHandler's registered descriptor (DGB_JNI_NATIVECALLBACK_SIG), so
+# it may not be renamed either.
+-keep class app.aroundtheblock.wallet.core.bridge.NativeCallback { *; }
+-keep class * implements app.aroundtheblock.wallet.core.bridge.NativeCallback { *; }
 
 # Belt and braces for anything else annotated as native.
 -keepclasseswithmembernames class * {
     native <methods>;
 }
 
-# NOTE: bridge/core.c and PeerManager.c also FindClass on
-# io/digibyte/presenter/entities/* and io/digibyte/wallet/BR*Manager. Every one
-# of those classes is ABSENT from this app — they are dead bread-wallet paths
-# whose lookups already fail at runtime. Deliberately NOT kept: keeping absent
-# classes would be a rule that silently protects nothing.
 
 # ---- Enums -----------------------------------------------------------------
 # values()/valueOf()/$VALUES are the reflective surface every enum needs; keeping
@@ -68,12 +65,12 @@
 # read back as `valueOf(prefs.getString(...))` (:407). A renamed constant does not
 # crash — it silently stops matching stored data, which is the worst failure mode
 # available to a wallet.
--keep class io.digibyte.ui.wallet.WalletViewModel$DisplayCurrency { *; }
+-keep class app.aroundtheblock.wallet.ui.wallet.WalletViewModel$DisplayCurrency { *; }
 
 # `stage.name` is embedded in the bug-report URL (SettingsScreen.kt:169). Renaming
 # it would not break anything; it would just turn every user-submitted report into
 # "stage=a", which is worse than the leak this narrowing is closing.
--keep class io.digibyte.core.model.SyncStage { *; }
+-keep class app.aroundtheblock.wallet.core.model.SyncStage { *; }
 
 # ---- SQLCipher: JNI-backed, loaded reflectively -----------------------------
 # If these are stripped the encrypted database fails to open, which in this app
@@ -87,7 +84,7 @@
 # ---- Room ------------------------------------------------------------------
 # Entity field names map to column names; generated DAO impls are resolved by
 # name at runtime.
--keep class io.digibyte.core.db.entity.** { *; }
+-keep class app.aroundtheblock.wallet.core.db.entity.** { *; }
 -keep class * extends androidx.room.RoomDatabase { *; }
 -dontwarn androidx.room.paging.**
 
